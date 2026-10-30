@@ -120,6 +120,9 @@ pub struct Recovery {
     pub anchor: StateAnchor,
     pub history_present: bool,
 }
+/// Control session and its associated durable custody.
+pub type OpenControl<J, N, A> = (DigSession<J, N>, AssociationStore<A>, Digest32);
+
 /// All paths, endpoints, credentials, source policy and leases are supplied by
 /// the host. None is reconstructed from an MCP request or a retained fingerprint.
 pub trait Shell {
@@ -165,11 +168,7 @@ pub trait Shell {
         &self,
         mode: Mode,
         c: &OperationContext,
-    ) -> Result<(
-        DigSession<Self::Journal, Self::Native>,
-        AssociationStore<Self::Association>,
-        Digest32,
-    )>;
+    ) -> Result<OpenControl<Self::Journal, Self::Native, Self::Association>>;
     fn native(
         &self,
         binding: &DigBinding,

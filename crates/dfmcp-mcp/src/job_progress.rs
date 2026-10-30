@@ -582,9 +582,9 @@ fn difference<T: PartialEq>(before: &Option<T>, after: &Option<T>) -> &'static s
     }
 }
 fn indicators(before: &Job, after: &Job) -> BTreeMap<&'static str, &'static str> {
-    let worker = if !before.worker.qualified() || !after.worker.qualified() {
-        "unestablished"
-    } else if matches!((&before.worker,&after.worker),
+    let worker = if !before.worker.qualified()
+        || !after.worker.qualified()
+        || matches!((&before.worker,&after.worker),
             (Worker::OutsideRoster(a),Worker::OutsideRoster(b))
             | (Worker::Strict{native:a,..},Worker::OutsideRoster(b))
             | (Worker::OutsideRoster(a),Worker::Strict{native:b,..}) if a==b)
@@ -825,33 +825,34 @@ fn assess(
         let status = report.identity_status(id);
         *counts.entry(status).or_default() += 1;
         let mut stable = false;
-        if let (Some(a), Some(b)) = (report.before.get(&id), report.after.get(&id)) {
-            if status == "same_generation" {
-                let delta = indicators(a, b);
-                stable = unchanged(&delta);
-                if changed(&delta) {
-                    indicators_changed += 1;
-                }
-                if stable {
-                    indicators_unchanged += 1;
-                }
-                if delta.values().any(|s| *s == "unestablished") {
-                    indicators_unestablished += 1;
-                }
-                if delta.get("holder_build_stage") == Some(&"advanced") {
-                    stage_advanced += 1;
-                }
-                if delta.get("holder_build_stage") == Some(&"regressed") {
-                    stage_regressed += 1;
-                }
-                if a.suspended == Some(true) && b.suspended == Some(true) {
-                    suspended_both += 1;
-                }
-                if a.worker == Worker::Unassigned && b.worker == Worker::Unassigned {
-                    unassigned_both += 1;
-                }
+        if let (Some(a), Some(b)) = (report.before.get(&id), report.after.get(&id))
+            && status == "same_generation"
+        {
+            let delta = indicators(a, b);
+            stable = unchanged(&delta);
+            if changed(&delta) {
+                indicators_changed += 1;
+            }
+            if stable {
+                indicators_unchanged += 1;
+            }
+            if delta.values().any(|s| *s == "unestablished") {
+                indicators_unestablished += 1;
+            }
+            if delta.get("holder_build_stage") == Some(&"advanced") {
+                stage_advanced += 1;
+            }
+            if delta.get("holder_build_stage") == Some(&"regressed") {
+                stage_regressed += 1;
+            }
+            if a.suspended == Some(true) && b.suspended == Some(true) {
+                suspended_both += 1;
+            }
+            if a.worker == Worker::Unassigned && b.worker == Worker::Unassigned {
+                unassigned_both += 1;
             }
         }
+
         if focus_id.is_none_or(|selected| selected == id) && (include_unchanged || !stable) {
             report.selected.push(id);
         }

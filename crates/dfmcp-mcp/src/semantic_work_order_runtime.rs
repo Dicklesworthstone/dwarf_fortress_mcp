@@ -112,6 +112,9 @@ pub struct Recovery {
     pub history_present: bool,
 }
 
+/// Control session and its associated durable custody.
+pub type OpenControl<J, N, A> = (WorkOrderSession<J, N>, AssociationStore<A>, Digest32);
+
 /// Resource factories are trusted embedding inputs, never client JSON. Tests
 /// inject bounded streams/storage while executing the same real coordinators.
 pub trait Shell {
@@ -140,11 +143,7 @@ pub trait Shell {
         &self,
         mode: Mode,
         c: &OperationContext,
-    ) -> Result<(
-        WorkOrderSession<Self::Journal, Self::Native>,
-        AssociationStore<Self::Association>,
-        Digest32,
-    )>;
+    ) -> Result<OpenControl<Self::Journal, Self::Native, Self::Association>>;
     fn acquire(&self, c: &OperationContext) -> Result<LiveObservationCapsule>;
     fn evidence(
         &self,
@@ -602,12 +601,10 @@ impl<S: Shell> Runtime<S> {
             .monitor
             .as_ref()
             .and_then(|m| m.last_observation_anchor())
+            && anchor.cursor.sequence > self.anchor.cursor.sequence
+            && anchor.tick >= self.anchor.tick
         {
-            if anchor.cursor.sequence > self.anchor.cursor.sequence
-                && anchor.tick >= self.anchor.tick
-            {
-                self.anchor = anchor;
-            }
+            self.anchor = anchor;
         }
     }
     fn start_monitor(&mut self, initialize: bool, work: &mut Work) -> Result<()> {
@@ -762,14 +759,15 @@ impl<S: Shell> Runtime<S> {
                     .ok_or_else(|| exhausted("canonical observation cursor exhausted"))?,
             });
         let projection = project_live_capsule(&capsule, self.anchor.fortress_id, cursor)?;
-        if let Some(original) = &self.original {
-            if projection.snapshot.anchor() != original.anchor {
-                return Err(DfmcpError::new(
-                    ErrorCode::StaleAnchor,
-                    "original semantic source changed; no rebase or new insertion is permitted",
-                ));
-            }
+        if let Some(original) = &self.original
+            && projection.snapshot.anchor() != original.anchor
+        {
+            return Err(DfmcpError::new(
+                ErrorCode::StaleAnchor,
+                "original semantic source changed; no rebase or new insertion is permitted",
+            ));
         }
+
         work.context.anchor = projection.snapshot.anchor();
         self.shell
             .acceptance()
@@ -1059,10 +1057,10 @@ impl<S: Shell> Runtime<S> {
         semantic: &mut Semantic<S>,
         original: &PreparedPlan,
         review: &SemanticWorkOrderReview,
-        target: &ClockTarget,
-        journal: Digest32,
+        target_and_journal: (&ClockTarget, Digest32),
         c: &OperationContext,
     ) -> Result<()> {
+        let (target, journal) = target_and_journal;
         shell.check_environment()?;
         if !shell.clock_enabled() {
             return Err(denied("operator clock authority was revoked"));
@@ -1127,7 +1125,13 @@ impl<S: Shell> Runtime<S> {
                     .max_wall_millis
                     .min(edge.budget.max_wall_millis);
                 Self::verify_clock_custody(
-                    shell, archive, semantic, original, review, &target, journal, &reserved,
+                    shell,
+                    archive,
+                    semantic,
+                    original,
+                    review,
+                    (&target, journal),
+                    &reserved,
                 )
             })?;
         self.view(&work.narrow(&output)?)
@@ -1181,7 +1185,13 @@ impl<S: Shell> Runtime<S> {
                     .max_wall_millis
                     .min(edge.budget.max_wall_millis);
                 Self::verify_clock_custody(
-                    shell, archive, semantic, original, review, &target, journal, &reserved,
+                    shell,
+                    archive,
+                    semantic,
+                    original,
+                    review,
+                    (&target, journal),
+                    &reserved,
                 )
             })?;
         self.view(&work.narrow(&output)?)

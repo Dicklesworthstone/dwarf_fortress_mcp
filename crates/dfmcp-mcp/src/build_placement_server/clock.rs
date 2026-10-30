@@ -1192,11 +1192,11 @@ pub(super) fn run_action<S: EffectJournalStorage, N: BuildSource, I: ClockIo>(
                         "retained room clock blocks furnishing clock publication",
                     ));
                 }
-            } else if check.is_err() {
-                if let Some(monitor) = &mut state.room_completion {
-                    monitor.verified = false;
-                    monitor.store_verified = false;
-                }
+            } else if check.is_err()
+                && let Some(monitor) = &mut state.room_completion
+            {
+                monitor.verified = false;
+                monitor.store_verified = false;
             }
         }
         if let Some(expected) = expected {

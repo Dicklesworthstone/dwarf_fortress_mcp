@@ -251,16 +251,15 @@ pub(super) fn configuration() -> Result<Config> {
         .as_deref()
         .map(super::monitor::Config::parse)
         .transpose()?;
-    if let Some(monitor) = &config.monitor {
-        if monitor.path == config.path
+    if let Some(monitor) = &config.monitor
+        && (monitor.path == config.path
             || monitor.source.endpoint() != config.endpoint
             || config.blueprint.as_ref().is_some_and(|parent| {
                 monitor.path == parent.path || (!monitor.initialize && parent.initialize)
             })
-            || (config.blueprint.is_none() && monitor.initialize)
-        {
-            return Err(denied());
-        }
+            || (config.blueprint.is_none() && monitor.initialize))
+    {
+        return Err(denied());
     }
     config.clock = optional("DFMCP_DIG_BLUEPRINT_CLOCK_CONFIG")?
         .as_deref()

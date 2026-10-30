@@ -1727,8 +1727,8 @@ async fn with_session(
                 Entry::Placement { state, config } => (state, config),
             };
             let placement_enabled = runtime::enabled().unwrap_or(false);
-            let clock_enabled = runtime::clock_enabled().map_or(false, |v| v);
-            let room_clock_enabled = runtime::room_clock_enabled().map_or(false, |v| v);
+            let clock_enabled = runtime::clock_enabled().is_ok_and(|v| v);
+            let room_clock_enabled = runtime::room_clock_enabled().is_ok_and(|v| v);
             let mut c = match state.context(
                 placement_enabled || clock_enabled || room_clock_enabled,
                 wall,
@@ -1850,11 +1850,12 @@ async fn with_session(
                 state.abandon();
                 return Ok(state.failed(op, Some(&c), &e));
             }
-            if clock_handoff {
-                if let Err(e) = verify_clock_handoff(state, &c, control.started, clock_recovery) {
-                    return Ok(state.failed(op, Some(&c), &e));
-                }
+            if clock_handoff
+                && let Err(e) = verify_clock_handoff(state, &c, control.started, clock_recovery)
+            {
+                return Ok(state.failed(op, Some(&c), &e));
             }
+
             if let Some(reservation) = room_publication {
                 let expected = state.clock_recovery;
                 if let Err(e) = reservation.verify(state, expected, false, false, |_| Ok(())) {
@@ -2064,6 +2065,10 @@ fn open_clock_recovery(
 #[tool(
     name = "fortress.open_session",
     description = "Open isolated furniture/1.19 custody. Use exactly one of selection JSON [kind,item_id,x,y,z], furniture_plan as complete dfmcp.furniture-plan/1 JSON, furniture_request as dfmcp.furniture-request/1 JSON, or room_request as dfmcp.room-construction-request/1 JSON with terrain region/floors/walls and the full nested furniture request. A request allocates all slots from one fresh operations/1.4 capture and seals its constraints and chosen items into operator-configured batch custody; room intake also retains every declared terrain requirement. Shortage creates no partial batch. Reopen retained custody without intent inputs or native bootstrap. Optional operator clock custody requires an existing completion monitor with an accepted sample; max_game_ticks defaults to zero and positive values require clock control. No client paths or policies. Operator clock-offline and clock-recover reopen only acknowledged monitor and clock histories without original placement files, native bootstrap or future game ticks. Opening never prepares, places, observes room terrain or advances time."
+)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the frozen MCP schema requires flat tool arguments"
 )]
 pub async fn fortress_open_session(
     selection: Option<String>,

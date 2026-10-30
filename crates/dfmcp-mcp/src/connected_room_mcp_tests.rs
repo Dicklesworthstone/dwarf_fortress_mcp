@@ -254,8 +254,7 @@ fn partial_room(session: &str) -> TestResult<(Json, PreparedPlan, Json, dfmcp_co
                 item,
                 location,
             } = step.action
-            {
-                if effects::validate_furniture_completion(
+                && effects::validate_furniture_completion(
                     guard.adapter.snapshot(),
                     effects::created_entity_id(&step.idempotency_key, 0),
                     kind,
@@ -263,9 +262,8 @@ fn partial_room(session: &str) -> TestResult<(Json, PreparedPlan, Json, dfmcp_co
                     location,
                 )
                 .is_ok()
-                {
-                    items.push(item);
-                }
+            {
+                items.push(item);
             }
         }
         Ok(items)

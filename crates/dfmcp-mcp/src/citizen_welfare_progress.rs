@@ -521,17 +521,18 @@ fn assess(
         let status = report.identity_status(id);
         *counts.entry(status).or_default() += 1;
         let mut stable = false;
-        if let (Some(a), Some(b)) = (report.before.get(&id), report.after.get(&id)) {
-            if status == "same_generation" {
-                let delta = indicators(a, b);
-                stable = unchanged(&delta);
-                indicator_changes += u64::from(changed(&delta));
-                indicator_unchanged += u64::from(stable);
-                indicator_unknown += u64::from(delta.values().any(|v| *v == "unestablished"));
-                *categories.entry(category_change(a, b)).or_default() += 1;
-                *transitions.entry(elevated_change(a, b)).or_default() += 1;
-            }
+        if let (Some(a), Some(b)) = (report.before.get(&id), report.after.get(&id))
+            && status == "same_generation"
+        {
+            let delta = indicators(a, b);
+            stable = unchanged(&delta);
+            indicator_changes += u64::from(changed(&delta));
+            indicator_unchanged += u64::from(stable);
+            indicator_unknown += u64::from(delta.values().any(|v| *v == "unestablished"));
+            *categories.entry(category_change(a, b)).or_default() += 1;
+            *transitions.entry(elevated_change(a, b)).or_default() += 1;
         }
+
         if focus_id.is_none_or(|selected| selected == id) && (include_unchanged || !stable) {
             report.selected.push(id);
         }

@@ -362,25 +362,24 @@ fn render(
         work["actions"] = json!([{"state":state,"native_phase":native_phase(view),"action_result":view["action_result"],
             "meaning":"historical native membership receipt; current original labor predicates require fresh selected-citizen evidence"}]);
     }
-    if verified {
-        if let Some(run) = clock_active {
-            if run["state"] == "prepared" {
-                if let Some(plans) = work["pending_plans"].as_array_mut() {
-                    plans.push(json!({"scope":"run","clock":clock,
+    if verified && let Some(run) = clock_active {
+        if run["state"] == "prepared" {
+            if let Some(plans) = work["pending_plans"].as_array_mut() {
+                plans.push(json!({"scope":"run","clock":clock,
                         "original_review":review(view),"recovery":recovery(view)}));
-                }
-                if let Some(confirmations) = work["confirmations"].as_array_mut() {
-                    confirmations.push(json!({"scope":"run","paired_seal":run["review_seal"],
+            }
+            if let Some(confirmations) = work["confirmations"].as_array_mut() {
+                confirmations.push(json!({"scope":"run","paired_seal":run["review_seal"],
                         "requires_confirmation":true,"commit_available":clock_commit,
                         "purpose":"explicit bounded game-time exposure for original labor stability"}));
-                }
-            }
-            if let Some(actions) = work["actions"].as_array_mut() {
-                actions.push(json!({"scope":"run","clock_run":run,
-                    "meaning":"native clock coordination; original labor truth and current pause require separate observations"}));
             }
         }
+        if let Some(actions) = work["actions"].as_array_mut() {
+            actions.push(json!({"scope":"run","clock_run":run,
+                    "meaning":"native clock coordination; original labor truth and current pause require separate observations"}));
+        }
     }
+
     if uncertain || (!verified && retained.is_some()) {
         work["indeterminate_effects"] = json!([{"identity":identity,
             "effect_may_have_started":if uncertain {json!(true)} else {Value::Null},"automatic_redispatch":false,

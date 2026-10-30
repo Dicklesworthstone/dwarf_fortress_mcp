@@ -242,11 +242,11 @@ impl clock::ClockIo<Memory> for Clocks {
             .corrupt_at_tick
             .as_ref()
             .is_some_and(|(tick, _)| c.anchor.tick.get() >= *tick)
+            && let Some((_, storage)) = self.corrupt_at_tick.take()
         {
-            if let Some((_, storage)) = self.corrupt_at_tick.take() {
-                storage.data.borrow_mut().get_mut()[0] ^= 1;
-            }
+            storage.data.borrow_mut().get_mut()[0] ^= 1;
         }
+
         c.budget.validate()?;
         if c.cancellation_requested
             || (self.fail_after_commit && self.game.borrow().count(Call::Commit) != 0)
@@ -261,11 +261,11 @@ impl clock::ClockIo<Memory> for Clocks {
         }
         if control
             && last_state(&self.storage.snapshot_bytes()) == Some(RunState::DispatchStarted as u8)
+            && let Some(parent) = self.corrupt_after_dispatch.take()
         {
-            if let Some(parent) = self.corrupt_after_dispatch.take() {
-                parent.data.borrow_mut().get_mut()[0] ^= 1;
-            }
+            parent.data.borrow_mut().get_mut()[0] ^= 1;
         }
+
         Ok(())
     }
 }

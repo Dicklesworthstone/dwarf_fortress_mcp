@@ -575,7 +575,8 @@ fn minimum_mining_routes_match_exhaustive_simple_paths_and_exact_mask_partitions
         // Independent exhaustive simple-path oracle on nine cells. It does not
         // use Dijkstra distances, the production neighbor helper or its queue.
         let mut pending = vec![vec![entry]];
-        let mut best: Option<(u32, usize, Vec<(i32, i32, i32)>)> = None;
+        type OraclePath = (u32, usize, Vec<(i32, i32, i32)>);
+        let mut best: Option<OraclePath> = None;
         while let Some(path) = pending.pop() {
             let at = *path.last().ok_or_else(|| invalid("oracle path missing"))?;
             if at == endpoint {

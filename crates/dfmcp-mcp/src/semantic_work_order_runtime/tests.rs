@@ -713,20 +713,22 @@ impl Shell for Resources {
         let native = Rc::clone(&self.native);
         let denied = Rc::clone(&self.policy_denied);
         let pins = self.pins.clone();
-        let factory: Box<dyn FnMut(&OperationContext) -> Result<Citizens>> = Box::new(move |_| {
+        type CitizenFactory = Box<dyn FnMut(&OperationContext) -> Result<Citizens>>;
+        let factory: CitizenFactory = Box::new(move |_| {
             let (capsule, _, page) = capsule(&native.borrow().queue)?;
             Ok(Citizens {
                 bridge: capsule.bridge,
                 page,
             })
         });
-        let authorizer: Box<
+        type CitizenAuthorizer = Box<
             dyn FnMut(
                 &LiveObservationCapsule,
                 &LiveWorldProjection,
                 &OperationContext,
             ) -> Result<EvidencePolicy>,
-        > = Box::new(move |capsule, projection, c| {
+        >;
+        let authorizer: CitizenAuthorizer = Box::new(move |capsule, projection, c| {
             if denied.get() {
                 return Err(super::denied("operator source acceptance revoked"));
             }
