@@ -1,2 +1,3 @@
 include_directories(${CMAKE_CURRENT_BINARY_DIR})
-dfhack_plugin(dfmcp_spatial_v1_8 dfmcp_spatial_v1_8.cpp PROTOBUFS DfmcpSpatialV1_8)
+dfhack_plugin(dfmcp_spatial_v1_8 dfmcp_spatial_v1_8.cpp PROTOBUFS DfmcpSpatialV1_8
+    LINK_LIBRARIES protobuf)
