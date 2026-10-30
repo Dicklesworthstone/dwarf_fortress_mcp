@@ -210,11 +210,12 @@ pub(super) fn configuration() -> Result<Config> {
         .map(super::monitor::Config::parse)
         .transpose()?;
     if let Some(monitor) = &config.monitor {
-        let parent = config.blueprint.as_ref().ok_or_else(denied)?;
         if monitor.path == config.path
-            || monitor.path == parent.path
             || monitor.source.endpoint() != config.endpoint
-            || (!monitor.initialize && parent.initialize)
+            || config.blueprint.as_ref().is_some_and(|parent| {
+                monitor.path == parent.path || (!monitor.initialize && parent.initialize)
+            })
+            || (config.blueprint.is_none() && monitor.initialize)
         {
             return Err(denied());
         }

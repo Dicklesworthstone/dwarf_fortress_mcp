@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-10-30 — Independent whole-blueprint monitor recovery
+
+- Add explicit `monitor-offline` and `monitor-recovery` opening modes that retain
+  only the existing proof history and Query authority. Missing native journals
+  and damaged blueprint parents no longer prevent historical monitor recovery.
+- Preserve exact original monitor, source, binding and acknowledged-head checks;
+  require no region, game connection or mutation authority. Offline inspection
+  never appends; writable recovery additionally permits local monitor stops.
+- Restrict schema discovery and all actions to history inspection and permitted
+  cancellation. Recovered satisfaction stays historical, with native inventory
+  and current terrain explicitly unverified. Original grant expiry still applies.
+- Support verified close and explicit unverified recovery release after damage,
+  preserving exact handoffs even when a durable stop outlives its failed response.
+- Pass all 128 focused tests (77 adapter, 51 MCP), including nine new recovery
+  groups; 388 adapter and 404 pipeline inputs remain unchanged. Independent async
+  routing review passes. Full FastMCP/native/live qualification remains unverified.
+
 ## 2026-10-30 — Whole-blueprint excavation monitoring through MCP
 
 - Expose exact monitor registration, one-capture sampling, head-pinned progress

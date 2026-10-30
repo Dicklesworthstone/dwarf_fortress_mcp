@@ -871,3 +871,6 @@ fn monitor_routing_is_exclusive_and_source_recovery_inputs_are_closed() -> Resul
     }
     Ok(())
 }
+
+#[path = "monitor_tests/recovery_tests.rs"]
+mod recovery_tests;

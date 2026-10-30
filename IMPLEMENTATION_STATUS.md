@@ -44,6 +44,36 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Independent whole-blueprint monitor recovery through MCP (2026-10-30)
+
+Explicit `monitor-offline` and `monitor-recovery` opening modes now reopen an
+existing private monitor without opening the original native journal, blueprint
+parent or game connection. The exact configured monitor identity, acknowledged
+history head, original binding and map source remain mandatory. These modes
+omit `region` and retain only Query authority. Offline recovery is read-only;
+writable recovery additionally permits durable local monitor cancellation.
+
+The independent owner supports historical progress pages, restricted schema
+discovery and history inspection through doctor. It refuses every native action,
+new monitor registration and live sample request. Neither recovered satisfaction
+nor a verified monitor history proves current terrain or verifies the original
+designation inventory. Original grants and the retained clock floor still fence
+every request. Normal close verifies history; explicit recovery release preserves
+an unverified exact handoff if the retained history or configuration is damaged.
+Ordinary mining opening still requires its original blueprint custody.
+
+All 128 focused tests pass: 77 adapter cases and 51 MCP cases, including nine new
+standalone recovery groups. Fixtures drop the combined owners, remove native
+journal bytes and damage the blueprint parent before reopening the intact
+monitor. Tests also cover Query-only authority, forbidden routes, exact source
+and recovery pins, historical satisfaction, cancellation after response failure,
+clock/grant expiry and damaged-history release. All 388 adapter and 404 pipeline
+input hashes remain unchanged. MCP compilation is warning-free; the adapter
+retains its preexisting unrelated workforce-test import warning. Actual async
+open/dispatch/close wiring received independent source review, but FastMCP and
+the Cx-owned async entrypoints remain outside the executable source-view harness.
+Full server, native, live and release qualification remain unverified.
+
 ### Whole-blueprint excavation progress through MCP (2026-10-30)
 
 The existing eleven-tool dig-control server now registers a monitor for one
@@ -67,9 +97,9 @@ queries/sampling requests. Current-result proof is withdrawn from historical
 query, terminal replay, errors, overflow, close and restart. Source selectors
 explicitly do not prove shared process identity, mining causality, continuous
 stability or structural safety. Local query/cancellation can inspect the monitor
-within an existing session even after native/parent damage; reopening the combined
-MCP session still requires those original files. The adapter monitor itself can
-be reopened independently. Offline mode never appends or contacts the game.
+within an existing session even after native/parent damage. Combined MCP restart
+still requires those original files; the independent recovery modes described
+above now reopen the monitor alone. Offline mode never appends or contacts the game.
 
 All 119 focused tests pass on the final feature source: 77 adapter cases and
 42 MCP handler/configuration cases, including 47 new adapter and 11 new MCP

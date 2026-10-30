@@ -509,6 +509,11 @@ component-test limitations. No production admission or native wire is changed.
 Optional `DFMCP_DIG_BLUEPRINT_MONITOR_CONFIG` adds whole-original-blueprint
 sampled excavation monitoring through those same tool names:
 
+- `open_session(mode="monitor-offline"|"monitor-recovery")`, with no region,
+  reopens only exact retained monitor history. Native/parent files and tokens
+  are unnecessary; Query-only authority permits inspection, and the writable
+  recovery mode permits local monitor cancellation. It cannot resume sampling.
+
 - `plan(monitor=<closed JSON string>)` registers the exact completed designation
   set, independent map/1.5 source and immutable deadline/stability/sample policy.
 - `wait(monitor_id=...)` takes one complete paused enclosing capture and

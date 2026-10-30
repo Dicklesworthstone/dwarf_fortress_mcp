@@ -37,6 +37,7 @@ use std::time::{Duration, Instant};
 
 mod batch;
 mod monitor;
+mod monitor_recovery;
 mod presentation;
 mod runtime;
 use presentation::{OUTPUT_BYTES, digest, failure, inventory, packet};
@@ -48,9 +49,45 @@ const OPEN_BYTES: u64 = 4 * VIEW_BYTES;
 const FAMILY: u128 = 18u128 << 57;
 static NEXT: AtomicU64 = AtomicU64::new(1);
 type Native = DigRpcClient<DigTcpStream>;
-struct Entry {
-    state: State<PrivateDigFile, Native, PrivateBuildFile>,
-    config: Config,
+enum Entry {
+    Native {
+        state: State<PrivateDigFile, Native, PrivateBuildFile>,
+        config: Config,
+    },
+    Monitor {
+        state: monitor_recovery::RecoveryState<PrivateBuildFile>,
+        config: Config,
+    },
+}
+impl Entry {
+    fn id(&self) -> SessionId {
+        match self {
+            Self::Native { state, .. } => state.id,
+            Self::Monitor { state, .. } => state.id(),
+        }
+    }
+    fn config(&self) -> &Config {
+        match self {
+            Self::Native { config, .. } | Self::Monitor { config, .. } => config,
+        }
+    }
+    fn blueprint_reference(&self) -> Option<Value> {
+        match self {
+            Self::Native { state, .. } => state.blueprint_reference(),
+            Self::Monitor { .. } => None,
+        }
+    }
+    fn monitor_reference(&self) -> Option<Value> {
+        match self {
+            Self::Native { state, .. } => state.monitor_reference(),
+            Self::Monitor { state, .. } => Some(state.reference()),
+        }
+    }
+    fn abandon(&mut self) {
+        if let Self::Native { state, .. } = self {
+            state.abandon();
+        }
+    }
 }
 static SESSION: Mutex<Option<Entry>> = Mutex::new(None);
 fn error(code: ErrorCode, text: &str) -> dfmcp_core::DfmcpError {
@@ -1391,50 +1428,62 @@ async fn with_session(
         let mut retained = None;
         let mut retained_monitor = None;
         let mut native_handoff = None;
+        let mut monitor_only = false;
         let result = (|| {
             let id = session_id(&raw)?;
             let mut locked = lock()?;
             let entry = locked
                 .as_mut()
-                .filter(|v| v.state.id == id)
+                .filter(|v| v.id() == id)
                 .ok_or_else(|| error(ErrorCode::SessionNotFound, "mining session absent"))?;
-            retained = entry.state.blueprint_reference();
-            retained_monitor = entry.state.monitor_reference();
+            retained = entry.blueprint_reference();
+            retained_monitor = entry.monitor_reference();
+            monitor_only = matches!(entry, Entry::Monitor { .. });
             if op == "fortress.observe" {
-                entry.state.abandon();
+                entry.abandon();
             }
-            runtime::boundary(&control, &entry.config, false)?;
-            let c = entry.state.context(runtime::enabled()?, wall)?;
-            let binding = entry.state.binding.clone();
-            let config = entry.config.clone();
-            let mut guard = runtime::Guard {
-                control: &control,
-                config: &config,
-                binding: &binding,
+            let config = entry.config().clone();
+            runtime::boundary(&control, &config, false)?;
+            let rendered = match entry {
+                Entry::Native { state, .. } => {
+                    let c = state.context(runtime::enabled()?, wall)?;
+                    let binding = state.binding.clone();
+                    let mut guard = runtime::Guard {
+                        control: &control,
+                        config: &config,
+                        binding: &binding,
+                    };
+                    let mut map_io = runtime::MonitorIo {
+                        control: &control,
+                        config: &config,
+                        mode: state.control.mode(),
+                    };
+                    run_action_with_monitor(
+                        state,
+                        c,
+                        op,
+                        action,
+                        control.started,
+                        &mut guard,
+                        |b, r, c| {
+                            config.matches(b)?;
+                            runtime::connect(&control, &config, r, c)
+                        },
+                        &mut map_io,
+                    )
+                }
+                Entry::Monitor { state, .. } => {
+                    let c = state.context(wall)?;
+                    state.run_action(c, op, action, control.started, |_| {
+                        runtime::boundary(&control, &config, false)
+                    })
+                }
             };
-            let mut map_io = runtime::MonitorIo {
-                control: &control,
-                config: &config,
-                mode: entry.state.control.mode(),
-            };
-            let rendered = run_action_with_monitor(
-                &mut entry.state,
-                c,
-                op,
-                action,
-                control.started,
-                &mut guard,
-                |b, r, c| {
-                    config.matches(b)?;
-                    runtime::connect(&control, &config, r, c)
-                },
-                &mut map_io,
-            );
-            retained = entry.state.blueprint_reference();
-            retained_monitor = entry.state.monitor_reference();
+            retained = entry.blueprint_reference();
+            retained_monitor = entry.monitor_reference();
             native_handoff = presentation::retained_handoff(&rendered);
             if let Err(e) = runtime::boundary(&control, &config, false) {
-                entry.state.abandon();
+                entry.abandon();
                 return Err(e);
             }
             Ok(rendered)
@@ -1443,7 +1492,11 @@ async fn with_session(
             Ok(value) => value,
             Err(e) => {
                 let mut result = failure(&e);
-                result["effect_may_have_occurred"] = json!(native_effect_requested);
+                result["effect_may_have_occurred"] =
+                    json!(native_effect_requested && !monitor_only);
+                if monitor_only {
+                    result["monitor_only"] = json!(true);
+                }
                 if let Some(reference) = retained {
                     result["blueprint"] = reference;
                 }
@@ -1544,6 +1597,12 @@ fn current_blueprint_context<N: DigSource>(
     Ok(current)
 }
 fn opening_mode(raw: Option<&str>, config: &Config) -> Result<DigMode> {
+    if config.monitor.is_some() && config.blueprint.is_none() {
+        return Err(error(
+            ErrorCode::CapabilityDenied,
+            "combined mining requires its original blueprint custody",
+        ));
+    }
     let mode = match raw {
         None | Some("control") => DigMode::Control,
         Some("offline") => DigMode::Offline,
@@ -1563,26 +1622,70 @@ fn opening_mode(raw: Option<&str>, config: &Config) -> Result<DigMode> {
     }
     Ok(mode)
 }
+fn opening_selection(
+    raw: Option<&str>,
+    region: Option<&str>,
+    config: &Config,
+) -> Result<(DigMode, Option<DigRegion>, bool)> {
+    let recovery = match raw {
+        Some("monitor-offline") => Some(DigMode::Offline),
+        Some("monitor-recovery") => Some(DigMode::Recover),
+        _ => None,
+    };
+    if let Some(mode) = recovery {
+        if region.is_some() {
+            return Err(error(
+                ErrorCode::InvalidRequest,
+                "monitor-only recovery takes no native bootstrap region",
+            ));
+        }
+        let selected = config.monitor.as_ref().ok_or_else(|| {
+            error(
+                ErrorCode::CapabilityDenied,
+                "monitor recovery is not configured",
+            )
+        })?;
+        if selected.initialize || selected.recovery.is_none() {
+            return Err(error(
+                ErrorCode::CapabilityDenied,
+                "monitor-only opening requires exact existing history",
+            ));
+        }
+        Ok((mode, None, true))
+    } else {
+        let mode = opening_mode(raw, config)?;
+        let region = parse_region(region.ok_or_else(|| {
+            error(
+                ErrorCode::InvalidRequest,
+                "native mining opening requires a region",
+            )
+        })?)?;
+        config.region(region)?;
+        Ok((mode, Some(region), false))
+    }
+}
 #[tool(
     name = "fortress.open_session",
-    description = "Open isolated mining control or an exact retained blueprint in offline/reconcile mode. region is [x,y,z,width,height] for initial native bootstrap only. Paths, protected areas, blueprint custody and checkpoint policy are operator configuration. No preparation or commit during open."
+    description = "Open mining control or retained blueprint offline/reconcile with region=[x,y,z,width,height]. For an intact retained monitor without native or parent custody, select monitor-offline (inspection) or monitor-recovery (inspection/local stop) and omit region. Monitor-only modes have Query authority only and never contact the game. Paths/source pins are operator configuration."
 )]
 pub async fn fortress_open_session(
-    region: String,
+    region: Option<String>,
     mode: Option<String>,
     max_wall_millis: Option<u64>,
     max_bytes: Option<u64>,
     max_output_tokens: Option<u32>,
 ) -> String {
+    let requested_monitor_only = matches!(
+        mode.as_deref(),
+        Some("monitor-offline" | "monitor-recovery")
+    );
     runtime::owned("fortress.open_session", move |control| {
         let mut retained=None;
         let mut retained_monitor=None;
         let result=(|| {
             let config=runtime::configuration()?;
             runtime::boundary(&control,&config,false)?;
-            let mode=opening_mode(mode.as_deref(),&config)?;
-            let region=parse_region(&region)?;
-            config.region(region)?;
+            let (mode,region,monitor_only)=opening_selection(mode.as_deref(),region.as_deref(),&config)?;
             let budget=WorkBudget {max_wall_millis:max_wall_millis.map_or(10_000,|n|n),
                 max_bytes:max_bytes.map_or(MAX_WORK_BYTES,|n|n),max_output_tokens:max_output_tokens.map_or(8192,|n|n),
                 max_entities:if config.monitor.is_some(){monitor::MAX_ENTITIES}else{300},max_actions:1,max_game_ticks:0};
@@ -1594,8 +1697,37 @@ pub async fn fortress_open_session(
             let mut c=OperationContext {session_id:id,request_id:RequestId::new(1),budget,cancellation_requested:false,
                 anchor:StateAnchor {fortress_id:config.fortress(),cursor:ObservationCursor::ORIGIN,tick:GameTick(0),state_hash:Digest32::ZERO},
                 grants:grants(config.fortress(),config.scope,write)};
-            if mode==DigMode::Offline {c.grants.retain(|g|g.capability==Capability::Query);}
+            if mode==DigMode::Offline || monitor_only {c.grants.retain(|g|g.capability==Capability::Query);}
             let mut work=Work::new(&c,control.started)?;
+            if monitor_only {
+                let selected=config.monitor.as_ref().ok_or_else(||error(ErrorCode::CapabilityDenied,"monitor recovery configuration absent"))?;
+                retained_monitor=selected.recovery.map(monitor::recovery);
+                let opening=work.take(&c,monitor::OPEN_BYTES)?;
+                let mut constructor=work.take(&c,2*monitor::FINAL_BYTES)?;
+                let mut inspection=work.take(&c,monitor::FINAL_BYTES)?;
+                let store=dfmcp_adapter::dig_blueprint::monitor::store::open_private_monitor_store(
+                    &selected.path,&opening,mode,None,false,selected.recovery,config.scope)?;
+                retained_monitor=Some(monitor::recovery(store.recovery()));
+                c.anchor.tick=c.anchor.tick.max(GameTick(store.high_tick()));
+                constructor.anchor=c.anchor;
+                constructor.budget.max_wall_millis=work.current(&c)?.budget.max_wall_millis;
+                let mut state=monitor_recovery::RecoveryState::new(store,&constructor,&config,mode)?;
+                state.set_budget(budget);
+                inspection.anchor=c.anchor;
+                inspection.budget.max_wall_millis=work.current(&c)?.budget.max_wall_millis;
+                let evidence=state.inspect(&inspection)?;
+                let result=json!({"ok":true,"session_id":id.to_string(),"monitor_only":true,
+                    "mode":if mode==DigMode::Offline{"monitor-offline"}else{"monitor-recovery"},
+                    "capabilities":["query"],"blueprint_monitor":evidence,"native_calls":0,
+                    "native_custody_opened":false,"blueprint_custody_opened":false,"game_mutations":0});
+                let rendered=packet("fortress.open_session",result,Some(&c),Some(state.binding()),None,None,None);
+                if rendered.len() as u64>OUTPUT_BYTES {return Err(exhausted());}
+                work.current(&c)?;
+                runtime::boundary(&control,&config,false)?;
+                *locked=Some(Entry::Monitor{state,config});
+                return Ok(rendered);
+            }
+            let region=region.ok_or_else(||error(ErrorCode::InternalInvariantViolation,"native opening lost its selected region"))?;
             let reopen_blueprint=config.blueprint.as_ref().is_some_and(|p|!p.initialize);
             // Reject predictable initialization failures before exclusive file
             // creation. An operator can then correct configuration and retry.
@@ -1714,13 +1846,14 @@ pub async fn fortress_open_session(
             if rendered.len() as u64>OUTPUT_BYTES {return Err(exhausted());}
             work.current(&c)?;
             runtime::boundary(&control,&config,false)?;
-            *locked=Some(Entry {state,config});
+            *locked=Some(Entry::Native {state,config});
             Ok(rendered)
         })();
         match result {
             Ok(v)=>v,
             Err(e)=>{
                 let mut result=failure(&e);
+                if requested_monitor_only {result["monitor_only"]=json!(true);}
                 if let Some(recovery)=retained {result["blueprint"]=json!({"recovery":recovery,"inventory_verified":false});}
                 if let Some(recovery)=retained_monitor {result["blueprint_monitor"]=json!({"recovery":recovery,"history_verified":false,
                     "fresh_sample_acquired":false,"sampled_excavation_condition_proven":false});}
@@ -1911,23 +2044,56 @@ async fn close(raw: String, release: bool) -> String {
     runtime::owned("fortress.cancel", move |control| {
         let mut retained = None;
         let mut retained_monitor = None;
+        let mut monitor_only = false;
         let result = (|| {
             control.checkpoint()?;
             let id = session_id(&raw)?;
             let mut locked = lock()?;
             let entry = locked
                 .as_mut()
-                .filter(|e| e.state.id == id)
+                .filter(|e| e.id() == id)
                 .ok_or_else(|| error(ErrorCode::SessionNotFound, "mining session absent"))?;
-            retained = entry.state.blueprint_reference();
-            retained_monitor = entry.state.monitor_reference();
-            let c = entry.state.context(false, None)?;
+            retained = entry.blueprint_reference();
+            retained_monitor = entry.monitor_reference();
+            if let Entry::Monitor { state, config } = entry {
+                monitor_only = true;
+                let c = state.context(None)?;
+                let output = state.close(c.clone(), release, control.started, |_| {
+                    if release {
+                        control.checkpoint()
+                    } else {
+                        runtime::boundary(&control, config, false)
+                    }
+                });
+                retained_monitor = Some(state.reference());
+                if output.len() as u64 > OUTPUT_BYTES {
+                    return Err(exhausted());
+                }
+                let value: Value = serde_json::from_str(&output).map_err(|_| {
+                    error(
+                        ErrorCode::InternalInvariantViolation,
+                        "invalid recovery close response",
+                    )
+                })?;
+                Work::new(&c, control.started)?.current(&c)?;
+                if value["result"]["ok"] == true {
+                    drop(locked.take());
+                }
+                return Ok(output);
+            }
+            let Entry::Native { state, config } = entry else {
+                return Err(error(
+                    ErrorCode::InternalInvariantViolation,
+                    "unknown mining session owner",
+                ));
+            };
+            let c = state.context(false, None)?;
             let view = if release {
                 None
             } else {
-                runtime::boundary(&control, &entry.config, false)?;
+                runtime::boundary(&control, config, false)?;
                 let work = Work::new(&c, control.started)?;
-                Some(entry.state.control.view(&work.view(&c)?)?)
+                Some(state.control.view(&work.view(&c)?)?)
             };
             if !release && view.as_ref().is_some_and(|v| v.pending.is_some()) {
                 return Err(error(
@@ -1936,7 +2102,7 @@ async fn close(raw: String, release: bool) -> String {
                 ));
             }
             let result = retain_blueprint(
-                &entry.state,
+                state,
                 json!({"ok":true,"scope":"session","closed":true,"release_for_recovery":release,
                 "effects_cancelled":false,"history_erased":false,"native_quiescence_proven":false}),
             );
@@ -1944,7 +2110,7 @@ async fn close(raw: String, release: bool) -> String {
                 "fortress.cancel",
                 result,
                 Some(&c),
-                Some(&entry.state.binding),
+                Some(&state.binding),
                 view.as_ref(),
                 None,
                 None,
@@ -1960,6 +2126,9 @@ async fn close(raw: String, release: bool) -> String {
             Err(e) => {
                 let mut result = failure(&e);
                 result["effect_may_have_occurred"] = json!(false);
+                if monitor_only {
+                    result["monitor_only"] = json!(true);
+                }
                 if let Some(reference) = retained {
                     result["blueprint"] = reference;
                 }

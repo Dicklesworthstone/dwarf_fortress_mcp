@@ -234,7 +234,9 @@ checks every selected tile for dry, visible, undesignated floor; all targets
 share one fixed sampled stability window. Durable progress, exact restart,
 bounded tile diagnostics and monitor-only cancellation preserve the original
 receipts and distinguish fresh results from historical achievement. See the
-[whole-blueprint monitoring workflow](docs/DIG_BLUEPRINT_MONITOR.md).
+[whole-blueprint monitoring workflow](docs/DIG_BLUEPRINT_MONITOR.md). Dedicated
+monitor-only recovery can inspect or stop intact progress history even after
+the original native journal or blueprint parent becomes unavailable.
 
 ### Durable whole-room readiness
 

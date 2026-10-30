@@ -19,6 +19,9 @@ multi-region projects, reviews one original child at a time, and adds exact
 offline/reconcile/control reopening plus permanent project stopping. The
 [whole-blueprint monitor](DIG_BLUEPRINT_MONITOR.md) adds independent map/1.5
 sampling and durable shared stability after every original child is Designated.
+Its `monitor-offline` and `monitor-recovery` opening modes independently recover
+retained monitor history with Query only when mining custody is unavailable;
+omit `region` in those modes.
 
 ## Operator configuration and checkpoint policy
 

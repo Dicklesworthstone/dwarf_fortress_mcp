@@ -103,9 +103,8 @@ histories retain their original terminal status. During an open session,
 monitor query and cancellation remain available if the native journal or parent
 becomes damaged; their response explicitly withholds current original-inventory
 verification. Reopening the **combined MCP session** still requires its original
-native journal and blueprint parent. The adapter's independent `MonitorStore`
-API can reopen monitor history without those files; this MCP profile has no
-monitor-only restart mode.
+native journal and blueprint parent. When those files are unavailable, use the
+independent monitor-only recovery modes below.
 
 For restart, keep the native/blueprint configuration and change the monitor
 configuration to `initialize:false`, with its original source pin and exact
@@ -133,6 +132,57 @@ Configured monitor sessions admit at most 2048 entities for the complete bounded
 capture and bookkeeping. Existing request byte/output ceilings still apply;
 complete source, history, final audit and response work is prepaid before map
 contact. Ordinary non-monitor sessions retain their existing entity allowance.
+
+## Recover monitoring when mining custody is unavailable
+
+An intact monitor history can be reopened through MCP even when the original
+native journal or blueprint parent has been lost, damaged or remains locked by
+another owner. Keep the original `DFMCP_DIG_BLUEPRINT_MONITOR_CONFIG` with
+`initialize:false`, its independent source pin and the last acknowledged
+`{monitor_id, head}`. No map or digging token is needed. The original folder,
+site, scope and endpoint configuration must still match the history.
+
+You may omit `DFMCP_DIG_BLUEPRINT_CONFIG` for this recovery. The existing
+`DFMCP_DIG_JOURNAL` path setting remains required configuration, but neither it
+nor any blueprint path is opened or recreated. Ordinary mining modes reject a
+monitor configuration without its original blueprint; there is no fallback to
+a new native journal.
+
+Open one of these modes and **omit `region`**:
+
+```text
+fortress.open_session(mode="monitor-offline", max_wall_millis=60000)
+fortress.open_session(mode="monitor-recovery", max_wall_millis=60000)
+```
+
+Use one session at a time. Both modes grant Query only and hold only the exact
+monitor file. Neither mode creates a native session, issues a lease, contacts
+the game, prepares work, samples terrain or restores native receipts.
+
+| Mode | Available actions |
+|---|---|
+| `monitor-offline` | Verified historical monitor queries, restricted query-schema discovery, monitor-history doctor and session close; no append or synchronization. |
+| `monitor-recovery` | The same inspection plus durable local `cancel(scope="monitor", monitor_id=...)`. |
+
+`fortress.query` accepts only `blueprint_monitor` and `schema` in these modes.
+`fortress.doctor` verifies this history, not live health or original native
+custody. `fortress.wait`, observation, native plan/commit/reconciliation,
+blueprint advancement, source replacement and new monitor registration are
+refused. Recovering historical evidence does not authorize resumed sampling.
+
+Use the same head-pinned query and monitor cancellation calls shown above.
+Historical `satisfied` remains historical; every packet explicitly sets
+`original_designations_verified:false`, `fresh_sample_acquired:false` and
+`sampled_excavation_condition_proven:false`. Agent Turn coverage is restricted
+to this monitor history and does not suggest a new terrain sample. An unfinished
+read remains fenced, with its retained clock floor and finite attempt count.
+
+`fortress.cancel(scope="session")` verifies and releases this local owner
+without cancelling the monitor or settling any native effect. If monitor
+custody itself becomes corrupt or configuration changes after opening, explicit
+`release_for_recovery:true` releases the lock while retaining an unverified
+identity/head handoff. It does not repair, erase or recreate any history. Current
+runtime cancellation and the request deadline still apply to release.
 
 ## Exact original work and source
 

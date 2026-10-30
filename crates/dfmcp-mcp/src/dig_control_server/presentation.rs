@@ -177,6 +177,7 @@ pub fn packet(
     }
     let blueprint = result.get("blueprint").filter(|v| v.is_object());
     let monitor = result.get("blueprint_monitor").filter(|v| v.is_object());
+    let monitor_only = result.get("monitor_only") == Some(&Value::Bool(true));
     let monitor_verified = monitor.is_some_and(|m| m["history_verified"] == true);
     let sampled_goal = monitor.is_some_and(|m| m["sampled_excavation_condition_proven"] == true);
     let blueprint_verified = blueprint.is_some_and(|p| p["inventory_verified"] == true);
@@ -202,6 +203,10 @@ pub fn packet(
             "counts":proof["counts"],"sampling_fenced":proof["sampling_fenced"],
             "shared_process_identity_proven":false,"mining_causality_proven":false});
     }
+    if monitor_only {
+        active["scope"] = json!("this_blueprint_monitor_history_only");
+        active["original_designations_verified"] = json!(false);
+    }
     let phase = match op {
         "fortress.open_session" => AgentPhase::Bootstrap,
         "fortress.observe" => AgentPhase::Orient,
@@ -212,7 +217,9 @@ pub fn packet(
     };
     let mut builder=AgentTurnBuilder::new(op,phase)
         .continuity(ContinuityStatus::Indeterminate,None,Some(json!({"world_history":"unestablished"})),None)
-        .briefing(json!({"runtime":"unadmitted_mining_control","bridge_protocol":"1.16","runtime_admitted":false,
+        .briefing(json!({"runtime":if monitor_only{"unadmitted_blueprint_monitor_recovery"}else{"unadmitted_mining_control"},
+            "bridge_protocol":if monitor_only{Value::Null}else{json!("1.16")},"runtime_admitted":false,
+            "monitor_only":monitor_only,
             "mutation_admissible":false,"development_policy":control_policy.map(policy),
             "current_terrain_proven":false,"excavation_completion_proven":false,
             "whole_blueprint_sampled_floor_condition_proven":sampled_goal,
@@ -220,7 +227,8 @@ pub fn packet(
         .active_work(active)
         .coverage(json!({"status":"partial","complete_domains":if view.is_some() && blueprint_verified {
                 json!(["this_journal_coordination_inventory","this_blueprint_original_prefix"])
-            }else if view.is_some(){json!(["this_journal_coordination_inventory"])}else{json!([])},
+            }else if view.is_some(){json!(["this_journal_coordination_inventory"])}
+            else if monitor_only && monitor_verified{json!(["this_blueprint_monitor_history"])}else{json!([])},
             "partial_domains":["bounded_mining_evidence","sampled_blueprint_excavation"],
             "omitted_domains":["continuous_excavation_state","structural_safety","other_controllers","game_checkpoint"]}))
         .uncertainty(vec![uncertainty("mining-not-excavation","unknown",
@@ -298,15 +306,16 @@ pub fn packet(
                 && m["sampling_fenced"] == false
                 && m["attempt_limit_reached"] == false
         }) {
-            let can_observe = binding.is_some_and(|b| {
-                c.authorize(
-                    Capability::Observe,
-                    RiskTier::ReadOnly,
-                    &[],
-                    Some(b.scope()),
-                )
-                .is_ok()
-            });
+            let can_observe = !monitor_only
+                && binding.is_some_and(|b| {
+                    c.authorize(
+                        Capability::Observe,
+                        RiskTier::ReadOnly,
+                        &[],
+                        Some(b.scope()),
+                    )
+                    .is_ok()
+                });
             if can_observe {
                 next.push(recommendation("sample-original-blueprint","fortress.wait",
                     "Acquire one whole original blueprint capture and advance its fixed sampled stability goal.",
