@@ -16,7 +16,7 @@ fn source_digest(request: &ProductionRequest) -> Digest32 {
     Digest32::of_bytes(&bytes)
 }
 
-pub(super) fn compile(
+pub(crate) fn compile(
     request: &ProductionRequest,
     id: IntentId,
     snapshot: &WorldSnapshot,

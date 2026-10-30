@@ -54,7 +54,7 @@ mod objectives;
 use objectives::{Objective, objective_history_roots};
 
 #[path = "production_source.rs"]
-mod production_source;
+pub(crate) mod production_source;
 
 #[path = "room_provisioning.rs"]
 mod room_provisioning;
@@ -3531,7 +3531,7 @@ fn action_work_json(session: &LabSession, action_id: ActionId) -> serde_json::Va
     if let Some(entity_id) = entity_id
         && authorize_entry(&ctx, Capability::Observe, RiskTier::ReadOnly).is_ok()
     {
-        match lab_world::workforce_action_json(adapter.snapshot(), entity_id) {
+        match crate::lab_world::workforce_action_json(adapter.snapshot(), entity_id) {
             Ok(Some(workforce)) => view["workforce"] = workforce,
             Ok(None) => {}
             Err(error) => {
@@ -3544,7 +3544,7 @@ fn action_work_json(session: &LabSession, action_id: ActionId) -> serde_json::Va
                 });
             }
         }
-        match lab_world::construction_material_action_json(adapter.snapshot(), entity_id) {
+        match crate::lab_world::construction_material_action_json(adapter.snapshot(), entity_id) {
             Ok(Some(materials)) => view["construction_materials"] = materials,
             Ok(None) => {}
             Err(error) => {
@@ -3557,7 +3557,7 @@ fn action_work_json(session: &LabSession, action_id: ActionId) -> serde_json::Va
                 });
             }
         }
-        match lab_world::provisions_action_json(adapter.snapshot(), entity_id) {
+        match crate::lab_world::provisions_action_json(adapter.snapshot(), entity_id) {
             Ok(Some(provisions)) => view["provisions"] = provisions,
             Ok(None) => {}
             Err(error) => {
@@ -3697,7 +3697,7 @@ fn session_workforce_json(session: &LabSession) -> Option<serde_json::Value> {
     if authorize_entry(&ctx, Capability::Observe, RiskTier::ReadOnly).is_err() {
         return None;
     }
-    match lab_world::workforce_json(session.adapter.snapshot()) {
+    match crate::lab_world::workforce_json(session.adapter.snapshot()) {
         Ok(workforce) => workforce,
         Err(error) => Some(json!({
             "available": false,
@@ -3714,7 +3714,7 @@ fn session_construction_material_json(session: &LabSession) -> Option<serde_json
     if authorize_entry(&ctx, Capability::Observe, RiskTier::ReadOnly).is_err() {
         return None;
     }
-    match lab_world::construction_material_json(session.adapter.snapshot()) {
+    match crate::lab_world::construction_material_json(session.adapter.snapshot()) {
         Ok(materials) => materials,
         Err(error) => Some(json!({
             "available": false,
@@ -3731,7 +3731,7 @@ fn session_provisions_json(session: &LabSession) -> Option<serde_json::Value> {
     if authorize_entry(&ctx, Capability::Observe, RiskTier::ReadOnly).is_err() {
         return None;
     }
-    match lab_world::provisions_json(session.adapter.snapshot()) {
+    match crate::lab_world::provisions_json(session.adapter.snapshot()) {
         Ok(provisions) => provisions,
         Err(error) => Some(json!({
             "available": false,

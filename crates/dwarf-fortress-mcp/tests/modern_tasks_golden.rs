@@ -546,6 +546,10 @@ fn modern_task_proves_every_original_step_and_preserves_terminal_evidence() -> T
         "supervising an already committed digest must reuse its original receipts"
     );
     assert_eq!(
+        recovered_payload["observed_anchor"], before_recovery["anchor"],
+        "retained action evidence must not replace the current goal observation"
+    );
+    assert_eq!(
         client.terrain(&session)?["anchor"],
         before_recovery["anchor"]
     );
@@ -715,7 +719,7 @@ fn cancellation_drains_original_plan_after_later_commit_without_dispatching_chil
 }
 
 #[test]
-fn late_observed_completion_fails_task_and_prevents_dependent_dispatch() -> TestResult {
+fn bounded_wait_proves_early_completion_before_its_final_frontier() -> TestResult {
     let mut client = StdioClient::spawn(true)?;
     client.discover()?;
     let session = client.open("906", false)?;
@@ -737,20 +741,28 @@ fn late_observed_completion_fails_task_and_prevents_dependent_dispatch() -> Test
         .and_then(|remaining| remaining.checked_add(1))
         .ok_or("plan deadline must be after dispatch")?;
     client.advance(&session, late)?;
-    let failed = client.await_terminal(&id, "failed")?;
-    assert!(failed.get("result").is_none());
-    assert!(failed["error"]["message"].is_string());
-    let evidence = &failed["error"]["data"];
-    assert_eq!(evidence["ok"], false);
-    assert_eq!(evidence["blind_retry_allowed"], false);
-    assert_actions_proven(evidence, &digest, "Failed", 2)?;
+    // Foreground wait now publishes intermediate proof frontiers. Its final
+    // tick being late cannot erase an on-time proof or prevent its successor.
+    let progress = client.task_record(&session, &id)?;
+    let actions = &progress["progress"]["obligation"]["actions"];
+    assert_eq!(actions[0]["state"], "Verified");
+    assert!(
+        actions[0]["observed_anchor"]["game_tick"]
+            .as_u64()
+            .is_some_and(|tick| tick <= deadline)
+    );
+    assert_eq!(actions[1]["state"], "AppliedAwaitingVerification");
     assert_eq!(
         client.terrain(&session)?["levels"][0]["rows"][0],
         ".",
-        "observing a completed excavation after its deadline cannot prove on-time success"
+        "the excavation finished at an intermediate observed frontier"
     );
-    assert!(find_entity(&client.entities(&session, "building")?, &building).is_none());
-    assert_eq!(client.task(&id)?, failed);
+    assert!(find_entity(&client.entities(&session, "building")?, &building).is_some());
+    client.advance(&session, 500)?;
+    let completed = client.await_terminal(&id, "completed")?;
+    let evidence = tool_payload(&completed["result"])?;
+    assert_actions_proven(&evidence, &digest, "Verified", 2)?;
+    assert_eq!(client.task(&id)?, completed);
     Ok(())
 }
 

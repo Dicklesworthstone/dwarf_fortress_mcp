@@ -476,7 +476,7 @@ impl ApplicationTaskSupervisor for LabTaskService {
                         work.honor_cancellation(Some("original plan drained before transport cancellation was admitted; both drain phases and the finalize certificate are retained".to_owned()))?;
                         return Ok(Some(()));
                     }
-                    let view = match crate::server::task_session::view(&definition.session_id, &definition.plan_digest) {
+                    let mut view = match crate::server::task_session::view(&definition.session_id, &definition.plan_digest) {
                         Ok(view) => view,
                         Err(error) => {
                             let payload = json!({"ok": false, "session_id": definition.session_id,
@@ -494,6 +494,7 @@ impl ApplicationTaskSupervisor for LabTaskService {
                             return Ok(Some(()));
                         }
                     };
+                    self.store.retain_original_actions(&definition, &mut view.payload)?;
                     self.store.record_progress(work.task_id(), json!({"stage": "observed", "obligation": view.payload}))?;
                     match view.status {
                         McpTaskStatus::Working | McpTaskStatus::InputRequired => Ok(None),

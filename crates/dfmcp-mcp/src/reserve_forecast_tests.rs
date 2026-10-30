@@ -50,7 +50,7 @@ fn fixture(until: u64, minimum: u32, paused: bool) -> Result<(MemoryAdapter, Pre
         })
         .to_string(),
     )?;
-    let (intent, _) = crate::production_source::compile(
+    let (intent, _) = crate::server::production_source::compile(
         &request,
         IntentId::new(1),
         adapter.snapshot(),

@@ -135,6 +135,43 @@ impl LabTaskStore {
             .map(|evidence| (evidence, record.terminal_failure.clone())))
     }
 
+    /// A second monitor of the same commit retains the first completed action
+    /// evidence. Current goal truth and physical-work admission are still read
+    /// by task_session; historical quiescence must never hide newly active work.
+    pub(crate) fn retain_original_actions(
+        &self,
+        work: &TaskWork,
+        payload: &mut Value,
+    ) -> McpResult<()> {
+        if payload["physical_quiescent"] != true {
+            return Ok(());
+        }
+        let records = self.records()?;
+        let prior = records
+            .values()
+            .filter(|record| {
+                record.work.session_id == work.session_id
+                    && record.work.plan_digest == work.plan_digest
+                    && record.terminal_failure.is_none()
+            })
+            .filter_map(|record| {
+                record
+                    .final_evidence
+                    .as_ref()
+                    .map(|value| (record.ordinal, value))
+            })
+            .filter(|(_, value)| value["status"] == "completed")
+            .min_by_key(|(ordinal, _)| *ordinal);
+        if let Some((_, prior)) = prior
+            && same_drained_receipts(&prior["actions"], &payload["actions"])
+        {
+            payload["actions"] = prior["actions"].clone();
+            payload["action_evidence_scope"] =
+                json!("original_terminal_receipts_and_quiescence_at_their_observed_anchors");
+        }
+        Ok(())
+    }
+
     pub(crate) fn retain_final_evidence(
         &self,
         id: &FinalTaskId,
@@ -288,6 +325,30 @@ impl LabTaskStore {
             "scope": "laboratory_process_only"}),
         )
     }
+}
+
+fn same_drained_receipts(prior: &Value, current: &Value) -> bool {
+    let (Some(prior), Some(current)) = (prior.as_array(), current.as_array()) else {
+        return false;
+    };
+    !prior.is_empty()
+        && prior.len() == current.len()
+        && prior.iter().zip(current).all(|(old, new)| {
+            old["fully_drained"] == true
+                && new["fully_drained"] == true
+                && [
+                    "action_id",
+                    "step",
+                    "state",
+                    "message",
+                    "receipt_digest",
+                    "observed_anchor",
+                    "obligation",
+                    "evidence",
+                ]
+                .iter()
+                .all(|field| old.get(*field).is_some() && old.get(*field) == new.get(*field))
+        })
 }
 
 impl FinalTaskStore for LabTaskStore {
@@ -625,5 +686,42 @@ impl FinalTaskStore for LabTaskStore {
 
     fn is_cancellation_requested(&self, task_id: &FinalTaskId) -> McpResult<bool> {
         self.inner.is_cancellation_requested(task_id)
+    }
+}
+
+#[cfg(test)]
+mod retained_action_tests {
+    use super::*;
+
+    fn receipt() -> Value {
+        json!([{"action_id":"original", "step":0, "state":"Verified", "message":"proved",
+            "receipt_digest":"digest", "observed_anchor":{"sequence":2}, "obligation":null,
+            "evidence":[], "fully_drained":true, "work_state":{"state":"quiescent", "observed_anchor":{"sequence":3}}}])
+    }
+
+    #[test]
+    fn retained_quiescence_requires_the_same_complete_immutable_receipts() {
+        let prior = receipt();
+        let mut current = prior.clone();
+        current[0]["work_state"]["observed_anchor"]["sequence"] = json!(4);
+        assert!(same_drained_receipts(&prior, &current));
+        for field in [
+            "action_id",
+            "step",
+            "state",
+            "message",
+            "receipt_digest",
+            "observed_anchor",
+            "obligation",
+            "evidence",
+        ] {
+            let mut different = current.clone();
+            different[0][field] = json!("changed");
+            assert!(!same_drained_receipts(&prior, &different), "{field}");
+        }
+        current[0]["fully_drained"] = json!(false);
+        assert!(!same_drained_receipts(&prior, &current));
+        assert!(!same_drained_receipts(&json!([]), &json!([])));
+        assert!(!same_drained_receipts(&prior, &Value::Null));
     }
 }
