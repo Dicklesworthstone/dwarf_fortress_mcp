@@ -39,7 +39,7 @@ fn binding() -> Result<BuildBinding> {
         plan()?.before(),
     )
 }
-fn context() -> Result<OperationContext> {
+pub(super) fn context() -> Result<OperationContext> {
     let plan = plan()?;
     let fortress_id = plan.before().fortress_id();
     Ok(OperationContext {
