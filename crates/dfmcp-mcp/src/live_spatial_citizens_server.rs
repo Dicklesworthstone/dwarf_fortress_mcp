@@ -320,7 +320,8 @@ fn packet_with_basis(
         maximum = s
             .budget
             .max_bytes
-            .min(u64::from(s.budget.max_output_tokens) * 4) as usize;
+            .min(u64::from(s.budget.max_output_tokens) * 4)
+            .min(schema_paging::MAX_INLINE_TEXT as u64) as usize;
         v["session_id"] = json!(s.id.to_string());
         v["anchor"] = anchor_json(a);
         let report = situation_report(s, c)?;
@@ -720,7 +721,8 @@ fn view(s: &Session, c: &OperationContext) -> Result<QueryResponseProjection> {
         maximum_bytes: s
             .budget
             .max_bytes
-            .min(u64::from(s.budget.max_output_tokens) * 4) as usize,
+            .min(u64::from(s.budget.max_output_tokens) * 4)
+            .min(schema_paging::MAX_INLINE_TEXT as u64) as usize,
     })
 }
 // Historical handlers intentionally use the unadorned view above. Never mix a

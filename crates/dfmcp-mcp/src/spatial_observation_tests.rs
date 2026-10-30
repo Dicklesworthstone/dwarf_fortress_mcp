@@ -160,6 +160,108 @@ fn forbid_at_next_tick(s: &mut Session, capability: Capability) -> Result<()> {
 }
 
 #[test]
+fn sixty_four_tile_queries_paginate_inside_the_modern_text_limit_without_loss() -> Result<()> {
+    use dfmcp_adapter::live_operations::OperationsProfile;
+    use fastmcp_rust::{FinalCallToolResult, ResultPeerEra, decode_typed_complete};
+    use std::collections::BTreeSet;
+
+    let _serial = crate::test_serial();
+    let first = fixture::observation(3, 0, 0, false)?;
+    let mut terrain = first.spatial().terrain().clone();
+    terrain.map.region.size = [16, 16, 3];
+    terrain.map.cells = vec![terrain.map.cells[0].clone(); 768];
+    let region = terrain.map.region;
+    let mut spatial = b"DFMS1600".to_vec();
+    let part = |out: &mut Vec<u8>, value: &[u8]| {
+        out.extend_from_slice(&(value.len() as u32).to_be_bytes());
+        out.extend_from_slice(value);
+    };
+    part(
+        &mut spatial,
+        &first
+            .spatial()
+            .operations()
+            .encode_profile(OperationsProfile::PagedV1_4)?,
+    );
+    part(&mut spatial, &terrain.encode_payload()?);
+    let mut combined = b"DFMS1800".to_vec();
+    part(&mut combined, &spatial);
+    part(&mut combined, b"DFMC1800\0\0\0\0");
+    let capture =
+        LiveSpatialCitizenObservation::decode_payload(&combined, 7, "df".into(), "dfhack".into())?;
+    let (mut s, calls) = session(None, &[])?;
+    s.state = LiveSpatialCitizenState::default();
+    s.state.publish(capture)?;
+    s.limits.spatial.region = region;
+    s.budget.max_entities = s.limits.entity_limit();
+    let anchor = anchor_json(s.anchor()?);
+    let id = s.id;
+    struct Registered(SessionId);
+    impl Drop for Registered {
+        fn drop(&mut self) {
+            if let Ok(mut sessions) = SESSIONS.lock() {
+                sessions.remove(&self.0);
+            }
+        }
+    }
+    lock(&SESSIONS)?.insert(id, Arc::new(Mutex::new(s)));
+    let _registered = Registered(id);
+    let mut input = json!({"schema":"dfmcp.query/1","query":{
+        "kind":"entities","kinds":["tile_feature"],
+        "fields":["position","visibility","shape"],"limit":64}});
+    let mut ids = BTreeSet::new();
+    let mut pages = 0;
+    loop {
+        let text = fortress_query(Some(id.to_string()), None, Some(input.clone()));
+        let envelope = json!({"resultType":"complete","content":[{"type":"text","text":text}],"isError":false}).to_string();
+        assert!(
+            decode_typed_complete::<FinalCallToolResult>(&envelope, ResultPeerEra::Modern).is_ok()
+        );
+        assert!(text.len() <= schema_paging::MAX_INLINE_TEXT);
+        let result: Value = serde_json::from_str(&text)
+            .map_err(|_| error(ErrorCode::InternalInvariantViolation, "tile page JSON"))?;
+        assert_eq!(result["ok"], true, "{result}");
+        assert_eq!(result["agent_turn"]["anchor"], anchor);
+        let rows = result["rows"]
+            .as_array()
+            .ok_or_else(|| error(ErrorCode::InternalInvariantViolation, "tile page rows"))?;
+        assert!(!rows.is_empty());
+        assert!(rows.len() <= 64);
+        for row in rows {
+            assert!(
+                ids.insert(
+                    row["entity_id"]
+                        .as_str()
+                        .ok_or_else(|| error(
+                            ErrorCode::InternalInvariantViolation,
+                            "tile page entity"
+                        ))?
+                        .to_owned()
+                )
+            );
+        }
+        pages += 1;
+        assert!(pages <= 768);
+        if result["continuation"].is_null() {
+            break;
+        }
+        assert_eq!(result["agent_turn"]["coverage"]["status"], "partial");
+        assert_eq!(
+            result["continuation"],
+            result["agent_turn"]["coverage"]["continuation"]
+        );
+        input["query"]["continuation"] = result["continuation"].clone();
+    }
+    assert_eq!(ids.len(), 768);
+    assert!(
+        pages > 12,
+        "the transport ceiling must narrow the requested 64-row pages"
+    );
+    assert_eq!(calls.count.load(Ordering::SeqCst), 0);
+    Ok(())
+}
+
+#[test]
 fn observe_expiry_preserves_both_journaled_and_memory_roots() -> Result<()> {
     let _serial = crate::test_serial();
     let files = Files::new()?;

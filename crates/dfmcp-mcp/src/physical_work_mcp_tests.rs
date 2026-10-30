@@ -595,6 +595,26 @@ fn emergency_cleanup_of_terminal_work_pauses_without_rewriting_goal_proof() -> T
     assert_eq!(early["commit_state"], "Verified", "{early}");
     assert_eq!(early["work_state"]["state"], "active");
     let original = receipt(&session, action)?;
+    let budget = in_session(&session, |guard| {
+        let original = guard.budget;
+        guard.budget.max_actions = 1;
+        Ok(original)
+    })?;
+    let before = snapshot(&session)?;
+    assert!(!before.paused);
+    let denied = cancel(&session, "emergency_pause_and_drain", "plan")?;
+    assert_eq!(denied["ok"], false, "{denied}");
+    assert_eq!(denied["error"]["code"], "budget_exceeded");
+    assert_eq!(
+        snapshot(&session)?,
+        before,
+        "one action cannot fund both the emergency pause and physical stop"
+    );
+    assert_eq!(receipt(&session, action)?, original);
+    in_session(&session, |guard| {
+        guard.budget = budget;
+        Ok(())
+    })?;
     // A second authorized controller pauses through a real plan, preserving
     // the first controller's original action custody and physical work.
     let paused = plan_and_commit(&other, r#"[{"action":{"kind":"pause","paused":true}}]"#)?;
@@ -602,24 +622,8 @@ fn emergency_cleanup_of_terminal_work_pauses_without_rewriting_goal_proof() -> T
     let consent = request_unpause(&session)?;
     assert_eq!(consent["ok"], false, "{consent}");
     assert_eq!(consent["clock_consent"]["votes"], 1);
-    let budget = in_session(&session, |guard| {
-        let original = guard.budget;
-        guard.budget.max_actions = 0;
-        Ok(original)
-    })?;
-    let before = snapshot(&session)?;
-    let denied = cancel(&session, "emergency_pause_and_drain", "plan")?;
-    assert_eq!(denied["ok"], false, "{denied}");
-    assert_eq!(denied["error"]["code"], "budget_exceeded");
-    assert_eq!(
-        snapshot(&session)?,
-        before,
-        "even an already paused fortress needs one authorized physical stop"
-    );
-    assert_eq!(receipt(&session, action)?, original);
     in_session(&session, |guard| {
         assert!(guard.leases.unpause_consent.contains(&guard.session_id));
-        guard.budget = budget;
         Ok(())
     })?;
     let drained = cancel(&session, "emergency_pause_and_drain", "plan")?;

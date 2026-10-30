@@ -252,7 +252,8 @@ pub(super) fn packet(
     let maximum = context
         .budget
         .max_bytes
-        .min(u64::from(context.budget.max_output_tokens) * 4);
+        .min(u64::from(context.budget.max_output_tokens) * 4)
+        .min(schema_paging::MAX_INLINE_TEXT as u64);
     if out.len() as u64 > maximum {
         return Err(error(
             ErrorCode::BudgetExceeded,
@@ -274,6 +275,7 @@ pub(super) fn result_context(
         .budget
         .max_bytes
         .min(u64::from(context.budget.max_output_tokens) * 4)
+        .min(schema_paging::MAX_INLINE_TEXT as u64)
         .checked_sub(overhead)
         .filter(|n| *n > 0)
         .ok_or_else(|| {
