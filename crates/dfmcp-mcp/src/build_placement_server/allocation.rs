@@ -131,3 +131,24 @@ pub(super) fn shortage(outcome: &AllocationOutcome, requested: &FurnitureRequest
         "interpretation":"The requested slots cannot all be assigned within this observation's conservative furniture model. No partial batch was created."}),
     )
 }
+
+pub(super) fn shortage_result(
+    outcome: &AllocationOutcome,
+    requested: &FurnitureRequest,
+    room: Option<&dfmcp_adapter::room_intent::RoomIntent>,
+) -> Result<Value> {
+    let mut result = json!({"ok":true,"status":"furniture_shortage","session_opened":false,
+        "session_id":null,"allocation":shortage(outcome, requested)?,
+        "native_preparation_dispatched":false,"game_mutation_dispatched":false,
+        "batch_created":false,"retry_commit_permitted":false});
+    if let Some(room) = room {
+        if room.furniture() != requested {
+            return Err(error(
+                ErrorCode::InternalInvariantViolation,
+                "room shortage changed its complete original furniture request",
+            ));
+        }
+        result["room"] = super::room_intake::display(room);
+    }
+    Ok(result)
+}

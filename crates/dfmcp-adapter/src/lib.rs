@@ -28,6 +28,7 @@ pub mod fenced_live_source_v1_1;
 pub mod furniture_allocation;
 pub mod furniture_batch;
 pub mod furniture_handoff;
+pub mod room_intent;
 pub mod furniture_supply;
 /// Legacy process-local framing laboratory. This is not the live DFHack wire.
 pub mod ipc;

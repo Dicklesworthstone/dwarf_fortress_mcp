@@ -235,6 +235,10 @@ executor outage; see `docs/FURNITURE_HANDOFF_MCP.md`.
 The isolated furniture/1.19 development server also uses these same eleven names
 for [complete furnishing batches](docs/FURNITURE_BATCH_MCP.md) and
 [whole-original-plan construction monitoring](docs/FURNITURE_COMPLETION_MCP.md).
+The same development server accepts a complete bounded `room_request` through
+`fortress.open_session`, preserving required floors/walls and the full furniture
+request in original batch custody. See [room construction intake](docs/ROOM_CONSTRUCTION_MCP.md).
+Declared room terrain is not construction-completion evidence.
 Its closed `query` modes `completion_start`/`completion`, `observe` selection
 `completion`, and `cancel` scope `completion` add receipt-linked, Query-authorized
 monitoring without adding tools. The complete original plan and all assessments

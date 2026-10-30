@@ -59,12 +59,17 @@ pub(super) fn seal(
 /// child, and the common Agent Turn. Batch rows contain receipt identities,
 /// never copies of full native records; those remain available through get.
 pub(super) fn reserve_output(plan: &FurniturePlan) -> Result<()> {
+    reserve_output_with_extra(plan, 0)
+}
+pub(super) fn reserve_output_with_extra(plan: &FurniturePlan, extra: usize) -> Result<()> {
     let rows = plan.steps().iter().map(|step| json!({
         "name":step.name,"idempotency_key":format!("fb-{}-{}", "f".repeat(64), step.name),
         "native_plan_digest":"f".repeat(64),"state":"cancel_requested", "outcome":"indeterminate",
         "receipt_digest":"f".repeat(64),"insertion":{"building_id":u32::MAX,"job_id":u32::MAX}
     })).collect::<Vec<_>>();
-    let bound = plan.canonical_bytes().len() + json!(rows).to_string().len() + 2048 + 32768;
+    let bound = (plan.canonical_bytes().len() + json!(rows).to_string().len() + 2048 + 32768)
+        .checked_add(extra)
+        .ok_or_else(exhausted)?;
     if bound as u64 > presentation::OUTPUT_BYTES {
         return Err(exhausted());
     }
@@ -112,6 +117,9 @@ pub(super) fn display(parent: &Parent, view: Option<&BuildInventory>, verified: 
         "fresh_observation_and_review_per_step":true,"reopening_restores_dispatch_permission":false});
     if let Some(handoff) = definition.handoff() {
         result["allocation"] = super::allocation::summary(handoff);
+    }
+    if let Some(room) = definition.room() {
+        result["room"] = super::room_intake::display(room);
     }
     result
 }

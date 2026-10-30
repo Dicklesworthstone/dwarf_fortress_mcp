@@ -44,6 +44,45 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Original room intent through Rust furniture intake (2026-10-30)
+
+The furniture MCP development server now accepts `room_request` with one bounded
+single-level region, complete required floor/wall selections and the full nested
+furniture request. One fresh operations/1.4 allocation must satisfy all 1..32
+original targets; shortage opens no session and creates no partial parent. Every
+material/subtype/distance/dependency/exclusion constraint is retained, every
+furnishing target is a required floor, and the complete region must fit both
+operator scope and observed native dimensions. Strict nested input bytes preserve
+duplicate-field and integer rejection.
+
+New `DFMFBD03` custody retains the unchanged full allocation handoff once plus
+compact canonical terrain masks. Room-only changes alter batch and original
+placement-key identity. Existing `DFMFBD01/02` bytes and keys remain exact. The
+maximum 16 KiB request, 32 targets and 4,096-cell terrain remain inside the
+unchanged 64 KiB parent store and complete construction-origin bound. Reopening
+cannot add, drop or replace the original room objective. Responses preserve every
+requirement and distinguish declared terrain from observed or completed terrain.
+
+The immutable intake checkpoint passes 188 adapter tests and 84 MCP/Agent Turn
+component tests (272 total), including 11 new adapter and five new handler groups.
+Checks cover exact legacy encodings, complete constraint identity, compact masks,
+all 32 targets, maximum terrain/request bounds, shortage, changed-parent refusal
+and real private-parent stop/reopen. The focused adapter view retains every
+production body and disables 113 unrelated test-module declarations; its two
+joint-monitor files use exact incoming-main baseline bodies because the later
+joint feature is not part of this checkpoint. Full MCP handler/native bodies
+compile with nonexecuted ambient runtime stubs; four worker tests and the
+allocation-owner ambient test module remain excluded. The existing source-bundle
+and static qualification blockers remain; this is component evidence, not full
+workspace/runtime/native/live qualification or admission.
+
+Intake does not observe terrain, designate cells, create a native room assignment
+or prove room completion. A separate joint terrain/furnishing monitor follows;
+ordinary furniture completion retains its narrower meaning. This is a new narrow
+Rust room-intent generation, not an import of Python RoomPlan routing semantics.
+See [the room workflow](docs/ROOM_CONSTRUCTION_MCP.md). Broader bridge beads remain
+in progress.
+
 ### Independent whole-furniture clock recovery through MCP (2026-10-30)
 
 The existing eleven-tool furniture server now exposes `clock-offline` and

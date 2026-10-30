@@ -245,3 +245,12 @@ The [focused execution report](evidence/build-placement-rust-mcp.json) records a
 45 adapter, 25 MCP, two shared runtime-entry and seven process cases, along with
 the tested binary identity and exact source hashes. It is development execution
 evidence and does not qualify a production server artifact.
+
+## Preserve a complete room objective
+
+`fortress.open_session(room_request=...)` accepts a bounded single-level region,
+required floor/wall cells and the complete nested furniture request. All targets
+are allocated together and retained in a distinct room-backed batch generation.
+See [room construction intake](ROOM_CONSTRUCTION_MCP.md) for the closed request,
+complete geometry projection, storage bounds and evidence scope. Intake preserves
+declared terrain; it does not observe or complete the room.

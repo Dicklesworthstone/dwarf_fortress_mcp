@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-10-30 — Preserve original room geometry through native furnishing intake
+
+- Add bounded `room_request` intake with complete floor/wall masks and all
+  original furniture constraints; allocate the whole request or return shortage
+  without partial custody.
+- Retain room identity in new DFMFBD03 batches and original placement keys while
+  preserving exact legacy generations and existing parent/origin storage bounds.
+- Carry complete compact geometry and request identity through batch responses,
+  current scope checks, immutable reopening and permanent stop.
+- Pass 188 adapter and 84 MCP/Agent Turn component tests, including 16 new groups;
+  preserve concurrent independent clock-recovery work on main. Ambient runtime,
+  native/live and full release qualification remain unverified. Joint room
+  observation is a separate following increment.
+
 ## 2026-10-30 — Recover original furniture clock runs without placement files
 
 - Add `clock-offline` and `clock-recover` through the existing eleven tools,

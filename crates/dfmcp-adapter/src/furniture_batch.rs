@@ -9,6 +9,7 @@ use dfmcp_core::{DfmcpError, Digest32, ErrorCode, Result};
 use crate::build_placement::journal::{BuildInventory, BuildState};
 use crate::build_placement::{BuildBinding, BuildCapture, BuildKind, BuildPhase, BuildSelection};
 use crate::furniture_handoff::{Handoff, MAX_HANDOFF_BYTES};
+use crate::room_intent::{MAX_TERRAIN_BYTES, RoomIntent, TerrainRequirements};
 
 pub mod store;
 
@@ -16,9 +17,11 @@ pub const SCHEMA: &str = "dfmcp.furniture-plan/1";
 pub const MAX_STEPS: usize = 32;
 pub const MAX_PLAN_BYTES: usize = 16_384;
 pub const MAX_LEGACY_DEFINITION_BYTES: usize = MAX_PLAN_BYTES + 1024 + 48;
-pub const MAX_DEFINITION_BYTES: usize = MAX_LEGACY_DEFINITION_BYTES + 4 + MAX_HANDOFF_BYTES;
+pub const MAX_DEFINITION_BYTES: usize =
+    MAX_LEGACY_DEFINITION_BYTES + 4 + MAX_HANDOFF_BYTES + 4 + MAX_TERRAIN_BYTES;
 const DEFINITION_MAGIC: &[u8; 8] = b"DFMFBD01";
 const HANDOFF_DEFINITION_MAGIC: &[u8; 8] = b"DFMFBD02";
+const ROOM_DEFINITION_MAGIC: &[u8; 8] = b"DFMFBD03";
 
 fn invalid(message: &str) -> DfmcpError {
     DfmcpError::new(ErrorCode::InvalidRequest, message)
@@ -224,6 +227,7 @@ impl FurniturePlan {
 pub struct BatchDefinition {
     plan: FurniturePlan,
     handoff: Option<Handoff>,
+    room: Option<RoomIntent>,
     binding: BuildBinding,
     journal_id: Digest32,
     id: Digest32,
@@ -238,6 +242,7 @@ impl BatchDefinition {
         let mut out = Self {
             plan,
             handoff: None,
+            room: None,
             binding,
             journal_id,
             id: Digest32::from_bytes([0; 32]),
@@ -258,6 +263,35 @@ impl BatchDefinition {
         out.id = hash(b"dfmcp-furniture-batch-rust/2", &out.canonical_bytes());
         Ok(out)
     }
+    /// Preserve the complete declared room before any placement. The original
+    /// allocation must concern exactly the same furniture request; matching only
+    /// selected items or targets cannot substitute different constraints.
+    /// DFMFBD01/02 constructors and their operation keys remain unchanged.
+    pub fn from_room_handoff(
+        room: RoomIntent,
+        handoff: Handoff,
+        binding: BuildBinding,
+        journal_id: Digest32,
+    ) -> Result<Self> {
+        require(
+            room.furniture() == handoff.request(),
+            "room furniture request differs from the complete original allocation",
+        )?;
+        let region = room.terrain().region();
+        let dimensions = binding.dimensions();
+        require(
+            (0..3).all(|axis| {
+                region.origin[axis]
+                    .checked_add(region.size[axis])
+                    .is_some_and(|end| end <= dimensions[axis])
+            }),
+            "complete room terrain region exceeds the bound native map",
+        )?;
+        let mut out = Self::from_handoff(handoff, binding, journal_id)?;
+        out.room = Some(room);
+        out.id = hash(b"dfmcp-furniture-batch-rust/3", &out.canonical_bytes());
+        Ok(out)
+    }
     pub fn plan(&self) -> &FurniturePlan {
         &self.plan
     }
@@ -266,6 +300,9 @@ impl BatchDefinition {
     }
     pub fn handoff(&self) -> Option<&Handoff> {
         self.handoff.as_ref()
+    }
+    pub fn room(&self) -> Option<&RoomIntent> {
+        self.room.as_ref()
     }
     pub fn journal_id(&self) -> Digest32 {
         self.journal_id
@@ -278,7 +315,9 @@ impl BatchDefinition {
     }
     pub fn canonical_bytes(&self) -> Vec<u8> {
         let binding = self.binding.encode();
-        let mut out = if self.handoff.is_some() {
+        let mut out = if self.room.is_some() {
+            ROOM_DEFINITION_MAGIC
+        } else if self.handoff.is_some() {
             HANDOFF_DEFINITION_MAGIC
         } else {
             DEFINITION_MAGIC
@@ -293,6 +332,13 @@ impl BatchDefinition {
             out.extend_from_slice(&(handoff.canonical_bytes().len() as u32).to_be_bytes());
             out.extend_from_slice(handoff.canonical_bytes());
         }
+        if let Some(room) = &self.room {
+            // The unchanged handoff already retains the exact full furniture
+            // request. Store it once and reconstruct the room from that same
+            // request, rather than duplicating it and widening origin custody.
+            out.extend_from_slice(&(room.terrain().canonical_bytes().len() as u32).to_be_bytes());
+            out.extend_from_slice(room.terrain().canonical_bytes());
+        }
         out
     }
     pub fn decode(raw: &[u8]) -> Result<Self> {
@@ -303,7 +349,9 @@ impl BatchDefinition {
         let mut reader = Bytes(raw);
         let magic = reader.take(8)?;
         require(
-            magic == DEFINITION_MAGIC || magic == HANDOFF_DEFINITION_MAGIC,
+            magic == DEFINITION_MAGIC
+                || magic == HANDOFF_DEFINITION_MAGIC
+                || magic == ROOM_DEFINITION_MAGIC,
             "invalid furniture batch definition",
         )?;
         let plan = FurniturePlan::decode(reader.field(MAX_PLAN_BYTES)?)?;
@@ -314,8 +362,15 @@ impl BatchDefinition {
                 .try_into()
                 .map_err(|_| invalid("invalid batch journal identity"))?,
         );
-        let handoff = if magic == HANDOFF_DEFINITION_MAGIC {
+        let handoff = if magic == HANDOFF_DEFINITION_MAGIC || magic == ROOM_DEFINITION_MAGIC {
             Some(Handoff::decode(reader.field(MAX_HANDOFF_BYTES)?)?)
+        } else {
+            None
+        };
+        let terrain = if magic == ROOM_DEFINITION_MAGIC {
+            Some(TerrainRequirements::decode(
+                reader.field(MAX_TERRAIN_BYTES)?,
+            )?)
         } else {
             None
         };
@@ -328,7 +383,12 @@ impl BatchDefinition {
                 handoff.plan() == &plan,
                 "batch plan differs from original allocation",
             )?;
-            Self::from_handoff(handoff, binding, journal_id)?
+            if let Some(terrain) = terrain {
+                let room = RoomIntent::new(handoff.request().clone(), terrain)?;
+                Self::from_room_handoff(room, handoff, binding, journal_id)?
+            } else {
+                Self::from_handoff(handoff, binding, journal_id)?
+            }
         } else {
             Self::new(plan, binding, journal_id)?
         };

@@ -9,6 +9,8 @@ use std::io::{self, Cursor, Read, Seek, SeekFrom, Write};
 use std::rc::Rc;
 #[path = "batch_tests.rs"]
 mod batch_tests;
+#[path = "room_intake_tests.rs"]
+mod room_intake_tests;
 fn fixture(name: &str) -> Result<Vec<u8>> {
     let value: Value = serde_json::from_str(include_str!(
         "../../../../bridge/common/tests/fixtures/build_placement_v1_19.json"

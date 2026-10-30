@@ -371,5 +371,67 @@
   "work_items": [
     "df-dfhack-bridge-plane-c-pic.4",
     "df-dfhack-bridge-plane-c-pic.5"
-  ]
+  ],
+  "room_intake": {
+    "schema": "dfmcp.room-construction-request/1",
+    "status": "implemented_unadmitted_development_only",
+    "open_argument": "room_request",
+    "mutually_exclusive_inputs": [
+      "selection",
+      "furniture_plan",
+      "furniture_request",
+      "room_request"
+    ],
+    "maximum_json_bytes": 131072,
+    "maximum_json_depth": 16,
+    "closed_fields": [
+      "schema",
+      "terrain",
+      "furniture"
+    ],
+    "terrain_closed_fields": [
+      "region",
+      "floors",
+      "walls"
+    ],
+    "region_closed_fields": [
+      "origin",
+      "size"
+    ],
+    "region_maximum_cells": 4096,
+    "region_maximum_side": 128,
+    "single_z_level": true,
+    "nonempty_floors": true,
+    "floor_wall_masks_disjoint": true,
+    "duplicate_coordinates_allowed": false,
+    "every_furnishing_target_is_required_floor": true,
+    "complete_region_within_operator_scope_and_native_dimensions": true,
+    "nested_furniture_schema": "dfmcp.furniture-request/1",
+    "nested_duplicates_and_noninteger_values_refused": true,
+    "full_original_furniture_constraints_retained": true,
+    "inventory_native_profile": "operations/1.4",
+    "full_single_capture_allocation_required": true,
+    "shortage_opens_session": false,
+    "shortage_creates_partial_batch": false,
+    "terrain_observed_during_intake": false,
+    "batch_definition_generation": "DFMFBD03",
+    "terrain_generation": "DFMRTN01",
+    "room_intent_generation": "DFMRIN01",
+    "maximum_terrain_bytes": 1058,
+    "maximum_room_intent_bytes": 17458,
+    "maximum_batch_definition_bytes": 43098,
+    "existing_parent_store_maximum_bytes": 65536,
+    "full_request_stored_once_in_retained_handoff": true,
+    "room_only_changes_bind_batch_and_operation_keys": true,
+    "legacy_generations_byte_identical": [
+      "DFMFBD01",
+      "DFMFBD02"
+    ],
+    "geometry_projection": "x-fastest-row-major-lsb0-hex",
+    "complete_output_preflight_before_custody": true,
+    "native_room_assignment": false,
+    "terrain_mutation": false,
+    "room_condition_proven": false,
+    "operator_guide": "docs/ROOM_CONSTRUCTION_MCP.md"
+  }
 }

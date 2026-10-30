@@ -31,6 +31,7 @@ mod clock_recovery;
 mod completion;
 mod policy;
 mod presentation;
+mod room_intake;
 mod runtime;
 use presentation::{OUTPUT_BYTES, digest, failure, inventory, packet};
 use runtime::Config;
@@ -1814,7 +1815,7 @@ fn open_clock_recovery(
 
 #[tool(
     name = "fortress.open_session",
-    description = "Open isolated furniture/1.19 custody. Use exactly one of selection JSON [kind,item_id,x,y,z], furniture_plan as complete dfmcp.furniture-plan/1 JSON, or furniture_request as dfmcp.furniture-request/1 JSON. A request allocates all slots from one fresh operations/1.4 capture and seals its constraints and chosen items into operator-configured batch custody; shortage creates no partial batch. Reopen retained custody without intent inputs or native bootstrap. Optional operator clock custody requires an existing completion monitor with an accepted sample; max_game_ticks defaults to zero and positive values require clock control. No client paths or policies. Operator clock-offline and clock-recover reopen only acknowledged monitor and clock histories without original placement files, native bootstrap or future game ticks. Opening never prepares, places or advances time."
+    description = "Open isolated furniture/1.19 custody. Use exactly one of selection JSON [kind,item_id,x,y,z], furniture_plan as complete dfmcp.furniture-plan/1 JSON, furniture_request as dfmcp.furniture-request/1 JSON, or room_request as dfmcp.room-construction-request/1 JSON with terrain region/floors/walls and the full nested furniture request. A request allocates all slots from one fresh operations/1.4 capture and seals its constraints and chosen items into operator-configured batch custody; room intake also retains every declared terrain requirement. Shortage creates no partial batch. Reopen retained custody without intent inputs or native bootstrap. Optional operator clock custody requires an existing completion monitor with an accepted sample; max_game_ticks defaults to zero and positive values require clock control. No client paths or policies. Operator clock-offline and clock-recover reopen only acknowledged monitor and clock histories without original placement files, native bootstrap or future game ticks. Opening never prepares, places, observes room terrain or advances time."
 )]
 pub async fn fortress_open_session(
     selection: Option<String>,
@@ -1824,27 +1825,31 @@ pub async fn fortress_open_session(
     furniture_plan: Option<String>,
     furniture_request: Option<String>,
     max_game_ticks: Option<u64>,
+    room_request: Option<String>,
 ) -> String {
     runtime::owned("fortress.open_session", move |control| {
         let result = (|| {
             let config = runtime::configuration()?;
             runtime::boundary(&control, &config, false)?;
             // Parse and bound complete intent before native contact or storage.
-            if usize::from(selection.is_some()) + usize::from(furniture_plan.is_some()) + usize::from(furniture_request.is_some()) > 1 {
-                return Err(error(ErrorCode::InvalidRequest, "furniture intent inputs are mutually exclusive"));
-            }
-            if config.clock.is_some() && (selection.is_some() || furniture_plan.is_some() || furniture_request.is_some()) {
+            room_intake::exclusive([selection.is_some(), furniture_plan.is_some(), furniture_request.is_some(), room_request.is_some()])?;
+            if config.clock.is_some() && (selection.is_some() || furniture_plan.is_some() || furniture_request.is_some() || room_request.is_some()) {
                 return Err(error(ErrorCode::InvalidRequest,
                     "construction clock opens only retained custody after its first accepted completion sample"));
             }
             let mut plan = furniture_plan.as_deref().map(|s|FurniturePlan::decode(s.as_bytes())).transpose()?;
-            let requested = furniture_request.as_deref().map(|s|FurnitureRequest::decode(s.as_bytes())).transpose()?;
+            let room = room_request.as_deref().map(room_intake::parse).transpose()?;
+            let requested = match &room {
+                Some(room) => Some(room.furniture().clone()),
+                None => furniture_request.as_deref().map(|s|FurnitureRequest::decode(s.as_bytes())).transpose()?,
+            };
             let importing = plan.is_some() || requested.is_some();
             if let Some(requested) = &requested {
                 if config.batch_path.is_none() || config.mode != BuildMode::Control || config.completion_only {
                     return Err(error(ErrorCode::InvalidRequest, "furniture request requires new Control batch custody"));
                 }
                 allocation::validate_request(requested, &config)?;
+                if let Some(room) = &room { room_intake::validate(room, &config)?; }
             }
             let mut selected = if let Some(plan) = &plan {
                 if config.batch_path.is_none() || config.mode != BuildMode::Control || selection.is_some() {
@@ -1945,10 +1950,7 @@ pub async fn fortress_open_session(
                 work.current(&c)?;
                 runtime::boundary(&control, &config, false)?;
                 if outcome.handoff.is_none() {
-                    let result = json!({"ok":true,"status":"furniture_shortage","session_opened":false,
-                        "session_id":null,"allocation":allocation::shortage(&outcome, requested)?,
-                        "native_preparation_dispatched":false,"game_mutation_dispatched":false,
-                        "batch_created":false,"retry_commit_permitted":false});
+                    let result = allocation::shortage_result(&outcome, requested, room.as_ref())?;
                     let output = packet("fortress.open_session",result,Some(&c),None,None,None,None,None,None);
                     if output.len() as u64 > OUTPUT_BYTES { return Err(exhausted()); }
                     work.current(&c)?.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
@@ -1957,7 +1959,7 @@ pub async fn fortress_open_session(
                 }
                 let allocated = outcome.handoff.ok_or_else(|| error(ErrorCode::InternalInvariantViolation,
                     "complete furniture allocation lost its handoff"))?;
-                batch::reserve_output(allocated.plan())?;
+                room_intake::reserve_output(allocated.plan(), room.as_ref())?;
                 selected = allocated.plan().ordered_steps().next().map(|step|step.selection);
                 plan = Some(allocated.plan().clone());
                 handoff = Some(allocated);
@@ -1972,6 +1974,9 @@ pub async fn fortress_open_session(
                 }
                 if let Some(handoff) = &handoff {
                     handoff.validate_capture(source.binding(), capture)?;
+                }
+                if let Some(room) = &room {
+                    room_intake::validate_dimensions(room, source.binding().dimensions())?;
                 }
                 c.anchor.tick = GameTick(capture.tick());
                 Some(source.binding().clone())
@@ -1991,7 +1996,11 @@ pub async fn fortress_open_session(
                         return Err(error(ErrorCode::Conflict,"new batch requires an empty original journal; reopen retained work without a plan"));
                     }
                     Some(if let Some(handoff) = handoff {
-                        BatchDefinition::from_handoff(handoff,journal.binding().clone(),view.journal_id)?
+                        if let Some(room) = room {
+                            BatchDefinition::from_room_handoff(room,handoff,journal.binding().clone(),view.journal_id)?
+                        } else {
+                            BatchDefinition::from_handoff(handoff,journal.binding().clone(),view.journal_id)?
+                        }
                     } else {
                         BatchDefinition::new(plan,journal.binding().clone(),view.journal_id)?
                     })
@@ -1999,7 +2008,8 @@ pub async fn fortress_open_session(
                 runtime::boundary(&control,&config,importing)?;
                 let mut parent = open_private_batch(path,&work.take(&c,LOCAL_BYTES)?,config.mode,expected)?;
                 batch::matches(parent.definition(),journal.binding())?;
-                batch::reserve_output(parent.definition().plan())?;
+                room_intake::reserve_output(parent.definition().plan(), parent.definition().room())?;
+                if let Some(room) = parent.definition().room() { room_intake::validate(room, &config)?; }
                 batch::verify(&mut parent,&view,&work.take(&c,batch::GUARD_BYTES)?)?;
                 // An allocated batch may restart before its first child exists.
                 // Its retained source tick must initialize the new session and
