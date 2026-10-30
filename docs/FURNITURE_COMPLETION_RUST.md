@@ -114,6 +114,34 @@ The Linux private opener retains no-follow, exact owner/mode, file/directory
 identity and complete-byte checks. Its monitor-specific maximum is 128 MiB;
 the original placement journal remains limited to 16 MiB with unchanged bytes.
 
+### Acknowledged monitor recovery
+
+`store::Recovery { monitor_id, head }` identifies the complete original monitor
+and a head already acknowledged to its caller. `MonitorStore::recovery()` returns
+the current cached reference; it does not certify present filesystem custody.
+After opening an existing monitor, `verify_recovery(context, expected)` verifies
+the exact current file and requires that acknowledged head in its fully checked
+history. A valid complete descendant can recover a lost acknowledgement. A
+rollback, a different monitor or a divergent history fails without modifying
+the file. Nonzero identity and head are required.
+
+Ancestry is collected by the same complete semantic replay that validates every
+retained sample, and extended only by this owner's synchronized appends. Finding
+a matching hash in an unvalidated prefix or payload is insufficient. The existing
+frame bound and `operation_reserve(false)` bound verification. Changed bytes or
+file identity fence the owner; expiry or insufficient Query/work authority does
+not manufacture corruption or repair the history. Verification restores no read
+permit, stability, native source authority or placement permission. Hosts retain
+the acknowledged reference outside the journal and must verify it before using
+the reopened monitor as an original clock-recovery association.
+
+`first_source()` retains the first accepted sample's independent furniture and
+operations source identities through the same replay. A later sample may record
+a different source while terminally invalidating the monitor; `progress().source`
+truthfully retains that later diagnostic evidence. Clock reconstruction uses
+`first_source()` so the replacement cannot change an existing original run's
+sealed target. Neither accessor establishes current native source continuity.
+
 ## Bounds and authority
 
 One foreground acquisition permits at most 327 RPC calls, a 16 MiB operations

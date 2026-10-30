@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-10-30 — Preserve original construction-monitor recovery custody
+
+- Add exact external monitor/head recovery references backed by complete semantic
+  replay and synchronized appends; accept valid descendants and reject rollback,
+  unrelated or divergent history, file substitution and malformed trailing frames.
+- Retain the first accepted operations source through later diagnostic source
+  changes, so an invalidated monitor cannot substitute the original clock target.
+- Preserve the private journal format, bounded verification and existing authority
+  checks; this core prerequisite restores neither sampling nor clock control.
+- Preserve incoming readiness core and MCP work; pass all 113 actual-source adapter
+  tests (91 construction-plan and 22 bounded-run), including seven new recovery
+  groups. All 276 adapter source hashes remain unchanged. Public recovery integration
+  follows separately; full runtime/native/live qualification remains unverified.
+
 ## 2026-10-30 — Complete durable furnishing run/sample cycles through MCP
 
 - Wire both clock guards to durable whole-plan readiness with write-ahead read

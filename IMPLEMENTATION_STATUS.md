@@ -44,6 +44,31 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Exact construction-monitor recovery ancestry (2026-10-30)
+
+The whole-furniture monitor now exposes an exact external recovery reference and
+verifies acknowledged ancestry against its complete semantically replayed history.
+Valid descendants recover lost acknowledgements; rollback, divergent history,
+changed file identity and malformed descendants fail without rewriting custody.
+The existing bounded verification reservation covers this read-only check, and
+the private journal format remains unchanged.
+
+The monitor also retains its first accepted source independently of the latest
+diagnostic progress. A later source-changing observation can invalidate the
+monitor and replace that diagnostic source; it cannot replace the original
+operations association needed to reconstruct an existing construction clock.
+This core prerequisite permits independent clock recovery without treating a
+replacement source as original evidence. Public recovery integration follows
+separately.
+
+After preserving both incoming construction-readiness increments, all 113
+actual-source adapter tests pass: 91 construction-plan and 22 bounded-run tests.
+The seven new recovery/source groups include later invalidation from either an
+ordinary goal sample or retained readiness. All 276 adapter Rust source hashes
+remain unchanged during both final runs. Changed Rust is formatted and introduces
+no new warning. One unrelated existing workforce-test import warning remains.
+Full FastMCP/native/live qualification and compatibility admission remain unverified.
+
 ### Durable MCP furnishing run/sample cycles (2026-10-30)
 
 The whole-batch MCP clock now uses the durable readiness path introduced below.

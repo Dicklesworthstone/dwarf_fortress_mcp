@@ -889,5 +889,306 @@ fn withdrawal_and_reopen_preserve_historical_terminal_achievement() -> Result<()
     Ok(())
 }
 
+#[test]
+fn acknowledged_recovery_accepts_full_descendants_without_restoring_read_ownership() -> Result<()> {
+    let fixture = fixture()?;
+    let disk = Memory::default();
+    let mut store = open(&fixture, disk.clone())?;
+    let initial = store.recovery();
+    sample(&mut store, &fixture, fixtures::TICK)?;
+    let accepted = store.recovery();
+    store.begin_read(&fixture.context, &mut admit, &mut guard)?;
+    let interrupted = store.recovery();
+    assert_ne!(initial.head, accepted.head);
+    assert_ne!(accepted.head, interrupted.head);
+    for pin in [initial, accepted, interrupted] {
+        store.verify_recovery(&fixture.context, pin)?;
+    }
+    let raw = disk.disk.borrow().bytes.clone();
+    let writes = disk.disk.borrow().writes;
+    let syncs = disk.disk.borrow().syncs;
+    drop(store);
+    let mut recovered = MonitorStore::open(
+        disk.clone(),
+        &fixture.context,
+        BuildMode::Offline,
+        None,
+        false,
+    )?;
+    let mut bounded_context = fixture.context.clone();
+    bounded_context.budget.max_bytes = recovered.operation_reserve(false);
+    for pin in [initial, accepted, interrupted] {
+        recovered.verify_recovery(&bounded_context, pin)?;
+    }
+    assert_eq!(recovered.recovery(), interrupted);
+    assert_eq!(recovered.progress().observations, 1);
+    assert_eq!(recovered.progress().last_tick, Some(fixtures::TICK));
+    assert_eq!(recovered.progress().streak, 0);
+    assert!(!recovered.read_owned());
+    assert_eq!(disk.disk.borrow().bytes, raw);
+    assert_eq!(disk.disk.borrow().writes, writes);
+    assert_eq!(disk.disk.borrow().syncs, syncs);
+    Ok(())
+}
+
+#[test]
+fn acknowledged_recovery_rejects_rollback_and_divergent_same_monitor_history() -> Result<()> {
+    let fixture = fixture()?;
+    let disk = Memory::default();
+    let mut store = open(&fixture, disk.clone())?;
+    let initial = store.recovery();
+    let earlier = disk.disk.borrow().bytes.clone();
+    sample(&mut store, &fixture, fixtures::TICK)?;
+    let accepted = store.recovery();
+    drop(store);
+    let rolled_back = Memory::from_bytes(earlier.clone());
+    let mut old = MonitorStore::open(
+        rolled_back.clone(),
+        &fixture.context,
+        BuildMode::Recover,
+        None,
+        false,
+    )?;
+    assert_eq!(
+        old.verify_recovery(&fixture.context, accepted)
+            .err()
+            .map(|e| e.code),
+        Some(ErrorCode::StaleAnchor)
+    );
+    assert!(!old.is_fenced());
+    old.verify_recovery(&fixture.context, initial)?;
+    assert_eq!(rolled_back.disk.borrow().bytes, earlier);
+    assert_eq!(rolled_back.disk.borrow().writes, 0);
+
+    // A separately valid cancellation branch shares the original definition
+    // and prefix, but cannot stand in for the acknowledged sample branch.
+    old.cancel(&fixture.context, &mut admit)?;
+    let divergent = old.recovery();
+    assert_eq!(divergent.monitor_id, accepted.monitor_id);
+    let raw = rolled_back.disk.borrow().bytes.clone();
+    let writes = rolled_back.disk.borrow().writes;
+    assert!(old.verify_recovery(&fixture.context, accepted).is_err());
+    old.verify_recovery(&fixture.context, initial)?;
+    old.verify_recovery(&fixture.context, divergent)?;
+    assert_eq!(rolled_back.disk.borrow().bytes, raw);
+    assert_eq!(rolled_back.disk.borrow().writes, writes);
+    Ok(())
+}
+
+#[test]
+fn acknowledged_recovery_requires_original_target_and_nonzero_exact_head() -> Result<()> {
+    let fixture = fixture()?;
+    let disk = Memory::default();
+    let mut store = open(&fixture, disk.clone())?;
+    sample(&mut store, &fixture, fixtures::TICK)?;
+    let accepted = store.recovery();
+    let raw = disk.disk.borrow().bytes.clone();
+    let writes = disk.disk.borrow().writes;
+    for expected in [
+        Recovery {
+            monitor_id: Digest32::of_bytes(b"another original monitor"),
+            ..accepted
+        },
+        Recovery {
+            head: Digest32::of_bytes(b"unrelated acknowledged head"),
+            ..accepted
+        },
+        Recovery {
+            monitor_id: Digest32::ZERO,
+            ..accepted
+        },
+        Recovery {
+            head: Digest32::ZERO,
+            ..accepted
+        },
+    ] {
+        assert!(store.verify_recovery(&fixture.context, expected).is_err());
+        assert!(!store.is_fenced());
+        assert_eq!(store.recovery(), accepted);
+        assert_eq!(disk.disk.borrow().bytes, raw);
+        assert_eq!(disk.disk.borrow().writes, writes);
+    }
+    store.verify_recovery(&fixture.context, accepted)?;
+    Ok(())
+}
+
+#[test]
+fn acknowledged_recovery_rechecks_exact_bytes_and_file_identity() -> Result<()> {
+    let fixture = fixture()?;
+    let disk = Memory::default();
+    let mut store = open(&fixture, disk.clone())?;
+    sample(&mut store, &fixture, fixtures::TICK)?;
+    let accepted = store.recovery();
+    let raw = disk.disk.borrow().bytes.clone();
+    let frames = store.frames();
+    drop(store);
+    for fault in 0..4 {
+        let file = Memory::from_bytes(raw.clone());
+        let mut recovered = MonitorStore::open(
+            file.clone(),
+            &fixture.context,
+            BuildMode::Recover,
+            None,
+            false,
+        )?;
+        recovered.verify_recovery(&fixture.context, accepted)?;
+        match fault {
+            0 => file.disk.borrow_mut().bytes[80] ^= 1,
+            1 => {
+                file.disk.borrow_mut().bytes.pop();
+            }
+            2 => file.disk.borrow_mut().invalid = true,
+            _ => {
+                // Even a valid later frame cannot be injected into an
+                // already-open owner behind its exclusive custody.
+                let appended = frame(frames, accepted.head, 4, &[])?;
+                file.disk.borrow_mut().bytes.extend_from_slice(&appended);
+            }
+        }
+        let changed = file.disk.borrow().bytes.clone();
+        assert_eq!(
+            recovered
+                .verify_recovery(&fixture.context, accepted)
+                .err()
+                .map(|e| e.code),
+            Some(ErrorCode::CorruptLedger)
+        );
+        assert!(recovered.is_fenced());
+        assert!(!recovered.read_owned());
+        assert_eq!(file.disk.borrow().bytes, changed);
+        assert_eq!(file.disk.borrow().writes, 0);
+    }
+    Ok(())
+}
+
+#[test]
+fn acknowledged_prefix_cannot_hide_rehashed_invalid_or_torn_descendants() -> Result<()> {
+    let fixture = fixture()?;
+    let disk = Memory::default();
+    let mut store = open(&fixture, disk.clone())?;
+    let accepted = store.recovery();
+    store.begin_read(&fixture.context, &mut admit, &mut guard)?;
+    let raw = disk.disk.borrow().bytes.clone();
+    let mut evidence = fixtures::sample(store.definition().goal(), fixtures::TICK);
+    evidence.before.df_version = "different-df".to_owned();
+    evidence.after.df_version = "different-df".to_owned();
+    evidence.operations.df_version = "different-df".to_owned();
+    let forged = frame(
+        store.frames(),
+        store.head(),
+        3,
+        &evidence.canonical_bytes()?,
+    )?;
+    drop(store);
+    for tail in [forged.clone(), forged[..forged.len() - 1].to_vec()] {
+        let mut bytes = raw.clone();
+        bytes.extend_from_slice(&tail);
+        let file = Memory::from_bytes(bytes.clone());
+        let result = MonitorStore::open(
+            file.clone(),
+            &fixture.context,
+            BuildMode::Offline,
+            None,
+            false,
+        )
+        .and_then(|mut owner| owner.verify_recovery(&fixture.context, accepted));
+        assert!(result.is_err());
+        assert_eq!(file.disk.borrow().bytes, bytes);
+        assert_eq!(file.disk.borrow().writes, 0);
+    }
+    Ok(())
+}
+
+#[test]
+fn recovery_verification_requires_current_owner_query_floor_and_work() -> Result<()> {
+    let fixture = fixture()?;
+    let disk = Memory::default();
+    let mut store = open(&fixture, disk.clone())?;
+    sample(&mut store, &fixture, fixtures::TICK + 100)?;
+    let accepted = store.recovery();
+    let raw = disk.disk.borrow().bytes.clone();
+    let writes = disk.disk.borrow().writes;
+    for variant in 0..5 {
+        let mut denied = fixture.context.clone();
+        match variant {
+            0 => denied.grants.clear(),
+            1 => denied.session_id = SessionId::new(987654),
+            2 => denied.anchor.fortress_id = dfmcp_core::FortressId::NIL,
+            3 => {
+                denied.anchor.tick = GameTick(0);
+                for grant in &mut denied.grants {
+                    grant.expires_at_tick = Some(GameTick(fixtures::TICK + 99));
+                }
+            }
+            _ => denied.budget.max_bytes = raw.len() as u64 - 1,
+        }
+        assert!(store.verify_recovery(&denied, accepted).is_err());
+        assert!(!store.is_fenced());
+        assert_eq!(store.recovery(), accepted);
+        assert_eq!(disk.disk.borrow().bytes, raw);
+        assert_eq!(disk.disk.borrow().writes, writes);
+    }
+    store.verify_recovery(&fixture.context, accepted)?;
+    assert_eq!(store.progress().last_tick, Some(fixtures::TICK + 100));
+    Ok(())
+}
+
+#[test]
+fn original_accepted_source_survives_later_source_invalidation_and_recovery() -> Result<()> {
+    for readiness in [false, true] {
+        let fixture = fixture()?;
+        let disk = Memory::default();
+        let mut store = open(&fixture, disk.clone())?;
+        assert!(store.first_source().is_none());
+        let definition = store.definition().canonical_bytes().to_vec();
+        sample(&mut store, &fixture, fixtures::TICK)?;
+        let original = store.first_source().cloned().ok_or_else(corrupt)?;
+        let accepted = store.recovery();
+        assert_eq!(store.progress().source.as_ref(), Some(&original));
+        store.begin_read(&fixture.context, &mut admit, &mut guard)?;
+        let mut observed = fixtures::observation(store.definition().goal(), fixtures::TICK + 10);
+        observed.jobs.bridge_generation += 1;
+        let changed = fixtures::with_observation(store.definition().goal(), observed);
+        if readiness {
+            store.publish_readiness(&fixture.context, &changed, &mut admit, &mut guard)?;
+        } else {
+            store.publish_sample(&fixture.context, &changed, &mut admit, &mut guard)?;
+        }
+        assert_eq!(store.progress().phase, "invalidated");
+        assert_eq!(store.progress().reason, "native_source_changed");
+        assert_eq!(store.first_source(), Some(&original));
+        assert_eq!(
+            store.progress().source.as_ref().map(|s| &s.operations),
+            Some(&changed.operations)
+        );
+        assert_ne!(&original.operations, &changed.operations);
+        assert_eq!(store.definition().canonical_bytes(), definition);
+        let final_pin = store.recovery();
+        let raw = disk.disk.borrow().bytes.clone();
+        let writes = disk.disk.borrow().writes;
+        drop(store);
+        let mut recovered = MonitorStore::open(
+            disk.clone(),
+            &fixture.context,
+            BuildMode::Offline,
+            None,
+            false,
+        )?;
+        recovered.verify_recovery(&fixture.context, accepted)?;
+        assert_eq!(recovered.recovery(), final_pin);
+        assert_eq!(recovered.first_source(), Some(&original));
+        assert_eq!(recovered.progress().phase, "invalidated");
+        assert_eq!(
+            recovered.progress().source.as_ref().map(|s| &s.operations),
+            Some(&changed.operations)
+        );
+        assert_eq!(recovered.definition().canonical_bytes(), definition);
+        assert_eq!(disk.disk.borrow().bytes, raw);
+        assert_eq!(disk.disk.borrow().writes, writes);
+        assert!(!recovered.read_owned());
+    }
+    Ok(())
+}
+
 #[path = "readiness_tests.rs"]
 mod readiness_tests;

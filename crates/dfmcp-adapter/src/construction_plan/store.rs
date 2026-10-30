@@ -13,7 +13,7 @@ use dfmcp_core::{
 };
 
 use super::origin::{MAX_DEFINITION_SIZE, MonitorDefinition, Origin};
-use super::{LinkedSample, MAX_SAMPLE, Progress};
+use super::{LinkedSample, MAX_SAMPLE, Progress, SourceIdentity};
 use crate::build_placement::journal::BuildMode;
 use crate::build_placement::journal::private_file::{PrivateBuildFile, open_private_storage};
 use crate::control_effect_journal::EffectJournalStorage;
@@ -25,6 +25,26 @@ const DOMAIN: &[u8] = b"dfmcp.furniture-completion-rust-journal/1\0";
 const HEADER: usize = 40;
 const OVERHEAD: usize = HEADER + 1 + 32;
 const MAX_BODY: usize = MAX_SAMPLE + 1;
+
+/// Externally retained original monitor identity and acknowledged history head.
+/// Complete descendants may recover a lost reply; earlier or unrelated
+/// histories cannot replace this acknowledged custody.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Recovery {
+    pub monitor_id: Digest32,
+    pub head: Digest32,
+}
+impl Recovery {
+    pub fn validate(self) -> Result<()> {
+        if self.monitor_id == Digest32::ZERO || self.head == Digest32::ZERO {
+            return Err(error(
+                ErrorCode::InvalidRequest,
+                "construction recovery requires its original monitor identity and acknowledged head",
+            ));
+        }
+        Ok(())
+    }
+}
 
 fn error(code: ErrorCode, message: &str) -> DfmcpError {
     DfmcpError::new(code, message)
@@ -249,8 +269,10 @@ fn transition(
 struct Replay {
     definition: MonitorDefinition,
     progress: Progress,
+    first_source: Option<SourceIdentity>,
     frames: u32,
     head: Digest32,
+    heads: Vec<Digest32>,
 }
 fn replay(bytes: &[u8], work: &mut Work) -> Result<Replay> {
     require(
@@ -292,25 +314,28 @@ fn replay(bytes: &[u8], work: &mut Work) -> Result<Replay> {
         require(head == hash(&bytes[offset..end - 32]))?;
         let kind = bytes[offset + HEADER];
         let payload = &bytes[offset + HEADER + 1..end - 32];
-        state = Some(if let Some(prior) = state {
+        let (definition, progress, first_source, mut heads) = if let Some(prior) = state {
             let progress = transition(&prior.definition, &prior.progress, kind, payload, work)?;
-            Replay {
-                definition: prior.definition,
-                progress,
-                frames: sequence + 1,
-                head,
-            }
+            (prior.definition, progress, prior.first_source, prior.heads)
         } else {
             require(kind == 1 && payload.len() <= MAX_DEFINITION_SIZE)?;
             work.charge(payload.len().saturating_mul(3))?;
             let definition = MonitorDefinition::decode(payload)?;
             let progress = Progress::new(definition.goal());
-            Replay {
-                definition,
-                progress,
-                frames: 1,
-                head,
-            }
+            (definition, progress, None, Vec::new())
+        };
+        let first_source = first_source.or_else(|| progress.source.clone());
+        // Membership is retained only after both the frame chain and the
+        // complete semantic transition pass. MAX_STORE_FRAMES bounds this
+        // evidence; a hash found in unvalidated payload bytes is never a head.
+        heads.push(head);
+        state = Some(Replay {
+            definition,
+            progress,
+            first_source,
+            frames: sequence + 1,
+            head,
+            heads,
         });
         offset = end;
     }
@@ -340,11 +365,13 @@ pub struct MonitorStore<S> {
     storage: S,
     definition: MonitorDefinition,
     progress: Progress,
+    first_source: Option<SourceIdentity>,
     visible: Progress,
     resume_reset: bool,
     raw: Vec<u8>,
     frames: u32,
     head: Digest32,
+    heads: Vec<Digest32>,
     mode: BuildMode,
     owner: SessionId,
     read_owned: bool,
@@ -419,11 +446,13 @@ impl<S: EffectJournalStorage> MonitorStore<S> {
             storage,
             definition: decoded.definition,
             progress: decoded.progress,
+            first_source: decoded.first_source,
             visible,
             resume_reset,
             raw,
             frames: decoded.frames,
             head: decoded.head,
+            heads: decoded.heads,
             mode,
             owner: context.session_id,
             read_owned: false,
@@ -436,6 +465,12 @@ impl<S: EffectJournalStorage> MonitorStore<S> {
     pub fn progress(&self) -> &Progress {
         &self.visible
     }
+    /// Source of the first accepted sample, retained through later diagnostic
+    /// source changes that terminally invalidate the monitor. An original
+    /// clock uses this immutable association, never the replacement source.
+    pub fn first_source(&self) -> Option<&SourceIdentity> {
+        self.first_source.as_ref()
+    }
     pub fn byte_len(&self) -> usize {
         self.raw.len()
     }
@@ -444,6 +479,13 @@ impl<S: EffectJournalStorage> MonitorStore<S> {
     }
     pub fn head(&self) -> Digest32 {
         self.head
+    }
+    /// Cached custody reference, not proof that the file is currently intact.
+    pub fn recovery(&self) -> Recovery {
+        Recovery {
+            monitor_id: self.definition.id(),
+            head: self.head,
+        }
     }
     pub fn is_fenced(&self) -> bool {
         self.fenced
@@ -521,6 +563,28 @@ impl<S: EffectJournalStorage> MonitorStore<S> {
         let mut work = Work::new(&self.access(context)?)?;
         self.verify_work(&mut work)
     }
+    /// Verify current exact custody against an externally acknowledged head.
+    /// Ancestry comes from full semantic replay or this owner's synchronized
+    /// appends. Verification writes no history and restores no authority or
+    /// read ownership; changed custody retains the existing fail-closed fence.
+    /// The existing `operation_reserve(false)` covers the bounded verification.
+    pub fn verify_recovery(
+        &mut self,
+        context: &OperationContext,
+        expected: Recovery,
+    ) -> Result<()> {
+        let mut work = Work::new(&self.access(context)?)?;
+        expected.validate()?;
+        self.verify_work(&mut work)?;
+        if expected.monitor_id != self.definition.id() || !self.heads.contains(&expected.head) {
+            return Err(error(
+                ErrorCode::StaleAnchor,
+                "construction monitor differs from its acknowledged recovery history",
+            ));
+        }
+        work.current()?;
+        Ok(())
+    }
     pub fn verify_origin<G>(&mut self, context: &OperationContext, guard: &mut G) -> Result<()>
     where
         G: FnMut(&Origin, &OperationContext) -> Result<()>,
@@ -577,8 +641,12 @@ impl<S: EffectJournalStorage> MonitorStore<S> {
         guard(self.definition.origin(), &work.current()?)?;
         authorize(&work.current()?, Some(&self.definition), Some(&proposed))?;
         self.head = tail(&frame)?;
+        self.heads.push(self.head);
         self.raw = bytes;
         self.frames += 1;
+        if self.first_source.is_none() {
+            self.first_source = proposed.source.clone();
+        }
         self.visible = if self.resume_reset && !proposed.terminal() {
             withdrawn(&proposed)
         } else {
