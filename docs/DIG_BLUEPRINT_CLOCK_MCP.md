@@ -229,6 +229,14 @@ acknowledgement refers to the joined local runtime, not remote network
 delivery. Keep all returned references and reconcile the original interval
 after an uncertain acknowledgement.
 
+Before publishing a clock result, the handler reserves and performs one final
+exact journal check after the last runtime checkpoint. A changed history
+withdraws the response and prepared review; commit/cancel failures retain an
+explicit possible-effect flag. Recovery references also retain the highest
+consumed authority tick from the dig, monitor and clock owners, including a
+map capture later rejected by custody verification. Keep that floor with the
+original recovery references; it is not permission to replay a commit.
+
 ## Meaning of the limits and evidence
 
 Tick and wall limits are native callback stop triggers, not hard real-time or

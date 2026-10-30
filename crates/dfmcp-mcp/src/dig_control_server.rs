@@ -354,19 +354,28 @@ impl<S: EffectJournalStorage, N: DigSource, B: EffectJournalStorage, C: EffectJo
         })
     }
     fn clock_reference(&self) -> Option<Value> {
+        let floor = self.authority_tick.max(self.control.high_tick()).max(
+            self.monitor
+                .as_ref()
+                .map_or(0, |monitor| monitor.high_tick()),
+        );
         self.clock
             .as_ref()
-            .map(clock::reference)
+            .map(|owner| {
+                let mut reference = clock::reference(owner);
+                reference["authority_tick_floor"] = json!(floor.max(owner.high_tick()));
+                reference
+            })
             .or_else(|| {
                 self.clock_recovery.map(|r| {
                     json!({"recovery":clock::recovery(r),"history_verified":false,
-                "publication_unverified":true,"current_pause_proven":false,
+                "publication_unverified":true,"current_pause_proven":false,"authority_tick_floor":floor,
                 "sampled_excavation_condition_proven":false,"retry_commit_permitted":false})
                 })
             })
             .or_else(|| {
                 self.clock_config.as_ref().map(|config| {
-                    json!({"creation_pending":config.initialize,"history_verified":false,
+                    json!({"creation_pending":config.initialize,"history_verified":false,"authority_tick_floor":floor,
                 "current_pause_proven":false,"sampled_excavation_condition_proven":false,
                 "retry_commit_permitted":false})
                 })

@@ -179,6 +179,9 @@ struct Clocks {
     fail_after_open: bool,
     opened_recovery: Option<ClockRecovery>,
     corrupt_after_dispatch: Option<Memory>,
+    checkpoints: usize,
+    corrupt_at_checkpoint: Option<usize>,
+    corrupt_at_tick: Option<(u64, Memory)>,
 }
 impl clock::ClockIo<Memory> for Clocks {
     type Source = ClockNative;
@@ -230,6 +233,20 @@ impl clock::ClockIo<Memory> for Clocks {
         })
     }
     fn checkpoint(&mut self, c: &OperationContext, control: bool) -> Result<()> {
+        self.checkpoints += 1;
+        if self.corrupt_at_checkpoint == Some(self.checkpoints) {
+            self.storage.data.borrow_mut().get_mut()[0] ^= 1;
+            self.corrupt_at_checkpoint = None;
+        }
+        if self
+            .corrupt_at_tick
+            .as_ref()
+            .is_some_and(|(tick, _)| c.anchor.tick.get() >= *tick)
+        {
+            if let Some((_, storage)) = self.corrupt_at_tick.take() {
+                storage.data.borrow_mut().get_mut()[0] ^= 1;
+            }
+        }
         c.budget.validate()?;
         if c.cancellation_requested
             || (self.fail_after_commit && self.game.borrow().count(Call::Commit) != 0)
@@ -298,6 +315,9 @@ fn fixture() -> Result<(Harness, Maps, Clocks)> {
             fail_after_open: false,
             opened_recovery: None,
             corrupt_after_dispatch: None,
+            checkpoints: 0,
+            corrupt_at_checkpoint: None,
+            corrupt_at_tick: None,
         },
     ))
 }
@@ -1262,6 +1282,109 @@ fn complete_clock_header_survives_failed_open_publication_and_recovers_exactly()
                 .streak(),
             1
         );
+    }
+    Ok(())
+}
+
+#[test]
+fn final_runtime_boundary_cannot_publish_clock_history_it_just_invalidated() -> Result<()> {
+    for operation in ["prepare", "query", "commit"] {
+        let (mut h, mut maps, mut clocks) = fixture()?;
+        let rejected = if operation == "prepare" {
+            maps.captures.push_back(ready(&h, TICK)?);
+            // Initial runtime check, two guard checks, post-operation check,
+            // then the final publication check after the packet is rendered.
+            clocks.corrupt_at_checkpoint = Some(5);
+            let action = request(&h, 10)?;
+            dispatch(&mut h, &mut maps, &mut clocks, "fortress.plan", action)?
+        } else {
+            let (seal, _) = prepare(&mut h, &mut maps, &mut clocks)?;
+            let final_check = if operation == "query" { 3 } else { 5 };
+            clocks.corrupt_at_checkpoint = Some(clocks.checkpoints + final_check);
+            if operation == "query" {
+                inspect(&mut h, &mut maps, &mut clocks, None)?
+            } else {
+                commit(&mut h, &mut maps, &mut clocks, seal)?
+            }
+        };
+        assert_eq!(rejected["result"]["ok"], false, "{operation}: {rejected}");
+        assert_eq!(clock_result(&rejected)["history_verified"], false);
+        assert_eq!(
+            clock_result(&rejected)["active_run"]["review_seal"],
+            Value::Null
+        );
+        assert!(
+            h.state
+                .clock
+                .as_ref()
+                .ok_or_else(exhausted)?
+                .prepared_seal()
+                .is_none()
+        );
+        assert_eq!(
+            rejected["result"]["effect_may_have_occurred"],
+            operation == "commit"
+        );
+        assert_eq!(
+            clocks.game.borrow().count(Call::Commit),
+            usize::from(operation == "commit")
+        );
+        assert!(h.state.clock_recovery.is_some());
+        assert_no_completion(&rejected);
+    }
+    Ok(())
+}
+
+#[test]
+fn rejected_post_capture_custody_preserves_consumed_clock_floor_in_handoff() -> Result<()> {
+    let (mut h, mut maps, mut clocks) = fixture()?;
+    let learned = TICK + 40;
+    maps.captures.push_back(ready(&h, learned)?);
+    clocks.corrupt_at_tick = Some((learned, h.runtime.parent.clone()));
+    let action = request(&h, 10)?;
+    let rejected = dispatch(&mut h, &mut maps, &mut clocks, "fortress.plan", action)?;
+    assert_eq!(rejected["result"]["ok"], false);
+    assert!(h.state.authority_tick >= learned);
+    assert!(
+        clock_result(&rejected)["authority_tick_floor"]
+            .as_u64()
+            .is_some_and(|tick| tick >= learned)
+    );
+    assert_eq!(
+        clock_result(&rejected)["active_run"]["review_seal"],
+        Value::Null
+    );
+    // The blueprint owner captures its run witness, then the durable run
+    // coordinator independently rechecks that witness before the map guard.
+    assert_eq!(clocks.game.borrow().count(Call::Observe), 2);
+    assert_eq!(clocks.game.borrow().count(Call::Prepare), 0);
+    assert_eq!(clocks.game.borrow().count(Call::Commit), 0);
+    assert_eq!(maps.reads, 1);
+    assert_no_completion(&rejected);
+    Ok(())
+}
+
+#[test]
+fn outer_worker_acknowledgement_controls_review_reuse_without_clock_replay() -> Result<()> {
+    for acknowledged in [false, true] {
+        let (mut h, mut maps, mut clocks) = fixture()?;
+        let (seal, _) = prepare(&mut h, &mut maps, &mut clocks)?;
+        let pin = h.state.clock_recovery.ok_or_else(exhausted)?;
+        let floor = h.state.authority_tick;
+        h.state.worker_acknowledgement = Some(Arc::new(AtomicBool::new(acknowledged)));
+        h.c = h.state.context_with_clock(true, true, None)?;
+        let connects = clocks.connects;
+        let outcome = commit(&mut h, &mut maps, &mut clocks, seal)?;
+        if acknowledged {
+            success(&outcome);
+            assert_eq!(clocks.game.borrow().count(Call::Commit), 1);
+        } else {
+            assert_eq!(outcome["result"]["ok"], false);
+            assert_eq!(clocks.connects, connects);
+            assert_eq!(clocks.game.borrow().count(Call::Commit), 0);
+            assert_eq!(h.state.clock_recovery, Some(pin));
+            assert!(h.state.authority_tick >= floor);
+        }
     }
     Ok(())
 }

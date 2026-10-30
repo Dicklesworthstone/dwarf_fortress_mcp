@@ -44,6 +44,31 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Clock publication custody and consumed authority floors (2026-10-30)
+
+The mining MCP clock handler now prepays a final exact journal replay before
+performing any operation. After rendering the result and completing the final
+runtime checkpoint, it rechecks the retained clock identity and head before
+publishing success. A late custody change withdraws the response, drops the
+process-local review seal, and retains the exact recovery reference. Failed
+commit/cancel responses explicitly preserve possible-effect uncertainty.
+
+Recovery handoffs retain the maximum consumed authority tick across the native
+dig owner, whole-blueprint monitor and clock owner, including a fresh map read
+whose subsequent original-custody check fails. Such a failure cannot reduce the
+next authorization floor or turn an unknown dispatch into permission to retry.
+
+Three new handler regression groups cover final-checkpoint history replacement,
+post-capture custody rejection with a learned tick, and acknowledged versus
+unacknowledged worker results. Focused actual-source component execution passed
+81 MCP/Agent Turn tests (75 mining handlers/helpers and 6 envelope tests), and
+the current query schema passed 59 valid and 205 invalid cases. The component
+harness excludes FastMCP attributes/stdio, asynchronous owner entry points and
+native socket shells. The full production MCP check was killed by shared memory
+pressure before reaching project type-checking; no full Rust, native, live,
+release or admission qualification is claimed. Independent clock-only restart
+is a separate remaining feature at this checkpoint.
+
 ### Whole-blueprint finite clock control through MCP (2026-10-30)
 
 The existing eleven-tool mining server now joins the complete original

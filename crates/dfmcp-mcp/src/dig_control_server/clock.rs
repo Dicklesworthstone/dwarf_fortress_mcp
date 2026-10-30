@@ -1040,6 +1040,12 @@ where
         &action,
         Action::PrepareClock(_) | Action::CommitClock { .. } | Action::CancelClock(_)
     );
+    let may_have_effect = matches!(&action, Action::CommitClock { .. } | Action::CancelClock(_));
+    let failure = |cause: &dfmcp_core::DfmcpError| {
+        let mut result = presentation::failure(cause);
+        result["effect_may_have_occurred"] = json!(may_have_effect);
+        result
+    };
     let packet = |state: &State<S, N, B, C>, result: Value, c: &OperationContext| {
         presentation::packet(
             op,
@@ -1058,10 +1064,18 @@ where
             if let Some(clock) = &mut state.clock {
                 clock.abandon_preparation();
             }
-            return packet(state, presentation::failure(&cause), &c);
+            retain_floor(state);
+            c.anchor.tick = GameTick(c.anchor.tick.get().max(state.authority_tick));
+            return packet(state, failure(&cause), &c);
         }
     };
-    let outcome = perform(state, &c, &mut work, action, maps, io);
+    // Prepay the final exact custody replay before any connection or native
+    // dispatch. A late runtime checkpoint may invalidate an earlier replay.
+    let publication_history = work.take(&c, VIEW_BYTES);
+    let outcome = match &publication_history {
+        Ok(_) => perform(state, &c, &mut work, action, maps, io),
+        Err(cause) => Err(cause.clone()),
+    };
     retain_floor(state);
     c.anchor.tick = GameTick(c.anchor.tick.get().max(state.authority_tick));
     let result = match outcome {
@@ -1071,15 +1085,26 @@ where
             if let Some(clock) = &mut state.clock {
                 clock.abandon_preparation();
             }
-            presentation::failure(&cause)
+            failure(&cause)
         }
     };
     let rendered = packet(state, result, &c);
+    let expected_clock = state.clock.as_ref().map(Clock::recovery);
     let final_check = (|| {
         if rendered.len() as u64 > presentation::OUTPUT_BYTES {
             return Err(exhausted());
         }
         io.checkpoint(&work.current(&c)?, control)?;
+        if let Some(expected) = expected_clock {
+            let reserved = publication_history.as_ref().map_err(Clone::clone)?;
+            let checked = inspect_current(state, &work, reserved)?;
+            if checked.recovery != expected {
+                return Err(error(
+                    ErrorCode::CorruptLedger,
+                    "clock publication no longer belongs to its verified history",
+                ));
+            }
+        }
         work.current(&c)?;
         Ok(())
     })();
@@ -1090,7 +1115,9 @@ where
             if let Some(clock) = &mut state.clock {
                 clock.abandon_preparation();
             }
-            packet(state, presentation::failure(&cause), &c)
+            retain_floor(state);
+            c.anchor.tick = GameTick(c.anchor.tick.get().max(state.authority_tick));
+            packet(state, failure(&cause), &c)
         }
     }
 }

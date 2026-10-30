@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-10-30 — Recheck clock custody at the final publication boundary
+
+- Reserve the final exact clock-history replay before work, then verify custody
+  after the last runtime callback and before publishing the rendered response.
+- Withdraw stale review/history success on a late change and preserve possible
+  commit/cancel effects instead of implying the action can safely be retried.
+- Carry the highest consumed shared authority tick into every clock handoff,
+  including map captures rejected by later original-custody checks.
+- Add three regression groups; pass 81 focused MCP/Agent Turn component tests
+  and the current 59 valid/205 invalid query-schema cases. The full production
+  build remains resource-blocked; native/live qualification is unclaimed.
+
 ## 2026-10-30 — Whole-blueprint clock control through the existing MCP tools
 
 - Add explicit finite clock preparation, separate confirmed commit, one-query
