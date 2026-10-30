@@ -874,14 +874,20 @@ impl<S: EffectJournalStorage> Clock<S> {
             plan: entry.plan().digest(),
             seal,
         });
-        let final_native = work.narrow(&output)?;
-        match self.inspect(&work.narrow(&work.c)?, &final_native) {
-            Ok(view) => Ok(view),
-            Err(cause) => {
-                self.abandon_preparation();
-                Err(cause)
-            }
+        self.publish_prepared(&work, &output)
+    }
+    /// Every final publication failure withdraws the process-local review,
+    /// including deadline expiry before the final journal inspection begins.
+    fn publish_prepared(&mut self, work: &Work, output: &OperationContext) -> Result<ClockView> {
+        let result = (|| {
+            let native = work.narrow(output)?;
+            let canonical = work.narrow(&work.c)?;
+            self.inspect(&canonical, &native)
+        })();
+        if result.is_err() {
+            self.abandon_preparation();
         }
+        result
     }
     pub fn commit_guarded<N, F>(
         &mut self,

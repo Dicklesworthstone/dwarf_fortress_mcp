@@ -66,6 +66,31 @@ allowance. It never restores permission to publish a previously interrupted read
 The original source is checked before read intent and around sample publication,
 including after synchronization. A failed or ambiguous append fences advancement.
 
+`publish_readiness` closes an owned read with a distinct full-sample readiness
+frame. It shares ordinary sample validation and original-custody guards, but its
+purpose is to retain construction eligibility around a separately reviewed
+clock run. Paused all-condition-met evidence may preserve an existing streak;
+it cannot add a positive sample, first proof tick or counted proof tick.
+Pending, unknown, unpaused, changed-at-the-same-tick or excessive-gap evidence
+clears the streak, and the original absorbing negative outcomes still apply.
+Every retained readiness consumes one completed acquisition from the unchanged
+`max_observations` allowance and durably retains source and identity floors.
+
+| Journal frame kind | Meaning |
+| --- | --- |
+| 1 | Original immutable monitor definition |
+| 2 | Started read, including interrupted-read reset |
+| 3 | Ordinary goal sample, eligible for positive stability credit |
+| 4 | Local cancellation |
+| 5 | Complete readiness sample, without positive stability credit |
+
+The existing header and frame encodings remain intact; kind 5 is an explicit
+extension. Readers that do not support readiness refuse that frame. They cannot
+mistake readiness for a credited goal observation. A failed or interrupted
+acquisition still has no acknowledged readiness frame and retains the normal
+reset; a successful readiness no longer creates an artificial interruption
+between every pair of ordinary run/sample cycles.
+
 An unfinished stability streak is withdrawn when its owner is reopened or when
 `withdraw_unpublished()` reports an enclosing runtime/publication failure or a
 contradictory clock-readiness capture. Withdrawal performs no I/O, retains the

@@ -888,3 +888,6 @@ fn withdrawal_and_reopen_preserve_historical_terminal_achievement() -> Result<()
     assert_eq!(disk.disk.borrow().bytes, raw);
     Ok(())
 }
+
+#[path = "readiness_tests.rs"]
+mod readiness_tests;

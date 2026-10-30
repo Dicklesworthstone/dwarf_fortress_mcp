@@ -172,7 +172,7 @@ fn read<S: EffectJournalStorage>(storage: &mut S, work: &mut Work) -> Result<Vec
     Ok(bytes)
 }
 fn frame(sequence: u32, previous: Digest32, kind: u8, payload: &[u8]) -> Result<Vec<u8>> {
-    require(sequence < MAX_STORE_FRAMES && (1..=4).contains(&kind) && payload.len() < MAX_BODY)?;
+    require(sequence < MAX_STORE_FRAMES && (1..=5).contains(&kind) && payload.len() < MAX_BODY)?;
     let mut out = Vec::with_capacity(OVERHEAD + payload.len());
     out.extend_from_slice(&((payload.len() + 1) as u32).to_be_bytes());
     out.extend_from_slice(&sequence.to_be_bytes());
@@ -209,7 +209,7 @@ fn transition(
             require(payload.is_empty())?;
             progress.begin_read()
         }
-        3 => {
+        3 | 5 => {
             // Parsing and all member evaluation share this one reservation;
             // no target or frame renews the enclosing operation allowance.
             let current = work.child(payload.len().saturating_mul(4).saturating_add(1024))?;
@@ -221,13 +221,23 @@ fn transition(
                 sample.before.df_version == binding.df_version()
                     && sample.before.dfhack_version == binding.dfhack_version(),
             )?;
-            super::advance_with_counter(
-                progress,
-                definition.goal(),
-                &sample,
-                &current,
-                &mut work.semantic_work,
-            )
+            if kind == 5 {
+                super::readiness::advance_with_counter(
+                    progress,
+                    definition.goal(),
+                    &sample,
+                    &current,
+                    &mut work.semantic_work,
+                )
+            } else {
+                super::advance_with_counter(
+                    progress,
+                    definition.goal(),
+                    &sample,
+                    &current,
+                    &mut work.semantic_work,
+                )
+            }
         }
         4 => {
             require(payload.is_empty())?;
@@ -662,6 +672,37 @@ impl<S: EffectJournalStorage> MonitorStore<S> {
         authorize(&work.current()?, Some(&self.definition), Some(&proposed))?;
         admit(&self.definition, &proposed)?;
         self.append(3, &payload, proposed, &mut work, guard)
+    }
+    /// Retain a complete acquisition without adding positive stability credit.
+    /// The original observation allowance, full-source validation and guarded
+    /// durable publication are identical to ordinary goal samples.
+    pub fn publish_readiness<F, G>(
+        &mut self,
+        context: &OperationContext,
+        sample: &LinkedSample,
+        admit: &mut F,
+        guard: &mut G,
+    ) -> Result<()>
+    where
+        F: FnMut(&MonitorDefinition, &Progress) -> Result<()>,
+        G: FnMut(&Origin, &OperationContext) -> Result<()>,
+    {
+        let mut work = Work::new(&self.access(context)?)?;
+        if !self.read_owned {
+            return Err(error(
+                ErrorCode::Conflict,
+                "reopened or unowned construction read cannot publish readiness",
+            ));
+        }
+        self.read_owned = false;
+        self.verify_work(&mut work)?;
+        guard(self.definition.origin(), &work.current()?)?;
+        let payload = sample.canonical_bytes()?;
+        work.charge(payload.len())?;
+        let proposed = transition(&self.definition, &self.progress, 5, &payload, &mut work)?;
+        authorize(&work.current()?, Some(&self.definition), Some(&proposed))?;
+        admit(&self.definition, &proposed)?;
+        self.append(5, &payload, proposed, &mut work, guard)
     }
     /// Cancels only this monitor. No original-source guard is consulted, so an
     /// active obligation can be retired when its original batch is unavailable.

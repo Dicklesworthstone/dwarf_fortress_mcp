@@ -44,6 +44,43 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Durable construction readiness without positive proof credit (2026-10-30)
+
+The whole-furnishing monitor now has a separate readiness publication path for
+clock preparation and commit. It retains the complete canonical receipt-bracketed
+sample in a distinct journal frame and replays all original source, identity,
+stage, allocation, deadline and shared-condition checks. A completed readiness
+acquisition consumes the original observation allowance and advances durable
+evidence floors, but never adds a stability sample, establishes a first proof
+tick, advances a counted proof tick or independently satisfies the goal.
+
+Paused readiness in which every original condition still holds can preserve an
+existing candidate streak. Pending, unknown, unpaused, same-tick changed or
+excessive-gap evidence resets it. Failure, invalidation and expiry remain
+absorbing. This supplies the missing acknowledgement between explicit finite
+runs: leaving each successful readiness read interrupted would erase progress
+between every ordinary completion sample. Interrupted or failed acquisitions
+still retain the existing continuity reset, and restart still withdraws live
+unfinished continuity while preserving recorded facts.
+
+The shared evaluator also exposes a pure readiness probe for clock integration:
+assessing an already retained readiness can avoid a second acquisition charge or
+a manufactured positive goal result. The clock host adopts that path separately. A final preparation publication failure, including wall
+expiry before the final replay, now also withdraws the local review seal while
+preserving original Prepared history and original-key retirement.
+
+**Evidence: 104 focused adapter tests pass (82 construction/readiness and 22
+bounded-run), including all 14 local TCP fault tests.** The isolated offline
+component view retains every production body and all selected test bodies;
+120 unrelated test-module declarations are disabled for the memory limit. The
+278 source/fixture inputs (276 Rust files) match the tested snapshot exactly.
+This is not full workspace, ambient runtime, native/live or admission
+qualification. Incoming main already exposes whole-batch clock routing through
+MCP; adoption of this new durable readiness publication path in its guards is
+a separate follow-up. This checkpoint supplies the tested core contract. See
+[the construction clock contract](docs/FURNITURE_CONSTRUCTION_CLOCK.md).
+The broader live mutation-dispatch bead remains in progress.
+
 ### Whole-furnishing-batch clock control through MCP (2026-10-30)
 
 The furniture development server now exposes the complete original construction

@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-10-30 — Retain furnishing readiness without crediting completion
+
+- Add durable whole-plan readiness publication and replay using the original
+  receipt, source, identity and fixed temporal checks.
+- Charge each completed readiness acquisition to the original observation limit,
+  preserve only an already valid stability streak, and give no positive proof
+  credit. Retain contradictory and terminal outcomes across reopen.
+- Expose a pure readiness probe for clock integration without a second
+  hypothetical acquisition charge or premature completion claim.
+- Withdraw a prepared review on all final publication failures, including
+  deadline expiry before the final custody replay.
+- Pass 104 focused adapter tests, including durable replay, readiness budgets,
+  valid streak preservation, final publication expiry and 14 TCP fault tests.
+  The offline component view retains all production bodies and selected tests;
+  full workspace/runtime/native/live qualification remains separate. Preserve
+  incoming clock and MCP work; host use of the new journal path follows.
+
 ## 2026-10-30 — Drive whole-batch furniture construction through MCP
 
 - Add finite clock preparation, separately confirmed commit, original-outcome

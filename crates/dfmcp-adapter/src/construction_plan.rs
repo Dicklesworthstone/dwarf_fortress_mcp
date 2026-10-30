@@ -7,6 +7,7 @@
 
 pub mod clock;
 pub mod origin;
+pub mod readiness;
 pub mod rpc;
 pub mod store;
 mod wire;
@@ -473,6 +474,13 @@ fn assess(
     Ok(outcome)
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum SamplePurpose {
+    Goal,
+    Readiness,
+    Probe,
+}
+
 /// Replay one fully bracketed acquisition. A false/unknown member clears the
 /// whole-plan streak; independently timed per-building successes never latch.
 pub fn advance(
@@ -495,13 +503,24 @@ pub(super) fn advance_with_counter(
     context: &OperationContext,
     used: &mut u64,
 ) -> Result<Progress> {
+    advance_for_purpose(state, goal, sample, context, used, SamplePurpose::Goal)
+}
+
+pub(super) fn advance_for_purpose(
+    state: &Progress,
+    goal: &Goal,
+    sample: &LinkedSample,
+    context: &OperationContext,
+    used: &mut u64,
+    purpose: SamplePurpose,
+) -> Result<Progress> {
     let mut work = Work::new(goal, context, state.last_tick.unwrap_or(0))?;
     work.used = used
         .checked_add(work.used)
         .ok_or_else(|| bounded("construction work overflow"))?;
     let result = work
         .charge(0)
-        .and_then(|()| advance_work(state, goal, sample, &mut work));
+        .and_then(|()| advance_work(state, goal, sample, &mut work, purpose));
     *used = work.used;
     result
 }
@@ -511,6 +530,7 @@ fn advance_work(
     goal: &Goal,
     sample: &LinkedSample,
     work: &mut Work,
+    purpose: SamplePurpose,
 ) -> Result<Progress> {
     require(
         state.goal_digest == goal.digest() && state.reading && !state.terminal(),
@@ -551,7 +571,9 @@ fn advance_work(
     ];
     let mut current = state.clone();
     current.reading = false;
-    current.observations += 1;
+    if purpose != SamplePurpose::Probe {
+        current.observations += 1;
+    }
     current.last_tick = Some(tick);
     current.last_capture = Some(capture);
     current.source = Some(source.clone());
@@ -644,27 +666,40 @@ fn advance_work(
         }) {
             current.stop("active", "observation_gap_or_same_tick_change", None);
         }
-        if state.last_tick != Some(tick)
-            && current
-                .counted_tick
-                .is_none_or(|old| tick.saturating_sub(old) >= u64::from(goal.timing.interval))
-        {
-            current.phase = "candidate";
-            current.reason = "awaiting_stability";
-            current.first_tick = Some(current.first_tick.unwrap_or(tick));
-            current.counted_tick = Some(tick);
-            current.streak += 1;
-        }
-        if current.streak >= goal.timing.stable_samples
-            && current
-                .first_tick
-                .is_some_and(|first| tick.saturating_sub(first) >= goal.timing.stable_span)
-            && current.counted_tick == Some(tick)
-        {
-            current.phase = "satisfied";
-            current.reason = "receipt_linked_plan_sampled_condition";
-            work.charge(1)?;
-            return Ok(current);
+        if purpose == SamplePurpose::Goal {
+            if state.last_tick != Some(tick)
+                && current
+                    .counted_tick
+                    .is_none_or(|old| tick.saturating_sub(old) >= u64::from(goal.timing.interval))
+            {
+                current.phase = "candidate";
+                current.reason = "awaiting_stability";
+                current.first_tick = Some(current.first_tick.unwrap_or(tick));
+                current.counted_tick = Some(tick);
+                current.streak += 1;
+            }
+            if current.streak >= goal.timing.stable_samples
+                && current
+                    .first_tick
+                    .is_some_and(|first| tick.saturating_sub(first) >= goal.timing.stable_span)
+                && current.counted_tick == Some(tick)
+            {
+                current.phase = "satisfied";
+                current.reason = "receipt_linked_plan_sampled_condition";
+                work.charge(1)?;
+                return Ok(current);
+            }
+        } else if !observed.jobs.paused {
+            current.stop("active", "readiness_unpaused", None);
+        } else {
+            current.phase = if current.streak > 0 {
+                "candidate"
+            } else {
+                "active"
+            };
+            if current.reason != "observation_gap_or_same_tick_change" {
+                current.reason = "readiness_retained";
+            }
         }
     }
     if current.observations >= goal.timing.max_observations {

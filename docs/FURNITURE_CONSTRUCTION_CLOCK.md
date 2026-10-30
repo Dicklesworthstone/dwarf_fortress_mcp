@@ -9,8 +9,10 @@ construction sample. The owner never starts an automatic simulation loop.
 The operator integration is documented in
 [whole-batch construction clock control through MCP](FURNITURE_CONSTRUCTION_CLOCK_MCP.md).
 The [construction monitor](FURNITURE_COMPLETION_RUST.md) and
-[durable run coordinator](BOUNDED_SIMULATION_COORDINATOR.md) retain their existing
-journal formats and independent responsibilities.
+[durable run coordinator](BOUNDED_SIMULATION_COORDINATOR.md) retain independent
+responsibilities. The run journal is unchanged. The monitor now additionally
+offers a distinct full-sample readiness publication path without positive proof
+credit; adopting that path in the clock host is a separate integration step.
 
 ## Preserve the whole original project
 
@@ -78,8 +80,11 @@ permission. Readiness never contributes a positive completion sample.
 Only the current owner that prepared an interval holds its process-local review
 seal. Commit consumes it before entering the dispatch path. Reopen,
 reconciliation, failed publication and explicit abandonment cannot restore that
-permission. After either guard, the run journal rechecks its own complete bytes
-and current authority before calling the native method.
+permission. A final preparation publication failure also clears the review
+when the wall deadline expires before journal inspection starts; the historical
+Prepared record remains available for original-key retirement. After either
+guard, the run journal rechecks its own complete bytes and current authority
+before calling the native method.
 
 A synchronized DispatchStarted marker permanently prevents another unpause
 attempt for that key, including after an original-custody failure before the

@@ -1167,3 +1167,31 @@ fn cached_disclosure_checks_current_and_retained_query_without_touching_custody(
     }
     Ok(())
 }
+
+#[test]
+fn final_preparation_publication_expiry_withdraws_seal_without_repeating_dispatch() -> Result<()> {
+    let (mut clock, _, mut source, c, n) = setup()?;
+    let seal = prepare(&mut clock, &mut source, &c, &n)?;
+    let mut work = Work::new(c.clone(), n.clone(), OPERATION_BYTES)?;
+    let output = work.take(VIEW_BYTES, true)?;
+    work.deadline = Instant::now()
+        .checked_sub(Duration::from_millis(1))
+        .ok_or_else(bounded)?;
+
+    assert_eq!(
+        code(clock.publish_prepared(&work, &output)),
+        Some(ErrorCode::BudgetExceeded)
+    );
+    assert_eq!(clock.prepared_seal(), None);
+    assert!(clock.cached_view().readiness.is_none());
+    let retained = clock.inspect(&c, &n)?;
+    assert_eq!(
+        retained.active().map(|run| run.entry.state()),
+        Some(RunState::Prepared)
+    );
+    assert!(commit(&mut clock, &mut source, seal, &c, &n).is_err());
+    assert_eq!(source.commits, 0);
+    clock.cancel(None, &c, &n)?;
+    assert_eq!(source.commits, 0);
+    Ok(())
+}
