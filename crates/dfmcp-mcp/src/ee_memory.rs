@@ -1,13 +1,13 @@
 #![forbid(unsafe_code)]
 
-//! Eidetic Engine (EE) Campaign Memory Curation & Export Bridge.
+//! Legacy campaign memory batch helper.
 //!
-//! WP-MCP-04: Curates high-value operational insights (procedural rules, incident
-//! diagnoses, anti-patterns, terminal predicate proofs) into structured EE memory batches.
+//! This helper emits its existing JSONL shape. It does not perform evidence
+//! curation or produce the separate E09 EE batch schema.
 
 use dfmcp_core::{Digest32, GameTick, StateAnchor};
 
-/// Structured knowledge item destined for Eidetic Engine long-term memory.
+/// A caller-supplied item for the legacy batch representation.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EeMemoryItem {
     pub memory_kind: String, // e.g. "procedural_rule", "incident_diagnosis", "anti_pattern"
@@ -17,7 +17,7 @@ pub struct EeMemoryItem {
     pub tags: Vec<String>,
 }
 
-/// Curated batch of memory items ready for `ee remember --batch` ingestion.
+/// A batch of caller-supplied memory items in the legacy JSONL representation.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EeMemoryBatch {
     pub batch_id: String,
@@ -47,12 +47,12 @@ impl EeMemoryBatch {
         for item in &self.items {
             let tags_str = item.tags.join(",");
             let line = format!(
-                r#"{{"kind":"{}","content":"{}","provenance":"{:?}","digest":"{:?}","tags":"{}"}}"#,
-                item.memory_kind,
-                item.content,
-                item.provenance_anchor.state_hash,
-                item.evidence_digest,
-                tags_str
+                r#"{{"kind":{},"content":{},"provenance":{},"digest":{},"tags":{}}}"#,
+                serde_json::Value::String(item.memory_kind.clone()),
+                serde_json::Value::String(item.content.clone()),
+                serde_json::Value::String(format!("{:?}", item.provenance_anchor.state_hash)),
+                serde_json::Value::String(format!("{:?}", item.evidence_digest)),
+                serde_json::Value::String(tags_str)
             );
             lines.push(line);
         }
