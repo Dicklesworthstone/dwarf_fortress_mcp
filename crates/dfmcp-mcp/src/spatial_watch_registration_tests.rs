@@ -234,7 +234,7 @@ fn live_schema_reuses_watch_definitions_and_archive_reads_cannot_register() -> R
     assert!(
         matches!(execute(&mut session,&c,&request),Err(e)if e.code==ErrorCode::CapabilityDenied)
     );
-    assert!(archive::query(&mut session, &c, &request, false).is_err());
+    assert!(archive::query(&mut session, &c, &request, None).is_err());
     Ok(())
 }
 

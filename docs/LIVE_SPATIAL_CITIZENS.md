@@ -74,6 +74,17 @@ The runtime uses a distinct process-scoped session family and grants only `Obser
 
 Convenience query modes are `summary`, `citizens`, `jobs`, `buildings`, `items`, `tiles`, `history`, and `schema`. The regular structured query engine can inspect unit fields, follow `performs`, `member_of`, and `located_at` edges, aggregate citizens, capture baselines, and register foreground watches.
 
+`mode: "schema"` returns the complete `query_schema` when the complete response
+fits the session budget and the pinned transport's text limit. Otherwise it
+returns `schema_discovery: "utf8-json-fragments/1"`, a UTF-8 `chunk`, byte
+`offset`, total `schema_bytes`, `schema_sha256`, and a `continuation` mode.
+Call `fortress.query` with that continuation as `mode` and the same session;
+concatenate chunks in offset order, verify the SHA-256 of the resulting UTF-8
+bytes, then parse the complete JSON schema. Continuations bind the session,
+complete anchor and exact schema generation; a changed anchor or schema requires
+starting discovery again. Every page retains its Agent Turn and response budget.
+Archive-only sessions expose their separately scoped schema by the same method.
+
 `map_route` and `spatial_inventory_plan` reuse the same route/allocation implementation as spatial/1.6, but execute against the citizen-inclusive snapshot and source digest. No separately timed state is introduced.
 
 For example, an agent can traverse an observed citizen assignment from the same anchor:

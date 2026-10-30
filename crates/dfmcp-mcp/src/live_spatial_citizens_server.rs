@@ -30,6 +30,8 @@ mod situation_presentation;
 #[path = "spatial_situation_tests.rs"]
 mod situation_tests;
 // Shared module compiled into several servers; each copy uses a subset.
+#[path = "spatial_schema_paging.rs"]
+mod schema_paging;
 #[allow(dead_code, clippy::duplicate_mod)]
 #[path = "spatial_queries.rs"]
 mod spatial_queries;
@@ -745,7 +747,7 @@ fn finish(view: &QueryResponseProjection, v: Value) -> Result<String> {
 }
 #[tool(
     name = "fortress.query",
-    description = "Query coherent spatial/1.8 data with compact operational attention. Modes: summary, situation, welfare, production, citizens, jobs, buildings, items, tiles, history, schema. Welfare ranks observed citizen stress and discloses unknown health and needs. Production diagnosis inspects observed job, holder and attached-item conditions, not proven causes; inventory_plan allocates declared stack units without reservations. historical_job_progress compares exact archived job generations, assignments, holder stages and material attachments; disappearance does not prove completion. historical_citizen_welfare compares exact archived citizen categories, availability and observed status without proving raw stress, health or continuous trends. Batch watches share one capture. Workforce queries do not assign labor. Recovery-only results remain historical."
+    description = "Query coherent spatial/1.8 data with compact operational attention. Modes: summary, situation, welfare, production, citizens, jobs, buildings, items, tiles, history, schema. Schema may return UTF-8 JSON fragments; pass each continuation as mode, concatenate chunks, verify schema_sha256 and parse. Welfare ranks observed citizen stress and discloses unknown health and needs. Production diagnosis inspects observed job, holder and attached-item conditions, not proven causes; inventory_plan allocates declared stack units without reservations. historical_job_progress compares exact archived job generations, assignments, holder stages and material attachments; disappearance does not prove completion. historical_citizen_welfare compares exact archived citizen categories, availability and observed status without proving raw stress, health or continuous trends. Batch watches share one capture. Workforce queries do not assign labor. Recovery-only results remain historical."
 )]
 pub fn fortress_query(
     session_id: Option<String>,
@@ -763,14 +765,17 @@ pub fn fortress_query(
                     "do not combine mode and query",
                 ));
             }
-            let schema = mode.as_deref() == Some("schema");
+            let schema = schema_paging::is_schema_mode(mode.as_deref());
             if mode.as_deref() == Some("situation") {
                 return situation_presentation::detail(s, &c);
             }
             let mut input = match query {
                 Some(v) => v,
                 None => match mode.as_deref() {
-                    None | Some("summary" | "schema") => {
+                    None | Some("summary") => {
+                        json!({"schema":"dfmcp.query/1","query":{"kind":"aggregate","group_by":{"kind":"entity_kind"}}})
+                    }
+                    Some(_) if schema => {
                         json!({"schema":"dfmcp.query/1","query":{"kind":"aggregate","group_by":{"kind":"entity_kind"}}})
                     }
                     Some("history") => json!({"schema":"dfmcp.query/1","query":{"kind":"history"}}),
@@ -804,7 +809,7 @@ pub fn fortress_query(
                 },
             };
             if s.source.archive_only() {
-                return archive::query(s, &c, &input, schema);
+                return archive::query(s, &c, &input, mode.as_deref().filter(|_| schema));
             }
             if !schema && watch_batch::handles(&input) {
                 return watch_batch::execute(s, &c, &input);
@@ -863,9 +868,30 @@ pub fn fortress_query(
             narrowed.budget.max_bytes =
                 situation_presentation::result_budget(&view, &input)? as u64;
             if schema {
+                let mode = mode
+                    .as_deref()
+                    .ok_or_else(|| error(ErrorCode::InvalidRequest, "missing schema mode"))?;
+                let document = watch_batch::extend_schema(workforce_queries::extend_schema(
+                    history::schema()?,
+                )?)?;
+                if mode == "schema" {
+                    let full = semantic_query::publish_with_active_work(
+                        &c,
+                        json!({"query_schema":document,"mode":"schema","profile":"spatial/1.8","source_stale":s.source.poisoned(),"truncated":false,"continuation":null}),
+                        |v| finish(&view, v),
+                    );
+                    match full {
+                        Ok(text) if text.len() <= schema_paging::MAX_INLINE_TEXT => {
+                            return Ok(text);
+                        }
+                        Ok(_) => {}
+                        Err(e) if e.code == ErrorCode::BudgetExceeded => {}
+                        Err(e) => return Err(e),
+                    }
+                }
                 return semantic_query::publish_with_active_work(
                     &c,
-                    json!({"query_schema":watch_batch::extend_schema(workforce_queries::extend_schema(history::schema()?)?)?,"mode":"schema","profile":"spatial/1.8","source_stale":s.source.poisoned(),"truncated":false,"continuation":null}),
+                    schema_paging::page(&document, mode, &c, "spatial/1.8", s.source.poisoned())?,
                     |v| finish(&view, v),
                 );
             }

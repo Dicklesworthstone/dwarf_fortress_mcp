@@ -320,17 +320,33 @@ pub(in super::super) fn query(
     session: &mut Session,
     context: &OperationContext,
     input: &Value,
-    schema_mode: bool,
+    schema_mode: Option<&str>,
 ) -> Result<String> {
     context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
     validate(session, context)?;
-    if schema_mode {
+    if let Some(mode) = schema_mode {
+        let document = schema()?;
+        if mode == "schema" {
+            let full = packet(
+                session,
+                context,
+                "fortress.query",
+                None,
+                json!({"mode":"schema","query_schema":document,"profile":"spatial/1.8-archive","truncated":false,"continuation":null}),
+            );
+            match full {
+                Ok(text) if text.len() <= schema_paging::MAX_INLINE_TEXT => return Ok(text),
+                Ok(_) => {}
+                Err(e) if e.code == ErrorCode::BudgetExceeded => {}
+                Err(e) => return Err(e),
+            }
+        }
         return packet(
             session,
             context,
             "fortress.query",
             None,
-            json!({"mode":"schema","query_schema":schema()?,"profile":"spatial/1.8-archive","truncated":false,"continuation":null}),
+            schema_paging::page(&document, mode, context, "spatial/1.8-archive", false)?,
         );
     }
     if history::changes::handles(input) {
