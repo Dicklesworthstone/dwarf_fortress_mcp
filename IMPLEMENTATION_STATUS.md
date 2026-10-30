@@ -30,6 +30,12 @@ admission, or support. No protocol beyond 1.0 appears in the production runner m
 
 ## Evidence hierarchy
 
+### Agent-operating-model status
+
+The shared response contract is implemented source. Current repairs remain
+unqualified source changes until their exact-source qualification receipts pass;
+focused tests or a prior live trial do not qualify the current worktree.
+
 1. **source present** — code, contracts, and tests are checked in;
 2. **static/Python checked** — static or design checks passed for one exact source generation;
 3. **Rust-qualified** — latest-nightly formatting, warning-denied Clippy, debug/release tests and rustdoc passed;
