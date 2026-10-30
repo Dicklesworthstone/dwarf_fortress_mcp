@@ -1,0 +1,68 @@
+{
+  "schema": "dfmcp.live-mutation-dispatch.v1",
+  "owner_bead": "df-dfhack-bridge-plane-c-pic.4",
+  "recovery_bead": "df-dfhack-bridge-plane-c-pic.5",
+  "module": "dfmcp_adapter::live_dispatch::durable",
+  "format_magic": "DFMLDJ01",
+  "limits": {
+    "steps": 16,
+    "original_archive_bytes": 262144,
+    "archive_nodes": 4096,
+    "archive_depth": 32,
+    "store_bytes": 4194304,
+    "frames": 4096,
+    "frame_bytes": 128,
+    "authority_grants": 64,
+    "entities_per_grant_scope": 4096
+  },
+  "identity": [
+    "complete_original_plan_archive",
+    "semantic_plan_digest",
+    "original_object_digest",
+    "journal_id",
+    "original_step_id",
+    "original_semantic_idempotency_key",
+    "exact_routed_family",
+    "dependency_ids"
+  ],
+  "recovery_pin": [
+    "journal_id",
+    "acknowledged_head",
+    "authority_tick_floor"
+  ],
+  "replay": {
+    "complete_original_archive_required": true,
+    "external_nonzero_identity_required": true,
+    "acknowledged_ancestor_required": true,
+    "full_hash_chain_and_semantic_transition_replay": true,
+    "repair_or_truncate": false,
+    "restores_process_local_review": false,
+    "restores_native_commit_permit": false
+  },
+  "execution": {
+    "active_nonterminal_steps": 1,
+    "preparation_intent_synced_before_family_prepare": true,
+    "dispatch_intent_synced_before_family_commit": true,
+    "cancellation_intent_synced_before_family_cancel": true,
+    "accepted_result_synced_before_publication": true,
+    "explicit_current_review_confirmation_required": true,
+    "failed_preparation_is_automatically_retryable": false,
+    "blind_commit_retry": false,
+    "query_recovery_after_original_expiry": true,
+    "opening_and_current_scoped_grants_required": true,
+    "monotone_authority_floor": true,
+    "single_shrinking_operation_deadline": true,
+    "prepaid_storage_and_family_work": true,
+    "delegated_grants_intersect_opening_and_current": true,
+    "empty_scope_intersection_does_not_become_unrestricted": true
+  },
+  "proof_boundary": {
+    "family_receipt": "historical_native_sequencing_evidence",
+    "concrete_executor_rechecks_predecessor_custody": true,
+    "all_applied_proves_original_goal": false,
+    "native_protocol_added": false,
+    "mcp_route_added": false,
+    "capability_or_source_authority_issued": false,
+    "production_admission_added": false
+  }
+}

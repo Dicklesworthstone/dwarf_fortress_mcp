@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-10-30 — Recover mixed-family execution from the complete original plan
+
+- Add a private bounded `DFMLDJ01` execution journal retaining the complete
+  original PlanArchive, actual StepIds, family routes, keys and dependencies.
+- Synchronize preparation, dispatch and cancellation intent before family
+  contact; retain lost replies and accepted results without blind mutation retry.
+- Require external journal/head/floor recovery pins and complete semantic replay;
+  reject rollback, corruption and replacement without repairing history.
+- Preserve Query-only recovery after original expiry, consumed tick floors,
+  opening/current entity, map, risk and expiry intersections inside every family
+  callback, shrinking deadlines, and room for complete
+  prepare/commit or cancellation publication before native contact.
+- Bind explicit confirmation to a process-local current-head review. Reopening
+  never recreates that review or a native commit permit; family receipts never
+  prove the whole original goal.
+- Pass 260 focused adapter tests, including 20 new crash/authority/retention and
+  real private-file groups. Full workspace/native/live qualification remains open.
+
 ## 2026-10-30 — Complete reviewed room-clock control through MCP
 
 - Add explicit room-clock plan/commit/wait/cancel and exact-head history query

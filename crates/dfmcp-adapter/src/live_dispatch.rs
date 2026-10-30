@@ -16,6 +16,8 @@ use dfmcp_intent::{PlanStep, PreparedPlan};
 
 use crate::live_routing::{LiveFamily, RoutedStep, route_plan};
 
+pub mod durable;
+
 fn error(code: ErrorCode, message: impl Into<String>) -> DfmcpError {
     DfmcpError::new(code, message)
 }
@@ -492,7 +494,7 @@ impl LiveDispatchCoordinator {
             ReconcileOutcome::Indeterminate => {
                 let preparation = match self.entries[index].state {
                     DispatchState::DispatchStarted(value) | DispatchState::Indeterminate(value) => value,
-                    _ => unreachable!("uncertain state checked above"),
+                    _ => return Err(conflict("original live dispatch no longer has an uncertain state")),
                 };
                 self.entries[index].state = DispatchState::Indeterminate(preparation);
             }

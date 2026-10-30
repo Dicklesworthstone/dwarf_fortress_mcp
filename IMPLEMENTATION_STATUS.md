@@ -44,6 +44,42 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Durable original-plan frontier for mixed-family execution (2026-10-30)
+
+`live_dispatch::durable` now retains the complete original prepared-plan archive
+and its cross-family execution frontier in a private `DFMLDJ01` journal. The
+bounded owner supports up to 16 routable steps, synchronizes preparation and
+dispatch intent before family contact, and synchronizes accepted outcomes before
+publication. At most one prepared or uncertain step owns the frontier. A lost
+preparation reply remains recoverable uncertainty, and an uncertain commit never
+authorizes redispatch.
+
+Opening requires an externally retained original journal ID, acknowledged head
+and authority tick floor. Complete archive, chain, ancestor and semantic-state
+replay reject rollback, torn tails and impossible transitions without repair.
+Failed native acquisitions can raise the externally retained floor even when no
+new frame can synchronize. Every operation narrows the opening/current grants,
+wall allowance and original deadlines; preparation reserves enough retention for
+its later commit or cancellation. Restart restores no local review or native
+permit. Query-only exact-key recovery works after original plan expiry.
+
+The frozen core passes 260 focused adapter tests, including 20 new groups for
+16-step replay, lost prepare/commit/sync replies, authority/deadline/floor
+failures, delegated entity/map/risk grant intersections, contradictory receipts,
+retention exhaustion and real private-file
+creation, locking, substitution and recovery. All 297 adapter inputs and 91
+core/world/intent dependency inputs match the tested source view. Every production
+body is retained; 113 unrelated test-module declarations are disabled. This is
+component execution evidence, not full workspace, native or live qualification.
+Required repository commands still stop at source-bundle/static-contract gates.
+
+The generic executor boundary remains responsible for exact native family truth
+and predecessor custody. `all_applied()` is historical sequencing status and
+`original_goal_proven()` remains false. Concrete labor/work-order integration is
+the next checkpoint; no new MCP route, bridge protocol or admission is added.
+The owning dispatcher and fault-campaign beads remain in progress/open. See
+[`LIVE_MUTATION_DISPATCH.md`](docs/LIVE_MUTATION_DISPATCH.md).
+
 ### Complete original-room run/reconcile/sample workflow through MCP (2026-10-30)
 
 The existing eleven-tool furniture server now exposes the separate joint room

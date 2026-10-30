@@ -6,7 +6,7 @@ already owns its native plan, preparation journal, confirmation, effect-specific
 revalidation and recovery. `dfmcp_adapter::live_dispatch` coordinates those
 owners for one sealed semantic plan without bypassing any of them.
 
-## Contract
+## In-memory sequencing contract
 
 `LiveDispatchCoordinator::new` accepts only a structurally valid, fully routable
 `PreparedPlan`. Unsupported semantic actions fail before a family executor can
@@ -60,7 +60,95 @@ A host implements `LiveFamilyExecutor`. The executor receives the original
 same semantic idempotency key. It may not invent a second key, widen capability
 scope, skip family confirmation, or translate an uncertain response into success.
 
-This core intentionally does not create a new wire protocol, MCP server, global
-controller fence, live evidence issuer or production admission. Concrete MCP
-wiring and durable reconstruction from the existing family journals remain the
-next part of `df-dfhack-bridge-plane-c-pic.4`.
+## Durable execution ownership
+
+`live_dispatch::durable::Coordinator` adds the persistent execution frontier.
+Use it when the host must retain preparation, dispatch and recovery history
+across process loss. `DFMLDJ01` stores the complete bounded original PlanArchive,
+its semantic and object digests, the journal incarnation, and a hash-chained
+sequence of checked state transitions. It never reconstructs a new one-step
+plan, changes an original key or renews an original deadline.
+
+The durable subset contains at most 16 routable steps. The original archive is
+bounded to 256 KiB, 4,096 nodes and depth 32; the complete store is bounded to
+4 MiB and 4,096 frames. Concrete executors may impose a smaller closed subset.
+All limits are checked before family contact. Every replay decodes the complete
+archive, recompiles routes and dependencies, and applies each transition again.
+A checksum alone cannot authorize an impossible frontier.
+
+The additional durable states distinguish preparation and cancellation calls
+whose replies may have been lost:
+
+| State | Meaning |
+|---|---|
+| Pending | No accepted preparation attempt owns this step. |
+| PrepareStarted | Preparation intent synchronized; the family outcome needs reconciliation. |
+| Prepared | Exact family preparation retained; only the current process may also hold a review. |
+| DispatchStarted | One commit intent synchronized; another commit is forbidden. |
+| CancelStarted | Cancellation intent synchronized; cancellation outcome needs reconciliation. |
+| Indeterminate | Original family outcome remains unresolved. |
+| Applied, Failed, Cancelled | Accepted historical family outcome, with its original receipt when available. |
+
+At most one nonterminal active step exists. Dependencies release only after an
+Applied family result. The concrete executor must establish what that result
+actually proves and recheck its own native predecessor custody at effect
+boundaries. `all_applied()` never proves the original goal;
+`original_goal_proven()` remains false.
+
+## Write ordering and review lifetime
+
+`prepare_next` synchronizes PrepareStarted **before** calling family prepare.
+Unlike the in-memory convenience coordinator, a failed or lost preparation reply
+does not simply make the step Pending again. The durable owner retains the
+original uncertainty. Only a strong family proof of absence before any dispatch
+can release an attempt that has no retained preparation or dispatch marker.
+
+A successful preparation is synchronized before a process-local review is
+published. The review binds the journal, complete original archive, exact step,
+family preparation, current head and acting session. `commit` requires that
+review's exact seal plus explicit confirmation. It consumes the review and
+synchronizes DispatchStarted before contacting the family. The accepted result
+must then synchronize before it can be published.
+
+Restart, inspection and Query recovery restore no review. Even a recovered
+Prepared result cannot create a native commit permit. It permits inspection or
+the family's authorized pre-dispatch cancellation path. Cancellation retains its
+own write-ahead intent and cannot undo an applied or possibly dispatched effect.
+
+Every operation has one shrinking wall-time allowance and prepaid storage/family
+byte work. The family receives only the time remaining after the last journal
+boundary. Mutation checks use both the opening and current scoped grants, the
+current session and fortress, the monotone authority clock, the original plan
+expiry and the selected obligation deadline. Expiry is inclusive. Query-only
+historical reconciliation remains available after the original plan expires.
+
+## Recovery pin and private custody
+
+Compute `initial_recovery` before exclusive creation and retain its result
+outside the journal. The recovery pin contains the nonzero original journal
+identity, an acknowledged head and the highest consumed authority tick. Opening
+requires that exact journal and a fully replayable descendant of the
+acknowledged head. A zero pin, missing ancestor, altered original archive,
+impossible transition, torn tail or corrupt frame is refused without repair or
+truncation.
+
+After every operation, including a failed acquisition, retain the latest
+`recovery()` value before handing the owner to another process. A later consumed
+tick can narrow authority even if the failed call could not append a new frame.
+That unsynchronized floor travels in the external pin; it is not presented as
+a durable observation. Reopening takes the maximum of the replayed floor, the
+pin's floor and the caller's floor. The next authorized append retains that
+floor in the journal.
+
+The private-file constructor reuses the existing descriptor-pinned,
+no-follow, exact-mode directory/file lock shell. An uncertain write,
+synchronization or result publication fences the owner. Recovery may synchronize
+and verify a complete surviving descendant; it never repairs damaged bytes or
+blindly repeats native work. Offline mode inspects history without contacting a
+family or changing the journal.
+
+This core creates no new native wire protocol, MCP server, source authority or
+production admission. A host supplies a `DurableFamilyExecutor` whose recovery
+uses the exact existing family journals and native keys. Concrete MCP wiring and
+live qualification remain separate work under
+`df-dfhack-bridge-plane-c-pic.4`.
