@@ -867,7 +867,8 @@ fn source_changes_and_clock_regression_invalidate_without_replacing_accepted_sam
     let spec = spec(parts())?;
     let state = MonitorState::new(spec.clone()).sample(capture(&spec, 1010)?)?;
     let baseline = state.latest().cloned();
-    let mutations: Vec<Box<dyn Fn(&mut LiveMapObservation)>> = vec![
+    type MapMutation = Box<dyn Fn(&mut LiveMapObservation)>;
+    let mutations: Vec<MapMutation> = vec![
         Box::new(|r| r.bridge_generation += 1),
         Box::new(|r| r.df_version.push('x')),
         Box::new(|r| r.dfhack_version.push('x')),

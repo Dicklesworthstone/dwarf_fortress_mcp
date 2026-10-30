@@ -545,7 +545,7 @@ fn room_batch_codec_rejects_truncation_missing_room_trailing_bytes_and_generatio
     for length in 0..raw.len() {
         assert!(BatchDefinition::decode(&raw[..length]).is_err());
     }
-    for version in [b'0', b'1', b'2', b'4'] {
+    for version in *b"0124" {
         let mut changed = raw.clone();
         changed[7] = version;
         assert!(BatchDefinition::decode(&changed).is_err());

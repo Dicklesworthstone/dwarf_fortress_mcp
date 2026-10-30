@@ -696,7 +696,7 @@ fn whole_definition_and_first_independent_sources_cannot_change_on_reopen() -> R
             2 => changed_source.furniture.furniture_generation += 1,
             3 => changed_source.map.dfhack_version.push_str("-other"),
             _ => {
-                let mut timing = definition.goal().timing().clone();
+                let mut timing = definition.goal().timing();
                 timing.stable_span += 1;
                 changed_definition = with_timing(&definition, timing)?;
             }
@@ -994,7 +994,7 @@ fn acknowledged_known_negative_remains_durable_when_later_clock_guard_fails() ->
 #[test]
 fn readiness_probe_never_uses_the_last_acquisition_or_grants_positive_credit() -> Result<()> {
     let (original, _) = fixture(1)?;
-    let mut timing = original.goal().timing().clone();
+    let mut timing = original.goal().timing();
     timing.max_observations = 3;
     let definition = with_timing(&original, timing)?;
     let (c, _) = contexts(&definition);
