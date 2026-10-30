@@ -236,7 +236,7 @@ fn durable_publication_failure_fences_remaining_wait_time_and_dispatch() -> Test
     assert_eq!(waited["partial_progress"], true);
     assert_eq!(waited["durability_pending"], true);
     assert_eq!(waited["agent_turn"]["anchor"], waited["observed_anchor"]);
-    assert_eq!(waited["agent_turn"]["briefing"]["paused"], waited["paused"]);
+    assert_eq!(waited["agent_turn"]["profile"], "pulse");
     assert!(
         waited["polled_actions"]
             .as_array()
@@ -246,6 +246,7 @@ fn durable_publication_failure_fences_remaining_wait_time_and_dispatch() -> Test
         let handle = resolve_session(Some(session.clone()))?;
         let guard = handle.lock().map_err(|_| "session poisoned")?;
         assert!(guard.durability_fault.is_some());
+        assert_eq!(waited["paused"], guard.adapter.snapshot().paused);
         (
             guard.adapter.snapshot().anchor(),
             guard

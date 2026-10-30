@@ -33,7 +33,7 @@ fn open_durable(
         Some(false),
         Some(selector.to_owned()),
         Some(caps()),
-        None,
+        Some(30_000),
         Some(100_000),
         None,
         None,

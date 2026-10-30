@@ -595,12 +595,16 @@ fn emergency_cleanup_of_terminal_work_pauses_without_rewriting_goal_proof() -> T
     assert_eq!(early["commit_state"], "Verified", "{early}");
     assert_eq!(early["work_state"]["state"], "active");
     let original = receipt(&session, action)?;
+    // A second authorized controller pauses through a real plan, preserving
+    // the first controller's original action custody and physical work.
+    let paused = plan_and_commit(&other, r#"[{"action":{"kind":"pause","paused":true}}]"#)?;
+    assert_eq!(paused["paused"], true, "{paused}");
     let consent = request_unpause(&session)?;
     assert_eq!(consent["ok"], false, "{consent}");
     assert_eq!(consent["clock_consent"]["votes"], 1);
     let budget = in_session(&session, |guard| {
         let original = guard.budget;
-        guard.budget.max_actions = 1;
+        guard.budget.max_actions = 0;
         Ok(original)
     })?;
     let before = snapshot(&session)?;
@@ -610,7 +614,7 @@ fn emergency_cleanup_of_terminal_work_pauses_without_rewriting_goal_proof() -> T
     assert_eq!(
         snapshot(&session)?,
         before,
-        "pause plus stop needs two action units"
+        "even an already paused fortress needs one authorized physical stop"
     );
     assert_eq!(receipt(&session, action)?, original);
     in_session(&session, |guard| {

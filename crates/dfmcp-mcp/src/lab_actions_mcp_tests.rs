@@ -201,8 +201,8 @@ fn agent_digs_builds_and_brews_through_the_eleven_tools() -> TestResult {
         Some(r#"{"mode":"entities","kind":"building"}"#.to_owned()),
     ))?;
     assert_eq!(
-        buildings["total"], 3,
-        "the new still beside the starter still and kitchen"
+        buildings["total"], 4,
+        "the new still beside the starter still, kitchen and carpenters"
     );
     let built = buildings["rows"]
         .as_array()
@@ -375,7 +375,10 @@ fn plan_scope_cancellation_drains_dependents_and_certifies_quiescence() -> TestR
         Some(session.clone()),
         Some(r#"{"mode":"entities","kind":"building"}"#.to_owned()),
     ))?;
-    assert_eq!(buildings["total"], 2, "only the starter still and kitchen");
+    assert_eq!(
+        buildings["total"], 3,
+        "only the starter still, kitchen and carpenters"
+    );
 
     // Draining an already quiescent plan is an idempotent no-op.
     let again = parsed(&fortress_cancel(
@@ -1167,8 +1170,8 @@ fn a_blueprint_objective_is_decomposed_dug_and_furnished() -> TestResult {
         Some(session.clone()),
         Some(r#"{"mode":"entities","kind":"building"}"#.to_owned()),
     ))?;
-    // Four furnishings plus the starter still and kitchen.
-    assert_eq!(buildings["total"], 6, "{buildings}");
+    // Four furnishings plus the starter still, kitchen and carpenters.
+    assert_eq!(buildings["total"], 7, "{buildings}");
     for row in buildings["rows"].as_array().ok_or("rows")? {
         assert_eq!(row["fields"]["construction_stage"], "complete", "{row}");
     }
