@@ -169,7 +169,7 @@ fn sixty_four_tile_queries_paginate_inside_the_modern_text_limit_without_loss() 
     let first = fixture::observation(3, 0, 0, false)?;
     let mut terrain = first.spatial().terrain().clone();
     terrain.map.region.size = [16, 16, 3];
-    terrain.map.cells = vec![terrain.map.cells[0].clone(); 768];
+    terrain.map.cells = vec![terrain.map.cells[0]; 768];
     let region = terrain.map.region;
     let mut spatial = b"DFMS1600".to_vec();
     let part = |out: &mut Vec<u8>, value: &[u8]| {
@@ -195,6 +195,22 @@ fn sixty_four_tile_queries_paginate_inside_the_modern_text_limit_without_loss() 
     s.limits.spatial.region = region;
     s.budget.max_entities = s.limits.entity_limit();
     let anchor = anchor_json(s.anchor()?);
+    let expected: BTreeSet<_> = s
+        .state
+        .snapshot()
+        .ok_or_else(|| {
+            error(
+                ErrorCode::InternalInvariantViolation,
+                "tile fixture snapshot",
+            )
+        })?
+        .graph
+        .entities
+        .values()
+        .filter(|entity| entity.kind == dfmcp_world::EntityKind::TileFeature)
+        .map(|entity| entity.id.to_string())
+        .collect();
+    assert_eq!(expected.len(), 768);
     let id = s.id;
     struct Registered(SessionId);
     impl Drop for Registered {
@@ -243,6 +259,10 @@ fn sixty_four_tile_queries_paginate_inside_the_modern_text_limit_without_loss() 
         pages += 1;
         assert!(pages <= 768);
         if result["continuation"].is_null() {
+            assert_eq!(result["truncated"], false);
+            assert!(result["agent_turn"]["coverage"]["continuation"].is_null());
+            // Complete query traversal does not certify complete fortress history.
+            assert_eq!(result["agent_turn"]["coverage"]["status"], "partial");
             break;
         }
         assert_eq!(result["agent_turn"]["coverage"]["status"], "partial");
@@ -252,7 +272,7 @@ fn sixty_four_tile_queries_paginate_inside_the_modern_text_limit_without_loss() 
         );
         input["query"]["continuation"] = result["continuation"].clone();
     }
-    assert_eq!(ids.len(), 768);
+    assert_eq!(ids, expected);
     assert!(
         pages > 12,
         "the transport ceiling must narrow the requested 64-row pages"

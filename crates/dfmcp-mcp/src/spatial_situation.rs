@@ -168,7 +168,7 @@ fn both(left: Option<bool>, right: Option<bool>) -> Option<bool> {
 fn applies(index: usize, entity: &EntityRecord) -> bool {
     matches!(
         (index, &entity.kind),
-        (0 | 1 | 2, EntityKind::Unit)
+        (0..=2, EntityKind::Unit)
             | (3, EntityKind::TileFeature)
             | (4 | 5, EntityKind::Job)
             | (6, EntityKind::Building)
