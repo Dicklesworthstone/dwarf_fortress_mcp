@@ -81,7 +81,7 @@ impl Recovery {
     }
 }
 
-fn recovery_batch(origin: &Origin) -> Value {
+pub(super) fn recovery_batch(origin: &Origin) -> Value {
     let definition = origin.definition();
     let rows = definition.plan().ordered_steps().zip(origin.receipts()).map(|(step, record)| {
         json!({"name":step.name,"idempotency_key":definition.key(step),
@@ -126,6 +126,9 @@ fn recovery_packet(
     if let Some(store) = store {
         completion["journal"] = json!({"head":store.head().to_string(),
             "frames":store.frames(),"byte_length":store.byte_len()});
+        let pin = store.recovery();
+        completion["recovery"] =
+            json!({"monitor_id":pin.monitor_id.to_string(),"head":pin.head.to_string()});
     }
     result["completion"] = completion;
     result["effect_may_have_occurred"] = json!(false);
@@ -447,7 +450,11 @@ pub(super) fn verify_source<S: EffectJournalStorage, N: BuildSource>(
     Ok(view)
 }
 
-fn projected(definition: &MonitorDefinition, progress: &Progress, verified: bool) -> Value {
+pub(super) fn projected(
+    definition: &MonitorDefinition,
+    progress: &Progress,
+    verified: bool,
+) -> Value {
     let timing = definition.goal().timing();
     let original = definition.origin();
     let rows = definition.goal().records().iter().map(|record| {
@@ -513,6 +520,9 @@ pub(super) fn display(monitor: &Monitor, verified: bool) -> Value {
     result["monitor_terminal"] = json!(local_verified && monitor.store.progress().terminal());
     result["journal"] = json!({"head":monitor.store.head().to_string(),
         "frames":monitor.store.frames(),"byte_length":monitor.store.byte_len()});
+    let pin = monitor.store.recovery();
+    result["recovery"] =
+        json!({"monitor_id":pin.monitor_id.to_string(),"head":pin.head.to_string()});
     result
 }
 

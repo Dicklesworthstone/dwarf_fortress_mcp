@@ -37,7 +37,8 @@
       "DFMCP_BUILD_MODE",
       "DFMCP_BUILD_CLOCK_CONFIG",
       "DFMCP_BUILD_CLOCK_TOKEN",
-      "DFMCP_BUILD_ALLOW_CLOCK"
+      "DFMCP_BUILD_ALLOW_CLOCK",
+      "DFMCP_BUILD_CLOCK_MONITOR_RECOVERY"
     ],
     "opt_in_exact_value": "1",
     "unknown_dfmcp_names_refused": true,
@@ -47,7 +48,9 @@
       "recover",
       "offline",
       "completion-recover",
-      "completion-offline"
+      "completion-offline",
+      "clock-recover",
+      "clock-offline"
     ],
     "default_mode": "control",
     "checkpoint_policies": [
@@ -59,7 +62,16 @@
     "client_selected_paths_or_credentials": false,
     "configured_custody_paths_must_be_distinct": true,
     "completion_requires_original_batch": true,
-    "completion_only_modes_allow_clock": false
+    "completion_only_modes_allow_clock": false,
+    "clock_only_modes_require_existing_monitor_and_clock": true,
+    "clock_monitor_recovery_closed_fields": [
+      "monitor_id",
+      "head"
+    ],
+    "clock_monitor_recovery_maximum_json_bytes": 2048,
+    "clock_monitor_recovery_requires_nonzero_digests": true,
+    "clock_monitor_recovery_allowed_in_other_modes": false,
+    "clock_only_max_game_ticks": 0
   },
   "selection": {
     "shape": [
@@ -148,6 +160,7 @@
     "status": "implemented_unadmitted_development_only",
     "adapter": "dfmcp_adapter::construction_plan::clock",
     "operator_guide": "docs/FURNITURE_CONSTRUCTION_CLOCK_MCP.md",
+    "recovery_operator_guide": "docs/FURNITURE_CONSTRUCTION_CLOCK_RECOVERY.md",
     "optional_operator_configuration": true,
     "configuration_maximum_json_bytes": 8192,
     "configuration_closed_fields": [
@@ -167,7 +180,8 @@
       "head"
     ],
     "initialization_exclusive": true,
-    "existing_sampled_monitor_required_before_open": true,
+    "existing_source_bearing_monitor_required_before_open": true,
+    "ordinary_activation_uses_first_completion_sample": true,
     "new_intent_inputs_with_clock_refused": true,
     "clock_opened_eagerly_before_session_publication": true,
     "lazy_initialization_during_sampling": false,
@@ -176,7 +190,9 @@
       "operations": "1.4",
       "run": "1.13"
     },
-    "operations_source_pinned_by_accepted_original_sample": true,
+    "operations_source_pinned_by_accepted_original_acquisition": true,
+    "operations_source_uses_immutable_first_accepted_monitor_source": true,
+    "later_terminal_source_change_rebinds_original_clock": false,
     "run_source_requires_original_endpoint_and_software": true,
     "source_generations_independently_pinned": true,
     "native_clock_authority_independent_of_named_fortress": true,
@@ -227,7 +243,83 @@
     "rollback_replacement_and_torn_tail_refused": true,
     "reopen_restores_review_permission": false,
     "combined_reopen_requires_original_placement_parent_monitor_files": true,
-    "independent_clock_only_reopen": false,
+    "independent_clock_only_reopen": true,
+    "independent_recovery": {
+      "modes": [
+        "clock-recover",
+        "clock-offline"
+      ],
+      "required_files": [
+        "original_completion_monitor",
+        "original_clock_journal"
+      ],
+      "required_external_acknowledgements": {
+        "monitor": [
+          "monitor_id",
+          "head"
+        ],
+        "clock": [
+          "journal_id",
+          "head"
+        ]
+      },
+      "original_placement_and_parent_path_strings_must_match": true,
+      "original_placement_file_opened": false,
+      "original_parent_file_opened": false,
+      "monitor_opened_read_only": true,
+      "initialization_allowed": false,
+      "new_intent_allowed": false,
+      "monitor_required_at_open": true,
+      "terminal_source_invalidated_monitor_allowed": true,
+      "clock_binding_uses_replayed_first_monitor_source": true,
+      "source_validated_retained_readiness_can_preserve_first_source": true,
+      "retained_readiness_contributes_goal_credit": false,
+      "monitor_ancestry_verified_by_full_semantic_replay": true,
+      "monitor_and_clock_accept_complete_acknowledged_descendants": true,
+      "opening_rechecks_both_histories_after_final_runtime_callback": true,
+      "published_verified_histories_rechecked_after_final_runtime_callback": true,
+      "monitor_verification_budget_uses_actual_retained_byte_length": true,
+      "maximum_game_ticks": 0,
+      "retained_capabilities": [
+        "Query",
+        "ControlClock_when_independently_enabled_at_open"
+      ],
+      "retained_plan_observe_or_construct_authority": false,
+      "native_query_requires_current_and_retained_independent_query": true,
+      "native_cancel_requires_current_and_retained_independent_query_clock": true,
+      "query_only_owner_can_be_promoted_by_later_opt_in": false,
+      "offline_native_connections": 0,
+      "offline_wait_and_clock_cancel_allowed": false,
+      "local_query_modes": [
+        "schema",
+        "completion",
+        "construction_clock",
+        "batch",
+        "allocation"
+      ],
+      "doctor_verifies_both_original_histories": true,
+      "maximum_native_queries_per_wait": 1,
+      "new_unpause_attempts": 0,
+      "completion_samples_acquired": 0,
+      "fresh_readiness_acquired": false,
+      "review_restored": false,
+      "new_plan_commit_or_placement_allowed": false,
+      "monitor_loss_after_successful_open_blocks_original_cancel": false,
+      "clock_damage_blocks_native_contact": true,
+      "missing_native_outcome_remains_unresolved": true,
+      "ordinary_close_requires_verified_settled_clock": true,
+      "explicit_release_requires_query_authority": false,
+      "explicit_release_verifies_custody": false,
+      "explicit_release_cancels_native_effect": false,
+      "expired_query_release_redacts_cached_evidence": true,
+      "historical_full_original_batch_visible_with_query": true,
+      "allocation_views_reallocate": false,
+      "original_placement_inventory_verified": false,
+      "fresh_goal_sampling_permitted": false,
+      "sampled_construction_condition_proven": false,
+      "current_pause_proven": false,
+      "evidence_scope": "this_original_monitor_and_clock_history_only"
+    },
     "monitor_format_enforces_optional_clock_configuration_presence": false,
     "final_exact_clock_replay_after_last_runtime_checkpoint": true,
     "authority_floor_includes_decoded_later_rejected_capture": true,

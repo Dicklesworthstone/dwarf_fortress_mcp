@@ -217,6 +217,8 @@ fn config() -> Result<Config> {
     Ok(Config {
         completion_path: None,
         completion_only: false,
+        clock_only: false,
+        clock_monitor_recovery: None,
         clock: None,
         batch_path: None,
         path: "/private/build/journal".into(),

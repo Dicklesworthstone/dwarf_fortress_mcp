@@ -44,6 +44,59 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Independent whole-furniture clock recovery through MCP (2026-10-30)
+
+The existing eleven-tool furniture server now exposes `clock-offline` and
+`clock-recover`. These modes open only the exact original construction monitor
+and clock journal. Missing placement and furniture-parent files no longer prevent
+an operator from inspecting or recovering an outstanding original run. Their
+configured path strings remain bound to the original project, but neither file
+is opened. Startup requires separately acknowledged monitor and clock identities
+and ancestry; it creates no history, performs no native bootstrap or inventory
+capture, and acquires no placement lease.
+
+Offline recovery performs local inspection only. Writable recovery can reconcile
+one original native outcome under Query authority; separately retained and current
+canonical/native clock authority permits original safety cancellation, even after
+the goal deadline or future-tick allowance has expired. Query-only owners cannot
+gain control from a later operator opt-in. Both modes keep future game ticks at
+zero and exclude new preparation, commit, placement, completion sampling and
+monitor mutation. Recovery uses the monitor's immutable first accepted operations
+source, including source-bearing readiness, rather than a later diagnostic source.
+
+After successful opening, monitor loss cannot strand reconciliation or safety
+cancellation through intact clock custody. Damaged clock custody still blocks
+native contact. Current and retained Query authority in both independent domains
+governs cached evidence and error handoffs; explicit release remains available
+after Query loss with that evidence redacted. Normal close requires an intact
+settled clock. Exact final replay follows the last runtime callback, consumed
+tick floors survive rejection, and historical receipts never prove current pause
+or construction completion. Recovery Agent Turns recommend only available
+history/reconciliation actions and authorized cancellation; closed sessions offer
+no further action.
+
+All 79 actual-source furniture handler/Agent Turn tests pass, including 19 new
+independent recovery groups and the incoming readiness integration. Combined with
+91 construction-plan and 22 bounded-run tests, 192 focused tests pass. All 420
+handler compiler inputs, 282 async-view inputs and 276 adapter Rust source files
+remain unchanged during their respective final checks. Complete public/native
+wrapper bodies type-check with nonexecuted fail-closed ambient runtime stubs.
+The executable view excludes FastMCP transport, ambient ownership and native
+effect shells, including `open_clock_recovery`; those paths received independent
+source review and compile checking, not runtime qualification.
+
+The locked/offline full MCP check still cannot resolve the uncached pinned
+`fastmcp-core` revision `180a7c88890705217bb8e202d19555adabf24187`.
+`verify.sh` passes its first four checks and stops at unchanged source-bundle
+documentation missing the required phrase `exact clean git commit`.
+`qualify_local.sh` stops at 76 static findings across 62 files, all byte-identical
+to starting main `9c93fda`. These blockers remain separate from the focused
+execution evidence. Full production runtime, native/live qualification, release
+qualification and admission remain unverified. A missing or damaged
+monitor at startup still prevents reconstruction; monitor-free recovery, generic
+mixed-action execution and verified game checkpoint/restore remain open. See the
+[independent recovery workflow](docs/FURNITURE_CONSTRUCTION_CLOCK_RECOVERY.md).
+
 ### Exact construction-monitor recovery ancestry (2026-10-30)
 
 The whole-furniture monitor now exposes an exact external recovery reference and
@@ -58,8 +111,8 @@ diagnostic progress. A later source-changing observation can invalidate the
 monitor and replace that diagnostic source; it cannot replace the original
 operations association needed to reconstruct an existing construction clock.
 This core prerequisite permits independent clock recovery without treating a
-replacement source as original evidence. Public recovery integration follows
-separately.
+replacement source as original evidence. The public recovery integration is
+described above.
 
 After preserving both incoming construction-readiness increments, all 113
 actual-source adapter tests pass: 91 construction-plan and 22 bounded-run tests.
@@ -203,10 +256,10 @@ three findings introduced by new test helpers, the standalone validator reports
 revision. The locked/offline full MCP build cannot resolve the uncached pinned
 `fastmcp-core` Git revision `180a7c88890705217bb8e202d19555adabf24187`.
 Full production FastMCP/ambient runtime, native/live qualification and compatibility
-admission remain unverified. The complete combined restart still
-needs the original parent, placement and monitor files; no furniture clock-only
-recovery mode is added. After successful opening, original-file loss does not
-strand reconciliation or safety cancellation through intact clock custody.
+admission remain unverified. Ordinary combined restart still needs the original
+parent, placement and monitor files. Independent monitor-and-clock recovery is
+described above. After successful opening, original-file loss does not strand
+reconciliation or safety cancellation through intact clock custody.
 Retain the clock configuration and exact recovery pin across restarts: omitting
 it cannot establish that no earlier run exists. See the
 [operator workflow](docs/FURNITURE_CONSTRUCTION_CLOCK_MCP.md). Broader mixed-action

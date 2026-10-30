@@ -266,13 +266,20 @@ configuration cannot prove that no clock history exists.
 
 Normal `offline` mode inspects existing history without native calls or writes.
 Normal `recover` mode can query an original unresolved run but cannot start an
-interval or acquire safety-cancel authority. Control mode with independent clock
-opt-in is required for a safety cancel. Both recovery modes still require all
-three original furniture files plus the exact clock file and accepted original
-operations source. This furniture integration has no separate clock-only restart
-mode when the original files cannot be reconstructed. Monitor-only recovery
-refuses configured clock custody. Retaining an owner in a running session and
-reopening after loss of original files are different recovery situations.
+interval or acquire safety-cancel authority. These combined modes still require
+the three original furniture files plus the exact clock file and accepted
+original operations source. Monitor-only recovery refuses configured clock custody.
+
+If the placement journal or furniture parent is unavailable, use
+[`clock-offline` or `clock-recover`](FURNITURE_CONSTRUCTION_CLOCK_RECOVERY.md).
+Those independent modes open only the exact original monitor and clock histories,
+using `result.completion.recovery` and `result.construction_clock.recovery`.
+Query-only recovery can reconcile one original outcome; separately enabled
+retained/current clock authority permits original safety cancellation. Future
+game ticks remain zero, and recovery cannot sample construction, prepare or
+commit a new run. The first accepted operations source remains the original
+clock association even if a later sample invalidated the monitor after a
+source change. The linked guide specifies configuration and close/release behavior.
 
 Before publishing an opening response, the server prepays and rechecks the
 original placement journal, batch custody, complete monitor and exact clock

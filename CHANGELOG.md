@@ -1,5 +1,26 @@
 # Changelog
 
+## 2026-10-30 — Recover original furniture clock runs without placement files
+
+- Add `clock-offline` and `clock-recover` through the existing eleven tools,
+  opening only acknowledged original monitor and run histories without placement
+  custody, a furniture parent, native bootstrap, inventory capture or a new lease.
+- Reconcile one original outcome with Query only; permit safety cancellation
+  under separately retained/current canonical and native clock authority, with
+  zero future ticks and no restored review, new run or construction sample.
+- Match immutable first-source history after ordinary or readiness invalidation;
+  preserve exact ancestry, consumed floors and final publication custody.
+- Keep original cancellation reachable after later monitor loss, refuse native
+  work after clock damage, and allow redacted explicit release after Query expiry.
+- Make recovery Agent Turn recommendations respect offline/query-only modes and
+  current authority, and remove follow-up actions from closed sessions.
+- Pass all 79 actual-source handler/Agent Turn tests, including 19 new recovery
+  groups. Combined with 113 adapter tests, 192 focused tests pass; all recorded
+  compiler inputs remain unchanged. Full public/native wrappers type-check with
+  nonexecuted ambient stubs. Full runtime/native/live qualification remains open.
+- Preserve both concurrent readiness increments on main and document the paired
+  recovery pins, 18 environment variables and seven operator modes.
+
 ## 2026-10-30 — Preserve original construction-monitor recovery custody
 
 - Add exact external monitor/head recovery references backed by complete semantic

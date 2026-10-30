@@ -17,7 +17,7 @@ use std::sync::{
 use std::time::Duration;
 use std::time::Instant;
 
-pub(super) const NAMES: [&str; 17] = [
+pub(super) const NAMES: [&str; 18] = [
     "DFMCP_ALLOW_UNADMITTED_BUILD_MCP_V1_19",
     "DFMCP_BUILD_WORLD_FOLDER",
     "DFMCP_BUILD_SITE_ID",
@@ -35,6 +35,7 @@ pub(super) const NAMES: [&str; 17] = [
     "DFMCP_BUILD_CLOCK_CONFIG",
     "DFMCP_BUILD_CLOCK_TOKEN",
     "DFMCP_BUILD_ALLOW_CLOCK",
+    "DFMCP_BUILD_CLOCK_MONITOR_RECOVERY",
 ];
 fn denied() -> dfmcp_core::DfmcpError {
     error(
@@ -71,6 +72,8 @@ pub(super) struct Config {
     pub batch_path: Option<PathBuf>,
     pub completion_path: Option<PathBuf>,
     pub completion_only: bool,
+    pub clock_only: bool,
+    pub clock_monitor_recovery: Option<dfmcp_adapter::construction_plan::store::Recovery>,
     pub clock: Option<super::clock::Config>,
     pub scope: MapCuboid,
     pub fortress: FortressIdentity,
@@ -211,12 +214,14 @@ fn configured(
         Some("disposable-fortress-no-checkpoint") => CheckpointPolicy::DisposableFortress,
         _ => return Err(denied()),
     };
-    let (mode, completion_only) = match mode {
-        None | Some("control") => (BuildMode::Control, false),
-        Some("recover") => (BuildMode::Recover, false),
-        Some("offline") => (BuildMode::Offline, false),
-        Some("completion-recover") => (BuildMode::Recover, true),
-        Some("completion-offline") => (BuildMode::Offline, true),
+    let (mode, completion_only, clock_only) = match mode {
+        None | Some("control") => (BuildMode::Control, false, false),
+        Some("recover") => (BuildMode::Recover, false, false),
+        Some("offline") => (BuildMode::Offline, false, false),
+        Some("completion-recover") => (BuildMode::Recover, true, false),
+        Some("completion-offline") => (BuildMode::Offline, true, false),
+        Some("clock-recover") => (BuildMode::Recover, false, true),
+        Some("clock-offline") => (BuildMode::Offline, false, true),
         _ => return Err(denied()),
     };
     Ok(Config {
@@ -224,6 +229,8 @@ fn configured(
         batch_path: None,
         completion_path: None,
         completion_only,
+        clock_only,
+        clock_monitor_recovery: None,
         clock: None,
         scope,
         fortress,
@@ -246,6 +253,26 @@ fn isolated(opt: &str, names: impl IntoIterator<Item = String>, admitted: bool) 
         }
     }
     Ok(())
+}
+pub(super) fn monitor_recovery(
+    raw: &str,
+) -> Result<dfmcp_adapter::construction_plan::store::Recovery> {
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Input {
+        monitor_id: String,
+        head: String,
+    }
+    if raw.is_empty() || raw.len() > 2048 {
+        return Err(denied());
+    }
+    let value: Input = serde_json::from_str(raw).map_err(|_| denied())?;
+    let monitor_id = super::presentation::digest(&value.monitor_id)?;
+    let head = super::presentation::digest(&value.head)?;
+    if monitor_id == dfmcp_core::Digest32::ZERO || head == dfmcp_core::Digest32::ZERO {
+        return Err(denied());
+    }
+    Ok(dfmcp_adapter::construction_plan::store::Recovery { monitor_id, head })
 }
 pub(super) fn configuration() -> Result<Config> {
     isolated(
@@ -304,6 +331,15 @@ pub(super) fn configuration() -> Result<Config> {
         .as_deref()
         .map(super::clock::Config::parse)
         .transpose()?;
+    config.clock_monitor_recovery = optional("DFMCP_BUILD_CLOCK_MONITOR_RECOVERY")?
+        .as_deref()
+        .map(monitor_recovery)
+        .transpose()?;
+    if config.clock_only != config.clock_monitor_recovery.is_some()
+        || (config.clock_only && (config.clock.is_none() || config.completion_path.is_none()))
+    {
+        return Err(denied());
+    }
     if let Some(clock) = &config.clock {
         if config.completion_only
             || config.completion_path.is_none()
@@ -311,7 +347,7 @@ pub(super) fn configuration() -> Result<Config> {
             || clock.path == config.path
             || config.batch_path.as_ref() == Some(&clock.path)
             || config.completion_path.as_ref() == Some(&clock.path)
-            || (clock.initialize && config.mode != BuildMode::Control)
+            || (clock.initialize && (config.mode != BuildMode::Control || config.clock_only))
         {
             return Err(denied());
         }
@@ -507,7 +543,11 @@ pub(super) fn connect(
     remaining: Duration,
 ) -> Result<BuildRpc> {
     current_request_check()?;
-    if &configuration()? != config || config.mode == BuildMode::Offline || config.completion_only {
+    if &configuration()? != config
+        || config.mode == BuildMode::Offline
+        || config.completion_only
+        || config.clock_only
+    {
         return Err(denied());
     }
     let token = required("DFMCP_BUILD_TOKEN", 256)?.into_bytes();
@@ -778,6 +818,7 @@ impl<'a> super::clock::ClockIo for ClockIo<'a> {
         let mode = match self.config.mode {
             BuildMode::Offline => RunMode::Offline,
             BuildMode::Control if clock_enabled()? => RunMode::Control,
+            BuildMode::Recover if self.config.clock_only && clock_enabled()? => RunMode::Control,
             _ => RunMode::Recover,
         };
         if selected.initialize && mode != RunMode::Control {
@@ -888,6 +929,9 @@ impl<'a> super::clock::ClockIo for ClockIo<'a> {
         definition: &dfmcp_adapter::construction_plan::origin::MonitorDefinition,
         c: &OperationContext,
     ) -> Result<dfmcp_adapter::construction_plan::LinkedSample> {
+        if self.config.clock_only {
+            return Err(denied());
+        }
         completion_sample(
             self.config,
             definition.origin().definition().binding(),

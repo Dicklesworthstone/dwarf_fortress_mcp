@@ -358,14 +358,19 @@ pub(super) fn packet(
         let seal = &clock["active_run"]["review_seal"];
         let verified = clock["history_verified"] == true;
         let pending = clock["pending"] == true || clock["unresolved"] == true;
+        let recovery = result["clock_recovery_only"] == true;
+        let closed = result["closed"] == true;
+        let can_reconcile = !recovery || result["clock_reconciliation_permitted"] == true;
+        let can_cancel = !recovery || result["clock_safety_cancel_permitted"] == true;
         turn["briefing"]["construction_clock"] = json!({
             "history_verified":verified,"pending":pending,
             "current_pause_proven":false,"goal_sample_published":false,
-            "separate_review_required":true,"source_has_named_fortress_identity":false});
+            "separate_review_required":!recovery,"clock_recovery_only":recovery,
+            "source_has_named_fortress_identity":false});
         let inspect = json!({"session_id":session,"query":json!({
             "mode":"construction_clock","monitor_id":id,
             "head":clock["recovery"]["head"],"limit":8}).to_string()});
-        let next = if verified && seal.is_string() {
+        let next = if !recovery && verified && seal.is_string() {
             recommendation(
                 "review-construction-clock",
                 "fortress.commit",
@@ -377,11 +382,15 @@ pub(super) fn packet(
                 true,
                 json!({"session_id":session,"scope":"clock","monitor_id":id,"review_seal":seal}),
             )
-        } else if verified && pending {
+        } else if verified && pending && can_reconcile {
             recommendation(
                 "reconcile-construction-clock",
                 "fortress.wait",
-                "Reconcile the retained original interval before another run or completion sample.",
+                if recovery {
+                    "Recover one outcome of the original interval; independent recovery cannot start runs or sample construction."
+                } else {
+                    "Reconcile the retained original interval before another run or completion sample."
+                },
                 "high",
                 "high",
                 "read_only",
@@ -389,11 +398,15 @@ pub(super) fn packet(
                 false,
                 json!({"session_id":session,"scope":"clock","monitor_id":id}),
             )
-        } else if !verified {
+        } else if !verified || recovery {
             recommendation(
                 "inspect-construction-clock",
                 "fortress.query",
-                "Verify the exact retained clock history before using any completion claim.",
+                if recovery {
+                    "Inspect the exact original clock history; this recovery profile provides historical evidence only."
+                } else {
+                    "Verify the exact retained clock history before using any completion claim."
+                },
                 "high",
                 "high",
                 "read_only",
@@ -414,8 +427,12 @@ pub(super) fn packet(
                 json!({"session_id":session,"selection":"completion"}),
             )
         };
-        turn["recommendations"] = json!([next]);
-        if pending {
+        turn["recommendations"] = if recovery && closed {
+            json!([])
+        } else {
+            json!([next])
+        };
+        if pending && can_cancel && !(recovery && closed) {
             turn["active_work"]["construction_clock"]["cancellation"] = json!({
                 "tool":"fortress.cancel","arguments":{"session_id":session,
                     "scope":"clock","monitor_id":id},

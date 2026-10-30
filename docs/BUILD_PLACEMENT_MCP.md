@@ -42,10 +42,11 @@ endpoint, credential, protocol, protected region or checkpoint exception.
 | `DFMCP_BUILD_ALLOW_PLACE` | Absent disables new placement; exact `1` enables consideration under all other checks |
 | `DFMCP_BUILD_CHECKPOINT_POLICY` | Default `required`; explicit `disposable-fortress-no-checkpoint` enables the development exception |
 | `DFMCP_BUILD_PROTECTED` | Optional array of at most 32 cuboids; default `[]` |
-| `DFMCP_BUILD_MODE` | `control` (default), `recover`, `offline`, `completion-recover` or `completion-offline` |
+| `DFMCP_BUILD_MODE` | `control` (default), `recover`, `offline`, `completion-recover`, `completion-offline`, `clock-recover` or `clock-offline` |
 | `DFMCP_BUILD_CLOCK_CONFIG` | Optional closed JSON selecting a distinct run journal, independently pinned run/1.13 source, and initialization or exact recovery |
 | `DFMCP_BUILD_CLOCK_TOKEN` | Independent run/1.13 credential, 32..256 bytes, needed for clock native calls |
 | `DFMCP_BUILD_ALLOW_CLOCK` | Absent disables clock effects; exact `1` permits consideration under retained and current clock authority |
+| `DFMCP_BUILD_CLOCK_MONITOR_RECOVERY` | Closed `{monitor_id,head}` JSON, required only by independent clock recovery to pin the original monitor ancestry |
 
 Every other `DFMCP_` name is rejected, including an empty production admission
 marker and the separate standalone native-client profile switch. The DFHack
@@ -72,8 +73,11 @@ cargo run --locked -p dfmcp-mcp --bin dfmcp-build-placement-dev-server
 
 The parent directory must already exist with the required ownership and mode.
 Control may create a missing journal exclusively. An existing empty or damaged
-file is refused, never repaired. Recovery and offline modes require the existing
-original journal and never create one. The Python client's directory of
+file is refused, never repaired. Ordinary recovery and offline modes require the existing
+original journal and never create one. Independent `clock-recover` and
+`clock-offline` instead open only the original completion monitor and clock
+journal, with exact recovery references for both histories. The configured
+placement and parent paths remain identity labels; those files need not exist. The Python client's directory of
 `.placement` files is a different format; this server does not import it.
 
 ## Agent workflow
@@ -210,6 +214,17 @@ The local lease and private journal lock do not fence a different journal, serve
 plugin or UI controller. Replacing evidence to bypass an unresolved operation is
 not a valid recovery strategy. The source remains unadmitted development code
 until its separate native, live-game and production evidence requirements are met.
+
+## Recover a clock after loss of placement files
+
+Use the [independent construction-clock recovery guide](FURNITURE_CONSTRUCTION_CLOCK_RECOVERY.md)
+when an outstanding original run must be inspected, reconciled or safety-cancelled
+after the original placement journal or furniture parent is unavailable.
+`clock-offline` performs local inspection only; `clock-recover` can query the
+original run and, with independent retained/current clock authority, request its
+safety cancellation. Both modes require intact original monitor and clock
+histories at opening and keep future game ticks at zero. They cannot place
+furniture, sample construction or restore permission to start another run.
 
 ## Executable verification
 

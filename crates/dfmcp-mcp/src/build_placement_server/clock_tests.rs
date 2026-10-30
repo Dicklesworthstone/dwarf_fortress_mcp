@@ -429,6 +429,7 @@ struct ClockIo {
     samples: VecDeque<LinkedSample>,
     complete: bool,
     acquisitions: usize,
+    connections: usize,
     checkpoints: usize,
     deny_control: bool,
     lose_parent_after_sample: Option<PathBuf>,
@@ -485,6 +486,7 @@ impl clock::ClockIo for ClockIo {
             return Err(error(ErrorCode::CapabilityDenied, "clock opt-in withdrawn"));
         }
         assert_eq!(config.binding.manifest(), &self.manifest);
+        self.connections += 1;
         Ok(RunNative {
             manifest: self.manifest.clone(),
             game: self.game.clone(),
@@ -702,6 +704,7 @@ fn setup_clock_with_observations(count: usize, max_observations: u32) -> Result<
         samples: VecDeque::new(),
         complete: false,
         acquisitions: 0,
+        connections: 0,
         checkpoints: 0,
         deny_control: false,
         lose_parent_after_sample: None,
@@ -729,6 +732,9 @@ fn setup_clock_with_observations(count: usize, max_observations: u32) -> Result<
         directory,
     })
 }
+
+#[path = "clock_recovery_tests.rs"]
+mod recovery_tests;
 impl Harness {
     fn id(&self) -> Result<Digest32> {
         Ok(self

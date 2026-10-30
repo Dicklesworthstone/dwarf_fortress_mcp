@@ -27,6 +27,7 @@ use std::time::{Duration, Instant};
 mod allocation;
 mod batch;
 mod clock;
+mod clock_recovery;
 mod completion;
 mod policy;
 mod presentation;
@@ -55,12 +56,20 @@ enum Entry {
         state: completion::Recovery,
         config: Config,
     },
+    ClockRecovery {
+        state: clock_recovery::RecoveryState<
+            PrivateBuildFile,
+            dfmcp_adapter::bounded_run::private_file::PrivateRunFile,
+        >,
+        config: Config,
+    },
 }
 impl Entry {
     fn id(&self) -> SessionId {
         match self {
             Self::Placement { state, .. } => state.id,
             Self::Completion { state, .. } => state.id,
+            Self::ClockRecovery { state, .. } => state.id(),
         }
     }
 }
@@ -470,6 +479,30 @@ fn add_clock_grants(c: &mut OperationContext, config: &Config, enabled: bool) {
             });
         }
     }
+}
+fn clock_recovery_authority(
+    config: &Config,
+    enabled: bool,
+) -> (Vec<CapabilityGrant>, Vec<CapabilityGrant>) {
+    let mut canonical = grants(config.fortress.fortress_id(), BuildMode::Recover, false);
+    let control = config.clock_only && config.mode == BuildMode::Recover && enabled;
+    if control {
+        canonical.push(CapabilityGrant {
+            capability: Capability::ControlClock,
+            scope: CapabilityScope {
+                fortress_id: Some(config.fortress.fortress_id()),
+                ..CapabilityScope::default()
+            },
+            max_risk: RiskTier::Guarded,
+            expires_at_tick: None,
+            remaining_uses: None,
+        });
+    }
+    let native = runtime::clock_grants(control)
+        .into_iter()
+        .filter(|grant| grant.capability != Capability::Plan)
+        .collect();
+    (canonical, native)
 }
 fn context(
     id: SessionId,
@@ -1484,6 +1517,22 @@ async fn with_session(
                         state, config, &control, op, action, wall,
                     ));
                 }
+                Entry::ClockRecovery { state, config } => {
+                    let mut c = state.context(wall)?;
+                    let mut n = state.native_context(&c)?;
+                    if !runtime::clock_enabled().unwrap_or(false) {
+                        c.grants
+                            .retain(|grant| grant.capability == Capability::Query);
+                        n.grants
+                            .retain(|grant| grant.capability == Capability::Query);
+                    }
+                    let mut io = runtime::ClockIo {
+                        control: &control,
+                        config,
+                        opening_recovery: config.clock.as_ref().and_then(|value| value.recovery),
+                    };
+                    return Ok(state.run_action(c, n, op, action, control.started, &mut io));
+                }
                 Entry::Placement { state, config } => (state, config),
             };
             let placement_enabled = runtime::enabled().unwrap_or(false);
@@ -1578,9 +1627,194 @@ async fn with_session(
     }
 }
 
+/// Open only the retained construction monitor and run journal. Original
+/// placement/parent paths remain configuration labels; this branch never opens
+/// them, allocates furniture, acquires a lease or contacts a native source.
+fn open_clock_recovery(
+    config: &Config,
+    request: &runtime::RequestControl,
+    context: &OperationContext,
+    native_grants: Vec<CapabilityGrant>,
+    work: &mut Work,
+) -> Result<(
+    clock_recovery::RecoveryState<
+        PrivateBuildFile,
+        dfmcp_adapter::bounded_run::private_file::PrivateRunFile,
+    >,
+    String,
+)> {
+    use clock::ClockIo as _;
+    use dfmcp_adapter::construction_plan::store::{MAX_STORE_BYTES, open_private_monitor};
+    if !config.clock_only || config.completion_only || context.budget.max_game_ticks != 0 {
+        return Err(error(
+            ErrorCode::CapabilityDenied,
+            "clock recovery cannot acquire new work",
+        ));
+    }
+    let mode = match config.mode {
+        BuildMode::Offline => clock_recovery::Mode::Offline,
+        BuildMode::Recover => clock_recovery::Mode::Recovery,
+        BuildMode::Control => {
+            return Err(error(
+                ErrorCode::CapabilityDenied,
+                "clock recovery requires its restricted mode",
+            ));
+        }
+    };
+    let path = config.completion_path.as_ref().ok_or_else(exhausted)?;
+    let pin = config.clock_monitor_recovery.ok_or_else(exhausted)?;
+    let selected = config.clock.as_ref().ok_or_else(exhausted)?;
+    if selected.initialize || selected.recovery.is_none() {
+        return Err(error(
+            ErrorCode::CapabilityDenied,
+            "clock recovery requires existing acknowledged custody",
+        ));
+    }
+    let mut c = context.clone();
+    c.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
+    clock::native_context(&c, &native_grants)?;
+    runtime::boundary(request, config, false)?;
+    let metadata = std::fs::symlink_metadata(path).map_err(|_| {
+        error(
+            ErrorCode::CorruptLedger,
+            "original construction monitor is unavailable",
+        )
+    })?;
+    if !metadata.is_file() || metadata.len() == 0 || metadata.len() > MAX_STORE_BYTES as u64 {
+        return Err(error(
+            ErrorCode::CorruptLedger,
+            "original construction monitor has invalid custody bounds",
+        ));
+    }
+    let length = usize::try_from(metadata.len()).map_err(|_| exhausted())?;
+    let inspect_bytes = clock_recovery::inspect_reserve(length)?;
+    // Reserve every full-history check before either original file is opened.
+    let opening = work.take(
+        &c,
+        metadata
+            .len()
+            .checked_mul(8)
+            .and_then(|bytes| bytes.checked_add(2 * 1024 * 1024))
+            .ok_or_else(exhausted)?,
+    )?;
+    let acknowledged = work.take(&c, metadata.len().checked_add(8192).ok_or_else(exhausted)?)?;
+    let clock_open = work.take(&c, clock::OPEN_BYTES)?;
+    let constructor = work.take(&c, inspect_bytes)?;
+    let inspection = work.take(&c, inspect_bytes)?;
+    let publication = work.take(&c, inspect_bytes)?;
+    let narrow = |reserved: &OperationContext,
+                  current: &OperationContext,
+                  work: &Work|
+     -> Result<OperationContext> {
+        let mut out = reserved.clone();
+        out.anchor = current.anchor;
+        out.grants = current.grants.clone();
+        out.budget.max_game_ticks = 0;
+        out.budget.max_wall_millis = out
+            .budget
+            .max_wall_millis
+            .min(work.current(current)?.budget.max_wall_millis);
+        Ok(out)
+    };
+    let mut monitor =
+        open_private_monitor(path, &narrow(&opening, &c, work)?, BuildMode::Offline, None)?;
+    let definition = monitor.definition().clone();
+    config.matches(definition.origin().definition().binding())?;
+    selected.matches(&definition)?;
+    let floor = definition
+        .origin()
+        .receipts()
+        .iter()
+        .flat_map(|record| {
+            [
+                record.plan().before().tick(),
+                record.after().map_or(0, |after| after.tick()),
+            ]
+        })
+        .chain(monitor.progress().last_tick)
+        .max()
+        .unwrap_or(0);
+    c.anchor.tick = c.anchor.tick.max(GameTick(floor));
+    monitor.verify_recovery(&narrow(&acknowledged, &c, work)?, pin)?;
+    let operations = monitor
+        .first_source()
+        .ok_or_else(|| {
+            error(
+                ErrorCode::StaleAnchor,
+                "clock recovery requires the original accepted operations source",
+            )
+        })?
+        .operations
+        .clone();
+    let opening = narrow(&clock_open, &c, work)?;
+    let native = clock::native_context(&opening, &native_grants)?;
+    let mut io = runtime::ClockIo {
+        control: request,
+        config,
+        opening_recovery: selected.recovery,
+    };
+    let owner = io.open(selected, &definition, &operations, &opening, &native)?;
+    c.anchor.tick = c.anchor.tick.max(GameTick(owner.high_tick()));
+    let mut native_grants = native_grants;
+    if !owner.is_control() {
+        c.grants
+            .retain(|grant| grant.capability == Capability::Query);
+        native_grants.retain(|grant| grant.capability == Capability::Query);
+    }
+    let constructor = narrow(&constructor, &c, work)?;
+    let native = clock::native_context(&constructor, &native_grants)?;
+    let mut state =
+        clock_recovery::RecoveryState::new(monitor, owner, &constructor, &native, config, mode)?;
+    state.set_budget(context.budget);
+    c.anchor.tick = GameTick(state.high_tick());
+    let inspection = narrow(&inspection, &c, work)?;
+    let native = state.native_context(&inspection)?;
+    let mut result = state.inspect(&inspection, &native)?;
+    c.anchor.tick = GameTick(state.high_tick());
+    result["session_opened"] = json!(true);
+    result["session_id"] = json!(state.id().to_string());
+    result["mode"] = json!(mode.as_str());
+    result["capabilities"] = json!(
+        c.grants
+            .iter()
+            .map(|grant| grant.capability.as_str())
+            .collect::<Vec<_>>()
+    );
+    result["native_capabilities"] = json!(
+        native_grants
+            .iter()
+            .map(|grant| grant.capability.as_str())
+            .collect::<Vec<_>>()
+    );
+    let expected_monitor = state.monitor_reference()["recovery"].clone();
+    let expected_clock = state.clock_reference()["recovery"].clone();
+    let published_tick = state.high_tick();
+    let native = state.native_context(&c)?;
+    let output = state.reply("fortress.open_session", &c, &native, result);
+    if output.len() as u64 > OUTPUT_BYTES {
+        return Err(exhausted());
+    }
+    work.current(&c)?;
+    runtime::boundary(request, config, false)?;
+    let publication = narrow(&publication, &c, work)?;
+    let native = state.native_context(&publication)?;
+    state.inspect(&publication, &native)?;
+    if state.monitor_reference()["recovery"] != expected_monitor
+        || state.clock_reference()["recovery"] != expected_clock
+        || state.high_tick() != published_tick
+    {
+        return Err(error(
+            ErrorCode::StaleAnchor,
+            "original recovered histories changed before publication",
+        ));
+    }
+    work.current(&c)?;
+    Ok((state, output))
+}
+
 #[tool(
     name = "fortress.open_session",
-    description = "Open isolated furniture/1.19 custody. Use exactly one of selection JSON [kind,item_id,x,y,z], furniture_plan as complete dfmcp.furniture-plan/1 JSON, or furniture_request as dfmcp.furniture-request/1 JSON. A request allocates all slots from one fresh operations/1.4 capture and seals its constraints and chosen items into operator-configured batch custody; shortage creates no partial batch. Reopen retained custody without intent inputs or native bootstrap. Optional operator clock custody requires an existing completion monitor with an accepted sample; max_game_ticks defaults to zero and positive values require clock control. No client paths or policies. Opening never prepares, places or advances time."
+    description = "Open isolated furniture/1.19 custody. Use exactly one of selection JSON [kind,item_id,x,y,z], furniture_plan as complete dfmcp.furniture-plan/1 JSON, or furniture_request as dfmcp.furniture-request/1 JSON. A request allocates all slots from one fresh operations/1.4 capture and seals its constraints and chosen items into operator-configured batch custody; shortage creates no partial batch. Reopen retained custody without intent inputs or native bootstrap. Optional operator clock custody requires an existing completion monitor with an accepted sample; max_game_ticks defaults to zero and positive values require clock control. No client paths or policies. Operator clock-offline and clock-recover reopen only acknowledged monitor and clock histories without original placement files, native bootstrap or future game ticks. Opening never prepares, places or advances time."
 )]
 pub async fn fortress_open_session(
     selection: Option<String>,
@@ -1648,8 +1882,20 @@ pub async fn fortress_open_session(
             let seq = NEXT.try_update(Ordering::AcqRel,Ordering::Acquire,|v|(v<(1u64<<57)).then_some(v+1)).map_err(|_|exhausted())?;
             let id = SessionId::new((1u128<<127)|FAMILY|u128::from(seq));
             let mut c = context(id,RequestId::new(1),config.fortress.fortress_id(),0,budget,config.mode,runtime::enabled()?);
-            add_clock_grants(&mut c, &config, runtime::clock_enabled()?);
+            let recovery_native_grants = if config.clock_only {
+                let (canonical, native) = clock_recovery_authority(&config, runtime::clock_enabled()?);
+                c.grants = canonical;
+                native
+            } else {
+                add_clock_grants(&mut c, &config, runtime::clock_enabled()?);
+                Vec::new()
+            };
             let mut work = Work::new(&c,control.started)?;
+            if config.clock_only {
+                let (state, output) = open_clock_recovery(&config, &control, &c, recovery_native_grants, &mut work)?;
+                *locked = Some(Entry::ClockRecovery { state, config });
+                return Ok(output);
+            }
             let mut opening_clock_replay = if config.clock.is_some() {
                 // Reserve the final replay before bootstrap or any storage work.
                 Some(work.take(&c, clock::VIEW_BYTES)?)
@@ -1782,7 +2028,7 @@ pub async fn fortress_open_session(
                 let monitor = state.completion.as_ref().ok_or_else(|| error(ErrorCode::InvalidRequest,
                     "enable the construction clock only after an original completion monitor has its first accepted sample"))?;
                 let definition = monitor.store.definition().clone();
-                let operations = monitor.store.progress().source.as_ref()
+                let operations = monitor.store.first_source()
                     .ok_or_else(|| error(ErrorCode::InvalidRequest,
                         "construction clock requires one accepted original completion sample"))?.operations.clone();
                 c = state.disclosure_context(&c)?;
@@ -1936,7 +2182,7 @@ pub async fn fortress_commit(
 
 #[tool(
     name = "fortress.query",
-    description = "Inspect local evidence with closed JSON modes batch/records/get/selection/schema/completion/allocation/construction_clock. allocation has view request (default) or items and returns original sealed constraints or selected-item evidence without reallocation. completion_start creates a fixed-deadline monitor from every original Placed receipt in a completed batch under Query authority. completion inspects retained progress and original custody. construction_clock requires monitor_id and exact head; offset and limit page original run history. No native calls or renewed commit permission."
+    description = "Inspect local evidence with closed JSON modes batch/records/get/selection/schema/completion/allocation/construction_clock. allocation has view request (default) or items and returns original sealed constraints or selected-item evidence without reallocation. completion_start creates a fixed-deadline monitor from every original Placed receipt in a completed batch under Query authority. completion inspects retained progress and original custody. construction_clock requires monitor_id and exact head; offset and limit page original run history. Independent clock recovery permits historical batch/allocation/completion/clock/schema inspection only. No native calls or renewed commit permission."
 )]
 pub async fn fortress_query(session_id: String, query: String) -> String {
     with_session(
@@ -1992,7 +2238,7 @@ fn effect_action(
 }
 #[tool(
     name = "fortress.wait",
-    description = "Reconcile one original outcome and synchronize validated evidence. Default scope=effect uses the original furniture key/digest; scope=clock uses only monitor_id and queries its unresolved run at most once. Terminal history returns locally. No commit retry, new run, timer or construction-completion claim. Querying clears local commit permission."
+    description = "Reconcile one original outcome and synchronize validated evidence. Default scope=effect uses the original furniture key/digest; scope=clock uses only monitor_id and queries its unresolved run at most once. Terminal history returns locally. No commit retry, new run, timer or construction-completion claim. Querying clears local commit permission. Independent clock-recover supports the original clock wait under Query authority; clock-offline never contacts the game."
 )]
 pub async fn fortress_wait(
     session_id: String,
@@ -2055,6 +2301,21 @@ async fn close(raw: String, release: bool) -> String {
                     drop(locked.take());
                     return Ok(output);
                 }
+                Entry::ClockRecovery { state, config } => {
+                    let c = state.context(None)?;
+                    let n = state.native_context(&c)?;
+                    let output = state.close(c.clone(), n, release, control.started, |_| {
+                        if release { control.checkpoint() } else { runtime::boundary(&control, config, false) }
+                    });
+                    if output.len() as u64 > OUTPUT_BYTES { return Err(exhausted()); }
+                    let value: Value = serde_json::from_str(&output).map_err(|_| error(
+                        ErrorCode::InternalInvariantViolation, "invalid clock recovery close response"))?;
+                    Work::new(&c, control.started)?.current(&c)?;
+                    if value["result"]["ok"] == true && value["result"]["closed"] == true {
+                        drop(locked.take());
+                    }
+                    return Ok(output);
+                }
                 Entry::Placement { state, config } => (state, config),
             };
             let c = state.context(false, None)?;
@@ -2101,7 +2362,7 @@ async fn close(raw: String, release: bool) -> String {
 }
 #[tool(
     name = "fortress.cancel",
-    description = "scope=completion cancels only the local completion monitor, preserving placement effects and evidence. scope=batch stops new batch steps under Query. scope=effect retires an exact prepared native record; cannot undo construction. scope=clock with monitor_id retires the original preparation or requests its native safety pause under current clock authority, even after future-tick budgets expire. scope=session releases custody; release_for_recovery preserves unresolved identities."
+    description = "scope=completion cancels only the local completion monitor, preserving placement effects and evidence. scope=batch stops new batch steps under Query. scope=effect retires an exact prepared native record; cannot undo construction. scope=clock with monitor_id retires the original preparation or requests its native safety pause under current clock authority, even after future-tick budgets expire. scope=session releases custody; release_for_recovery preserves unresolved identities. Independent clock recovery permits clock cancellation only with separately retained current clock authority, and explicit session release remains possible after Query loss with evidence redacted."
 )]
 pub async fn fortress_cancel(
     session_id: String,
@@ -2174,7 +2435,7 @@ pub async fn fortress_restore(session_id: String) -> String {
 }
 #[tool(
     name = "fortress.doctor",
-    description = "Verify local furniture coordination custody and inventory. Does not inspect live fortress health, building completion, other controllers or production admission."
+    description = "Verify local furniture coordination custody and inventory. Independent clock recovery verifies only the retained monitor and clock histories. Does not inspect live fortress health, building completion, other controllers or production admission."
 )]
 pub async fn fortress_doctor(session_id: String) -> String {
     with_session(session_id, "fortress.doctor", None, Ok(Action::Inventory)).await
@@ -2187,7 +2448,7 @@ pub fn run_stdio() {
     let server=ServerBuilder::new("dfmcp-build-placement-dev",env!("CARGO_PKG_VERSION"))
         .tool(FortressOpenSession).tool(FortressObserve).tool(FortressQuery).tool(FortressPlan).tool(FortressCommit)
         .tool(FortressWait).tool(FortressCancel).tool(FortressCheckpoint).tool(FortressRestore).tool(FortressExplain).tool(FortressDoctor)
-        .instructions("Unadmitted furniture/1.19 development control. With operator batch custody, use open_session furniture_request (dfmcp.furniture-request/1 JSON) to allocate all requested slots from one fresh operations/1.4 capture, or import an exact furniture_plan (dfmcp.furniture-plan/1 JSON). A shortage creates no session or partial batch. Inspect query mode batch and observe selection next. Query mode allocation with view request or items inspects the immutable original constraints and selection. Review and commit exactly one returned original key at a time; only retained terminal Placed prefixes unlock more steps. Reopening a batch omits all intent inputs, performs no reallocation, and restores no permit. scope=batch cancellation permanently stops advancement while preserving original-key recovery. Single-selection control remains available without batch configuration. Default policy requires an unavailable game checkpoint; only explicit operator disposable-fortress policy permits placement. Query the original key after uncertainty; never retry commit. Placed proves historical stage-zero registration. Once every original step is Placed, completion_start fixes a whole-plan goal, observe selection completion acquires one sample, and query completion or local cancel inspects or stops the monitor. Optional operator construction-clock custody requires one accepted original completion sample before activation. Reopen with an explicit max_game_ticks allowance, plan with clock JSON, separately review commit(scope=clock,monitor_id,review_seal), then wait(scope=clock,monitor_id) for one reconciliation. Unsettled clock history blocks completion samples; readiness never counts as positive construction progress. cancel(scope=clock,monitor_id) requests original safety cancellation; query construction_clock requires its exact head. Preserve clock recovery across restart. No canonical world anchor, shared process identity, global controller fence, arbitrary command, verified checkpoint or restore.").build();
+        .instructions("Unadmitted furniture/1.19 development control. With operator batch custody, use open_session furniture_request (dfmcp.furniture-request/1 JSON) to allocate all requested slots from one fresh operations/1.4 capture, or import an exact furniture_plan (dfmcp.furniture-plan/1 JSON). A shortage creates no session or partial batch. Inspect query mode batch and observe selection next. Query mode allocation with view request or items inspects the immutable original constraints and selection. Review and commit exactly one returned original key at a time; only retained terminal Placed prefixes unlock more steps. Reopening a batch omits all intent inputs, performs no reallocation, and restores no permit. scope=batch cancellation permanently stops advancement while preserving original-key recovery. Single-selection control remains available without batch configuration. Default policy requires an unavailable game checkpoint; only explicit operator disposable-fortress policy permits placement. Query the original key after uncertainty; never retry commit. Placed proves historical stage-zero registration. Once every original step is Placed, completion_start fixes a whole-plan goal, observe selection completion acquires one sample, and query completion or local cancel inspects or stops the monitor. Optional operator construction-clock custody requires one accepted original completion sample before activation. If original placement or parent files are unavailable, operator clock-offline or clock-recover opens only the exact acknowledged monitor and run histories. These modes permit historical inspection, original clock reconciliation and separately authorized safety cancellation, with zero future game ticks and no new review or construction samples. Retain completion.recovery and construction_clock.recovery for both independent histories. Reopen with an explicit max_game_ticks allowance, plan with clock JSON, separately review commit(scope=clock,monitor_id,review_seal), then wait(scope=clock,monitor_id) for one reconciliation. Unsettled clock history blocks completion samples; readiness never counts as positive construction progress. cancel(scope=clock,monitor_id) requests original safety cancellation; query construction_clock requires its exact head. Preserve clock recovery across restart. No canonical world anchor, shared process identity, global controller fence, arbitrary command, verified checkpoint or restore.").build();
     crate::run_modern_stdio(server);
 }
 #[cfg(test)]
