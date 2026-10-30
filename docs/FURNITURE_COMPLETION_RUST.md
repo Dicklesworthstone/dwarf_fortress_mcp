@@ -66,6 +66,18 @@ allowance. It never restores permission to publish a previously interrupted read
 The original source is checked before read intent and around sample publication,
 including after synchronization. A failed or ambiguous append fences advancement.
 
+An unfinished stability streak is withdrawn when its owner is reopened or when
+`withdraw_unpublished()` reports an enclosing runtime/publication failure or a
+contradictory clock-readiness capture. Withdrawal performs no I/O, retains the
+last accepted source, clock floor, observation count and full original goal, and
+consumes any outstanding publication permit. The next sample durably records an
+interrupted-read transition before source contact. This uses the existing pair
+of read-intent frames, so existing journal bytes and replay remain unchanged;
+a crash between the frames leaves an unfinished read. Terminal historical
+achievement is preserved, while elapsed downtime never counts as observed
+stability. The host separately verifies that original custody and clock history
+permit a fresh goal sample.
+
 Cancellation needs current Query authority and intact monitor custody; it does
 not require the original placement files. This keeps local monitoring stoppable
 when those files disappear. The caller must separately report that original

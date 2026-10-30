@@ -180,12 +180,12 @@ fn identity(name: &str, inode: u64) -> PrivateFileIdentity {
         directory_owner: 1000,
     }
 }
-struct Fixture {
-    definition: MonitorDefinition,
-    context: OperationContext,
-    inventory: BuildInventory,
+pub(crate) struct Fixture {
+    pub(crate) definition: MonitorDefinition,
+    pub(crate) context: OperationContext,
+    pub(crate) inventory: BuildInventory,
 }
-fn fixture() -> Result<Fixture> {
+pub(crate) fn fixture() -> Result<Fixture> {
     let originals = fixtures::goal(2);
     let software = fixtures::sample(&originals, fixtures::TICK).before;
     let first = originals.records().first().ok_or_else(corrupt)?;
@@ -729,5 +729,162 @@ fn replayed_samples_share_the_same_semantic_work_allowance() -> Result<()> {
     let interrupted = candidate.begin_read()?;
     assert!(transition(&fixture.definition, &interrupted, 3, &payload, &mut work).is_err());
     assert!(work.semantic_work > crate::construction_plan::MAX_WORK);
+    Ok(())
+}
+
+#[test]
+fn withdrawn_progress_restarts_durably_without_rewriting_original_history() -> Result<()> {
+    let fixture = fixture()?;
+    let disk = Memory::default();
+    let mut store = open(&fixture, disk.clone())?;
+    sample(&mut store, &fixture, fixtures::TICK)?;
+    let raw = disk.disk.borrow().bytes.clone();
+    let original = store.definition().canonical_bytes().to_vec();
+    let head = store.head();
+    let count = store.progress().observations;
+    store.withdraw_unpublished();
+    store.withdraw_unpublished();
+    assert_eq!(disk.disk.borrow().bytes, raw);
+    assert_eq!(store.head(), head);
+    assert_eq!(store.progress().phase, "active");
+    assert_eq!(store.progress().streak, 0);
+    assert_eq!(store.progress().observations, count);
+    assert_eq!(store.progress().last_tick, Some(fixtures::TICK));
+    let reserve = store.operation_reserve(false);
+    let mut bounded_context = fixture.context.clone();
+    bounded_context.budget.max_bytes = reserve;
+    store.begin_read(&bounded_context, &mut admit, &mut guard)?;
+    assert!(store.read_owned());
+    assert_eq!(store.progress().interruptions, 1);
+    assert_eq!(store.progress().streak, 0);
+    assert!(disk.disk.borrow().bytes.starts_with(&raw));
+    assert_eq!(store.frames(), 5);
+    let sample = fixtures::sample(store.definition().goal(), fixtures::TICK + 10);
+    store.publish_sample(&fixture.context, &sample, &mut admit, &mut guard)?;
+    assert_eq!(store.progress().phase, "candidate");
+    assert_eq!(store.progress().streak, 1);
+    assert_eq!(store.definition().canonical_bytes(), original);
+    Ok(())
+}
+
+#[test]
+fn withdrawn_active_read_cannot_publish_and_recovery_cannot_resume_old_streak() -> Result<()> {
+    let fixture = fixture()?;
+    let disk = Memory::default();
+    let mut store = open(&fixture, disk.clone())?;
+    sample(&mut store, &fixture, fixtures::TICK)?;
+    store.begin_read(&fixture.context, &mut admit, &mut guard)?;
+    store.withdraw_unpublished();
+    assert!(!store.read_owned());
+    assert_eq!(store.progress().streak, 0);
+    let sample = fixtures::sample(store.definition().goal(), fixtures::TICK + 10);
+    assert!(
+        store
+            .publish_sample(&fixture.context, &sample, &mut admit, &mut guard)
+            .is_err()
+    );
+    drop(store);
+    let mut reopened = MonitorStore::open(disk, &fixture.context, BuildMode::Recover, None, false)?;
+    assert_eq!(reopened.progress().streak, 0);
+    assert!(reopened.progress().reading);
+    reopened.begin_read(&fixture.context, &mut admit, &mut guard)?;
+    assert_eq!(reopened.progress().interruptions, 1);
+    reopened.publish_sample(&fixture.context, &sample, &mut admit, &mut guard)?;
+    assert_eq!(reopened.progress().phase, "candidate");
+    assert_eq!(reopened.progress().streak, 1);
+    Ok(())
+}
+
+#[test]
+fn complete_unfinished_history_reopens_with_reset_before_source_contact() -> Result<()> {
+    let fixture = fixture()?;
+    let disk = Memory::default();
+    let mut store = open(&fixture, disk.clone())?;
+    sample(&mut store, &fixture, fixtures::TICK)?;
+    let raw = disk.disk.borrow().bytes.clone();
+    drop(store);
+    let mut reopened = MonitorStore::open(
+        disk.clone(),
+        &fixture.context,
+        BuildMode::Recover,
+        None,
+        false,
+    )?;
+    assert_eq!(disk.disk.borrow().bytes, raw);
+    assert_eq!(reopened.progress().streak, 0);
+    assert_eq!(reopened.progress().observations, 1);
+    reopened.begin_read(&fixture.context, &mut admit, &mut guard)?;
+    assert_eq!(reopened.progress().interruptions, 1);
+    let durable_reset = disk.disk.borrow().bytes.clone();
+    let recovered = MonitorStore::open(
+        Memory::from_bytes(durable_reset),
+        &fixture.context,
+        BuildMode::Offline,
+        None,
+        false,
+    )?;
+    assert_eq!(recovered.progress().streak, 0);
+    assert_eq!(recovered.progress().interruptions, 1);
+    assert!(recovered.progress().reading);
+    let sample = fixtures::sample(reopened.definition().goal(), fixtures::TICK + 10);
+    reopened.publish_sample(&fixture.context, &sample, &mut admit, &mut guard)?;
+    assert_eq!(reopened.progress().streak, 1);
+    assert_eq!(reopened.progress().phase, "candidate");
+    Ok(())
+}
+
+#[test]
+fn reset_failure_never_restores_stability_or_dispatches_a_sample() -> Result<()> {
+    let fixture = fixture()?;
+    let disk = Memory::default();
+    let mut store = open(&fixture, disk.clone())?;
+    sample(&mut store, &fixture, fixtures::TICK)?;
+    store.withdraw_unpublished();
+    let raw = disk.disk.borrow().bytes.clone();
+    let mut denied = fixture.context.clone();
+    denied.grants.clear();
+    assert!(store.begin_read(&denied, &mut admit, &mut guard).is_err());
+    assert_eq!(disk.disk.borrow().bytes, raw);
+    assert_eq!(store.progress().streak, 0);
+    disk.disk.borrow_mut().fail_sync = true;
+    assert!(
+        store
+            .begin_read(&fixture.context, &mut admit, &mut guard)
+            .is_err()
+    );
+    assert!(store.is_fenced());
+    assert!(!store.read_owned());
+    assert_eq!(store.progress().streak, 0);
+    disk.disk.borrow_mut().fail_sync = false;
+    let reopened = MonitorStore::open(disk, &fixture.context, BuildMode::Recover, None, false)?;
+    assert_eq!(reopened.progress().streak, 0);
+    assert!(reopened.progress().reading);
+    Ok(())
+}
+
+#[test]
+fn withdrawal_and_reopen_preserve_historical_terminal_achievement() -> Result<()> {
+    let fixture = fixture()?;
+    let disk = Memory::default();
+    let mut store = open(&fixture, disk.clone())?;
+    sample(&mut store, &fixture, fixtures::TICK)?;
+    sample(&mut store, &fixture, fixtures::TICK + 10)?;
+    let terminal = store.progress().clone();
+    let raw = disk.disk.borrow().bytes.clone();
+    store.withdraw_unpublished();
+    assert_eq!(store.progress(), &terminal);
+    assert_eq!(disk.disk.borrow().bytes, raw);
+    drop(store);
+    let mut recovered = MonitorStore::open(
+        disk.clone(),
+        &fixture.context,
+        BuildMode::Recover,
+        None,
+        false,
+    )?;
+    recovered.withdraw_unpublished();
+    assert_eq!(recovered.progress(), &terminal);
+    recovered.cancel(&fixture.context, &mut admit)?;
+    assert_eq!(disk.disk.borrow().bytes, raw);
     Ok(())
 }

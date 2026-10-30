@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-10-30 — Reviewed finite clock control for complete furnishing batches
+
+- Retain the whole original furniture goal, complete Placed receipt set and
+  independently accepted operations source under an original run/1.13 journal.
+- Recheck complete current construction readiness after durable preparation and
+  dispatch boundaries, with separate review and one finite unpause attempt.
+- Preserve exact ancestral recovery, paired retained/current authority, consumed
+  tick floors and safety cancellation after future budgets or goal time expire.
+- Block fresh completion behind unresolved runs and withdraw unfinished stability
+  after contradictory readiness, interrupted publication or reopening; retain
+  terminal history and the unchanged fixed observation policy.
+- Pass all 93 focused actual-source adapter tests, including 22 new clock and
+  five new continuity groups; all 273 adapter Rust inputs remain unchanged.
+  Full FastMCP/native/live qualification and production admission remain unverified.
+
 ## 2026-10-30 — Recover blueprint clock runs without original mining custody
 
 - Add `clock-offline` and `clock-recovery` through the existing eleven tools,

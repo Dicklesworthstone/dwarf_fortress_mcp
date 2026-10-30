@@ -5,6 +5,7 @@
 //! canonical world anchor, effect discharge, or proof of current usability.
 //! Beads: df-dfhack-bridge-plane-c-pic.4/.5, df-action-coordinator-exec-ero.4.
 
+pub mod clock;
 pub mod origin;
 pub mod rpc;
 pub mod store;

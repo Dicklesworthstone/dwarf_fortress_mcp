@@ -44,6 +44,41 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Complete furnishing-batch finite clock core (2026-10-30)
+
+`construction_plan::clock` binds an independently pinned run/1.13 journal to the
+complete immutable original furniture monitor, every original Placed receipt,
+original batch/placement custody and the operations source established by a real
+accepted completion sample. A fresh complete receipt bracket after durable Intent
+and DispatchStarted must agree with the paused clock; every target must remain
+eligible. Readiness contributes no positive goal sample. Runs have separate live
+review seals, one native unpause attempt, fixed deadline/cadence and tick/wall/work
+bounds, and at most `min(64, max_observations)` retained original intents.
+
+Exact acknowledged ancestral recovery rejects rollback and unrelated histories.
+Retained and current named-fortress/native grants are checked independently;
+consumed ticks survive later rejection. Safety cancellation remains possible
+under paired Query/ControlClock after Plan/Observe or future budgets expire.
+Pending or unresolved clock work blocks fresh completion. Pure monitor withdrawal
+clears unfinished stability after contradictory readiness, reopening or failed
+publication without renewing the goal; the next read durably records interruption
+using existing journal frames. Terminal historical achievement remains retained.
+
+All 93 focused actual-source adapter tests pass: 71 construction-plan tests
+(22 new clock groups, five new continuity groups and 44 existing tests) plus 22
+bounded-run regressions. Loopback TCP fixtures ran with explicit local-network
+permission. All 273 adapter Rust source hashes remained unchanged during the
+final runs. The pinned nightly toolchain reports one unrelated existing test
+import warning; new source is warning-free. These minimal-dependency component
+runs do not establish a complete workspace build.
+The implementation changes no native protocol, dependency, production runner or
+compatibility entry. Full FastMCP/runtime, native/live and release qualification
+remain unverified. Independent source generations do not prove a common process,
+clock fortress identity, global exclusion or construction causality. See
+[the core contract](docs/FURNITURE_CONSTRUCTION_CLOCK.md). The broader live
+mutation-dispatch bead remains in progress; generic mixed-action execution and
+verified game checkpoint/restore remain incomplete.
+
 ### Independent whole-blueprint clock recovery (2026-10-30)
 
 The existing mining MCP server now opens `clock-offline` and `clock-recovery`

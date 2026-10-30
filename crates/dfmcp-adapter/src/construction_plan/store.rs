@@ -307,6 +307,22 @@ fn replay(bytes: &[u8], work: &mut Work) -> Result<Replay> {
     state.ok_or_else(corrupt)
 }
 
+/// Local display only. The original source, clock floor, observation allowance
+/// and exact last assessments stay retained; none can become a new positive
+/// sample merely because the enclosing caller lost continuity.
+fn withdrawn(progress: &Progress) -> Progress {
+    let mut visible = progress.clone();
+    if !visible.terminal() {
+        visible.phase = "active";
+        visible.reason = "continuity_withdrawn";
+        visible.reason_building = None;
+        visible.streak = 0;
+        visible.first_tick = None;
+        visible.counted_tick = None;
+    }
+    visible
+}
+
 /// The storage is owned for the complete session. Current source custody is
 /// checked through a caller-supplied guard using the same shrinking deadline;
 /// the caller reserves its source-file I/O separately from this journal's I/O.
@@ -314,6 +330,8 @@ pub struct MonitorStore<S> {
     storage: S,
     definition: MonitorDefinition,
     progress: Progress,
+    visible: Progress,
+    resume_reset: bool,
     raw: Vec<u8>,
     frames: u32,
     head: Digest32,
@@ -381,10 +399,18 @@ impl<S: EffectJournalStorage> MonitorStore<S> {
         )?;
         // Detect changed old bytes between replay and owner publication.
         require(read(&mut storage, &mut work)? == raw)?;
+        let resume_reset = !create && !decoded.progress.terminal();
+        let visible = if resume_reset {
+            withdrawn(&decoded.progress)
+        } else {
+            decoded.progress.clone()
+        };
         Ok(Self {
             storage,
             definition: decoded.definition,
             progress: decoded.progress,
+            visible,
+            resume_reset,
             raw,
             frames: decoded.frames,
             head: decoded.head,
@@ -398,7 +424,7 @@ impl<S: EffectJournalStorage> MonitorStore<S> {
         &self.definition
     }
     pub fn progress(&self) -> &Progress {
-        &self.progress
+        &self.visible
     }
     pub fn byte_len(&self) -> usize {
         self.raw.len()
@@ -419,11 +445,26 @@ impl<S: EffectJournalStorage> MonitorStore<S> {
     /// Its already synchronized read intent remains unknown for the next read.
     pub fn abandon_read(&mut self) {
         self.read_owned = false;
+        if self.progress.reading {
+            self.withdraw_unpublished();
+        }
+    }
+    /// Withdraw an unfinished streak after enclosing runtime/publication failure
+    /// or contradictory readiness evidence. No authority, I/O or history rewrite
+    /// occurs here. Existing terminal historical evidence remains immutable.
+    /// The next read durably records an interruption before source contact and
+    /// cannot reuse this owner's previous publication permission.
+    pub fn withdraw_unpublished(&mut self) {
+        self.read_owned = false;
+        if !self.progress.terminal() {
+            self.visible = withdrawn(&self.progress);
+            self.resume_reset = true;
+        }
     }
     /// Conservative reservation for monitor I/O and semantic validation. Source
     /// guards and response bytes belong to the caller's separate reservations.
     pub fn operation_reserve(&self, sample: bool) -> u64 {
-        (3 * self.raw.len() + if sample { 7 * MAX_SAMPLE } else { 0 } + 16_384) as u64
+        (5 * self.raw.len() + if sample { 7 * MAX_SAMPLE } else { 0 } + 16_384) as u64
     }
     fn access(&self, context: &OperationContext) -> Result<OperationContext> {
         if context.session_id != self.owner {
@@ -528,6 +569,11 @@ impl<S: EffectJournalStorage> MonitorStore<S> {
         self.head = tail(&frame)?;
         self.raw = bytes;
         self.frames += 1;
+        self.visible = if self.resume_reset && !proposed.terminal() {
+            withdrawn(&proposed)
+        } else {
+            proposed.clone()
+        };
         self.progress = proposed;
         self.fenced = false;
         Ok(())
@@ -559,14 +605,33 @@ impl<S: EffectJournalStorage> MonitorStore<S> {
                 "construction read is already owned; finish or abandon that acquisition",
             ));
         }
-        if self.raw.len().saturating_add(MAX_SAMPLE + 3 * OVERHEAD) > MAX_STORE_BYTES
-            || self.frames.saturating_add(3) > MAX_STORE_FRAMES
+        let reset_start = self.resume_reset && !self.progress.reading;
+        let reserve_frames = if reset_start { 4 } else { 3 };
+        if self
+            .raw
+            .len()
+            .saturating_add(MAX_SAMPLE + reserve_frames * OVERHEAD)
+            > MAX_STORE_BYTES
+            || self.frames.saturating_add(reserve_frames as u32) > MAX_STORE_FRAMES
         {
             return Err(bounded());
+        }
+        // Preserve the existing journal format: a second read intent is the
+        // canonical interrupted-read transition. On restart or local withdrawal,
+        // first persist an unowned intent if the prior history was not reading.
+        // A crash between these two frames leaves an interrupted read, never a
+        // reusable stability streak or permission to publish the old sample.
+        if reset_start {
+            let started = self.progress.begin_read()?;
+            let reset = started.begin_read()?;
+            admit(&self.definition, &reset)?;
+            self.append(2, &[], started, &mut work, guard)?;
         }
         let proposed = self.progress.begin_read()?;
         admit(&self.definition, &proposed)?;
         self.append(2, &[], proposed, &mut work, guard)?;
+        self.resume_reset = false;
+        self.visible = self.progress.clone();
         self.read_owned = true;
         Ok(())
     }
@@ -648,4 +713,4 @@ pub fn open_private_monitor(
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
