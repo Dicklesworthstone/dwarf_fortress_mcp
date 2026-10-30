@@ -158,7 +158,9 @@ fn count_schema_is_discoverable_and_refused_registration_leaves_no_checkpoint() 
     let _serial = crate::test_serial();
     let files = Files::new()?;
     let s = register(&files, 3, &[], false)?;
-    let schema = decode(&fortress_query(s.handle(), Some("schema".into()), None))?;
+    let schema = crate::live_spatial_citizens_server::schema_paging::test_decode_schema(
+        &fortress_query(s.handle(), Some("schema".into()), None),
+    )?;
     require_success(&schema)?;
     let conditions = schema["query_schema"]["$defs"]["watch_condition"]["oneOf"]
         .as_array()

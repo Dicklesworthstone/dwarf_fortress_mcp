@@ -84,9 +84,32 @@ fn workforce_orientation_requires_current_observe_and_does_not_cache_an_old_repo
     assert_eq!(observed["ok"], true, "{observed}");
     assert_eq!(
         observed["world"]["workforce"]["source_anchor"],
-        observed["anchor"]
+        observed["agent_turn"]["anchor"]
     );
-    assert_ne!(observed["anchor"], opened["anchor"]);
+    assert_eq!(
+        observed["agent_turn"]["anchor"]["fortress_id"],
+        observed["fortress_id"]
+    );
+    assert_eq!(
+        observed["agent_turn"]["anchor"]["epoch"],
+        observed["cursor"]["epoch"]
+    );
+    assert_eq!(
+        observed["agent_turn"]["anchor"]["sequence"],
+        observed["cursor"]["sequence"]
+    );
+    assert_eq!(
+        observed["agent_turn"]["anchor"]["game_tick"],
+        observed["game_tick"]
+    );
+    assert_eq!(
+        observed["agent_turn"]["anchor"]["state_hash"],
+        observed["state_hash"]
+    );
+    assert_ne!(
+        observed["agent_turn"]["anchor"],
+        opened["agent_turn"]["anchor"]
+    );
     assert_eq!(
         observed["agent_turn"]["briefing"]["workforce"],
         observed["world"]["workforce"]

@@ -98,6 +98,55 @@ pub(super) fn page(
     )
 }
 
+/// Test client for the real handler: retain existing schema assertions while
+/// exercising every emitted continuation and checking the exact reassembly.
+#[cfg(test)]
+pub(crate) fn test_decode_schema(raw: &str) -> Result<Value> {
+    let mut first: Value = serde_json::from_str(raw).map_err(|_| invalid())?;
+    if first["schema_discovery"] != "utf8-json-fragments/1" {
+        return Ok(first);
+    }
+    let session = first["session_id"].as_str().ok_or_else(invalid)?.to_owned();
+    let expected = first["schema_sha256"]
+        .as_str()
+        .ok_or_else(invalid)?
+        .to_owned();
+    let length = first["schema_bytes"].as_u64().ok_or_else(invalid)? as usize;
+    let anchor = first["agent_turn"]["anchor"].clone();
+    let mut part = first.clone();
+    let mut bytes = String::new();
+    loop {
+        if part["ok"] != true
+            || part["agent_turn"]["anchor"] != anchor
+            || part["schema_sha256"] != expected
+            || part["schema_bytes"] != length
+            || part["offset"].as_u64() != Some(bytes.len() as u64)
+        {
+            return Err(invalid());
+        }
+        bytes.push_str(part["chunk"].as_str().ok_or_else(invalid)?);
+        if bytes.len() > length || bytes.len() > MAX_SCHEMA_BYTES {
+            return Err(invalid());
+        }
+        let Some(next) = part["continuation"].as_str() else {
+            break;
+        };
+        if part["truncated"] != true {
+            return Err(invalid());
+        }
+        let raw = super::fortress_query(Some(session.clone()), Some(next.to_owned()), None);
+        part = serde_json::from_str(&raw).map_err(|_| invalid())?;
+    }
+    if part["truncated"] != false
+        || bytes.len() != length
+        || Digest32::of_bytes(bytes.as_bytes()).to_string() != expected
+    {
+        return Err(invalid());
+    }
+    first["query_schema"] = serde_json::from_str(&bytes).map_err(|_| invalid())?;
+    Ok(first)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

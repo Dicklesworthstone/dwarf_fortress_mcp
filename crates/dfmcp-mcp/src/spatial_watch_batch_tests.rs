@@ -382,7 +382,9 @@ fn schema_discovers_batches_but_archive_and_historical_queries_refuse_them() -> 
     let _serial = crate::test_serial();
     let files = Files::new()?;
     let s = register(&files, 3, &[], false)?;
-    let schema = decode(&fortress_query(s.handle(), Some("schema".into()), None))?;
+    let schema = crate::live_spatial_citizens_server::schema_paging::test_decode_schema(
+        &fortress_query(s.handle(), Some("schema".into()), None),
+    )?;
     require_success(&schema)?;
     let variants = schema["query_schema"]["$defs"]["query"]["oneOf"]
         .as_array()

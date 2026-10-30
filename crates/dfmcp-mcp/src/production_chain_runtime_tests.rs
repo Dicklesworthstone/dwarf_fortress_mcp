@@ -113,7 +113,9 @@ fn live_chain_query_exposes_dependencies_and_deficits_without_game_reads_or_writ
     assert_eq!(out["summary"]["modeled_steps"], 2);
     assert_eq!(out["summary"]["shortage_resources"], 1);
     assert_eq!(out["agent_turn"]["briefing"]["bridge_protocol"], "1.8");
-    let schema = decode(&fortress_query(s.handle(), Some("schema".into()), None))?;
+    let schema = crate::live_spatial_citizens_server::schema_paging::test_decode_schema(
+        &fortress_query(s.handle(), Some("schema".into()), None),
+    )?;
     assert_eq!(schema["ok"], true, "{schema}");
     assert!(
         schema["query_schema"]["$defs"]["query"]["oneOf"]

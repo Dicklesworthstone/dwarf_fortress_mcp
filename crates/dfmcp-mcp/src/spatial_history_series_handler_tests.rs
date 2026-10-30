@@ -389,11 +389,12 @@ fn offline_series_matches_live_history_and_rejects_old_session_continuations() -
     assert_eq!(result["archive_only"], true);
     assert_eq!(result["bridge_connection_present"], false);
     assert_eq!(ask(&s, paged)?["error"]["code"], "stale_anchor");
-    let schema = ok(decode(&fortress_query(
-        s.handle(),
-        Some("schema".into()),
-        None,
-    ))?);
+    let schema =
+        ok(
+            crate::live_spatial_citizens_server::schema_paging::test_decode_schema(
+                &fortress_query(s.handle(), Some("schema".into()), None),
+            )?,
+        );
     let series = schema["query_schema"]["$defs"]["query"]["oneOf"]
         .as_array()
         .and_then(|v| {
@@ -499,11 +500,12 @@ fn schema_and_runtime_keep_series_out_of_recursive_historical_measurements() -> 
     let files = Files::new()?;
     let s = register(&files, &[])?;
     let query = timeline(&s)?;
-    let schema = ok(decode(&fortress_query(
-        s.handle(),
-        Some("schema".into()),
-        None,
-    ))?);
+    let schema =
+        ok(
+            crate::live_spatial_citizens_server::schema_paging::test_decode_schema(
+                &fortress_query(s.handle(), Some("schema".into()), None),
+            )?,
+        );
     assert!(
         schema["query_schema"]["$defs"]["query"]["oneOf"]
             .as_array()

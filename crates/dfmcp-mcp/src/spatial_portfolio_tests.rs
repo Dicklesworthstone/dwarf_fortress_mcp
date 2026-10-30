@@ -394,11 +394,12 @@ fn offline_reopening_can_plan_but_cannot_claim_current_readiness() -> Result<()>
     assert_eq!(result["bridge_connection_present"], false);
     assert_eq!(result["current_freshness_proven"], false);
     assert_eq!(result["native_captures"], 0);
-    let schema = ok(decode(&fortress_query(
-        s.handle(),
-        Some("schema".into()),
-        None,
-    ))?);
+    let schema =
+        ok(
+            crate::live_spatial_citizens_server::schema_paging::test_decode_schema(
+                &fortress_query(s.handle(), Some("schema".into()), None),
+            )?,
+        );
     assert!(
         schema["query_schema"]["$defs"]["query"]["oneOf"]
             .as_array()

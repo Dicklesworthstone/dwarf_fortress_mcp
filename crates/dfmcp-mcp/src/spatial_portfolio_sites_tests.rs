@@ -255,11 +255,12 @@ fn offline_site_planning_and_schema_discovery_require_no_bridge() -> Result<()> 
     assert_eq!(result["historical"], true);
     assert_eq!(result["bridge_connection_present"], false);
     assert_eq!(result["native_captures"], 0);
-    let schema = ok(decode(&fortress_query(
-        s.handle(),
-        Some("schema".into()),
-        None,
-    ))?);
+    let schema =
+        ok(
+            crate::live_spatial_citizens_server::schema_paging::test_decode_schema(
+                &fortress_query(s.handle(), Some("schema".into()), None),
+            )?,
+        );
     let portfolio = schema["query_schema"]["$defs"]["query"]["oneOf"]
         .as_array()
         .expect("variants")

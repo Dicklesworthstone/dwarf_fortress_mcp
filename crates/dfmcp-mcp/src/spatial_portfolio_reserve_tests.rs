@@ -219,11 +219,12 @@ fn schema_and_no_reserve_defaults_preserve_existing_query_identity() -> Result<(
         );
         assert_eq!(out["rows"], original["rows"]);
     }
-    let schema = ok(decode(&fortress_query(
-        s.handle(),
-        Some("schema".into()),
-        None,
-    ))?);
+    let schema =
+        ok(
+            crate::live_spatial_citizens_server::schema_paging::test_decode_schema(
+                &fortress_query(s.handle(), Some("schema".into()), None),
+            )?,
+        );
     let variant = schema["query_schema"]["$defs"]["query"]["oneOf"]
         .as_array()
         .expect("variants")

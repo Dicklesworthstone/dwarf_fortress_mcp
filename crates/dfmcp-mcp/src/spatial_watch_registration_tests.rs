@@ -178,7 +178,9 @@ fn live_schema_reuses_watch_definitions_and_archive_reads_cannot_register() -> R
     let _serial = crate::test_serial();
     let files = Files::new()?;
     let s = register(&files, 3, &[], false)?;
-    let result = decode(&fortress_query(s.handle(), Some("schema".into()), None))?;
+    let result = crate::live_spatial_citizens_server::schema_paging::test_decode_schema(
+        &fortress_query(s.handle(), Some("schema".into()), None),
+    )?;
     require_success(&result)?;
     let schema = &result["query_schema"];
     let variants = schema["$defs"]["query"]["oneOf"]

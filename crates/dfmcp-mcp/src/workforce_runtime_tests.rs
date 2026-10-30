@@ -223,7 +223,9 @@ fn planned(workers: u32) -> Value {
 fn registered_queries_discover_skills_plan_without_conflicts_and_drill_into_routes() -> Result<()> {
     let _serial = crate::test_serial();
     let s = register(2, 65_536)?;
-    let schema = decode(&fortress_query(s.handle(), Some("schema".into()), None))?;
+    let schema = crate::live_spatial_citizens_server::schema_paging::test_decode_schema(
+        &fortress_query(s.handle(), Some("schema".into()), None),
+    )?;
     assert_eq!(schema["ok"], true, "{schema}");
     let variants = schema["query_schema"]["$defs"]["query"]["oneOf"]
         .as_array()

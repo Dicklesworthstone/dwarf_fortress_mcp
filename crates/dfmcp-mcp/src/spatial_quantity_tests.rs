@@ -242,11 +242,12 @@ fn quantity_schema_is_composed_once_and_rejected_results_leave_monitoring_intact
     let _serial = crate::test_serial();
     let files = Files::new()?;
     let s = register(&files, 1, vec![])?;
-    let schema = ok(decode(&fortress_query(
-        s.handle(),
-        Some("schema".into()),
-        None,
-    ))?)?;
+    let schema =
+        ok(
+            crate::live_spatial_citizens_server::schema_paging::test_decode_schema(
+                &fortress_query(s.handle(), Some("schema".into()), None),
+            )?,
+        )?;
     let definitions = &schema["query_schema"]["$defs"];
     let conditions = definitions["watch_condition"]["oneOf"]
         .as_array()

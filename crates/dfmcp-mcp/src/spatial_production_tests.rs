@@ -513,11 +513,12 @@ fn a_failed_live_source_still_allows_verified_history_and_offline_production_rec
         "historical_query"
     );
     ok(ask(&s, supply())?)?;
-    let schema = ok(decode(&fortress_query(
-        s.handle(),
-        Some("schema".into()),
-        None,
-    ))?)?;
+    let schema =
+        ok(
+            crate::live_spatial_citizens_server::schema_paging::test_decode_schema(
+                &fortress_query(s.handle(), Some("schema".into()), None),
+            )?,
+        )?;
     assert_eq!(
         schema["query_schema"]["$defs"]["archive_stateless"]["oneOf"]
             .as_array()

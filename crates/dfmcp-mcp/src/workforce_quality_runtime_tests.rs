@@ -211,7 +211,9 @@ fn quality_pages_keep_active_watches_and_bind_objective_priorities_and_capture()
 fn schema_discovers_quality_and_runtime_refuses_invalid_or_ignored_priorities() -> Result<()> {
     let _serial = crate::test_serial();
     let s = register(2, 65_536)?;
-    let schema = decode(&fortress_query(s.handle(), Some("schema".into()), None))?;
+    let schema = crate::live_spatial_citizens_server::schema_paging::test_decode_schema(
+        &fortress_query(s.handle(), Some("schema".into()), None),
+    )?;
     let variants = schema["query_schema"]["$defs"]["query"]["oneOf"]
         .as_array()
         .expect("test variants");

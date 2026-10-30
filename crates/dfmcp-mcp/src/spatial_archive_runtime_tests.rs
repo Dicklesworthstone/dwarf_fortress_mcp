@@ -473,7 +473,9 @@ fn archive_schema_advertises_read_variants_including_job_progress() -> Result<()
     let files = Files::new()?;
     files.populate(2)?;
     let (s, _) = register(&files, 65536)?;
-    let result = decode(&fortress_query(s.handle(), Some("schema".into()), None))?;
+    let result = crate::live_spatial_citizens_server::schema_paging::test_decode_schema(
+        &fortress_query(s.handle(), Some("schema".into()), None),
+    )?;
     assert_eq!(result["ok"], true, "{result}");
     let variants = result["query_schema"]["$defs"]["query"]["oneOf"]
         .as_array()
