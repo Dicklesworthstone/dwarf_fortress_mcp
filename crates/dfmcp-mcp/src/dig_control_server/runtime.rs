@@ -15,7 +15,7 @@ use std::sync::{
 };
 use std::time::Instant;
 
-const NAMES: [&str; 11] = [
+const NAMES: [&str; 13] = [
     "DFMCP_ALLOW_UNADMITTED_DIG_CONTROL_V1_16",
     "DFMCP_DIG_WORLD_FOLDER",
     "DFMCP_DIG_SITE_ID",
@@ -27,6 +27,8 @@ const NAMES: [&str; 11] = [
     "DFMCP_DIG_CHECKPOINT_POLICY",
     "DFMCP_DIG_PROTECTED",
     "DFMCP_DIG_BLUEPRINT_CONFIG",
+    "DFMCP_DIG_BLUEPRINT_MONITOR_CONFIG",
+    "DFMCP_DIG_BLUEPRINT_MAP_TOKEN",
 ];
 fn denied() -> dfmcp_core::DfmcpError {
     error(
@@ -44,6 +46,7 @@ pub(super) struct Config {
     pub protected: Vec<MapCuboid>,
     pub checkpoint: DigCheckpointPolicy,
     pub blueprint: Option<super::batch::Config>,
+    pub monitor: Option<super::monitor::Config>,
 }
 impl Config {
     pub fn fortress(&self) -> dfmcp_core::FortressId {
@@ -154,6 +157,7 @@ fn configured(
         protected,
         checkpoint,
         blueprint: None,
+        monitor: None,
     })
 }
 fn isolated(opt: &str, names: impl IntoIterator<Item = String>, admitted: bool) -> Result<()> {
@@ -200,6 +204,20 @@ pub(super) fn configuration() -> Result<Config> {
         .is_some_and(|b| b.path == config.path)
     {
         return Err(denied());
+    }
+    config.monitor = optional("DFMCP_DIG_BLUEPRINT_MONITOR_CONFIG")?
+        .as_deref()
+        .map(super::monitor::Config::parse)
+        .transpose()?;
+    if let Some(monitor) = &config.monitor {
+        let parent = config.blueprint.as_ref().ok_or_else(denied)?;
+        if monitor.path == config.path
+            || monitor.path == parent.path
+            || monitor.source.endpoint() != config.endpoint
+            || (!monitor.initialize && parent.initialize)
+        {
+            return Err(denied());
+        }
     }
     Ok(config)
 }
@@ -336,6 +354,140 @@ pub(super) fn connect(
     let mut nonce = c.session_id.get().to_be_bytes().to_vec();
     nonce.extend_from_slice(&c.request_id.get().to_be_bytes());
     DigRpcClient::connect(config.endpoint, token, nonce, r, c)
+}
+
+/// One foreground, supervised, read-only source. The same absolute deadline
+/// covers connection setup and the existing typed map protocol.
+pub(super) struct MonitorIo<'a> {
+    pub control: &'a RequestControl,
+    pub config: &'a Config,
+    pub mode: dfmcp_adapter::dig_designation::journal::DigMode,
+}
+struct MapStream {
+    stream: std::net::TcpStream,
+    deadline: Instant,
+}
+impl std::io::Read for MapStream {
+    fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
+        std::io::Read::read(&mut self.stream, out)
+    }
+}
+impl std::io::Write for MapStream {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        std::io::Write::write(&mut self.stream, bytes)
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        std::io::Write::flush(&mut self.stream)
+    }
+}
+impl dfmcp_adapter::dig_blueprint::monitor::io::ProofStream for MapStream {
+    fn set_deadline(&mut self, deadline: Instant) -> std::io::Result<()> {
+        self.deadline = self.deadline.min(deadline);
+        let left = self
+            .deadline
+            .checked_duration_since(Instant::now())
+            .filter(|left| !left.is_zero())
+            .ok_or_else(|| {
+                std::io::Error::new(std::io::ErrorKind::TimedOut, "map deadline elapsed")
+            })?;
+        self.stream.set_read_timeout(Some(left))?;
+        self.stream.set_write_timeout(Some(left))
+    }
+}
+impl
+    super::monitor::MonitorIo<
+        dfmcp_adapter::build_placement::journal::private_file::PrivateBuildFile,
+    > for MonitorIo<'_>
+{
+    fn create_history(
+        &mut self,
+        spec: dfmcp_adapter::dig_blueprint::monitor::MonitorSpec,
+        c: &OperationContext,
+    ) -> Result<
+        dfmcp_adapter::dig_blueprint::monitor::store::MonitorStore<
+            dfmcp_adapter::build_placement::journal::private_file::PrivateBuildFile,
+        >,
+    > {
+        boundary(self.control, self.config, false)?;
+        let config = self.config.monitor.as_ref().ok_or_else(denied)?;
+        config.matches(&spec)?;
+        if !config.initialize {
+            return Err(denied());
+        }
+        dfmcp_adapter::dig_blueprint::monitor::store::open_private_monitor_store(
+            &config.path,
+            c,
+            self.mode,
+            Some(spec),
+            true,
+            None,
+            self.config.scope,
+        )
+    }
+    fn read_map(
+        &mut self,
+        spec: &dfmcp_adapter::dig_blueprint::monitor::MonitorSpec,
+        c: &OperationContext,
+    ) -> Result<dfmcp_adapter::live_map::LiveMapObservation> {
+        use dfmcp_adapter::dig_blueprint::monitor::io::{preflight, read_map};
+        let deadline = Instant::now()
+            .checked_add(std::time::Duration::from_millis(c.budget.max_wall_millis))
+            .ok_or_else(super::exhausted)?;
+        boundary(self.control, self.config, false)?;
+        self.config
+            .monitor
+            .as_ref()
+            .ok_or_else(denied)?
+            .matches(spec)?;
+        preflight(spec, c)?;
+        let token = value("DFMCP_DIG_BLUEPRINT_MAP_TOKEN", 256)?.into_bytes();
+        if token.len() < 32 {
+            return Err(denied());
+        }
+        let mut nonce = c.session_id.get().to_be_bytes().to_vec();
+        nonce.extend_from_slice(&c.request_id.get().to_be_bytes());
+        boundary(self.control, self.config, false)?;
+        let left = deadline
+            .checked_duration_since(Instant::now())
+            .filter(|v| !v.is_zero())
+            .ok_or_else(super::exhausted)?;
+        let stream = std::net::TcpStream::connect_timeout(&spec.source().endpoint(), left)
+            .map_err(|_| {
+                error(
+                    ErrorCode::AdapterUnavailable,
+                    "blueprint map connection failed",
+                )
+            })?;
+        let mut current = c.clone();
+        current.budget.max_wall_millis = u64::try_from(
+            deadline
+                .checked_duration_since(Instant::now())
+                .ok_or_else(super::exhausted)?
+                .as_millis(),
+        )
+        .map_err(|_| super::exhausted())?;
+        if current.budget.max_wall_millis == 0 {
+            return Err(super::exhausted());
+        }
+        read_map(
+            MapStream { stream, deadline },
+            spec,
+            token,
+            nonce,
+            &current,
+            |_| boundary(self.control, self.config, false),
+        )
+    }
+    fn checkpoint(&mut self, c: &OperationContext) -> Result<()> {
+        c.budget.validate()?;
+        if c.cancellation_requested {
+            return Err(error(
+                ErrorCode::CancellationRequested,
+                "monitor request cancelled",
+            ));
+        }
+        boundary(self.control, self.config, false)
+    }
 }
 
 #[cfg(test)]

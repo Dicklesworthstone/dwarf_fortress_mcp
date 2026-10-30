@@ -183,6 +183,7 @@ impl Harness {
             protected: vec![],
             checkpoint,
             blueprint: None,
+            monitor: None,
         };
         let binding = DigBinding::new(
             config.endpoint,
@@ -597,6 +598,7 @@ fn reopened_prepared_journal_cannot_reconstruct_review_or_native_permission() ->
         protected: vec![],
         checkpoint: DigCheckpointPolicy::DisposableFortress,
         blueprint: None,
+        monitor: None,
     };
     let journal = DigJournal::open(
         h.runtime.memory.clone(),

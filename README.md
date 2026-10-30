@@ -228,6 +228,14 @@ preserve the original history; designation remains separate from excavation
 completion. See the [MCP blueprint workflow](docs/DIG_BLUEPRINT_MCP.md) for this
 unadmitted development profile and its limits.
 
+After every original region is designated, the same server can monitor the
+whole blueprint through an independently pinned map source. One paused capture
+checks every selected tile for dry, visible, undesignated floor; all targets
+share one fixed sampled stability window. Durable progress, exact restart,
+bounded tile diagnostics and monitor-only cancellation preserve the original
+receipts and distinguish fresh results from historical achievement. See the
+[whole-blueprint monitoring workflow](docs/DIG_BLUEPRINT_MONITOR.md).
+
 ### Durable whole-room readiness
 
 The development room workflow can monitor every original floor, required wall

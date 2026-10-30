@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-10-30 — Whole-blueprint excavation monitoring through MCP
+
+- Expose exact monitor registration, one-capture sampling, head-pinned progress
+  and separate cancellation through the existing eleven-tool mining server.
+- Join every original terminal Designated receipt to the shared sampled-floor
+  condition without equating independent map/dig generations or native effects.
+- Create private history lazily at registration and carry learned clocks across
+  exact restart. Keep deadlines and attempt limits fixed, preserve raw negative
+  evidence and never restore current truth from historical satisfaction.
+- Preserve local monitor inspection/cancellation through damaged native custody
+  in an open session, and retain exact recovery through failures and release.
+- Prepay complete source/history/final-audit/output work, enforce bounded socket
+  deadlines and expose actionable selected-cell diagnostics and Agent Turns.
+- Pass 119 focused actual-source tests (77 adapter, 42 MCP), including 58 new
+  monitor cases; 402 pipeline inputs remain unchanged. JSON Schema 49/175 passes.
+  Full FastMCP/native/live and release qualification remain unverified.
+
 ## 2026-10-30 — Durable whole-blueprint excavation monitoring core
 
 - Bind complete original sparse geometry and all terminal Designated receipts

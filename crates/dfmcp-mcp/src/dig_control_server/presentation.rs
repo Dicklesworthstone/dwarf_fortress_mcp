@@ -143,6 +143,9 @@ pub(super) fn retained_handoff(raw: &str) -> Option<Value> {
         json!({"inventory_verified":false,"historical_evidence_only":true,
         "journal":active["counts"],"pending_plans":active["pending_plans"],
         "recovery":active["recovery"],"record":record,"operation":result["operation"],
+        "blueprint_monitor":result.get("blueprint_monitor").map(|m|json!({
+            "monitor_id":m["monitor_id"],"recovery":m["recovery"],"history_verified":false,
+            "fresh_sample_acquired":false,"sampled_excavation_condition_proven":false})),
         "retry_commit_permitted":false,"dispatch_authorized":false}),
     )
 }
@@ -173,6 +176,9 @@ pub fn packet(
         }
     }
     let blueprint = result.get("blueprint").filter(|v| v.is_object());
+    let monitor = result.get("blueprint_monitor").filter(|v| v.is_object());
+    let monitor_verified = monitor.is_some_and(|m| m["history_verified"] == true);
+    let sampled_goal = monitor.is_some_and(|m| m["sampled_excavation_condition_proven"] == true);
     let blueprint_verified = blueprint.is_some_and(|p| p["inventory_verified"] == true);
     if let Some(parent) = blueprint {
         active["scope"] = json!("this_blueprint_and_original_dig_journal");
@@ -186,6 +192,16 @@ pub fn packet(
             "excavation_completion_proven":false,"reopening_restores_dispatch_permission":false
         });
     }
+    if let Some(proof) = monitor {
+        active["blueprint_monitor"] = json!({"monitor_id":proof["monitor_id"],"blueprint_id":proof["blueprint_id"],
+            "recovery":proof["recovery"],"history_verified":monitor_verified,"status":proof["status"],
+            "original_designations_verified":proof["original_designations_verified"],
+            "fresh_sample_acquired":proof["fresh_sample_acquired"],"sampled_excavation_condition_proven":sampled_goal,
+            "latest_sample_tick":proof["latest_sample_tick"],"first_satisfied_tick":proof["first_satisfied_tick"],
+            "matching_samples":proof["matching_samples"],"matching_since_tick":proof["matching_since_tick"],
+            "counts":proof["counts"],"sampling_fenced":proof["sampling_fenced"],
+            "shared_process_identity_proven":false,"mining_causality_proven":false});
+    }
     let phase = match op {
         "fortress.open_session" => AgentPhase::Bootstrap,
         "fortress.observe" => AgentPhase::Orient,
@@ -198,19 +214,23 @@ pub fn packet(
         .continuity(ContinuityStatus::Indeterminate,None,Some(json!({"world_history":"unestablished"})),None)
         .briefing(json!({"runtime":"unadmitted_mining_control","bridge_protocol":"1.16","runtime_admitted":false,
             "mutation_admissible":false,"development_policy":control_policy.map(policy),
-            "current_terrain_proven":false,"excavation_completion_proven":false}))
+            "current_terrain_proven":false,"excavation_completion_proven":false,
+            "whole_blueprint_sampled_floor_condition_proven":sampled_goal,
+            "monitor_history_verified":monitor_verified}))
         .active_work(active)
         .coverage(json!({"status":"partial","complete_domains":if view.is_some() && blueprint_verified {
                 json!(["this_journal_coordination_inventory","this_blueprint_original_prefix"])
             }else if view.is_some(){json!(["this_journal_coordination_inventory"])}else{json!([])},
-            "partial_domains":["bounded_mining_evidence"],"omitted_domains":["excavation_completion","structural_safety","other_controllers","game_checkpoint"]}))
+            "partial_domains":["bounded_mining_evidence","sampled_blueprint_excavation"],
+            "omitted_domains":["continuous_excavation_state","structural_safety","other_controllers","game_checkpoint"]}))
         .uncertainty(vec![uncertainty("mining-not-excavation","unknown",
             "Designation proof is historical configuration, not excavation completion or structural safety.",
             "Preserve unresolved work and recover its exact key; never infer nonapplication from a lost reply.",None,Value::Null)]);
     if let Some(c) = c {
         let mut budget = empty_budget();
         budget["admitted"] = json!({"max_wall_millis":c.budget.max_wall_millis,
-            "max_bytes":c.budget.max_bytes,"max_output_tokens":c.budget.max_output_tokens,"max_game_ticks":0,"max_actions":1});
+            "max_bytes":c.budget.max_bytes,"max_output_tokens":c.budget.max_output_tokens,
+            "max_entities":c.budget.max_entities,"max_game_ticks":0,"max_actions":1});
         budget["reserved_output_bytes"] = json!(OUTPUT_BYTES);
         budget["accounting"] = json!("conservative_byte_reservations_not_measured_tokens");
         let mut next = vec![];
@@ -272,7 +292,31 @@ pub fn packet(
                 }
             }
         }
-        let query = if let Some(parent) = blueprint.filter(|p| p["blueprint_id"].is_string()) {
+        if let Some(proof) = monitor.filter(|m| {
+            m["history_verified"] == true
+                && m["terminal"] == false
+                && m["sampling_fenced"] == false
+                && m["attempt_limit_reached"] == false
+        }) {
+            let can_observe = binding.is_some_and(|b| {
+                c.authorize(
+                    Capability::Observe,
+                    RiskTier::ReadOnly,
+                    &[],
+                    Some(b.scope()),
+                )
+                .is_ok()
+            });
+            if can_observe {
+                next.push(recommendation("sample-original-blueprint","fortress.wait",
+                    "Acquire one whole original blueprint capture and advance its fixed sampled stability goal.",
+                    "high","high","read_only","not_applicable",false,
+                    json!({"session_id":c.session_id.to_string(),"monitor_id":proof["monitor_id"]})));
+            }
+        }
+        let query = if let Some(proof) = monitor.filter(|m| m["monitor_id"].is_string()) {
+            json!({"mode":"blueprint_monitor","monitor_id":proof["monitor_id"],"offset":0,"limit":16})
+        } else if let Some(parent) = blueprint.filter(|p| p["blueprint_id"].is_string()) {
             json!({"mode":"blueprint","blueprint_id":parent["blueprint_id"],"offset":0,"limit":8})
         } else {
             json!({"mode":"records","limit":8})

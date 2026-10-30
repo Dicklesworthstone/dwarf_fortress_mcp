@@ -506,6 +506,27 @@ single-original-Mine goal/clock profile is not widened into a multi-step goal.
 See `docs/DIG_BLUEPRINT_MCP.md` for bounds, operator setup, exact recovery and
 component-test limitations. No production admission or native wire is changed.
 
+Optional `DFMCP_DIG_BLUEPRINT_MONITOR_CONFIG` adds whole-original-blueprint
+sampled excavation monitoring through those same tool names:
+
+- `plan(monitor=<closed JSON string>)` registers the exact completed designation
+  set, independent map/1.5 source and immutable deadline/stability/sample policy.
+- `wait(monitor_id=...)` takes one complete paused enclosing capture and
+  durably publishes progress after current source, authority and original
+  receipt checks. Native key/plan arguments are omitted for this alternative.
+- `query(mode="blueprint_monitor", monitor_id=...)` inspects verified historical
+  progress and selected-cell diagnostics, with exact history-head page pins.
+- `cancel(scope="monitor", monitor_id=...)` stops only read-only monitoring.
+
+Every selected cell must be visible dry floor without magma or a dig designation
+in the same capture and shared stability window. Unselected gaps are ignored.
+No game clock is advanced; equal-tick reads cannot accumulate samples. Reopen
+preserves history and clock floors, resets unfinished stability and never
+renews the deadline. Fresh acknowledged satisfaction, historical achievement,
+original native outcomes and safety remain distinct. The map/dig source link
+does not claim shared-process identity or mining causality. See
+`docs/DIG_BLUEPRINT_MONITOR.md` for exact configuration and recovery limitations.
+
 ## Common mutation state
 
 ```text

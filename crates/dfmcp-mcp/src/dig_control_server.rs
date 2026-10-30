@@ -36,6 +36,7 @@ use std::sync::{
 use std::time::{Duration, Instant};
 
 mod batch;
+mod monitor;
 mod presentation;
 mod runtime;
 use presentation::{OUTPUT_BYTES, digest, failure, inventory, packet};
@@ -129,6 +130,9 @@ struct State<S, N, B = S> {
     blueprint_storage: Option<B>,
     blueprint_recovery: Option<BlueprintRecovery>,
     blueprint_required: bool,
+    monitor: Option<dfmcp_adapter::dig_blueprint::monitor::store::MonitorStore<B>>,
+    monitor_recovery: Option<dfmcp_adapter::dig_blueprint::monitor::store::Recovery>,
+    monitor_config: Option<monitor::Config>,
 }
 impl<S: EffectJournalStorage, N: DigSource, B: EffectJournalStorage> State<S, N, B> {
     fn new(mut control: DigSession<S, N>, c: &OperationContext, config: &Config) -> Result<Self> {
@@ -174,6 +178,9 @@ impl<S: EffectJournalStorage, N: DigSource, B: EffectJournalStorage> State<S, N,
             blueprint_storage: None,
             blueprint_recovery: None,
             blueprint_required: config.blueprint.is_some(),
+            monitor: None,
+            monitor_recovery: None,
+            monitor_config: config.monitor.clone(),
         })
     }
     fn context(&mut self, write_enabled: bool, wall: Option<u64>) -> Result<OperationContext> {
@@ -233,6 +240,17 @@ impl<S: EffectJournalStorage, N: DigSource, B: EffectJournalStorage> State<S, N,
             "excavation_completion_proven":false,"retry_commit_permitted":false})
                 })
             })
+    }
+    fn monitor_reference(&self) -> Option<Value> {
+        self.monitor.as_ref().map(monitor::reference).or_else(|| {
+            self.monitor_recovery.map(|r| {
+                json!({"monitor_id":r.monitor_id.to_string(),
+                "recovery":monitor::recovery(r),"history_verified":false,
+                "publication_unverified":true,"fresh_sample_acquired":false,
+                "sampled_excavation_condition_proven":false,
+                "shared_process_identity_proven":false,"mining_causality_proven":false})
+            })
+        })
     }
 }
 fn grants(
@@ -351,6 +369,12 @@ impl Work {
 #[derive(Deserialize)]
 #[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
 enum Query {
+    BlueprintMonitor {
+        monitor_id: String,
+        expected_head: Option<String>,
+        offset: Option<usize>,
+        limit: Option<usize>,
+    },
     Blueprint {
         blueprint_id: String,
         expected_head: Option<String>,
@@ -401,6 +425,20 @@ impl Query {
         let value: Self = serde_json::from_str(raw)
             .map_err(|_| error(ErrorCode::InvalidRequest, "invalid closed mining query"))?;
         match &value {
+            Self::BlueprintMonitor {
+                monitor_id,
+                expected_head,
+                offset,
+                limit,
+            } => {
+                digest(monitor_id)?;
+                if let Some(head) = expected_head {
+                    digest(head)?;
+                }
+                if offset.map_or(0, |n| n) >= 512 || !(1..=16).contains(&limit.map_or(16, |n| n)) {
+                    return Err(exhausted());
+                }
+            }
             Self::Blueprint {
                 blueprint_id,
                 expected_head,
@@ -463,6 +501,9 @@ fn tile_bounds(offset: usize, limit: Option<usize>) -> Result<()> {
     Ok(())
 }
 enum Action {
+    StartMonitor(monitor::Request),
+    SampleMonitor(Digest32),
+    CancelMonitor(Digest32),
     Blueprint(Layout),
     StopBlueprint(Digest32),
     Observe(DigRegion),
@@ -532,6 +573,13 @@ where
         None
     };
     match action {
+        Action::StartMonitor(_)
+        | Action::SampleMonitor(_)
+        | Action::CancelMonitor(_)
+        | Action::Query(Query::BlueprintMonitor { .. }) => Err(error(
+            ErrorCode::InternalInvariantViolation,
+            "monitor action bypassed its read-only owner",
+        )),
         Action::Blueprint(layout) => {
             if let Some(parent) = state.blueprint.as_mut() {
                 if parent.definition().layout() != &layout {
@@ -1007,6 +1055,63 @@ where
     G: DigSessionGuard,
     F: FnOnce(&DigBinding, DigRegion, &OperationContext) -> Result<N>,
 {
+    run_action_with_monitor(
+        state,
+        c,
+        op,
+        action,
+        started,
+        runtime,
+        connect,
+        &mut monitor::Unavailable,
+    )
+}
+#[allow(clippy::too_many_arguments)]
+fn run_action_with_monitor<S, N, B, G, F, M>(
+    state: &mut State<S, N, B>,
+    c: OperationContext,
+    op: &str,
+    action: Result<Action>,
+    started: Instant,
+    runtime: &mut G,
+    connect: F,
+    io: &mut M,
+) -> String
+where
+    S: EffectJournalStorage,
+    N: DigSource,
+    B: EffectJournalStorage,
+    G: DigSessionGuard,
+    F: FnOnce(&DigBinding, DigRegion, &OperationContext) -> Result<N>,
+    M: monitor::MonitorIo<B>,
+{
+    match action {
+        Ok(
+            action @ (Action::StartMonitor(_)
+            | Action::SampleMonitor(_)
+            | Action::CancelMonitor(_)
+            | Action::Query(Query::BlueprintMonitor { .. })),
+        ) => monitor::run_action(state, c, op, action, started, io),
+        action => run_native_action(state, c, op, action, started, runtime, connect),
+    }
+}
+#[allow(clippy::too_many_arguments)]
+fn run_native_action<S, N, B, G, F>(
+    state: &mut State<S, N, B>,
+    c: OperationContext,
+    op: &str,
+    action: Result<Action>,
+    started: Instant,
+    runtime: &mut G,
+    connect: F,
+) -> String
+where
+    S: EffectJournalStorage,
+    N: DigSource,
+    B: EffectJournalStorage,
+    G: DigSessionGuard,
+    F: FnOnce(&DigBinding, DigRegion, &OperationContext) -> Result<N>,
+{
     let operation = action.as_ref().ok().and_then(|action| {
         let identity = match action {
             Action::Plan {key,witness,hidden} => state.control.selected().filter(|c|c.witness()==*witness)
@@ -1233,6 +1338,11 @@ fn retain_blueprint<S: EffectJournalStorage, N: DigSource, B: EffectJournalStora
             result["blueprint"] = reference;
         }
     }
+    if result.get("blueprint_monitor").is_none() {
+        if let Some(reference) = state.monitor_reference() {
+            result["blueprint_monitor"] = reference;
+        }
+    }
     result
 }
 fn lock() -> Result<MutexGuard<'static, Option<Entry>>> {
@@ -1276,8 +1386,10 @@ async fn with_session(
     wall: Option<u64>,
     action: Result<Action>,
 ) -> String {
+    let native_effect_requested = matches!(&action, Ok(Action::Commit { .. } | Action::Cancel(..)));
     runtime::owned(op, move |control: RequestControl| {
         let mut retained = None;
+        let mut retained_monitor = None;
         let mut native_handoff = None;
         let result = (|| {
             let id = session_id(&raw)?;
@@ -1287,6 +1399,7 @@ async fn with_session(
                 .filter(|v| v.state.id == id)
                 .ok_or_else(|| error(ErrorCode::SessionNotFound, "mining session absent"))?;
             retained = entry.state.blueprint_reference();
+            retained_monitor = entry.state.monitor_reference();
             if op == "fortress.observe" {
                 entry.state.abandon();
             }
@@ -1299,7 +1412,12 @@ async fn with_session(
                 config: &config,
                 binding: &binding,
             };
-            let rendered = run_action(
+            let mut map_io = runtime::MonitorIo {
+                control: &control,
+                config: &config,
+                mode: entry.state.control.mode(),
+            };
+            let rendered = run_action_with_monitor(
                 &mut entry.state,
                 c,
                 op,
@@ -1310,8 +1428,10 @@ async fn with_session(
                     config.matches(b)?;
                     runtime::connect(&control, &config, r, c)
                 },
+                &mut map_io,
             );
             retained = entry.state.blueprint_reference();
+            retained_monitor = entry.state.monitor_reference();
             native_handoff = presentation::retained_handoff(&rendered);
             if let Err(e) = runtime::boundary(&control, &config, false) {
                 entry.state.abandon();
@@ -1323,10 +1443,12 @@ async fn with_session(
             Ok(value) => value,
             Err(e) => {
                 let mut result = failure(&e);
-                result["effect_may_have_occurred"] =
-                    json!(matches!(op, "fortress.commit" | "fortress.cancel"));
+                result["effect_may_have_occurred"] = json!(native_effect_requested);
                 if let Some(reference) = retained {
                     result["blueprint"] = reference;
+                }
+                if let Some(reference) = retained_monitor {
+                    result["blueprint_monitor"] = reference;
                 }
                 if let Some(handoff) = native_handoff {
                     result["native_handoff"] = handoff;
@@ -1454,6 +1576,7 @@ pub async fn fortress_open_session(
 ) -> String {
     runtime::owned("fortress.open_session", move |control| {
         let mut retained=None;
+        let mut retained_monitor=None;
         let result=(|| {
             let config=runtime::configuration()?;
             runtime::boundary(&control,&config,false)?;
@@ -1462,7 +1585,7 @@ pub async fn fortress_open_session(
             config.region(region)?;
             let budget=WorkBudget {max_wall_millis:max_wall_millis.map_or(10_000,|n|n),
                 max_bytes:max_bytes.map_or(MAX_WORK_BYTES,|n|n),max_output_tokens:max_output_tokens.map_or(8192,|n|n),
-                max_entities:300,max_actions:1,max_game_ticks:0};
+                max_entities:if config.monitor.is_some(){monitor::MAX_ENTITIES}else{300},max_actions:1,max_game_ticks:0};
             let mut locked=lock()?;
             if locked.is_some() {return Err(error(ErrorCode::Conflict,"release the current mining session first"));}
             let seq=NEXT.try_update(Ordering::AcqRel,Ordering::Acquire,|n|(n<(1u64<<57)).then_some(n+1)).map_err(|_|exhausted())?;
@@ -1525,6 +1648,17 @@ pub async fn fortress_open_session(
             // Parent bootstrap is a conservative clock floor, including when no
             // child intent exists yet. It supplies neither a grant nor a permit.
             c=context_with_blueprint_floor(&c,parent_owner.as_ref());
+            let mut monitor_owner=None;
+            if let Some(selected)=config.monitor.as_ref().filter(|p|!p.initialize) {
+                retained_monitor=selected.recovery.map(monitor::recovery);
+                let owned=dfmcp_adapter::dig_blueprint::monitor::store::open_private_monitor_store(
+                    &selected.path,&work.take(&c,monitor::OPEN_BYTES)?,mode,None,false,selected.recovery,config.scope)?;
+                selected.matches(owned.spec())?;
+                c.anchor.tick=c.anchor.tick.max(GameTick(owned.high_tick()));
+                owned.spec().authorize(&work.current(&c)?,false)?;
+                retained_monitor=Some(monitor::recovery(owned.recovery()));
+                monitor_owner=Some(owned);
+            }
             let mut session=DigSession::<_,Native>::new(journal,&work.view(&c)?)?;
             c.anchor.tick=c.anchor.tick.max(GameTick(session.high_tick()));
             if let Some(owned)=parent_owner.as_mut() {
@@ -1533,6 +1667,7 @@ pub async fn fortress_open_session(
                 }
                 let (view,records)=session.complete_inventory(&work.take(&c,COMPLETE_INVENTORY_BYTES)?)?;
                 batch::verify(owned,&view,&records,&work.take(&c,batch::PUBLICATION_BYTES)?)?;
+                if let Some(proof)=monitor_owner.as_ref() {proof.spec().verify_original(owned.definition(),&view,&records)?;}
                 if mode==DigMode::Control {
                     let first=owned.definition().bootstrap().region();
                     let mut source=runtime::connect(&control,&config,first,&work.take(&c,SOURCE_RESERVATION_BYTES)?)?;
@@ -1548,6 +1683,10 @@ pub async fn fortress_open_session(
             state.budget=budget;
             state.grants=c.grants.clone();
             state.blueprint_storage=parent_storage;
+            if let Some(owned)=monitor_owner {
+                state.monitor_recovery=Some(owned.recovery());
+                state.monitor=Some(owned);
+            }
             if let Some(owned)=parent_owner {
                 state.blueprint_recovery=Some(owned.recovery());
                 state.blueprint=Some(owned);
@@ -1560,11 +1699,16 @@ pub async fn fortress_open_session(
                 "mode":match mode {DigMode::Control=>"control",DigMode::Recover=>"reconcile",DigMode::Offline=>"offline"},
                 "capabilities":c.grants.iter().map(|g|g.capability.as_str()).collect::<Vec<_>>(),
                 "planning_observation_retained":false,"native_designation_dispatched":false,
-                "blueprint_configured":state.blueprint_required,"blueprint_creation_pending":state.blueprint_storage.is_some()});
+                "blueprint_configured":state.blueprint_required,"blueprint_creation_pending":state.blueprint_storage.is_some(),
+                "blueprint_monitor_configured":state.monitor_config.is_some()});
             if let Some(parent)=state.blueprint.as_mut() {
                 let (full,records)=state.control.complete_inventory(&work.take(&c,COMPLETE_INVENTORY_BYTES)?)?;
                 let progress=batch::verify(parent,&full,&records,&work.take(&c,batch::PUBLICATION_BYTES)?)?;
                 result["blueprint"]=batch::display(parent,&progress,&full,0,8)?;
+            }
+            if let Some(proof)=state.monitor.as_mut() {
+                proof.verify(&work.take(&c,monitor::FINAL_BYTES)?)?;
+                result["blueprint_monitor"]=monitor::display(proof,false,true,0,16)?;
             }
             let rendered=packet("fortress.open_session",result,Some(&c),Some(&state.binding),Some(&view),Some(&state.policy),None);
             if rendered.len() as u64>OUTPUT_BYTES {return Err(exhausted());}
@@ -1578,6 +1722,8 @@ pub async fn fortress_open_session(
             Err(e)=>{
                 let mut result=failure(&e);
                 if let Some(recovery)=retained {result["blueprint"]=json!({"recovery":recovery,"inventory_verified":false});}
+                if let Some(recovery)=retained_monitor {result["blueprint_monitor"]=json!({"recovery":recovery,"history_verified":false,
+                    "fresh_sample_acquired":false,"sampled_excavation_condition_proven":false});}
                 packet("fortress.open_session",result,None,None,None,None,None)
             }
         }
@@ -1611,7 +1757,7 @@ pub async fn fortress_observe(session_id: String, region: String) -> String {
 }
 #[tool(
     name = "fortress.plan",
-    description = "Pass blueprint alone to retain a complete configured sparse floor project; no child is prepared. Otherwise pass idempotency_key, observation_witness and allow_hidden_neighbors to prepare one exact region. Blueprint children use only the returned original next key and require false hidden-neighbor policy. Review the returned native plan digest and parent-bound seal. No designation is dispatched yet."
+    description = "Pass blueprint alone to retain a complete configured sparse floor project. After every original child is terminal Designated, pass monitor alone as closed JSON with blueprint_id, deadline_tick and optional stability/sample bounds to register read-only whole-blueprint completion monitoring. Otherwise pass the complete idempotency_key, observation_witness and allow_hidden_neighbors review request. No designation is dispatched during plan."
 )]
 pub async fn fortress_plan(
     session_id: String,
@@ -1619,14 +1765,35 @@ pub async fn fortress_plan(
     observation_witness: Option<String>,
     allow_hidden_neighbors: Option<bool>,
     blueprint: Option<String>,
+    monitor: Option<String>,
 ) -> String {
-    let action = plan_action(
+    let action = plan_with_monitor_action(
         idempotency_key,
         observation_witness,
         allow_hidden_neighbors,
         blueprint,
+        monitor,
     );
     with_session(session_id, "fortress.plan", None, action).await
+}
+fn plan_with_monitor_action(
+    id: Option<String>,
+    observed: Option<String>,
+    hidden: Option<bool>,
+    blueprint: Option<String>,
+    monitor: Option<String>,
+) -> Result<Action> {
+    if let Some(raw) = monitor {
+        if id.is_some() || observed.is_some() || hidden.is_some() || blueprint.is_some() {
+            return Err(error(
+                ErrorCode::InvalidRequest,
+                "supply the monitor request alone",
+            ));
+        }
+        monitor::Request::parse(&raw).map(Action::StartMonitor)
+    } else {
+        plan_action(id, observed, hidden, blueprint)
+    }
 }
 fn plan_action(
     idempotency_key: Option<String>,
@@ -1671,7 +1838,7 @@ pub async fn fortress_commit(
 }
 #[tool(
     name = "fortress.query",
-    description = "Bounded local records, selection_tiles, plan_tiles, blueprint, blueprint_layout or schema query. query is closed JSON. Blueprint progress audits every original child and pages 1..16 rows. All evidence is historical; no native calls or excavation-completion claim."
+    description = "Bounded local records, selection_tiles, plan_tiles, blueprint, blueprint_layout, blueprint_monitor or schema query. query is closed JSON. blueprint_monitor requires monitor_id, accepts expected_head, offset and limit, and shows durable historical progress and selected tile deficits. Query never acquires fresh terrain or proves current completion."
 )]
 pub async fn fortress_query(session_id: String, query: String) -> String {
     with_session(
@@ -1692,21 +1859,36 @@ fn effect_action(
 }
 #[tool(
     name = "fortress.wait",
-    description = "Query the original native mining outcome once, then sync validated evidence. No commit replay, timer loop or game-clock advance. Terminal and permanent Unknown return locally. Querying a preparation revokes local commit permission."
+    description = "Pass monitor_id alone to acquire one paused whole-blueprint map capture, retain it durably and advance its fixed sampled stability goal. Or pass idempotency_key and plan_digest to reconcile one original native designation outcome. Terminal monitors/effects return historical evidence locally. No commit replay, polling loop or game-clock advance."
 )]
 pub async fn fortress_wait(
     session_id: String,
-    idempotency_key: String,
-    plan_digest: String,
+    idempotency_key: Option<String>,
+    plan_digest: Option<String>,
+    monitor_id: Option<String>,
     max_wall_millis: Option<u64>,
 ) -> String {
     with_session(
         session_id,
         "fortress.wait",
         max_wall_millis,
-        effect_action(idempotency_key, plan_digest, Action::Wait),
+        wait_action(idempotency_key, plan_digest, monitor_id),
     )
     .await
+}
+fn wait_action(
+    key: Option<String>,
+    plan: Option<String>,
+    monitor: Option<String>,
+) -> Result<Action> {
+    match (key, plan, monitor) {
+        (Some(key), Some(plan), None) => effect_action(key, plan, Action::Wait),
+        (None, None, Some(id)) => digest(&id).map(Action::SampleMonitor),
+        _ => Err(error(
+            ErrorCode::InvalidRequest,
+            "wait requires one exact native operation or monitor identity",
+        )),
+    }
 }
 #[tool(
     name = "fortress.explain",
@@ -1728,6 +1910,7 @@ pub async fn fortress_explain(
 async fn close(raw: String, release: bool) -> String {
     runtime::owned("fortress.cancel", move |control| {
         let mut retained = None;
+        let mut retained_monitor = None;
         let result = (|| {
             control.checkpoint()?;
             let id = session_id(&raw)?;
@@ -1737,6 +1920,7 @@ async fn close(raw: String, release: bool) -> String {
                 .filter(|e| e.state.id == id)
                 .ok_or_else(|| error(ErrorCode::SessionNotFound, "mining session absent"))?;
             retained = entry.state.blueprint_reference();
+            retained_monitor = entry.state.monitor_reference();
             let c = entry.state.context(false, None)?;
             let view = if release {
                 None
@@ -1779,6 +1963,9 @@ async fn close(raw: String, release: bool) -> String {
                 if let Some(reference) = retained {
                     result["blueprint"] = reference;
                 }
+                if let Some(reference) = retained_monitor {
+                    result["blueprint_monitor"] = reference;
+                }
                 packet("fortress.cancel", result, None, None, None, None, None)
             }
         }
@@ -1787,7 +1974,7 @@ async fn close(raw: String, release: bool) -> String {
 }
 #[tool(
     name = "fortress.cancel",
-    description = "scope=blueprint and blueprint_id permanently stops further original child advancement, without cancelling native work. scope=effect retires one exact native preparation; it cannot undo designation. scope=session releases settled custody, or unresolved custody with release_for_recovery=true. Every original journal identity is retained."
+    description = "scope=monitor with monitor_id stops only the read-only excavation monitor and preserves its history. scope=blueprint with blueprint_id permanently stops original child advancement. scope=effect retires an exact native preparation. scope=session releases custody, with release_for_recovery=true for unresolved effects. None of these undo excavation or erase history."
 )]
 pub async fn fortress_cancel(
     session_id: String,
@@ -1796,11 +1983,27 @@ pub async fn fortress_cancel(
     plan_digest: Option<String>,
     release_for_recovery: Option<bool>,
     blueprint_id: Option<String>,
+    monitor_id: Option<String>,
 ) -> String {
     let release = release_for_recovery.is_some_and(|v| v);
-    match (scope.as_str(), idempotency_key, plan_digest, blueprint_id) {
-        ("session", None, None, None) => close(session_id, release).await,
-        ("blueprint", None, None, Some(id)) if !release => {
+    match (
+        scope.as_str(),
+        idempotency_key,
+        plan_digest,
+        blueprint_id,
+        monitor_id,
+    ) {
+        ("session", None, None, None, None) => close(session_id, release).await,
+        ("monitor", None, None, None, Some(id)) if !release => {
+            with_session(
+                session_id,
+                "fortress.cancel",
+                None,
+                digest(&id).map(Action::CancelMonitor),
+            )
+            .await
+        }
+        ("blueprint", None, None, Some(id), None) if !release => {
             with_session(
                 session_id,
                 "fortress.cancel",
@@ -1809,7 +2012,7 @@ pub async fn fortress_cancel(
             )
             .await
         }
-        ("effect", Some(key), Some(plan), None) if !release => {
+        ("effect", Some(key), Some(plan), None, None) if !release => {
             with_session(
                 session_id,
                 "fortress.cancel",
@@ -1856,7 +2059,7 @@ pub fn run_stdio() {
     let server=ServerBuilder::new("dfmcp-dig-control-dev",env!("CARGO_PKG_VERSION"))
         .tool(FortressOpenSession).tool(FortressObserve).tool(FortressQuery).tool(FortressPlan).tool(FortressCommit)
         .tool(FortressWait).tool(FortressCancel).tool(FortressCheckpoint).tool(FortressRestore).tool(FortressExplain).tool(FortressDoctor)
-        .instructions("Unadmitted development mining control. Default policy requires an unavailable game checkpoint. Explicit operator disposable-fortress policy permits consideration. Optional operator blueprint custody retains one complete sparse floor project: plan with blueprint alone, then observe/prepare/review/confirm each returned original next region. Only a complete terminal Designated prefix unlocks another child. Never replace or retry an uncertain key. Blueprint stop is permanent and preserves pending native recovery. Offline/reconcile reopening restores no commit permit. Historical designation is not excavation completion or safety. Whole shared blocks require the host lease and must avoid protected areas. No arbitrary commands, automatic clock advancement, checkpoint or restore.")
+        .instructions("Unadmitted development mining control. Default policy requires an unavailable game checkpoint. Explicit operator disposable-fortress policy permits consideration. Optional operator blueprint custody retains one complete sparse floor project: plan with blueprint alone, then observe/prepare/review/confirm each original next region. Only terminal Designated receipts unlock further children and whole-blueprint monitoring. Register a configured monitor through plan, sample it through wait with monitor_id, inspect its historical progress through query, and stop it with cancel scope=monitor. One independent map capture covers the whole original mask; completion requires visible dry floors with cleared designations over the fixed shared sampled stability window. Source pins do not prove shared process identity or mining causality. Never replace uncertain work or extend the original deadline. Blueprint stop preserves native recovery and does not stop read-only monitoring. Offline/reconcile reopening restores no commit permit. No automatic game-clock advancement, checkpoint or restore.")
         .build();
     crate::run_modern_stdio(server);
 }

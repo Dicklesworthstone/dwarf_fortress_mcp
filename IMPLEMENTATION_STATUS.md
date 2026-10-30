@@ -44,6 +44,45 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Whole-blueprint excavation progress through MCP (2026-10-30)
+
+The existing eleven-tool dig-control server now registers a monitor for one
+complete original Designated blueprint, samples it with `wait(monitor_id=...)`,
+queries exact history and bounded target diagnostics, and stops it with
+`cancel(scope="monitor")`. Operator-selected source pins and private custody
+stay outside tool input. Creation is lazy at explicit registration, allowing
+long-running designation projects to restart before a monitor exists. Recover
+mode can register and sample using Query/Observe without Plan or Designate.
+
+One bounded map/1.5 capture covers the original whole sparse mask. Durable raw
+evidence precedes newly learned tick/grant checks; current source, original
+receipt inventory and history are rechecked before fresh progress escapes.
+A shared fixed stability window prevents independently timed regions or repeated
+paused ticks from completing the project. Complete source/history/final-audit/
+response allowances are prepaid before map contact and one absolute wall limit
+covers connection, wire work and rendering. No game time advances automatically.
+
+Agent Turns expose sampled progress, deficits, exact recovery and usable next
+queries/sampling requests. Current-result proof is withdrawn from historical
+query, terminal replay, errors, overflow, close and restart. Source selectors
+explicitly do not prove shared process identity, mining causality, continuous
+stability or structural safety. Local query/cancellation can inspect the monitor
+within an existing session even after native/parent damage; reopening the combined
+MCP session still requires those original files. The adapter monitor itself can
+be reopened independently. Offline mode never appends or contacts the game.
+
+All 119 focused tests pass on the final feature source: 77 adapter cases and
+42 MCP handler/configuration cases, including 47 new adapter and 11 new MCP
+monitor groups. All 388 adapter and 402 pipeline compiler/source input hashes
+remain unchanged during their runs. MCP compilation is warning-free; the adapter
+retains its one preexisting unrelated workforce-test import warning. The actual
+production socket deadline wrapper compiles unchanged; FastMCP macros/stdio,
+public async wrappers and the Cx-owned connection/session shell remain outside
+the focused source-view harness. The query schema separately passes 49 valid and
+175 invalid cases. This is component evidence, not full server/native/live or
+release qualification. Existing production admission and native protocols remain
+unchanged. See `docs/DIG_BLUEPRINT_MONITOR.md` for the complete operator workflow.
+
 ### Durable whole-blueprint excavation monitor core (2026-10-30)
 
 The Rust adapter now binds the complete original sparse blueprint and every

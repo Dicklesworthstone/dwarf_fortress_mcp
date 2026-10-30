@@ -6,6 +6,134 @@ This closes the gap between recording designations and observing their intended
 terrain result. It uses the existing map/1.5 observation protocol; dig/1.16 alone
 does not expose a normalized floor shape.
 
+The existing `dfmcp-dig-control-dev-server` exposes the workflow through
+`fortress.plan`, `fortress.wait`, `fortress.query` and `fortress.cancel`. Native
+designation and monitor sampling remain separate operations with separate
+histories. No additional top-level MCP tool is added.
+
+## MCP workflow
+
+Start with the [retained blueprint workflow](DIG_BLUEPRINT_MCP.md). Add these
+operator variables before opening the session:
+
+```sh
+export DFMCP_DIG_BLUEPRINT_MONITOR_CONFIG='{"path":"/private/mining/project/excavation.history","initialize":true,"source":{"endpoint":"127.0.0.1:5000","generation":9,"df_version":"<exact DF version>","dfhack_version":"<exact DFHack version>"}}'
+export DFMCP_DIG_BLUEPRINT_MAP_TOKEN='<matching native map token>'
+```
+
+Replace the example generation and software strings with the independently
+accepted map/1.5 source values. The endpoint must match the original digging
+endpoint. Configure the unchanged map plugin separately in DFHack as described
+in [LIVE_MAP.md](LIVE_MAP.md); its own opt-in/token variables belong to that
+process, not this isolated MCP profile. The monitor file must differ from both
+the native journal and blueprint parent, under a real private `0700` directory.
+
+Opening with `initialize:true` does **not** precreate an empty history. The file
+is created only when the explicit monitor registration succeeds. This allows a
+long designation project to close and reopen before monitoring starts. You can
+also add the monitor configuration when reopening an already designated project.
+
+After the project reports `all_designated`, call `fortress.plan` with `monitor`
+alone. Its value is a serialized closed JSON object containing:
+
+| Field | Meaning and default |
+|---|---|
+| `blueprint_id` | Required exact original project identity. |
+| `deadline_tick` | Required absolute game tick, at or after the retained start and far enough away to fit the requested stability. |
+| `stable_ticks` | Elapsed ticks in the shared matching window; default `10`, maximum `403200`. |
+| `required_samples` | Advancing-tick matching samples; default `2`, range `1..64`. |
+| `max_gap_ticks` | Largest permitted gap between samples; default `1200`, range `1..403200`. |
+| `max_samples` | Total read attempts, including failed or unfinished reads; default `128`, range `1..128`. |
+
+For example, if the current retained tick is `12345`, an illustrative request is:
+
+```text
+fortress.plan(session_id,
+  monitor='{"blueprint_id":"<original id>","deadline_tick":13345,"stable_ticks":10,"required_samples":2,"max_gap_ticks":1200,"max_samples":128}')
+```
+
+Choose the deadline from the actual project clock. Omit `blueprint` and the
+individual native review arguments. Registration performs no map read or game
+mutation and requires only scoped Query/Observe authority. It works in writable
+`reconcile` mode without new Plan/Designate permission. All original children
+must have verified terminal Designated receipts; a stopped completed parent is
+eligible. Identical registration returns the same original monitor. Changed
+policy or a later deadline cannot replace it.
+
+Keep `result.blueprint_monitor.recovery` outside the session. Sample once with:
+
+```text
+fortress.wait(session_id, monitor_id="<returned monitor id>", max_wall_millis=60000)
+```
+
+Omit the native key and plan digest. Each call acquires one complete paused
+map capture, durably retains it, rechecks the original designation inventory,
+then publishes recomputed progress. This call does not advance game time or
+poll in a loop. If the game remains at the same tick, repeated calls cannot add
+stability samples. Advance gameplay separately and pause before another sample.
+
+The result reports exact selected-cell counts, overlapping deficit categories,
+matching samples and start tick, the original policy, remaining attempt status,
+latest accepted sample tick and first historical satisfaction tick. Status is
+`pending`, `unknown`, `stabilizing`, `satisfied`, `expired`, `invalidated` or
+`cancelled`. A fresh acknowledged satisfying sample sets
+`sampled_excavation_condition_proven:true`. Historical query, terminal replay,
+restart, errors and retained handoffs never set that current-result flag.
+
+Inspect local history or page through selected targets using `fortress.query`:
+
+```json
+{"mode":"blueprint_monitor","monitor_id":"<original monitor id>","offset":0,"limit":16}
+```
+
+Use the returned `target_page.next_query` for later pages. Its `expected_head`
+rejects mixing pages from different history generations. `status:satisfied` in
+a query is historical achievement, with `fresh_sample_acquired:false` and no
+claim that the terrain remains satisfied now. Query performs no map read.
+
+To stop only the read-only monitor:
+
+```text
+fortress.cancel(session_id, scope="monitor", monitor_id="<original monitor id>")
+```
+
+This needs current scoped Query in a writable mode and preserves all evidence.
+It neither stops miners nor changes the native project. Already terminal
+histories retain their original terminal status. During an open session,
+monitor query and cancellation remain available if the native journal or parent
+becomes damaged; their response explicitly withholds current original-inventory
+verification. Reopening the **combined MCP session** still requires its original
+native journal and blueprint parent. The adapter's independent `MonitorStore`
+API can reopen monitor history without those files; this MCP profile has no
+monitor-only restart mode.
+
+For restart, keep the native/blueprint configuration and change the monitor
+configuration to `initialize:false`, with its original source pin and exact
+returned recovery object:
+
+```json
+{
+  "path":"/private/mining/project/excavation.history",
+  "initialize":false,
+  "source":{"endpoint":"127.0.0.1:5000","generation":9,"df_version":"<exact DF version>","dfhack_version":"<exact DFHack version>"},
+  "recovery":{"monitor_id":"<original monitor id>","head":"<last acknowledged history head>"}
+}
+```
+
+`offline` opening makes no native connection and permits historical queries;
+it cannot append or cancel. `reconcile` opens without a native connection and
+permits explicit sampling or monitor cancellation under read grants. `control`
+also performs the existing independent native clock check before issuing its
+host lease. The maximum of native and monitor clock floors governs current
+authority. Reopening never renews the monitor deadline or its attempt allowance,
+restores fresh satisfaction, or resumes an interrupted read. Preserve changed
+recovery heads from every acknowledged operation and from failure handoffs.
+
+Configured monitor sessions admit at most 2048 entities for the complete bounded
+capture and bookkeeping. Existing request byte/output ceilings still apply;
+complete source, history, final audit and response work is prepaid before map
+contact. Ordinary non-monitor sessions retain their existing entity allowance.
+
 ## Exact original work and source
 
 `MonitorSpec::new` takes the complete retained `BatchDefinition`, verified native

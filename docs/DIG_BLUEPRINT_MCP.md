@@ -8,9 +8,10 @@ attempt. Unselected gaps are preserved, including when separate rooms share a
 native scheduling block.
 
 This is an unadmitted development path using the existing dig/1.16 protocol.
-Its result is historical designation evidence. It does not advance the game,
-prove completed excavation or join a multi-region project to the separate
-original-Mine goal monitor. The limits are 32 nonoverlapping floor parts, 512
+Its native result is historical designation evidence. Optional independent
+map/1.5 monitoring now evaluates sampled excavation of the entire retained
+blueprint through the same tools; see [the monitoring workflow](DIG_BLUEPRINT_MONITOR.md).
+Neither path automatically advances the game. The limits are 32 nonoverlapping floor parts, 512
 selected tiles, a 1,024-cell bounding capture and 128 native regions, each at
 most 8x8 on one level. See [the geometry and custody contract](DIG_BLUEPRINT_BATCH.md).
 
@@ -222,5 +223,5 @@ These component checks exclude FastMCP macro/stdio routing and ambient runtime
 scheduling, and do not constitute full-workspace Rust qualification, a native
 DFHack build, a live fortress campaign or compatibility admission. See the dated
 results in [IMPLEMENTATION_STATUS.md](../IMPLEMENTATION_STATUS.md). Generic mixed
-action DAGs, verified game checkpoint/restore and multi-region excavation-goal
-proof remain separate work.
+action DAGs, verified game checkpoint/restore, live monitoring qualification
+and continuous terrain or structural-safety proof remain separate work.

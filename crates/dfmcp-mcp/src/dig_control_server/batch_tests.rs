@@ -384,6 +384,7 @@ impl Harness {
             endpoint: "127.0.0.1:5000".parse().map_err(|_| exhausted())?,
             protected: vec![],
             checkpoint,
+            monitor: None,
             blueprint: Some(batch::Config {
                 path: "/private/dig/blueprint".into(),
                 initialize: true,
@@ -1352,3 +1353,6 @@ fn blueprint_query_pins_closed_inputs_and_error_release_handoffs_are_exact() -> 
     );
     Ok(())
 }
+
+#[path = "batch_tests/monitor_tests.rs"]
+mod monitor_tests;
