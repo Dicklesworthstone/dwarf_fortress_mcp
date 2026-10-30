@@ -1388,3 +1388,6 @@ fn outer_worker_acknowledgement_controls_review_reuse_without_clock_replay() -> 
     }
     Ok(())
 }
+
+#[path = "clock_tests/recovery_tests.rs"]
+mod recovery_tests;

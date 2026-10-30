@@ -532,6 +532,31 @@ original native outcomes and safety remain distinct. The map/dig source link
 does not claim shared-process identity or mining causality. See
 `docs/DIG_BLUEPRINT_MONITOR.md` for exact configuration and recovery limitations.
 
+Optional `DFMCP_DIG_BLUEPRINT_CLOCK_CONFIG` adds separately reviewed finite
+run/1.13 intervals for that original monitor. `plan(clock=<closed JSON string>)`
+prepares the interval, and `commit(scope="clock", monitor_id=..., review_seal=...)`
+confirms its distinct review. `wait(scope="clock", monitor_id=...)` reconciles
+the retained clock before a separate excavation sample. Each interval requires
+its own review; no wait starts or chains intervals. Clock receipts remain
+historical coordination evidence. See `docs/DIG_BLUEPRINT_CLOCK_MCP.md`.
+
+When original native or blueprint-parent custody is unavailable, explicit
+`open_session(mode="clock-offline"|"clock-recovery", max_game_ticks=0)` omits
+the region and opens only the exact existing monitor and clock histories.
+Both histories must be intact at opening; no original parent file, native dig
+bootstrap, map read or designation token is used. `clock-offline` permits local
+history queries. `clock-recovery` additionally permits one original clock
+reconciliation through `wait(scope="clock", monitor_id=...)`. Explicit clock
+opt-in at opening can retain separate named-fortress and native-source
+ControlClock grants for `cancel(scope="clock", monitor_id=...)`; cancellation
+rechecks current opt-in and never requires a positive future-tick budget.
+Enabling clock control later cannot add missing opening grants. These modes
+cannot plan another interval, sample terrain or recover designation authority.
+`query` exposes `blueprint_clock` and `blueprint_monitor` histories with their
+independent recovery pins, and explicit session release preserves unresolved
+work without claiming a current pause. See `docs/DIG_BLUEPRINT_CLOCK_RECOVERY.md`
+for recovery after file loss and the complete operator sequence.
+
 ## Common mutation state
 
 ```text

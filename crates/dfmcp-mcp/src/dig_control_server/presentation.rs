@@ -121,6 +121,35 @@ pub fn failure(e: &dfmcp_core::DfmcpError) -> Value {
     "retry_commit_permitted":false,"effect_outcome_inferred":false,
     "recovery":"Inspect the original key and journal; do not reprepare or create another key to bypass uncertainty."})
 }
+
+fn opening_history_reference(mut reference: Value) -> Value {
+    if reference.get("recovery").is_none() {
+        reference = json!({"recovery":reference});
+    }
+    reference["history_verified"] = json!(false);
+    reference["historical_evidence_only"] = json!(true);
+    reference["sampled_excavation_condition_proven"] = json!(false);
+    reference
+}
+
+/// Opening may retain an operator pin before custody or a complete reference
+/// after custody. Preserve the same public recovery shape on either failure.
+pub(super) fn opening_monitor_reference(reference: Value) -> Value {
+    let mut reference = opening_history_reference(reference);
+    reference["fresh_sample_acquired"] = json!(false);
+    reference["original_designations_verified"] = json!(false);
+    reference
+}
+
+pub(super) fn opening_clock_reference(reference: Value) -> Value {
+    let mut reference = opening_history_reference(reference);
+    reference["current_pause_proven"] = json!(false);
+    reference["fresh_goal_sampling_permitted"] = json!(false);
+    reference["retry_commit_permitted"] = json!(false);
+    reference["dispatch_authorized"] = json!(false);
+    reference
+}
+
 /// Keep bounded original identities if a final runtime check fails after work.
 /// A prior packet is historical evidence, never a fresh inventory or review.
 pub(super) fn retained_handoff(raw: &str) -> Option<Value> {
@@ -145,9 +174,11 @@ pub(super) fn retained_handoff(raw: &str) -> Option<Value> {
         "recovery":active["recovery"],"record":record,"operation":result["operation"],
         "blueprint_monitor":result.get("blueprint_monitor").map(|m|json!({
             "monitor_id":m["monitor_id"],"recovery":m["recovery"],"history_verified":false,
+            "authority_tick_floor":m["authority_tick_floor"],
             "fresh_sample_acquired":false,"sampled_excavation_condition_proven":false})),
         "blueprint_clock":result.get("blueprint_clock").map(|clock|json!({
             "monitor_id":clock["monitor_id"],"recovery":clock["recovery"],"history_verified":false,
+            "authority_tick_floor":clock["authority_tick_floor"],
             "pending":clock["pending"],"unresolved":clock["unresolved"],
             "current_pause_proven":false,"retry_commit_permitted":false})),
         "retry_commit_permitted":false,"dispatch_authorized":false}),
@@ -162,13 +193,23 @@ pub fn packet(
     control_policy: Option<&DigControlPolicy>,
     review: Option<Digest32>,
 ) -> String {
+    let clock_recovery_only = result.get("clock_recovery_only") == Some(&Value::Bool(true));
     let clock_pending = result
         .get("blueprint_clock")
         .is_some_and(|clock| clock["pending"] == true || clock["unresolved"] == true);
-    if clock_pending {
+    if clock_pending || clock_recovery_only {
         if let Some(proof) = result.get_mut("blueprint_monitor") {
             proof["sampled_excavation_condition_proven"] = json!(false);
             proof["fresh_sample_acquired"] = json!(false);
+            if clock_recovery_only {
+                proof["original_designations_verified"] = json!(false);
+            }
+        }
+    }
+    if clock_recovery_only {
+        if let Some(clock) = result.get_mut("blueprint_clock") {
+            clock["fresh_goal_sampling_permitted"] = json!(false);
+            clock["current_pause_proven"] = json!(false);
         }
     }
     let mut active = empty_active_work();
@@ -193,6 +234,7 @@ pub fn packet(
     let clock = result.get("blueprint_clock").filter(|v| v.is_object());
     let monitor_only = result.get("monitor_only") == Some(&Value::Bool(true));
     let monitor_verified = monitor.is_some_and(|m| m["history_verified"] == true);
+    let clock_verified = clock.is_some_and(|clock| clock["history_verified"] == true);
     let sampled_goal = monitor.is_some_and(|m| m["sampled_excavation_condition_proven"] == true);
     let blueprint_verified = blueprint.is_some_and(|p| p["inventory_verified"] == true);
     if let Some(parent) = blueprint {
@@ -234,6 +276,13 @@ pub fn packet(
             active["pending_absence_proven"] = json!(false);
         }
     }
+    if clock_recovery_only {
+        active["scope"] = json!("this_original_monitor_and_clock_history_only");
+        active["original_designations_verified"] = json!(false);
+        active["clock_inventory_verified"] = json!(clock_verified);
+        active["monitor_inventory_verified"] = json!(monitor_verified);
+        active["clock_pending_absence_proven"] = json!(clock_verified && !clock_pending);
+    }
     let phase = match op {
         "fortress.open_session" => AgentPhase::Bootstrap,
         "fortress.observe" => AgentPhase::Orient,
@@ -242,21 +291,40 @@ pub fn packet(
         "fortress.wait" | "fortress.cancel" => AgentPhase::Reconcile,
         _ => AgentPhase::Inspect,
     };
+    let complete_domains = if clock_recovery_only {
+        let mut domains = vec![];
+        if monitor_verified {
+            domains.push("this_blueprint_monitor_history");
+        }
+        if clock_verified {
+            domains.push("this_blueprint_clock_history");
+        }
+        json!(domains)
+    } else if view.is_some() && blueprint_verified {
+        json!([
+            "this_journal_coordination_inventory",
+            "this_blueprint_original_prefix"
+        ])
+    } else if view.is_some() {
+        json!(["this_journal_coordination_inventory"])
+    } else if monitor_only && monitor_verified {
+        json!(["this_blueprint_monitor_history"])
+    } else {
+        json!([])
+    };
     let mut builder=AgentTurnBuilder::new(op,phase)
         .continuity(ContinuityStatus::Indeterminate,None,Some(json!({"world_history":"unestablished"})),None)
-        .briefing(json!({"runtime":if monitor_only{"unadmitted_blueprint_monitor_recovery"}else{"unadmitted_mining_control"},
-            "bridge_protocol":if monitor_only{Value::Null}else{json!("1.16")},"runtime_admitted":false,
+        .briefing(json!({"runtime":if clock_recovery_only{"unadmitted_blueprint_clock_recovery"}else if monitor_only{"unadmitted_blueprint_monitor_recovery"}else{"unadmitted_mining_control"},
+            "bridge_protocol":if clock_recovery_only{json!("1.13")}else if monitor_only{Value::Null}else{json!("1.16")},"runtime_admitted":false,
             "monitor_only":monitor_only,"clock_protocol":clock.map(|_|"1.13"),
+            "clock_recovery_only":clock_recovery_only,
             "clock_pending":clock_pending,"current_pause_proven":false,
             "mutation_admissible":false,"development_policy":control_policy.map(policy),
             "current_terrain_proven":false,"excavation_completion_proven":false,
             "whole_blueprint_sampled_floor_condition_proven":sampled_goal,
             "monitor_history_verified":monitor_verified}))
         .active_work(active)
-        .coverage(json!({"status":"partial","complete_domains":if view.is_some() && blueprint_verified {
-                json!(["this_journal_coordination_inventory","this_blueprint_original_prefix"])
-            }else if view.is_some(){json!(["this_journal_coordination_inventory"])}
-            else if monitor_only && monitor_verified{json!(["this_blueprint_monitor_history"])}else{json!([])},
+        .coverage(json!({"status":"partial","complete_domains":complete_domains,
             "partial_domains":["bounded_mining_evidence","sampled_blueprint_excavation"],
             "omitted_domains":["continuous_excavation_state","structural_safety","other_controllers","game_checkpoint"]}))
         .uncertainty(vec![uncertainty("mining-not-excavation","unknown",
@@ -335,6 +403,7 @@ pub fn packet(
                 && m["attempt_limit_reached"] == false
         }) {
             let can_observe = !monitor_only
+                && !clock_recovery_only
                 && !clock_pending
                 && binding.is_some_and(|b| {
                     c.authorize(
@@ -360,6 +429,7 @@ pub fn packet(
                 && c.authorize(Capability::ControlClock, RiskTier::Guarded, &[], None)
                     .is_ok();
             let can_plan = can_control
+                && !clock_recovery_only
                 && binding.is_some_and(|b| {
                     c.authorize(Capability::Plan, RiskTier::Guarded, &[], Some(b.scope()))
                         .is_ok()
@@ -377,7 +447,12 @@ pub fn packet(
                     "Confirm this separately reviewed finite interval for the original blueprint.",
                     "high","high","guarded","not_reversible",true,
                     json!({"session_id":c.session_id.to_string(),"scope":"clock","monitor_id":id,"review_seal":run["review_seal"]})));
-            } else if verified && clock["needs_reconciliation"] == true {
+            } else if verified
+                && clock["needs_reconciliation"] == true
+                && clock["mode"] != "offline"
+                && result["profile"] != "clock-offline"
+                && result["mode"] != "clock-offline"
+            {
                 next.push(recommendation("reconcile-blueprint-clock","fortress.wait",
                     "Query the retained run once before another excavation sample; this cannot unpause.",
                     "high","high","read_only","not_applicable",false,
@@ -389,7 +464,9 @@ pub fn packet(
                     "high","high","guarded","not_reversible",false,
                     json!({"session_id":c.session_id.to_string(),"scope":"clock","monitor_id":id})));
             }
-            if verified && clock["unresolved"] == true && run["terminal"] == true {
+            if (verified && clock["unresolved"] == true && run["terminal"] == true)
+                || (clock_recovery_only && clock_pending && !can_control)
+            {
                 next.push(recommendation("release-unresolved-blueprint-clock","fortress.cancel",
                     "Preserve the unresolved run reference and release local custody without claiming a pause.",
                     "high","high","read_only","not_applicable",false,

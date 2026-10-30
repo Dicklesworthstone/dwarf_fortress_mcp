@@ -39,6 +39,7 @@ use std::time::{Duration, Instant};
 
 mod batch;
 mod clock;
+mod clock_recovery;
 mod monitor;
 mod monitor_recovery;
 mod presentation;
@@ -61,35 +62,44 @@ enum Entry {
         state: monitor_recovery::RecoveryState<PrivateBuildFile>,
         config: Config,
     },
+    ClockRecovery {
+        state: clock_recovery::RecoveryState<PrivateBuildFile, PrivateRunFile>,
+        config: Config,
+    },
 }
 impl Entry {
     fn id(&self) -> SessionId {
         match self {
             Self::Native { state, .. } => state.id,
             Self::Monitor { state, .. } => state.id(),
+            Self::ClockRecovery { state, .. } => state.id(),
         }
     }
     fn config(&self) -> &Config {
         match self {
-            Self::Native { config, .. } | Self::Monitor { config, .. } => config,
+            Self::Native { config, .. }
+            | Self::Monitor { config, .. }
+            | Self::ClockRecovery { config, .. } => config,
         }
     }
     fn blueprint_reference(&self) -> Option<Value> {
         match self {
             Self::Native { state, .. } => state.blueprint_reference(),
-            Self::Monitor { .. } => None,
+            Self::Monitor { .. } | Self::ClockRecovery { .. } => None,
         }
     }
     fn monitor_reference(&self) -> Option<Value> {
         match self {
             Self::Native { state, .. } => state.monitor_reference(),
             Self::Monitor { state, .. } => Some(state.reference()),
+            Self::ClockRecovery { state, .. } => Some(state.monitor_reference()),
         }
     }
     fn clock_reference(&self) -> Option<Value> {
         match self {
             Self::Native { state, .. } => state.clock_reference(),
             Self::Monitor { .. } => None,
+            Self::ClockRecovery { state, .. } => Some(state.clock_reference()),
         }
     }
     fn abandon(&mut self) {
@@ -1658,6 +1668,7 @@ async fn with_session(
         let mut retained_clock = None;
         let mut native_handoff = None;
         let mut monitor_only = false;
+        let mut clock_profile = None;
         let result = (|| {
             let id = session_id(&raw)?;
             let mut locked = lock()?;
@@ -1672,6 +1683,9 @@ async fn with_session(
             retained_monitor = entry.monitor_reference();
             retained_clock = entry.clock_reference();
             monitor_only = matches!(entry, Entry::Monitor { .. });
+            if let Entry::ClockRecovery { state, .. } = entry {
+                clock_profile = Some(state.mode().as_str());
+            }
             if op == "fortress.observe" {
                 entry.abandon();
             }
@@ -1744,6 +1758,24 @@ async fn with_session(
                         runtime::boundary(&control, &config, false)
                     })
                 }
+                Entry::ClockRecovery { state, .. } => {
+                    let mut c = state.context(wall)?;
+                    if !runtime::clock_enabled()? {
+                        c.grants
+                            .retain(|grant| grant.capability == Capability::Query);
+                    }
+                    let mut io = runtime::ClockIo {
+                        control: &control,
+                        config: &config,
+                        mode: if state.mode() == clock_recovery::Mode::Offline {
+                            DigMode::Offline
+                        } else {
+                            DigMode::Control
+                        },
+                        opening_recovery: None,
+                    };
+                    state.run_action(c, op, action, control.started, &mut io)
+                }
             };
             retained = entry.blueprint_reference();
             retained_monitor = entry.monitor_reference();
@@ -1771,6 +1803,10 @@ async fn with_session(
                     json!(native_effect_requested && !monitor_only);
                 if monitor_only {
                     result["monitor_only"] = json!(true);
+                }
+                if let Some(profile) = clock_profile {
+                    result["clock_recovery_only"] = json!(true);
+                    result["profile"] = json!(profile);
                 }
                 if let Some(reference) = retained {
                     result["blueprint"] = reference;
@@ -1948,9 +1984,85 @@ fn opening_selection(
         Ok((mode, Some(region), false))
     }
 }
+
+fn clock_recovery_selection(
+    raw: Option<&str>,
+    region: Option<&str>,
+    config: &Config,
+    game_ticks: Option<u64>,
+) -> Result<Option<clock_recovery::Mode>> {
+    let mode = match raw {
+        Some("clock-offline") => clock_recovery::Mode::Offline,
+        Some("clock-recovery") => clock_recovery::Mode::Recovery,
+        _ => return Ok(None),
+    };
+    if region.is_some() || game_ticks.is_some_and(|ticks| ticks != 0) {
+        return Err(error(
+            ErrorCode::InvalidRequest,
+            "independent clock recovery takes no bootstrap region or future game ticks",
+        ));
+    }
+    let monitor = config.monitor.as_ref().ok_or_else(|| {
+        error(
+            ErrorCode::CapabilityDenied,
+            "clock recovery requires its original monitor configuration",
+        )
+    })?;
+    let clock = config.clock.as_ref().ok_or_else(|| {
+        error(
+            ErrorCode::CapabilityDenied,
+            "clock recovery requires exact existing run custody",
+        )
+    })?;
+    if monitor.initialize
+        || monitor.recovery.is_none()
+        || clock.initialize
+        || clock.recovery.is_none()
+    {
+        return Err(error(
+            ErrorCode::CapabilityDenied,
+            "independent recovery never initializes replacement history",
+        ));
+    }
+    Ok(Some(mode))
+}
+
+/// Fresh opening grants for the two independent identities. Recovery never
+/// issues observation, planning, designation or future advancement authority.
+fn clock_recovery_authority(
+    config: &Config,
+    mode: clock_recovery::Mode,
+    enabled: bool,
+) -> (Vec<CapabilityGrant>, Vec<CapabilityGrant>) {
+    let control = mode == clock_recovery::Mode::Recovery && enabled;
+    let mut canonical = grants(config.fortress(), config.scope, false);
+    canonical.retain(|grant| grant.capability == Capability::Query);
+    if control {
+        canonical.push(CapabilityGrant {
+            capability: Capability::ControlClock,
+            scope: CapabilityScope {
+                fortress_id: Some(config.fortress()),
+                ..CapabilityScope::default()
+            },
+            max_risk: RiskTier::Guarded,
+            expires_at_tick: None,
+            remaining_uses: None,
+        });
+    }
+    let native = runtime::clock_grants(control)
+        .into_iter()
+        .filter(|grant| {
+            matches!(
+                grant.capability,
+                Capability::Query | Capability::ControlClock
+            )
+        })
+        .collect();
+    (canonical, native)
+}
 #[tool(
     name = "fortress.open_session",
-    description = "Open mining control or retained blueprint offline/reconcile with region=[x,y,z,width,height]. For an intact retained monitor without native or parent custody, select monitor-offline (inspection) or monitor-recovery (inspection/local stop) and omit region. Monitor-only modes have Query authority only and never contact the game. Paths/source pins are operator configuration."
+    description = "Open combined mining control or retained blueprint offline/reconcile with a region. Select clock-offline or clock-recovery without region and with zero game-tick allowance to recover exact existing monitor and clock histories without original dig/parent custody. Clock recovery can query the original run and, with separately retained clock authority, request its safety pause; it cannot plan or sample. Monitor-only modes remain available without configured clock custody. Paths/source pins are operator configuration."
 )]
 pub async fn fortress_open_session(
     region: Option<String>,
@@ -1964,6 +2076,7 @@ pub async fn fortress_open_session(
         mode.as_deref(),
         Some("monitor-offline" | "monitor-recovery")
     );
+    let requested_clock_only = matches!(mode.as_deref(), Some("clock-offline" | "clock-recovery"));
     runtime::owned("fortress.open_session", move |control| {
         let mut retained=None;
         let mut retained_monitor=None;
@@ -1971,8 +2084,11 @@ pub async fn fortress_open_session(
         let result=(|| {
             let config=runtime::configuration()?;
             runtime::boundary(&control,&config,false)?;
-            let (mode,region,monitor_only)=opening_selection(mode.as_deref(),region.as_deref(),&config)?;
-            let game_ticks=max_game_ticks.unwrap_or(0);
+            let recovery_mode=clock_recovery_selection(mode.as_deref(),region.as_deref(),&config,max_game_ticks)?;
+            let (mode,region,monitor_only)=if let Some(recovery)=recovery_mode {
+                (if recovery==clock_recovery::Mode::Offline {DigMode::Offline}else{DigMode::Control},None,false)
+            }else{opening_selection(mode.as_deref(),region.as_deref(),&config)?};
+            let game_ticks=max_game_ticks.map_or(0,|ticks|ticks);
             if game_ticks>1200 || (game_ticks>0 && (mode!=DigMode::Control || config.clock.is_none() || !runtime::clock_enabled()?)) {
                 return Err(error(ErrorCode::CapabilityDenied,"positive clock work requires configured control, explicit clock opt-in and at most1200 ticks"));
             }
@@ -1983,13 +2099,103 @@ pub async fn fortress_open_session(
             if locked.is_some() {return Err(error(ErrorCode::Conflict,"release the current mining session first"));}
             let seq=NEXT.try_update(Ordering::AcqRel,Ordering::Acquire,|n|(n<(1u64<<57)).then_some(n+1)).map_err(|_|exhausted())?;
             let id=SessionId::new((1u128<<127)|FAMILY|u128::from(seq));
-            let write=mode==DigMode::Control && runtime::enabled()?;
+            let write=recovery_mode.is_none() && mode==DigMode::Control && runtime::enabled()?;
             let mut c=OperationContext {session_id:id,request_id:RequestId::new(1),budget,cancellation_requested:false,
                 anchor:StateAnchor {fortress_id:config.fortress(),cursor:ObservationCursor::ORIGIN,tick:GameTick(0),state_hash:Digest32::ZERO},
                 grants:grants(config.fortress(),config.scope,write)};
-            if mode==DigMode::Offline || monitor_only {c.grants.retain(|g|g.capability==Capability::Query);}
-            add_clock_grants(&mut c,&config,mode,runtime::clock_enabled()?);
+            let mut recovery_native_grants=vec![];
+            if let Some(recovery)=recovery_mode {
+                (c.grants,recovery_native_grants)=clock_recovery_authority(&config,recovery,runtime::clock_enabled()?);
+            }else{
+                if mode==DigMode::Offline || monitor_only {c.grants.retain(|g|g.capability==Capability::Query);}
+                add_clock_grants(&mut c,&config,mode,runtime::clock_enabled()?);
+            }
             let mut work=Work::new(&c,control.started)?;
+            if let Some(recovery)=recovery_mode {
+                use clock::ClockIo as _;
+                let monitor_config=config.monitor.as_ref().ok_or_else(||error(ErrorCode::CapabilityDenied,"original monitor configuration absent"))?;
+                let clock_config=config.clock.as_ref().ok_or_else(||error(ErrorCode::CapabilityDenied,"original clock configuration absent"))?;
+                retained_monitor=monitor_config.recovery.map(monitor::recovery);
+                retained_clock=clock_config.recovery.map(clock::recovery);
+                // Reserve the whole opening before either private file is touched.
+                let monitor_open=work.take(&c,monitor::OPEN_BYTES)?;
+                let mut clock_open=work.take(&c,clock::OPEN_BYTES)?;
+                let mut constructor=work.take(&c,clock_recovery::INSPECT_BYTES)?;
+                let mut inspection=work.take(&c,clock_recovery::INSPECT_BYTES)?;
+                let mut publication=work.take(&c,clock_recovery::INSPECT_BYTES)?;
+                let store=dfmcp_adapter::dig_blueprint::monitor::store::open_private_monitor_store(
+                    &monitor_config.path,&monitor_open,DigMode::Offline,None,false,monitor_config.recovery,config.scope)?;
+                config.matches(store.spec().parent().binding())?;
+                monitor_config.matches(store.spec())?;
+                c.anchor.tick=c.anchor.tick.max(GameTick(store.high_tick()));
+                retained_monitor=Some(monitor::reference(&store));
+                if let Some(reference)=retained_monitor.as_mut(){reference["authority_tick_floor"]=json!(c.anchor.tick.get());}
+                retained_clock=clock_config.recovery.map(|pin|json!({
+                    "recovery":clock::recovery(pin),"authority_tick_floor":c.anchor.tick.get()}));
+                clock_open.anchor=c.anchor;
+                clock_open.budget.max_wall_millis=work.current(&c)?.budget.max_wall_millis;
+                let native=clock::native_context(&clock_open,&recovery_native_grants)?;
+                let mut io=runtime::ClockIo{control:&control,config:&config,mode,opening_recovery:None};
+                let opened=io.open(store.spec(),&clock_open,&native);
+                if let Some(pin)=io.opening_recovery(){retained_clock=Some(json!({
+                    "recovery":clock::recovery(pin),"authority_tick_floor":c.anchor.tick.get()}));}
+                let owner=opened?;
+                c.anchor.tick=c.anchor.tick.max(GameTick(owner.high_tick()));
+                let mut reference=clock::reference(&owner);
+                reference["authority_tick_floor"]=json!(c.anchor.tick.get());
+                retained_clock=Some(reference);
+                // Current opt-in may have disappeared after initial grant issue.
+                // The actual private owner's mode bounds this session forever.
+                if owner.mode()!=dfmcp_adapter::bounded_run::journal::RunMode::Control {
+                    c.grants.retain(|grant|grant.capability==Capability::Query);
+                    recovery_native_grants.retain(|grant|grant.capability==Capability::Query);
+                }
+                constructor.anchor=c.anchor;
+                constructor.grants=c.grants.clone();
+                constructor.budget.max_wall_millis=work.current(&c)?.budget.max_wall_millis;
+                let native=clock::native_context(&constructor,&recovery_native_grants)?;
+                let mut state=clock_recovery::RecoveryState::new(store,owner,&constructor,&native,&config,recovery)?;
+                state.set_budget(budget);
+                c.anchor.tick=GameTick(state.high_tick());
+                inspection.anchor=c.anchor;
+                inspection.grants=c.grants.clone();
+                inspection.budget.max_wall_millis=work.current(&c)?.budget.max_wall_millis;
+                let native=clock::native_context(&inspection,&recovery_native_grants)?;
+                let inspected=state.inspect(&inspection,&native);
+                c.anchor.tick=c.anchor.tick.max(GameTick(state.high_tick()));
+                retained_monitor=Some(state.monitor_reference());
+                retained_clock=Some(state.clock_reference());
+                let mut result=inspected?;
+                result["session_id"]=json!(id.to_string());
+                result["mode"]=json!(recovery.as_str());
+                result["capabilities"]=json!(c.grants.iter().map(|grant|grant.capability.as_str()).collect::<Vec<_>>());
+                result["native_capabilities"]=json!(recovery_native_grants.iter().map(|grant|grant.capability.as_str()).collect::<Vec<_>>());
+                result["max_game_ticks"]=json!(0);
+                let expected_monitor=result["blueprint_monitor"]["recovery"].clone();
+                let expected_clock=result["blueprint_clock"]["recovery"].clone();
+                let published_tick=c.anchor.tick;
+                let rendered=packet("fortress.open_session",result,Some(&c),Some(state.binding()),None,None,None);
+                if rendered.len() as u64>OUTPUT_BYTES{return Err(exhausted());}
+                work.current(&c)?;
+                runtime::boundary(&control,&config,false)?;
+                publication.anchor=c.anchor;
+                publication.grants=c.grants.clone();
+                publication.budget.max_wall_millis=work.current(&c)?.budget.max_wall_millis;
+                let native=clock::native_context(&publication,&recovery_native_grants)?;
+                let final_check=state.inspect(&publication,&native);
+                c.anchor.tick=c.anchor.tick.max(GameTick(state.high_tick()));
+                retained_monitor=Some(state.monitor_reference());
+                retained_clock=Some(state.clock_reference());
+                let final_check=final_check?;
+                if final_check["blueprint_monitor"]["recovery"]!=expected_monitor
+                    || final_check["blueprint_clock"]["recovery"]!=expected_clock
+                    || c.anchor.tick!=published_tick {
+                    return Err(error(ErrorCode::StaleAnchor,"original recovered histories changed before publication"));
+                }
+                work.current(&c)?;
+                *locked=Some(Entry::ClockRecovery{state,config});
+                return Ok(rendered);
+            }
             if monitor_only {
                 let selected=config.monitor.as_ref().ok_or_else(||error(ErrorCode::CapabilityDenied,"monitor recovery configuration absent"))?;
                 retained_monitor=selected.recovery.map(monitor::recovery);
@@ -2170,11 +2376,10 @@ pub async fn fortress_open_session(
             Err(e)=>{
                 let mut result=failure(&e);
                 if requested_monitor_only {result["monitor_only"]=json!(true);}
+                if requested_clock_only {result["clock_recovery_only"]=json!(true);}
                 if let Some(recovery)=retained {result["blueprint"]=json!({"recovery":recovery,"inventory_verified":false});}
-                if let Some(recovery)=retained_monitor {result["blueprint_monitor"]=json!({"recovery":recovery,"history_verified":false,
-                    "fresh_sample_acquired":false,"sampled_excavation_condition_proven":false});}
-                if let Some(recovery)=retained_clock {result["blueprint_clock"]=json!({"recovery":recovery,"history_verified":false,
-                    "current_pause_proven":false,"sampled_excavation_condition_proven":false,"retry_commit_permitted":false});}
+                if let Some(reference)=retained_monitor {result["blueprint_monitor"]=presentation::opening_monitor_reference(reference);}
+                if let Some(reference)=retained_clock {result["blueprint_clock"]=presentation::opening_clock_reference(reference);}
                 packet("fortress.open_session",result,None,None,None,None,None)
             }
         }
@@ -2439,6 +2644,7 @@ async fn close(raw: String, release: bool) -> String {
         let mut retained_monitor = None;
         let mut retained_clock = None;
         let mut monitor_only = false;
+        let mut clock_profile = None;
         let result = (|| {
             control.checkpoint()?;
             let id = session_id(&raw)?;
@@ -2468,6 +2674,33 @@ async fn close(raw: String, release: bool) -> String {
                     error(
                         ErrorCode::InternalInvariantViolation,
                         "invalid recovery close response",
+                    )
+                })?;
+                Work::new(&c, control.started)?.current(&c)?;
+                if value["result"]["ok"] == true {
+                    drop(locked.take());
+                }
+                return Ok(output);
+            }
+            if let Entry::ClockRecovery { state, config } = entry {
+                clock_profile = Some(state.mode().as_str());
+                let c = state.context(None)?;
+                let output = state.close(c.clone(), release, control.started, |_| {
+                    if release {
+                        control.checkpoint()
+                    } else {
+                        runtime::boundary(&control, config, false)
+                    }
+                });
+                retained_monitor = Some(state.monitor_reference());
+                retained_clock = Some(state.clock_reference());
+                if output.len() as u64 > OUTPUT_BYTES {
+                    return Err(exhausted());
+                }
+                let value: Value = serde_json::from_str(&output).map_err(|_| {
+                    error(
+                        ErrorCode::InternalInvariantViolation,
+                        "invalid clock recovery close response",
                     )
                 })?;
                 Work::new(&c, control.started)?.current(&c)?;
@@ -2544,6 +2777,10 @@ async fn close(raw: String, release: bool) -> String {
                 result["effect_may_have_occurred"] = json!(false);
                 if monitor_only {
                     result["monitor_only"] = json!(true);
+                }
+                if let Some(profile) = clock_profile {
+                    result["clock_recovery_only"] = json!(true);
+                    result["profile"] = json!(profile);
                 }
                 if let Some(reference) = retained {
                     result["blueprint"] = reference;
@@ -2662,5 +2899,7 @@ pub fn run_stdio() {
 }
 #[cfg(test)]
 mod batch_tests;
+#[cfg(test)]
+mod clock_recovery_routing_tests;
 #[cfg(test)]
 mod tests;

@@ -214,14 +214,21 @@ monitor format. Omitting it cannot establish that no clock history exists.
 Offline opening permits historical inspection. Reconcile mode permits native
 queries without new advancement. New intervals and safety cancellation require
 independently enabled Control authority. Combined restart still requires the
-original native dig journal, parent and monitor custody. If those are damaged
-but the clock journal remains intact, use the
-[standalone bounded-run runtime](BOUNDED_SIMULATION_MCP.md) for offline
-inspection, reconciliation or independently authorized safety cancellation
-under the same source binding. Do not prepare a replacement interval to bypass
-uncertainty about the original. Standalone run recovery does not reconstruct
-the blueprint proof. Monitor-only recovery does not open or conceal a
-configured clock.
+original native dig journal, parent and monitor custody. When the original
+monitor and clock histories remain intact, the independent
+[`clock-offline` and `clock-recovery` modes](DIG_BLUEPRINT_CLOCK_RECOVERY.md)
+reopen those exact two histories without the native dig journal, parent or a
+paused bootstrap observation. Omit `region` and keep `max_game_ticks=0`.
+Query-only recovery can reconcile the original run; separately retained clock
+authority permits its safety pause. Neither mode can start a new interval or
+sample the excavation goal.
+
+If the original monitor itself cannot be reconstructed, the
+[standalone bounded-run runtime](BOUNDED_SIMULATION_MCP.md) remains available
+for an intact clock journal under the same source binding, without reconstructing
+the blueprint association. Do not prepare a replacement interval to bypass
+uncertainty about the original. Monitor-only recovery does not open or conceal
+a configured clock.
 
 A failed response publication or an unacknowledged worker result withdraws
 unfinished monitor continuity and drops the prepared clock seal. The worker

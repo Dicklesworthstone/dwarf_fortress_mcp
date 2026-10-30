@@ -266,21 +266,31 @@ pub(super) fn configuration() -> Result<Config> {
         .as_deref()
         .map(super::clock::Config::parse)
         .transpose()?;
+    validate_clock_configuration(&config)?;
+    Ok(config)
+}
+
+/// An exact retained clock and monitor can be recovered without opening the
+/// original parent. Normal mining modes still require that parent at selection.
+fn validate_clock_configuration(config: &Config) -> Result<()> {
     if let Some(clock) = &config.clock {
-        let parent = config.blueprint.as_ref().ok_or_else(denied)?;
         let monitor = config.monitor.as_ref().ok_or_else(denied)?;
         if clock.path == config.path
             || clock.path == monitor.path
-            || clock.path == parent.path
+            || config.blueprint.as_ref().is_some_and(|parent| {
+                clock.path == parent.path || (!clock.initialize && parent.initialize)
+            })
+            || (config.blueprint.is_none() && clock.initialize)
             || clock.binding.endpoint() != config.endpoint
+            || clock.binding.endpoint() != monitor.source.endpoint()
             || clock.binding.manifest().df_version != monitor.source.df_version()
             || clock.binding.manifest().dfhack_version != monitor.source.dfhack_version()
-            || (!clock.initialize && (parent.initialize || monitor.initialize))
+            || (!clock.initialize && monitor.initialize)
         {
             return Err(denied());
         }
     }
-    Ok(config)
+    Ok(())
 }
 
 pub(super) struct RequestControl {
@@ -858,6 +868,85 @@ mod tests {
         }
         assert!(isolated("true", names.clone(), false).is_err());
         assert!(isolated("1", names, true).is_err());
+    }
+
+    fn retained_clock_config() -> Result<Config> {
+        use dfmcp_core::Digest32;
+        use serde_json::json;
+        let mut config = config(None, None)?;
+        let source = json!({"endpoint":"127.0.0.1:5000","generation":9,
+            "df_version":"test-df","dfhack_version":"test-dfhack"});
+        config.monitor = Some(super::super::monitor::Config::parse(
+            &json!({
+                "path":"/private/dig/monitor","initialize":false,"source":source,
+                "recovery":{"monitor_id":Digest32::of_bytes(b"original-monitor").to_string(),
+                    "head":Digest32::of_bytes(b"monitor-head").to_string()}
+            })
+            .to_string(),
+        )?);
+        let mut run_source = source;
+        run_source["generation"] = json!(41);
+        config.clock = Some(super::super::clock::Config::parse(
+            &json!({
+                "path":"/private/dig/clock","initialize":false,"source":run_source,
+                "recovery":{"journal_id":Digest32::of_bytes(b"original-run-journal").to_string(),
+                    "head":Digest32::of_bytes(b"run-head").to_string()}
+            })
+            .to_string(),
+        )?);
+        Ok(config)
+    }
+
+    #[test]
+    fn exact_existing_clock_configuration_allows_an_absent_parent_without_initialization()
+    -> Result<()> {
+        let original = retained_clock_config()?;
+        assert!(original.blueprint.is_none());
+        validate_clock_configuration(&original)?;
+        let mut changed = original.clone();
+        changed.clock.as_mut().ok_or_else(denied)?.initialize = true;
+        changed.clock.as_mut().ok_or_else(denied)?.recovery = None;
+        assert!(validate_clock_configuration(&changed).is_err());
+        let mut changed = original.clone();
+        changed.monitor.as_mut().ok_or_else(denied)?.initialize = true;
+        changed.monitor.as_mut().ok_or_else(denied)?.recovery = None;
+        assert!(validate_clock_configuration(&changed).is_err());
+        let mut changed = original;
+        changed.monitor = None;
+        assert!(validate_clock_configuration(&changed).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn parentless_clock_recovery_preserves_distinct_paths_and_exact_map_source() -> Result<()> {
+        use dfmcp_adapter::bounded_run::journal::RunBinding;
+        let original = retained_clock_config()?;
+        let monitor = original.monitor.as_ref().ok_or_else(denied)?;
+        let clock = original.clock.as_ref().ok_or_else(denied)?;
+        assert_ne!(
+            clock.binding.manifest().generation,
+            monitor.source.generation()
+        );
+        for path in [&original.path, &monitor.path] {
+            let mut changed = original.clone();
+            changed.clock.as_mut().ok_or_else(denied)?.path = path.clone();
+            assert!(validate_clock_configuration(&changed).is_err());
+        }
+        for field in ["endpoint", "df_version", "dfhack_version"] {
+            let mut changed = original.clone();
+            let selected = changed.clock.as_mut().ok_or_else(denied)?;
+            let mut manifest = selected.binding.manifest().clone();
+            let mut endpoint = selected.binding.endpoint();
+            match field {
+                "endpoint" => endpoint.set_port(endpoint.port() + 1),
+                "df_version" => manifest.df_version.push_str("-changed"),
+                "dfhack_version" => manifest.dfhack_version.push_str("-changed"),
+                _ => return Err(denied()),
+            }
+            selected.binding = RunBinding::new(endpoint, manifest)?;
+            assert!(validate_clock_configuration(&changed).is_err());
+        }
+        Ok(())
     }
 
     #[test]

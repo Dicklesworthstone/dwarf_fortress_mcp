@@ -44,6 +44,46 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Independent whole-blueprint clock recovery (2026-10-30)
+
+The existing mining MCP server now opens `clock-offline` and `clock-recovery`
+from the exact retained monitor and run histories without opening the native
+designation journal or blueprint parent, taking a paused bootstrap observation,
+acquiring terrain or issuing a mining lease. Both modes omit `region`, forbid
+positive game-time allowances, and retain no Plan, Observe or Designate grant.
+Offline inspection contacts no native source. Query-only writable recovery
+performs one original-outcome reconciliation per explicit request; independently
+retained named-fortress and NIL-source Clock authority permits the original
+safety cancellation. Neither mode can prepare a new interval or restore a
+recovered review. Later opt-in cannot promote a fixed Query-only owner.
+
+After intact startup, damage to the monitor file cannot strand cancellation
+through the intact original clock journal. Clock damage still refuses native
+operations; explicit recovery release preserves unverified references without
+claiming pause, settlement, quiescence or excavation proof. Every response
+retains the highest consumed authority tick. Opening reserves its full work
+before either file, checks both histories after the final runtime boundary,
+and preserves normal recovery-reference shapes through late failure and the
+outer runtime handoff. Agent Turn coverage distinguishes these two histories
+from the absent original designation inventory.
+
+Nineteen new routing/configuration/lifecycle regression groups join the earlier
+publication tests. All 100 focused actual-source MCP/Agent Turn tests pass,
+including lost dispatch, missing native/parent custody, post-open monitor
+damage, independent grant expiry, fixed Query-only recovery, late clock damage
+and failed cancellation publication. The query schema passes 59 valid and 205
+invalid cases. Full unchanged opening/dispatch/close and native I/O bodies also
+pass a separate Rust type/ownership check with actual core/world/intent/adapter
+and serde; only FastMCP registration and ambient asupersync APIs are nonexecuted
+stubs. This is component evidence, not full runtime or live qualification.
+
+Required `verify.sh` still stops at the existing source-bundle documentation
+failure. `qualify_local.sh` still stops at 76 static findings in 62 unchanged
+files. The full production MCP build remains unverified after shared memory
+pressure killed its earlier dependency build. No native/live campaign, release
+qualification, compatibility admission or production-map change is claimed.
+See [the recovery workflow](docs/DIG_BLUEPRINT_CLOCK_RECOVERY.md).
+
 ### Clock publication custody and consumed authority floors (2026-10-30)
 
 The mining MCP clock handler now prepays a final exact journal replay before

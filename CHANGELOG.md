@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-10-30 — Recover blueprint clock runs without original mining custody
+
+- Add `clock-offline` and `clock-recovery` through the existing eleven tools,
+  reopening exact monitor/run histories without the native dig journal, parent,
+  terrain acquisition or a paused bootstrap.
+- Permit original outcome reconciliation with Query only and separately enabled
+  safety cancellation with retained named/native Clock authority; keep future
+  game ticks at zero and permanently exclude new runs or restored review seals.
+- Allow cancellation after post-startup monitor damage while refusing native
+  work after clock damage; preserve unresolved histories on explicit release.
+- Verify both histories after the final opening callback, preserve consumed
+  floors and normal recovery shapes, and publish only historical coverage.
+- Add 19 regression groups; pass all 100 focused MCP/Agent Turn tests and 59
+  valid/205 invalid schema cases. Full wrapper bodies type-check with nonexecuted
+  ambient stubs. Existing repository-wide gate failures and full native/runtime
+  qualification limits remain explicit.
+
 ## 2026-10-30 — Recheck clock custody at the final publication boundary
 
 - Reserve the final exact clock-history replay before work, then verify custody
