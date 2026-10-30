@@ -9,6 +9,8 @@ import re
 import sys
 from dataclasses import dataclass
 
+import check_live_mcp
+
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 EXPECTED_RPC_METHODS = ["Handshake", "ReadObservation"]
 COMPILED_ADAPTER_MODULES = [
@@ -229,7 +231,9 @@ def check_adapter_graph(failures: list[Failure]) -> None:
         rust = read_required(path, failures)
         if not rust:
             continue
-        require("#![forbid(unsafe_code)]" in rust, path, "safe-Rust prohibition is missing", failures)
+        crate_root = "crates/dfmcp-mcp/src/lib.rs" if path.startswith("crates/dfmcp-mcp/") else lib_path
+        root_source = read_required(crate_root, failures)
+        require("#![forbid(unsafe_code)]" in root_source, crate_root, "crate-wide safe-Rust prohibition is missing", failures)
         code = code_mask(rust)
         for token in FORBIDDEN_PRODUCTION_TOKENS:
             require(token not in code, path, f"forbidden production token present: {token}", failures)
@@ -263,7 +267,14 @@ def check_adapter_graph(failures: list[Failure]) -> None:
     projection_path = "crates/dfmcp-adapter/src/live_projection.rs"
     projection = read_required(projection_path, failures)
     require("FactSource::DfhackField" in projection, projection_path, "live facts do not preserve DFHack provenance", failures)
-    require("duplicate native unit identity" in projection, projection_path, "duplicate native identity rejection is missing", failures)
+    require(
+        re.search(r"if\s+entities\.insert\(entity_id,\s*entity\)\.is_some\(\)\s*\{\s*return Err\(error\(\s*ErrorCode::AdapterRejected,\s*\"live citizen projection produced a duplicate canonical entity ID\"", projection) is not None,
+        projection_path, "duplicate canonical entity identity rejection is missing", failures,
+    )
+    require(
+        re.search(r"if\s+edges\.insert\(edge\.id,\s*edge\)\.is_some\(\)\s*\{\s*return Err\(error\(\s*ErrorCode::AdapterRejected,\s*\"live citizen projection produced a duplicate membership edge ID\"", projection) is not None,
+        projection_path, "duplicate membership edge rejection is missing", failures,
+    )
 
     adapter_path = "crates/dfmcp-adapter/src/live_adapter.rs"
     adapter = read_required(adapter_path, failures)
@@ -278,10 +289,11 @@ def check_adapter_graph(failures: list[Failure]) -> None:
 
 
 def check_mcp_and_cli(failures: list[Failure]) -> None:
-    lib_path = "crates/dfmcp-mcp/src/lib.rs"
-    lib = read_required(lib_path, failures)
-    require("pub mod live_server;" in lib, lib_path, "live server is not compiled", failures)
-    require("pub use live_server::run_live_stdio;" in lib, lib_path, "live server entrypoint is not exported", failures)
+    # Share the admission-aware wiring contract, including private runner and
+    # protocol-bound ticket dispatch, with the independent live MCP gate.
+    wiring_failures: list[check_live_mcp.Failure] = []
+    check_live_mcp.check_cli_and_crate_wiring(wiring_failures)
+    failures.extend(Failure(f.path, f.message) for f in wiring_failures)
 
     server_path = "crates/dfmcp-mcp/src/live_server.rs"
     server = read_required(server_path, failures)

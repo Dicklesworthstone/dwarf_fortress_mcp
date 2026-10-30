@@ -6,9 +6,14 @@ from __future__ import annotations
 import ast
 import json
 import pathlib
+import os
+import subprocess
 import sys
 from dataclasses import dataclass
 from typing import Any
+
+import check_dfhack_bridge
+import check_local_qualification_receipt as local_receipt
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 CONTRACT = ROOT / "architecture/live_read_acceptance_v1.json"
@@ -535,15 +540,35 @@ def check_qualification_wiring(failures: list[Failure]) -> None:
         for marker in common:
             require(marker in source, path, f"qualification wiring omits {marker}", failures)
         require("dfmcp-live-probe" in source, path, "qualification does not execute probe help", failures)
-    qualify = read(ROOT / "scripts/qualify_local.sh", failures)
-    for digest_name in [
-        "dfhack_acceptance_probe",
-        "live_acceptance_probe_binary",
-        "live_acceptance_journal",
-        "live_acceptance_secret_scanner",
-        "live_acceptance_secret_scanner_tests",
-    ]:
-        require(digest_name in qualify, ROOT / "scripts/qualify_local.sh", f"qualification receipt omits {digest_name}", failures)
+    # The current receipt binds every tracked HEAD file via a stable two-phase
+    # source snapshot; retired per-file aliases are no longer receipt fields.
+    try:
+        local_receipt.check_contract()
+        local_receipt.check_writer()
+        local_receipt.check_wrapper()
+    except (OSError, SyntaxError, json.JSONDecodeError, local_receipt.ContractError) as exc:
+        failures.append(Failure("scripts/qualify_local.sh", f"qualification source binding is invalid: {exc}"))
+    writer_path = ROOT / "scripts/write_local_qualification_receipt.py"
+    require(check_dfhack_bridge.receipt_inventory_dataflow(read(writer_path, failures)), writer_path,
+            "qualification receipt does not preserve complete two-phase inventory dataflow", failures)
+    required = [
+        "crates/dfmcp-adapter/src/dfhack_probe.rs",
+        "crates/dwarf-fortress-mcp/src/bin/dfmcp-live-probe.rs",
+        "scripts/live_read_evidence_journal.py",
+        "scripts/scan_live_read_secrets.py",
+        "scripts/test_scan_live_read_secrets.py",
+    ]
+    try:
+        environment = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        result = subprocess.run(["git", "ls-tree", "-r", "--name-only", "-z", "HEAD", "--", *required],
+                                cwd=ROOT, capture_output=True, check=True, timeout=30, env=environment)
+        tracked = set(result.stdout.decode("utf-8").split("\0"))
+    except (OSError, UnicodeDecodeError, subprocess.SubprocessError) as exc:
+        failures.append(Failure("scripts/qualify_local.sh", f"cannot verify HEAD acceptance inventory: {exc}"))
+    else:
+        for item in required:
+            require(item in tracked and (ROOT / item).is_file() and not (ROOT / item).is_symlink(),
+                    ROOT / item, "required acceptance source is absent from HEAD inventory or redirected", failures)
     native = read(ROOT / "scripts/qualify_dfhack_plugin.sh", failures)
     for marker in [
         "scripts/check_live_acceptance_contract.py",

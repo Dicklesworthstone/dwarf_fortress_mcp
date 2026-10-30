@@ -111,6 +111,7 @@ class Fixture:
             "schema_version": promotion.REGISTRY_SCHEMA,
             "status": "admitted_live_tuples",
             "entries": [self.entry],
+            "revocations": [],
         }
         self.registry_path.write_text(json.dumps(self.registry, sort_keys=True) + "\n")
         launcher.compatibility_floor.initialize_floor(

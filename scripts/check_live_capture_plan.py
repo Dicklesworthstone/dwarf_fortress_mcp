@@ -5,10 +5,15 @@ from __future__ import annotations
 
 import ast
 import json
+import os
 import pathlib
+import subprocess
 import sys
 from dataclasses import dataclass
 from typing import Any
+
+import check_dfhack_bridge
+import check_local_qualification_receipt as local_receipt
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ACCEPTANCE = ROOT / "architecture/live_read_acceptance_v1.json"
@@ -146,7 +151,11 @@ def check_plan(failures: list[Failure]) -> None:
         require(all(isinstance(value, str) and value for value in argv), PLAN, f"{gate}/{case} argv contains an invalid value", failures)
         joined = "\0".join(value for value in argv if isinstance(value, str))
         for forbidden in FORBIDDEN_ARGUMENTS:
-            require(forbidden not in argv and forbidden not in joined, PLAN, f"{gate}/{case} argv contains forbidden fragment {forbidden}", failures)
+            if forbidden in {"bash", "sh", "zsh", "cmd", "powershell", "pwsh"}:
+                blocked = bool(argv) and pathlib.Path(argv[0]).name.lower().removesuffix(".exe") == forbidden
+            else:
+                blocked = forbidden in argv
+            require(not blocked, PLAN, f"{gate}/{case} argv contains forbidden argument {forbidden}", failures)
         require("DFMCP_BRIDGE_TOKEN=" not in joined and "--token" not in joined and "--secret" not in joined, PLAN, f"{gate}/{case} argv exposes secret material", failures)
         if kind == "probe":
             require("dfmcp-live-probe" in argv and append_mode == "append-probe", PLAN, f"{gate}/{case} probe command or append mode drifted", failures)
@@ -191,8 +200,25 @@ def check_guidance(failures: list[Failure]) -> None:
         "finalize_argv",
     ]:
         require(marker in source, GUIDANCE, f"guidance output omits {marker}", failures)
-    for forbidden in ["shell=True", "os.system", "subprocess", "DFMCP_BRIDGE_TOKEN="]:
-        require(forbidden not in source, GUIDANCE, f"guidance contains forbidden execution/secret token {forbidden}", failures)
+    # A defensive deny-list must be allowed to name the token it rejects.
+    # The same literal anywhere outside that one set is still rejected.
+    defensive_literals = set()
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(
+            isinstance(target, ast.Name) and target.id == "FORBIDDEN_ARG_FRAGMENTS"
+            for target in node.targets
+        ) and isinstance(node.value, ast.Set):
+            defensive_literals.update(id(child) for child in ast.walk(node.value))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            require("DFMCP_BRIDGE_TOKEN=" not in node.value or id(node) in defensive_literals,
+                    GUIDANCE, "guidance contains a secret-assignment literal outside its defensive set", failures)
+        if isinstance(node, ast.keyword) and node.arg == "shell":
+            require(not isinstance(node.value, ast.Constant) or node.value.value is not True,
+                    GUIDANCE, "guidance enables shell execution", failures)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+            require(node.func.id not in {"__import__", "eval", "exec", "compile"},
+                    GUIDANCE, "guidance contains dynamic code execution", failures)
 
 
 def check_tests(failures: list[Failure]) -> None:
@@ -230,14 +256,27 @@ def check_wiring(failures: list[Failure]) -> None:
         source = read(path, failures)
         for marker in markers:
             require(marker in source, path, f"qualification wiring omits {marker}", failures)
-    qualify = read(ROOT / "scripts/qualify_local.sh", failures)
-    for digest_name in [
-        "live_capture_plan",
-        "live_capture_plan_checker",
-        "live_capture_guidance",
-        "live_capture_guidance_tests",
-    ]:
-        require(digest_name in qualify, ROOT / "scripts/qualify_local.sh", f"qualification receipt omits {digest_name}", failures)
+    try:
+        local_receipt.check_contract()
+        local_receipt.check_writer()
+        local_receipt.check_wrapper()
+    except (OSError, SyntaxError, json.JSONDecodeError, local_receipt.ContractError) as exc:
+        failures.append(Failure("scripts/qualify_local.sh", f"qualification source binding is invalid: {exc}"))
+    writer = ROOT / "scripts/write_local_qualification_receipt.py"
+    require(check_dfhack_bridge.receipt_inventory_dataflow(read(writer, failures)), writer,
+            "qualification receipt omits complete two-phase source inventory", failures)
+    required = [relative(path) for path in [PLAN, ROOT / markers[0], GUIDANCE, TESTS]]
+    try:
+        environment = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        result = subprocess.run(["git", "ls-tree", "-r", "--name-only", "-z", "HEAD", "--", *required],
+                                cwd=ROOT, capture_output=True, check=True, timeout=30, env=environment)
+        tracked = set(result.stdout.decode("utf-8").split("\0"))
+    except (OSError, UnicodeDecodeError, subprocess.SubprocessError) as exc:
+        failures.append(Failure("scripts/qualify_local.sh", f"cannot verify capture source inventory: {exc}"))
+    else:
+        for path in required:
+            require(path in tracked and (ROOT / path).is_file() and not (ROOT / path).is_symlink(),
+                    ROOT / path, "capture source is missing from HEAD inventory or redirected", failures)
 
 
 def main() -> int:

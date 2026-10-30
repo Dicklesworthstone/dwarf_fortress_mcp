@@ -14,6 +14,7 @@ import unittest
 from pathlib import Path
 from typing import Any
 from unittest import mock
+import check_live_server_artifact as artifact_gate
 
 MODULE_PATH = Path(__file__).with_name("verify_live_server_binary_receipt.py")
 SPEC = importlib.util.spec_from_file_location("verify_live_server_binary_receipt", MODULE_PATH)
@@ -182,6 +183,19 @@ class Fixture:
 
 
 class LiveServerBinaryReceiptTests(unittest.TestCase):
+    def test_aggregate_wiring_binds_actual_source_inventory(self) -> None:
+        artifact_gate.check_wiring_and_docs()
+        original = Path.read_text
+        target = artifact_gate.ROOT / "scripts/write_local_qualification_receipt.py"
+        def changed(path, *args, **kwargs):
+            source = original(path, *args, **kwargs)
+            if path == target:
+                source = source.replace("current_after_publish != snapshot", "False")
+            return source
+        with mock.patch.object(Path, "read_text", changed):
+            with self.assertRaises((artifact_gate.ContractError, artifact_gate.local_receipt.ContractError)):
+                artifact_gate.check_wiring_and_docs()
+
     def fixture(self) -> tuple[tempfile.TemporaryDirectory[str], Fixture]:
         temporary = tempfile.TemporaryDirectory()
         return temporary, Fixture(Path(temporary.name))

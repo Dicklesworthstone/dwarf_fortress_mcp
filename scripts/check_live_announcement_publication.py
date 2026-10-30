@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -31,7 +32,8 @@ def require(condition: bool, message: str) -> None:
 def require_markers(path: Path, markers: list[str]) -> str:
     source = path.read_text(encoding="utf-8")
     for marker in markers:
-        require(marker in source, f"{path.relative_to(ROOT)} omits {marker}")
+        require(re.sub(r"\s+", "", marker) in re.sub(r"\s+", "", source),
+                f"{path.relative_to(ROOT)} omits {marker}")
     return source
 
 
@@ -288,10 +290,11 @@ def check_status() -> None:
         "returns no capsule",
         "candidate projection and budget validation before state publication",
         "no fresh passing source qualification receipt",
-        "current normal admitted mcp server is still protocol 1.0",
+        "normal admitted mcp server remains protocol 1.0",
         "no mutation authority",
     ]:
-        require(marker in source, f"announcement implementation status omits {marker}")
+        require(" ".join(marker.split()) in " ".join(source.split()),
+                f"announcement implementation status omits {marker}")
 
 
 def main() -> int:

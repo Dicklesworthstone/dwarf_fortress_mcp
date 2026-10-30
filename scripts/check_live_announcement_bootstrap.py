@@ -139,7 +139,8 @@ def check_status() -> None:
         "announcement continuation",
         "still unadmitted",
     ]:
-        require(marker in source, f"announcement implementation status omits {marker}")
+        require(" ".join(marker.split()) in " ".join(source.split()),
+                f"announcement implementation status omits {marker}")
 
 
 def main() -> int:

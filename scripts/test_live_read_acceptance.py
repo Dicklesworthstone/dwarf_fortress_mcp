@@ -8,6 +8,7 @@ import importlib.util
 import json
 import tempfile
 import unittest
+from unittest.mock import patch
 import sys
 from pathlib import Path
 from typing import Any
@@ -436,6 +437,42 @@ class LiveReadAcceptanceTests(unittest.TestCase):
                 verifier.verify_acceptance(
                     fixture.evidence_path, fixture.contract_path, fixture.options()
                 )
+
+
+class QualificationInventoryTests(unittest.TestCase):
+    def test_acceptance_sources_are_bound_by_the_current_receipt(self) -> None:
+        import check_live_acceptance_contract as contract
+        failures = []
+        contract.check_qualification_wiring(failures)
+        self.assertEqual(failures, [])
+
+    def test_removed_inventory_and_snapshot_checks_are_rejected(self) -> None:
+        import check_live_acceptance_contract as contract
+        writer_path = contract.ROOT / "scripts/write_local_qualification_receipt.py"
+        original = writer_path.read_text()
+        real_read = contract.read
+        for old, new in [("listing.split(b\"\\0\")", "[]"),
+                         ("if current_before_publish != snapshot:", "if False:"),
+                         ('{entry["path"]: entry["sha256"] for entry in snapshot["entries"]}', "{}")]:
+            with self.subTest(old=old):
+                mutant = original.replace(old, new)
+                self.assertNotEqual(mutant, original)
+                failures = []
+                with patch.object(contract, "read", side_effect=lambda p, f: mutant if p == writer_path else real_read(p, f)):
+                    contract.check_qualification_wiring(failures)
+                self.assertTrue(any("inventory dataflow" in f.message for f in failures))
+
+    def test_missing_acceptance_source_in_head_is_rejected(self) -> None:
+        import check_live_acceptance_contract as contract
+        actual_run = contract.subprocess.run
+        def omitted(*args, **kwargs):
+            result = actual_run(*args, **kwargs)
+            result.stdout = result.stdout.replace(b"scripts/live_read_evidence_journal.py\0", b"")
+            return result
+        failures = []
+        with patch.object(contract.subprocess, "run", side_effect=omitted):
+            contract.check_qualification_wiring(failures)
+        self.assertTrue(any(f.path == "scripts/live_read_evidence_journal.py" and "HEAD inventory" in f.message for f in failures))
 
 
 if __name__ == "__main__":

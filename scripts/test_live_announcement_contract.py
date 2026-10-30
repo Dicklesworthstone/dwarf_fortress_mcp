@@ -120,6 +120,24 @@ class LiveAnnouncementContractTests(unittest.TestCase):
             path.write_text(json.dumps(value) + "\n", encoding="utf-8")
             self.assertNotEqual(self.run_checker(root).returncode, 0)
 
+    def test_native_rpc_registration_is_exact_and_local(self) -> None:
+        for before, after in [
+            ('service->addFunction("Handshake", Handshake, 0);',
+             'service->addFunction("Handshake", Handshake, SF_ALLOW_REMOTE);'),
+            ('service->addFunction("ReadObservation", ReadObservation, 0);',
+             '// service->addFunction("ReadObservation", ReadObservation, 0);'),
+            ('return service;',
+             'service->addFunction("Extra", Handshake, 0); return service;'),
+        ]:
+            with self.subTest(after=after):
+                temporary, root = self.fixture()
+                with temporary:
+                    path = root / "bridge/dfhack-plugin/src/dfmcp_bridge_v1_1.cpp"
+                    source = path.read_text(encoding="utf-8")
+                    self.assertIn(before, source)
+                    path.write_text(source.replace(before, after), encoding="utf-8")
+                    self.assertNotEqual(self.run_checker(root).returncode, 0)
+
     def test_projection_history_overclaim_is_rejected(self) -> None:
         temporary, root = self.fixture()
         with temporary:

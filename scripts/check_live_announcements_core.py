@@ -381,8 +381,19 @@ def check_proto_and_native() -> None:
             "publish_announcements",
             "HARD_MAX_ANNOUNCEMENTS = 512",
             "MAX_ANNOUNCEMENT_TEXT_BYTES = 2048",
-            "DFHACK_PLUGIN_RPC_HANDLERS",
+            "DFhackCExport RPCService *plugin_rpcconnect(color_ostream &)",
+            'service->addFunction("Handshake", Handshake, 0);',
+            'service->addFunction("ReadObservation", ReadObservation, 0);',
         ],
+    )
+    registrations = re.findall(
+        r'service->addFunction\(\s*"([^"\n]+)"\s*,\s*(\w+)\s*,\s*([^)]*)\)',
+        re.sub(r"//[^\n]*|/\*.*?\*/", "", native, flags=re.S),
+    )
+    require(
+        registrations == [("Handshake", "Handshake", "0"),
+                          ("ReadObservation", "ReadObservation", "0")],
+        "protocol 1.1 must register exactly two authenticated local RPC handlers",
     )
     for forbidden in [
         'add_supported_methods("ReadAnnouncements")',
@@ -607,7 +618,8 @@ def check_qualification_and_docs() -> None:
         "no mutation method",
         "handshake\nreadobservation",
     ]:
-        require(marker in documentation, f"announcement documentation omits {marker}")
+        require(" ".join(marker.split()) in " ".join(documentation.split()),
+                f"announcement documentation omits {marker}")
 
     status = STATUS.read_text(encoding="utf-8").lower()
     for marker in [

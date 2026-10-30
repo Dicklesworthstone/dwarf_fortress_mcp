@@ -14,6 +14,8 @@ admitted merely because the implementation exists or a development read succeeds
 
 ## Implemented source path
 
+The Safe-Rust wire and publication layers remain outside the native DFHack trust domain.
+
 The protocol-1.1 stack now contains:
 
 ```text
@@ -94,6 +96,8 @@ are required, the publisher:
 8. preserves an initial retained-window gap;
 9. combines pages into one canonical protocol-1.1 capsule only after the suffix reaches the observed
    high-water.
+
+This transactional multi-page announcement publication never exposes an incomplete candidate.
 
 Any failure returns no capsule. Transport pagination therefore cannot become partial canonical
 state, and one-page versus multi-page transport produces the same final capsule identity for the

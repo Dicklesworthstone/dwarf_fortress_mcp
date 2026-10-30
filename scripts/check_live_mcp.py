@@ -145,16 +145,21 @@ def check_live_server(failures: list[Failure]) -> None:
         body = function_body(source, tool)
         require(bool(body), path, f"cannot isolate body for {tool}", failures)
         signature = re.search(
-            rf"pub fn {re.escape(tool)}\s*\((.*?)\)\s*->",
+            rf"pub fn {re.escape(tool)}\s*\(([^{{}}]*?)\)\s*->",
             source,
             re.S,
         )
         if signature is not None:
-            arguments = signature.group(1).lower()
+            arguments = re.findall(r"\b([a-z_][a-z0-9_]*)\s*:", signature.group(1).lower())
+            if tool == "fortress_open_session":
+                require(
+                    arguments == ["paused", "fortress_selector", "requested_capabilities", "max_wall_millis", "max_game_ticks", "max_entities", "max_bytes", "max_output_tokens", "max_actions"],
+                    path,
+                    "fortress_open_session argument allowlist changed",
+                    failures,
+                )
             require(
-                "token" not in arguments
-                and "endpoint" not in arguments
-                and "secret" not in arguments,
+                all(name == "max_output_tokens" or not any(forbidden in name for forbidden in ("token", "endpoint", "secret")) for name in arguments),
                 path,
                 f"{tool} exposes deployment secrets or endpoint as MCP arguments",
                 failures,
@@ -261,7 +266,7 @@ def check_adapter_chain(failures: list[Failure]) -> None:
         "crates/dfmcp-adapter/src/live_bootstrap.rs": [
             "bootstrap_live_read_adapter",
             "PrimedLiveSource",
-            "bootstrap reads the underlying source once",
+            "bootstrap_reads_the_underlying_source_once",
             "source manifest changed between the first capsule and adapter bootstrap",
         ],
         "crates/dfmcp-adapter/src/live_identity.rs": [
@@ -321,15 +326,32 @@ def check_cli_and_crate_wiring(failures: list[Failure]) -> None:
     lib_path = "crates/dfmcp-mcp/src/lib.rs"
     lib = read(lib_path, failures)
     require(
-        "pub mod live_server;" in lib,
+        re.search(r"(?m)^mod live_server;\s*$", lib) is not None,
         lib_path,
-        "live server module is not compiled",
+        "live server module must be compiled privately",
         failures,
     )
     require(
-        "pub use live_server::run_live_stdio;" in lib,
+        re.search(r"pub use admission::\{[^}]*\brun_live_stdio\b[^}]*\};", lib, re.S) is not None,
         lib_path,
-        "live server entrypoint is not exported",
+        "admission-controlled live server entrypoint is not exported",
+        failures,
+    )
+
+    admission_path = "crates/dfmcp-mcp/src/admission.rs"
+    admission = read(admission_path, failures)
+    runner = re.search(r"fn admitted_live_runner\([^{}]*\)\s*->\s*[^{}]+\{(.*?)\n\}", admission, re.S)
+    startup = re.search(r"pub fn run_live_stdio\(\)\s*\{(.*?)\n\}", admission, re.S)
+    require(
+        runner is not None and startup is not None
+        and "ADMITTED_BRIDGE_PROTOCOL_V1 => Ok(crate::live_server::run_live_stdio)" in runner.group(1)
+        and "_ => Err(" in runner.group(1)
+        and "consume_admission_ticket_from_environment()" in startup.group(1)
+        and "admitted_live_runner(provenance.bridge_protocol())" in startup.group(1)
+        and "runner();" in startup.group(1)
+        and startup.group(1).index("consume_admission_ticket_from_environment()") < startup.group(1).index("admitted_live_runner(provenance.bridge_protocol())") < startup.group(1).index("runner();"),
+        admission_path,
+        "private live runner is not routed through protocol-bound admission",
         failures,
     )
 

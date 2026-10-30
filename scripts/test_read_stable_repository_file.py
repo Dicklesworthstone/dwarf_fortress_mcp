@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -14,6 +15,7 @@ SPEC = importlib.util.spec_from_file_location("read_stable_repository_file", MOD
 if SPEC is None or SPEC.loader is None:
     raise RuntimeError("cannot load stable repository file reader")
 reader = importlib.util.module_from_spec(SPEC)
+sys.modules[SPEC.name] = reader
 SPEC.loader.exec_module(reader)
 
 

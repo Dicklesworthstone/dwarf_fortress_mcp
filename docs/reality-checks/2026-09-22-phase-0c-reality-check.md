@@ -1,4 +1,137 @@
-# Reality Check — Phase 0C vs the Promised Control Plane (2026-09-22)
+# Reality Check — Current Wiring and Historical Findings
+
+## 2026-10-30 executable recheck (in progress)
+
+The September assessment below is historical. It is not the current implementation inventory.
+The current project has real native read and isolated development mutation paths, durable
+laboratory workflows and modern MCP Tasks. It does **not** yet establish a competent autonomous
+fortress campaign or an admitted deployment. The compatibility registry is empty; the production
+runner map remains protocol 1.0 only. Development execution grants no admission.
+
+This pass uses `reality-check-for-project`, `beads-br`, `beads-workflow`, and NTM. The parent read
+the full governing AGENTS/README and required architecture boundaries, inspected executable
+dispatch, and obtained an independent Terra wiring review. This is a capability-family audit;
+it is not a claim that every function or every Markdown document was exhaustively reviewed.
+The canonical work item is **dfmcp-reality-wiring-proof-4bf**. Historical closed umbrella beads
+are retained as history, with explicit residual work rather than silent completion credit.
+
+### Evidence custody and limits
+
+- Real installation: official DF Classic 53.16 and DFHack 53.16-r3 on the tailnet Linux host
+  `trj-ts`; actual SDK/source revision `0bf381cc1615656acf756e6e67573fffca715125`.
+- The quiet `ts2-ts` worker compiles against the real generated SDK headers, bundled protobuf
+  2.6, upstream unmodified DFHack plugin macro and matching installed DFHack libraries. All
+  **20 plugins in 19 packages** compile and link after repairs, including a newly restored
+  protocol-1.1 build fragment. This is a native development build, not a complete R1 receipt.
+- The shared checkout changes concurrently. Failed runs, source inventories and logs remain
+  under `target/reality-check-20261030/`. The private clean R7 candidate is
+  `a5fa53c4f9365e7ba27da1ffa0ac9ab0c7509952`, parent
+  `e08ae1469ef07be097a437eed606f9f069b43370`; its 2,587-file manifest SHA-256 is
+  `49175ad8ef890ac0b6ef61b77b7f506fd5c419c17b4d23d02cc07f78a5270623`.
+- Full workspace/all-target/all-feature runs used latest nightly, locked/offline resolution
+  and no fail-fast: R4 **5,014 passed / 54 failed**, R5 **5,100 / 12**, R6 **5,111 / 2**,
+  each across **123 targets, zero ignored**, exit 101. Modern Tasks process goldens passed
+  **7/7**. Failed runs remain failed; subsequent focused passes do not replace them.
+- Clean private R7 built all binaries, then `qualify_local.sh` passed static/Python gates,
+  locked metadata and formatting but failed warning-denied Clippy on ten adapter findings.
+  Repairs preserve visible progress and exact private journal encoding; a new full run is
+  required. The clean qualifier correctly refuses the dirty shared root.
+- Sonnet 5.5, launched and observed through NTM, captured **67 schema pages in 72 requests**,
+  reconstructed complete JSON, refused a tampered continuation and exited 0. This proves
+  discovery. Protocol-1.0 citizens match all seven native names, including four previously
+  truncated diacritics. Protocol-1.1 development reads cover the retained announcement suffix;
+  complete fortress history remains unproved.
+- A real welcome modal exposed a raw/composite pause defect. The repaired engine performs
+  and verifies a raw safety pause before releasing ownership; a failed setter/readback keeps
+  the owner. Actual SDK builds and deterministic failure vectors cover all three shared run
+  writers. An adversarial modal trial independently verifies raw pause after terminalization.
+- The **exact-source ten-tick MCP trial succeeded**: one plan/commit, two foreground waits,
+  `tick_limit`, ten ticks advanced, zero overshoot, closed custody, child exit 0; fresh-session
+  and native checks show pause true and no active owner. Server SHA-256:
+  `7dae1087e82ace62c0b7a01b6a6131710f24dbd9e4de1b870ed732392b9b1898`.
+  Its [source-bound report](../../target/reality-check-20261030/live4-sourcebound-export/terra-live4-sourcebound-report.json)
+  seals 40 artifacts; SHA256SUMS digest
+  `1eb42b06b302fdedd8024f4fd28d8b46ab19db3c15344a9f38be891631d50555`.
+- The earlier sixty-tick request reached **47 ticks** before `wall_limit`, then reconciled
+  and verified pause. The [larger live report](../../target/reality-check-20261030/live4-export/terra-live4-report.json)
+  seals 199 artifacts; SHA256SUMS digest
+  `a4834efbd86e24447fc4a1e41d33875c0f3b81c8b36d3840665be0f09a7c6ae9`.
+  Its older Rust binaries are hash-identified but lack the later R7 source binding.
+- Mining refuses hidden cells in the required safety halo. Tree trunks are correctly not
+  natural mineable walls. No designation, excavation, furniture-production or sustained
+  fortress campaign is credited. Operator-only save loading and welcome-modal removal kept
+  raw pause true and time unchanged and are excluded from agent gameplay credit.
+- Both sealed exports verify on TRJ, TS2 and this machine; token scans (including decompressed
+  source members) found zero matches. The owned game/supervisor group is stopped, TCP closed,
+  original save backup intact, and the verified idle NTM trial session has been removed.
+  No fresh complete qualification, R1/R2–R5 campaign, release or production admission exists.
+
+### Current vision and wiring matrix
+
+| Goal | Actual reachable path and present limit | Status / owning work |
+|---|---|---|
+| One eleven-tool semantic loop | Main `serve` → agent facade → laboratory server; all 21 MCP development entrypoints dispatch to explicit profile servers; canonical Agent Turn and negotiated bounds | PARTIAL; .1/.3/.6; full current qualification pending |
+| Modern transport and Tasks | Pinned owned FastMCP → actual stdio child → task service/store → retained original plan and foreground progress | Executed process tests 7/7; .1; no full qualification transfer |
+| Real read-only world observation | Native authenticated Handshake/ReadObservation → wire/capsule/projection → read adapter → admitted wrapper or isolated dev server | Real citizens/items/buildings/map read trials; no admitted tuple |
+| Protocol-1.1 announcements | Separate native plugin → transactional suffix publication → one-read bootstrap → development MCP | Real retained-suffix development reads; no A1–A6 or production-map admission |
+| Original Mine designation and goal proof | Semantic Mine runtime → independent canonical/native evidence → dig/1.16 journal → fresh floor samples | Live planning refusals preserved; excavation competence UNPROVEN; .5 |
+| Bounded game clock | Separately reviewed run/1.13 or goal-bound clock owner; wait reconciles rather than starts another run | Exact-source ten-tick live success; 47/60 wall stop retained; full campaign .5 |
+| Job suspension | Real bounded SDK job-list lookup; missing/duplicate/cyclic/oversize source rejected; eligibility currently false | PARTIAL, positive mutation unavailable; .8; refusal-only proof cannot close it |
+| Work orders, labor and furniture | Dedicated semantic owners preserve exact source/plan/native identities; concrete production executor now exists | Source/native build; mixed-family executor has no MCP host consumer found; pic.4/.5 |
+| Shared cancellation and physical work | Laboratory coordinator → owned actions → dependency-order drain → observations/certificates | Runtime selector and obligation retention repaired; full qualification pending; .1 |
+| Durable goals and restart | Laboratory private durable stores retain original plan, historical receipts and current proof separately | Real lab integration tests; native save/restore remains outside MCP |
+| World MVCC and witnesses | Canonical snapshots, immutable historical views, witness validation and deterministic state transitions are real | PARTIAL; production FrankenSQLite consumer remains 54h.1 |
+| Structural semantic merge | MCP intent replay is reachable; structural merge/certificate engine is separately implemented | No runtime fallback consumer found; .10 |
+| ATP distribution | Cryptographic capsule/tree/seal verification exists | No actual movement/repair daemon proved; 54h.3 and jtg |
+| Checkpoint and restore | Laboratory durable checkpoints/epoch fencing work; live profiles explicitly refuse missing providers | PARTIAL; FrankenFS/live integration 54h.2 |
+| Graph algorithms and spatial inference | Bounded route/dominance/resilience and historical query handlers consume real canonical projections | Reachable; focused regressions repaired; immutable backend generation work 54h.4 |
+| Search and attention | Actual bounded lexical retrieval and deterministic attention selection exist | Owned FrankenSearch runtime integration not proved; .9 |
+| Resource URI contract | Actual registered session and doctor resources; session replay/Tasks use the real resolver | Broader fortress/knowledge/memory families remain .11 |
+| EE memory | Evidence-curation workflow is distinct from the legacy batch helper; hostile text now produces valid escaped JSONL | Legacy helper repair .7; no automatic memory ingestion or authority implied |
+| SLOs and economics | Actual timings and bounded refusal witnesses recorded; large observations still cost tens of seconds on this host | UNPROVEN against declared SLOs; .4 and existing benchmark work |
+| Compatibility/release/process authority | Registry/floor/artifact/ticket/private-runner machinery exists and refuses unsupported launch states | Empty registry and no current complete evidence chain; no admitted product |
+
+Here `.N` means `dfmcp-reality-wiring-proof-4bf.N`; `54h.N` means
+`df-franken-storage-mvcc-54h.N`, `pic.4` means `df-dfhack-bridge-plane-c-pic.4`, and
+`jtg` means `df-raptorq-por-movement-jtg`. Every gap above maps to executable work rather
+than a percentage of historical closed issues. Registry coverage presently checks 22/22 WPs;
+that syntactic coverage alone does not establish vision completion.
+
+### Complete binary inventory
+
+`target/reality-check-20261030/binary-entrypoints.json` binds each of the **25** entrypoints
+to its exact source bytes. They divide as follows:
+
+| Entry points | Actual purpose / proof limit |
+|---|---|
+| `dwarf-fortress-mcp` | Main CLI: laboratory `serve`, protocol-1.0 admission-bound `serve-live`, diagnostic/replay/evaluation commands |
+| `dfmcp-live-probe`, `dfmcp-live-announcement-probe` | Authenticated diagnostic read/evidence clients; not mutation authority |
+| `dfmcp-live-v1-1-dev-server` | Explicitly unadmitted announcement-aware read-only server |
+| `dfmcp-live-jobs-dev-server`, `dfmcp-live-operations-dev-server`, `dfmcp-live-operations-paged-dev-server`, `dfmcp-live-map-dev-server`, `dfmcp-live-spatial-dev-server`, `dfmcp-live-spatial-citizens-dev-server` | Six isolated read profiles; actual schema paging repaired in the extended spatial profile |
+| `dfmcp-live-control-dev-server`, `dfmcp-live-run-dev-server`, `dfmcp-live-job-control-dev-server` | Three isolated pause/run/job profiles; job eligibility remains unavailable |
+| `dfmcp-live-work-orders-dev-server`, `dfmcp-live-work-order-progress-dev-server`, `dfmcp-live-order-run-dev-server`, `dfmcp-live-workforce-dev-server` | Four native production/labor profiles; goal competence needs an independent live campaign |
+| `dfmcp-dig-control-dev-server`, `dfmcp-dig-recovery-dev-server`, `dfmcp-excavation-run-dev-server`, `dfmcp-build-placement-dev-server` | Four bounded native effect/recovery owners; no general production admission |
+| `dfmcp-live-semantic-dig-dev-server`, `dfmcp-live-semantic-work-orders-dev-server`, `dfmcp-live-semantic-workforce-dev-server`, `dfmcp-live-semantic-furniture-dev-server` | Four original-plan semantic compositions; source or native build cannot stand in for goal proof |
+
+### Repair and refinement record
+
+The current bridge plan is executable proof before broader closure: repair full composition,
+compile actual native packages, restore executable gates, bound schema output, then exercise
+real goal loops and audit the resulting claims. The new residual beads preserve all promised
+features and require positive execution, failure/recovery tests and exact receipts.
+
+Refinement has already changed concrete work: (1) native SDK compilation exposed fictional APIs
+that synthetic tests accepted; (2) Tasks recovery separated immutable historical action evidence
+from a fresh current anchor; (3) modern wire decoding exposed an oversized text field and led to
+lossless session/anchor-bound schema pages; (4) the matrix audit was unblocked from the live trial
+because the audit can proceed independently; (5) source inventories and negative witnesses were
+made explicit because concurrent commits invalidate commit-only provenance. Further findings and
+test results revise this section in place. The audit is still active and no convergence or
+whole-project completion is claimed.
+
+---
+
+# Historical Reality Check — Phase 0C vs the Promised Control Plane (2026-09-22)
 
 `reality-check-for-project` comprehensive pass (Variant A, end-to-end): README/AGENTS/plan
 vision contrasted against ground truth (code, tests, live binary runs, bead coverage).

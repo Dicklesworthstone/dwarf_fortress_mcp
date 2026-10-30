@@ -77,7 +77,7 @@ def validate_argv(value: Any, path: str) -> list[str]:
         if any(fragment in argument for fragment in FORBIDDEN_ARG_FRAGMENTS):
             fail(f"{path}[{index}] contains a forbidden authority or secret fragment")
         output.append(argument)
-    if output and output[0] in {"bash", "sh", "zsh", "cmd", "powershell", "pwsh"}:
+    if output and Path(output[0]).name.lower() in {"bash", "sh", "zsh", "cmd", "cmd.exe", "powershell", "powershell.exe", "pwsh", "pwsh.exe"}:
         fail(f"{path} must not route through a shell interpreter")
     if "-c" in output or "/c" in [argument.lower() for argument in output]:
         fail(f"{path} must not contain a shell-command argument")
@@ -190,6 +190,7 @@ def next_guidance(
     if next_item is None:
         return {
             "schema": PLAN_SCHEMA,
+            "command_representation": plan["output_contract"]["command_representation"],
             "run_directory": str(resolved_run),
             "complete": True,
             "sealed": state.get("sealed") is True,
@@ -228,6 +229,7 @@ def next_guidance(
     ]
     return {
         "schema": PLAN_SCHEMA,
+        "command_representation": plan["output_contract"]["command_representation"],
         "run_directory": str(resolved_run),
         "complete": False,
         "sealed": state.get("sealed") is True,

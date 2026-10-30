@@ -56,7 +56,7 @@ class SourceBundleOutputLocationTests(unittest.TestCase):
                 creator.DEFAULT_CONTRACT,
             )
             self.assertEqual(result["status"], "created_and_verified")
-            self.assertEqual(Path(result["output_directory"]), destination)
+            self.assertEqual(Path(result["output_directory"]), destination.resolve())
             self.assertTrue(Path(result["archive"]).is_file())
             self.assertEqual(
                 git(source, "status", "--porcelain=v1", "--untracked-files=all"),

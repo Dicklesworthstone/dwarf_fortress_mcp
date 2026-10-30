@@ -5,8 +5,13 @@ from __future__ import annotations
 
 import ast
 import json
+import os
+import subprocess
 import sys
 from pathlib import Path
+
+import check_dfhack_bridge
+import check_local_qualification_receipt as local_receipt
 
 ROOT = Path(__file__).resolve().parents[1]
 CONTRACT_PATH = ROOT / "architecture/live_server_binary_receipt_v1.json"
@@ -370,11 +375,25 @@ def check_wiring_and_docs() -> None:
             "scripts/test_admitted_live_launcher.py",
             "scripts/test_live_admission_ticket.py",
             "architecture/live_admission_ticket_v2.json",
-            "crates/dfmcp-mcp/src/admission.rs",
-            "crates/dfmcp-mcp/src/agent_turn.rs",
-            "crates/dwarf-fortress-mcp/tests/live_admission.rs",
         ]:
             require(marker in source, f"{relative} omits {marker}")
+    # Both aggregates compile/test the workspace. Source custody belongs to the
+    # full tracked inventory, not to incidental path literals in shell scripts.
+    local_receipt.check_contract()
+    local_receipt.check_writer()
+    local_receipt.check_wrapper()
+    writer = (ROOT / "scripts/write_local_qualification_receipt.py").read_text(encoding="utf-8")
+    require(check_dfhack_bridge.receipt_inventory_dataflow(writer),
+            "server qualification lacks complete two-phase source inventory")
+    required = ["crates/dfmcp-mcp/src/admission.rs", "crates/dfmcp-mcp/src/agent_turn.rs",
+                "crates/dwarf-fortress-mcp/tests/live_admission.rs"]
+    environment = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    result = subprocess.run(["git", "ls-tree", "-r", "--name-only", "-z", "HEAD", "--", *required],
+                            cwd=ROOT, capture_output=True, check=True, timeout=30, env=environment)
+    tracked = set(result.stdout.decode("utf-8").split("\0"))
+    for path in required:
+        require(path in tracked and (ROOT / path).is_file() and not (ROOT / path).is_symlink(),
+                f"required admission source is not bound by the HEAD inventory: {path}")
     documentation = DOC_PATH.read_text(encoding="utf-8")
     for marker in [
         "server binary receipt",
@@ -404,7 +423,8 @@ def main() -> int:
         check_launcher()
         check_rust_admission()
         check_wiring_and_docs()
-    except (OSError, SyntaxError, json.JSONDecodeError, ContractError) as exc:
+    except (OSError, SyntaxError, UnicodeDecodeError, subprocess.SubprocessError,
+            json.JSONDecodeError, ContractError, local_receipt.ContractError) as exc:
         print(f"live server artifact admission: FAIL: {exc}", file=sys.stderr)
         return 1
     print(

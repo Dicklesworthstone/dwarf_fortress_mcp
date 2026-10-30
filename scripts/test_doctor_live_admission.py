@@ -109,6 +109,7 @@ class Fixture:
             "schema_version": promotion.REGISTRY_SCHEMA,
             "status": "admitted_live_tuples",
             "entries": [entry()],
+            "revocations": [],
         }
         self.registry_path.write_text(json.dumps(self.registry, sort_keys=True) + "\n")
         self.manifest_path.write_text(json.dumps(manifest(), sort_keys=True) + "\n")
@@ -261,6 +262,7 @@ class LiveAdmissionDoctorTests(unittest.TestCase):
                 "schema_version": promotion.REGISTRY_SCHEMA,
                 "status": "no_admitted_live_tuples",
                 "entries": [],
+                "revocations": [],
             }
             fixture.registry_path.write_text(json.dumps(empty, sort_keys=True) + "\n")
             fixture.floor_path.unlink()
