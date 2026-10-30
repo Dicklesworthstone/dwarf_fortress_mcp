@@ -5,6 +5,7 @@
 #include <set>
 #include <string_view>
 #include "Core.h"
+#include "DataDefs.h"
 #include "Export.h"
 #include "PluginManager.h"
 #include "RemoteServer.h"
@@ -155,7 +156,8 @@ void designate(const dg::Region &r) {
         dg::require(entry.block,5); entry.priority=priority_event(entry.block);
         if (!entry.priority) {
             dg::require(entry.block->block_events.size()<MAX_EVENTS,5);
-            entry.fresh=std::make_unique<df::block_square_event_designation_priorityst>();
+            entry.fresh.reset(df::allocate<df::block_square_event_designation_priorityst>());
+            dg::require(entry.fresh != nullptr,5);
             for (unsigned x=0;x<16;++x) for (unsigned y=0;y<16;++y) entry.fresh->priority[x][y]=0;
             entry.priority=entry.fresh.get(); entry.block->block_events.reserve(entry.block->block_events.size()+1);
         }

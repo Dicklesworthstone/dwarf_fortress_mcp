@@ -56,7 +56,7 @@ def generate_doubles(build: Path) -> None:
             sizes.append(f'(has_{field}_ ? {field}_.size() + 4 : 0)' if native == 'std::string'
                          else f'(has_{field}_ ? 11 : 0)')
         result += ['bool IsInitialized() const { return ' + ' && '.join(required) + '; }',
-                   'std::size_t ByteSizeLong() const { return ' + ' + '.join(sizes) + '; }', '};']
+                   'std::size_t ByteSize() const { return ' + ' + '.join(sizes) + '; }', '};']
     result += ['}']
     (build / 'DfmcpRunV1_13.pb.h').write_text('\n'.join(result) + '\n')
     sdk = r'''#pragma once

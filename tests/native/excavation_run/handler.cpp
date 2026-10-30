@@ -14,7 +14,7 @@ static wire::Request base() {
 }
 static wire::Reply call(Rpc rpc, const wire::Request &in, bool accepted = true) {
     wire::Reply out; CHECK(rpc(output, &in, &out) == CR_OK); CHECK(out.IsInitialized());
-    CHECK(out.accepted() == accepted); CHECK(out.ByteSizeLong() <= 4096);
+    CHECK(out.accepted() == accepted); CHECK(out.ByteSize() <= 4096);
     CHECK(fake::suspension == 0); return out;
 }
 static void setup() {
@@ -272,7 +272,7 @@ static void vectors_and_maximum_size() {
     CHECK(run::encode_capture(record.before).size() <= run::MAX_CAPTURE_BYTES);
     auto packet = base(); wire::Reply reply; initialize_reply(packet, reply); reply.set_effect_record(maximum);
     reply.set_client_nonce(std::string(64, 'n')); reply.set_df_version(std::string(128,'v')); reply.set_dfhack_version(std::string(128,'v'));
-    reply.set_owner_active(false); reply.set_retained_records(256); CHECK(reply.ByteSizeLong() <= 4096);
+    reply.set_owner_active(false); reply.set_retained_records(256); CHECK(reply.ByteSize() <= 4096);
     std::cout << "{\"scenarios\":" << scenarios << ",\"assertions\":" << assertions << ",\"maximum_record_bytes\":" << maximum.size()
         << ",\"vectors\":{\"capture\":\"" << hex(run::encode_capture(before)) << "\",\"plan\":\"" << hex(plan)
         << "\",\"token\":\"" << hex(run::token_for("golden", plan)) << "\",\"prepared\":\"" << hex(prepared)

@@ -49,7 +49,7 @@ void initialize_reply(const wire::Request &in, wire::Reply &out) {
     out.set_df_version(""); out.set_dfhack_version("");
 }
 void authenticate(const wire::Request &in, wire::Reply &out) {
-    run::require(in.IsInitialized() && in.ByteSizeLong() <= 2048
+    run::require(in.IsInitialized() && in.ByteSize() <= 2048
         && in.GetReflection()->GetUnknownFields(in).field_count() == 0);
     run::require(in.client_nonce().size() >= 16 && in.client_nonce().size() <= 64);
     run::require(in.protocol_major() == 1 && in.protocol_minor() == 18, 2);
@@ -114,7 +114,7 @@ void execute(const wire::Request &in, wire::Reply &out, Operation op) {
         if (known) out.set_effect_record(run::encode_record(*known));
     }
     out.set_owner_active(engine.active()); out.set_retained_records(static_cast<std::uint32_t>(engine.size()));
-    run::require(out.ByteSizeLong() <= 4096, 5);
+    run::require(out.ByteSize() <= 4096, 5);
 }
 command_result dispatch(const wire::Request *in, wire::Reply *out, Operation op) {
     CoreSuspender suspend;

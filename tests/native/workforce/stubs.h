@@ -94,7 +94,7 @@ struct Request {
     struct Fields { int n; int field_count() const { return n; } };
     struct Reflection { Fields GetUnknownFields(const Request &r) const { return {r.unknown}; } } reflection;
     const Reflection *GetReflection() const { return &reflection; }
-    bool IsInitialized() const { return initialized; } std::size_t ByteSizeLong() const { return size; }
+    bool IsInitialized() const { return initialized; } std::size_t ByteSize() const { return size; }
     const auto &bearer_token() const { return token; } const auto &client_nonce() const { return nonce; }
     auto protocol_major() const { return major; } auto protocol_minor() const { return minor; }
     bool has_idempotency_key() const { return mask&1; } const auto &idempotency_key() const { return key; }

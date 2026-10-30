@@ -361,7 +361,7 @@ struct Request {
     struct Reflection { Fields GetUnknownFields(const Request &) const { return {}; } };
     const Reflection *GetReflection() const { static Reflection value; return &value; }
     bool IsInitialized() const { return mock::initialized; }
-    std::size_t ByteSizeLong() const { return mock::oversized_request ? 2049 : 64 + bearer.size() + nonce.size() + key.size() + witness.size() + plan.size() + token.size(); }
+    std::size_t ByteSize() const { return mock::oversized_request ? 2049 : 64 + bearer.size() + nonce.size() + key.size() + witness.size() + plan.size() + token.size(); }
     const std::string &bearer_token() const { return bearer; }
     const std::string &client_nonce() const { return nonce; }
     unsigned protocol_major() const { return major; }
@@ -400,7 +400,7 @@ struct Reply {
     void set_replayed(bool value) { mask |= 4; replayed = value; }
     void set_unresolved(bool value) { mask |= 8; unresolved = value; }
     void set_retained_records(unsigned value) { mask |= 16; records = value; }
-    std::size_t ByteSizeLong() const {
+    std::size_t ByteSize() const {
         return mock::oversized_reply ? 8193 : 128 + nonce.size() + df_version.size()
             + dfhack_version.size() + observation.size() + effect.size();
     }

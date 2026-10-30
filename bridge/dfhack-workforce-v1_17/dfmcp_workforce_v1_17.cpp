@@ -110,7 +110,7 @@ void empty_reply(const wire::Request &in, wire::Reply &out, std::uint32_t code) 
     out.set_df_version(""); out.set_dfhack_version("");
 }
 void authenticate(const wire::Request &in, wire::Reply &out) {
-    wf::require(in.IsInitialized() && in.ByteSizeLong() <= 2048
+    wf::require(in.IsInitialized() && in.ByteSize() <= 2048
         && in.GetReflection()->GetUnknownFields(in).field_count() == 0);
     wf::require(in.client_nonce().size() >= 16 && in.client_nonce().size() <= 64);
     wf::require(in.protocol_major() == 1 && in.protocol_minor() == 17, 2);

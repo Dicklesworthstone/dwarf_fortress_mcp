@@ -68,14 +68,14 @@ void complete_job_and_event_validation(){
     for(std::size_t i=0;i<links.size();++i){jobs[i].id=static_cast<int>(i);jobs[i].pos={50,50,5};links[i].item=&jobs[i];links[i].next=i+1<links.size()?&links[i+1]:nullptr;}
     world.jobs.list.next=links.data();ReadDesignation(output,&q,&r);CHECK(!r.accepted&&r.code==5);
     links[MAX_JOBS-1].next=nullptr;ReadDesignation(output,&q,&r);CHECK(r.accepted);world.jobs.list.next=nullptr;
-    reset();target().block_events.push_back(new df::block_square_event_designation_priorityst());
-    target().block_events.push_back(new df::block_square_event_designation_priorityst());ReadDesignation(output,&q,&r);CHECK(!r.accepted&&r.code==5);
+    reset();target().block_events.push_back(df::allocate<df::block_square_event_designation_priorityst>());
+    target().block_events.push_back(df::allocate<df::block_square_event_designation_priorityst>());ReadDesignation(output,&q,&r);CHECK(!r.accepted&&r.code==5);
     reset();target().block_events.push_back(nullptr);ReadDesignation(output,&q,&r);CHECK(!r.accepted&&r.code==5);target().block_events.pop_back();
 }
 void real_writer_preserves_non_targets(){
     for(auto material:{df::tiletype::StoneWall,df::tiletype::SoilWall,df::tiletype::MineralWall}){
         reset();for(unsigned x=15;x<=16;++x)for(unsigned y=15;y<=16;++y)Maps::getTileBlock(x,y,2)->tiletype[x&15][y&15]=material;
-        auto&b=target();auto*p=new df::block_square_event_designation_priorityst();p->priority[14][14]=2000;b.block_events.push_back(p);
+        auto&b=target();auto*p=df::allocate<df::block_square_event_designation_priorityst>();p->priority[14][14]=2000;b.block_events.push_back(p);
         b.designation[14][14].bits.dig=df::tile_dig_designation::Channel;b.flags.bits.other=11;
         df::job outside{99,{14,14,2}};df::job_list_link link{&outside,nullptr};world.jobs.list.next=&link;
         auto q=prepared();auto c=commit(q);CHECK(c.accepted);const auto*r=engine.query(q.key,q.plan);CHECK(r&&r->state==dg::State::Designated);

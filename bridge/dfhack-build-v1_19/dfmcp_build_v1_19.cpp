@@ -73,7 +73,7 @@ void authorize_credential(const std::string &provided) {
 }
 void authorize(const wire::Request *in, wire::Reply *out) {
     empty_reply(in, out, 3);
-    bp::require(in->ByteSizeLong() <= MAX_REQUEST_BYTES && in->IsInitialized()
+    bp::require(static_cast<std::size_t>(in->ByteSize()) <= MAX_REQUEST_BYTES && in->IsInitialized()
         && in->GetReflection()->GetUnknownFields(*in).empty());
     bp::require(in->client_nonce().size() >= 16 && in->client_nonce().size() <= 64);
     bp::require(in->protocol_major() == 1 && in->protocol_minor() == 19, 2);
@@ -349,7 +349,7 @@ template<class Body> command_result guarded(const wire::Request *in, wire::Reply
         if (placing) bp::require(enabled("DFMCP_BUILD_ALLOW_PLACE"), 1);
         manifest(out); body(); out->set_unresolved(engine.unresolved());
         out->set_retained_records(static_cast<std::uint32_t>(engine.size()));
-        out->set_failure_code(0); out->set_accepted(true); bp::require(out->ByteSizeLong() <= MAX_REPLY_BYTES, 5);
+        out->set_failure_code(0); out->set_accepted(true); bp::require(static_cast<std::size_t>(out->ByteSize()) <= MAX_REPLY_BYTES, 5);
         return CR_OK;
     } catch (const bp::Failure &e) {
         try { empty_reply(in, out, e.code); return CR_OK; } catch (...) { out->Clear(); return CR_FAILURE; }

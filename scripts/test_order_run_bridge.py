@@ -31,7 +31,7 @@ def protobuf_double(schema):
             lines += [f'void set_{field}(const {cpp} &v) {{ {fault} v_{field}=v; p_{field}=true; }}']
         initialized = ' && '.join(f'p_{f}' for mode, _, f, _ in fields if mode == 'required')
         lines += [f'bool IsInitialized() const {{ return {initialized}; }}',
-                  'std::size_t ByteSizeLong() const { return forced_size ? forced_size : 256' +
+                  'std::size_t ByteSize() const { return forced_size ? forced_size : 256' +
                   ''.join(f' + v_{f}.size()' for _, k, f, _ in fields if k in ('bytes', 'string')) + '; }',
                   f'void Clear() {{ *this = {name}{{}}; }}',
                   'struct Unknown { int count; int field_count() const { return count; } };',

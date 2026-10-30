@@ -1,5 +1,6 @@
 #include "../common/job_suspension.h"
 #include <cstdlib>
+#include <set>
 #include <string_view>
 #include <vector>
 #include "Core.h"
@@ -14,7 +15,9 @@
 #include "df/building_type.h"
 #include "df/global_objects.h"
 #include "df/job.h"
+#include "df/job_list_link.h"
 #include "df/unit.h"
+#include "df/world.h"
 #include "DfmcpJobControlV1_9.pb.h"
 
 using namespace DFHack;
@@ -53,13 +56,26 @@ void authorize(const wire::Request *in, wire::Reply *out) {
 }
 // flags=0 registration gives DFHack-owned CoreSuspender serialization. There is
 // no onUpdate work, detached task or pointer retained outside that suspension.
+df::job *find_job(std::uint32_t id) {
+    js::require(df::global::world && id <= INT32_MAX, 5);
+    std::set<std::int32_t> seen;
+    df::job *selected = nullptr;
+    for (auto *link = df::global::world->jobs.list.next; link; link = link->next) {
+        js::require(seen.size() < 65536 && link->item && link->item->id >= 0, 5);
+        auto *job = link->item;
+        js::require(seen.insert(job->id).second, 5);
+        if (static_cast<std::uint32_t>(job->id) == id) selected = job;
+    }
+    return selected;
+}
+
 js::Observation read_job(std::uint32_t id) {
     js::require(Core::getInstance().isWorldLoaded() && Core::getInstance().isMapLoaded() && World::isFortressMode(), 4);
     const auto year = static_cast<std::int64_t>(World::ReadCurrentYear());
     const auto tick = World::ReadCurrentTick(); const auto site = World::GetCurrentSiteId();
     js::require(year >= 0 && year <= UINT32_MAX && tick < 403200 && site >= 0 && site <= INT32_MAX, 5);
     js::require(df::global::job_next_id && *df::global::job_next_id >= 0 && id <= INT32_MAX, 5);
-    auto *job = Job::getJob(static_cast<int>(id)); js::require(job != nullptr, 4);
+    auto *job = find_job(id); js::require(job != nullptr, 4);
     js::require(job->id >= 0 && static_cast<std::uint32_t>(job->id) == id
         && job->general_refs.size() <= 4096 && job->items.size() <= 65536 && job->job_items.elements.size() <= 4096, 5);
     for (const auto *ref : job->general_refs) js::require(ref != nullptr, 5);
@@ -72,10 +88,13 @@ js::Observation read_job(std::uint32_t id) {
     out.paused = World::ReadPauseState(); out.worker = worker ? worker->id : -1; out.holder = holder ? holder->id : -1;
     out.x = job->pos.x; out.y = job->pos.y; out.z = job->pos.z; out.timer = job->completion_timer;
     out.attachments = static_cast<std::uint32_t>(job->items.size()); out.filters = static_cast<std::uint32_t>(job->job_items.elements.size());
-    out.supported = Job::isSupportedJob(job);
+    // DFHack 53.16 exposes no equivalent supported-job predicate.  A false
+    // bit conservatively prevents preparation; it is not an eligibility proof.
+    out.supported = false;
     if (holder) {
         const auto kind = holder->getType(); out.holder_type = static_cast<std::int32_t>(kind);
-        const auto stage = holder->getBuildStage(), maximum = holder->getMaxBuildStage();
+        const auto stage = holder->getBuildStage();
+        const auto maximum = holder->getMaxBuildStage();
         js::require(stage >= 0 && maximum >= stage, 5);
         out.holder_complete = stage == maximum;
         out.production_holder = kind == df::building_type::Workshop || kind == df::building_type::Furnace;
@@ -83,10 +102,10 @@ js::Observation read_job(std::uint32_t id) {
     return out;
 }
 void set_suspended(std::uint32_t id, bool desired) {
-    auto *job = Job::getJob(static_cast<int>(id)); js::require(job != nullptr, 5);
-    // read_job/Engine just checked paused, idle, supported and completed holder.
-    // Do not detach a worker, delete a job, change repeat, or unpause simulation.
-    job->flags.bits.suspend = desired;
+    // No supported-job predicate has been established for this SDK.  Even an
+    // unexpected direct call must not dispatch a setter without that evidence.
+    (void)id; (void)desired;
+    throw js::Failure(4);
 }
 unsigned shape(const wire::Request *in) {
     return (in->has_idempotency_key() ? 1 : 0) | (in->has_native_job_id() ? 2 : 0)

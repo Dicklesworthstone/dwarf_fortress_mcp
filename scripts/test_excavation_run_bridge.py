@@ -55,7 +55,7 @@ def protobuf_double(proto: str) -> str:
             if cardinality == 'required':
                 required.append('p_' + field)
         out += ['bool IsInitialized() const { return ' + ' && '.join(required) + '; }',
-                'std::size_t ByteSizeLong() const { return size_override ? size_override : ' + '+'.join(sizes) + '; }', '};']
+                'std::size_t ByteSize() const { return size_override ? size_override : ' + '+'.join(sizes) + '; }', '};']
     out.append('}}}')
     return '\n'.join(out) + '\n'
 

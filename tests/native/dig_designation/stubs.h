@@ -34,11 +34,16 @@ union tile_designation {
 union tile_occupancy {std::uint32_t whole;struct{std::uint32_t building:3,unit:1,unit_grounded:1,item:1,unused:26;}bits;tile_occupancy():whole(0){}};
 union block_flags {std::uint32_t whole;struct{std::uint32_t designated:1,other:31;}bits;block_flags():whole(0){}};
 struct block_square_event {virtual ~block_square_event()=default;};
+template<class T> T* allocate();
 struct block_square_event_designation_priorityst: block_square_event {
     std::uint32_t priority[16][16]{};
+protected:
+    template<class T> friend T* allocate();
     block_square_event_designation_priorityst(){if(++mock::event_constructor_calls==mock::fail_constructor_at)throw std::bad_alloc();++mock::events_alive;}
+public:
     ~block_square_event_designation_priorityst() override{--mock::events_alive;}
 };
+template<class T> T* allocate() { return new T(); }
 struct EventVector:std::vector<block_square_event*>{
     void reserve(std::size_t n){if(mock::reserve_failure)throw std::bad_alloc();std::vector<block_square_event*>::reserve(n);}
 };
