@@ -81,5 +81,30 @@ fn production() { todo!(); }
                 self.assertRegex(mask, pattern)
 
 
+class ExampleValidationTests(unittest.TestCase):
+    def test_all_room_examples_use_their_real_closed_request_decoder(self):
+        import json
+        schema = json.loads((validator.ROOT / "schemas/dfmcp.schema.json").read_text())
+        examples = list((validator.ROOT / "examples").glob("room_*.json"))
+        self.assertGreaterEqual(len(examples), 9)
+        for path in examples:
+            with self.subTest(path=path.name):
+                validator.validate_example(json.loads(path.read_text()), schema)
+
+    def test_room_discriminator_cannot_bypass_input_or_policy_validation(self):
+        import json
+        schema = json.loads((validator.ROOT / "schemas/dfmcp.schema.json").read_text())
+        request = json.loads((validator.ROOT / "examples/room_layout_minimum_targets.json").read_text())
+        mutations = [{**request, "unexpected": True}, {**request, "objective": "invented"},
+                     {**request, "site": True}, {**request, "region": {}},
+                     {**request, "schema": "invented"},
+                     {**request, "search": {"max_nodes": 0}},
+                     {**request, "world_folder": "x" * 20000}]
+        for value in mutations:
+            with self.subTest(value=str(value)[:100]):
+                with self.assertRaises(validator.ValidationError):
+                    validator.validate_example(value, schema)
+
+
 if __name__ == "__main__":
     unittest.main()

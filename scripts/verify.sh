@@ -110,6 +110,7 @@ ok "Bead coverage"
 
 info "Running Python contract tests"
 python3 scripts/test_repository_integrity.py
+python3 scripts/test_validate_repo_rust.py
 python3 scripts/test_read_stable_repository_file.py
 python3 scripts/test_read_stable_repository_file_loader.py
 python3 scripts/test_source_bundle.py
@@ -145,6 +146,7 @@ ok "Excavation and blueprint goal regressions"
 info "Checking script syntax"
 python3 -m py_compile \
   scripts/validate_repo.py \
+  scripts/test_validate_repo_rust.py \
   scripts/read_stable_repository_file.py \
   scripts/check_repository_integrity.py \
   scripts/test_repository_integrity.py \

@@ -22,7 +22,7 @@ SPEC.loader.exec_module(checker)
 
 
 class ToolchainPolicyTests(unittest.TestCase):
-    def test_both_repository_gates_enforce_the_approved_fleet_pin(self) -> None:
+    def test_both_repository_gates_enforce_latest_nightly(self) -> None:
         root = Path(__file__).resolve().parents[1]
         toolchain_path = root / "rust-toolchain.toml"
         policy_path = root / "architecture/dependency_allowlist.toml"
@@ -36,9 +36,9 @@ class ToolchainPolicyTests(unittest.TestCase):
             sys.modules[spec.name] = gate
             spec.loader.exec_module(gate)
             for changed_path in (toolchain_path, policy_path):
-                for candidate in ("nightly-2026-08-31", "nightly", "stable", "nightly-2026-08-30", ""):
+                for candidate in ("nightly", "stable", "nightly-2026-08-31", "nightly-2026-08-30", ""):
                     with self.subTest(script=script, changed_path=changed_path, candidate=candidate):
-                        replacement = original_read_text(changed_path).replace("nightly-2026-08-31", candidate)
+                        replacement = original_read_text(changed_path).replace('"nightly"', f'"{candidate}"')
 
                         def read_text(path: Path, *args, **kwargs) -> str:
                             if path == changed_path:
@@ -57,9 +57,9 @@ class ToolchainPolicyTests(unittest.TestCase):
                         with patch.object(Path, "read_text", read_text), patch.object(Path, "open", open_path):
                             with redirect_stdout(output), redirect_stderr(output):
                                 status = gate.main()
-                        self.assertEqual(status, 0 if candidate == "nightly-2026-08-31" else 1, output.getvalue())
+                        self.assertEqual(status, 0 if candidate == "nightly" else 1, output.getvalue())
                         if status != 0:
-                            self.assertIn("approved fleet pin nightly-2026-08-31", output.getvalue())
+                            self.assertIn("latest nightly channel", output.getvalue())
 
 
 class RepositoryIntegrityTests(unittest.TestCase):

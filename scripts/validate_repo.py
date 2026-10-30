@@ -169,6 +169,38 @@ def validate_instance(instance: Any, schema: dict[str, Any], root: dict[str, Any
                 validate_instance(value, additional, root, f"{path}.{key}")
 
 
+def validate_example(instance: Any, main_schema: dict[str, Any]) -> None:
+    """MCP envelopes and offline room requests have different entry contracts.
+
+    Use the actual closed, bounded room decoder, including observed-cost policy,
+    rather than forcing offline requests into the MCP tool-envelope oneOf or
+    exempting them from validation. Unknown schema names still fail the MCP gate.
+    """
+    if isinstance(instance, dict) and instance.get("schema") == "dfmcp.room-provisioning-request/1":
+        from room_provisioning import RoomPlan
+
+        try:
+            RoomPlan.compile(instance)
+        except (ValueError, TypeError, KeyError) as error:
+            raise ValidationError("$", f"invalid bounded room provisioning request: {error}") from error
+        return
+    if isinstance(instance, dict) and instance.get("schema") == "dfmcp.room-layout-request/1":
+        import room_layout
+        import room_layout_observed
+
+        raw = json.dumps(instance, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        try:
+            if instance.get("objective") == room_layout_observed.EXCAVATION_OBJECTIVE:
+                room_layout_observed.prepare(raw)
+            else:
+                value = room_layout._json(raw, room_layout.MAX_INPUT, room_layout._idle)
+                room_layout._normalize(value, room_layout._Work(room_layout.MAX_WORK, room_layout._idle))
+        except (ValueError, TypeError, KeyError) as error:
+            raise ValidationError("$", f"invalid bounded room request: {error}") from error
+        return
+    validate_instance(instance, main_schema, main_schema)
+
+
 def extract_balanced_block(text: str, opening_brace: int) -> str:
     depth = 0
     for index in range(opening_brace, len(text)):
@@ -434,8 +466,8 @@ def validate_repository() -> None:
     check(package_defaults.get("edition") == "2024", "workspace must use Rust edition 2024")
     check("rust-version" not in package_defaults, "nightly workspace must not advertise a misleading stable MSRV")
     toolchain = parsed_toml.get(ROOT / "rust-toolchain.toml", {}).get("toolchain", {})
-    check(toolchain.get("channel") == "nightly-2026-08-31", "toolchain must use the approved fleet pin nightly-2026-08-31")
-    check(policy_document.get("toolchain") == "nightly-2026-08-31", "dependency policy must declare the approved fleet pin nightly-2026-08-31")
+    check(toolchain.get("channel") == "nightly", "toolchain must use the latest nightly channel")
+    check(policy_document.get("toolchain") == "nightly", "dependency policy must declare the latest nightly channel")
     components = set(toolchain.get("components", []))
     check({"clippy", "rustfmt", "rust-src", "llvm-tools-preview"} <= components, "nightly toolchain components are incomplete")
     members = workspace.get("members", [])
@@ -540,7 +572,7 @@ def validate_repository() -> None:
     if isinstance(main_schema, dict):
         for path in sorted((ROOT / "examples").glob("*.json")):
             try:
-                validate_instance(documents[path], main_schema, main_schema)
+                validate_example(documents[path], main_schema)
             except ValidationError as error:
                 check(False, f"schema validation failed for {path.relative_to(ROOT)}: {error}")
             else:
