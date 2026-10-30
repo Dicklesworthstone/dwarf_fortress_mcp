@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-10-30 — Coordinate sealed mutations across live native families
+
+- Add one deterministic cross-family dispatch frontier over the existing control,
+  dig, furniture, work-order and workforce routes.
+- Recheck each semantic step's exact capability, risk and entity/map scope at
+  preparation and commit without widening family authority.
+- Record DispatchStarted before native commit; any lost or invalid commit result
+  becomes indeterminate and blocks all later family work until the exact original
+  idempotency key is reconciled.
+- Permit a step to become pending again only when its family explicitly proves
+  the durable dispatch marker was never sent. Prepared cancellation cannot undo
+  an effect that may have started.
+- Bind plan, family, dependencies, semantic keys and every frontier state into a
+  stable domain-separated digest suitable for durable host handoffs.
+- Keep all native I/O, preparation journals, confirmations and effect-specific
+  verification inside the existing narrow family owners. Generic MCP execution
+  wiring and live qualification remain separate.
+
 ## 2026-10-30 — Preserve original room geometry through native furnishing intake
 
 - Add bounded `room_request` intake with complete floor/wall masks and all

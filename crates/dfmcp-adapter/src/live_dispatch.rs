@@ -239,6 +239,75 @@ impl LiveDispatchCoordinator {
         self.entries.iter().any(|entry| entry.state.uncertain())
     }
 
+    /// Stable identity of the complete cross-family frontier. Hosts can bind
+    /// this digest into their own durable handoff without treating it as a
+    /// family receipt or mutation authority.
+    #[must_use]
+    pub fn frontier_digest(&self) -> Digest32 {
+        fn family_code(family: LiveFamily) -> u8 {
+            match family {
+                LiveFamily::ControlV1_7 => 1,
+                LiveFamily::DigV1_16 => 2,
+                LiveFamily::BuildV1_19 => 3,
+                LiveFamily::WorkOrdersV1_10 => 4,
+                LiveFamily::WorkforceV1_17 => 5,
+            }
+        }
+        let mut bytes = b"dfmcp-live-dispatch-frontier/1".to_vec();
+        bytes.extend_from_slice(self.plan.digest.as_bytes());
+        bytes.extend_from_slice(&(self.entries.len() as u64).to_be_bytes());
+        for entry in &self.entries {
+            bytes.extend_from_slice(&entry.step.get().to_be_bytes());
+            bytes.push(family_code(entry.family));
+            bytes.extend_from_slice(&(entry.idempotency_key.len() as u64).to_be_bytes());
+            bytes.extend_from_slice(entry.idempotency_key.as_bytes());
+            bytes.extend_from_slice(&(entry.depends_on.len() as u64).to_be_bytes());
+            for dependency in &entry.depends_on {
+                bytes.extend_from_slice(&dependency.get().to_be_bytes());
+            }
+            match entry.state {
+                DispatchState::Pending => bytes.push(0),
+                DispatchState::Prepared(preparation) => {
+                    bytes.push(1);
+                    bytes.extend_from_slice(preparation.digest.as_bytes());
+                }
+                DispatchState::DispatchStarted(preparation) => {
+                    bytes.push(2);
+                    bytes.extend_from_slice(preparation.digest.as_bytes());
+                }
+                DispatchState::Applied(receipt) => {
+                    bytes.push(3);
+                    bytes.extend_from_slice(receipt.digest.as_bytes());
+                }
+                DispatchState::Failed(receipt) => {
+                    bytes.push(4);
+                    match receipt {
+                        Some(receipt) => {
+                            bytes.push(1);
+                            bytes.extend_from_slice(receipt.digest.as_bytes());
+                        }
+                        None => bytes.push(0),
+                    }
+                }
+                DispatchState::Cancelled(receipt) => {
+                    bytes.push(5);
+                    match receipt {
+                        Some(receipt) => {
+                            bytes.push(1);
+                            bytes.extend_from_slice(receipt.digest.as_bytes());
+                        }
+                        None => bytes.push(0),
+                    }
+                }
+                DispatchState::Indeterminate(preparation) => {
+                    bytes.push(6);
+                    bytes.extend_from_slice(preparation.digest.as_bytes());
+                }
+            }
+        }
+        Digest32::of_bytes(&bytes)
+    }
+
     fn index(&self, step: StepId) -> Result<usize> {
         self.entries
             .iter()
@@ -757,10 +826,28 @@ mod tests {
             Predicate::Paused(true),
         )
         .steps(vec![unsupported])
+        .max_risk(RiskTier::Guarded)
         .required_capabilities(required)
         .expires_at_tick(GameTick(500))
         .build();
         assert!(LiveDispatchCoordinator::new(plan).is_err());
+    }
+
+    #[test]
+    fn frontier_digest_binds_state_without_becoming_family_authority() -> Result<()> {
+        let mut coordinator = LiveDispatchCoordinator::new(plan())?;
+        let mut fake = Fake::default();
+        let c = context();
+        let initial = coordinator.frontier_digest();
+        coordinator.prepare_next(&mut fake, &c)?;
+        let prepared = coordinator.frontier_digest();
+        assert_ne!(prepared, initial);
+        coordinator.commit_prepared(StepId::new(0), &mut fake, &c)?;
+        let applied = coordinator.frontier_digest();
+        assert_ne!(applied, prepared);
+        assert_ne!(applied, initial);
+        assert_eq!(coordinator.plan().digest, plan().digest);
+        Ok(())
     }
 
     #[test]

@@ -44,6 +44,39 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Cross-family live mutation dispatch frontier (2026-10-30)
+
+The adapter now has a single deterministic coordinator above the existing
+control/1.7, dig/1.16, build/1.19, work-orders/1.10 and workforce/1.17 family
+routes. A fully routable sealed semantic plan is compiled before any executor is
+contacted. Exactly one prepared or uncertain family operation may own the
+frontier at a time, so an unknown outcome cannot race another independent family
+and create a mixed partial plan.
+
+Each prepare and commit rechecks the original semantic action capability, risk
+and exact entity/map scope against the current operation context. The family's
+own coordinator still owns native plan construction, durable preparation,
+confirmation, source checks, effect journal and post-state proof. This layer does
+not perform native I/O, mint authority or reinterpret family receipts.
+
+Before invoking a family's commit, the cross-family state records
+DispatchStarted. Any commit error or mismatched receipt therefore becomes
+indeterminate and prevents another prepare or blind retry. Recovery must query
+the exact original semantic/family key. Only an explicit family result proving
+that the durable dispatch marker was never sent returns that same step to
+Pending; Applied and Failed become terminal. A prepared cancellation is allowed
+only before DispatchStarted and is not compensation.
+
+The complete frontier has a domain-separated digest covering the sealed plan,
+family, semantic idempotency key, dependency list and every per-step state and
+receipt/preparation identity. Hosts can bind that digest into durable recovery
+handoffs without treating it as native effect evidence.
+
+This closes the in-memory cross-family sequencing core of
+`df-dfhack-bridge-plane-c-pic.4`. Concrete MCP executor wiring to the existing
+family runtimes, durable reconstruction from their journals, and live/native
+qualification remain in progress.
+
 ### Original room intent through Rust furniture intake (2026-10-30)
 
 The furniture MCP development server now accepts `room_request` with one bounded
