@@ -6,7 +6,7 @@
         "fortress_id": "660123",
         "game_tick": 1,
         "sequence": 0,
-        "state_hash": "191ec0ea50bbb89ad8a62d76060e313f8e6b2083f2acdd1577382f691675ef89"
+        "state_hash": "53b3da0ad373ca0ca0ee557cf9c017905cebdf59a54f8369d4c2e47dcf3767e5"
       },
       "arguments": {
         "durable": null,
@@ -62,7 +62,7 @@
         "fortress_id": "660123",
         "game_tick": 1,
         "sequence": 0,
-        "state_hash": "191ec0ea50bbb89ad8a62d76060e313f8e6b2083f2acdd1577382f691675ef89"
+        "state_hash": "53b3da0ad373ca0ca0ee557cf9c017905cebdf59a54f8369d4c2e47dcf3767e5"
       },
       "arguments": {
         "actions": "[{\"action\":{\"kind\":\"designate_dig\",\"min\":[1,3,10],\"max\":[4,4,10],\"mode\":\"mine\"}}]",
@@ -81,10 +81,10 @@
         "fortress_id": "660123",
         "game_tick": 1,
         "sequence": 1,
-        "state_hash": "40009c0049eba4f7fc56855b652fbd9b9f2fd71aad00496126af51a9bd51c08f"
+        "state_hash": "70ca5902bff9819de580553b666fbab8327a68a987f1f9c860269fe78352c1f5"
       },
       "arguments": {
-        "plan_digest": "92d0c931b565a1edc7fdea88ab18af6ad149ccfef206297c0899bc46dd91faac"
+        "plan_digest": "b176c64667cdabdf7db47b1d51763c8ae751177e6a8fcbd902df360a5ff75450"
       },
       "error_code": null,
       "ok": true,
@@ -97,7 +97,7 @@
         "fortress_id": "660123",
         "game_tick": 1,
         "sequence": 1,
-        "state_hash": "40009c0049eba4f7fc56855b652fbd9b9f2fd71aad00496126af51a9bd51c08f"
+        "state_hash": "70ca5902bff9819de580553b666fbab8327a68a987f1f9c860269fe78352c1f5"
       },
       "arguments": {
         "label": null
@@ -112,8 +112,8 @@
         "epoch": 0,
         "fortress_id": "660123",
         "game_tick": 101,
-        "sequence": 2,
-        "state_hash": "1bc28f92ff8f008df57e89f755e926bdb2f3fb6ec12644042a13fdc179d26613"
+        "sequence": 10,
+        "state_hash": "ddb9638f16d8393856a3f99bcd425078d80930e6f167a24ca1a131ecd1b2fbaa"
       },
       "arguments": {
         "max_game_ticks": 100
@@ -128,8 +128,8 @@
         "epoch": 0,
         "fortress_id": "660123",
         "game_tick": 101,
-        "sequence": 2,
-        "state_hash": "1bc28f92ff8f008df57e89f755e926bdb2f3fb6ec12644042a13fdc179d26613"
+        "sequence": 10,
+        "state_hash": "ddb9638f16d8393856a3f99bcd425078d80930e6f167a24ca1a131ecd1b2fbaa"
       },
       "arguments": {
         "plan_digest": "0000000000000000000000000000000000000000000000000000000000000000"
@@ -145,10 +145,10 @@
         "fortress_id": "660123",
         "game_tick": 1,
         "sequence": 0,
-        "state_hash": "1d4325140572e9f5978be8d95e12125b741e6481e9513d423a082ec0e0c08f28"
+        "state_hash": "bf442b2986780a234a48c051f73a2d2996ca44b4c1cec24c5f3e1f55c7bee7f6"
       },
       "arguments": {
-        "checkpoint_id": "57e81c09e8ccba62495660122bce1129"
+        "checkpoint_id": "7a0fb2a5c353135cf8fcbfd2132a0628"
       },
       "error_code": null,
       "ok": true,
@@ -161,7 +161,7 @@
         "fortress_id": "660123",
         "game_tick": 1,
         "sequence": 0,
-        "state_hash": "1d4325140572e9f5978be8d95e12125b741e6481e9513d423a082ec0e0c08f28"
+        "state_hash": "bf442b2986780a234a48c051f73a2d2996ca44b4c1cec24c5f3e1f55c7bee7f6"
       },
       "arguments": {},
       "error_code": null,
@@ -170,7 +170,7 @@
       "tool": "fortress.observe"
     }
   ],
-  "calls_digest": "5b3dfd4c26a77fcf805dfd4bebfdb6831dbef2907882472303560d098bdb9da0",
+  "calls_digest": "d4860ec892160a4f4a40fbe096c3e3bd7212f49cd9814def87d445e0119fd6ff",
   "not_replayable_reason": null,
   "note": "replay with `dwarf-fortress-mcp replay <bundle.json>`; every call is re-executed in a fresh laboratory session and compared by outcome and resulting canonical anchor",
   "replayable": true,
