@@ -12,6 +12,7 @@
 #include "Console.h"
 #include "DfmcpBridge.pb.h"
 #include "Export.h"
+#include "MiscUtils.h"
 #include "PluginManager.h"
 #include "RemoteServer.h"
 #include "VersionInfo.h"
@@ -397,7 +398,8 @@ command_result ReadObservation(color_ostream &,
                 ? Translation::translateName(visible_name, false)
                 : std::string();
             record->set_name(
-                bounded_utf8_prefix(translated_name, MAX_UNIT_NAME_BYTES));
+                bounded_utf8_prefix(DF2UTF(translated_name.substr(0, MAX_UNIT_NAME_BYTES)),
+                    MAX_UNIT_NAME_BYTES));
         }
         else
         {
