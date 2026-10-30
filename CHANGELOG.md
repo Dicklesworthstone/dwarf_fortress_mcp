@@ -25,6 +25,16 @@
 - Close source-bundle Git subprocess pipes on success and failure; exercise actual
   child exit, bounded oversized output and ResourceWarning-denied cleanup.
 
+- Record the source-bound R15 live 768-tile query success and independent cleanup.
+  Preserve its subsequent six private-journal lock failures; add actual-backend
+  duplicate-descriptor regression candidates under reality bead .13. Full
+  qualification remains incomplete.
+
+- Reproduce private lock retention after owner drop in all three actual affected
+  backends, then add owned cleanup immediately at every adapter acquisition.
+  Preserve nonblocking refusal, context checks and journal bytes; Linux regression
+  and full qualification are pending. No sleeps, retries or test serialization.
+
 ## 2026-10-30 — Execute complete original labor and work-order plans
 
 - Connect the durable frontier to the real workforce/1.17 and work-orders/1.10
