@@ -106,14 +106,23 @@ impl NativeEvidence {
         self.high_sequence = self.high_sequence.max(capture.sequence());
         self.high_tick = self.high_tick.max(capture.tick());
         self.config.selection(capture.region())?;
+        let blockers = capture.blockers(false);
         if regressed
             || capture.tick() != self.original.anchor().tick.get()
             || !capture.paused()
-            || !capture.blockers(false).is_empty()
+            || !blockers.is_empty()
         {
             return Err(denied(
                 "native mining witness no longer matches the original paused terrain",
-            ));
+            )
+            .with_detail("source_regressed", regressed.to_string())
+            .with_detail("observed_tick", capture.tick().to_string())
+            .with_detail(
+                "required_tick",
+                self.original.anchor().tick.get().to_string(),
+            )
+            .with_detail("paused", capture.paused().to_string())
+            .with_detail("blockers", format!("{blockers:?}")));
         }
         Ok(())
     }

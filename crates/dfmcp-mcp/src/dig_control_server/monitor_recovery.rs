@@ -71,6 +71,7 @@ impl<B: EffectJournalStorage> RecoveryState<B> {
     pub(super) fn binding(&self) -> &DigBinding {
         self.store.spec().parent().binding()
     }
+    #[cfg(test)]
     pub(super) fn mode(&self) -> DigMode {
         self.mode
     }

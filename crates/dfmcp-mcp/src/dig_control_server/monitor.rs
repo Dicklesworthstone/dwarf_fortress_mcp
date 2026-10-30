@@ -190,7 +190,9 @@ pub(super) trait MonitorIo<S: EffectJournalStorage> {
     fn read_map(&mut self, spec: &MonitorSpec, c: &OperationContext) -> Result<LiveMapObservation>;
     fn checkpoint(&mut self, c: &OperationContext) -> Result<()>;
 }
+#[cfg(test)]
 pub(super) struct Unavailable;
+#[cfg(test)]
 impl<S: EffectJournalStorage> MonitorIo<S> for Unavailable {
     fn create_history(&mut self, _: MonitorSpec, _: &OperationContext) -> Result<MonitorStore<S>> {
         Err(error(

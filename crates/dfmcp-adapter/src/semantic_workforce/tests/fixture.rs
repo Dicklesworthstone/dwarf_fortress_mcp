@@ -6,7 +6,7 @@ use crate::live_projection::{LiveWorldProjection, project_live_capsule};
 use crate::live_routing::LiveRoutingEvidence;
 use crate::semantic_workforce::store::AssociationStore;
 use crate::semantic_workforce::{
-    SemanticWorkforceResult, SemanticWorkforceReview, SemanticWorkforceSession, SingleLaborResult,
+    SemanticWorkforceReview, SemanticWorkforceSession, SingleLaborResult,
     WorkforceEvidenceOwner,
 };
 use crate::workforce_control::journal::{

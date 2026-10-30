@@ -138,15 +138,6 @@ impl ClockTarget {
     pub fn digest(&self) -> Digest32 {
         self.digest
     }
-    pub fn original_paired_seal(&self) -> Digest32 {
-        self.original_seal
-    }
-    pub fn native_order_id(&self) -> u32 {
-        self.order
-    }
-    pub fn deadline_tick(&self) -> u64 {
-        self.deadline
-    }
     fn context(&self, c: &OperationContext) -> Result<()> {
         if c.anchor.fortress_id != self.fortress.fortress_id()
             || c.anchor.cursor.epoch != self.epoch
@@ -471,6 +462,7 @@ impl<J: EffectJournalStorage> Clock<J> {
         c.authorize(Capability::ControlClock, RiskTier::Guarded, &[], None)?;
         c.authorize(Capability::Observe, RiskTier::ReadOnly, &[], None)
     }
+    #[cfg(test)]
     pub fn prepare<N: OrderRunSource>(
         &mut self,
         target: &ClockTarget,
@@ -561,6 +553,7 @@ impl<J: EffectJournalStorage> Clock<J> {
             .prepare(&mut checked, &plan, &work.reserve(ACTION_BYTES)?)?;
         self.inspect(Some(target), &work.narrow(&output)?)
     }
+    #[cfg(test)]
     pub fn commit<N: OrderRunSource>(
         &mut self,
         target: &ClockTarget,

@@ -1239,6 +1239,7 @@ where
     }
 }
 
+#[cfg(test)]
 fn run_action<S, N, B, C, G, F>(
     state: &mut State<S, N, B, C>,
     c: OperationContext,
