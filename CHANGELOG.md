@@ -1,5 +1,29 @@
 # Changelog
 
+## 2026-10-30 — Execute complete original labor and work-order plans
+
+- Connect the durable frontier to the real workforce/1.17 and work-orders/1.10
+  owners for up to sixteen labor and finite wooden-furniture-order steps.
+- Select actual original StepIds while retaining the complete sealed parent,
+  original keys, anchor, dependencies, terminal predicate and obligations.
+  Preserve public single-step family entry points and reject selected multi-step
+  reviews at legacy whole-goal monitors.
+- Release dependencies only from exact verified labor receipts and retained
+  semantic/native custody; recheck predecessor custody after the order dispatch
+  marker and before insertion. Reject unsupported whole-plan requirements before
+  family contact and prevent direct-trait route/dependency bypasses.
+- Reconcile lost native replies with original keys under Query-only recovery,
+  without restoring a commit permit or crediting queue insertion as goal proof.
+- Carry narrower opening/current authority into native calls and retain decoded
+  queue clock floors through later failures, including executor and durable pins.
+  Preserve later-epoch historical Query while refusing cross-epoch native control.
+- Pass 352 focused adapter tests, including 44 new groups across this executor
+  and the preceding durable core, plus 58 public work-order and 47 public
+  workforce regressions (457 passing tests across three targets). The original
+  historical Query-after-restore regression is unchanged.
+  Existing repository gates still block full qualification. Combined MCP exposure,
+  native/live qualification and production admission remain open.
+
 ## 2026-10-30 — Recover mixed-family execution from the complete original plan
 
 - Add a private bounded `DFMLDJ01` execution journal retaining the complete

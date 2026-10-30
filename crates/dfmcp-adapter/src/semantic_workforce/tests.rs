@@ -534,6 +534,7 @@ fn cancellation_keeps_unit_scope_at_the_native_boundary_and_can_clean_up_after_e
         let mut scoped = Scoped {
             native: f.native.clone(),
             original: &review.original,
+            step: StepId::ZERO,
             association: Some(&review.association),
             associations: &mut f.owner.associations,
             call: &mut call,
@@ -911,3 +912,6 @@ fn association_post_sync_byte_mismatch_fences_before_publishing_the_new_root() -
 }
 
 mod goal_history;
+
+#[path = "tests/selected.rs"]
+mod selected;

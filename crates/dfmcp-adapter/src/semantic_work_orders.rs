@@ -10,11 +10,12 @@ use dfmcp_core::{
     Capability, Digest32, ErrorCode, GameTick, OperationContext, Result, RiskTier, StateAnchor,
     StepId,
 };
-use dfmcp_intent::{Action, ObligationSpec, PreparedPlan};
+use dfmcp_intent::{Action, ObligationSpec, PlanStep, PreparedPlan};
 use dfmcp_world::Predicate;
 
 use crate::control_effect_journal::EffectJournalStorage;
 use crate::live_routing::{LiveRoutingEvidence, resolve_work_order_step};
+use crate::semantic_selection::SelectedSemanticStep;
 use crate::work_order_control::session::WorkOrderSession;
 use crate::work_order_control::{
     CreationRecord, CreationState, CreationSummary, JournalMode, MAX_RECORD_BYTES,
@@ -187,6 +188,56 @@ fn original(plan: &PreparedPlan) -> Result<()> {
     }
     Ok(())
 }
+fn selected_original(plan: &PreparedPlan, step_id: StepId) -> Result<()> {
+    let step = SelectedSemanticStep::validate(plan, step_id)?;
+    let Action::CreateWorkOrder {
+        name,
+        job_token,
+        conditions,
+        ..
+    } = &step.action
+    else {
+        return Err(refused(
+            "selected semantic work-order action must be CreateWorkOrder",
+        ));
+    };
+    if name.len() > 256
+        || job_token.len() > 128
+        || !conditions.is_empty()
+        || step.compensation.is_some()
+        || step.preconditions.iter().any(|p| !protected(p))
+    {
+        return Err(refused(
+            "selected work-order requirements exceed the exact native queue capture",
+        ));
+    }
+    let route = crate::live_routing::route_step(step)
+        .outcome
+        .map_err(|r| refused(&r.reason))?;
+    if !matches!(
+        route.request,
+        crate::live_routing::LiveRequest::WorkOrder { .. }
+    ) {
+        return Err(refused(
+            "selected action has no closed native work-order recipe",
+        ));
+    }
+    Ok(())
+}
+fn validate_review_original(plan: &PreparedPlan, step_id: StepId) -> Result<()> {
+    if plan.steps.len() == 1 && step_id == StepId::ZERO {
+        original(plan)
+    } else {
+        selected_original(plan, step_id)
+    }
+}
+fn selected_step(plan: &PreparedPlan, step_id: StepId) -> Result<&PlanStep> {
+    plan.steps
+        .get(step_id.get() as usize)
+        .filter(|step| step.id == step_id)
+        .ok_or_else(custody)
+}
+
 fn authorize_scope(plan: &PreparedPlan, c: &OperationContext) -> Result<()> {
     if c.budget.max_actions == 0 {
         return Err(exhausted());
@@ -205,11 +256,11 @@ fn authorize_scope(plan: &PreparedPlan, c: &OperationContext) -> Result<()> {
         None,
     )
 }
-fn authorize_original(plan: &PreparedPlan, c: &OperationContext) -> Result<()> {
+fn authorize_original(plan: &PreparedPlan, step_id: StepId, c: &OperationContext) -> Result<()> {
     authorize_scope(plan, c)?;
     if c.anchor != plan.anchor
         || c.anchor.tick >= plan.expires_at_tick
-        || plan.steps[0]
+        || selected_step(plan, step_id)?
             .obligation
             .as_ref()
             .is_some_and(|o| c.anchor.tick >= o.deadline_tick)
@@ -226,6 +277,7 @@ fn authorize_original(plan: &PreparedPlan, c: &OperationContext) -> Result<()> {
 #[derive(Clone, Debug)]
 pub struct SemanticWorkOrderReview {
     original: PreparedPlan,
+    step: StepId,
     native: WorkOrderPlan,
     association: Association,
     seal: Digest32,
@@ -233,6 +285,13 @@ pub struct SemanticWorkOrderReview {
 impl SemanticWorkOrderReview {
     pub fn original_plan(&self) -> &PreparedPlan {
         &self.original
+    }
+    pub fn step_id(&self) -> StepId {
+        self.step
+    }
+    pub fn selected_step(&self) -> &PlanStep {
+        // Private constructors validate this immutable whole-parent selection.
+        &self.original.steps[self.step.get() as usize]
     }
     pub fn native_plan(&self) -> &WorkOrderPlan {
         &self.native
@@ -272,7 +331,7 @@ impl SemanticWorkOrderResult {
         false
     }
     pub fn pending_obligation(&self) -> Option<&ObligationSpec> {
-        self.review.original.steps[0].obligation.as_ref()
+        self.review.selected_step().obligation.as_ref()
     }
 }
 
@@ -555,6 +614,7 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage, N: WorkOrderSource>
         Ok(out)
     }
     fn view(&mut self, call: &mut Call) -> Result<(CreationSummary, Vec<CreationRecord>)> {
+        call.context.anchor.tick = self.native.authority_tick(&call.context)?;
         self.floor.authority(call)?;
         self.associations.verify(&call.reserve(STORE_BYTES)?)?;
         let mut retained = SourceFloor::default();
@@ -595,7 +655,6 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage, N: WorkOrderSource>
             if association.native != record.plan().digest()
                 || association.witness != record.plan().observation().witness()
                 || association.anchor.fortress_id != summary.fortress_id
-                || association.step != StepId::ZERO
             {
                 return Err(custody());
             }
@@ -622,7 +681,14 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage, N: WorkOrderSource>
         Ok((summary, records))
     }
     fn observe_native(&mut self, call: &mut Call) -> Result<WorkOrderObservation> {
-        let observation = self.native.observe(&call.reserve(NATIVE_BYTES)?)?;
+        let result = self.native.observe(&call.reserve(NATIVE_BYTES)?);
+        // A strictly decoded queue advances authority even when source identity,
+        // admission or current Query checks subsequently refuse its publication.
+        self.floor.retain_tick(
+            call.context.anchor.cursor.epoch,
+            GameTick(self.native.high_tick()),
+        )?;
+        let observation = result?;
         let clock = NativeClock::observed(&observation, call.context.anchor.cursor.epoch);
         if let Err(error) = self.floor.permit_native(clock) {
             self.native.clear_selection();
@@ -645,17 +711,32 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage, N: WorkOrderSource>
         Ok(())
     }
     fn attached(&self, seal: Digest32) -> Result<SemanticWorkOrderReview> {
-        self.attached
+        let review = self
+            .attached
             .as_ref()
-            .filter(|r| r.seal == seal)
+            .filter(|review| review.seal == seal)
             .cloned()
             .ok_or_else(|| {
                 error(
                     ErrorCode::Conflict,
                     "attach the exact original semantic work-order plan and paired review seal",
                 )
-            })
+            })?;
+        validate_review_original(&review.original, review.step)?;
+        if review.association.semantic != review.original.digest
+            || review.association.anchor != review.original.anchor
+            || review.association.step != review.step
+            || review.association.key != review.selected_step().idempotency_key
+            || review.association.key != review.native.key()
+            || review.association.native != review.native.digest()
+            || review.association.witness != review.native.observation().witness()
+            || review.seal != review.association.seal(self.associations.native_journal())
+        {
+            return Err(custody());
+        }
+        Ok(review)
     }
+
     fn exact(&self, review: &SemanticWorkOrderReview) -> Result<()> {
         if self.associations.get(review.native.key()) != Some(&review.association) {
             return Err(custody());
@@ -694,6 +775,16 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage, N: WorkOrderSource>
             creation,
         })
     }
+    /// Highest consumed canonical/native tick, including rejected observations.
+    /// This floor is not a source, capability or verified current observation.
+    pub fn high_tick(&self) -> u64 {
+        self.floor
+            .authority_tick
+            .map_or(0, |(_, tick)| tick.get())
+            .max(self.floor.canonical.map_or(0, |anchor| anchor.tick.get()))
+            .max(self.floor.native.map_or(0, |clock| clock.tick))
+            .max(self.native.high_tick())
+    }
     pub fn inventory(&mut self, context: &OperationContext) -> Result<Vec<CreationRecord>> {
         self.view(&mut Call::new(context)?)
             .map(|(_, records)| records)
@@ -707,13 +798,36 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage, N: WorkOrderSource>
         self.attached = None;
         self.native.clear_selection();
         original(&plan)?;
+        self.observe_step(plan, StepId::ZERO, evidence, context)
+    }
+
+    pub(crate) fn observe_selected<E: WorkOrderEvidenceOwner>(
+        &mut self,
+        selection: SelectedSemanticStep,
+        evidence: &mut E,
+        context: &OperationContext,
+    ) -> Result<SemanticWorkOrderReview> {
+        self.attached = None;
+        self.native.clear_selection();
+        let (plan, step_id) = selection.into_parts();
+        selected_original(&plan, step_id)?;
+        self.observe_step(plan, step_id, evidence, context)
+    }
+
+    fn observe_step<E: WorkOrderEvidenceOwner>(
+        &mut self,
+        plan: PreparedPlan,
+        step_id: StepId,
+        evidence: &mut E,
+        context: &OperationContext,
+    ) -> Result<SemanticWorkOrderReview> {
         let mut call = Call::new(context)?;
         call.admit(LOCAL_BYTES + 2 * VIEW_COST + NATIVE_BYTES + EVIDENCE_BYTES + 1)?;
         call.reserve(LOCAL_BYTES)?;
         let (summary, records) = self.view(&mut call)?;
-        authorize_original(&plan, &call.current()?)?;
+        authorize_original(&plan, step_id, &call.current()?)?;
         self.floor.permit_anchor(plan.anchor)?;
-        let key = &plan.steps[0].idempotency_key;
+        let key = &selected_step(&plan, step_id)?.idempotency_key;
         if records.iter().any(|r| r.plan().key() == key) {
             return Err(error(
                 ErrorCode::Conflict,
@@ -721,19 +835,15 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage, N: WorkOrderSource>
             ));
         }
         let observation = self.observe_native(&mut call)?;
-        authorize_original(&plan, &call.current()?)?;
+        authorize_original(&plan, step_id, &call.current()?)?;
         evidence.refresh_after_observation(&observation, &call.reserve(EVIDENCE_BYTES)?)?;
-        let route = resolve_work_order_step(
-            &plan,
-            StepId::ZERO,
-            &evidence.routing_evidence()?,
-            &observation,
-        )?;
+        let route =
+            resolve_work_order_step(&plan, step_id, &evidence.routing_evidence()?, &observation)?;
         self.floor.retain_anchor(plan.anchor)?;
         let association = Association {
             key: key.clone(),
             semantic: plan.digest,
-            step: StepId::ZERO,
+            step: step_id,
             anchor: plan.anchor,
             source: route.source_digest(),
             native: route.native_plan().digest(),
@@ -752,11 +862,12 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage, N: WorkOrderSource>
         let review = SemanticWorkOrderReview {
             seal: association.seal(summary.journal_id),
             original: plan,
+            step: step_id,
             native: route.native_plan().clone(),
             association,
         };
         self.view(&mut call)?;
-        authorize_original(&review.original, &call.current()?)?;
+        authorize_original(&review.original, review.step, &call.current()?)?;
         self.attached = Some(review.clone());
         Ok(review)
     }
@@ -768,14 +879,35 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage, N: WorkOrderSource>
         self.attached = None;
         self.native.clear_selection();
         original(&plan)?;
+        self.reattach_step(plan, StepId::ZERO, context)
+    }
+
+    pub(crate) fn reattach_selected(
+        &mut self,
+        selection: SelectedSemanticStep,
+        context: &OperationContext,
+    ) -> Result<SemanticWorkOrderReview> {
+        self.attached = None;
+        self.native.clear_selection();
+        let (plan, step_id) = selection.into_parts();
+        selected_original(&plan, step_id)?;
+        self.reattach_step(plan, step_id, context)
+    }
+
+    fn reattach_step(
+        &mut self,
+        plan: PreparedPlan,
+        step_id: StepId,
+        context: &OperationContext,
+    ) -> Result<SemanticWorkOrderReview> {
         let mut call = Call::new(context)?;
         call.reserve(LOCAL_BYTES)?;
         let (summary, records) = self.view(&mut call)?;
-        let key = &plan.steps[0].idempotency_key;
+        let key = &selected_step(&plan, step_id)?.idempotency_key;
         let association = self.associations.get(key).ok_or_else(custody)?.clone();
         if association.semantic != plan.digest
             || association.anchor != plan.anchor
-            || association.step != StepId::ZERO
+            || association.step != step_id
         {
             return Err(error(
                 ErrorCode::Conflict,
@@ -787,6 +919,7 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage, N: WorkOrderSource>
         let review = SemanticWorkOrderReview {
             seal: association.seal(summary.journal_id),
             original: plan,
+            step: step_id,
             native,
             association,
         };
@@ -808,7 +941,7 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage, N: WorkOrderSource>
         call.admit(VIEW_COST + NATIVE_BYTES + GUARD_BYTES + 1)?;
         let (_, records) = self.view(&mut call)?;
         self.exact(&review)?;
-        authorize_original(&review.original, &call.current()?)?;
+        authorize_original(&review.original, review.step, &call.current()?)?;
         self.floor.permit_anchor(review.original.anchor)?;
         let record = records
             .iter()
@@ -855,7 +988,7 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage, N: WorkOrderSource>
         call.reserve(LOCAL_BYTES)?;
         let (summary, records) = self.view(&mut call)?;
         self.writable(&summary)?;
-        authorize_original(&review.original, &call.current()?)?;
+        authorize_original(&review.original, review.step, &call.current()?)?;
         self.floor.permit_anchor(review.original.anchor)?;
         if !records
             .iter()
@@ -908,7 +1041,7 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage, N: WorkOrderSource>
         let (summary, records) = self.view(&mut call)?;
         self.writable(&summary)?;
         self.exact(&review)?;
-        authorize_original(&review.original, &call.current()?)?;
+        authorize_original(&review.original, review.step, &call.current()?)?;
         self.floor.permit_anchor(review.original.anchor)?;
         if records.iter().any(|record| {
             record.plan() == &review.native && record.state() == CreationState::Prepared
@@ -1017,11 +1150,11 @@ fn guard<B: EffectJournalStorage, E: WorkOrderEvidenceOwner>(
     if associations.get(native.key()) != Some(&review.association) {
         return Err(custody());
     }
-    authorize_original(&review.original, &call.current()?)?;
+    authorize_original(&review.original, review.step, &call.current()?)?;
     evidence.refresh_after_observation(native.observation(), &call.reserve(EVIDENCE_BYTES)?)?;
     let route = resolve_work_order_step(
         &review.original,
-        StepId::ZERO,
+        review.step,
         &evidence.routing_evidence()?,
         native.observation(),
     )?;
@@ -1029,5 +1162,5 @@ fn guard<B: EffectJournalStorage, E: WorkOrderEvidenceOwner>(
         return Err(custody());
     }
     associations.verify(&call.reserve(STORE_BYTES)?)?;
-    authorize_original(&review.original, &call.current()?)
+    authorize_original(&review.original, review.step, &call.current()?)
 }

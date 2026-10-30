@@ -44,6 +44,62 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Execute original labor and work-order plans through the native owners (2026-10-30)
+
+`live_production::Executor` now connects the durable dispatcher to the existing
+workforce/1.17 and work-orders/1.10 semantic and native owners. Its closed subset
+accepts one to sixteen original steps: exact single-labor changes for up to 32
+canonical citizens and finite wooden bed, door, table or chair orders. Every
+family selection retains the complete original sealed plan, actual StepId,
+original key, dependencies, anchor, terminal predicate and obligations. Existing
+public one-step family entry points preserve their contract.
+
+Only an exact retained `SingleLaborResult::Verified` can release a dependent
+step. Labor predecessors must have postconditions that the strict receipt really
+proves and cannot carry temporal obligations; work orders must be leaves. The
+executor checks actual predecessor receipts and semantic/native custody, including
+after the order's native dispatch marker has synchronized. Direct trait calls
+cannot substitute a route or invented Applied frontier. Queue insertion remains
+historical insertion evidence, never proof of finished goods or the original goal.
+
+Lost preparation and commit replies reconcile through the original native keys.
+Query-only reopening after original expiry restores neither local review nor
+commit permission. The combined owner retains the narrower opening/current grant
+scope, risk and expiry in nested calls. Native work-order reads now retain a
+strictly decoded queue's clock floor even if subsequent identity, source or Query
+checks fail; the semantic owner, executor and durable recovery pin preserve it.
+The floor remains scoped to the opening restore epoch: later-epoch historical
+Query uses its own clock, while new native capture and control cannot cross epochs.
+Errors withdraw the latest published evidence and local preparation.
+
+The final combined adapter component suite passes 352 tests,
+including 44 new groups across the durable core, selected-family
+integration, concrete executor and native clock-floor fix. Coverage includes
+complete two- and sixteen-step execution, exact native-key lost-reply recovery,
+post-dispatch predecessor custody loss, rejected goal-monitor shortcuts,
+opening/current authority attenuation and failed-read expiry. All
+303 adapter inputs and 91 core/world/intent
+inputs match the tested view. Production bodies are retained; only
+110 unrelated test-module declarations are disabled.
+A further 58 public work-order and 47 public workforce regression tests pass,
+including the unchanged historical Query-after-restore case (457 passing tests
+across the three targets).
+
+Required repository gates remain blocked before full Rust qualification:
+`verify.sh` stops at the existing source-bundle exact-clean-commit documentation
+gate; `qualify_local.sh` stops at existing static-contract findings.
+The remaining 76 static findings span 62 paths whose bytes are unchanged from
+the session's starting main; no new static finding remains in this feature's
+files. These component tests do not establish full workspace, ambient runtime,
+native DFHack or live-fortress qualification.
+
+This is an implemented Rust embedding boundary. A combined MCP owner and
+plan/commit/reconcile workflow are still absent; the existing eleven-tool surface
+and production protocol map are unchanged. Other mutation families, complete
+original-goal monitoring for the combined plan, native/live qualification and
+admission remain open. Dispatcher and fault-campaign beads retain their existing
+statuses. See [the executor contract](docs/LIVE_PRODUCTION_EXECUTOR.md).
+
 ### Durable original-plan frontier for mixed-family execution (2026-10-30)
 
 `live_dispatch::durable` now retains the complete original prepared-plan archive
@@ -75,8 +131,9 @@ Required repository commands still stop at source-bundle/static-contract gates.
 
 The generic executor boundary remains responsible for exact native family truth
 and predecessor custody. `all_applied()` is historical sequencing status and
-`original_goal_proven()` remains false. Concrete labor/work-order integration is
-the next checkpoint; no new MCP route, bridge protocol or admission is added.
+`original_goal_proven()` remains false. The executor checkpoint above supplies
+concrete labor/work-order integration; no new MCP route, bridge protocol or
+admission is added.
 The owning dispatcher and fault-campaign beads remain in progress/open. See
 [`LIVE_MUTATION_DISPATCH.md`](docs/LIVE_MUTATION_DISPATCH.md).
 

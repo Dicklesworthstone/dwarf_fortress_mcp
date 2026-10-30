@@ -17,6 +17,8 @@ pub struct WorkOrderSession<S, N> {
     id: SessionId,
     journal: WorkOrderJournal<S>,
     source: Option<N>,
+    epoch: u64,
+    high_tick: u64,
     selected: Option<Selection>,
 }
 impl<S: EffectJournalStorage, N: WorkOrderSource> WorkOrderSession<S, N> {
@@ -32,29 +34,73 @@ impl<S: EffectJournalStorage, N: WorkOrderSource> WorkOrderSession<S, N> {
                 "offline creation recovery cannot retain a native connection",
             ));
         }
+        let high_tick = journal
+            .records
+            .values()
+            .fold(context.anchor.tick.get(), |high, record| {
+                high.max(record.plan().observation().tick())
+            });
+        let mut current = context.clone();
+        current.anchor.tick = GameTick(high_tick);
+        journal.validate_access(&current)?;
         Ok(Self {
             id: context.session_id,
             journal,
             source,
+            epoch: context.anchor.cursor.epoch,
+            high_tick,
             selected: None,
         })
     }
-    fn access(&self, context: &OperationContext) -> Result<()> {
+    /// Highest consumed queue tick in this opening's canonical restore epoch,
+    /// including a capture refused after decoding.
+    /// This authority floor does not make the queue a usable current selection.
+    pub fn high_tick(&self) -> u64 {
+        self.high_tick
+    }
+    /// Project retained authority only within its original restore-clock domain.
+    /// A later epoch can inspect historical custody, but cannot adopt this source.
+    pub(crate) fn authority_tick(&self, context: &OperationContext) -> Result<GameTick> {
+        match context.anchor.cursor.epoch.cmp(&self.epoch) {
+            std::cmp::Ordering::Less => Err(error(
+                ErrorCode::StaleAnchor,
+                "creation authority predates the retained restore epoch",
+            )),
+            std::cmp::Ordering::Equal => {
+                Ok(GameTick(self.high_tick.max(context.anchor.tick.get())))
+            }
+            std::cmp::Ordering::Greater => Ok(context.anchor.tick),
+        }
+    }
+    fn original_epoch(&self, context: &OperationContext) -> Result<()> {
+        if context.anchor.cursor.epoch != self.epoch {
+            return Err(error(
+                ErrorCode::StaleAnchor,
+                "creation source cannot cross an unestablished restore epoch",
+            ));
+        }
+        Ok(())
+    }
+    fn access(&self, context: &OperationContext) -> Result<OperationContext> {
         if context.session_id != self.id {
             return Err(error(
                 ErrorCode::CapabilityDenied,
                 "creation evidence belongs to another session",
             ));
         }
-        self.journal.validate_access(context)
+        let mut current = context.clone();
+        current.anchor.tick = self.authority_tick(context)?;
+        self.journal.validate_access(&current)?;
+        Ok(current)
     }
-    fn production(&self, context: &OperationContext) -> Result<()> {
-        self.access(context)?;
-        self.journal.writable(context, true)
+    fn production(&self, context: &OperationContext) -> Result<OperationContext> {
+        self.original_epoch(context)?;
+        let current = self.access(context)?;
+        self.journal.writable(&current, true)?;
+        Ok(current)
     }
     pub fn summary(&self, context: &OperationContext) -> Result<CreationSummary> {
-        self.access(context)?;
-        self.journal.summary(context)
+        self.journal.summary(&self.access(context)?)
     }
     pub fn has_source(&self, context: &OperationContext) -> Result<bool> {
         self.access(context)?;
@@ -82,8 +128,10 @@ impl<S: EffectJournalStorage, N: WorkOrderSource> WorkOrderSession<S, N> {
     }
     /// A failed refresh never leaves the old witness eligible for new control.
     pub fn observe(&mut self, context: &OperationContext) -> Result<WorkOrderObservation> {
-        self.access(context)?;
         self.selected = None;
+        self.original_epoch(context)?;
+        let current = self.access(context)?;
+        let context = &current;
         let mut budget = Allowance::new(context)?;
         budget.charge(RPC_RESERVE_BYTES)?;
         let source = self.source.as_mut().ok_or_else(|| {
@@ -96,6 +144,7 @@ impl<S: EffectJournalStorage, N: WorkOrderSource> WorkOrderSession<S, N> {
         let result = (|| {
             let value = source.read_orders(budget.remaining()?)?;
             let value = WorkOrderObservation::decode(value.canonical_bytes())?;
+            self.high_tick = self.high_tick.max(value.tick());
             if source.manifest() != &manifest
                 || value.generation() != manifest.generation
                 || value.fortress_id() != context.anchor.fortress_id
@@ -109,7 +158,7 @@ impl<S: EffectJournalStorage, N: WorkOrderSource> WorkOrderSession<S, N> {
                 return Err(exhausted());
             }
             let mut current = context.clone();
-            current.anchor.tick = GameTick(value.tick());
+            current.anchor.tick = GameTick(self.high_tick.max(current.anchor.tick.get()));
             current.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
             budget.remaining()?;
             Ok(value)
@@ -170,7 +219,8 @@ impl<S: EffectJournalStorage, N: WorkOrderSource> WorkOrderSession<S, N> {
     where
         G: FnMut(&WorkOrderPlan, &OperationContext) -> Result<()>,
     {
-        self.production(context)?;
+        let current = self.production(context)?;
+        let context = &current;
         validate_key(key)?;
         if let Some(record) = self.journal.lookup(key, context)? {
             if record.plan().spec() != spec || record.plan().observation().witness() != witness {
@@ -203,7 +253,8 @@ impl<S: EffectJournalStorage, N: WorkOrderSource> WorkOrderSession<S, N> {
         digest: Digest32,
         context: &OperationContext,
     ) -> Result<CreationRecord> {
-        self.access(context)?;
+        let current = self.access(context)?;
+        let context = &current;
         let record = self.journal.lookup(key, context)?.ok_or_else(|| {
             error(
                 ErrorCode::InvalidRequest,
@@ -240,7 +291,8 @@ impl<S: EffectJournalStorage, N: WorkOrderSource> WorkOrderSession<S, N> {
     where
         G: FnMut(&WorkOrderPlan, &OperationContext) -> Result<()>,
     {
-        self.production(context)?;
+        let current = self.production(context)?;
+        let context = &current;
         let record = self.record(key, digest, context)?;
         if record.plan().observation().witness() != witness {
             return Err(error(
@@ -278,6 +330,8 @@ impl<S: EffectJournalStorage, N: WorkOrderSource> WorkOrderSession<S, N> {
         digest: Digest32,
         context: &OperationContext,
     ) -> Result<CreationRecord> {
+        let current = self.access(context)?;
+        let context = &current;
         let record = self.record(key, digest, context)?;
         if !record.state().unresolved() {
             return Ok(record);
@@ -293,7 +347,8 @@ impl<S: EffectJournalStorage, N: WorkOrderSource> WorkOrderSession<S, N> {
         digest: Digest32,
         context: &OperationContext,
     ) -> Result<CreationRecord> {
-        self.production(context)?;
+        let current = self.production(context)?;
+        let context = &current;
         let record = self.record(key, digest, context)?;
         self.journal.cancel(record.plan(), context)
     }
@@ -304,8 +359,8 @@ impl<S: EffectJournalStorage, N: WorkOrderSource> WorkOrderSession<S, N> {
         limit: usize,
         context: &OperationContext,
     ) -> Result<CreationPage> {
-        self.access(context)?;
-        self.journal.records_page(head, after, limit, context)
+        self.journal
+            .records_page(head, after, limit, &self.access(context)?)
     }
 }
 

@@ -9,10 +9,20 @@ it does not establish execution readiness, native admission, source authority,
 capabilities, preparation, or goal completion.
 
 The semantic plan remains the source of its action, canonical anchor, predicates,
-idempotency key, and temporal obligation. No generic cross-family execution
-coordinator is introduced. Existing guarded family sessions remain responsible
+idempotency key, and temporal obligation. Routing itself creates no execution
+authority. Existing guarded family sessions remain responsible
 for native preparation and confirmation, capability checks, durable journals,
 revalidation and recovery.
+
+The separate `live_dispatch::durable` owner retains the complete original plan
+and cross-family frontier through process loss. Its concrete `live_production`
+executor currently supports a closed maximum-16-step labor/work-order subset.
+It selects actual original StepIds without slicing or resealing the parent and
+rechecks real predecessor receipts at effect boundaries. Work orders are leaves;
+only labor postconditions proved by strict native readback release a dependent
+step. See [`LIVE_MUTATION_DISPATCH.md`](LIVE_MUTATION_DISPATCH.md) and
+[`LIVE_PRODUCTION_EXECUTOR.md`](LIVE_PRODUCTION_EXECUTOR.md). Neither routing nor
+an all-applied native frontier proves the complete original goal.
 
 ## Canonical identities remain canonical
 

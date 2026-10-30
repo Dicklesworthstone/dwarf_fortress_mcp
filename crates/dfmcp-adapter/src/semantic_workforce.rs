@@ -11,12 +11,13 @@ use std::time::{Duration, Instant};
 use dfmcp_core::{
     Capability, Digest32, EntityId, ErrorCode, GameTick, OperationContext, Result, RiskTier, StepId,
 };
-use dfmcp_intent::{Action, ObligationSpec, PreparedPlan};
+use dfmcp_intent::{Action, ObligationSpec, PlanStep, PreparedPlan};
 use dfmcp_world::{CompareOp, EntityKind, Predicate};
 
 use crate::bounded_run::error;
 use crate::control_effect_journal::EffectJournalStorage;
 use crate::live_routing::{LiveRoutingEvidence, resolve_workforce_step};
+use crate::semantic_selection::SelectedSemanticStep;
 use crate::workforce_control::journal::{
     AssignmentRecord, MAX_FRAME, WorkforceBinding, WorkforceView,
 };
@@ -164,8 +165,47 @@ fn original(plan: &PreparedPlan) -> Result<()> {
     Ok(())
 }
 
-fn authorize_scope(plan: &PreparedPlan, c: &OperationContext) -> Result<()> {
-    let Action::SetLabor { units, .. } = &plan.steps[0].action else {
+// This private path retains the entire parent; dependency custody remains the
+// combined owner's responsibility and is never inferred from selection alone.
+fn selected_original(plan: &PreparedPlan, step_id: StepId) -> Result<()> {
+    let step = SelectedSemanticStep::validate(plan, step_id)?;
+    let Action::SetLabor { units, labor, .. } = &step.action else {
+        return Err(refused(
+            "selected semantic workforce action must be SetLabor",
+        ));
+    };
+    if units.is_empty()
+        || units.len() > 32
+        || labor.is_empty()
+        || labor.len() > 64
+        || step.compensation.is_some()
+        || step
+            .preconditions
+            .iter()
+            .any(|predicate| !protected(predicate, units))
+    {
+        return Err(refused(
+            "selected workforce requirements exceed the exact native capture",
+        ));
+    }
+    Ok(())
+}
+fn validate_review_original(plan: &PreparedPlan, step_id: StepId) -> Result<()> {
+    if plan.steps.len() == 1 && step_id == StepId::ZERO {
+        original(plan)
+    } else {
+        selected_original(plan, step_id)
+    }
+}
+fn selected_step(plan: &PreparedPlan, step_id: StepId) -> Result<&PlanStep> {
+    plan.steps
+        .get(step_id.get() as usize)
+        .filter(|step| step.id == step_id)
+        .ok_or_else(custody)
+}
+
+fn authorize_scope(plan: &PreparedPlan, step_id: StepId, c: &OperationContext) -> Result<()> {
+    let Action::SetLabor { units, .. } = &selected_step(plan, step_id)?.action else {
         return Err(custody());
     };
     if c.budget.max_actions == 0 {
@@ -181,10 +221,10 @@ fn authorize_scope(plan: &PreparedPlan, c: &OperationContext) -> Result<()> {
     c.authorize(Capability::ConfigureLabor, RiskTier::Guarded, units, None)
 }
 
-fn authorize_original(plan: &PreparedPlan, c: &OperationContext) -> Result<()> {
-    authorize_scope(plan, c)?;
+fn authorize_original(plan: &PreparedPlan, step_id: StepId, c: &OperationContext) -> Result<()> {
+    authorize_scope(plan, step_id, c)?;
     if c.anchor.tick >= plan.expires_at_tick
-        || plan.steps[0]
+        || selected_step(plan, step_id)?
             .obligation
             .as_ref()
             .is_some_and(|obligation| c.anchor.tick >= obligation.deadline_tick)
@@ -202,6 +242,7 @@ fn authorize_original(plan: &PreparedPlan, c: &OperationContext) -> Result<()> {
 #[derive(Clone, Debug)]
 pub struct SemanticWorkforceReview {
     original: PreparedPlan,
+    step: StepId,
     native: AssignmentPlan,
     association: Association,
     seal: Digest32,
@@ -209,6 +250,13 @@ pub struct SemanticWorkforceReview {
 impl SemanticWorkforceReview {
     pub fn original_plan(&self) -> &PreparedPlan {
         &self.original
+    }
+    pub fn step_id(&self) -> StepId {
+        self.step
+    }
+    pub fn selected_step(&self) -> &PlanStep {
+        // The field is private and every constructor validates the full parent.
+        &self.original.steps[self.step.get() as usize]
     }
     pub fn native_plan(&self) -> &AssignmentPlan {
         &self.native
@@ -250,7 +298,7 @@ impl SemanticWorkforceResult {
         false
     }
     pub fn pending_obligation(&self) -> Option<&ObligationSpec> {
-        self.review.original.steps[0].obligation.as_ref()
+        self.review.selected_step().obligation.as_ref()
     }
 }
 
@@ -422,7 +470,8 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage> SemanticWorkforceSession<
         Ok(())
     }
     fn attached(&self, seal: Digest32) -> Result<SemanticWorkforceReview> {
-        self.attached
+        let review = self
+            .attached
             .as_ref()
             .filter(|review| review.seal == seal)
             .cloned()
@@ -430,8 +479,26 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage> SemanticWorkforceSession<
                 conflict(
                     "exact original semantic plan and review seal must be attached in this session",
                 )
-            })
+            })?;
+        validate_review_original(&review.original, review.step)?;
+        if review.association.semantic != review.original.digest
+            || review.association.anchor != review.original.anchor
+            || review.association.step != review.step
+            || review.association.key != review.selected_step().idempotency_key
+            || review.association.key != review.native.key()
+            || review.association.native != review.native.digest()
+            || review.association.witness != review.native.before().witness()
+            || review.seal != review.association.seal(self.associations.native_journal())
+        {
+            return Err(custody());
+        }
+        Ok(review)
     }
+
+    pub fn high_tick(&self) -> u64 {
+        self.native.high_tick()
+    }
+
     /// Historical native inventory is available without reconstructing any
     /// original plan. It never enables semantic dispatch or goal verification.
     pub fn inventory(&mut self, context: &OperationContext) -> Result<WorkforceView> {
@@ -455,16 +522,51 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage> SemanticWorkforceSession<
         self.attached = None;
         self.native.clear_selection();
         original(&plan)?;
+        self.observe_step(plan, StepId::ZERO, evidence, context, factory)
+    }
+
+    pub(crate) fn observe_selected<N, F, E>(
+        &mut self,
+        selection: SelectedSemanticStep,
+        evidence: &mut E,
+        context: &OperationContext,
+        factory: F,
+    ) -> Result<SemanticWorkforceReview>
+    where
+        N: WorkforceSource,
+        F: FnOnce(&WorkforceBinding, &OperationContext) -> Result<N>,
+        E: WorkforceEvidenceOwner,
+    {
+        self.attached = None;
+        self.native.clear_selection();
+        let (plan, step_id) = selection.into_parts();
+        selected_original(&plan, step_id)?;
+        self.observe_step(plan, step_id, evidence, context, factory)
+    }
+
+    fn observe_step<N, F, E>(
+        &mut self,
+        plan: PreparedPlan,
+        step_id: StepId,
+        evidence: &mut E,
+        context: &OperationContext,
+        factory: F,
+    ) -> Result<SemanticWorkforceReview>
+    where
+        N: WorkforceSource,
+        F: FnOnce(&WorkforceBinding, &OperationContext) -> Result<N>,
+        E: WorkforceEvidenceOwner,
+    {
         let mut call = Call::new(context)?;
         let view = self.view(&mut call)?;
-        authorize_original(&plan, &call.context()?)?;
-        let key = &plan.steps[0].idempotency_key;
+        authorize_original(&plan, step_id, &call.context()?)?;
+        let key = &selected_step(&plan, step_id)?.idempotency_key;
         if view.records.iter().any(|record| record.plan().key() == key) {
             return Err(conflict(
                 "native key already exists; only exact original-plan reattachment is permitted",
             ));
         }
-        let Action::SetLabor { units, .. } = &plan.steps[0].action else {
+        let Action::SetLabor { units, .. } = &selected_step(&plan, step_id)?.action else {
             return Err(custody());
         };
         let ids = evidence
@@ -480,11 +582,12 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage> SemanticWorkforceSession<
         let scoped = move |binding: &WorkforceBinding, c: &OperationContext| -> Result<_> {
             store.verify(&guard_call.context()?)?;
             let current = guard_call.edge(c)?;
-            authorize_original(guard_original, &current)?;
+            authorize_original(guard_original, step_id, &current)?;
             let native = factory(binding, &current)?;
             Ok(Scoped {
                 native,
                 original: guard_original,
+                step: step_id,
                 association: None,
                 associations: store,
                 call: guard_call,
@@ -493,11 +596,11 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage> SemanticWorkforceSession<
         let capture = self.native.observe(&ids, &native_context, scoped)?;
         call.refresh(evidence, &capture, &native_context)?;
         let candidate =
-            resolve_workforce_step(&plan, StepId::ZERO, &evidence.routing_evidence()?, &capture)?;
+            resolve_workforce_step(&plan, step_id, &evidence.routing_evidence()?, &capture)?;
         let association = Association {
             key: key.clone(),
             semantic: plan.digest,
-            step: StepId::ZERO,
+            step: step_id,
             anchor: plan.anchor,
             source: candidate.source_digest(),
             native: candidate.native_plan().digest(),
@@ -515,11 +618,12 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage> SemanticWorkforceSession<
         let review = SemanticWorkforceReview {
             seal: association.seal(view.id),
             original: plan,
+            step: step_id,
             native: candidate.native_plan().clone(),
             association,
         };
         self.view(&mut call)?;
-        authorize_original(&review.original, &call.context()?)?;
+        authorize_original(&review.original, review.step, &call.context()?)?;
         self.attached = Some(review.clone());
         Ok(review)
     }
@@ -535,13 +639,32 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage> SemanticWorkforceSession<
         self.attached = None;
         self.native.clear_selection();
         original(&plan)?;
+        self.reattach_step(plan, StepId::ZERO, context)
+    }
+
+    pub(crate) fn reattach_selected(
+        &mut self,
+        selection: SelectedSemanticStep,
+        context: &OperationContext,
+    ) -> Result<SemanticWorkforceReview> {
+        self.attached = None;
+        self.native.clear_selection();
+        let (plan, step_id) = selection.into_parts();
+        selected_original(&plan, step_id)?;
+        self.reattach_step(plan, step_id, context)
+    }
+
+    fn reattach_step(
+        &mut self,
+        plan: PreparedPlan,
+        step_id: StepId,
+        context: &OperationContext,
+    ) -> Result<SemanticWorkforceReview> {
         let mut call = Call::new(context)?;
         let view = self.view(&mut call)?;
-        let key = &plan.steps[0].idempotency_key;
+        let key = &selected_step(&plan, step_id)?.idempotency_key;
         let stored = self.associations.get(key).ok_or_else(custody)?.clone();
-        if stored.semantic != plan.digest
-            || stored.anchor != plan.anchor
-            || stored.step != StepId::ZERO
+        if stored.semantic != plan.digest || stored.anchor != plan.anchor || stored.step != step_id
         {
             return Err(conflict(
                 "reattachment changed the original semantic digest, anchor or step",
@@ -561,6 +684,7 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage> SemanticWorkforceSession<
         let review = SemanticWorkforceReview {
             seal: stored.seal(view.id),
             original: plan,
+            step: step_id,
             native,
             association: stored,
         };
@@ -584,7 +708,7 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage> SemanticWorkforceSession<
         let review = self.attached(seal)?;
         let mut call = Call::new(context)?;
         let view = self.view(&mut call)?;
-        authorize_original(&review.original, &call.context()?)?;
+        authorize_original(&review.original, review.step, &call.context()?)?;
         // Critically, missing semantic custody cannot adopt a pre-existing
         // native key, even when its native plan digest happens to match.
         if self.associations.get(review.native.key()).is_none()
@@ -599,14 +723,14 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage> SemanticWorkforceSession<
         self.associations
             .retain(review.association.clone(), &call.context()?)?;
         let native_context = call.edge(&native_context)?;
-        authorize_original(&review.original, &native_context)?;
+        authorize_original(&review.original, review.step, &native_context)?;
         let store = &mut self.associations;
         let guard_call = &mut call;
         let guard_review = &review;
         let guarded = move |binding: &WorkforceBinding, c: &OperationContext| -> Result<_> {
             store.verify(&guard_call.context()?)?;
             let current = guard_call.edge(c)?;
-            authorize_original(&guard_review.original, &current)?;
+            authorize_original(&guard_review.original, guard_review.step, &current)?;
             let native = factory(binding, &current)?;
             Ok(Guarded {
                 native,
@@ -650,7 +774,7 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage> SemanticWorkforceSession<
         let mut call = Call::new(context)?;
         let view = self.view(&mut call)?;
         self.exact_association(&review)?;
-        authorize_original(&review.original, &call.context()?)?;
+        authorize_original(&review.original, review.step, &call.context()?)?;
         let native_context = call.native(&view)?;
         let store = &mut self.associations;
         let guard_call = &mut call;
@@ -658,7 +782,7 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage> SemanticWorkforceSession<
         let guarded = move |binding: &WorkforceBinding, c: &OperationContext| -> Result<_> {
             store.verify(&guard_call.context()?)?;
             let current = guard_call.edge(c)?;
-            authorize_original(&guard_review.original, &current)?;
+            authorize_original(&guard_review.original, guard_review.step, &current)?;
             let native = factory(binding, &current)?;
             Ok(Guarded {
                 native,
@@ -705,6 +829,7 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage> SemanticWorkforceSession<
             Ok(Scoped {
                 native,
                 original: &guard_review.original,
+                step: guard_review.step,
                 association: Some(&guard_review.association),
                 associations: store,
                 call: guard_call,
@@ -748,7 +873,7 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage> SemanticWorkforceSession<
         self.exact_association(&review)?;
         // Cleanup needs current scoped authority, but an expired semantic plan
         // must not strand already prepared or uncertain native work.
-        authorize_scope(&review.original, &call.context()?)?;
+        authorize_scope(&review.original, review.step, &call.context()?)?;
         let c = call.native(&view)?;
         let store = &mut self.associations;
         let guard_call = &mut call;
@@ -756,11 +881,12 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage> SemanticWorkforceSession<
         let scoped = move |binding: &WorkforceBinding, c: &OperationContext| -> Result<_> {
             store.verify(&guard_call.context()?)?;
             let current = guard_call.edge(c)?;
-            authorize_scope(&guard_review.original, &current)?;
+            authorize_scope(&guard_review.original, guard_review.step, &current)?;
             let native = factory(binding, &current)?;
             Ok(Scoped {
                 native,
                 original: &guard_review.original,
+                step: guard_review.step,
                 association: Some(&guard_review.association),
                 associations: store,
                 call: guard_call,
@@ -819,8 +945,12 @@ impl<N: WorkforceSource, E: WorkforceEvidenceOwner, B: EffectJournalStorage> Gua
         }
         self.call.refresh(self.evidence, plan.before(), context)?;
         let scope = self.evidence.routing_evidence()?;
-        let current =
-            resolve_workforce_step(&self.review.original, StepId::ZERO, &scope, plan.before())?;
+        let current = resolve_workforce_step(
+            &self.review.original,
+            self.review.step,
+            &scope,
+            plan.before(),
+        )?;
         if current.native_plan() != plan
             || current.source_digest() != self.review.association.source
         {
@@ -828,7 +958,11 @@ impl<N: WorkforceSource, E: WorkforceEvidenceOwner, B: EffectJournalStorage> Gua
                 "fresh semantic evidence differs from the original reviewed native binding",
             ));
         }
-        authorize_original(&self.review.original, &self.call.context()?)?;
+        authorize_original(
+            &self.review.original,
+            self.review.step,
+            &self.call.context()?,
+        )?;
         self.associations.verify(&self.call.context()?)?;
         Ok(())
     }
@@ -845,7 +979,7 @@ impl<N: WorkforceSource, E: WorkforceEvidenceOwner, B: EffectJournalStorage> Wor
     fn observe(&mut self, ids: &[u32], context: &OperationContext) -> Result<WorkforceCapture> {
         self.associations.verify(&self.call.context()?)?;
         let current = self.call.edge(context)?;
-        authorize_original(&self.review.original, &current)?;
+        authorize_original(&self.review.original, self.review.step, &current)?;
         let capture = self.native.observe(ids, &current)?;
         if &capture != self.review.native.before() {
             return Err(error(
@@ -863,7 +997,7 @@ impl<N: WorkforceSource, E: WorkforceEvidenceOwner, B: EffectJournalStorage> Wor
     ) -> Result<AssignmentEffect> {
         self.check(plan, context)?;
         let current = self.call.edge(context)?;
-        authorize_original(&self.review.original, &current)?;
+        authorize_original(&self.review.original, self.review.step, &current)?;
         self.native.prepare(plan, &current)
     }
     fn commit(
@@ -873,7 +1007,7 @@ impl<N: WorkforceSource, E: WorkforceEvidenceOwner, B: EffectJournalStorage> Wor
     ) -> Result<AssignmentEffect> {
         self.check(plan, context)?;
         let current = self.call.edge(context)?;
-        authorize_original(&self.review.original, &current)?;
+        authorize_original(&self.review.original, self.review.step, &current)?;
         self.native.commit(plan, &current)
     }
     fn query(
@@ -898,6 +1032,7 @@ impl<N: WorkforceSource, E: WorkforceEvidenceOwner, B: EffectJournalStorage> Wor
 struct Scoped<'a, N, B> {
     native: N,
     original: &'a PreparedPlan,
+    step: StepId,
     association: Option<&'a Association>,
     associations: &'a mut AssociationStore<B>,
     call: &'a mut Call,
@@ -914,6 +1049,8 @@ impl<N: WorkforceSource, B: EffectJournalStorage> Scoped<'_, N, B> {
             || association.witness != plan.before().witness()
             || association.semantic != self.original.digest
             || association.anchor != self.original.anchor
+            || association.step != self.step
+            || selected_step(self.original, self.step)?.idempotency_key != plan.key()
             || self.associations.get(plan.key()) != Some(association)
         {
             return Err(custody());
@@ -935,7 +1072,7 @@ impl<N: WorkforceSource, B: EffectJournalStorage> WorkforceSource for Scoped<'_,
             ));
         }
         let current = self.current(context)?;
-        authorize_original(self.original, &current)?;
+        authorize_original(self.original, self.step, &current)?;
         self.native.observe(ids, &current)
     }
     fn prepare(&mut self, _: &AssignmentPlan, _: &OperationContext) -> Result<AssignmentEffect> {
@@ -960,7 +1097,7 @@ impl<N: WorkforceSource, B: EffectJournalStorage> WorkforceSource for Scoped<'_,
     ) -> Result<AssignmentEffect> {
         let current = self.current(context)?;
         self.bound(plan)?;
-        authorize_scope(self.original, &current)?;
+        authorize_scope(self.original, self.step, &current)?;
         self.native.cancel(plan, &current)
     }
 }
@@ -976,7 +1113,7 @@ fn action_result(
     if effect.phase() != AssignmentPhase::Applied {
         return Ok(SingleLaborResult::Unverified);
     }
-    let Action::SetLabor { labor, enabled, .. } = &review.original.steps[0].action else {
+    let Action::SetLabor { labor, enabled, .. } = &review.selected_step().action else {
         return Err(custody());
     };
     let column = review

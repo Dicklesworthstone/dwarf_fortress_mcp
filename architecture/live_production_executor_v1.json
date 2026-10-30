@@ -1,0 +1,84 @@
+{
+  "schema": "dfmcp.live-production-executor.v1",
+  "owner_bead": "df-dfhack-bridge-plane-c-pic.4",
+  "module": "dfmcp_adapter::live_production",
+  "durable_frontier_contract": "live_mutation_dispatch_v1.json",
+  "limits": {
+    "steps": 16,
+    "complete_original_archive_bytes": 65536,
+    "archive_nodes": 4096,
+    "archive_depth": 16,
+    "complete_parent_predicate_nodes": 512,
+    "selected_labor_units": 32,
+    "grant_inputs_and_output": 64
+  },
+  "families": [
+    "workforce/1.17",
+    "work-orders/1.10"
+  ],
+  "supported_actions": [
+    "SetLabor",
+    "CreateWorkOrder"
+  ],
+  "work_order_recipes": [
+    "wooden_bed",
+    "wooden_door",
+    "wooden_table",
+    "wooden_chair"
+  ],
+  "refused_requirements": [
+    "unsupported_action_family",
+    "mandatory_checkpoint",
+    "compensation",
+    "work_order_conditions",
+    "work_order_with_dependents",
+    "labor_predecessor_temporal_obligation",
+    "labor_predecessor_postcondition_outside_exact_receipt_proof",
+    "cross_family_current_precondition_without_source_proof"
+  ],
+  "labor_predecessor_postconditions": {
+    "leaf": "FieldCompare(selected canonical unit, labor.<requested labor>, Eq, requested boolean)",
+    "composition": "nonempty All of supported leaves or conjunctions",
+    "required_native_result": "SingleLaborResult::Verified",
+    "other_labor_columns_preserved": true,
+    "broader_native_applied_releases_dependency": false
+  },
+  "identity_and_recovery": {
+    "whole_original_plan_retained": true,
+    "actual_original_step_id_retained": true,
+    "original_key_reused": true,
+    "one_step_slicing_or_resealing": false,
+    "original_anchor_or_deadline_rebased": false,
+    "existing_public_one_step_contracts_preserved": true,
+    "selected_multi_step_review_enters_legacy_goal_monitor": false,
+    "query_recovery_uses_exact_native_key": true,
+    "recovery_restores_local_preparation": false,
+    "strict_decoded_queue_tick_retained_on_failure": true,
+    "native_clock_floor_scoped_to_opening_restore_epoch": true,
+    "later_epoch_query_historical_only_within_established_owner": true,
+    "later_epoch_reuses_owner_for_new_native_capture_or_control": false
+  },
+  "effect_boundary": {
+    "full_plan_step_and_typed_route_checked": true,
+    "sessions_exclusively_owned": true,
+    "invented_applied_frontier_authorizes": false,
+    "actual_predecessor_receipt_and_association_rechecked": true,
+    "work_order_post_dispatch_evidence_refresh_rechecks_labor_custody": true,
+    "opening_and_current_native_grants_intersected": true,
+    "native_guarded_risk_required": true,
+    "earliest_grant_expiry_propagated_to_children": true,
+    "grant_scope": "named original whole fortress required by existing native owners",
+    "single_shrinking_operation_deadline": true,
+    "failed_final_publication_withdraws_latest_evidence": true
+  },
+  "proof_boundary": {
+    "verified_labor_receipt": "historical selected labor effect",
+    "inserted_order_receipt": "exact finite queue insertion",
+    "current_state_proven": false,
+    "original_goal_proven": false,
+    "produced_goods_proven_by_insertion": false,
+    "mcp_route_added": false,
+    "protocol_or_source_authority_added": false,
+    "production_admission_added": false
+  }
+}
