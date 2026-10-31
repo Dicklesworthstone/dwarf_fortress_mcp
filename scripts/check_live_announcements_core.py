@@ -295,6 +295,7 @@ def check_source_contract() -> None:
         "evidence_mode": "0600",
         "receipt_create_only": True,
         "remove_receipt_on_post_publication_error": True,
+        "cleanup_failure_reports_indeterminate_identity": True,
     }, "announcement source custody policy drifted")
     require(authority.get("capabilities_granted") == [], "source contract grants capability")
     require(authority.get("mutation_capabilities") == [], "source contract grants mutation")
@@ -621,6 +622,7 @@ def check_qualification_and_docs() -> None:
         'SOURCE_SNAPSHOT="$OUT_DIR/source-snapshot.json"',
         'mkdir -m 0700 "$OUT_DIR"',
         'export PYTHONPYCACHEPREFIX="$ROOT/target/python-cache"',
+        'export CARGO_NET_OFFLINE=true',
         "run_gate announcement-mcp-process-tests cargo test --locked -p dwarf-fortress-mcp --test live_v1_1_development_admission",
         "run_gate clippy cargo clippy --locked --workspace --all-targets --all-features -- -D warnings",
         "run_gate workspace-tests cargo test --locked --workspace --all-targets --all-features",

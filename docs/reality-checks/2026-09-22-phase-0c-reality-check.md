@@ -135,6 +135,30 @@ Its 2,592-file manifest SHA-256 is
 `243e85393655c4e7f5e8ea76bccd8537ac25ee6149f387fb13ae75641ed6bd94`.
 Full qualification remains pending until both commands terminate successfully.
 
+Live7 then used the two source-bound R17 workforce executables. Terra discovered
+a valid single-MINE selected-only detail and an eligible citizen. A 5-second
+evidence deadline expired during 15.103 seconds of reasoning; the pre-dispatch
+refusal left zero records and unchanged captured configuration. One same-original
+60-second caller correction reached Prepared. Terra refused to commit because
+Plan/Explain exposed hashes without native review details. Parent verified all
+138 export members and independently re-decoded three canonical, byte-identical
+captures. The export manifest SHA-256 is
+`7bc52e808cb0295fa448155dc51444e04a0635db7be27d429dd30bca5068a60e`.
+One preparation and its recovery remain recorded; shutdown is not cancellation.
+No assignment or productive work is credited. Bead `.16` implements compact
+native review and a bounded transport fallback; its Rust/live execution remains
+pending. Deadline/error ergonomics remain `.4`.
+
+The later source-custody review found a separate qualifier's start-only clean
+claim and a real common post-publication read-error bug. Actual missing-file
+regressions failed **0/2** before repair. Bead `.15` reuses the full bounded
+HEAD-equivalent snapshot before/after source-only receipt publication; the common
+suite now passes **22/22**, announcement custody **5/5**, and source-contract
+mutations **12/12**. Failed cleanup reports all possible residual identities as
+indeterminate; every Cargo stage is forced offline. All three gate-list
+representations agree on seventeen source-only gates. These later bytes require
+their own complete qualification and do not inherit R17's results.
+
 ### Current vision and wiring matrix
 
 | Goal | Actual reachable path and present limit | Status / owning work |
@@ -146,7 +170,7 @@ Full qualification remains pending until both commands terminate successfully.
 | Original Mine designation and goal proof | Semantic Mine runtime → independent canonical/native evidence → dig/1.16 journal → fresh floor samples | Live planning refusals preserved; excavation competence UNPROVEN; .5 |
 | Bounded game clock | Separately reviewed run/1.13 or goal-bound clock owner; wait reconciles rather than starts another run | Exact-source ten-tick live success; 47/60 wall stop retained; full campaign .5 |
 | Job suspension | Real bounded SDK job-list lookup; missing/duplicate/cyclic/oversize source rejected; eligibility currently false | PARTIAL, positive mutation unavailable; .8; refusal-only proof cannot close it |
-| Work orders, labor and furniture | Dedicated semantic owners preserve exact source/plan/native identities; concrete production executor exists | Source/native build; mixed-family executor has no MCP host consumer found; pic.4/.5 |
+| Work orders, labor and furniture | Dedicated semantic owners preserve exact source/plan/native identities; concrete production executor exists | Live labor reached Prepared, no commit; opaque review repair source-only .16; mixed-family MCP host gap pic.4/.5 |
 | First-fortress workshop prerequisites | Real trial has only a wagon; live build/1.19 supports bed/chair/table placement, with no workshop construction consumer | Missing live prerequisite; .14; order insertion cannot prove production |
 | Shared cancellation and physical work | Laboratory coordinator → owned actions → dependency-order drain → observations/certificates | Runtime selector and obligation retention repaired; full qualification pending; .1 |
 | Durable goals and restart | Laboratory private durable stores retain original plan, historical receipts and current proof separately | Real lab integration tests; native save/restore remains outside MCP |
@@ -159,7 +183,7 @@ Full qualification remains pending until both commands terminate successfully.
 | Resource URI contract | Actual registered session and doctor resources; session replay/Tasks use the real resolver | Broader fortress/knowledge/memory families remain .11 |
 | EE memory | Evidence-curation workflow is distinct from the legacy batch helper; hostile text now produces valid escaped JSONL | Legacy helper repair .7; no automatic memory ingestion or authority implied |
 | SLOs and economics | Actual timings and bounded refusal witnesses recorded; large observations still cost tens of seconds on this host | UNPROVEN against declared SLOs; .4 and existing benchmark work |
-| Compatibility/release/process authority | Registry/floor/artifact/ticket/private-runner machinery exists and refuses unsupported launch states | Empty registry and no current complete evidence chain; no admitted product |
+| Compatibility/release/process authority | Registry/floor/artifact/ticket/private-runner machinery exists and refuses unsupported launch states | Empty registry; source-only custody repair .15 awaits exact full run; no admitted product |
 
 Here `.N` means `dfmcp-reality-wiring-proof-4bf.N`; `54h.N` means
 `df-franken-storage-mvcc-54h.N`, `pic.4` means `df-dfhack-bridge-plane-c-pic.4`, and

@@ -47,7 +47,13 @@
   gates and before/after create-only publication. Reject hidden, untracked and
   HEAD drift; remove a published snapshot or receipt when final source reading
   raises. Actual missing-file regressions fail 0/2 before repair; the common
-  receipt suite now passes 20/20 and announcement custody passes 5/5.
+  receipt suite now passes 22/22 and announcement custody passes 5/5. Failed OS
+  cleanup reports all possible residual identities as indeterminate; every Cargo
+  gate is forced offline.
+- Preserve the live7 workforce refusal: one Prepared record, no commit and
+  byte-identical independent captures. Add a compact source-bound native review
+  for semantic Plan/Explain and a truthful 65,535-byte transport fallback. Rust
+  execution and the new live replay remain pending for those later bytes.
 
 ## 2026-10-30 — Execute complete original labor and work-order plans
 

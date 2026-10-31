@@ -254,6 +254,9 @@ mode `0600`. Explicit Python syntax caches go under ignored `target/`. Source
 custody tests use real temporary Git trees, including assume-unchanged byte drift,
 untracked files, HEAD changes and post-publication missing files. Endpoint checks
 do not prove that no transient edit was made and reverted between checks.
+If the OS prevents cleanup, the writer reports indeterminate publication and all
+possible residual paths; a JSON file marked passed is not a completed result in
+that case. All Cargo stages are forced offline through `CARGO_NET_OFFLINE=true`.
 
 This is later source than frozen R17. Focused checks do not grant full source
 qualification, native evidence or admission; a fresh complete source-only run is

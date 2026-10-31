@@ -5434,8 +5434,26 @@ existing full bounded HEAD-equivalent snapshot machinery, private create-only
 custody, and source comparisons before and after publication. Two actual
 post-publication missing-file regressions exposed stale common snapshots/receipts
 left after a read exception (0/2 before repair); both now remove their output on
-any final verification exception. The common suite passes 20/20 and the new
+any final verification exception. The common suite passes 22/22 and the new
 announcement custody suite 5/5, including hidden byte, untracked and HEAD drift.
 The machine gate/digest inventories and aggregate wiring are updated. These later
 Python source changes still require their own full qualification; R17 remains
 frozen and grants no transferred pass.
+
+Independent review additionally reproduced failed-publication cleanup being
+silenced. The writer now reports indeterminate publication with every possible
+residual identity if the OS prevents removal or durable cleanup. Both destination
+and temporary-name failures are covered; a remaining JSON marked passed is not
+a completed qualification. All three qualification/verification scripts now
+force Cargo offline at every stage.
+
+The source-bound R17 live7 workforce trial selected a real eligible citizen and
+MINE-only detail. Its initial 5-second observation-evidence deadline expired
+during 15.103 seconds of agent reasoning, before dispatch. A safely reconciled
+same-original 60-second caller correction reached Prepared, but Terra refused
+opaque hash-only review and sent no commit. Three independently re-decoded native
+captures are byte-identical; one native preparation was retained, with no
+unresolved effect. Shutdown is not cancellation, and original recovery remains
+archived. Reality bead .16 adds a bounded native detail/citizen/membership review
+to the existing semantic Plan/Explain and enforces the actual text limit in its
+fallback. These new Rust tests and a source-bound live replay remain pending.

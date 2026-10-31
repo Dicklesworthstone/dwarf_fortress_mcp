@@ -226,7 +226,7 @@ class LiveAnnouncementContractTests(unittest.TestCase):
             self.assertNotEqual(self.run_checker(root).returncode, 0)
 
     def test_source_custody_policy_gate_and_wiring_cannot_be_removed(self) -> None:
-        for mutation in ("policy", "gate", "digest", "capture", "publish"):
+        for mutation in ("policy", "gate", "digest", "capture", "publish", "offline"):
             with self.subTest(mutation=mutation):
                 temporary, root = self.fixture()
                 with temporary:
@@ -241,10 +241,13 @@ class LiveAnnouncementContractTests(unittest.TestCase):
                     else:
                         wrapper = root / "scripts/qualify_live_announcement_source.sh"
                         text = wrapper.read_text(encoding="utf-8")
-                        text = text.replace(
-                            f"from announcement_source_custody import {mutation}",
-                            f"from announcement_source_custody import removed_{mutation}",
-                        )
+                        if mutation == "offline":
+                            text = text.replace("export CARGO_NET_OFFLINE=true", "")
+                        else:
+                            text = text.replace(
+                                f"from announcement_source_custody import {mutation}",
+                                f"from announcement_source_custody import removed_{mutation}",
+                            )
                         wrapper.write_text(text, encoding="utf-8")
                     path.write_text(json.dumps(value) + "\n", encoding="utf-8")
                     self.assertNotEqual(self.run_checker(root).returncode, 0)

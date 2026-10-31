@@ -93,7 +93,8 @@
     "run_directory_mode": "0700",
     "evidence_mode": "0600",
     "receipt_create_only": true,
-    "remove_receipt_on_post_publication_error": true
+    "remove_receipt_on_post_publication_error": true,
+    "cleanup_failure_reports_indeterminate_identity": true
   },
   "authority": {
     "capabilities_granted": [],
