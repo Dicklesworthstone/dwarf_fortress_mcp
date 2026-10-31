@@ -10,9 +10,15 @@
   234 policy checks, the 397-assertion complete handler suite under UBSan and
   all three engine mutation checks. Preserve codec goldens and disclose the
   corrected stale throwing-setter expectation.
-- Compile/link the changed plugin against the real DFHack 53.16-r3 SDK. Fresh
-  full-source and actual-game MCP proof remain pending; the owning Bead stays
-  in progress and production admission remains unchanged.
+- Compile/link the changed plugin against the real DFHack 53.16-r3 SDK. Fix
+  the independently found hidden-worker reference case with exactly one valid
+  holder reference. Through actual public MCP, suspend and resume one real idle
+  bed job; independently verify native receipts and unchanged captured fields.
+- Qualify exact clean `7bba4d01debdc7069e081adb824a4ace4fa199b3` on TRJ:
+  43 gates plus verifier, 5,124 debug and 5,124 release tests per command,
+  zero failed/ignored and 2,591 unchanged source hashes. Preserve the earlier
+  documentation and TS2 budget failures. Operator workshop/job fixture setup
+  earns no MCP construction or production credit; admission remains unchanged.
 
 ## 2026-10-31 — Complete exact-source and fresh server qualification
 

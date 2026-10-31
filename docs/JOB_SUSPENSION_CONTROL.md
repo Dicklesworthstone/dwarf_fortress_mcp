@@ -115,8 +115,22 @@ The changed plugin also compiles and links against the matching real 53.16-r3
 SDK (`0bf381cc1615656acf756e6e67573fffca715125`). The development binary SHA-256 is
 `da84fea2f1a96d278de7900f58cdece21029de9ec40320d79aca0480da682b8d`.
 That is actual SDK build evidence, not R1, a real-game intervention or admission.
-Current full-source qualification and the disposable-game MCP replay remain
-required under `dfmcp-reality-wiring-proof-4bf.8`.
+Exact clean source `7bba4d01debdc7069e081adb824a4ace4fa199b3` now passes
+43 local gates and the full verifier on TRJ: 5,124 debug and 5,124 release tests
+per command, zero failed or ignored. Independent source-receipt replay and all
+2,591 final hashes pass. Earlier failed source runs remain failed.
+
+The actual public MCP live10 replay suspends and resumes real job 3 under two
+separately reviewed keys. Parent checks 127 export hashes, fifteen modern
+exchanges, canonical native observations and both complete native receipt hashes.
+Captured state differs only by suspension `0 → 2 → 0`, with unchanged raw pause
+and game tick. The independent before/after scope is selected job/holder/queue,
+references, attachments, selected filters and world clock, not every game field.
+Operator setup constructs a real workshop and queues the job; it earns no MCP
+construction, produced-item or fortress-competence credit. Artifacts are under
+`target/reality-check-20261030/terra-live10-export`; independent replay is
+`target/bang-for-buck-20261031/live10-parent-review.json`. Development evidence
+does not grant compatibility or runtime admission.
 
 The earlier implementation record below describes its original synthetic run;
 it does not retroactively establish valid real-SDK acquisition.

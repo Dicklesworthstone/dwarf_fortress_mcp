@@ -7,8 +7,11 @@ reported every job unsupported after fictional SDK calls were removed. The new
 closed policy in `JOB_SUSPENSION_CONTROL.md` enables four ordinary furniture-job
 types at completed workshops and restores the sole Boolean setter. The actual
 SDK build succeeds; handler tests cover positive effects as well as refusal and
-replay. A new source-qualified disposable-game MCP replay is still required;
-none of these results grants admission or proves later production completion.
+replay. Exact R23 source now passes full qualification and verifier; the live10
+public MCP trial proves suspend/resume of one real eligible job under separate
+reviews. Independent native capture, receipt and raw exchange replay are recorded
+in `JOB_SUSPENSION_CONTROL.md`. None of these results grants admission or proves
+later production completion.
 
 The implementation-era unexecuted statements below are historical. R21's full
 workspace qualification covers its exact prior Rust source, not the later native

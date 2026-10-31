@@ -30,7 +30,11 @@ admission, or support. No protocol beyond 1.0 appears in the production runner m
 
 ## Evidence hierarchy
 
-### Latest exact-source qualification (2026-10-31)
+### R21 source and executable qualification (2026-10-31)
+
+The later exact R23 source qualification and selected real-game job-control
+proof are recorded under "Restore positive idle furniture-job suspension" below.
+R21 retains the separately qualified production server executable described here.
 
 Private clean commit `742e5a1dd419110979c42647ae7d88cb54696363` passed
 `qualify_local.sh` (43/43 gates), `verify.sh`, the separate announcement-source
@@ -105,9 +109,35 @@ The plugin compiles and links against the actual 53.16-r3 SDK, revision
 `da84fea2f1a96d278de7900f58cdece21029de9ec40320d79aca0480da682b8d`.
 The build preserves 3,639 SDK inputs, 84 unchanged native inputs and the one
 explicitly changed handler, with before/after custody. This is development build
-evidence, not R1. Current full-source qualification, independent review and a
-disposable actual-game MCP intervention remain required under
-`dfmcp-reality-wiring-proof-4bf.8`; it stays in progress.
+evidence, not R1. Independent review additionally caught first-match general
+references hiding a worker. The final policy requires exactly one resolving
+`BUILDING_HOLDER` reference with matching ID and pointer; extra/dangling/worker
+references refuse. Native source SHA-256 is
+`512bd4edf367c44677157ebf3e5c9e21e7656d8b614da2f38bec5d24de59c8cb`.
+
+The actual public MCP live10 trial suspended job 3 and resumed it under a fresh
+key and review. Parent replay verified 127 export members, 15 modern exchanges
+and both native plan/token/readback/receipt hashes. Independent captured WORLD,
+holder/queue, job, references, attachments and selected filter fields changed
+only suspension `0 → 2 → 0`; raw pause and tick 12113667 stayed unchanged.
+Stored-terminal waits did not dispatch another mutation. The actual game agent
+was GPT-6.1 Terra directly; build/test used Codex through NTM. Operator setup built
+a real workshop with normal construction and queued a bed, advancing 867 setup
+ticks; it earns no MCP workshop-construction or production credit. Game and client
+were drained, TCP closed and the retained thirty-file backup independently
+rechecked. Initial transport failures and screenshot-count correction remain.
+
+Exact clean private revision `7bba4d01debdc7069e081adb824a4ace4fa199b3`
+subsequently passed all 43 local gates and `verify.sh` on TRJ, with 5,124 debug
+and 5,124 release tests per command across 123 targets per profile, zero failed or
+ignored. All 2,591 source hashes and clean status match. Independent receipt replay
+passed; receipt SHA-256 is
+`7f7bbf990a3f15cb3cd7775a2478c66d2de9d3839a1893ae1678bf3e7f745904`.
+Earlier R22 documentation-contract failure and TS2 R23 budget failures remain
+failed; passing identical tests on another worker does not reclassify them or
+establish their sole cause. The scoped job-control defect is complete; later
+report/Bead edits inherit no qualification. No R1, broad fortress competence,
+productive output, production server-artifact or runtime admission follows.
 
 ### Execute original labor and work-order plans through the native owners (2026-10-30)
 

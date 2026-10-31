@@ -4,7 +4,9 @@ The later MCP consumer is documented in `JOB_CONTROL_MCP.md`. Its Rust source
 was included in the exact R21 full workspace qualification. Earlier unexecuted
 statements below retain the implementation-era record. The 2026-10-31 native
 repair enables the closed actual-SDK policy in `JOB_SUSPENSION_CONTROL.md`;
-fresh full-source qualification and real-game intervention remain separate.
+exact R23 full-source qualification and the selected real-game intervention are
+recorded separately in that document. These results do not qualify later edits
+or establish productive output, native R1 or runtime admission.
 
 This isolated development extension connects the existing native job-suspension
 contract to Rust evidence, fixed RPC and durable coordination. It does not change
