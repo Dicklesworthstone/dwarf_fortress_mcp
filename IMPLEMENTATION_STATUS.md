@@ -64,7 +64,8 @@ the production runner map remains protocol 1.0, and no runtime is admitted.
 
 The shared response contract is implemented source. The exact private revision
 named above has source and artifact qualification; focused tests or a prior live
-trial do not qualify the later shared worktree.
+trial do not qualify the later shared worktree. Later edits remain unqualified source changes
+until their own exact-source receipts pass.
 
 1. **source present** — code, contracts, and tests are checked in;
 2. **static/Python checked** — static or design checks passed for one exact source generation;
