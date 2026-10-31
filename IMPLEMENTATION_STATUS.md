@@ -5457,3 +5457,87 @@ unresolved effect. Shutdown is not cancellation, and original recovery remains
 archived. Reality bead .16 adds a bounded native detail/citizen/membership review
 to the existing semantic Plan/Explain and enforces the actual text limit in its
 fallback. These new Rust tests and a source-bound live replay remain pending.
+
+R17b's qualifier completed all 43 gates on clean source, including 5,120 debug
+and 5,120 release tests across 123 targets each, zero failed or ignored; its
+receipt SHA-256 is `dc3f66d7887717fb63fb42ab7d1a680fce635d2c2b9b0fbed835372313612f9a`.
+Independent receipt replay accepted all 2,592 source digests. The subsequent
+verifier also exited zero, but the final combined check found eleven untracked
+Python caches. This is **not a completed clean combined qualification**. All
+tracked source hashes matched. The failed final check and misleading zero from
+the external wrapper are retained; cleanup does not grant retroactive credit.
+
+Reality bead .17 fixes the trigger: sanitized tracker subprocesses dropped the
+parent's Python cache variables. The direct read-only CLI now disables bytecode
+before local imports. Its real isolated subprocess regression fails before the
+repair and passes after. An actual macOS FIFO test also exposed locking before
+file-type rejection; regular-file validation now precedes locking, with every
+existing post-lock check preserved. All 64 excavation/blueprint tests pass on
+macOS and isolated Linux. The eleven private-worker cache copies were archived
+and hashed before removal; shared-root caches and recovery artifacts remain
+untouched. The unbuilt R18 snapshot is superseded, and the next full source run
+must include these fixes and propagate its final source check.
+
+
+A later artifact-custody review exposed a separate server-qualification defect
+(reality bead .18): Cargo could honor an alternate target directory or configured
+target while the wrapper checked an old canonical `target/release` executable.
+The actual wrapper and independent verifier issued a qualified receipt for that
+stale file in a clean isolated Git fixture with target-aware fake Cargo. This
+reproduces orchestration, not a real Cargo build or an admitted artifact. The
+repair creates a fresh private build target inside each create-only run, explicitly
+selects it with locked/offline Cargo, and checks only its new executable. A routed
+target triple fails before checks instead of selecting stale output. All 13
+wrapper tests and 10 release-custody tests pass, including red-before/green-after
+routing regressions. A real Cargo routing probe and exact-source full qualification
+remain pending; frozen R20 is unchanged and grants no artifact or runtime admission.
+
+
+R20's source-bound live8 semantic workforce executable now supplies an actual
+public-handler witness for review bead .16. Parent independently hash-verified
+all 78 export members and parsed all nine semantic MCP exchanges: matching
+Plan/Explain native reviews, one confirmed commit, verified Applied receipt,
+fresh wait and resource-only close. Native canonical round trips and the
+predeclared comparator confirm exactly the intended membership/MINE change,
+with all other captured fields unchanged across 7 citizens, 11 details and
+94 labor columns at paused tick 12112800. Both original-goal and semantic-
+completion flags remain false: the temporal obligation has zero eligible
+samples. No time, mining or productive output is credited. This is bounded
+assignment evidence, not full fortress competence or admission. The source
+passes 5,124 debug tests across 123 targets, zero failed/ignored; release and
+remaining full checks continue independently. Export manifest SHA-256:
+`07ae39adceb04a02721e78f7ed71ee724d4ec9f55bca7a43d5db6a25a7bcfa24`.
+The export discloses an NTM pane copy before host scanning; all seven private
+values were later absent, but the order is not retroactively corrected.
+
+
+R20 subsequently passed all 43 local source gates and `verify.sh`, each with
+5,124 debug and 5,124 release tests across 123 targets per configuration, zero
+failed or ignored. Independent receipt replay accepted all 2,591 clean
+HEAD-equivalent inputs; receipt SHA-256
+`36caca740e43de24a7d535f6dd8b01acbb412041ce190e07f52fd69685986fe3`.
+The combined three-command run nevertheless failed: the separate announcement
+qualifier was tracked mode 0644 and could not start (exit 126, zero gates).
+Its final source check remained clean. Bead .19 makes six documented qualifier
+entrypoints executable and adds an actual-process packaging regression; it is
+red on all six before repair and the full wrapper suite passes 14/14 after.
+These later mode, artifact-builder and Python changes require the next exact
+source run, not inherited R20 qualification.
+
+R20 live9 completes one deliberately single-sample original labor goal. The
+actual source-bound semantic executable and fresh real-SDK run plugin prepare
+and confirm one assignment and one distinct ten-tick run. Parent verifies 104
+export members, twelve main MCP exchanges, eighteen history-chain events and
+six canonical captures. A fresh native capture at tick 12112810 matches the
+published source digest and proves both original-goal and semantic completion;
+the run stopped at exactly +10, zero observed overshoot, with independent raw
+pause/owner-inactive evidence. Whole-domain coverage remains unknown; selected
+positive identity/labor facts are observed. No sustained, mining, productive
+output or broad fortress-competence claim follows. The live9 export manifest is
+`6479141c9b6121bdbc98452e0234dfbee72c58f76caf433ceb46b68bdb5a35c1`.
+It preserves a pre-goal wrong-version refusal, an agent-authored valid config
+used before a stricter operator message arrived, and four setup screenshots
+copied before later clean host scans. Subsequent package exports were gated.
+These departures prevent a clean campaign claim; all owned processes stopped
+and both 30-file save copies remained intact. Old live7 Prepared remains
+historical, without current native reconciliation.

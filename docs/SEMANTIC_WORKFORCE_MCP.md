@@ -226,14 +226,34 @@ this compact review, and other effects of automatic labor recomputation are
 unknown until the existing native readback proves them. No credential, source
 path, new authority or native control input is added.
 
-This review presentation is source-only and its new focused tests and live
-handler behavior have not yet been run. A prior real development trial reached
-Prepared but the agent declined to commit because the then-running executable
-exposed only review digests; the retained preparation was not cancelled by
-closing the session or stopping the game. The source change is not evidence of
-a successful assignment or admission. If the complete response cannot fit the
-modern transport's text limit, the source returns an explicit bounded failure
-with retained recovery evidence instead of silently truncating the review.
+Exact private R20 source `3f89445824ff146f617807ae9958cbba16a2f4d6`
+passes 87 focused workforce tests and the full 5,124-test debug suite. Its
+source-bound semantic executable
+`fc1585f3ccfa04a1747c1e62f170546bb88a5e9cbcfdc7b6dc2e6629ccfa0f81`
+was exercised by Terra through NTM in live8. Actual public Plan and Explain
+exposed identical native review; one confirmed commit returned a verified
+Applied receipt. Independent canonical native captures confirmed the selected
+citizen's membership and MINE changed false to true, with every other captured
+field unchanged across seven citizens, eleven details and 94 labor columns.
+No tick advanced. The fresh wait found the requested labor value true but the
+original temporal obligation active: both original-goal and semantic-completion
+flags remained false. This proves one captured assignment, not the complete
+temporal goal, productivity or admission. Full release/source qualification of
+R20 is named by its passed 43-gate local receipt and verifier. Its separate
+announcement qualifier did not start because of a tracked executable-mode
+defect; later shell/Python repairs need a new exact-source qualification.
+
+The earlier live7 preparation remains historical Prepared. Supported offline
+inspection preserved its custody, but closing the session or stopping the game
+did not cancel it or establish current native state. The live8 export contains
+78 hash-verified members; its manifest SHA-256 is
+`07ae39adceb04a02721e78f7ed71ee724d4ec9f55bca7a43d5db6a25a7bcfa24`,
+under `target/reality-check-20261030/terra-live8-export`. It discloses an NTM
+pane copy before host scanning; all seven private values were subsequently
+absent, and this order is not relabeled as scan-before-copy.
+If a complete response cannot fit the modern transport's text limit, the
+runtime returns an explicit bounded failure with retained recovery evidence
+instead of silently truncating the review.
 
 The confirmation request has this shape:
 
@@ -471,7 +491,29 @@ execute DFHack's real SDK, a live fortress, FastMCP macro-generated handlers or
 the stdio executable. The exact test counts and build limitations for this
 increment are recorded in [IMPLEMENTATION_STATUS.md](../IMPLEMENTATION_STATUS.md).
 
-No compatibility, production admission, live-game success, host power-loss
-qualification or cross-controller exclusion is claimed. The native work-detail
+The later live9 development trial completed one explicitly single-sample original
+labor goal through this executable and a fresh source-bound run plugin. One
+reviewed assignment and one separately confirmed ten-tick run were followed by a
+fresh paused native capture at tick 12112810. Both original-goal and semantic-
+completion flags were true; the native run stopped for `tick_limit` with zero
+observed overshoot, and an independent read confirmed raw pause and inactive
+ownership. Parent replay verified all 104 export members, twelve main MCP
+exchanges, eighteen goal-history hash-chain events and six canonical native
+captures. The final capture hash matches the published goal source digest.
+The policy grants positive selected-unit facts; whole-domain coverage remains
+unknown. This proves the declared one-sample goal at its anchor, not continuous
+stability, mining, productivity or general fortress competence.
+
+The actual valid configuration was agent-authored after a pre-goal wrong-version
+refusal; a correction-message race meant the later operator-authored file was
+unused. Four setup screenshots had been copied before host scanning and were
+later clear of all nine private values. Subsequent package copies used exact-byte
+host scan/stage gating. These procedural departures remain explicit; the result
+is bounded control evidence, not a clean qualification campaign. Export manifest
+SHA-256 is `6479141c9b6121bdbc98452e0234dfbee72c58f76caf433ceb46b68bdb5a35c1`,
+under `target/reality-check-20261030/terra-live9-export`.
+
+No compatibility or production admission, host power-loss qualification or
+cross-controller exclusion is claimed. The native work-detail
 system can be changed by another controller; its complete paused capture is
 revalidated at dispatch, and later state requires a fresh observation.

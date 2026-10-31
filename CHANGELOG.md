@@ -54,6 +54,34 @@
   byte-identical independent captures. Add a compact source-bound native review
   for semantic Plan/Explain and a truthful 65,535-byte transport fallback. Rust
   execution and the new live replay remain pending for those later bytes.
+- Preserve R17b's passed 43-gate qualifier and both 5,120-test configurations,
+  while rejecting its dirty combined completion: sanitized read-only tracker
+  children generated eleven caches after qualification. Disable bytecode in the
+  CLI itself and reject special journals before locking. The new regression is
+  red before repair; all 64 tracker suites pass on macOS and isolated Linux after.
+  Archive generated worker caches without relabeling the failed final check.
+
+- Reproduce artifact qualification selecting a stale canonical executable after
+  target-aware fake Cargo builds elsewhere. Build into a fresh private directory
+  under the create-only run and refuse redirected target-triple output before
+  checks. All 13 wrapper tests pass; real Cargo routing and full exact-source
+  qualification remain pending under .18. No artifact or runtime admission follows.
+
+- Prove R20 native review through actual public MCP Plan/Explain and one Terra
+  confirmed assignment. Independent captures show exactly the intended MINE and
+  detail-membership change, no other captured changes and zero ticks advanced.
+  The original temporal goal remains active and unproven; retain that distinction
+  and the disclosed export-order limitation. Full R20 debug passes 5,124 tests.
+
+- Record R20's full 43-gate local qualifier and verifier success, with 5,124
+  passing tests in each configuration. Preserve its separate source qualifier
+  launch failure (0644 mode, exit 126); make all six direct qualifier entrypoints
+  executable and add actual-process coverage, red before and 14/14 after.
+- Prove one deliberately single-sample labor goal through actual public MCP,
+  one separately reviewed ten-tick run and a fresh paused fulfilled sample.
+  Independently replay native captures and durable history, preserving the
+  configuration/message and pre-scan screenshot-copy departures. Broader
+  fortress competence and productive work remain unproved.
 
 ## 2026-10-30 — Execute complete original labor and work-order plans
 

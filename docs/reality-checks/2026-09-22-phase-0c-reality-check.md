@@ -135,6 +135,25 @@ Its 2,592-file manifest SHA-256 is
 `243e85393655c4e7f5e8ea76bccd8537ac25ee6149f387fb13ae75641ed6bd94`.
 Full qualification remains pending until both commands terminate successfully.
 
+R17b subsequently passed its 43-gate qualifier with **5,120 debug and 5,120
+release tests**, 123 targets each, zero failed or ignored. Its clean receipt
+SHA-256 is `dc3f66d7887717fb63fb42ab7d1a680fce635d2c2b9b0fbed835372313612f9a`;
+independent replay accepted all 2,592 source digests. The verifier also exited
+zero. However, the final combined check found eleven generated untracked caches,
+so there is **no clean combined completion**. The external wrapper incorrectly
+returned zero despite that assertion; its exit is not qualification authority.
+All tracked bytes matched, and the complete failure witness is retained.
+
+The real cause was the tracker CLI's sanitized subprocess environment, which
+correctly excluded both parent cache variables. Bead `.17` disables implicit
+bytecode at direct CLI startup instead of weakening that isolation. A copied-
+source, real-journal, empty-environment subprocess test fails before the fix and
+passes after. An actual macOS FIFO failure also led to regular-file rejection
+before locking, retaining all later custody checks. All **64/64** tracker tests
+pass on macOS and isolated Linux. The private worker's eleven generated caches
+were preserved and hashed before cleanup; shared-root recovery/cache files were
+untouched. R18 was frozen but unbuilt and is superseded by the next source run.
+
 Live7 then used the two source-bound R17 workforce executables. Terra discovered
 a valid single-MINE selected-only detail and an eligible citizen. A 5-second
 evidence deadline expired during 15.103 seconds of reasoning; the pre-dispatch
@@ -159,20 +178,82 @@ indeterminate; every Cargo stage is forced offline. All three gate-list
 representations agree on seventeen source-only gates. These later bytes require
 their own complete qualification and do not inherit R17's results.
 
+A separate server-artifact review reproduced stale output selection: the real
+wrapper and verifier accepted an old canonical executable after target-aware
+fake Cargo built a different file elsewhere. The clean isolated fixture is
+explicitly orchestration evidence. Bead `.18` now creates a fresh private Cargo
+target under the create-only run, builds locked/offline and checks only its new
+executable. All 13 wrapper tests pass, including routing failures reproduced
+before repair. Real Cargo routing proof and full qualification of these later
+bytes remain pending. R20's frozen source run continues, without artifact credit.
+The reproduction report SHA-256 is
+`f55a34d6b7d1d72562c6adfbcb9bd92f812cc88e969bfcb51bfa389e67178c8c`,
+under `target/reality-check-20261030/server-binary-routing-review.json`.
+
+R20 live8 then exercised the reviewed assignment through the actual public MCP
+handlers. Parent verified 78 export members, all nine semantic exchanges, exact
+Plan/Explain review equality and one confirmed Applied/verified commit. Native
+round trips and the predeclared strict comparator prove the intended membership
+and MINE change, with all other captured fields unchanged across 7 citizens,
+11 details and 94 labor columns. Tick 12112800 remained paused. The fresh wait
+found the labor value true, while original-goal and semantic-completion remained
+false with no eligible temporal samples. The game, clients and NTM were drained,
+and both save copies retained all 30 files. Export manifest SHA-256:
+`07ae39adceb04a02721e78f7ed71ee724d4ec9f55bca7a43d5db6a25a7bcfa24`,
+under `target/reality-check-20261030/terra-live8-export`. Its disclosed NTM pane
+copy-before-scan is retained; all seven private values were subsequently absent.
+No temporal completion, productive work or broad fortress competence follows.
+
+Live9 then completed one deliberately single-sample original labor goal through
+the same R20 semantic executable and a fresh source-bound run plugin. Parent
+verified all 104 export members and twelve main semantic exchanges: one reviewed
+assignment, one distinct reviewed ten-tick/20,000-ms run, and fresh paused goal
+proof at tick 12112810. The native run stopped for `tick_limit`, exactly +10
+and zero observed overshoot; an independent read found raw pause and inactive
+ownership. The eighteen-event durable goal-history hash chain contains six
+canonical native captures; the final capture's hash equals the published goal
+source digest. Selected identity/labor fields are observed, while whole-domain
+coverage remains unknown. Both goal and semantic-completion flags are true for
+the original cadence-five, single-sample, deadline-12112900 request. No
+intermediate sample, sustained stability, excavation or productive output is
+inferred. Export manifest SHA-256:
+`6479141c9b6121bdbc98452e0234dfbee72c58f76caf433ceb46b68bdb5a35c1`,
+under `target/reality-check-20261030/terra-live9-export`.
+
+The export preserves the wrong-version refusal, the agent-authored valid
+configuration used before a stricter operator message arrived, ambiguous message
+delivery, and four screenshot copies before later clean host scans. Subsequent
+package copies used exact-byte scan/stage gating. These departures prevent a
+clean live-campaign claim. The universal pre-export-scan checkbox in `.5` was
+corrected to unchecked; owned drains and both 30-file save copies remain proved.
+Old live7 Prepared is still not reconciled against its original native source,
+so `.16` remains open despite the new successful native review.
+
+R20's qualifier and verifier each passed all Rust configurations: 5,124 debug
+and 5,124 release tests over 123 targets each, zero failures or ignored tests.
+The 43-gate clean receipt is
+`36caca740e43de24a7d535f6dd8b01acbb412041ce190e07f52fd69685986fe3`.
+Its combined run failed because the separate announcement qualifier could not
+start at tracked mode 0644 (exit 126, zero source-only gates). Final source
+custody passed all 2,591 files. Bead `.19` repairs six documented direct qualifier
+entrypoints to 0755; actual repository execution is red on all six before repair
+and the wrapper suite passes 14/14 after. Later `.18` artifact-build, mode and
+Python repairs need their own next exact-source run and actual server receipt.
+
 ### Current vision and wiring matrix
 
 | Goal | Actual reachable path and present limit | Status / owning work |
 |---|---|---|
-| One eleven-tool semantic loop | Main `serve` → agent facade → laboratory server; all 22 MCP development entrypoints dispatch to explicit profile servers; canonical Agent Turn and negotiated bounds | PARTIAL; .1/.3/.6; full current qualification pending |
+| One eleven-tool semantic loop | Main `serve` → agent facade → laboratory server; 22 separate development profiles preserve the waist and Agent Turn; combined native family owner still missing | PARTIAL; R20 Rust-qualified; later gates .3/.19; combined owner pic.4 |
 | Modern transport and Tasks | Pinned owned FastMCP → actual stdio child → task service/store → retained original plan and foreground progress | Executed process tests 7/7; .1; no full qualification transfer |
 | Real read-only world observation | Native authenticated Handshake/ReadObservation → wire/capsule/projection → read adapter → admitted wrapper or isolated dev server | Real citizens/items/buildings/map read trials; no admitted tuple |
 | Protocol-1.1 announcements | Separate native plugin → transactional suffix publication → one-read bootstrap → development MCP | Real retained-suffix development reads; no A1–A6 or production-map admission |
 | Original Mine designation and goal proof | Semantic Mine runtime → independent canonical/native evidence → dig/1.16 journal → fresh floor samples | Live planning refusals preserved; excavation competence UNPROVEN; .5 |
-| Bounded game clock | Separately reviewed run/1.13 or goal-bound clock owner; wait reconciles rather than starts another run | Exact-source ten-tick live success; 47/60 wall stop retained; full campaign .5 |
+| Bounded game clock | Separately reviewed run/1.13 or goal-bound clock owner; wait reconciles rather than starts another run | R7 ten-tick and R20 original-labor-bound ten-tick success; 47/60 wall stop retained; full campaign .5 |
 | Job suspension | Real bounded SDK job-list lookup; missing/duplicate/cyclic/oversize source rejected; eligibility currently false | PARTIAL, positive mutation unavailable; .8; refusal-only proof cannot close it |
-| Work orders, labor and furniture | Dedicated semantic owners preserve exact source/plan/native identities; concrete production executor exists | Live labor reached Prepared, no commit; opaque review repair source-only .16; mixed-family MCP host gap pic.4/.5 |
+| Work orders, labor and furniture | Dedicated semantic owners preserve exact source/plan/native identities; concrete production executor exists | R20 live single-sample labor goal plus clock passes; old Prepared .16, productive output .5 and mixed-family MCP owner pic.4 remain open |
 | First-fortress workshop prerequisites | Real trial has only a wagon; live build/1.19 supports bed/chair/table placement, with no workshop construction consumer | Missing live prerequisite; .14; order insertion cannot prove production |
-| Shared cancellation and physical work | Laboratory coordinator → owned actions → dependency-order drain → observations/certificates | Runtime selector and obligation retention repaired; full qualification pending; .1 |
+| Shared cancellation and physical work | Laboratory coordinator → owned actions → dependency-order drain → observations/certificates | Runtime selector and obligation retention repaired; R20 Rust-qualified; .1; later source qualification separate |
 | Durable goals and restart | Laboratory private durable stores retain original plan, historical receipts and current proof separately | Real lab integration tests; native save/restore remains outside MCP |
 | World MVCC and witnesses | Canonical snapshots, immutable historical views, witness validation and deterministic state transitions are real | PARTIAL; production FrankenSQLite consumer remains 54h.1 |
 | Structural semantic merge | MCP intent replay is reachable; structural merge/certificate engine is separately implemented | No runtime fallback consumer found; .10 |
@@ -183,7 +264,7 @@ their own complete qualification and do not inherit R17's results.
 | Resource URI contract | Actual registered session and doctor resources; session replay/Tasks use the real resolver | Broader fortress/knowledge/memory families remain .11 |
 | EE memory | Evidence-curation workflow is distinct from the legacy batch helper; hostile text now produces valid escaped JSONL | Legacy helper repair .7; no automatic memory ingestion or authority implied |
 | SLOs and economics | Actual timings and bounded refusal witnesses recorded; large observations still cost tens of seconds on this host | UNPROVEN against declared SLOs; .4 and existing benchmark work |
-| Compatibility/release/process authority | Registry/floor/artifact/ticket/private-runner machinery exists and refuses unsupported launch states | Empty registry; source-only custody repair .15 awaits exact full run; no admitted product |
+| Compatibility/release/process authority | Registry/floor/artifact/ticket/private-runner machinery exists and refuses unsupported launch states | Empty registry; custody/cache repairs .15/.17 await exact clean combined run; artifact build binding .18 and direct execution .19; no admitted product |
 
 Here `.N` means `dfmcp-reality-wiring-proof-4bf.N`; `54h.N` means
 `df-franken-storage-mvcc-54h.N`, `pic.4` means `df-dfhack-bridge-plane-c-pic.4`, and
