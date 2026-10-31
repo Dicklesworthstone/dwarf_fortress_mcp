@@ -92,9 +92,30 @@ observations from the existing complete operations sample, with exact anchor,
 source identity and omission counts. Its separate read-only policy preserves
 the original goal-policy fingerprint and old recovery semantics. Unknown
 material classification, usability and production attribution remain explicit.
-Failed reads, unpause, recovery and authorization loss withhold old rows. New
-focused component/packet-renderer tests are source-only pending exact Rust
-execution; this later increment inherits no R23 qualification or live credit.
+Failed reads, unpause, recovery and authorization loss withhold old rows.
+Frozen private R24 `2f724b90eab986c3fa913fa99e2fd91bfcae3a29` passes
+the twenty focused runtime cases and all 43 local qualification gates, including
+5,127 debug and 5,127 release tests across 123 targets per profile, zero failed or
+ignored. Receipt SHA-256 is
+`6f25a857b5d6d45d02f8a539be886c8c5496a9733a5547ce03e984418e324a91`.
+The separately required `verify.sh` then fails its adapter target: 1,286 passed,
+two failed, zero ignored. The failures concern actual-disk lost-commit recovery
+and maximum-roster furniture acquisition. All 2,591 source hashes remain unchanged
+and Git is clean. The driver stops before the development-server build; no R24
+artifact or fresh live item-view proof exists. Bead `.20` owns the test-peer
+diagnostic/lifetime repair, and `.5.2` remains blocked on it. Short peer idle
+timeouts are a hypothesis, not an established cause of the original failures.
+
+The subsequent test-only repair separates 100 ms I/O poll slices from fixed
+15-second excavation and sixty-second furniture peer lifetimes. Partial I/O
+progress and cancellation remain bounded; scoped sender threads join on failure.
+Two new allowed-work counterexamples fail against the old peers before repair.
+The repaired full adapter suite passes 1,292 tests, zero failed or ignored,
+including both original failures and four new regressions. The actual-disk test
+now proves one retained stopped commit before reopening, and peer errors retain
+their stage and event context. Production deadlines, limits and existing positive
+oracles are unchanged. Both required full commands for the repaired clean source,
+the new server artifact and live item-view evidence remain pending.
 
 On exact R23 source `7bba4d01debdc7069e081adb824a4ace4fa199b3`,
 Terra used actual public MCP to insert one original `wooden_bed` order and

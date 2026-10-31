@@ -15,6 +15,37 @@ it is not a claim that every function or every Markdown document was exhaustivel
 The canonical work item is **dfmcp-reality-wiring-proof-4bf**. Historical closed umbrella beads
 are retained as history, with explicit residual work rather than silent completion credit.
 
+### R24 item-view qualification and verifier disagreement (2026-10-31)
+
+Exact private `2f724b90eab986c3fa913fa99e2fd91bfcae3a29` adds a bounded,
+separately authorized read-only furniture view while preserving the original
+goal policy and history. Twenty focused cases and all 43 qualification gates
+pass, including 5,127 debug and 5,127 release tests per profile across 123
+targets with zero failed or ignored. Its separate verifier fails the adapter
+target with 1,286 passed and two failed: actual-disk lost-commit recovery and
+maximum-roster furniture acquisition. Source custody remains exact and clean.
+The driver does not build or seal a new server, and live trial C is held.
+
+Independent source review finds that the first test checks native dispatch
+only after its failing recovery assertion, while the second discards peer
+diagnostics on acquisition failure. The test peers' 200 ms and two-second idle
+timeouts are shorter than the callers' five- and sixty-second allowances.
+Those are diagnostic defects and a plausible disconnect mechanism, not proof
+of the original failure cause. Bead `.20` requires stronger effect and failure
+observability plus bounded peer behavior without changing production budgets
+or weakening the existing recovery, roster, identity, digest or release oracles.
+Both required full commands and fresh live evidence remain outstanding.
+
+The two added timing counterexamples each execute one test and fail against the
+old peers, retaining the timeout and last event. The test-only repair uses fixed
+peer deadlines, short cancellation polls and partial-I/O-safe reads/writes; it
+also proves the intended stopped commit before recovery. The full adapter suite
+then passes 1,292 cases, zero failed or ignored, including the two original
+failures and four new cases. Independent review additionally corrected sender
+threads that could detach on an early test error. No production budget, existing
+positive oracle, gate or profile was relaxed. The repaired source still needs
+both required full commands and its exact artifact before trial C can start.
+
 ### R23 prepared-fortress production result (2026-10-31)
 
 Terra directly used the actual semantic work-order MCP runtime to insert one

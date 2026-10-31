@@ -1,12 +1,28 @@
 # Changelog
 
+## 2026-10-31 — Preserve bounded TCP test-peer lifetime and intended effects
+
+- Reproduce two short-idle-timeout counterexamples within unchanged caller
+  budgets, then separate peer polling from fixed overall deadlines. Preserve
+  partial I/O, cancellation and joined shutdown; add scoped real-socket tests.
+- Prove exactly one retained stopped commit before disk recovery and retain
+  peer error/event diagnostics. Preserve the full maximum-roster, identity,
+  attachment, digest, release and no-replay assertions.
+- Pass the full 1,292-case adapter suite, zero failed or ignored. Preserve R24's
+  separate verifier failure; full qualification and verifier checks for the
+  repaired source, a new server artifact and live item-view proof remain pending.
+
 ## 2026-10-31 — Prove bounded real output and retain the completion gap
 
 - Expose bounded source/anchor-bound furniture candidates from the existing
   operations sample, independently of the original order's receipt link.
   Preserve original goal policy and history; withdraw stale or unauthorized
   rows and leave material classification and production attribution unknown.
-  Focused runtime and production packet-renderer regressions await Rust execution.
+  Frozen R24 passes twenty focused cases and all 43 qualification gates with
+  5,127 debug plus 5,127 release tests. Preserve the separate verifier's two
+  adapter failures; the required command set is incomplete and the driver does
+  not build a server or start a new game trial. Strengthen peer diagnostics and
+  intended-effect assertions under Bead `.20` without changing production limits.
 - Through actual public MCP, insert one original bed order and execute two
   reviewed bounded runs on an explicitly operator-prepared fortress. Independent
   replay verifies the insertion, clock receipts, six complete observations and a
