@@ -55,6 +55,7 @@ EXPECTED_SOURCE_GATES = [
     "announcement-acceptance-tests",
     "announcement-mcp-contract",
     "announcement-mcp-contract-tests",
+    "source-custody-tests",
     "python-syntax",
     "shell-syntax",
     "cargo-metadata",
@@ -267,6 +268,12 @@ def check_source_contract() -> None:
         "announcement_mcp_checker_tests": "scripts/test_live_mcp_v1_1.py",
         "contract_checker_tests": "scripts/test_live_announcement_contract.py",
         "source_qualification_wrapper": "scripts/qualify_live_announcement_source.sh",
+        "announcement_source_custody": "scripts/announcement_source_custody.py",
+        "announcement_source_custody_tests": "scripts/test_announcement_source_custody.py",
+        "local_qualification_contract": "architecture/local_qualification_receipt_v1.json",
+        "local_qualification_writer": "scripts/write_local_qualification_receipt.py",
+        "local_qualification_receipt_tests": "scripts/test_local_qualification_receipt.py",
+        "stable_file_reader": "scripts/read_stable_repository_file.py",
         "announcement_probe": "crates/dwarf-fortress-mcp/src/bin/dfmcp-live-announcement-probe.rs",
         "stream_documentation": "docs/LIVE_ANNOUNCEMENT_STREAM.md",
         "implementation_status": "docs/LIVE_ANNOUNCEMENT_IMPLEMENTATION_STATUS.md",
@@ -279,6 +286,16 @@ def check_source_contract() -> None:
         require(isinstance(name, str) and isinstance(relative, str), "source mapping is malformed")
         require((ROOT / relative).is_file(), f"source-bound file is missing: {relative}")
     authority = value.get("authority", {})
+    require(value.get("source_custody") == {
+        "snapshot_schema": "dfmcp.qualification-source-snapshot/1",
+        "full_tracked_head_equivalence": True,
+        "compare_before_and_after_publication": True,
+        "run_directory_create_only": True,
+        "run_directory_mode": "0700",
+        "evidence_mode": "0600",
+        "receipt_create_only": True,
+        "remove_receipt_on_post_publication_error": True,
+    }, "announcement source custody policy drifted")
     require(authority.get("capabilities_granted") == [], "source contract grants capability")
     require(authority.get("mutation_capabilities") == [], "source contract grants mutation")
 
@@ -598,6 +615,12 @@ def check_qualification_and_docs() -> None:
         "run_gate announcement-acceptance-tests python3 scripts/test_live_announcement_acceptance.py",
         "run_gate announcement-mcp-contract python3 scripts/check_live_mcp_v1_1.py",
         "run_gate announcement-mcp-contract-tests python3 scripts/test_live_mcp_v1_1.py",
+        "run_gate source-custody-tests python3 scripts/test_announcement_source_custody.py",
+        "from announcement_source_custody import capture",
+        "from announcement_source_custody import publish",
+        'SOURCE_SNAPSHOT="$OUT_DIR/source-snapshot.json"',
+        'mkdir -m 0700 "$OUT_DIR"',
+        'export PYTHONPYCACHEPREFIX="$ROOT/target/python-cache"',
         "run_gate announcement-mcp-process-tests cargo test --locked -p dwarf-fortress-mcp --test live_v1_1_development_admission",
         "run_gate clippy cargo clippy --locked --workspace --all-targets --all-features -- -D warnings",
         "run_gate workspace-tests cargo test --locked --workspace --all-targets --all-features",

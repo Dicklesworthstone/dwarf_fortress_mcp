@@ -245,6 +245,20 @@ tests, development-MCP contract and process tests, Python/shell syntax, locked o
 metadata, rustfmt, warning-denied Clippy, adapter and workspace tests, warning-denied rustdoc, and
 diagnostic-probe help for one exact clean commit.
 
+The source-only qualifier now captures the same bounded, full tracked
+HEAD-equivalent snapshot used by local qualification. It compares that snapshot
+before and after create-only receipt publication, derives the receipt's source
+identity from it, and removes evidence if the final read fails or changes. The
+run directory is create-only mode `0700`; snapshots, gate journal and receipt are
+mode `0600`. Explicit Python syntax caches go under ignored `target/`. Source
+custody tests use real temporary Git trees, including assume-unchanged byte drift,
+untracked files, HEAD changes and post-publication missing files. Endpoint checks
+do not prove that no transient edit was made and reverted between checks.
+
+This is later source than frozen R17. Focused checks do not grant full source
+qualification, native evidence or admission; a fresh complete source-only run is
+still required for these bytes.
+
 No fresh passing source qualification receipt is implied by this document or by the latest commits.
 
 ## Evidence still required

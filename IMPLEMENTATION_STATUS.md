@@ -5428,3 +5428,14 @@ ignored `target/`. An isolated execution of its actual nine-file syntax command
 reproduces nine untracked caches before the fix and clean source custody after,
 with all nine source files unchanged. This focused repair is later than frozen
 R17 and inherits no full qualification from it.
+
+Reality bead .15 also replaces that qualifier's start-only clean check with the
+existing full bounded HEAD-equivalent snapshot machinery, private create-only
+custody, and source comparisons before and after publication. Two actual
+post-publication missing-file regressions exposed stale common snapshots/receipts
+left after a read exception (0/2 before repair); both now remove their output on
+any final verification exception. The common suite passes 20/20 and the new
+announcement custody suite 5/5, including hidden byte, untracked and HEAD drift.
+The machine gate/digest inventories and aggregate wiring are updated. These later
+Python source changes still require their own full qualification; R17 remains
+frozen and grants no transferred pass.

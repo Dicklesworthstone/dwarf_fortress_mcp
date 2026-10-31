@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+umask 077
 
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 # Explicit py_compile must preserve the clean source revision it qualifies.
 export PYTHONDONTWRITEBYTECODE=1
+export CARGO_NET_OFFLINE=true
 export PYTHONPYCACHEPREFIX="$ROOT/target/python-cache"
 
 if [[ -t 1 ]]; then
@@ -43,11 +45,24 @@ COMMIT="$(git rev-parse HEAD)"
 STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 RUN_ID="${STARTED_AT//[:]/-}-${COMMIT:0:12}"
 OUT_DIR="${1:-$ROOT/target/live-announcement-source-qualification/$RUN_ID}"
-mkdir -p "$OUT_DIR"
+[[ "$OUT_DIR" == /* ]] || OUT_DIR="$ROOT/$OUT_DIR"
+[[ ! -e "$OUT_DIR" && ! -L "$OUT_DIR" ]] || die "source qualification directory already exists"
+mkdir -p "$(dirname -- "$OUT_DIR")"
+mkdir -m 0700 "$OUT_DIR"
 OUT_DIR="$(cd "$OUT_DIR" && pwd)"
 GATES_FILE="$OUT_DIR/gates.tsv"
+SOURCE_SNAPSHOT="$OUT_DIR/source-snapshot.json"
 RECEIPT="$OUT_DIR/live-announcement-source-qualification.json"
 : > "$GATES_FILE"
+
+python3 - "$ROOT" "$SOURCE_SNAPSHOT" "$COMMIT" <<'PY'
+import sys
+from pathlib import Path
+root=Path(sys.argv[1])
+sys.path.insert(0,str(root/'scripts'))
+from announcement_source_custody import capture
+capture(root,root/'architecture/local_qualification_receipt_v1.json',Path(sys.argv[2]),sys.argv[3])
+PY
 
 record() { printf '%s\t%s\t%s\n' "$1" "$2" "$3" >> "$GATES_FILE"; }
 run_gate() {
@@ -69,24 +84,19 @@ write_receipt() {
   finished_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   CONTRACT="$CONTRACT" COMMIT="$COMMIT" STARTED_AT="$STARTED_AT" \
   FINISHED_AT="$finished_at" STATUS="$status" GATES_FILE="$GATES_FILE" \
-  RECEIPT="$RECEIPT" python3 - <<'PY'
+  SOURCE_SNAPSHOT="$SOURCE_SNAPSHOT" RECEIPT="$RECEIPT" python3 - <<'PY'
 from __future__ import annotations
-import hashlib,json,os,platform,subprocess,tempfile
+import hashlib,json,os,platform,subprocess,sys
 from pathlib import Path
 root=Path.cwd()
+sys.path.insert(0,str(root/'scripts'))
+from announcement_source_custody import publish, verify
 contract=json.loads(Path(os.environ['CONTRACT']).read_text(encoding='utf-8'))
-def digest(path: Path) -> str:
-    if not path.is_file():
-        raise SystemExit(f'missing source-bound file: {path.relative_to(root)}')
-    value=hashlib.sha256()
-    with path.open('rb') as handle:
-        for chunk in iter(lambda:handle.read(1024*1024),b''):
-            value.update(chunk)
-    return value.hexdigest()
+captured=verify(root,root/'architecture/local_qualification_receipt_v1.json',
+                Path(os.environ['SOURCE_SNAPSHOT']),os.environ['COMMIT'])
+source_hashes={entry['path']:entry['sha256'] for entry in captured['entries']}
 def command_output(args: list[str]) -> str:
     return subprocess.run(args,check=True,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT).stdout.strip()
-def canonical(value: object) -> bytes:
-    return json.dumps(value,sort_keys=True,separators=(',',':'),ensure_ascii=False).encode('utf-8')
 gates=[]
 for line in Path(os.environ['GATES_FILE']).read_text(encoding='utf-8').splitlines():
     name,state,detail=(line.split('\t',2)+['',''])[:3]
@@ -98,7 +108,7 @@ if os.environ['STATUS']=='passed':
     if [gate['name'] for gate in gates] != required or any(gate['state']!='passed' for gate in gates):
         raise SystemExit('passing receipt requires every exact source gate to pass')
 digests={
-    name:digest(root/relative)
+    name:source_hashes[relative]
     for name,relative in contract['required_source_digests'].items()
 }
 unsigned={
@@ -106,7 +116,6 @@ unsigned={
     'status':os.environ['STATUS'],
     'started_at':os.environ['STARTED_AT'],
     'finished_at':os.environ['FINISHED_AT'],
-    'source':{'commit':os.environ['COMMIT'],'dirty':False},
     'bridge':contract['bridge'],
     'host':{
         'system':platform.system(),
@@ -125,23 +134,9 @@ unsigned={
     'claims_established':contract['claims_established'] if os.environ['STATUS']=='passed' else [],
     'claims_not_established':contract['claims_not_established'],
 }
-receipt={**unsigned,'receipt_digest':hashlib.sha256(canonical(unsigned)).hexdigest()}
-destination=Path(os.environ['RECEIPT'])
-payload=json.dumps(receipt,indent=2,sort_keys=True)+'\n'
-fd,temporary=tempfile.mkstemp(prefix=f'.{destination.name}.',dir=destination.parent)
-try:
-    with os.fdopen(fd,'w',encoding='utf-8',newline='\n') as handle:
-        handle.write(payload)
-        handle.flush()
-        os.fsync(handle.fileno())
-    os.replace(temporary,destination)
-    directory=os.open(destination.parent,os.O_RDONLY | getattr(os,'O_DIRECTORY',0))
-    try: os.fsync(directory)
-    finally: os.close(directory)
-except BaseException:
-    try: os.unlink(temporary)
-    except OSError: pass
-    raise
+publish(root,root/'architecture/local_qualification_receipt_v1.json',
+        Path(os.environ['SOURCE_SNAPSHOT']),os.environ['COMMIT'],
+        Path(os.environ['RECEIPT']),unsigned)
 PY
 }
 trap 'status=$?; if [[ $status -ne 0 ]]; then write_receipt failed >/dev/null 2>&1 || true; fi' EXIT
@@ -152,7 +147,10 @@ run_gate announcement-contract-tests python3 scripts/test_live_announcement_cont
 run_gate announcement-acceptance-tests python3 scripts/test_live_announcement_acceptance.py
 run_gate announcement-mcp-contract python3 scripts/check_live_mcp_v1_1.py
 run_gate announcement-mcp-contract-tests python3 scripts/test_live_mcp_v1_1.py
+run_gate source-custody-tests python3 scripts/test_announcement_source_custody.py
 run_gate python-syntax python3 -m py_compile \
+  scripts/announcement_source_custody.py \
+  scripts/test_announcement_source_custody.py \
   scripts/check_live_announcements.py \
   scripts/check_live_announcements_core.py \
   scripts/check_live_announcement_publication.py \

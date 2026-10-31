@@ -43,6 +43,11 @@
   cache under `target/` as well. Its actual nine-file syntax command dirties an
   isolated clean checkout before the repair and preserves it after; full updated
   source qualification remains separate from frozen R17 evidence.
+- Bind announcement source qualification to the full clean HEAD snapshot before
+  gates and before/after create-only publication. Reject hidden, untracked and
+  HEAD drift; remove a published snapshot or receipt when final source reading
+  raises. Actual missing-file regressions fail 0/2 before repair; the common
+  receipt suite now passes 20/20 and announcement custody passes 5/5.
 
 ## 2026-10-30 — Execute complete original labor and work-order plans
 
