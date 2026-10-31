@@ -136,6 +136,9 @@ pub trait Shell {
     ) -> Result<Option<OrderRunJournal<Self::ClockJournal>>>;
     fn clock_source(&self, c: &OperationContext) -> Result<Self::ClockSource>;
     fn acceptance(&self) -> &policy::SourceAcceptance;
+    fn authorize_item_presentation(&self, _c: &OperationContext) -> Result<()> {
+        Ok(())
+    }
     fn recovery(&self) -> Option<Recovery>;
     fn check_environment(&self) -> Result<()>;
     fn production_enabled(&self) -> bool;
@@ -197,6 +200,7 @@ pub struct Runtime<S: Shell> {
     archive: Option<PlanArchiveStore<S::Archive>>,
     review: Option<SemanticWorkOrderReview>,
     monitor: Option<DurableWorkOrderGoalMonitor<S::History>>,
+    item_observations: Option<Value>,
     history_initialized: bool,
     clock: Option<Clock<S::ClockJournal>>,
     production_at_open: bool,
@@ -216,6 +220,7 @@ pub struct View {
     pub native: Option<CreationRecord>,
     pub creation: Option<NativeOrderCreation>,
     pub goal: Option<WorkOrderGoalProgress>,
+    pub item_observations: Option<Value>,
     pub first_satisfied_anchor: Option<StateAnchor>,
     pub historical_obligation: Option<ObligationStatus>,
     pub history_events: usize,
@@ -285,6 +290,10 @@ impl View {
             "recovery":recovery,
             "native_state":self.native.as_ref().map(|n|n.state().as_str()),"insertion":insertion,
             "current_goal":goal,"current_goal_available":self.goal.is_some(),
+            "item_observations":self.item_observations.clone().unwrap_or_else(|| json!({
+                "coverage":"unknown", "freshness":"unavailable", "items":[],
+                "returned":0, "omitted":null, "material_classification":"unknown",
+                "production_attribution":"unknown"})),
             "first_satisfied_anchor":self.first_satisfied_anchor.map(anchor_json),
             "historical_obligation":self.historical_obligation.as_ref().map(|s|format!("{s:?}")),
             "history":{"events":self.history_events,"bytes":self.history_bytes,"fenced":self.history_fenced},
@@ -450,6 +459,7 @@ impl<S: Shell> Runtime<S> {
             archive: None,
             review: None,
             monitor: None,
+            item_observations: None,
             history_initialized: recovery.is_some_and(|r| r.history_present),
             clock,
             production_at_open,
@@ -652,6 +662,18 @@ impl<S: Shell> Runtime<S> {
     }
     fn view(&mut self, c: &OperationContext) -> Result<View> {
         self.shell.check_environment()?;
+        if self.item_observations.is_some()
+            && (c
+                .authorize(Capability::Query, RiskTier::ReadOnly, &[], None)
+                .is_err()
+                || c.authorize(Capability::Observe, RiskTier::ReadOnly, &[], None)
+                    .is_err()
+                || self.shell.authorize_item_presentation(c).is_err())
+        {
+            // Revocation withholds this optional presentation without altering
+            // the original goal, and a later grant cannot revive the old view.
+            self.item_observations = None;
+        }
         let mut work = Work::new(c)?;
         if let Some(archive) = &mut self.archive {
             let original = archive.recover(&work.reserve(ARCHIVE_BYTES)?)?;
@@ -679,7 +701,7 @@ impl<S: Shell> Runtime<S> {
                 "retained native record has no exact original review",
             ));
         };
-        let clock = if self.clock.is_some() {
+        let clock: Option<ClockView> = if self.clock.is_some() {
             let target = self.clock_target(result.as_ref().map(|r| r.creation_result()))?;
             self.clock
                 .as_mut()
@@ -708,6 +730,19 @@ impl<S: Shell> Runtime<S> {
             native: result.as_ref().map(|r| r.native_record().clone()),
             creation: result.as_ref().map(|r| r.creation_result().clone()),
             goal: self.monitor.as_ref().and_then(|m| m.latest()).cloned(),
+            item_observations: self
+                .item_observations
+                .as_ref()
+                .filter(|_| {
+                    self.mode != Mode::Offline
+                        && self
+                            .monitor
+                            .as_ref()
+                            .and_then(|m| m.latest())
+                            .is_some_and(|latest| latest.anchor == self.anchor)
+                        && clock.as_ref().is_none_or(ClockView::can_sample_goal)
+                })
+                .cloned(),
             first_satisfied_anchor: self
                 .monitor
                 .as_ref()
@@ -888,6 +923,8 @@ impl<S: Shell> Runtime<S> {
         self.view(&work.narrow(&output)?)
     }
     pub fn wait(&mut self, c: &OperationContext) -> Result<View> {
+        // Never carry an earlier item sample through a failed or incomplete read.
+        self.item_observations = None;
         self.check(c, false)?;
         let review = self
             .review
@@ -955,6 +992,7 @@ impl<S: Shell> Runtime<S> {
         };
         let shell = &self.shell;
         let acceptance = shell.acceptance().clone();
+        let mut presentation: Option<Option<Value>> = None;
         let result = self.semantic.poll_original_goal_durable(
             monitor,
             cursor,
@@ -963,7 +1001,19 @@ impl<S: Shell> Runtime<S> {
             |c| shell.operations(c),
             |p, c| {
                 shell.check_environment()?;
-                acceptance.goal(p, c)
+                let goal_policy = acceptance.goal(p, c)?;
+                // A missing or changed presentation grant withholds the item
+                // view; it must not change the original goal's proof policy.
+                let items = shell
+                    .authorize_item_presentation(c)
+                    .and_then(|()| acceptance.items(p, c))
+                    .ok();
+                presentation = Some(match presentation.take() {
+                    None => items,
+                    Some(prior) if prior == items => prior,
+                    Some(_) => None,
+                });
+                Ok(goal_policy)
             },
         );
         self.raise_monitor_floor();
@@ -972,6 +1022,7 @@ impl<S: Shell> Runtime<S> {
         }
         work.context.anchor = self.anchor;
         result?;
+        self.item_observations = presentation.flatten();
         self.view(&work.narrow(&output)?)
     }
     pub fn production_control_enabled(&self) -> bool {
@@ -1172,6 +1223,7 @@ impl<S: Shell> Runtime<S> {
         // after an attempted unpause. Retained goal samples keep their anchors.
         self.basis = None;
         self.evidence = None;
+        self.item_observations = None;
         self.clock
             .as_mut()
             .ok_or_else(|| denied("operator clock source is not configured"))?
