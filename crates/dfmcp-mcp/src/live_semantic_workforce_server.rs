@@ -22,6 +22,22 @@ use std::time::Instant;
 mod presentation;
 use presentation::{RESPONSE_RESERVE, packet};
 
+#[cfg(test)]
+pub(crate) fn render_fixture_packet(operation: &str, view: &View) -> String {
+    let value = view.to_json();
+    packet(
+        operation,
+        None,
+        Some(view.anchor),
+        Some("control"),
+        None,
+        None,
+        value.clone(),
+        Some(value),
+        false,
+    )
+}
+
 const FAMILY: u128 = 31u128 << 57;
 const SEQUENCE_LIMIT: u64 = 1u64 << 57;
 const OPEN_INSPECTION_BYTES: u64 = 64 * 1024 * 1024;
