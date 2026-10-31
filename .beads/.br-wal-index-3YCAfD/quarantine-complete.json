@@ -1,5 +1,0 @@
-{
-  "schema_version": "br.wal_index.quarantine.v1",
-  "stage": "complete",
-  "retained_index": "/Users/jemanuel/projects/dwarf_fortress_mcp/.beads/.br-wal-index-3YCAfD/poisoned-shm"
-}

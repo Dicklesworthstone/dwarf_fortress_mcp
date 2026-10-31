@@ -210,7 +210,32 @@ deadline or renew preparation. Plan returns a separately inspectable paired
 semantic/native review and **does not assign labor**.
 
 Inspect `result.original_plan`, `result.review` and the native evidence. Commit
-requires `result.review.paired_seal`; a native plan digest alone is insufficient:
+requires `result.review.paired_seal`; a native plan digest alone is insufficient.
+
+The current source adds a compact `result.review.native_review` to Plan and
+Explain and to the retained Agent Turn review. It is derived from the existing
+native plan covered by the paired seal, without another native read. It includes
+the original idempotency key, native plan and capture digests, capture-local
+detail index and name, selected-only and requested-labor flags, and the labor
+key and column. For each selected citizen it gives the canonical and native IDs,
+observed eligibility, membership and requested-labor value, and the intended
+membership and labor value. `membership_changes` compares captured membership
+with the intended value. The capture is historical; intended values are not
+observed post-commit values. Other detail members and labor columns are outside
+this compact review, and other effects of automatic labor recomputation are
+unknown until the existing native readback proves them. No credential, source
+path, new authority or native control input is added.
+
+This review presentation is source-only and its new focused tests and live
+handler behavior have not yet been run. A prior real development trial reached
+Prepared but the agent declined to commit because the then-running executable
+exposed only review digests; the retained preparation was not cancelled by
+closing the session or stopping the game. The source change is not evidence of
+a successful assignment or admission. If the complete response cannot fit the
+modern transport's text limit, the source returns an explicit bounded failure
+with retained recovery evidence instead of silently truncating the review.
+
+The confirmation request has this shape:
 
 ```json
 {

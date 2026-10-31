@@ -7,6 +7,7 @@ import io
 import json
 import os
 from pathlib import Path
+import shutil
 import stat
 import subprocess
 import sys
@@ -230,6 +231,26 @@ class TrackerTests(unittest.TestCase):
             self.assertEqual(result.returncode, 2, result.stderr)
         result = subprocess.run(command, env={}, capture_output=True, text=True, timeout=5)
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_offline_cli_empty_environment_does_not_write_source_caches(self):
+        journal_before = self.seed()
+        source = self.root / 'isolated-source'
+        source.mkdir()
+        for path in Path(t.__file__).resolve().parent.glob('*.py'):
+            shutil.copyfile(path, source / path.name)
+        before = {p.relative_to(source): p.read_bytes() for p in source.rglob('*') if p.is_file()}
+        self.assertTrue(before)
+        result = subprocess.run([sys.executable, str(source / 'track_excavation.py'),
+                                 'inspect', '--journal', str(self.path)],
+                                env={}, capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertEqual(json.loads(result.stdout)['native_reads_attempted'], 0)
+        self.assertEqual(self.path.read_bytes(), journal_before)
+        after = {p.relative_to(source) for p in source.rglob('*') if p.is_file()}
+        self.assertEqual(after, set(before), 'offline CLI must not create or remove source files')
+        for path, content in before.items():
+            self.assertEqual((source / path).read_bytes(), content, str(path))
+        self.assertFalse(any(p.name == '__pycache__' for p in source.rglob('*')))
 
     def test_same_length_corruption_and_inode_substitution_fence_live_journal(self):
         original = self.seed()

@@ -5369,8 +5369,8 @@ A later Terra read-only search covered eleven windows and 1,859 target origins;
 native assessment confirmed hidden-context refusal, with no designation or time
 advance. Two 64-row tile queries exposed another transport-size failure; current
 spatial live/archive source now reserves the pinned text ceiling before page
-production. That repair and its actual-handler decoder regression require fresh
-execution. Both qualifiers also now keep explicit Python syntax caches under
+production. The source-bound R15 replay below executes that repair and its
+actual-handler decoder regression. Both qualifiers also keep explicit Python syntax caches under
 ignored `target/`, preventing their checks from dirtying the source they qualify.
 
 Full workspace runs preserve their failures: R4 had 5,014 passed / 54 failed;
@@ -5400,8 +5400,80 @@ The source-bound live query result does not qualify later ownership changes.
 
 R16 actual-backend duplicate-descriptor regressions all fail before the repair
 (0/3), independently confirming a local lock-lifetime defect. Current source
-introduces an owned guard immediately after all twelve successful adapter lock
+introduces an owned guard immediately after all thirteen successful adapter lock
 acquisitions, releasing owned kernel locks on scope exit and early errors. No
-acquisition authority, modes, byte formats or retry behavior is relaxed. Linux
-regression and complete qualification results remain pending; best-effort cleanup
-alone is not proof of release or durability.
+acquisition authority, modes, byte formats or retry behavior is relaxed. Clean
+R17 `c51d6b5b3941faca02306917922eeffc963d5eca` passes the Linux backend regressions
+3/3, guard tests 3/3 and full parallel adapter suite 1,288/1,288 with zero ignored,
+plus full warning-denied Clippy. All thirteen sites across twelve storage files
+have an independently checked immediate guard. Best-effort cleanup alone is not
+proof of release or durability.
+
+R17's full qualifier completed 5,120 debug tests across 123 targets, zero failed
+or ignored, before a host reboot interrupted release compilation. There is no
+terminal receipt; the run remains `host_reboot_interrupted`. R17b repeats both
+required aggregates on the same clean source, with persistent build storage and
+LAN transport recovery. Complete qualification remains pending.
+
+The practical production gap is explicit: the untouched real fortress has no
+observed carpenter workshop, while live build/1.19 places beds/chairs/tables and
+does not construct workshops. A work-order insertion is not output proof. Reality
+bead .14 owns that native prerequisite and its live goal evidence; the separate
+mixed-family MCP host gap remains pic.4. Competent first-fortress production is
+unproved.
+
+The separate protocol-1.1 source qualifier had the same explicit Python cache
+defect as the two aggregates. Its current startup now routes those caches under
+ignored `target/`. An isolated execution of its actual nine-file syntax command
+reproduces nine untracked caches before the fix and clean source custody after,
+with all nine source files unchanged. This focused repair is later than frozen
+R17 and inherits no full qualification from it.
+
+Reality bead .15 also replaces that qualifier's start-only clean check with the
+existing full bounded HEAD-equivalent snapshot machinery, private create-only
+custody, and source comparisons before and after publication. Two actual
+post-publication missing-file regressions exposed stale common snapshots/receipts
+left after a read exception (0/2 before repair); both now remove their output on
+any final verification exception. The common suite passes 22/22 and the new
+announcement custody suite 5/5, including hidden byte, untracked and HEAD drift.
+The machine gate/digest inventories and aggregate wiring are updated. These later
+Python source changes still require their own full qualification; R17 remains
+frozen and grants no transferred pass.
+
+Independent review additionally reproduced failed-publication cleanup being
+silenced. The writer now reports indeterminate publication with every possible
+residual identity if the OS prevents removal or durable cleanup. Both destination
+and temporary-name failures are covered; a remaining JSON marked passed is not
+a completed qualification. All three qualification/verification scripts now
+force Cargo offline at every stage.
+
+The source-bound R17 live7 workforce trial selected a real eligible citizen and
+MINE-only detail. Its initial 5-second observation-evidence deadline expired
+during 15.103 seconds of agent reasoning, before dispatch. A safely reconciled
+same-original 60-second caller correction reached Prepared, but Terra refused
+opaque hash-only review and sent no commit. Three independently re-decoded native
+captures are byte-identical; one native preparation was retained, with no
+unresolved effect. Shutdown is not cancellation, and original recovery remains
+archived. Reality bead .16 adds a bounded native detail/citizen/membership review
+to the existing semantic Plan/Explain and enforces the actual text limit in its
+fallback. These new Rust tests and a source-bound live replay remain pending.
+
+R17b's qualifier completed all 43 gates on clean source, including 5,120 debug
+and 5,120 release tests across 123 targets each, zero failed or ignored; its
+receipt SHA-256 is `dc3f66d7887717fb63fb42ab7d1a680fce635d2c2b9b0fbed835372313612f9a`.
+Independent receipt replay accepted all 2,592 source digests. The subsequent
+verifier also exited zero, but the final combined check found eleven untracked
+Python caches. This is **not a completed clean combined qualification**. All
+tracked source hashes matched. The failed final check and misleading zero from
+the external wrapper are retained; cleanup does not grant retroactive credit.
+
+Reality bead .17 fixes the trigger: sanitized tracker subprocesses dropped the
+parent's Python cache variables. The direct read-only CLI now disables bytecode
+before local imports. Its real isolated subprocess regression fails before the
+repair and passes after. An actual macOS FIFO test also exposed locking before
+file-type rejection; regular-file validation now precedes locking, with every
+existing post-lock check preserved. All 64 excavation/blueprint tests pass on
+macOS and isolated Linux. The eleven private-worker cache copies were archived
+and hashed before removal; shared-root caches and recovery artifacts remain
+untouched. The unbuilt R18 snapshot is superseded, and the next full source run
+must include these fixes and propagate its final source check.

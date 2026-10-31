@@ -45,7 +45,8 @@
     "atomic_no_replace_hard_link": true,
     "parent_directory_fsync": true,
     "reverify_source_after_receipt_publication": true,
-    "invalid_evidence_removed_and_absence_verified": true
+    "invalid_evidence_removed_and_absence_verified": true,
+    "cleanup_failure_reports_indeterminate_identity": true
   },
   "authority": {
     "executes_project_code": false,
@@ -62,6 +63,7 @@
     "a local qualification receipt does not qualify a release server binary",
     "a local qualification receipt does not authorize a process launch",
     "two-phase source snapshots detect endpoint drift but do not prove that no transient modification was reverted during gate execution",
-    "ignored untracked files are not included in the tracked source snapshot and must not influence qualified builds"
+    "ignored untracked files are not included in the tracked source snapshot and must not influence qualified builds",
+    "publication cleanup failure is indeterminate even if JSON marked passed remains visible; a residual artifact is not a completed qualification result"
   ]
 }

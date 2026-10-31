@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 export PYTHONDONTWRITEBYTECODE=1
+export CARGO_NET_OFFLINE=true
 
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
@@ -123,6 +124,7 @@ python3 scripts/test_local_qualification_receipt.py
 python3 scripts/test_implementation_status.py
 python3 scripts/test_release_source_custody.py
 python3 scripts/test_live_announcement_contract.py
+python3 scripts/test_announcement_source_custody.py
 python3 scripts/test_live_mcp_v1_1.py
 python3 scripts/test_live_announcement_acceptance.py
 python3 scripts/test_live_announcement_evidence_journal.py
@@ -149,6 +151,8 @@ ok "Excavation and blueprint goal regressions"
 
 info "Checking script syntax"
 python3 -m py_compile \
+  scripts/announcement_source_custody.py \
+  scripts/test_announcement_source_custody.py \
   scripts/validate_repo.py \
   scripts/test_validate_repo_rust.py \
   scripts/test_dfhack_bridge_contract.py \

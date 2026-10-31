@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 umask 077
 export PYTHONDONTWRITEBYTECODE=1
+export CARGO_NET_OFFLINE=true
 
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
@@ -126,7 +127,7 @@ run_gate repository-integrity-tests bash -c \
 run_gate local-qualification-receipt-tests python3 scripts/test_local_qualification_receipt.py
 run_gate implementation-status-tests python3 scripts/test_implementation_status.py
 run_gate live-acceptance-tests bash -c \
-  'python3 scripts/test_live_read_acceptance.py && python3 scripts/test_live_announcement_contract.py && python3 scripts/test_live_mcp_v1_1.py && python3 scripts/test_live_announcement_acceptance.py && python3 scripts/test_dfhack_plugin_receipt_v1_1.py'
+  'python3 scripts/test_live_read_acceptance.py && python3 scripts/test_live_announcement_contract.py && python3 scripts/test_announcement_source_custody.py && python3 scripts/test_live_mcp_v1_1.py && python3 scripts/test_live_announcement_acceptance.py && python3 scripts/test_dfhack_plugin_receipt_v1_1.py'
 run_gate live-acceptance-journal-tests bash -c \
   'python3 scripts/test_live_read_evidence_journal.py && python3 scripts/test_live_announcement_evidence_journal.py'
 run_gate live-acceptance-secret-scanner-tests python3 scripts/test_scan_live_read_secrets.py
@@ -141,6 +142,8 @@ run_gate live-server-binary-receipt-tests python3 scripts/test_live_server_binar
 run_gate admitted-live-launcher-tests bash -c \
   'python3 scripts/test_admitted_live_launcher.py && python3 scripts/test_live_admission_ticket.py'
 run_gate python-syntax python3 -m py_compile \
+  scripts/announcement_source_custody.py \
+  scripts/test_announcement_source_custody.py \
   scripts/validate_repo.py \
   scripts/read_stable_repository_file.py \
   scripts/check_repository_integrity.py \

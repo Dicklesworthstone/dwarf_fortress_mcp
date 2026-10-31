@@ -416,6 +416,74 @@ class LocalQualificationReceiptTests(unittest.TestCase):
                     fixture.finish()
             self.assertFalse(fixture.receipt.exists())
 
+    def test_post_publication_read_error_removes_receipt(self) -> None:
+        temporary, fixture = self.fixture()
+        with temporary:
+            fixture.begin()
+            fixture.passing_gates()
+            original = issuer.write_atomic_create_only
+
+            def remove_source_after_publish(path: Path, value: dict[str, Any]) -> Path:
+                published = original(path, value)
+                (fixture.repository / "src/lib.rs").unlink()
+                return published
+
+            with mock.patch.object(
+                issuer, "write_atomic_create_only", side_effect=remove_source_after_publish
+            ):
+                with self.assertRaises(FileNotFoundError):
+                    fixture.finish()
+            self.assertFalse(fixture.receipt.exists())
+
+    def test_post_publication_read_error_removes_snapshot(self) -> None:
+        temporary, fixture = self.fixture()
+        with temporary:
+            original = issuer.write_atomic_create_only
+
+            def remove_source_after_publish(path: Path, value: dict[str, Any]) -> Path:
+                published = original(path, value)
+                (fixture.repository / "src/lib.rs").unlink()
+                return published
+
+            with mock.patch.object(
+                issuer, "write_atomic_create_only", side_effect=remove_source_after_publish
+            ):
+                with self.assertRaises(FileNotFoundError):
+                    fixture.begin()
+            self.assertFalse(fixture.snapshot.exists())
+
+    def test_failed_cleanup_reports_indeterminate_publication_identity(self) -> None:
+        temporary, fixture = self.fixture()
+        with temporary:
+            original_unlink = issuer.os.unlink
+
+            def deny_destination(path: Any, *args: Any, **kwargs: Any) -> None:
+                if Path(path).resolve() == fixture.receipt.resolve():
+                    raise PermissionError("injected destination removal denial")
+                original_unlink(path, *args, **kwargs)
+
+            with mock.patch.object(issuer, "fsync_directory", side_effect=OSError("injected sync error")):
+                with mock.patch.object(issuer.os, "unlink", side_effect=deny_destination):
+                    with self.assertRaises(issuer.PublicationIndeterminateError) as raised:
+                        issuer.write_atomic_create_only(fixture.receipt, {"status": "passed"})
+            self.assertEqual(raised.exception.path, fixture.receipt.resolve())
+            self.assertIn("indeterminate", str(raised.exception))
+            self.assertIn(str(fixture.receipt), str(raised.exception))
+            self.assertTrue(fixture.receipt.exists())
+
+    def test_both_cleanup_failures_report_all_residual_identities(self) -> None:
+        temporary, fixture = self.fixture()
+        with temporary:
+            with mock.patch.object(issuer.os, "unlink", side_effect=PermissionError("removal denied")):
+                with self.assertRaises(issuer.PublicationIndeterminateError) as raised:
+                    issuer.write_atomic_create_only(fixture.receipt, {"status": "passed"})
+            remaining = {path.resolve() for path in fixture.output.iterdir()}
+            self.assertEqual(len(remaining), 2)
+            self.assertEqual(set(raised.exception.paths), remaining)
+            self.assertEqual(raised.exception.path, fixture.receipt.resolve())
+            for path in remaining:
+                self.assertIn(str(path), str(raised.exception))
+
 
 if __name__ == "__main__":
     unittest.main()

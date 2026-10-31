@@ -92,6 +92,7 @@ def check_contract() -> None:
         "parent_directory_fsync",
         "reverify_source_after_receipt_publication",
         "invalid_evidence_removed_and_absence_verified",
+        "cleanup_failure_reports_indeterminate_identity",
     ]:
         require(publication.get(field) is True, f"local receipt publication weakens {field}")
     require(
@@ -164,6 +165,8 @@ def check_writer() -> None:
         "fsync_directory(parent)",
         "source changed while publishing the qualification receipt",
         "remove_published_evidence(published, \"qualification receipt\")",
+        "class PublicationIndeterminateError(QualificationReceiptError)",
+        "qualification publication is indeterminate at",
     ]:
         require(marker in source, f"local qualification issuer omits {marker}")
     for forbidden in [
@@ -180,7 +183,7 @@ def check_writer() -> None:
 
 def check_tests() -> None:
     source = TESTS.read_text(encoding="utf-8")
-    require(source.count("def test_") >= 18, "local qualification issuer needs eighteen tests")
+    require(source.count("def test_") >= 22, "local qualification issuer needs twenty-two tests")
     for name in [
         "test_clean_snapshot_and_passed_receipt_are_exact_and_owner_private",
         "test_tracked_byte_drift_prevents_receipt_publication",
@@ -200,6 +203,10 @@ def check_tests() -> None:
         "test_evidence_files_must_share_one_private_run_directory",
         "test_tracked_symbolic_link_is_rejected",
         "test_post_publication_source_change_removes_receipt",
+        "test_post_publication_read_error_removes_receipt",
+        "test_post_publication_read_error_removes_snapshot",
+        "test_failed_cleanup_reports_indeterminate_publication_identity",
+        "test_both_cleanup_failures_report_all_residual_identities",
     ]:
         require(f"def {name}" in source, f"local qualification tests omit {name}")
 
@@ -209,6 +216,7 @@ def check_wrapper() -> None:
     for marker in [
         "umask 077",
         "export PYTHONDONTWRITEBYTECODE=1",
+        "export CARGO_NET_OFFLINE=true",
         'RECEIPT_WRITER="$ROOT/scripts/write_local_qualification_receipt.py"',
         'LOCAL_RECEIPT_CONTRACT="$ROOT/architecture/local_qualification_receipt_v1.json"',
         'SOURCE_SNAPSHOT="$OUT_DIR/source-snapshot.json"',
@@ -243,6 +251,7 @@ def check_wrapper() -> None:
 def check_gate_and_server_binding() -> None:
     verify = VERIFY.read_text(encoding="utf-8")
     for marker in [
+        "export CARGO_NET_OFFLINE=true",
         "python3 scripts/check_local_qualification_receipt.py",
         "python3 scripts/test_local_qualification_receipt.py",
         "python3 scripts/check_implementation_status.py",

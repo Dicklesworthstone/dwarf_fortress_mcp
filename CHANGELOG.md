@@ -21,7 +21,7 @@
 - Preserve Terra's later read-only mining search and native hidden-context refusal;
   repair the 64-row spatial text overflow at pre-pagination packet budgeting.
   Direct explicit Python syntax caches under ignored `target/` so qualification
-  preserves clean source custody. Fresh execution remains required.
+  preserves clean source custody. R15 supplies the source-bound tile replay.
 - Close source-bundle Git subprocess pipes on success and failure; exercise actual
   child exit, bounded oversized output and ResourceWarning-denied cleanup.
 
@@ -32,8 +32,34 @@
 
 - Reproduce private lock retention after owner drop in all three actual affected
   backends, then add owned cleanup immediately at every adapter acquisition.
-  Preserve nonblocking refusal, context checks and journal bytes; Linux regression
-  and full qualification are pending. No sleeps, retries or test serialization.
+  Preserve nonblocking refusal, context checks and journal bytes. R17 passes Linux
+  regressions 3/3, guard tests 3/3 and the 1,288-test adapter suite at 32 threads;
+  full debug qualification passes 5,120 tests before a host reboot interrupts
+  release compilation. R17b repeats the full checks; no interrupted pass credit.
+  No sleeps, retries or test serialization are used to repair ownership.
+- Record the missing live workshop construction prerequisite as reality bead .14.
+  Furniture placement and queue insertion do not establish productive bed output.
+- Route the separate protocol-1.1 source qualifier's explicit Python compilation
+  cache under `target/` as well. Its actual nine-file syntax command dirties an
+  isolated clean checkout before the repair and preserves it after; full updated
+  source qualification remains separate from frozen R17 evidence.
+- Bind announcement source qualification to the full clean HEAD snapshot before
+  gates and before/after create-only publication. Reject hidden, untracked and
+  HEAD drift; remove a published snapshot or receipt when final source reading
+  raises. Actual missing-file regressions fail 0/2 before repair; the common
+  receipt suite now passes 22/22 and announcement custody passes 5/5. Failed OS
+  cleanup reports all possible residual identities as indeterminate; every Cargo
+  gate is forced offline.
+- Preserve the live7 workforce refusal: one Prepared record, no commit and
+  byte-identical independent captures. Add a compact source-bound native review
+  for semantic Plan/Explain and a truthful 65,535-byte transport fallback. Rust
+  execution and the new live replay remain pending for those later bytes.
+- Preserve R17b's passed 43-gate qualifier and both 5,120-test configurations,
+  while rejecting its dirty combined completion: sanitized read-only tracker
+  children generated eleven caches after qualification. Disable bytecode in the
+  CLI itself and reject special journals before locking. The new regression is
+  red before repair; all 64 tracker suites pass on macOS and isolated Linux after.
+  Archive generated worker caches without relabeling the failed final check.
 
 ## 2026-10-30 — Execute complete original labor and work-order plans
 

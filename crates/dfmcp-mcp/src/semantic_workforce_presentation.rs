@@ -6,6 +6,11 @@ use dfmcp_core::{Digest32, RequestId, SessionId, StateAnchor, WorkBudget};
 use serde_json::{Value, json};
 
 pub(super) const RESPONSE_RESERVE: u64 = 128 * 1024;
+const EFFECTIVE_TEXT_LIMIT: u64 = if RESPONSE_RESERVE < 65_535 {
+    RESPONSE_RESERVE
+} else {
+    65_535
+};
 
 fn anchor_value(a: StateAnchor) -> Value {
     json!({"fortress_id":a.fortress_id.get().to_string(),"epoch":a.cursor.epoch,
@@ -46,9 +51,82 @@ fn recovery(view: &Value) -> Option<Value> {
 }
 fn review(view: &Value) -> Option<Value> {
     let r = &view["review"];
-    Some(json!({"paired_seal":digest(&r["paired_seal"])?,
+    let mut result = json!({"paired_seal":digest(&r["paired_seal"])?,
         "native_plan_digest":digest(&r["native_plan_digest"])?,
-        "semantic_plan_digest":digest(&r["semantic_plan_digest"])?}))
+        "semantic_plan_digest":digest(&r["semantic_plan_digest"])?});
+    if let Some(native) = native_review(&r["native_review"], &r["native_plan_digest"]) {
+        result["native_review"] = native;
+    }
+    Some(result)
+}
+fn native_review(value: &Value, native_digest: &Value) -> Option<Value> {
+    if digest(&value["native_plan_digest"])? != digest(native_digest)?
+        || digest(&value["capture_witness"]).is_none()
+        || value["detail_index"].as_u64()? >= 64
+        || value["labor_column"].as_u64()? >= 128
+        || value["detail_name"].as_str()?.len() > 256
+        || value["labor"].as_str()?.is_empty()
+        || value["labor"].as_str()?.len() > 64
+        || value["idempotency_key"].as_str()?.is_empty()
+        || value["idempotency_key"].as_str()?.len() > 128
+        || !value["idempotency_key"]
+            .as_str()?
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+        || value["scope"] != "selected_citizens_and_requested_labor_only"
+        || value["other_members_and_labor_columns"] != "not_shown"
+        || value["other_recomputed_labor_effects"] != "unknown"
+        || value["capture_is_current_state"] != false
+        || value["intended_is_observed"] != false
+    {
+        return None;
+    }
+    value["selected_only"].as_bool()?;
+    value["requested_labor_allowed"].as_bool()?;
+    let citizens = value["citizens"].as_array()?;
+    if citizens.is_empty() || citizens.len() > 32 {
+        return None;
+    }
+    let mut selected = Vec::with_capacity(citizens.len());
+    let mut seen = std::collections::BTreeSet::new();
+    let mut common_intent = None;
+    for citizen in citizens {
+        let native = citizen["native_id"].as_u64()?;
+        if !seen.insert(native)
+            || native > i32::MAX as u64
+            || citizen["canonical_id"].as_str()? != (native + 1).to_string()
+        {
+            return None;
+        }
+        let member = citizen["member_observed"].as_bool()?;
+        let intended = citizen["member_intended"].as_bool()?;
+        if common_intent.is_some_and(|previous| previous != intended) {
+            return None;
+        }
+        common_intent = Some(intended);
+        if citizen["membership_changes"].as_bool()? != (member != intended)
+            || citizen["labor_intended"].as_bool()? != intended
+        {
+            return None;
+        }
+        citizen["eligible_observed"].as_bool()?;
+        citizen["labor_observed"].as_bool()?;
+        selected.push(
+            json!({"canonical_id":citizen["canonical_id"],"native_id":native,
+            "eligible_observed":citizen["eligible_observed"],"member_observed":member,
+            "member_intended":intended,"membership_changes":member != intended,
+            "labor_observed":citizen["labor_observed"],"labor_intended":intended}),
+        );
+    }
+    Some(
+        json!({"idempotency_key":value["idempotency_key"],"native_plan_digest":value["native_plan_digest"],
+        "capture_witness":value["capture_witness"],"detail_index":value["detail_index"],
+        "detail_name":value["detail_name"],"selected_only":value["selected_only"],
+        "requested_labor_allowed":value["requested_labor_allowed"],"labor":value["labor"],
+        "labor_column":value["labor_column"],"citizens":selected,
+        "scope":"selected_citizens_and_requested_labor_only","other_members_and_labor_columns":"not_shown",
+        "other_recomputed_labor_effects":"unknown","capture_is_current_state":false,"intended_is_observed":false}),
+    )
 }
 fn native_state(view: &Value) -> Option<&str> {
     view["native_state"].as_str().filter(|s| {
@@ -583,7 +661,9 @@ pub(super) fn packet(
         retained.as_ref(),
         effect_may_have_started,
     );
-    if out.len() as u64 <= RESPONSE_RESERVE {
+    // The modern transport independently bounds a single text value to 65,536
+    // bytes, even when the caller reserved more application output budget.
+    if out.len() as u64 <= EFFECTIVE_TEXT_LIMIT {
         return out;
     }
     let may_have_started = effect_may_have_started
@@ -600,7 +680,7 @@ pub(super) fn packet(
         "closed":result["closed"].as_bool().unwrap_or(false),
         "effects_cancelled":result["effects_cancelled"].as_bool(),
         "details_omitted":true,"runtime_admitted":false,"automatic_redispatch":false,
-        "effect_may_have_started":may_have_started,"output_limit_bytes":RESPONSE_RESERVE}),
+        "effect_may_have_started":may_have_started,"output_limit_bytes":EFFECTIVE_TEXT_LIMIT}),
         reduced.as_ref(),
         may_have_started,
     )

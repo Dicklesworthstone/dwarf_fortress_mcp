@@ -37,6 +37,19 @@ class QualificationReceiptError(ValueError):
     pass
 
 
+class PublicationIndeterminateError(QualificationReceiptError):
+    def __init__(
+        self, path: Path, label: str, error: BaseException,
+        related_paths: tuple[Path, ...] = (),
+    ) -> None:
+        self.path = path
+        self.paths = (path, *related_paths)
+        super().__init__(
+            f"qualification publication is indeterminate at {', '.join(map(str, self.paths))}: "
+            f"cannot prove removal of {label}: {error}"
+        )
+
+
 def fail(message: str) -> NoReturn:
     raise QualificationReceiptError(message)
 
@@ -314,6 +327,7 @@ def load_contract(path: Path) -> dict[str, Any]:
             "parent_directory_fsync",
             "reverify_source_after_receipt_publication",
             "invalid_evidence_removed_and_absence_verified",
+            "cleanup_failure_reports_indeterminate_identity",
         },
         "contract.publication",
     )
@@ -327,6 +341,7 @@ def load_contract(path: Path) -> dict[str, Any]:
         "parent_directory_fsync",
         "reverify_source_after_receipt_publication",
         "invalid_evidence_removed_and_absence_verified",
+        "cleanup_failure_reports_indeterminate_identity",
     ]:
         if publication.get(field) is not True:
             fail(f"contract.publication.{field} must remain true")
@@ -689,9 +704,9 @@ def write_atomic_create_only(path: Path, value: dict[str, Any]) -> Path:
     published = False
     try:
         descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=parent)
-        if hasattr(os, "fchmod"):
-            os.fchmod(descriptor, 0o600)
         with os.fdopen(descriptor, "wb", closefd=True) as handle:
+            if hasattr(os, "fchmod"):
+                os.fchmod(handle.fileno(), 0o600)
             handle.write(payload)
             handle.flush()
             os.fsync(handle.fileno())
@@ -710,39 +725,43 @@ def write_atomic_create_only(path: Path, value: dict[str, Any]) -> Path:
         if stable.content != payload:
             fail("published qualification evidence bytes differ from the prepared payload")
         return destination
-    except BaseException:
+    except BaseException as primary:
+        cleanup_errors: list[tuple[Path, BaseException]] = []
         if published:
             try:
-                os.unlink(destination)
-                fsync_directory(parent)
-            except OSError:
-                pass
-        raise
-    finally:
+                remove_published_evidence(destination, "partially published qualification evidence")
+            except BaseException as exc:
+                cleanup_errors.append((destination, exc))
         if temporary is not None:
             try:
-                os.unlink(temporary)
-                fsync_directory(parent)
-            except OSError:
-                pass
+                remove_published_evidence(Path(temporary), "temporary qualification evidence")
+            except BaseException as exc:
+                cleanup_errors.append((Path(temporary), exc))
+        if cleanup_errors:
+            first, _ = cleanup_errors[0]
+            detail = QualificationReceiptError("; ".join(str(error) for _, error in cleanup_errors))
+            raise PublicationIndeterminateError(
+                first, "qualification rollback", detail,
+                tuple(path for path, _ in cleanup_errors[1:]),
+            ) from primary
+        raise
 
 
 def remove_published_evidence(path: Path, label: str) -> None:
-    candidate, parent = private_evidence_candidate(path)
     try:
-        os.unlink(candidate)
-    except FileNotFoundError:
-        return
-    except OSError as exc:
-        fail(f"cannot remove invalid {label}: {exc}")
-    fsync_directory(parent)
-    try:
-        os.lstat(candidate)
-    except FileNotFoundError:
-        return
-    except OSError as exc:
-        fail(f"cannot verify invalid {label} removal: {exc}")
-    fail(f"invalid {label} still exists after removal")
+        candidate, parent = private_evidence_candidate(path)
+        try:
+            os.unlink(candidate)
+        except FileNotFoundError:
+            return
+        fsync_directory(parent)
+        try:
+            os.lstat(candidate)
+        except FileNotFoundError:
+            return
+        fail(f"invalid {label} still exists after removal")
+    except BaseException as exc:
+        raise PublicationIndeterminateError(path, label, exc) from exc
 
 
 def begin(
@@ -760,10 +779,13 @@ def begin(
             "clean local qualification refuses a dirty, untracked, mode-divergent, or HEAD-divergent worktree"
         )
     published = write_atomic_create_only(snapshot_path, snapshot)
-    current = collect_source_snapshot(source_root, contract, expected_commit)
-    if current != snapshot:
+    try:
+        current = collect_source_snapshot(source_root, contract, expected_commit)
+        if current != snapshot:
+            fail("source changed while publishing the qualification snapshot")
+    except BaseException:
         remove_published_evidence(published, "qualification source snapshot")
-        fail("source changed while publishing the qualification snapshot")
+        raise
     return {
         "schema": "dfmcp.qualification-source-snapshot-result/1",
         "status": "captured",
@@ -844,10 +866,13 @@ def finish(
     if current_before_publish != snapshot:
         fail("source changed while preparing the qualification receipt")
     published = write_atomic_create_only(output_candidate, receipt)
-    current_after_publish = collect_source_snapshot(source_root, contract, expected)
-    if current_after_publish != snapshot:
+    try:
+        current_after_publish = collect_source_snapshot(source_root, contract, expected)
+        if current_after_publish != snapshot:
+            fail("source changed while publishing the qualification receipt")
+    except BaseException:
         remove_published_evidence(published, "qualification receipt")
-        fail("source changed while publishing the qualification receipt")
+        raise
     return receipt
 
 
