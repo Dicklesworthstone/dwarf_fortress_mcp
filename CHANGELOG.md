@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-10-30 — Restore guarded workshop and furnace job control
+
+- Replace refusal-only native job suspension with a closed eight-type policy
+  using actual DFHack job, holder, posting and activity fields. Restrict writes
+  to idle, unposted, unclaimed jobs in completed matching production buildings.
+- Validate the complete bounded job list and exact holder queue membership before
+  the sole suspension-bit setter; retain stale-plan refusal, original-key replay
+  and immediate exact readback without retrying uncertain effects.
+- Replace fictional SDK test helpers and `BrewDrink` enum assumptions with
+  SDK-shaped lists and real enum values. Pass 863 handler/engine assertions under
+  UBSan, 26 independent SDK-guard assertions, and reject five safety mutations.
+- Retain explicit source/test scope: matching-SDK build, live MCP execution and
+  full Rust qualification remain open. No bridge method or admission is added.
+
 ## 2026-10-30 — Repair executable wiring and prove a bounded live run
 
 - Repair laboratory composition, Tasks recovery of original receipts, partial-wait

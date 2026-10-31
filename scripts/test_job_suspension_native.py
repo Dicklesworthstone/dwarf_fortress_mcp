@@ -20,7 +20,7 @@ MOCK = r'''
 #include <vector>
 #define DFHACK_PLUGIN(name)
 #define DFhackCExport
-#define ENUM_KEY_STR(kind,value) std::string("BrewDrink")
+#define ENUM_KEY_STR(kind,value) df::job_type_key(value)
 struct color_ostream {};
 enum command_result { CR_OK, CR_FAILURE };
 enum state_change_event { SC_MAP_LOADED, SC_MAP_UNLOADED, SC_WORLD_LOADED, SC_WORLD_UNLOADED, SC_PAUSED, SC_UNPAUSED, SC_OTHER };
@@ -30,21 +30,43 @@ struct TrackedBool {
  TrackedBool &operator=(bool v) { ++writes;value=v;if(fail)throw 42;return *this; }
 };
 namespace df {
-enum class building_type { Workshop=1, Furnace=2, Other=3 };
+// Names and enum values match df-structures 1dd01aad64219afa0578f1328cf15bd0c6006d5a.
+// These remain explicit boundary doubles, not an SDK or ABI qualification.
+enum class building_type { Workshop=13, Furnace=5, Other=0 };
+enum class job_type { Dig=5, ConstructDoor=67, ConstructBed=69, ConstructThrone=70,
+ ConstructTable=72, SmeltOre=89, MeltMetalObject=90, PrepareMeal=114,
+ MakeCharcoal=183, CustomReaction=208 };
+inline std::string job_type_key(job_type value) {
+ switch(value) {
+  case job_type::ConstructBed:return "ConstructBed";
+  case job_type::ConstructDoor:return "ConstructDoor";case job_type::ConstructTable:return "ConstructTable";
+  case job_type::ConstructThrone:return "ConstructThrone";case job_type::PrepareMeal:return "PrepareMeal";
+  case job_type::SmeltOre:return "SmeltOre";case job_type::MeltMetalObject:return "MeltMetalObject";
+  case job_type::MakeCharcoal:return "MakeCharcoal";
+  case job_type::CustomReaction:return "CustomReaction";case job_type::Dig:return "Dig";
+ }
+ return "?"+std::to_string(static_cast<int>(value))+"?";
+}
+struct job;
+struct job_list_link;
 struct building {
  int id=20,stage=3,maximum=3;building_type kind=building_type::Workshop;
+ std::vector<job*> jobs;
  building_type getType() const {return kind;} int getBuildStage() const {return stage;} int getMaxBuildStage() const {return maximum;}
 };
 struct unit {int id=42;};
 struct job {
- int id=3,job_type=5,completion_timer=-1;
+ int id=3,completion_timer=-1,posting_index=-1;df::job_type job_type=df::job_type::ConstructBed;
  struct {int x=1,y=2,z=5;} pos;
- struct {struct {TrackedBool suspend;bool repeat=true;} bits;} flags;
+ struct {struct {TrackedBool suspend;bool repeat=true,working=false,fetching=false,bringing=false,special=false;} bits;} flags;
  struct {std::vector<void*> elements;} job_items;
- std::vector<void*> general_refs,items;std::string reaction_name;
- building *holder=nullptr;unit *worker=nullptr;bool supported=true;
+ std::vector<void*> general_refs,items,specific_refs;std::string reaction_name;
+ job_list_link *list_link=nullptr;
+ building *holder=nullptr;unit *worker=nullptr;
 };
-namespace global {inline int counter=10;inline int *job_next_id=&counter;}
+struct job_list_link {job *item=nullptr;job_list_link *prev=nullptr,*next=nullptr;};
+struct world {struct {job_list_link list;} jobs;};
+namespace global {inline int counter=10;inline int *job_next_id=&counter;inline df::world *world=nullptr;}
 }
 namespace DFHack {
 struct PluginCommand {};
@@ -62,10 +84,9 @@ namespace World {
  inline bool ReadPauseState(){return paused;}inline bool isFortressMode(){return fortress;}
 }
 namespace Job {
- inline df::job *current=nullptr;inline bool fail_read=false,fail_after_write=false;
- inline df::job *getJob(int id){if(fail_read||(fail_after_write&&TrackedBool::writes))throw 42;return current&&current->id==id?current:nullptr;}
- inline df::unit *getWorker(df::job*j){return j->worker;}inline df::building *getHolder(df::job*j){return j->holder;}
- inline bool isSupportedJob(df::job*j){return j->supported;}
+ inline bool fail_read=false,fail_after_write=false;
+ inline df::unit *getWorker(df::job*j){if(fail_read||(fail_after_write&&TrackedBool::writes))throw 42;return j->worker;}
+ inline df::building *getHolder(df::job*j){return j->holder;}
 }
 }
 namespace dfmcp::job_control::v1_9 {
@@ -106,11 +127,14 @@ unsigned checks=0,groups=0;std::string group;
 void check(bool v,const char *message){++checks;if(!v)throw std::runtime_error(message);}
 std::string hex(const std::string&s){const char*h="0123456789abcdef";std::string out;for(unsigned char c:s){out+=h[c>>4];out+=h[c&15];}return out;}
 struct Fixture {
- df::building holder;df::job job;df::unit unit;wire::Request r;wire::Reply p;color_ostream out;
+ df::building holder;df::job job;df::unit unit;df::world world;df::job_list_link link;
+ wire::Request r;wire::Reply p;color_ostream out;
  Fixture(){engine=js::Engine(7);TrackedBool::writes=0;TrackedBool::fail=false;Job::fail_read=false;Job::fail_after_write=false;
   Core::getInstance().loaded=true;Core::getInstance().map=true;Core::getInstance().vinfo=std::make_shared<VersionInfo>();VersionInfo::failure=0;Version::null_version=false;
   World::year=105;World::tick=3;World::paused=true;World::site=1;World::fortress=true;World::folder="region1";
-  df::global::counter=10;df::global::job_next_id=&df::global::counter;Job::current=&job;job.holder=&holder;}
+  df::global::counter=10;df::global::job_next_id=&df::global::counter;df::global::world=&world;
+  world.jobs.list.next=&link;link.prev=&world.jobs.list;link.item=&job;job.list_link=&link;job.holder=&holder;
+  holder.jobs.push_back(&job);job.job_items.elements.push_back(&unit);}
  void observe(){r.mask=2;ReadJob(out,&r,&p);check(p.accepted&&!p.observation.empty(),"read job");}
  void prepare(const std::string &key="job-001",bool desired=true){observe();r.witness=dfmcp_snapshot::sha256(p.observation);
   r.key=key;r.desired=desired;r.plan=js::plan_digest(r.id,desired,r.witness);r.mask=31;
@@ -139,17 +163,104 @@ int main(){
    check(TrackedBool::writes==2&&World::paused,"resume unpaused game");});
   run("eligibility",[]{for(int c=0;c<8;++c){Fixture f;
    switch(c){case 0:World::paused=false;break;case 1:f.job.worker=&f.unit;break;case 2:f.holder.stage=2;break;
-    case 3:f.holder.kind=df::building_type::Other;break;case 4:f.job.holder=nullptr;break;case 5:f.job.supported=false;break;
+    case 3:f.holder.kind=df::building_type::Other;break;case 4:f.job.holder=nullptr;break;case 5:f.job.job_type=df::job_type::Dig;break;
     case 6:f.job.completion_timer=0;break;default:f.job.completion_timer=20;}
    f.observe();f.r.witness=dfmcp_snapshot::sha256(f.p.observation);f.r.key="blocked";f.r.plan=js::plan_digest(f.r.id,true,f.r.witness);f.r.mask=31;
    PrepareSuspension(f.out,&f.r,&f.p);check(!f.p.accepted&&f.p.code==4,"ineligible prepare accepted");check(engine.size()==0&&TrackedBool::writes==0,"ineligible side effect");}});
+  run("sdk-production-policy",[]{
+   for(auto type:{df::job_type::ConstructBed,df::job_type::ConstructDoor,df::job_type::ConstructThrone,
+     df::job_type::ConstructTable,df::job_type::PrepareMeal,df::job_type::SmeltOre,
+     df::job_type::MeltMetalObject,df::job_type::MakeCharcoal}){
+    const bool furnace=type==df::job_type::SmeltOre||type==df::job_type::MeltMetalObject||type==df::job_type::MakeCharcoal;
+    for(bool suspended:{false,true})for(bool repeat:{false,true}){
+     Fixture f;f.job.job_type=type;f.holder.kind=furnace?df::building_type::Furnace:df::building_type::Workshop;
+     f.job.flags.bits.suspend.value=suspended;f.job.flags.bits.repeat=repeat;f.prepare("allowed",!suspended);
+     const auto&r=f.commit();check(r.state==js::State::Applied&&r.after_suspended==!suspended,"allowed production job did not apply");
+     check(TrackedBool::writes==1&&f.job.flags.bits.repeat==repeat&&World::paused,"allowed job changed another setting");
+     check(f.job.posting_index==-1&&!f.job.worker&&f.job.items.empty(),"job resources changed");
+    }
+    Fixture wrong;wrong.job.job_type=type;wrong.holder.kind=furnace?df::building_type::Workshop:df::building_type::Furnace;
+    wrong.observe();check(!read_job(3).eligible(),"wrong holder class eligible");
+   }
+   for(int c=0;c<11;++c){Fixture f;
+    switch(c){case 0:f.job.flags.bits.working=true;break;case 1:f.job.flags.bits.fetching=true;break;
+     case 2:f.job.flags.bits.bringing=true;break;case 3:f.job.flags.bits.special=true;break;
+     case 4:f.job.posting_index=0;break;case 5:f.job.specific_refs.push_back(&f.unit);break;
+     case 6:f.job.reaction_name="CUSTOM";break;case 7:f.job.items.push_back(&f.unit);break;
+     case 8:f.job.job_items.elements.clear();break;case 9:f.job.job_type=df::job_type::CustomReaction;break;
+     default:f.job.job_type=static_cast<df::job_type>(32767);}
+    f.observe();check(!read_job(3).eligible(),"unsupported job eligible");f.r.witness=dfmcp_snapshot::sha256(f.p.observation);
+    f.r.key="unsupported";f.r.plan=js::plan_digest(f.r.id,true,f.r.witness);f.r.mask=31;
+    PrepareSuspension(f.out,&f.r,&f.p);check(!f.p.accepted&&f.p.code==4,"unsupported policy prepared");
+    check(engine.size()==0&&TrackedBool::writes==0,"unsupported policy mutated");
+   }
+  });
+  run("complete-job-list",[]{
+   for(int c=0;c<13;++c){Fixture f;df::job other;df::job_list_link tail;
+    other.id=4;other.list_link=&tail;tail.item=&other;tail.prev=&f.link;
+    switch(c){case 0:df::global::world=nullptr;break;case 1:f.link.item=nullptr;break;
+     case 2:f.job.id=-1;break;case 3:f.job.id=10;break;case 4:f.link.prev=nullptr;break;
+     case 5:f.job.list_link=nullptr;break;case 6:f.link.next=&f.link;break;
+     case 7:f.link.next=&tail;other.id=3;break;case 8:f.link.next=&tail;tail.item=nullptr;break;
+     case 9:f.link.next=&tail;tail.prev=nullptr;break;case 10:f.link.next=&tail;other.list_link=&f.link;break;
+     case 11:f.link.next=&tail;other.id=10;break;default:f.link.next=&tail;tail.next=&f.link;}
+    f.r.mask=2;ReadJob(f.out,&f.r,&f.p);check(!f.p.accepted&&f.p.observation.empty(),"malformed complete job list accepted");
+    check(engine.size()==0&&TrackedBool::writes==0,"malformed job list mutated");
+   }
+   Fixture valid;df::job other;df::job_list_link tail;other.id=4;other.list_link=&tail;tail.item=&other;
+   tail.prev=&valid.link;valid.link.next=&tail;valid.observe();check(read_job(3).eligible(),"valid tail rejected");
+   valid.prepare();tail.item=nullptr;valid.refused();
+   for(std::size_t count:{65536u,65537u}){Fixture f;
+    std::vector<df::job> jobs(count);std::vector<df::job_list_link> links(count);
+    df::global::counter=static_cast<int>(count+1);f.world.jobs.list.next=links.data();
+    for(std::size_t i=0;i<count;++i){jobs[i].id=static_cast<int>(i);jobs[i].list_link=&links[i];
+     links[i].item=&jobs[i];links[i].prev=i?&links[i-1]:&f.world.jobs.list;
+     links[i].next=i+1<count?&links[i+1]:nullptr;}
+    jobs[3].holder=&f.holder;jobs[3].job_items.elements.push_back(&f.unit);f.holder.jobs={&jobs[3]};
+    f.r.mask=2;ReadJob(f.out,&f.r,&f.p);
+    check(f.p.accepted==(count==65536),"job list bound is not exact");
+    check(TrackedBool::writes==0&&engine.size()==0,"bounded read mutated");
+   }
+  });
+  run("malformed-job-and-holder",[]{
+   for(int c=0;c<13;++c){Fixture f;df::job other;other.id=4;
+    switch(c){case 0:f.job.posting_index=-2;break;case 1:f.job.job_items.elements.push_back(nullptr);break;
+     case 2:f.job.specific_refs.push_back(nullptr);break;case 3:f.job.items.push_back(nullptr);break;
+     case 4:f.job.job_items.elements.resize(4097,&f.unit);break;case 5:f.job.specific_refs.resize(4097,&f.unit);break;
+     case 6:f.holder.jobs.push_back(nullptr);break;case 7:f.holder.jobs.push_back(&f.job);break;
+     case 8:f.holder.jobs.push_back(&other);other.id=3;break;case 9:f.holder.jobs.resize(11,&other);break;
+     case 10:f.holder.jobs.push_back(&other);other.id=-1;break;case 11:f.holder.stage=-1;break;default:f.holder.maximum=2;}
+    f.r.mask=2;ReadJob(f.out,&f.r,&f.p);check(!f.p.accepted&&f.p.observation.empty(),"malformed job or holder returned");
+    check(engine.size()==0&&TrackedBool::writes==0,"malformed job or holder mutated");
+   }
+   for(bool substituted:{false,true}){Fixture f;df::job copy=f.job;f.holder.jobs.clear();
+    if(substituted)f.holder.jobs.push_back(&copy);
+    f.observe();check(!read_job(3).eligible(),"missing exact holder membership eligible");
+   }
+  });
+  run("policy-revalidated-before-setter",[]{
+   for(int c=0;c<10;++c){Fixture f;f.prepare();
+    switch(c){case 0:f.job.flags.bits.working=true;break;case 1:f.job.flags.bits.fetching=true;break;
+     case 2:f.job.flags.bits.bringing=true;break;case 3:f.job.flags.bits.special=true;break;
+     case 4:f.job.posting_index=0;break;case 5:f.job.specific_refs.push_back(&f.unit);break;
+     case 6:f.job.job_items.elements.clear();break;case 7:f.holder.jobs.clear();break;
+     case 8:f.holder.kind=df::building_type::Furnace;break;default:f.job.list_link=nullptr;}
+    f.refused();
+   }
+   for(int c=0;c<4;++c){Fixture f;
+    switch(c){case 0:World::paused=false;break;case 1:f.job.job_type=df::job_type::Dig;break;
+     case 2:f.job.posting_index=0;break;default:f.holder.jobs.clear();}
+    bool refused=false;try{set_suspended(3,true);}catch(const js::Failure&){refused=true;}
+    check(refused&&TrackedBool::writes==0,"direct setter bypassed policy");
+   }
+  });
   run("changed-witness",[]{for(int c=0;c<16;++c){Fixture f;f.prepare();
    switch(c){case 0:World::tick++;break;case 1:World::paused=false;break;case 2:df::global::counter++;break;
-    case 3:f.job.job_type++;break;case 4:f.job.pos.x++;break;case 5:f.job.flags.bits.repeat=false;break;
+    case 3:f.job.job_type=df::job_type::ConstructDoor;break;case 4:f.job.pos.x++;break;case 5:f.job.flags.bits.repeat=false;break;
     case 6:f.job.flags.bits.suspend.value=true;break;case 7:f.job.reaction_name="different";break;case 8:f.holder.id++;break;
     case 9:f.job.worker=&f.unit;break;case 10:World::folder="region2";break;case 11:World::site++;break;
     case 12:f.job.items.push_back(&f.unit);break;case 13:f.job.job_items.elements.push_back(&f.unit);break;
-    case 14:Job::current=nullptr;break;default:Job::fail_read=true;}
+    case 14:f.world.jobs.list.next=nullptr;break;default:Job::fail_read=true;}
    f.refused();Job::fail_read=false;const auto first=engine.query(f.r.key,f.r.plan)->encode();f.r.mask=49;
    CommitSuspension(f.out,&f.r,&f.p);check(f.p.accepted&&f.p.record==first&&TrackedBool::writes==0,"refused key revived");}});
   run("competing-preparations",[]{Fixture f;f.prepare("a");const auto a=f.r;f.prepare("b");const auto b=f.r;
@@ -158,11 +269,14 @@ int main(){
    Fixture noop;noop.prepare("a",false);const auto old=noop.r;noop.prepare("b",true);const auto later=noop.r;
    noop.r=old;check(noop.commit().state==js::State::Applied,"no-op commit");noop.r=later;
    check(noop.commit().state==js::State::Refused&&TrackedBool::writes==1,"no-op did not fence");});
-  run("unknown-outcomes",[]{for(int c=0;c<2;++c){Fixture f;f.prepare();if(c==0)TrackedBool::fail=true;else Job::fail_after_write=true;
+  run("unknown-outcomes",[]{for(int c=0;c<2;++c){Fixture f;f.prepare();TrackedBool::fail=c==0;Job::fail_after_write=true;
    check(f.commit().state==js::State::Unknown,"ambiguous effect claimed terminal");check(TrackedBool::writes==1,"ambiguous setter count");
    const auto old=engine.query(f.r.key,f.r.plan)->encode();TrackedBool::fail=false;Job::fail_after_write=false;
    f.commit();check(TrackedBool::writes==1&&f.p.record==old,"unknown redispatched");
    check(engine.query(f.r.key,f.r.plan)->receipt==std::string(32,'\0'),"unknown receipt invented");}
+   Fixture throwing;throwing.prepare();TrackedBool::fail=true;
+   check(throwing.commit().state==js::State::Applied,"fresh exact readback did not resolve throwing setter");
+   check(TrackedBool::writes==1,"throwing setter retried");TrackedBool::fail=false;
    Fixture lost;lost.prepare();wire::Reply::fail_success=true;lost.r.mask=49;CommitSuspension(lost.out,&lost.r,&lost.p);
    check(!lost.p.accepted&&TrackedBool::writes==1,"lost response effect");wire::Reply::fail_success=false;
    check(lost.commit().state==js::State::Applied&&TrackedBool::writes==1,"lost acknowledgement redispatched");});
@@ -243,7 +357,7 @@ def main() -> None:
     parser.add_argument("--compiler", default="g++")
     parser.add_argument("--ubsan", action="store_true")
     parser.add_argument("--fixture-dir", type=Path)
-    parser.add_argument("--mutant", choices=["witness", "idempotency", "eligibility"])
+    parser.add_argument("--mutant", choices=["witness", "idempotency", "eligibility", "job-list", "job-policy"])
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     source = root / "bridge/dfhack-job-control-v1_9/dfmcp_job_control_v1_9.cpp"
@@ -259,19 +373,23 @@ def main() -> None:
             copied.parent.mkdir(parents=True, exist_ok=True)
             copied.write_bytes(original.read_bytes())
         if args.mutant:
-            target = path / engine.relative_to(root)
+            target = path / (source if args.mutant.startswith("job-") else engine).relative_to(root)
             text = target.read_text()
             old, new = {
                 "witness": ("current.eligible() && current.witness() == r.witness", "current.eligible()"),
                 "idempotency": ("if (r.state != State::Prepared) return r;", "/* removed repeat-dispatch fence */"),
                 "eligibility": ("require(before.eligible(), 4);", "/* removed eligibility preflight */"),
+                "job-list": ("if (static_cast<std::uint32_t>(job->id) == id) selected = job;",
+                             "if (static_cast<std::uint32_t>(job->id) == id) return job;"),
+                "job-policy": ("        default:\n            return false;\n    }",
+                               "        default:\n            return true;\n    }"),
             }[args.mutant]
             assert text.count(old) == 1
             target.write_text(text.replace(old, new))
         (path / "mock.hpp").write_text(MOCK)
         names = ["Core.h", "Export.h", "MiscUtils.h", "PluginManager.h", "RemoteServer.h", "VersionInfo.h",
                  "modules/Job.h", "modules/World.h", "df/building.h", "df/building_type.h", "df/global_objects.h",
-                 "df/job.h", "df/unit.h", "DfmcpJobControlV1_9.pb.h"]
+                 "df/job.h", "df/job_type.h", "df/job_list_link.h", "df/world.h", "df/unit.h", "DfmcpJobControlV1_9.pb.h"]
         for name in names:
             header = path / name
             header.parent.mkdir(parents=True, exist_ok=True)

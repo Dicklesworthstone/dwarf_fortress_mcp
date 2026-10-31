@@ -50,6 +50,33 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Restore positive job suspension with actual SDK fields (2026-10-30)
+
+The existing job-control/1.9 handler now implements an explicit eight-type
+eligibility policy instead of refusing every job after the removal of fictional
+DFHack APIs. The allowed workshop and furnace jobs must be idle, unposted,
+unclaimed, in a completed holder, and free of active item handling or special
+references. The complete bounded world job list and holder queue must agree on
+the exact selected job. Preparation and the sole suspension setter both retain
+the existing witness, authority, idempotency and immediate-readback boundaries.
+
+The actual handler and engine pass 863 assertions in 13 groups with nonrecovering
+UBSan and warnings denied against explicit SDK-shaped doubles. All five mutations
+removing witness, replay, eligibility, complete-list or closed-policy checks are
+rejected. The independent SDK guard passes 26 assertions. The regenerated wire
+fixtures use actual `ConstructBed=69` and `Workshop=13` enum values; the earlier
+synthetic `BrewDrink` fixture and its fictional helper methods do not establish
+SDK compatibility. Python independently verifies the new witness/plan/token/
+receipt chain and rejects altered or incomplete journal histories.
+
+These are source and executed boundary-double results, not a matching-SDK build
+or live-fortress trial. An attempted full adapter Rust unit-test build was killed
+before tests ran on the original resource-exhausted host. Full workspace, native
+and live qualification remain separate. Bead `dfmcp-reality-wiring-proof-4bf.8`
+remains open for its real-SDK and real-MCP acceptance requirements. The existing
+wire generation, five methods, production runner map and empty compatibility
+registry are unchanged. See [`JOB_SUSPENSION_CONTROL.md`](docs/JOB_SUSPENSION_CONTROL.md).
+
 ### Execute original labor and work-order plans through the native owners (2026-10-30)
 
 `live_production::Executor` now connects the durable dispatcher to the existing

@@ -16,6 +16,7 @@
 #include "df/global_objects.h"
 #include "df/job.h"
 #include "df/job_list_link.h"
+#include "df/job_type.h"
 #include "df/unit.h"
 #include "df/world.h"
 #include "DfmcpJobControlV1_9.pb.h"
@@ -57,16 +58,59 @@ void authorize(const wire::Request *in, wire::Reply *out) {
 // flags=0 registration gives DFHack-owned CoreSuspender serialization. There is
 // no onUpdate work, detached task or pointer retained outside that suspension.
 df::job *find_job(std::uint32_t id) {
-    js::require(df::global::world && id <= INT32_MAX, 5);
+    js::require(df::global::world && df::global::job_next_id
+        && *df::global::job_next_id >= 0 && id <= INT32_MAX, 5);
     std::set<std::int32_t> seen;
     df::job *selected = nullptr;
-    for (auto *link = df::global::world->jobs.list.next; link; link = link->next) {
-        js::require(seen.size() < 65536 && link->item && link->item->id >= 0, 5);
+    auto *previous = &df::global::world->jobs.list;
+    for (auto *link = previous->next; link; previous = link, link = link->next) {
+        js::require(seen.size() < 65536 && link->prev == previous && link->item
+            && link->item->id >= 0 && link->item->id < *df::global::job_next_id, 5);
         auto *job = link->item;
-        js::require(seen.insert(job->id).second, 5);
+        js::require(job->list_link == link && seen.insert(job->id).second, 5);
         if (static_cast<std::uint32_t>(job->id) == id) selected = job;
     }
     return selected;
+}
+
+// DFHack 53.16 has no public Job::isSupportedJob API. This closed policy uses
+// the actual job/holder fields and enum members from that SDK. The existing
+// supported bit represents the complete conjunction; no new wire field or
+// caller-provided eligibility flag is introduced.
+bool supported_job(df::job *job, df::building *holder) {
+    if (!holder || !job->reaction_name.empty() || !job->specific_refs.empty()
+        || !job->items.empty() || job->job_items.elements.empty()
+        || job->posting_index != -1 || job->flags.bits.working
+        || job->flags.bits.fetching || job->flags.bits.bringing || job->flags.bits.special)
+        return false;
+    const auto kind = holder->getType();
+    switch (job->job_type) {
+        case df::job_type::ConstructBed:
+        case df::job_type::ConstructDoor:
+        case df::job_type::ConstructThrone:
+        case df::job_type::ConstructTable:
+        case df::job_type::PrepareMeal:
+            if (kind != df::building_type::Workshop) return false;
+            break;
+        case df::job_type::SmeltOre:
+        case df::job_type::MeltMetalObject:
+        case df::job_type::MakeCharcoal:
+            if (kind != df::building_type::Furnace) return false;
+            break;
+        default:
+            return false;
+    }
+    // getHolder resolves the general reference. Require its corresponding
+    // bounded queue back-reference too; a forged/missing holder relation is
+    // not enough to authorize changing the selected job.
+    js::require(holder->jobs.size() <= 10, 5);
+    std::set<std::int32_t> ids;
+    unsigned selected = 0;
+    for (const auto *queued : holder->jobs) {
+        js::require(queued && queued->id >= 0 && ids.insert(queued->id).second, 5);
+        if (queued == job) ++selected;
+    }
+    return selected == 1;
 }
 
 js::Observation read_job(std::uint32_t id) {
@@ -77,8 +121,13 @@ js::Observation read_job(std::uint32_t id) {
     js::require(df::global::job_next_id && *df::global::job_next_id >= 0 && id <= INT32_MAX, 5);
     auto *job = find_job(id); js::require(job != nullptr, 4);
     js::require(job->id >= 0 && static_cast<std::uint32_t>(job->id) == id
-        && job->general_refs.size() <= 4096 && job->items.size() <= 65536 && job->job_items.elements.size() <= 4096, 5);
+        && job->general_refs.size() <= 4096 && job->specific_refs.size() <= 4096
+        && job->items.size() <= 65536 && job->job_items.elements.size() <= 4096
+        && job->posting_index >= -1, 5);
     for (const auto *ref : job->general_refs) js::require(ref != nullptr, 5);
+    for (const auto *ref : job->specific_refs) js::require(ref != nullptr, 5);
+    for (const auto *item : job->items) js::require(item != nullptr, 5);
+    for (const auto *filter : job->job_items.elements) js::require(filter != nullptr, 5);
     auto *worker = Job::getWorker(job); auto *holder = Job::getHolder(job);
     js::require((!worker || worker->id >= 0) && (!holder || holder->id >= 0), 5);
     js::Observation out; out.job = id; out.next_job = *df::global::job_next_id; out.site = static_cast<std::uint32_t>(site);
@@ -88,9 +137,7 @@ js::Observation read_job(std::uint32_t id) {
     out.paused = World::ReadPauseState(); out.worker = worker ? worker->id : -1; out.holder = holder ? holder->id : -1;
     out.x = job->pos.x; out.y = job->pos.y; out.z = job->pos.z; out.timer = job->completion_timer;
     out.attachments = static_cast<std::uint32_t>(job->items.size()); out.filters = static_cast<std::uint32_t>(job->job_items.elements.size());
-    // DFHack 53.16 exposes no equivalent supported-job predicate.  A false
-    // bit conservatively prevents preparation; it is not an eligibility proof.
-    out.supported = false;
+    out.supported = supported_job(job, holder);
     if (holder) {
         const auto kind = holder->getType(); out.holder_type = static_cast<std::int32_t>(kind);
         const auto stage = holder->getBuildStage();
@@ -102,10 +149,15 @@ js::Observation read_job(std::uint32_t id) {
     return out;
 }
 void set_suspended(std::uint32_t id, bool desired) {
-    // No supported-job predicate has been established for this SDK.  Even an
-    // unexpected direct call must not dispatch a setter without that evidence.
-    (void)id; (void)desired;
-    throw js::Failure(4);
+    // Engine::commit has already reproduced the exact prepared witness and
+    // retained Unknown before this callback. Recheck the closed eligibility
+    // even at this sole setter edge. The RPC still owns CoreSuspender, so no
+    // pointer escapes and the game cannot advance between these checks/write.
+    const auto current = engine.inspect(id, read_job);
+    js::require(current.eligible(), 4);
+    auto *job = find_job(id);
+    js::require(job != nullptr, 4);
+    job->flags.bits.suspend = desired;
 }
 unsigned shape(const wire::Request *in) {
     return (in->has_idempotency_key() ? 1 : 0) | (in->has_native_job_id() ? 2 : 0)
