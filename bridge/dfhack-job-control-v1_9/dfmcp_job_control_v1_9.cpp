@@ -14,7 +14,10 @@
 #include "df/building.h"
 #include "df/building_type.h"
 #include "df/global_objects.h"
+#include "df/general_ref.h"
+#include "df/general_ref_type.h"
 #include "df/job.h"
+#include "df/job_type.h"
 #include "df/job_list_link.h"
 #include "df/unit.h"
 #include "df/world.h"
@@ -69,6 +72,41 @@ df::job *find_job(std::uint32_t id) {
     return selected;
 }
 
+// Closed development policy, using actual 53.16 SDK fields rather than a
+// nonexistent DFHack supported-job API. These four ordinary furniture jobs
+// may be toggled only while idle at their exact owning workshop. Custom
+// reactions, special/active jobs and malformed holder queues remain read-only.
+bool supported_job(const df::job &job, df::building *holder) {
+    if (!holder || holder->getType() != df::building_type::Workshop
+        || !job.reaction_name.empty() || !job.specific_refs.empty()
+        || job.flags.bits.working || job.flags.bits.fetching || job.flags.bits.special
+        || job.flags.bits.bringing || job.flags.bits.item_lost) return false;
+    // DFHack's getWorker/getHolder return only the first matching reference.
+    // A dangling first worker must not conceal a later assigned worker. This
+    // first policy accepts exactly one reference: the resolvable exact holder.
+    if (job.general_refs.size() != 1) return false;
+    auto *reference = job.general_refs.front();
+    if (!reference || reference->getType() != df::general_ref_type::BUILDING_HOLDER
+        || reference->getID() != holder->id || reference->getBuilding() != holder) return false;
+    switch (job.job_type) {
+    case df::job_type::ConstructBed:
+    case df::job_type::ConstructDoor:
+    case df::job_type::ConstructThrone:
+    case df::job_type::ConstructTable: break;
+    default: return false;
+    }
+    // Job::assignToWorkshop documents at most ten jobs. Validate the complete
+    // bounded queue: an early match cannot hide nulls or duplicate identities.
+    if (holder->jobs.empty() || holder->jobs.size() > 10) return false;
+    bool present = false;
+    std::set<std::int32_t> ids;
+    for (const auto *candidate : holder->jobs) {
+        if (!candidate || candidate->id < 0 || !ids.insert(candidate->id).second) return false;
+        if (candidate == &job) present = true;
+    }
+    return present;
+}
+
 js::Observation read_job(std::uint32_t id) {
     js::require(Core::getInstance().isWorldLoaded() && Core::getInstance().isMapLoaded() && World::isFortressMode(), 4);
     const auto year = static_cast<std::int64_t>(World::ReadCurrentYear());
@@ -88,9 +126,7 @@ js::Observation read_job(std::uint32_t id) {
     out.paused = World::ReadPauseState(); out.worker = worker ? worker->id : -1; out.holder = holder ? holder->id : -1;
     out.x = job->pos.x; out.y = job->pos.y; out.z = job->pos.z; out.timer = job->completion_timer;
     out.attachments = static_cast<std::uint32_t>(job->items.size()); out.filters = static_cast<std::uint32_t>(job->job_items.elements.size());
-    // DFHack 53.16 exposes no equivalent supported-job predicate.  A false
-    // bit conservatively prevents preparation; it is not an eligibility proof.
-    out.supported = false;
+    out.supported = supported_job(*job, holder);
     if (holder) {
         const auto kind = holder->getType(); out.holder_type = static_cast<std::int32_t>(kind);
         const auto stage = holder->getBuildStage();
@@ -102,10 +138,13 @@ js::Observation read_job(std::uint32_t id) {
     return out;
 }
 void set_suspended(std::uint32_t id, bool desired) {
-    // No supported-job predicate has been established for this SDK.  Even an
-    // unexpected direct call must not dispatch a setter without that evidence.
-    (void)id; (void)desired;
-    throw js::Failure(4);
+    // Engine commit already checked the exact witness under CoreSuspender.
+    // Repeat eligibility even for a direct internal call; retain no pointer
+    // beyond this one suspended callback and change only the requested bit.
+    js::require(read_job(id).eligible(), 4);
+    auto *job = find_job(id);
+    js::require(job != nullptr, 4);
+    job->flags.bits.suspend = desired;
 }
 unsigned shape(const wire::Request *in) {
     return (in->has_idempotency_key() ? 1 : 0) | (in->has_native_job_id() ? 2 : 0)

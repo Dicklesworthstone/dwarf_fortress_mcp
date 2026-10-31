@@ -20,7 +20,7 @@ MOCK = r'''
 #include <vector>
 #define DFHACK_PLUGIN(name)
 #define DFhackCExport
-#define ENUM_KEY_STR(kind,value) std::string("BrewDrink")
+#define ENUM_KEY_STR(kind,value) mock_job_key(value)
 struct color_ostream {};
 enum command_result { CR_OK, CR_FAILURE };
 enum state_change_event { SC_MAP_LOADED, SC_MAP_UNLOADED, SC_WORLD_LOADED, SC_WORLD_UNLOADED, SC_PAUSED, SC_UNPAUSED, SC_OTHER };
@@ -31,20 +31,48 @@ struct TrackedBool {
 };
 namespace df {
 enum class building_type { Workshop=1, Furnace=2, Other=3 };
+enum class job_type : std::int16_t {
+ ConstructBuilding=66, ConstructDoor=67, ConstructBed=69, ConstructThrone=70, ConstructTable=72
+};
+struct job;
 struct building {
  int id=20,stage=3,maximum=3;building_type kind=building_type::Workshop;
+ std::vector<job*> jobs;
  building_type getType() const {return kind;} int getBuildStage() const {return stage;} int getMaxBuildStage() const {return maximum;}
 };
 struct unit {int id=42;};
-struct job {
- int id=3,job_type=5,completion_timer=-1;
- struct {int x=1,y=2,z=5;} pos;
- struct {struct {TrackedBool suspend;bool repeat=true;} bits;} flags;
- struct {std::vector<void*> elements;} job_items;
- std::vector<void*> general_refs,items;std::string reaction_name;
- building *holder=nullptr;unit *worker=nullptr;bool supported=true;
+enum class general_ref_type { UNIT_WORKER=19, BUILDING_HOLDER=36, OTHER=0 };
+struct general_ref {
+ general_ref_type type=general_ref_type::BUILDING_HOLDER;int id=20;
+ df::building *building=nullptr;df::unit *unit=nullptr;
+ general_ref_type getType(){return type;}int getID(){return id;}
+ df::building *getBuilding(){return building&&building->id==id?building:nullptr;}
+ df::unit *getUnit(){return unit&&unit->id==id?unit:nullptr;}
 };
-namespace global {inline int counter=10;inline int *job_next_id=&counter;}
+struct job {
+ int id=3,completion_timer=-1;df::job_type job_type=df::job_type::ConstructBed;
+ struct {int x=1,y=2,z=5;} pos;
+ struct {struct {TrackedBool suspend;bool repeat=true,working=false,fetching=false,
+  special=false,bringing=false,item_lost=false;} bits;} flags;
+ struct {std::vector<void*> elements;} job_items;
+ std::vector<general_ref*> general_refs;std::vector<void*> items,specific_refs;std::string reaction_name;
+};
+struct job_list_link { job *item=nullptr; job_list_link *next=nullptr; };
+struct world { struct { job_list_link list; } jobs; };
+namespace global {
+ inline int counter=10;inline int *job_next_id=&counter;
+ inline df::world fixture_world;inline job_list_link selected;
+ inline df::world *world=&fixture_world;
+}
+}
+inline std::string mock_job_key(df::job_type type) {
+ switch(type) {
+ case df::job_type::ConstructBed:return "ConstructBed";
+ case df::job_type::ConstructDoor:return "ConstructDoor";
+ case df::job_type::ConstructThrone:return "ConstructThrone";
+ case df::job_type::ConstructTable:return "ConstructTable";
+ default:return "ConstructBuilding";
+ }
 }
 namespace DFHack {
 struct PluginCommand {};
@@ -62,10 +90,21 @@ namespace World {
  inline bool ReadPauseState(){return paused;}inline bool isFortressMode(){return fortress;}
 }
 namespace Job {
- inline df::job *current=nullptr;inline bool fail_read=false,fail_after_write=false;
- inline df::job *getJob(int id){if(fail_read||(fail_after_write&&TrackedBool::writes))throw 42;return current&&current->id==id?current:nullptr;}
- inline df::unit *getWorker(df::job*j){return j->worker;}inline df::building *getHolder(df::job*j){return j->holder;}
- inline bool isSupportedJob(df::job*j){return j->supported;}
+ inline df::job *&current=df::global::selected.item;
+ inline bool fail_read=false,fail_after_write=false;
+ inline df::unit *getWorker(df::job*j){
+  if(fail_read||(fail_after_write&&TrackedBool::writes))throw 42;
+  for(auto*r:j->general_refs){
+   if(r&&r->getType()==df::general_ref_type::UNIT_WORKER)return r->getUnit();
+  }
+  return nullptr;
+ }
+ inline df::building *getHolder(df::job*j){
+  for(auto*r:j->general_refs){
+   if(r&&r->getType()==df::general_ref_type::BUILDING_HOLDER)return r->getBuilding();
+  }
+  return nullptr;
+ }
 }
 }
 namespace dfmcp::job_control::v1_9 {
@@ -106,11 +145,17 @@ unsigned checks=0,groups=0;std::string group;
 void check(bool v,const char *message){++checks;if(!v)throw std::runtime_error(message);}
 std::string hex(const std::string&s){const char*h="0123456789abcdef";std::string out;for(unsigned char c:s){out+=h[c>>4];out+=h[c&15];}return out;}
 struct Fixture {
- df::building holder;df::job job;df::unit unit;wire::Request r;wire::Reply p;color_ostream out;
+ df::building holder;df::job job;df::unit unit;df::general_ref holder_ref,worker_ref;
+ wire::Request r;wire::Reply p;color_ostream out;
  Fixture(){engine=js::Engine(7);TrackedBool::writes=0;TrackedBool::fail=false;Job::fail_read=false;Job::fail_after_write=false;
   Core::getInstance().loaded=true;Core::getInstance().map=true;Core::getInstance().vinfo=std::make_shared<VersionInfo>();VersionInfo::failure=0;Version::null_version=false;
   World::year=105;World::tick=3;World::paused=true;World::site=1;World::fortress=true;World::folder="region1";
-  df::global::counter=10;df::global::job_next_id=&df::global::counter;Job::current=&job;job.holder=&holder;}
+  df::global::counter=10;df::global::job_next_id=&df::global::counter;
+  df::global::world=&df::global::fixture_world;df::global::selected.next=nullptr;
+  df::global::world->jobs.list.next=&df::global::selected;
+  Job::current=&job;holder.jobs={&job};holder_ref.building=&holder;
+  worker_ref.type=df::general_ref_type::UNIT_WORKER;worker_ref.unit=&unit;worker_ref.id=unit.id;
+  job.general_refs={&holder_ref};}
  void observe(){r.mask=2;ReadJob(out,&r,&p);check(p.accepted&&!p.observation.empty(),"read job");}
  void prepare(const std::string &key="job-001",bool desired=true){observe();r.witness=dfmcp_snapshot::sha256(p.observation);
   r.key=key;r.desired=desired;r.plan=js::plan_digest(r.id,desired,r.witness);r.mask=31;
@@ -138,16 +183,16 @@ int main(){
    f.prepare("resume",false);check(f.commit().state==js::State::Applied&&!f.job.flags.bits.suspend,"resume failed");
    check(TrackedBool::writes==2&&World::paused,"resume unpaused game");});
   run("eligibility",[]{for(int c=0;c<8;++c){Fixture f;
-   switch(c){case 0:World::paused=false;break;case 1:f.job.worker=&f.unit;break;case 2:f.holder.stage=2;break;
-    case 3:f.holder.kind=df::building_type::Other;break;case 4:f.job.holder=nullptr;break;case 5:f.job.supported=false;break;
+   switch(c){case 0:World::paused=false;break;case 1:f.job.general_refs.push_back(&f.worker_ref);break;case 2:f.holder.stage=2;break;
+    case 3:f.holder.kind=df::building_type::Other;break;case 4:f.job.general_refs.clear();break;case 5:f.job.job_type=df::job_type::ConstructBuilding;break;
     case 6:f.job.completion_timer=0;break;default:f.job.completion_timer=20;}
    f.observe();f.r.witness=dfmcp_snapshot::sha256(f.p.observation);f.r.key="blocked";f.r.plan=js::plan_digest(f.r.id,true,f.r.witness);f.r.mask=31;
    PrepareSuspension(f.out,&f.r,&f.p);check(!f.p.accepted&&f.p.code==4,"ineligible prepare accepted");check(engine.size()==0&&TrackedBool::writes==0,"ineligible side effect");}});
   run("changed-witness",[]{for(int c=0;c<16;++c){Fixture f;f.prepare();
    switch(c){case 0:World::tick++;break;case 1:World::paused=false;break;case 2:df::global::counter++;break;
-    case 3:f.job.job_type++;break;case 4:f.job.pos.x++;break;case 5:f.job.flags.bits.repeat=false;break;
+    case 3:f.job.job_type=df::job_type::ConstructDoor;break;case 4:f.job.pos.x++;break;case 5:f.job.flags.bits.repeat=false;break;
     case 6:f.job.flags.bits.suspend.value=true;break;case 7:f.job.reaction_name="different";break;case 8:f.holder.id++;break;
-    case 9:f.job.worker=&f.unit;break;case 10:World::folder="region2";break;case 11:World::site++;break;
+    case 9:f.job.general_refs.push_back(&f.worker_ref);break;case 10:World::folder="region2";break;case 11:World::site++;break;
     case 12:f.job.items.push_back(&f.unit);break;case 13:f.job.job_items.elements.push_back(&f.unit);break;
     case 14:Job::current=nullptr;break;default:Job::fail_read=true;}
    f.refused();Job::fail_read=false;const auto first=engine.query(f.r.key,f.r.plan)->encode();f.r.mask=49;
@@ -159,10 +204,13 @@ int main(){
    noop.r=old;check(noop.commit().state==js::State::Applied,"no-op commit");noop.r=later;
    check(noop.commit().state==js::State::Refused&&TrackedBool::writes==1,"no-op did not fence");});
   run("unknown-outcomes",[]{for(int c=0;c<2;++c){Fixture f;f.prepare();if(c==0)TrackedBool::fail=true;else Job::fail_after_write=true;
-   check(f.commit().state==js::State::Unknown,"ambiguous effect claimed terminal");check(TrackedBool::writes==1,"ambiguous setter count");
+   // A throwing setter with complete exact immediate readback is proved Applied;
+   // only failed readback leaves Unknown. Neither outcome permits redispatch.
+   const auto expected=c==0?js::State::Applied:js::State::Unknown;
+   check(f.commit().state==expected,"immediate readback outcome");check(TrackedBool::writes==1,"ambiguous setter count");
    const auto old=engine.query(f.r.key,f.r.plan)->encode();TrackedBool::fail=false;Job::fail_after_write=false;
    f.commit();check(TrackedBool::writes==1&&f.p.record==old,"unknown redispatched");
-   check(engine.query(f.r.key,f.r.plan)->receipt==std::string(32,'\0'),"unknown receipt invented");}
+   check((engine.query(f.r.key,f.r.plan)->receipt==std::string(32,'\0'))==(c==1),"receipt certainty differs from readback");}
    Fixture lost;lost.prepare();wire::Reply::fail_success=true;lost.r.mask=49;CommitSuspension(lost.out,&lost.r,&lost.p);
    check(!lost.p.accepted&&TrackedBool::writes==1,"lost response effect");wire::Reply::fail_success=false;
    check(lost.commit().state==js::State::Applied&&TrackedBool::writes==1,"lost acknowledgement redispatched");});
@@ -271,7 +319,8 @@ def main() -> None:
         (path / "mock.hpp").write_text(MOCK)
         names = ["Core.h", "Export.h", "MiscUtils.h", "PluginManager.h", "RemoteServer.h", "VersionInfo.h",
                  "modules/Job.h", "modules/World.h", "df/building.h", "df/building_type.h", "df/global_objects.h",
-                 "df/job.h", "df/unit.h", "DfmcpJobControlV1_9.pb.h"]
+                 "df/job.h", "df/job_type.h", "df/general_ref.h", "df/general_ref_type.h",
+                 "df/job_list_link.h", "df/world.h", "df/unit.h", "DfmcpJobControlV1_9.pb.h"]
         for name in names:
             header = path / name
             header.parent.mkdir(parents=True, exist_ok=True)
