@@ -153,3 +153,38 @@ format remain unchanged. Focused tests execute actual Rust coordinators,
 archive/history codecs and private-file custody with injected game/source
 responses. This is component evidence, not a DFHack SDK build, live fortress,
 complete FastMCP executable or production admission.
+
+
+## Later bounded development witness
+
+The R20 live9 trial used source `3f89445824ff146f617807ae9958cbba16a2f4d6`,
+semantic executable `fc1585f3ccfa04a1747c1e62f170546bb88a5e9cbcfdc7b6dc2e6629ccfa0f81`,
+and freshly built native run plugin
+`6ca8e54fde444d30605116ed8d4d501a0284f5cc8589008fc2c5611223298066`.
+Its native build checked 85 source, 3,639 SDK and three extra inputs before and
+after compilation. This is a development build, not R1 or tuple admission.
+
+Terra through NTM negotiated ten ticks and declared an original MINE labor goal
+with cadence five, one stable sample and deadline 12112900. One reviewed
+assignment left the same-tick goal active with zero eligible samples. A distinct
+clock review bound the original labor seal to one ten-tick/20,000-ms run. One
+confirmed unpause stopped at tick 12112810 for `tick_limit`, zero observed
+overshoot. A fresh paused sample then proved that single-sample original goal
+and semantic completion. Independent reads confirmed raw pause and inactive
+clock ownership. A clock receipt itself still grants no current goal proof.
+
+Parent independently replayed twelve main MCP exchanges, the eighteen-event
+goal-history hash chain and six canonical native captures; the last raw capture
+hash equals the published goal source digest. Its policy leaves whole-domain
+coverage unknown and grants only the selected positive identity/labor facts.
+No intermediate paused sample or two-sample/continuous stability is inferred.
+
+The trial preserves the earlier wrong-version refusal and unused operator
+configuration, correction-message ambiguity, and four screenshot copies before
+subsequent host scans. Later package export was gated on exact scanned bytes,
+with all nine private values absent. These are procedural limitations, so this
+is bounded control evidence rather than a clean live qualification campaign.
+The original save and backup each retained all 30 files, and all owned clients,
+game and NTM processes were stopped. Export manifest SHA-256:
+`6479141c9b6121bdbc98452e0234dfbee72c58f76caf433ceb46b68bdb5a35c1`,
+under `target/reality-check-20261030/terra-live9-export`.

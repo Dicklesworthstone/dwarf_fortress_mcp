@@ -41,8 +41,9 @@ inspection boundary more deterministic and prevent a caller-supplied `GIT_DIR` o
 override from redirecting evidence.
 
 This establishes exact tracked-source identity. It does not by itself make the build environment
-hermetic: ignored build outputs and controlled-host toolchain configuration remain explicit
-qualification assumptions until isolated build-root custody is implemented.
+hermetic: ordinary source gates can reuse ignored build outputs, and controlled-host toolchain
+configuration remains an explicit qualification assumption. The separate server qualifier below
+uses fresh private build output to prevent selection of a stale executable.
 
 ## Two-phase source snapshot
 
@@ -169,6 +170,18 @@ The server qualifier performs that complete replay before the build, again after
 executable checks, again while issuing the receipt, and through the independent verifier after
 publication. Source changed during qualification or server build yields no qualified server
 receipt.
+
+The server qualifier creates a fresh exact-mode `0700` `build-target` directory inside the
+create-only run directory. Its locked, offline Cargo command explicitly selects that directory,
+overriding an ambient `CARGO_TARGET_DIR`. Only its newly produced
+`build-target/release/dwarf-fortress-mcp` may run checks or receive a receipt. A configured or
+environment-selected target triple that routes output elsewhere is refused before executable
+checks; an older workspace `target/release` executable is never a fallback.
+
+The receipt's `binary.relative_path` is relative to this server qualification run directory.
+Independent verification still opens the explicitly supplied executable and checks its inode,
+metadata and hash. The fresh target directory entails a separate build; it does not make the
+host toolchain hermetic or qualify native DFHack, compatibility, or runtime authority.
 
 The server receipt additionally binds:
 

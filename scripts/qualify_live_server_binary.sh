@@ -84,8 +84,10 @@ OUT_DIR="$OUT_PARENT/$RUN_NAME"
   die "server qualification run directory already exists: $OUT_DIR"
 mkdir -m 0700 "$OUT_DIR"
 mkdir -m 0700 "$OUT_DIR/logs"
+mkdir -m 0700 "$OUT_DIR/build-target"
 
-BINARY="$ROOT/target/release/dwarf-fortress-mcp"
+BUILD_TARGET="$OUT_DIR/build-target"
+BINARY="$BUILD_TARGET/release/dwarf-fortress-mcp"
 CHECKS_TSV="$OUT_DIR/checks.tsv"
 RECEIPT="$OUT_DIR/live-server-binary-receipt.json"
 CHECKSUMS="$OUT_DIR/SHA256SUMS"
@@ -129,7 +131,7 @@ validate_local_receipt
 ok "Prerequisite local qualification receipt"
 
 info "Building the exact release server binary"
-cargo build --locked --release --bin dwarf-fortress-mcp \
+cargo build --locked --offline --release --target-dir "$BUILD_TARGET" --bin dwarf-fortress-mcp \
   >"$OUT_DIR/logs/build.stdout" 2>"$OUT_DIR/logs/build.stderr"
 [[ -f "$BINARY" ]] || die "release build did not produce $BINARY"
 
@@ -235,7 +237,7 @@ unsigned={
     'binary':{
         'name':contract['binary']['name'],
         'profile':'release',
-        'relative_path':'target/release/dwarf-fortress-mcp',
+        'relative_path':'build-target/release/dwarf-fortress-mcp',
         'bytes':metadata.st_size,
         'sha256':binary_sha,
     },
