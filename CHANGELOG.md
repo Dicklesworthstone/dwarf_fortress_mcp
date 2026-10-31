@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-10-31 — Prove bounded real output and retain the completion gap
+
+- Expose bounded source/anchor-bound furniture candidates from the existing
+  operations sample, independently of the original order's receipt link.
+  Preserve original goal policy and history; withdraw stale or unauthorized
+  rows and leave material classification and production attribution unknown.
+  Focused runtime and production packet-renderer regressions await Rust execution.
+- Through actual public MCP, insert one original bed order and execute two
+  reviewed bounded runs on an explicitly operator-prepared fortress. Independent
+  replay verifies the insertion, clock receipts, six complete observations and a
+  new cherry-wood bed. Preserve the original goal as Unknown after the game removes
+  its order, with semantic completion unproved and an unrelated job remaining.
+- Document the separate native-plugin opt-ins after a retained pre-effect launch
+  failure. Keep broader workshop/production Beads open; operator setup and source
+  qualification do not establish autonomous fortress competence or admission.
+
 ## 2026-10-31 — Restore the positive native job-control path
 
 - Replace job-control's unconditional unsupported/refusing adapter with a closed

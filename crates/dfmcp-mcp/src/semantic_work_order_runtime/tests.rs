@@ -576,6 +576,11 @@ struct Resources {
     policy_denied: Rc<Cell<bool>>,
     remaining: Rc<Cell<i32>>,
     jobs: Rc<Cell<bool>>,
+    item_count: Rc<Cell<usize>>,
+    item_denied: Rc<Cell<bool>>,
+    item_authorizations: Rc<Cell<usize>>,
+    item_grant_limit: Rc<Cell<usize>>,
+    changed_operations_generation: Rc<Cell<bool>>,
     sequence: Rc<Cell<u64>>,
     recovery: Option<Recovery>,
     initialize: bool,
@@ -618,6 +623,11 @@ impl Resources {
             policy_denied: Rc::new(Cell::new(false)),
             remaining: Rc::new(Cell::new(5)),
             jobs: Rc::new(Cell::new(false)),
+            item_count: Rc::new(Cell::new(0)),
+            item_denied: Rc::new(Cell::new(false)),
+            item_authorizations: Rc::new(Cell::new(0)),
+            item_grant_limit: Rc::new(Cell::new(usize::MAX)),
+            changed_operations_generation: Rc::new(Cell::new(false)),
             sequence: Rc::new(Cell::new(1)),
             recovery: None,
             initialize: true,
@@ -668,6 +678,15 @@ impl Shell for Resources {
     type Operations = OperationsFixture;
     fn acceptance(&self) -> &policy::SourceAcceptance {
         &self.pins
+    }
+    fn authorize_item_presentation(&self, _: &OperationContext) -> Result<()> {
+        let calls = self.item_authorizations.get();
+        self.item_authorizations.set(calls + 1);
+        if self.item_denied.get() || calls >= self.item_grant_limit.get() {
+            Err(rejected())
+        } else {
+            Ok(())
+        }
     }
     fn recovery(&self) -> Option<Recovery> {
         self.recovery
@@ -798,8 +817,20 @@ impl Shell for Resources {
         ))
     }
     fn operations(&self, _: &OperationContext) -> Result<OperationsFixture> {
+        let count = self.item_count.get();
+        let mut raw = operations(&self.native.borrow().queue, count > 0, self.jobs.get());
+        if self.changed_operations_generation.get() {
+            raw.jobs.bridge_generation += 1;
+        }
+        if let Some(first) = raw.items.first().cloned() {
+            for n in 1..count {
+                let mut item = first.clone();
+                item.native_id = 2 + n as u32;
+                raw.items.push(item);
+            }
+        }
         Ok(OperationsFixture {
-            raw: operations(&self.native.borrow().queue, false, self.jobs.get()),
+            raw,
             closed: Rc::new(Cell::new(0)),
         })
     }
@@ -885,6 +916,8 @@ fn actual_runtime_prepares_once_inserts_once_and_proves_original_goal_after_two_
     let c = runtime.context(false)?;
     let first = runtime.wait(&c)?;
     assert!(!first.goal.as_ref().expect("sample").current_goal_proven());
+    assert_eq!(first.to_json()["item_observations"]["coverage"], "complete");
+    assert_eq!(first.to_json()["item_observations"]["returned"], 0);
     resources.advance(10, 0)?;
     let c = runtime.context(false)?;
     let done = runtime.wait(&c)?;
@@ -901,6 +934,152 @@ fn actual_runtime_prepares_once_inserts_once_and_proves_original_goal_after_two_
         true
     );
     assert_eq!(resources.native.borrow().commits, 1);
+    Ok(())
+}
+
+#[test]
+fn item_presentation_bounds_matching_rows_without_claiming_material_or_causation() -> Result<()> {
+    let resources = Resources::new()?;
+    let mut runtime = start(&resources)?;
+    let prepared = prepare(&mut runtime, "wooden_bed")?;
+    let c = runtime.context(false)?;
+    runtime.commit(prepared.review.as_ref().expect("review").seal(), true, &c)?;
+    resources.item_count.set(20);
+    resources.advance(10, 4)?;
+    let c = runtime.context(false)?;
+    let value = runtime.wait(&c)?.to_json();
+    let items = &value["item_observations"];
+    assert_eq!(items["total_items"], 20);
+    assert_eq!(items["matching_items"], 20);
+    assert_eq!(items["returned"], 16);
+    assert_eq!(items["omitted"], 4);
+    assert_eq!(items["items"].as_array().expect("rows").len(), 16);
+    assert_eq!(items["material_classification"], "unknown");
+    assert_eq!(items["production_attribution"], "unknown");
+    resources.item_denied.set(true);
+    let c = runtime.context(false)?;
+    assert_eq!(
+        runtime.inspect(&c)?.to_json()["item_observations"]["coverage"],
+        "unknown"
+    );
+    resources.item_denied.set(false);
+    resources.item_authorizations.set(0);
+    resources.item_grant_limit.set(1); // first policy check passes, final one denies
+    resources.advance(10, 3)?;
+    let c = runtime.context(false)?;
+    let denied_view = runtime.wait(&c)?.to_json();
+    assert_eq!(denied_view["item_observations"]["coverage"], "unknown");
+    assert_eq!(denied_view["item_observations"]["returned"], 0);
+    assert_eq!(denied_view["current_goal_available"], true);
+    assert_eq!(denied_view["current_goal"]["current_truth"], "false");
+    Ok(())
+}
+
+#[test]
+fn missing_order_publishes_only_authorized_bounded_items_and_clears_on_failure_and_recovery()
+-> Result<()> {
+    let resources = Resources::new()?;
+    let mut runtime = start(&resources)?;
+    let prepared = prepare(&mut runtime, "wooden_bed")?;
+    let c = runtime.context(false)?;
+    runtime.commit(prepared.review.as_ref().expect("review").seal(), true, &c)?;
+    resources.advance(10, 1)?;
+    resources.item_count.set(1);
+    // Simulate the native queue removing the just-created order, retaining the
+    // monotonic next ID and all unrelated orders.
+    let queue = resources.native.borrow().queue.clone();
+    let mut bytes = queue.canonical_bytes().to_vec();
+    let count_offset = 43 + queue.world_folder().len();
+    let count = queue.order_ids().len();
+    assert!(count > 0);
+    bytes[count_offset..count_offset + 4].copy_from_slice(&((count - 1) as u32).to_be_bytes());
+    bytes.truncate(bytes.len() - 4);
+    resources.native.borrow_mut().queue = WorkOrderObservation::decode(&bytes)?;
+    let c = runtime.context(false)?;
+    let sample = runtime.wait(&c)?;
+    let out = sample.to_json();
+    assert_eq!(out["current_goal"]["current_truth"], "unknown");
+    assert_eq!(out["current_goal"]["semantic_completion_proven"], false);
+    assert_eq!(out["item_observations"]["coverage"], "complete");
+    assert_eq!(out["item_observations"]["returned"], 1);
+    assert_eq!(out["item_observations"]["omitted"], 0);
+    assert_eq!(out["item_observations"]["items"][0]["type_key"], "BED");
+    assert_eq!(out["item_observations"]["items"][0]["material_type"], 420);
+    assert_eq!(
+        out["item_observations"]["material_classification"],
+        "unknown"
+    );
+    assert_eq!(
+        out["item_observations"]["production_attribution"],
+        "unknown"
+    );
+    // The actual production packet renderer receives the real injected-runtime
+    // View; this does not exercise NativeRuntime environment or sockets.
+    let packet = crate::live_semantic_work_orders_server::test_packet_for_view(
+        &sample,
+        runtime.session_id(),
+        budget(),
+    );
+    let rendered: Value = serde_json::from_str(&packet).expect("facade packet JSON");
+    assert_eq!(rendered["agent_turn"]["schema"], "dfmcp.agent_turn/1");
+    assert_eq!(
+        rendered["agent_turn"]["anchor"],
+        out["item_observations"]["anchor"]
+    );
+    assert_eq!(
+        rendered["result"]["item_observations"],
+        out["item_observations"]
+    );
+    assert_eq!(
+        rendered["result"]["current_goal"]["current_truth"],
+        "unknown"
+    );
+    assert_eq!(
+        rendered["result"]["current_goal"]["semantic_completion_proven"],
+        false
+    );
+    let handoff = resources.recover(&sample);
+    let mut small = runtime.context(false)?;
+    small.budget.max_bytes = 1;
+    assert!(runtime.wait(&small).is_err());
+    let c = runtime.context(false)?;
+    assert_eq!(
+        runtime.inspect(&c)?.to_json()["item_observations"]["coverage"],
+        "unknown"
+    );
+    drop(runtime);
+    let mut reopened = Runtime::from_shell(handoff, Mode::Offline, SessionId::new(41), budget())?;
+    let c = reopened.context(false)?;
+    assert_eq!(
+        reopened.inspect(&c)?.to_json()["item_observations"]["coverage"],
+        "unknown"
+    );
+    Ok(())
+}
+
+#[test]
+fn changed_item_source_generation_clears_the_previous_presentation() -> Result<()> {
+    let resources = Resources::new()?;
+    let mut runtime = start(&resources)?;
+    let prepared = prepare(&mut runtime, "wooden_bed")?;
+    let c = runtime.context(false)?;
+    runtime.commit(prepared.review.as_ref().expect("review").seal(), true, &c)?;
+    resources.item_count.set(1);
+    resources.advance(10, 4)?;
+    let c = runtime.context(false)?;
+    assert_eq!(
+        runtime.wait(&c)?.to_json()["item_observations"]["coverage"],
+        "complete"
+    );
+    resources.changed_operations_generation.set(true);
+    resources.advance(10, 3)?;
+    let c = runtime.context(false)?;
+    assert!(runtime.wait(&c).is_err());
+    let c = runtime.context(false)?;
+    assert_eq!(
+        runtime.inspect(&c)?.to_json()["item_observations"]["coverage"],
+        "unknown"
+    );
     Ok(())
 }
 #[test]

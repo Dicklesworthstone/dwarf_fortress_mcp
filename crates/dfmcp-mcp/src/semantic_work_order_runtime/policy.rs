@@ -11,6 +11,7 @@ use dfmcp_adapter::{BridgeManifest, LiveObservationCapsule};
 use dfmcp_core::{Capability, FortressId, OperationContext, Result, RiskTier};
 use dfmcp_world::{EntityKind, EvidenceCoverage, EvidencePolicy, EvidenceSource};
 use serde::Deserialize;
+use serde_json::{Value, json};
 
 pub const ACCEPTANCE_KIND: &str = "operator-development-source-acceptance/1";
 
@@ -32,6 +33,71 @@ pub struct SourceAcceptance {
     pub operations_generation: u64,
 }
 impl SourceAcceptance {
+    /// A separately authorized presentation policy. It is deliberately not part
+    /// of the original-goal policy fingerprint or its durable proof history.
+    pub fn items(
+        &self,
+        projection: &WorkOrderGoalProjection,
+        context: &OperationContext,
+    ) -> Result<Value> {
+        self.goal(projection, context)?;
+        let operations = projection.operations();
+        let digest = operations.source_digest()?;
+        let mut policy = EvidencePolicy::at(projection.anchor());
+        policy.paused = true;
+        policy
+            .entity_kinds
+            .insert(EntityKind::Item, EvidenceCoverage::Complete);
+        let available = projection.observed_sources();
+        for field in [
+            "item.id",
+            "item.getType",
+            "item.type_key",
+            "item.getSubtype",
+            "item.getMaterial",
+            "item.getMaterialIndex",
+            "item.getStackSize",
+        ] {
+            let source = EvidenceSource::Observed {
+                field: format!("operations/1.3.{field}"),
+                source_digest: digest,
+            };
+            if !operations.items.is_empty() && !available.contains(&source) {
+                return Err(denied("item presentation source field is unavailable"));
+            }
+            if available.contains(&source) {
+                policy.sources.insert(source);
+            }
+        }
+        projection.evidence(policy)?;
+        let matches: Vec<_> = operations
+            .items
+            .iter()
+            .filter(|item| {
+                matches!(
+                    item.type_key.as_str(),
+                    "BED" | "DOOR" | "TABLE" | "CHAIR" | "THRONE"
+                )
+            })
+            .collect();
+        let entries: Vec<_> = matches.iter().take(16).map(|item| json!({
+            "native_item_id":item.native_id, "item_type":item.item_type, "type_key":item.type_key,
+            "subtype":item.subtype, "material_type":item.material_type,
+            "material_index":item.material_index, "stack_size":item.stack_size
+        })).collect();
+        Ok(
+            json!({"coverage":"complete", "coverage_domain":"operations_item_roster",
+            "freshness":"as_of_anchor", "anchor":super::anchor_json(projection.anchor()),
+            "source_protocol":"operations/1.3", "source_digest":digest.to_hex(),
+            "source_generation":operations.jobs.bridge_generation,
+            "world_folder":operations.jobs.world_folder, "site_id":operations.jobs.site_id,
+            "df_version":operations.jobs.df_version, "dfhack_version":operations.jobs.dfhack_version,
+            "total_items":operations.items.len(), "matching_items":matches.len(),
+            "returned":entries.len(), "omitted":matches.len().saturating_sub(entries.len()),
+            "items":entries, "eligibility":"not_assessed", "material_classification":"unknown",
+            "production_attribution":"unknown"}),
+        )
+    }
     pub fn validate(&self) -> Result<()> {
         if self.kind != ACCEPTANCE_KIND
             || self.world_folder.is_empty()

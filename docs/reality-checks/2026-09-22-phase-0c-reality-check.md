@@ -15,6 +15,32 @@ it is not a claim that every function or every Markdown document was exhaustivel
 The canonical work item is **dfmcp-reality-wiring-proof-4bf**. Historical closed umbrella beads
 are retained as history, with explicit residual work rather than silent completion credit.
 
+### R23 prepared-fortress production result (2026-10-31)
+
+Terra directly used the actual semantic work-order MCP runtime to insert one
+original bed order and execute two separately reviewed runs. Complete independent
+item captures prove new BED 540 with `PLANT:CHERRY:WOOD`; the final native operations
+capture agrees on the ID and numeric material. Parent replay verifies all 71
+export files, 15 modern exchanges, three creation frames, ten clock frames and
+42 goal-history frames containing six complete observations. It recomputes native
+receipts and the final combined source digest from retained bytes.
+
+Run one made zero progress because the manager UI remained open. After operator
+UI closure while paused, run two advanced 1,055 ticks without overshoot and stopped
+when the original order disappeared. No further run was attempted. The unchanged
+original goal remains Unknown; no causal item-to-order certificate or semantic
+completion is claimed. One unrelated fishing job remains. Workshop construction
+and manager appointment were legitimate operator prerequisites and earn no MCP
+construction credit. `.5.1`, broader `.5`, and workshop `.14` remain open.
+
+The evidence manifest is
+`5404b2b9c849f7f7d23c836daa660cb94afbe7a7cabf9fdc4fa671f3db3e2b5d`;
+`target/bang-for-buck-20261031/review-production-b.py` independently replays it.
+Fresh parent cleanup verifies empty owned process groups, closed TCP and all
+thirty hashes in both original save copies. Earlier missing-opt-in and zero-request
+clients remain failed or excluded. This is bounded development execution on the
+qualified R23 source, not R1, campaign or runtime admission.
+
 ### Later R23 positive job-control result (2026-10-31)
 
 The previously refusal-only real-SDK job-control path now supports a closed set
@@ -46,7 +72,7 @@ worker-sensitive execution, not the sole cause or performance-SLO compliance.
 
 The scoped job-control Bead `.8` is closed. Its local independent replay is
 `target/bang-for-buck-20261031/live10-parent-review.json`, with source acceptance
-in `r23-trj-parent-review.json`. The next prepared-fortress one-bed experiment
+in `r23-trj-parent-review.json`. The prepared-fortress one-bed experiment above
 is `.5.1`; it cannot close broader `.5` or workshop `.14` by borrowing operator
 setup. No native R1, competent fortress campaign or runtime admission follows.
 
@@ -333,7 +359,7 @@ Python repairs need their own next exact-source run and actual server receipt.
 | Original Mine designation and goal proof | Semantic Mine runtime → independent canonical/native evidence → dig/1.16 journal → fresh floor samples | Live planning refusals preserved; excavation competence UNPROVEN; .5 |
 | Bounded game clock | Separately reviewed run/1.13 or goal-bound clock owner; wait reconciles rather than starts another run | R7 ten-tick and R20 original-labor-bound ten-tick success; 47/60 wall stop retained; full campaign .5 |
 | Job suspension | Real bounded SDK lookup and closed idle furniture policy; exact holder reference/queue, witness, authority and receipt checks | R23 source-qualified and real public MCP suspend/resume proved; scoped .8 closed; later execution/output unproved |
-| Work orders, labor and furniture | Dedicated semantic owners preserve exact source/plan/native identities; concrete production executor exists | R20 live single-sample labor goal plus clock passes; old Prepared .16, productive output .5 and mixed-family MCP owner pic.4 remain open |
+| Work orders, labor and furniture | Dedicated semantic owners preserve exact source/plan/native identities; concrete production executor exists | R23 observes a new wooden bed after one MCP order; removed original order leaves goal Unknown. Broader .5, old Prepared .16 and mixed-family MCP owner pic.4 remain open |
 | First-fortress workshop prerequisites | Real trial has only a wagon; live build/1.19 supports bed/chair/table placement, with no workshop construction consumer | Missing live prerequisite; .14; order insertion cannot prove production |
 | Shared cancellation and physical work | Laboratory coordinator → owned actions → dependency-order drain → observations/certificates | Runtime selector and obligation retention repaired; R21 source-qualified; scoped .1 closed; no general native cancellation claim |
 | Durable goals and restart | Laboratory private durable stores retain original plan, historical receipts and current proof separately | Real lab integration tests; native save/restore remains outside MCP |

@@ -21,6 +21,24 @@ use std::time::Instant;
 mod presentation;
 use presentation::{RESPONSE_RESERVE, packet};
 
+#[cfg(test)]
+pub(crate) fn test_packet_for_view(view: &View, session: SessionId, budget: WorkBudget) -> String {
+    let mut result = view.to_json();
+    result["session_id"] = json!(session.to_string());
+    result["retained_state_currently_verified"] = json!(true);
+    packet(
+        "fortress.wait",
+        Some(session),
+        Some(view.anchor),
+        Some("control"),
+        Some(RequestId::new(1)),
+        Some(budget),
+        result.clone(),
+        Some(result),
+        false,
+    )
+}
+
 const FAMILY: u128 = 30u128 << 57;
 const SEQUENCE_LIMIT: u64 = 1u64 << 57;
 const OPEN_INSPECTION_BYTES: u64 = 32 * 1024 * 1024;

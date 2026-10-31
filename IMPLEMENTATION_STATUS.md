@@ -85,6 +85,52 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Observe real bed output without inventing original-goal completion (2026-10-31)
+
+An additive source implementation now exposes up to sixteen furniture item
+observations from the existing complete operations sample, with exact anchor,
+source identity and omission counts. Its separate read-only policy preserves
+the original goal-policy fingerprint and old recovery semantics. Unknown
+material classification, usability and production attribution remain explicit.
+Failed reads, unpause, recovery and authorization loss withhold old rows. New
+focused component/packet-renderer tests are source-only pending exact Rust
+execution; this later increment inherits no R23 qualification or live credit.
+
+On exact R23 source `7bba4d01debdc7069e081adb824a4ace4fa199b3`,
+Terra used actual public MCP to insert one original `wooden_bed` order and
+review two finite simulation runs. The first stopped at a modal UI pause with
+zero ticks; after an operator closed the UI while paused, the second advanced
+1,055 ticks and stopped on target absence. Neither overshot. The original
+deadline, review, key and success predicate stayed unchanged; no further runs
+were attempted. Legitimate operator workshop construction and manager setup
+are excluded from agent prerequisite competence.
+
+Parent replay verifies 71 export members, 15 modern MCP exchanges, three
+creation-journal frames, ten clock-journal frames and 42 goal-history frames
+containing six complete bracketed observations. It independently recomputes the
+insertion and clock receipts and final combined source digest. Complete native
+and separate Lua captures agree on new BED item 540, absent from the 536-item
+baseline and present in the final 537-item roster. Independent game material
+inspection identifies `PLANT:CHERRY:WOOD`; operations records its numeric
+material tuple `(420, 163)`. This proves observed new wooden-bed output during
+the bounded experiment, not a native item-to-order causal certificate.
+
+The original order was removed by the game. Its receipt-linked completion
+remains **Unknown**, and semantic completion is false; one unrelated `Fish`
+job remains. Original success criteria were not changed to manufacture a pass.
+Bead `.5.1` therefore remains open for original-goal acceptance, and broader
+production `.5` and workshop `.14` remain open. The earlier missing-native-opt-in
+setup failure and zero-request client are retained without success credit.
+
+Evidence is under `target/bang-for-buck-20261031/production-b-export`:
+manifest SHA-256
+`5404b2b9c849f7f7d23c836daa660cb94afbe7a7cabf9fdc4fa671f3db3e2b5d`.
+The reproducible parent review is `review-production-b.py`; its report is
+`production-b-parent-review.json`. A fresh parent host check finds owned process
+groups empty, TCP closed and all thirty working-save and backup hashes unchanged.
+Build/test used Codex through NTM; gameplay used Terra directly. Native builds
+and development execution grant no compatibility or runtime admission.
+
 ### Restore positive idle furniture-job suspension (2026-10-31)
 
 The real-SDK job-control/1.9 adapter now implements a closed policy for idle

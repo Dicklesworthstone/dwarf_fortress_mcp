@@ -51,6 +51,38 @@ become original-goal proof or replace its canonical sample anchor.
 
 ## Operator configuration
 
+### Configure the game process separately
+
+The native plugins and the Rust MCP process have different closed environments.
+Enabling the semantic MCP runtime does not enable a native plugin in the game.
+The game process must receive the following configuration before it starts:
+
+| Native source | Game-process credential | Additional game-process gate |
+|---|---|---|
+| Citizen 1.0 | `DFMCP_BRIDGE_TOKEN` | None |
+| Work orders 1.10 | `DFMCP_WORK_ORDERS_TOKEN` | `DFMCP_ALLOW_UNADMITTED_WORK_ORDERS_V1_10=1`; prepare/commit also require `DFMCP_WORK_ORDERS_ALLOW_PRODUCTION=1` |
+| Selected-order progress 1.12 | `DFMCP_WORK_ORDER_PROGRESS_TOKEN` | `DFMCP_ALLOW_UNADMITTED_WORK_ORDER_PROGRESS_V1_12=1` |
+| Operations 1.3 | `DFMCP_OPERATIONS_TOKEN` | None |
+| Optional order-run 1.14 | `DFMCP_ORDER_RUN_TOKEN` | `DFMCP_ALLOW_UNADMITTED_ORDER_RUN_V1_14=1` |
+
+The native production gate is checked for both preparation and commit; a passing
+handshake alone does not establish permission to insert an order. Order-run also
+refuses `DFMCP_ADMITTED_BRIDGE_PROTOCOL`. Use separate credentials
+and exact matching plugins. After loading the intended disposable save, verify
+each configured source's authenticated handshake and retain its actual version
+and generation before preparing workshop/order fixtures. A refused handshake is
+not an accepted source pin. Keep the raw reply and transport stderr before
+decoding or asserting success, so a setup failure retains its diagnosis.
+
+These game-process names must not leak into the Rust server environment below:
+the semantic runtime rejects unrelated `DFMCP_*` variables. Its production and
+clock gates independently authorize the corresponding MCP operations. Neither
+set of gates creates compatibility admission. This separation addresses an
+actual pre-effect trial failure where a valid semantic-runtime configuration
+was paired with a game process missing the native work-order opt-in.
+
+### Configure the MCP process
+
 Build and run the dedicated executable:
 
 ```sh
@@ -397,10 +429,31 @@ falls back to bounded recovery identifiers and explicit uncertainty.
 
 Source policy is fixed in code: initial canonical pause/citizen identity,
 receipt-linked selected-order counters/status and complete global job count
-needed for physical quiescence. Operator JSON cannot add evidence fields or
-capabilities. All native source pins are rechecked at acquisition and publication
-boundaries. Prepared-plan, association, creation and durable-history formats
-are the existing bounded formats.
+needed for physical quiescence. A separate read-only presentation policy accepts
+the existing operations/1.3 item identity, type, subtype, numeric material and
+stack fields. It does not change the original goal policy or its durable history
+fingerprint. Operator JSON cannot add evidence fields or capabilities. All native
+source pins are rechecked at acquisition and publication boundaries. Prepared-plan,
+association, creation and durable-history formats are the existing bounded formats.
+
+`result.item_observations` presents up to sixteen observed `BED`, `DOOR`, `TABLE`,
+`CHAIR` or `THRONE` candidates from a complete paused operations item roster. It
+binds the exact sample anchor, operations protocol/generation/source digest,
+world/site and DF/DFHack versions. `total_items`, `matching_items`, `returned`
+and `omitted` distinguish roster coverage from the bounded selection. Native
+item IDs are observation data, not authorized handles. Numeric material pairs
+do not establish wood, usable supply, new production or which order caused an
+item. Material classification, eligibility and production attribution remain
+unknown. Empty results prove no matching candidates only when coverage is
+complete for that recorded anchor.
+
+The item view may remain useful when the original order disappears and its
+goal becomes Unknown. It never promotes original completion or mutation
+preconditions. Failed/incomplete sampling, attempted unpause, changed source,
+presentation-authorization loss and recovery withhold the previous rows;
+unavailable coverage is explicitly unknown. Inspecting a retained sample does
+not prove current game freshness. These are additional observations under the
+same eleven tools, with no new bridge fields or output-oriented goal mode.
 
 The component tests execute the real original-plan compiler, semantic/native
 and clock coordinators, durable goal monitor and private-file open modes with
