@@ -5421,3 +5421,10 @@ does not construct workshops. A work-order insertion is not output proof. Realit
 bead .14 owns that native prerequisite and its live goal evidence; the separate
 mixed-family MCP host gap remains pic.4. Competent first-fortress production is
 unproved.
+
+The separate protocol-1.1 source qualifier had the same explicit Python cache
+defect as the two aggregates. Its current startup now routes those caches under
+ignored `target/`. An isolated execution of its actual nine-file syntax command
+reproduces nine untracked caches before the fix and clean source custody after,
+with all nine source files unchanged. This focused repair is later than frozen
+R17 and inherits no full qualification from it.

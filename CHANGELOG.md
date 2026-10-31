@@ -39,6 +39,10 @@
   No sleeps, retries or test serialization are used to repair ownership.
 - Record the missing live workshop construction prerequisite as reality bead .14.
   Furniture placement and queue insertion do not establish productive bed output.
+- Route the separate protocol-1.1 source qualifier's explicit Python compilation
+  cache under `target/` as well. Its actual nine-file syntax command dirties an
+  isolated clean checkout before the repair and preserves it after; full updated
+  source qualification remains separate from frozen R17 evidence.
 
 ## 2026-10-30 — Execute complete original labor and work-order plans
 
