@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-10-31 — Prove bounded real output and retain the completion gap
+
+- Expose bounded source/anchor-bound furniture candidates from the existing
+  operations sample, independently of the original order's receipt link.
+  Preserve original goal policy and history; withdraw stale or unauthorized
+  rows and leave material classification and production attribution unknown.
+  Focused runtime and production packet-renderer regressions await Rust execution.
+- Through actual public MCP, insert one original bed order and execute two
+  reviewed bounded runs on an explicitly operator-prepared fortress. Independent
+  replay verifies the insertion, clock receipts, six complete observations and a
+  new cherry-wood bed. Preserve the original goal as Unknown after the game removes
+  its order, with semantic completion unproved and an unrelated job remaining.
+- Document the separate native-plugin opt-ins after a retained pre-effect launch
+  failure. Keep broader workshop/production Beads open; operator setup and source
+  qualification do not establish autonomous fortress competence or admission.
+
 ## 2026-10-31 — Restore the positive native job-control path
 
 - Replace job-control's unconditional unsupported/refusing adapter with a closed
@@ -10,9 +26,15 @@
   234 policy checks, the 397-assertion complete handler suite under UBSan and
   all three engine mutation checks. Preserve codec goldens and disclose the
   corrected stale throwing-setter expectation.
-- Compile/link the changed plugin against the real DFHack 53.16-r3 SDK. Fresh
-  full-source and actual-game MCP proof remain pending; the owning Bead stays
-  in progress and production admission remains unchanged.
+- Compile/link the changed plugin against the real DFHack 53.16-r3 SDK. Fix
+  the independently found hidden-worker reference case with exactly one valid
+  holder reference. Through actual public MCP, suspend and resume one real idle
+  bed job; independently verify native receipts and unchanged captured fields.
+- Qualify exact clean `7bba4d01debdc7069e081adb824a4ace4fa199b3` on TRJ:
+  43 gates plus verifier, 5,124 debug and 5,124 release tests per command,
+  zero failed/ignored and 2,591 unchanged source hashes. Preserve the earlier
+  documentation and TS2 budget failures. Operator workshop/job fixture setup
+  earns no MCP construction or production credit; admission remains unchanged.
 
 ## 2026-10-31 — Complete exact-source and fresh server qualification
 
