@@ -6,6 +6,13 @@ read. Inspect and cancel never connect; cancellation stops this monitor only.
 """
 from __future__ import annotations
 
+import sys
+
+# The CLI is also invoked with a deliberately empty environment. Prevent
+# implicit writes beside the source before importing local helper modules.
+if __name__ == '__main__':
+    sys.dont_write_bytecode = True
+
 import argparse
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
@@ -16,7 +23,6 @@ from pathlib import Path
 import secrets
 import stat
 import struct
-import sys
 import time
 from typing import Callable, Iterator
 
@@ -392,6 +398,7 @@ def open_journal(path: Path, budget: Budget, *, writable=False, create=False) ->
         if create:
             flags |= os.O_CREAT | os.O_EXCL
         fd = os.open(path.name, flags | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK, 0o600, dir_fd=parent)
+        e.require(stat.S_ISREG(os.fstat(fd).st_mode), 'journal must be a regular file')
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         journal = Journal(path, fd, parent, writable, budget)
         journal.raw = journal.contents()
