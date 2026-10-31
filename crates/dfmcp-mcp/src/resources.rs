@@ -1,13 +1,15 @@
 //! Read-only `df://` resource families (MCP_SURFACE.md §Resources),
 //! laboratory slice.
 //!
-//! Session-scoped URIs carry their own authority: the `{session_id}` slot
+//! Session-scoped URIs identify an authority lookup: the `{session_id}` slot
 //! names the session whose negotiated grants gate the read. Fortress-scoped
 //! families (`df://fortress/{id}/anchor`, map chunks, events, …) stay
-//! unimplemented on purpose until `resources/read` gains a session-binding
+//! unregistered until `resources/read` gains a transport session-binding
 //! design: a fortress URI without a session slot could only be authorized
 //! from the transport context, and transport identity grants nothing
 //! (CAPABILITIES.md: no ambient authority).
+//! Session-bound immutable state pages already expose retained entities,
+//! relations, map chunks, and event records without ambient authority.
 //!
 //! Facade note: the pinned `fastmcp_rust` facade does not re-export
 //! `UriParams`, so template handlers spell the parameter type as the
@@ -18,7 +20,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use dfmcp_adapter::GameAdapter;
-use fastmcp_rust::ResourceTemplate;
+use fastmcp_rust::{
+    CacheTtl, CompleteResult, FinalReadResourceResult, FinalResourceReadCacheHintProvenance,
+    ResourceTemplate,
+};
 use fastmcp_rust::prelude::{
     McpContext, McpError, McpResult, Resource, ResourceContent, ResourceHandler,
 };
@@ -30,19 +35,22 @@ use crate::server::{
 };
 use dfmcp_core::{Capability, RiskTier};
 
+mod state;
+
 /// One template serves every session view. The pinned fastmcp router admits
 /// at most one template per compatible leading literal (`df://session/`), so
 /// separate per-view templates would be silently dropped; dispatching on the
 /// `view` capture keeps the documented URIs exactly.
 const SESSION_VIEW_TEMPLATE: &str = "df://session/{session_id}/{view}";
 /// Views served under `df://session/{session_id}/{view}`.
-pub const SESSION_VIEWS: [&str; 6] = [
+pub const SESSION_VIEWS: [&str; 7] = [
     "summary",
     "capabilities",
     "handoff",
     "replay",
     "anchor",
     "tasks",
+    "state",
 ];
 const DOCTOR_BUNDLE_TEMPLATE: &str = "df://doctor/{session_id}";
 
@@ -560,7 +568,9 @@ const SESSION_VIEW_DESCRIPTION: &str = "Session views: summary (bounded snapshot
      (dfmcp.replay.bundle/1 of every recorded call for deterministic re-execution), anchor \
      (the session fortress's current canonical anchor), tasks and tasks-{offset} (bounded modern \
      MCP task handles, active first), task-{taskId} (original plan progress, cancellation drains \
-     and final evidence; laboratory process only)";
+     and final evidence; laboratory process only), state (current world manifest), \
+     state-{state_hash} (exact retained manifest), state-{state_hash}~{section}~{offset} \
+     (immutable bounded entities, relations, chunks, or events page; requires observe)";
 
 impl ResourceHandler for SessionViewResource {
     fn definition(&self) -> Resource {
@@ -583,6 +593,26 @@ impl ResourceHandler for SessionViewResource {
         Err(template_read_refusal())
     }
 
+    fn final_resource_read_cache_hint_provenance(&self) -> FinalResourceReadCacheHintProvenance {
+        FinalResourceReadCacheHintProvenance::Explicit
+    }
+
+    fn read_final_with_uri(
+        &self,
+        ctx: &McpContext,
+        uri: &str,
+        params: &HashMap<String, String>,
+    ) -> McpResult<CompleteResult<FinalReadResourceResult>> {
+        let mut result = fastmcp_server::promote_legacy_resource_contents(
+            self.read_with_uri(ctx, uri, params)?,
+        )?;
+        // The facade otherwise supplies a private one-hour TTL. Current state,
+        // work and grants change, and even immutable pages carry current
+        // authorization/continuity. Require a fresh server read for every view.
+        result.payload.ttl_ms = CacheTtl::milliseconds(0);
+        Ok(result)
+    }
+
     fn read_with_uri(
         &self,
         _ctx: &McpContext,
@@ -597,6 +627,8 @@ impl ResourceHandler for SessionViewResource {
             "replay" => session_replay(raw, uri),
             "anchor" => session_anchor(raw, uri),
             "tasks" => session_tasks(raw, uri, 0),
+            "state" => state::read(raw, uri, view),
+            page if page.starts_with("state-") => state::read(raw, uri, page),
             page if page.starts_with("tasks-") => {
                 let offset = page[6..].parse::<usize>().map_err(|_| {
                     McpError::invalid_params("task page offset must be a nonnegative integer")
@@ -907,7 +939,8 @@ mod tests {
                 "handoff",
                 "replay",
                 "anchor",
-                "tasks"
+                "tasks",
+                "state"
             ]
         );
         let doctor = DoctorBundleResource.template().expect("doctor template");

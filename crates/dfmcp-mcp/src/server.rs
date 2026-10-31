@@ -238,6 +238,25 @@ fn not_retained_reason(session: &LabSession, hex: &str) -> String {
     }
 }
 
+/// Resolve an exact immutable version for an already-authorized resource
+/// read while `with_session` owns the current fortress. Addresses never fall
+/// back to a newer version or another session's history.
+pub(crate) fn retained_resource_snapshot<'a>(
+    session: &'a LabSession,
+    hash: Option<&str>,
+) -> Result<&'a WorldSnapshot> {
+    let current = session.adapter.snapshot();
+    match hash {
+        None => Ok(current),
+        Some(hash) if current.state_hash.to_hex() == hash => Ok(current),
+        Some(hash) => session
+            .history
+            .find_hex(hash)
+            .and_then(|digest| session.history.get(&digest))
+            .ok_or_else(|| DfmcpError::new(ErrorCode::StaleAnchor, not_retained_reason(session, hash))),
+    }
+}
+
 /// Observed world changes from the version with `from_state_hash` to the
 /// newest version this session saw. `None` when the session is unknown;
 /// a single `history_not_retained` item when the base aged out.

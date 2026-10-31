@@ -50,6 +50,39 @@ Higher rungs apply only to the exact source, binary, protocol, platform and inpu
 
 ## Present now
 
+### Read immutable world records through authorized MCP resources (2026-10-30)
+
+The laboratory session resource template now exposes `state`, exact retained
+`state-{hash}` manifests, and paginated entities, relations, map chunks and
+events. Every page uses the existing presence-aware `research-full` canonical
+projection and carries the original source hash and complete version identity.
+Continuations stay on that version while the current world changes; collected
+or unknown versions return `stale_anchor` without substituting newer records.
+
+Each read resolves the session's durable-owner fence and checks current Observe
+authority under the shared-world lock, including current-tick expiry for old
+versions. Narrow grants cannot acquire whole-world coverage. Source work and
+escaped transport output are budgeted, rows remain indivisible, and clipped
+pages retract full-domain and absence claims. Session resources explicitly
+return private zero-lifetime cache hints so grants and current continuity are
+rechecked. The frozen eleven tools and production admission remain unchanged.
+
+Ten focused resource unit tests and one real modern-stdio integration test are
+present, covering immutable traversal through an intervening plan/commit,
+canonical records, retention, authority, coverage and response bounds. They
+have not executed in this session: the actual pinned runtime dependency build
+was killed by the shared host's memory limit before project diagnostics. Static
+review and formatting do not establish Rust execution or live qualification.
+Both required repository commands were attempted: `verify.sh` and a documented
+development-dirty `qualify_local.sh` run pass repository/source/Agent Turn checks
+before stopping at the same nine existing DFHack bridge-contract findings.
+The three reported paths are unchanged by these feature commits; no gate was
+weakened to turn those failures into qualification.
+The complete URI inventory and deferred fortress/knowledge/memory consumers
+are recorded in [`RESOURCE_URIS.md`](docs/RESOURCE_URIS.md). Bead
+`dfmcp-reality-wiring-proof-4bf.11` remains open for the broader surface and its
+executed acceptance evidence.
+
 ### Restore positive job suspension with actual SDK fields (2026-10-30)
 
 The existing job-control/1.9 handler now implements an explicit eight-type
@@ -71,7 +104,10 @@ receipt chain and rejects altered or incomplete journal histories.
 
 These are source and executed boundary-double results, not a matching-SDK build
 or live-fortress trial. An attempted full adapter Rust unit-test build was killed
-before tests ran on the original resource-exhausted host. Full workspace, native
+before tests ran on the original resource-exhausted host. A subsequent actual
+`cargo check --locked --offline -p dfmcp-adapter --lib` passes on latest nightly
+with the complete original core/world/intent/adapter production composition.
+This is type-checking evidence, not Rust test execution. Full workspace, native
 and live qualification remain separate. Bead `dfmcp-reality-wiring-proof-4bf.8`
 remains open for its real-SDK and real-MCP acceptance requirements. The existing
 wire generation, five methods, production runner map and empty compatibility

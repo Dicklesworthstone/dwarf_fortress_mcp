@@ -548,3 +548,253 @@ fn test_session_resources_resolve_over_stdio() -> Result<(), Box<dyn Error>> {
     assert!(unknown.get("error").is_some(), "{unknown}");
     Ok(())
 }
+
+fn resource_method(
+    client: &mut StdioClient,
+    id: &mut u64,
+    method: &str,
+    mut params: Value,
+) -> Result<Value, Box<dyn Error>> {
+    *id += 1;
+    params["_meta"] = modern_meta();
+    client.send(&json!({"jsonrpc":"2.0", "id":*id, "method":method, "params":params}))
+}
+
+fn resource_tool(
+    client: &mut StdioClient,
+    id: &mut u64,
+    name: &str,
+    arguments: Value,
+) -> Result<Value, Box<dyn Error>> {
+    let response = resource_method(
+        client,
+        id,
+        "tools/call",
+        json!({"name":name,"arguments":arguments}),
+    )?;
+    assert_modern_envelope(&response, *id);
+    let payload: Value = serde_json::from_str(
+        response["result"]["content"][0]["text"]
+            .as_str()
+            .ok_or("tool JSON text missing")?,
+    )?;
+    assert_eq!(payload["ok"], true, "{name}: {payload}");
+    Ok(payload)
+}
+
+fn read_state_resource(
+    client: &mut StdioClient,
+    id: &mut u64,
+    uri: &str,
+) -> Result<Value, Box<dyn Error>> {
+    let response = resource_method(client, id, "resources/read", json!({"uri":uri}))?;
+    assert_modern_envelope(&response, *id);
+    // Count the real escaped transport response, not only its inner JSON text.
+    assert!(
+        response.to_string().len() <= 4_096 * 4,
+        "resource exceeds negotiated wire budget"
+    );
+    assert_eq!(response["result"]["contents"][0]["uri"], uri);
+    assert_eq!(
+        response["result"]["contents"][0]["mimeType"],
+        "application/json"
+    );
+    assert_eq!(response["result"]["ttlMs"], 0);
+    assert_eq!(response["result"]["cacheScope"], "private");
+    let payload: Value = serde_json::from_str(
+        response["result"]["contents"][0]["text"]
+            .as_str()
+            .ok_or("resource JSON text missing")?,
+    )?;
+    assert_eq!(payload["ok"], true);
+    assert_eq!(payload["agent_turn"]["schema"], "dfmcp.agent_turn/1");
+    Ok(payload)
+}
+
+/// Bead dfmcp-reality-wiring-proof-4bf.11: discovery and real resources/read
+/// consumers must preserve an immutable view across an actual plan/commit.
+#[test]
+fn test_immutable_world_resource_pages_over_modern_stdio() -> Result<(), Box<dyn Error>> {
+    use std::collections::BTreeSet;
+
+    let mut client = StdioClient::spawn()?;
+    let mut id = 0;
+    let discover = resource_method(&mut client, &mut id, "server/discover", json!({}))?;
+    assert_modern_envelope(&discover, id);
+    let listed = resource_method(&mut client, &mut id, "resources/list", json!({}))?;
+    assert_modern_envelope(&listed, id);
+    let templates = resource_method(&mut client, &mut id, "resources/templates/list", json!({}))?;
+    assert_modern_envelope(&templates, id);
+    let session_template = templates["result"]["resourceTemplates"]
+        .as_array()
+        .ok_or("resource templates missing")?
+        .iter()
+        .find(|template| template["uriTemplate"] == "df://session/{session_id}/{view}")
+        .ok_or("session resource template missing")?;
+    assert!(
+        session_template["description"]
+            .as_str()
+            .ok_or("description")?
+            .contains("state-{state_hash}")
+    );
+
+    let opened = resource_tool(
+        &mut client,
+        &mut id,
+        "fortress_open_session",
+        json!({
+            "paused":true, "scenario":"starter_fortress", "max_output_tokens":4_096,
+        }),
+    )?;
+    let session_id = opened["session_id"].as_str().ok_or("session id missing")?;
+    let current_uri = format!("df://session/{session_id}/state");
+    let manifest = read_state_resource(&mut client, &mut id, &current_uri)?;
+    assert_eq!(manifest["schema"], "dfmcp.lab-state-manifest/1");
+    assert_eq!(manifest["game_mutation_dispatched"], false);
+    assert_eq!(
+        manifest["agent_turn"]["coverage"]["complete_domains"],
+        json!([])
+    );
+    let anchor = manifest["anchor"].clone();
+    let hash = manifest["state_hash"]
+        .as_str()
+        .ok_or("state hash missing")?;
+    let sections = manifest["sections"].as_array().ok_or("sections missing")?;
+    assert_eq!(sections.len(), 4);
+    let first_uri = sections[2]["uri"].as_str().ok_or("chunk URI")?;
+    let first_page = read_state_resource(&mut client, &mut id, first_uri)?;
+    assert_eq!(first_page["section"], "chunks");
+    assert!(
+        first_page["next"].is_string(),
+        "the starter's 27 chunks must require bounded continuation"
+    );
+    assert_eq!(first_page["absence_proven"], false);
+    // The protocol admits encoded string IDs up to 256 bytes. They must not
+    // defeat the negotiated byte ceiling through uncounted envelope overhead.
+    let long_id = "x".repeat(254);
+    let long_id_read = client.send(&json!({
+        "jsonrpc":"2.0", "id":long_id, "method":"resources/read",
+        "params":{"_meta":modern_meta(), "uri":first_uri},
+    }))?;
+    assert_eq!(long_id_read["id"], long_id);
+    assert!(long_id_read.get("error").is_none(), "{long_id_read}");
+    assert!(long_id_read.to_string().len() <= 4_096 * 4);
+    // Numeric IDs preserve an even larger exact integer lexeme in this pin.
+    let numeric_id: Value = serde_json::from_str(&"9".repeat(4_096))?;
+    let numeric_id_read = client.send(&json!({
+        "jsonrpc":"2.0", "id":numeric_id, "method":"resources/read",
+        "params":{"_meta":modern_meta(), "uri":first_uri},
+    }))?;
+    assert_eq!(numeric_id_read["id"], numeric_id);
+    assert!(numeric_id_read.get("error").is_none(), "{numeric_id_read}");
+    assert!(numeric_id_read.to_string().len() <= 4_096 * 4);
+
+    // Change the actual server world between reads; never rebuild a page from
+    // latest state just because its old hash still appears in a client URI.
+    let plan = resource_tool(
+        &mut client,
+        &mut id,
+        "fortress_plan",
+        json!({
+            "session_id":session_id, "summary":"unpause between immutable pages", "paused_target":false,
+        }),
+    )?;
+    resource_tool(
+        &mut client,
+        &mut id,
+        "fortress_commit",
+        json!({
+            "session_id":session_id, "plan_digest":plan["plan_digest"],
+        }),
+    )?;
+    let current = read_state_resource(&mut client, &mut id, &current_uri)?;
+    assert_ne!(current["anchor"], anchor);
+    let historical = read_state_resource(
+        &mut client,
+        &mut id,
+        &format!("df://session/{session_id}/state-{hash}"),
+    )?;
+    assert_eq!(historical["anchor"], anchor);
+    assert_eq!(historical["historical"], true);
+    assert_eq!(historical["sections"], manifest["sections"]);
+
+    for section in sections {
+        let name = section["section"].as_str().ok_or("section name")?;
+        let mut uri = section["uri"].as_str().ok_or("section URI")?.to_owned();
+        let key = match name {
+            "entities" => "entity_id",
+            "relations" => "edge_id",
+            "chunks" => "coord",
+            "events" => "event_id",
+            _ => return Err("unknown section".into()),
+        };
+        let mut seen = BTreeSet::new();
+        let mut pages = 0;
+        loop {
+            pages += 1;
+            assert!(pages < 100, "continuation failed to terminate");
+            let page = read_state_resource(&mut client, &mut id, &uri)?;
+            assert_eq!(page["anchor"], anchor);
+            assert_eq!(page["agent_turn"]["anchor"], anchor);
+            assert_eq!(page["historical"], true);
+            assert_eq!(page["agent_turn"]["continuity"]["status"], "stale");
+            for row in page["rows"].as_array().ok_or("rows missing")? {
+                assert!(seen.insert(row[key].to_string()), "duplicate {name} record");
+            }
+            match page["next"].as_str() {
+                Some(next) => uri = next.to_owned(),
+                None => {
+                    assert_eq!(page["complete"], true);
+                    break;
+                }
+            }
+        }
+        assert_eq!(
+            seen.len() as u64,
+            section["record_count"].as_u64().ok_or("record count")?
+        );
+    }
+
+    for view in [
+        format!("state-{}", "0".repeat(64)),
+        format!("state-{hash}~entities~00"),
+        format!("state-{hash}~memory~0"),
+    ] {
+        let refused = resource_method(
+            &mut client,
+            &mut id,
+            "resources/read",
+            json!({"uri":format!("df://session/{session_id}/{view}")}),
+        )?;
+        assert!(refused["error"].is_object(), "{refused}");
+        assert_eq!(
+            refused["error"]["data"]["agent_turn"]["schema"],
+            "dfmcp.agent_turn/1"
+        );
+        assert_eq!(
+            refused["error"]["data"]["agent_turn"]["coverage"]["complete_domains"],
+            json!([])
+        );
+    }
+    let restricted = resource_tool(
+        &mut client,
+        &mut id,
+        "fortress_open_session",
+        json!({
+            "paused":true, "max_output_tokens":4_096, "requested_capabilities":[["query","read_only"]],
+        }),
+    )?;
+    let restricted_id = restricted["session_id"].as_str().ok_or("restricted id")?;
+    let denied = resource_method(
+        &mut client,
+        &mut id,
+        "resources/read",
+        json!({"uri":format!("df://session/{restricted_id}/state")}),
+    )?;
+    assert_eq!(
+        denied["error"]["data"]["error"]["code"],
+        "capability_denied"
+    );
+    assert_eq!(denied["error"]["data"]["agent_turn"]["anchor"], Value::Null);
+    Ok(())
+}

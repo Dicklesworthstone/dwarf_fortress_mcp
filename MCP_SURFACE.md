@@ -586,12 +586,23 @@ Only `verified`, `compensated`, `cancelled`, and `failed` are ordinary terminal 
 
 ## Resources
 
+This inventory includes both implemented consumers and target families. The
+laboratory registers session and doctor templates; the exact implemented views,
+authority rules, returned schemas, retention behavior and deferred families are
+documented in [`docs/RESOURCE_URIS.md`](docs/RESOURCE_URIS.md). Fortress-scoped,
+knowledge and memory URI families below are not yet registered consumers.
+
 ```text
 df://session/{id}/summary
 df://session/{id}/capabilities
 df://session/{id}/handoff
+df://session/{id}/replay
+df://session/{id}/anchor
 df://session/{id}/tasks
 df://session/{id}/task-{task_id}
+df://session/{id}/state
+df://session/{id}/state-{state_hash}
+df://session/{id}/state-{state_hash}~{section}~{offset}
 df://fortress/{id}/anchor
 df://fortress/{id}/entity/{entity}
 df://fortress/{id}/map/chunk/{x}/{y}/{z}
