@@ -205,6 +205,58 @@ fn prepare_runtime(r: &mut Runtime<MockShell>) -> Result<View> {
     let c = r.context(false)?;
     r.plan(request, &c)
 }
+#[test]
+fn prepared_review_is_visible_in_modern_plan_and_explain_packets() -> Result<()> {
+    use fastmcp_rust::{FinalCallToolResult, ResultPeerEra, decode_typed_complete};
+    let (mut runtime, shell) = runtime_fixture()?;
+    let prepared = prepare_runtime(&mut runtime)?;
+    let value = prepared.to_json();
+    let native = &value["review"]["native_review"];
+    assert_eq!(native["labor"], "MINE");
+    assert_eq!(native["citizens"][0]["canonical_id"], "43");
+    assert_eq!(native["citizens"][0]["native_id"], 42);
+    assert_eq!(native["citizens"][0]["member_observed"], false);
+    assert_eq!(native["citizens"][0]["member_intended"], true);
+    assert_eq!(native["citizens"][0]["labor_observed"], false);
+    assert_eq!(native["citizens"][0]["labor_intended"], true);
+    assert_eq!(native["other_recomputed_labor_effects"], "unknown");
+    assert_eq!(
+        native["native_plan_digest"],
+        value["review"]["native_plan_digest"]
+    );
+    assert_eq!(
+        native["idempotency_key"],
+        value["original_plan"]["steps"][0]["key"]
+    );
+    for operation in ["fortress.plan", "fortress.explain"] {
+        let text = crate::semantic_workforce_presentation::packet(
+            operation,
+            None,
+            Some(prepared.anchor),
+            Some("control"),
+            None,
+            None,
+            value.clone(),
+            Some(value.clone()),
+            false,
+        );
+        assert!(text.len() < 65_536);
+        let envelope = serde_json::json!({"resultType":"complete","content":[{"type":"text","text":text}],"isError":false}).to_string();
+        assert!(
+            decode_typed_complete::<FinalCallToolResult>(&envelope, ResultPeerEra::Modern).is_ok()
+        );
+        let result: serde_json::Value =
+            serde_json::from_str(&text).map_err(|_| invalid("packet JSON"))?;
+        assert_eq!(result["result"]["review"]["native_review"], *native);
+        assert_eq!(
+            result["agent_turn"]["references"][0]["review"]["native_review"],
+            *native
+        );
+        assert!(!native.to_string().contains("region1"));
+    }
+    assert_eq!(shell.native.data.borrow().calls[2], 0);
+    Ok(())
+}
 fn capture_after(shell: &MockShell, tick: u64, enabled: bool) {
     let mut native = shell.native.data.borrow_mut();
     native.fixture.sequence = 4;

@@ -31,6 +31,129 @@ fn retained() -> Value {
 fn success() -> Value {
     json!({"ok":true,"development_labor_enabled":true})
 }
+#[test]
+fn native_review_rejects_bad_binding_and_never_forwards_extra_fields() {
+    let mut value = json!({"idempotency_key":"original-key","native_plan_digest":"d".repeat(64),
+        "capture_witness":"e".repeat(64),"detail_index":0,"detail_name":"Mining",
+        "selected_only":true,"requested_labor_allowed":true,"labor":"MINE","labor_column":0,
+        "citizens":[{"canonical_id":"43","native_id":42,"eligible_observed":true,
+            "member_observed":false,"member_intended":true,"membership_changes":true,
+            "labor_observed":false,"labor_intended":true,"token":"do-not-forward"}],
+        "scope":"selected_citizens_and_requested_labor_only","other_members_and_labor_columns":"not_shown",
+        "other_recomputed_labor_effects":"unknown","capture_is_current_state":false,
+        "intended_is_observed":false,"path":"do-not-forward"});
+    let expected = json!("d".repeat(64));
+    let filtered = native_review(&value, &expected).expect("valid review");
+    assert!(!filtered.to_string().contains("do-not-forward"));
+    value["native_plan_digest"] = json!("a".repeat(64));
+    assert!(native_review(&value, &expected).is_none());
+    value["native_plan_digest"] = expected.clone();
+    value["citizens"][0]["canonical_id"] = json!("44");
+    assert!(native_review(&value, &expected).is_none());
+    value["citizens"][0]["canonical_id"] = json!("43");
+    value["citizens"][0]["membership_changes"] = json!(false);
+    assert!(native_review(&value, &expected).is_none());
+    value["citizens"][0]["membership_changes"] = json!(true);
+    let citizen = value["citizens"][0].clone();
+    value["citizens"] = json!([citizen.clone(), citizen]);
+    assert!(native_review(&value, &expected).is_none());
+    value["citizens"] = json!((0..33).map(|_| json!({})).collect::<Vec<_>>());
+    assert!(native_review(&value, &expected).is_none());
+}
+
+#[test]
+fn modern_text_limit_refuses_oversize_before_transport() {
+    use fastmcp_rust::{FinalCallToolResult, ResultPeerEra, decode_typed_complete};
+    let mut view = retained();
+    view["original_plan"]["unbounded_details"] = json!("x".repeat(70_000));
+    let text = packet(
+        "fortress.explain",
+        Some(SessionId::new(9)),
+        Some(original_anchor()),
+        Some("control"),
+        None,
+        None,
+        success(),
+        Some(view),
+        false,
+    );
+    assert!(text.len() < 65_536);
+    let envelope =
+        json!({"resultType":"complete","content":[{"type":"text","text":text}],"isError":false})
+            .to_string();
+    assert!(decode_typed_complete::<FinalCallToolResult>(&envelope, ResultPeerEra::Modern).is_ok());
+    let result: Value = serde_json::from_str(&text).expect("valid packet");
+    assert_eq!(result["result"]["details_omitted"], true);
+    assert_eq!(result["result"]["output_limit_bytes"], EFFECTIVE_TEXT_LIMIT);
+}
+
+#[test]
+fn maximum_selected_review_fits_modern_result_envelope() {
+    use fastmcp_rust::{FinalCallToolResult, ResultPeerEra, decode_typed_complete};
+    let mut view = retained();
+    let citizens: Vec<Value> = (i32::MAX as u32 - 31..=i32::MAX as u32)
+        .map(|id| {
+            json!({"canonical_id":(id+1).to_string(),
+        "native_id":id,"eligible_observed":true,"member_observed":false,"member_intended":true,
+        "membership_changes":true,"labor_observed":false,"labor_intended":true})
+        })
+        .collect();
+    view["review"]["native_review"] = json!({"idempotency_key":"k".repeat(128),"native_plan_digest":"d".repeat(64),
+        "capture_witness":"e".repeat(64),"detail_index":63,"detail_name":"\u{0001}".repeat(256),
+        "selected_only":true,"requested_labor_allowed":true,"labor":"M".repeat(64),"labor_column":127,
+        "citizens":citizens,"scope":"selected_citizens_and_requested_labor_only",
+        "other_members_and_labor_columns":"not_shown","other_recomputed_labor_effects":"unknown",
+        "capture_is_current_state":false,"intended_is_observed":false});
+    let text = packet(
+        "fortress.plan",
+        Some(SessionId::new(9)),
+        Some(original_anchor()),
+        Some("control"),
+        None,
+        None,
+        view.clone(),
+        Some(view.clone()),
+        false,
+    );
+    assert!(text.len() < 65_536);
+    let envelope =
+        json!({"resultType":"complete","content":[{"type":"text","text":text}],"isError":false})
+            .to_string();
+    assert!(decode_typed_complete::<FinalCallToolResult>(&envelope, ResultPeerEra::Modern).is_ok());
+    let parsed: Value = serde_json::from_str(&text).expect("valid packet");
+    assert_eq!(
+        parsed["result"]["review"]["native_review"]["citizens"]
+            .as_array()
+            .map(Vec::len),
+        Some(32)
+    );
+    view["original_plan"]["unbounded_details"] = json!("x".repeat(70_000));
+    let recovery = view["recovery"].clone();
+    let fallback = packet(
+        "fortress.plan",
+        Some(SessionId::new(9)),
+        Some(original_anchor()),
+        Some("control"),
+        None,
+        None,
+        success(),
+        Some(view),
+        false,
+    );
+    assert!(fallback.len() as u64 <= EFFECTIVE_TEXT_LIMIT);
+    let envelope = json!({"resultType":"complete","content":[{"type":"text","text":fallback}],"isError":false}).to_string();
+    assert!(decode_typed_complete::<FinalCallToolResult>(&envelope, ResultPeerEra::Modern).is_ok());
+    let parsed: Value = serde_json::from_str(&fallback).expect("valid fallback");
+    assert_eq!(parsed["result"]["details_omitted"], true);
+    assert_eq!(parsed["result"]["output_limit_bytes"], EFFECTIVE_TEXT_LIMIT);
+    assert_eq!(parsed["retained_state"]["recovery"], recovery);
+    assert_eq!(
+        parsed["retained_state"]["review"]["native_review"]["citizens"]
+            .as_array()
+            .map(Vec::len),
+        Some(32)
+    );
+}
 fn output(operation: &str, mode: &str, result: Value, view: Value, uncertain: bool) -> Value {
     serde_json::from_str(&packet(
         operation,

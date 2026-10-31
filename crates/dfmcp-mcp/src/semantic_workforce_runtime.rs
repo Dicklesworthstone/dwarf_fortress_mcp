@@ -25,7 +25,7 @@ use dfmcp_core::{
     WorkBudget,
 };
 use dfmcp_intent::plan_archive::{ArchiveLimits, PlanArchiveSeal};
-use dfmcp_intent::{ObligationStatus, PreparedPlan};
+use dfmcp_intent::{Action, ObligationStatus, PreparedPlan};
 use dfmcp_world::{PredicateEvidence, PredicateTruth};
 use serde_json::{Value, json};
 use std::time::{Duration, Instant};
@@ -265,6 +265,52 @@ fn truth(t: PredicateTruth) -> &'static str {
         PredicateTruth::Unknown => "unknown",
     }
 }
+// This projection uses only the immutable native plan already bound into the
+// paired seal. It makes no claim about other members or recomputed labor bits.
+fn native_review(review: &SemanticWorkforceReview) -> Option<Value> {
+    let Action::SetLabor {
+        units,
+        labor,
+        enabled,
+    } = &review.selected_step().action
+    else {
+        return None;
+    };
+    let plan = review.native_plan();
+    let capture = plan.before();
+    let detail = capture.details().get(plan.spec().detail() as usize)?;
+    let column = capture.labor_keys().iter().position(|key| key == labor)?;
+    if *enabled != plan.spec().assigned() || units.len() != capture.citizens().len() {
+        return None;
+    }
+    let mut citizens = Vec::with_capacity(units.len());
+    for citizen in capture.citizens() {
+        let raw = i32::try_from(citizen.id()).ok()?;
+        let canonical = raw_unit_id_to_entity_id(raw).ok()?;
+        if !units.contains(&canonical) {
+            return None;
+        }
+        let before = *citizen.labors().get(column)? != 0;
+        let member = detail.members().binary_search(&citizen.id()).is_ok();
+        citizens.push(
+            json!({"canonical_id":canonical.to_string(),"native_id":citizen.id(),
+            "eligible_observed":citizen.eligible(),"member_observed":member,
+            "member_intended":*enabled,"membership_changes":member != *enabled,
+            "labor_observed":before,"labor_intended":*enabled}),
+        );
+    }
+    Some(
+        json!({"idempotency_key":plan.key(),"native_plan_digest":plan.digest().to_hex(),
+        "capture_witness":capture.witness().to_hex(),"detail_index":plan.spec().detail(),
+        "detail_name":detail.name(),"selected_only":detail.selected_only(),
+        "requested_labor_allowed":detail.labors().get(column).copied()? != 0,
+        "labor":labor,"labor_column":column,"citizens":citizens,
+        "scope":"selected_citizens_and_requested_labor_only",
+        "other_members_and_labor_columns":"not_shown",
+        "other_recomputed_labor_effects":"unknown",
+        "capture_is_current_state":false,"intended_is_observed":false}),
+    )
+}
 impl View {
     pub fn to_json(&self) -> Value {
         let verified = matches!(self.action, Some(SingleLaborResult::Verified { .. }));
@@ -285,7 +331,7 @@ impl View {
             "clock_advanced":if self.clock.as_ref().is_some_and(|v|v.has_runs()){Value::Null}else{json!(false)},
             "clock":self.clock.as_ref().map(ClockView::to_json),"development_clock_enabled":self.clock_control_enabled,
             "development_labor_enabled":self.labor_control_enabled,"observation":self.observation,"original_plan":original,
-            "review":self.review.as_ref().map(|r|json!({"paired_seal":r.seal().to_hex(),"native_plan_digest":r.native_plan().digest().to_hex(),"semantic_plan_digest":r.original_plan().digest.to_hex()})),"recovery":recovery,
+            "review":self.review.as_ref().map(|r|json!({"paired_seal":r.seal().to_hex(),"native_plan_digest":r.native_plan().digest().to_hex(),"semantic_plan_digest":r.original_plan().digest.to_hex(),"native_review":native_review(r)})),"recovery":recovery,
             "native_state":self.native.as_ref().map(|n|n.state().as_str()),"native_phase":self.native.as_ref().and_then(|n|n.effect()).map(|e|e.phase().as_str()),
             "native_needs_query":self.native.as_ref().is_some_and(|n|n.needs_query()),"effect_uncertain":self.native.as_ref().is_some_and(|n|n.state().unresolved()),"action_result":action,
             "current_goal":goal,"current_goal_available":self.goal.is_some(),"first_satisfied_anchor":self.first_satisfied_anchor.map(anchor_json),"historical_obligation":self.historical_obligation.as_ref().map(|s|format!("{s:?}")),
