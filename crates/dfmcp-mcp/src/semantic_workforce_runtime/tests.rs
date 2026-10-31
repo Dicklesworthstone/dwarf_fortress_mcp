@@ -229,17 +229,8 @@ fn prepared_review_is_visible_in_modern_plan_and_explain_packets() -> Result<()>
         value["original_plan"]["steps"][0]["key"]
     );
     for operation in ["fortress.plan", "fortress.explain"] {
-        let text = crate::semantic_workforce_presentation::packet(
-            operation,
-            None,
-            Some(prepared.anchor),
-            Some("control"),
-            None,
-            None,
-            value.clone(),
-            Some(value.clone()),
-            false,
-        );
+        let text =
+            crate::live_semantic_workforce_server::render_fixture_packet(operation, &prepared);
         assert!(text.len() < 65_536);
         let envelope = serde_json::json!({"resultType":"complete","content":[{"type":"text","text":text}],"isError":false}).to_string();
         assert!(
