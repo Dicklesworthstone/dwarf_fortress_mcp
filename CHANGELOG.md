@@ -1,5 +1,36 @@
 # Changelog
 
+## 2026-10-31 — Restore the positive native job-control path
+
+- Replace job-control's unconditional unsupported/refusing adapter with a closed
+  actual-SDK policy for four idle furniture-job types at their exact completed
+  workshop. Validate the entire holder queue and preserve all original effect,
+  witness, authority, replay and readback checks; change only suspension.
+- Remove fictional lookup/support APIs from the native test doubles. Execute
+  234 policy checks, the 397-assertion complete handler suite under UBSan and
+  all three engine mutation checks. Preserve codec goldens and disclose the
+  corrected stale throwing-setter expectation.
+- Compile/link the changed plugin against the real DFHack 53.16-r3 SDK. Fresh
+  full-source and actual-game MCP proof remain pending; the owning Bead stays
+  in progress and production admission remains unchanged.
+
+## 2026-10-31 — Complete exact-source and fresh server qualification
+
+- Qualify private clean commit `742e5a1dd419110979c42647ae7d88cb54696363`:
+  43 local gates, verifier success, 17 announcement-source gates, and 5,124
+  debug plus 5,124 release tests per aggregate, zero failed or ignored.
+  Preserve all 2,591 source hashes and clean final custody.
+- Complete four real Cargo routing fixtures and the actual fresh release build.
+  Contract, doctor, demo and independent opened-descriptor receipt checks pass
+  for executable SHA-256
+  `112523b7c419f9fa45769b6e0a1426a1f65dcd8da15302092e6270ab0cb030c1`.
+  Close the bounded composition, gate, lock, publication, cache, artifact-selection
+  and executable-mode repairs with exact evidence; keep broader gaps open.
+- Preserve earlier failed/interrupted runs, live procedural departures and the
+  old unreconciled Prepared record. Source/artifact qualification grants no
+  native campaign, registry, production-runner or runtime admission, and does
+  not transfer to the later shared checkout or report updates.
+
 ## 2026-10-30 — Repair executable wiring and prove a bounded live run
 
 - Repair laboratory composition, Tasks recovery of original receipts, partial-wait

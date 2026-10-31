@@ -1,6 +1,6 @@
 # Reality Check — Current Wiring and Historical Findings
 
-## 2026-10-30 executable recheck (in progress)
+## 2026-10-30–31 executable recheck (bounded audit complete; project gaps open)
 
 The September assessment below is historical. It is not the current implementation inventory.
 The current project has real native read and isolated development mutation paths, durable
@@ -15,12 +15,59 @@ it is not a claim that every function or every Markdown document was exhaustivel
 The canonical work item is **dfmcp-reality-wiring-proof-4bf**. Historical closed umbrella beads
 are retained as history, with explicit residual work rather than silent completion credit.
 
+### Terminal R21 result
+
+Clean private commit `742e5a1dd419110979c42647ae7d88cb54696363` passed all
+43 local qualification gates, `verify.sh`, all 17 separate announcement-source
+gates, and actual server-artifact qualification. Each required aggregate passed
+5,124 debug and 5,124 release tests across 123 targets per configuration, zero
+failed or ignored. Formatting, warning-denied Clippy and rustdoc passed. A final
+independent source check verified all 2,591 hashes, exact HEAD, clean Git status
+and all six direct qualifier modes. No gate was skipped or profile weakened.
+
+The fresh artifact's contract, doctor, demo and independent opened-descriptor
+verification pass. Executable SHA-256 is
+`112523b7c419f9fa45769b6e0a1426a1f65dcd8da15302092e6270ab0cb030c1`
+(17,970,728 bytes); its receipt SHA-256 is
+`689bdc4f931677f5b7ef9e4fe9dc1838852d4ed2e65c06f3663f4cf2106f0dcc`.
+The local receipt is
+`ebb0fd3b97d2ac1cc607e6b7a0b21137cba5fc8f7380a876611bcb674b463350`;
+the announcement-source receipt is
+`ea6d5f09d627f919fd3904ab4afca56667c8e266fe96ba255402b8d92d8604f3`.
+The separate real Cargo fixture passes four routing/failure cases and never
+executes stale output; that fixture alone does not qualify the project binary.
+
+`target/reality-check-20261030/ntm-r21-report.json` retains terminal exits,
+test denominators, gate journals and quiescence. The independent parent replay
+is `r21-parent-receipt-review.json`; receipts and the hash-checked Linux executable
+are copied locally. All evidence names the frozen private revision. Later shared
+documentation/Bead updates do not inherit its qualification. R17 interruption,
+R17b dirty combined completion, R19 test wiring failure and R20 separate launch
+126 remain distinct failed or incomplete witnesses.
+
+The 22-row capability-family matrix and all 25 binary entrypoints have an
+independent Terra source review. This completes the bounded wiring audit, not
+every function or the project vision. Broader storage, search, merge, ATP,
+resource, workshop, performance and mixed-family MCP gaps keep explicit owners.
+The R20 game experiment proves one selected labor assignment with a fresh
+single-sample original-goal witness and separately reviewed ten-tick control.
+It does not establish excavation, productive output, sustained stability or
+competent fortress management. Disclosed live procedural departures prevent a
+clean campaign claim. Registry entries remain zero; the production map remains
+1.0; no runtime is admitted. Game, client and build process trees are drained.
+
 ### Evidence custody and limits
+
+The following run-by-run record preserves what was known at each endpoint;
+earlier pending statements are superseded only by the exact terminal result above.
 
 - Real installation: official DF Classic 53.16 and DFHack 53.16-r3 on the tailnet Linux host
   `trj-ts`; actual SDK/source revision `0bf381cc1615656acf756e6e67573fffca715125`.
-- The quiet `ts2-ts` worker compiles against the real generated SDK headers, bundled protobuf
-  2.6, upstream unmodified DFHack plugin macro and matching installed DFHack libraries. All
+- The TS2 worker compiles against the real generated SDK headers, staged protobuf,
+  upstream unmodified DFHack plugin macro and matching installed DFHack libraries. The
+  recorded version query prints `libprotoc 2.4.1` with exit 1; actual generation/build
+  exits are 0. The existing LAN alias restored access after its tailnet endpoint went
+  offline. All
   **20 plugins in 19 packages** compile and link after repairs, including a newly restored
   protocol-1.1 build fragment. This is a native development build, not a complete R1 receipt.
 - The shared checkout changes concurrently. Failed runs, source inventories and logs remain
@@ -244,8 +291,8 @@ Python repairs need their own next exact-source run and actual server receipt.
 
 | Goal | Actual reachable path and present limit | Status / owning work |
 |---|---|---|
-| One eleven-tool semantic loop | Main `serve` → agent facade → laboratory server; 22 separate development profiles preserve the waist and Agent Turn; combined native family owner still missing | PARTIAL; R20 Rust-qualified; later gates .3/.19; combined owner pic.4 |
-| Modern transport and Tasks | Pinned owned FastMCP → actual stdio child → task service/store → retained original plan and foreground progress | Executed process tests 7/7; .1; no full qualification transfer |
+| One eleven-tool semantic loop | Main `serve` → agent facade → laboratory server; 22 separate development profiles preserve the waist and Agent Turn; combined native family owner still missing | PARTIAL; R21 source-qualified; .3/.19 repaired; combined owner pic.4 open |
+| Modern transport and Tasks | Pinned owned FastMCP → actual stdio child → task service/store → retained original plan and foreground progress | Executed process tests 7/7 plus R21 full qualification; bounded repair .1 closed |
 | Real read-only world observation | Native authenticated Handshake/ReadObservation → wire/capsule/projection → read adapter → admitted wrapper or isolated dev server | Real citizens/items/buildings/map read trials; no admitted tuple |
 | Protocol-1.1 announcements | Separate native plugin → transactional suffix publication → one-read bootstrap → development MCP | Real retained-suffix development reads; no A1–A6 or production-map admission |
 | Original Mine designation and goal proof | Semantic Mine runtime → independent canonical/native evidence → dig/1.16 journal → fresh floor samples | Live planning refusals preserved; excavation competence UNPROVEN; .5 |
@@ -253,7 +300,7 @@ Python repairs need their own next exact-source run and actual server receipt.
 | Job suspension | Real bounded SDK job-list lookup; missing/duplicate/cyclic/oversize source rejected; eligibility currently false | PARTIAL, positive mutation unavailable; .8; refusal-only proof cannot close it |
 | Work orders, labor and furniture | Dedicated semantic owners preserve exact source/plan/native identities; concrete production executor exists | R20 live single-sample labor goal plus clock passes; old Prepared .16, productive output .5 and mixed-family MCP owner pic.4 remain open |
 | First-fortress workshop prerequisites | Real trial has only a wagon; live build/1.19 supports bed/chair/table placement, with no workshop construction consumer | Missing live prerequisite; .14; order insertion cannot prove production |
-| Shared cancellation and physical work | Laboratory coordinator → owned actions → dependency-order drain → observations/certificates | Runtime selector and obligation retention repaired; R20 Rust-qualified; .1; later source qualification separate |
+| Shared cancellation and physical work | Laboratory coordinator → owned actions → dependency-order drain → observations/certificates | Runtime selector and obligation retention repaired; R21 source-qualified; scoped .1 closed; no general native cancellation claim |
 | Durable goals and restart | Laboratory private durable stores retain original plan, historical receipts and current proof separately | Real lab integration tests; native save/restore remains outside MCP |
 | World MVCC and witnesses | Canonical snapshots, immutable historical views, witness validation and deterministic state transitions are real | PARTIAL; production FrankenSQLite consumer remains 54h.1 |
 | Structural semantic merge | MCP intent replay is reachable; structural merge/certificate engine is separately implemented | No runtime fallback consumer found; .10 |
@@ -264,7 +311,7 @@ Python repairs need their own next exact-source run and actual server receipt.
 | Resource URI contract | Actual registered session and doctor resources; session replay/Tasks use the real resolver | Broader fortress/knowledge/memory families remain .11 |
 | EE memory | Evidence-curation workflow is distinct from the legacy batch helper; hostile text now produces valid escaped JSONL | Legacy helper repair .7; no automatic memory ingestion or authority implied |
 | SLOs and economics | Actual timings and bounded refusal witnesses recorded; large observations still cost tens of seconds on this host | UNPROVEN against declared SLOs; .4 and existing benchmark work |
-| Compatibility/release/process authority | Registry/floor/artifact/ticket/private-runner machinery exists and refuses unsupported launch states | Empty registry; custody/cache repairs .15/.17 await exact clean combined run; artifact build binding .18 and direct execution .19; no admitted product |
+| Compatibility/release/process authority | Registry/floor/artifact/ticket/private-runner machinery exists and refuses unsupported launch states | R21 source/artifact qualification passes; .15/.17/.18/.19 closed; empty registry, no admitted product |
 
 Here `.N` means `dfmcp-reality-wiring-proof-4bf.N`; `54h.N` means
 `df-franken-storage-mvcc-54h.N`, `pic.4` means `df-dfhack-bridge-plane-c-pic.4`, and
@@ -301,13 +348,13 @@ from a fresh current anchor; (3) modern wire decoding exposed an oversized text 
 lossless session/anchor-bound schema pages; (4) the matrix audit was unblocked from the live trial
 because the audit can proceed independently; (5) source inventories and negative witnesses were
 made explicit because concurrent commits invalidate commit-only provenance. Further findings and
-test results revise this section in place. The audit is still active and no convergence or
-whole-project completion is claimed. The later gameplay review exposed another
+test results revise this section in place. The bounded family audit converged after
+independent Terra review; no whole-project completion is claimed. The later gameplay review exposed another
 concrete gap: the untouched trial has no carpenter workshop, and a finite bed
 order alone proves neither validation nor productive work. Bead `.14` now owns
 the missing native workshop path and a real output witness. A workforce
-assignment is a plausible conditional effect probe only after separately reading
-the native labor configuration; existing captures do not prove its prerequisites.
+assignment later supplied the independently read and reviewed live8/live9 effect
+witnesses above; it does not supply workshop or productive-output evidence.
 
 ---
 

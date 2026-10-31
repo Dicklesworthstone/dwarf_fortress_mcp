@@ -30,11 +30,41 @@ admission, or support. No protocol beyond 1.0 appears in the production runner m
 
 ## Evidence hierarchy
 
+### Latest exact-source qualification (2026-10-31)
+
+Private clean commit `742e5a1dd419110979c42647ae7d88cb54696363` passed
+`qualify_local.sh` (43/43 gates), `verify.sh`, the separate announcement-source
+qualifier (17/17 gates), and the actual server-artifact qualifier. Both required
+aggregates passed 5,124 debug and 5,124 release tests across 123 targets per
+configuration, with zero failures or ignored tests. Latest-nightly formatting,
+warning-denied Clippy and rustdoc also passed. The final independent check found
+all 2,591 source files unchanged and the private checkout clean.
+
+The fresh release executable is 17,970,728 bytes with SHA-256
+`112523b7c419f9fa45769b6e0a1426a1f65dcd8da15302092e6270ab0cb030c1`.
+Its source-bound receipt SHA-256 is
+`689bdc4f931677f5b7ef9e4fe9dc1838852d4ed2e65c06f3663f4cf2106f0dcc`;
+contract, doctor, demo and independent opened-descriptor verification passed.
+The four-case real Cargo routing probe passed separately and is explicitly
+fixture evidence. Local receipt SHA-256 is
+`ebb0fd3b97d2ac1cc607e6b7a0b21137cba5fc8f7380a876611bcb674b463350`;
+announcement-source receipt SHA-256 is
+`ea6d5f09d627f919fd3904ab4afca56667c8e266fe96ba255402b8d92d8604f3`.
+Copies and independent replay are under `target/reality-check-20261030/`.
+
+These results supersede earlier pending qualification statements only for that
+exact private revision and executable. The shared checkout and later report or
+Bead updates inherit no qualification. Earlier failures remain retained. The
+separate R20 live trials prove bounded development behavior, including one
+single-sample labor goal and ten ticks; they do not qualify a live campaign or
+transfer runtime evidence to R21. The compatibility registry remains empty,
+the production runner map remains protocol 1.0, and no runtime is admitted.
+
 ### Agent-operating-model status
 
-The shared response contract is implemented source. Current repairs remain
-unqualified source changes until their exact-source qualification receipts pass;
-focused tests or a prior live trial do not qualify the current worktree.
+The shared response contract is implemented source. The exact private revision
+named above has source and artifact qualification; focused tests or a prior live
+trial do not qualify the later shared worktree.
 
 1. **source present** — code, contracts, and tests are checked in;
 2. **static/Python checked** — static or design checks passed for one exact source generation;
@@ -49,6 +79,34 @@ focused tests or a prior live trial do not qualify the current worktree.
 Higher rungs apply only to the exact source, binary, protocol, platform and inputs they name.
 
 ## Present now
+
+### Restore positive idle furniture-job suspension (2026-10-31)
+
+The real-SDK job-control/1.9 adapter now implements a closed policy for idle
+`ConstructBed`, `ConstructDoor`, `ConstructThrone` and `ConstructTable` jobs at
+completed workshops. The exact job must occur in its holder's complete bounded
+queue; nulls, duplicate IDs, custom reactions, specific references and active or
+special flags refuse. Preparation and commit retain their original exact witness,
+authentication, authority, generation, idempotency and readback rules. The only
+setter changes the suspension bit after repeating eligibility. Other classes
+remain unsupported; no protocol, production map or admission is widened.
+
+The actual-handler policy regression is red before repair, then passes 234
+checks covering four positive classes and 28 rejection policies. The updated
+SDK-shaped complete handler suite passes 397 assertions in nine groups under
+nonrecovering UBSan; all three existing engine mutants are rejected. No checked-in
+codec golden was regenerated. One stale test assertion was corrected to the
+unchanged engine's rule: a throwing setter followed by complete exact readback
+can prove Applied, while failed readback remains Unknown.
+
+The plugin compiles and links against the actual 53.16-r3 SDK, revision
+`0bf381cc1615656acf756e6e67573fffca715125`; its development artifact SHA-256 is
+`da84fea2f1a96d278de7900f58cdece21029de9ec40320d79aca0480da682b8d`.
+The build preserves 3,639 SDK inputs, 84 unchanged native inputs and the one
+explicitly changed handler, with before/after custody. This is development build
+evidence, not R1. Current full-source qualification, independent review and a
+disposable actual-game MCP intervention remain required under
+`dfmcp-reality-wiring-proof-4bf.8`; it stays in progress.
 
 ### Execute original labor and work-order plans through the native owners (2026-10-30)
 
