@@ -5369,8 +5369,8 @@ A later Terra read-only search covered eleven windows and 1,859 target origins;
 native assessment confirmed hidden-context refusal, with no designation or time
 advance. Two 64-row tile queries exposed another transport-size failure; current
 spatial live/archive source now reserves the pinned text ceiling before page
-production. That repair and its actual-handler decoder regression require fresh
-execution. Both qualifiers also now keep explicit Python syntax caches under
+production. The source-bound R15 replay below executes that repair and its
+actual-handler decoder regression. Both qualifiers also keep explicit Python syntax caches under
 ignored `target/`, preventing their checks from dirtying the source they qualify.
 
 Full workspace runs preserve their failures: R4 had 5,014 passed / 54 failed;
@@ -5400,8 +5400,24 @@ The source-bound live query result does not qualify later ownership changes.
 
 R16 actual-backend duplicate-descriptor regressions all fail before the repair
 (0/3), independently confirming a local lock-lifetime defect. Current source
-introduces an owned guard immediately after all twelve successful adapter lock
+introduces an owned guard immediately after all thirteen successful adapter lock
 acquisitions, releasing owned kernel locks on scope exit and early errors. No
-acquisition authority, modes, byte formats or retry behavior is relaxed. Linux
-regression and complete qualification results remain pending; best-effort cleanup
-alone is not proof of release or durability.
+acquisition authority, modes, byte formats or retry behavior is relaxed. Clean
+R17 `c51d6b5b3941faca02306917922eeffc963d5eca` passes the Linux backend regressions
+3/3, guard tests 3/3 and full parallel adapter suite 1,288/1,288 with zero ignored,
+plus full warning-denied Clippy. All thirteen sites across twelve storage files
+have an independently checked immediate guard. Best-effort cleanup alone is not
+proof of release or durability.
+
+R17's full qualifier completed 5,120 debug tests across 123 targets, zero failed
+or ignored, before a host reboot interrupted release compilation. There is no
+terminal receipt; the run remains `host_reboot_interrupted`. R17b repeats both
+required aggregates on the same clean source, with persistent build storage and
+LAN transport recovery. Complete qualification remains pending.
+
+The practical production gap is explicit: the untouched real fortress has no
+observed carpenter workshop, while live build/1.19 places beds/chairs/tables and
+does not construct workshops. A work-order insertion is not output proof. Reality
+bead .14 owns that native prerequisite and its live goal evidence; the separate
+mixed-family MCP host gap remains pic.4. Competent first-fortress production is
+unproved.

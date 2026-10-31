@@ -83,7 +83,8 @@ Two 64-row tile queries in that campaign returned a modern invalid-result error;
 spatial packets at 60,000 text bytes before reserving result bytes, preserving
 normal pagination and coverage. Its new actual-handler regression requests the
 same fields and page limit over 768 tiles and checks each complete MCP envelope
-with the pinned modern decoder. Execution of that repair remains pending.
+with the pinned modern decoder. R15's source-bound execution below supersedes the
+earlier pending state for this transport-size repair.
 R11 also exposed explicit `py_compile` dirtying its own source; both aggregates
 now direct bytecode into ignored `target/`. R12's postcheck verified all 2,590
 source files unchanged and a clean worktree, while its remaining test-only lint
@@ -113,13 +114,26 @@ No retry, serialization, ignored test or guard weakening is an accepted repair.
 R16 then reproduced the lock lifetime defect deterministically in the actual
 furniture, dig and excavation backends: **0 passed / 3 failed**, with duplicate
 open-file descriptions kept alive after the logical owner dropped. Current
-source wraps all twelve successful lock acquisitions in eleven storage families
+source wraps all thirteen successful lock acquisitions in twelve storage files
 immediately in an owned guard. Cleanup explicitly unlocks the already-owned local
 descriptor, including early-error paths; acquisition remains nonblocking and
 subject to the original context checks. No journal encoding, custody rule or
-native protocol changes. Three guard-kernel tests passed on macOS; Linux backend,
-parallel-suite and full qualification execution remain pending. An unlock failure
-is not a release certificate; subsequent acquisition continues to fail closed.
+native protocol changes. Clean R17 source
+`c51d6b5b3941faca02306917922eeffc963d5eca` passed Linux backend regressions **3/3**,
+guard-kernel tests **3/3**, warning-denied full Clippy and the full adapter suite
+**1,288/1,288** with 32 test threads and zero ignored. An independent Terra review
+paired every acquisition with its immediate guard and exact source digest. An
+unlock failure is not a release certificate; later acquisition still fails closed.
+
+The R17 full qualifier completed **5,120 debug tests across 123 targets**, zero
+failed or ignored, then the host rebooted during release compilation at midnight
+UTC. It has no terminal receipt and remains `host_reboot_interrupted`, not passed.
+The source and evidence survived under `/data`; the existing LAN SSH alias
+restored access without changing the offline tailnet identity. R17b repeats both
+required aggregates on the same clean commit with a persistent build directory.
+Its 2,592-file manifest SHA-256 is
+`243e85393655c4e7f5e8ea76bccd8537ac25ee6149f387fb13ae75641ed6bd94`.
+Full qualification remains pending until both commands terminate successfully.
 
 ### Current vision and wiring matrix
 
@@ -132,7 +146,8 @@ is not a release certificate; subsequent acquisition continues to fail closed.
 | Original Mine designation and goal proof | Semantic Mine runtime → independent canonical/native evidence → dig/1.16 journal → fresh floor samples | Live planning refusals preserved; excavation competence UNPROVEN; .5 |
 | Bounded game clock | Separately reviewed run/1.13 or goal-bound clock owner; wait reconciles rather than starts another run | Exact-source ten-tick live success; 47/60 wall stop retained; full campaign .5 |
 | Job suspension | Real bounded SDK job-list lookup; missing/duplicate/cyclic/oversize source rejected; eligibility currently false | PARTIAL, positive mutation unavailable; .8; refusal-only proof cannot close it |
-| Work orders, labor and furniture | Dedicated semantic owners preserve exact source/plan/native identities; concrete production executor now exists | Source/native build; mixed-family executor has no MCP host consumer found; pic.4/.5 |
+| Work orders, labor and furniture | Dedicated semantic owners preserve exact source/plan/native identities; concrete production executor exists | Source/native build; mixed-family executor has no MCP host consumer found; pic.4/.5 |
+| First-fortress workshop prerequisites | Real trial has only a wagon; live build/1.19 supports bed/chair/table placement, with no workshop construction consumer | Missing live prerequisite; .14; order insertion cannot prove production |
 | Shared cancellation and physical work | Laboratory coordinator → owned actions → dependency-order drain → observations/certificates | Runtime selector and obligation retention repaired; full qualification pending; .1 |
 | Durable goals and restart | Laboratory private durable stores retain original plan, historical receipts and current proof separately | Real lab integration tests; native save/restore remains outside MCP |
 | World MVCC and witnesses | Canonical snapshots, immutable historical views, witness validation and deterministic state transitions are real | PARTIAL; production FrankenSQLite consumer remains 54h.1 |
@@ -182,7 +197,12 @@ lossless session/anchor-bound schema pages; (4) the matrix audit was unblocked f
 because the audit can proceed independently; (5) source inventories and negative witnesses were
 made explicit because concurrent commits invalidate commit-only provenance. Further findings and
 test results revise this section in place. The audit is still active and no convergence or
-whole-project completion is claimed.
+whole-project completion is claimed. The later gameplay review exposed another
+concrete gap: the untouched trial has no carpenter workshop, and a finite bed
+order alone proves neither validation nor productive work. Bead `.14` now owns
+the missing native workshop path and a real output witness. A workforce
+assignment is a plausible conditional effect probe only after separately reading
+the native labor configuration; existing captures do not prove its prerequisites.
 
 ---
 
