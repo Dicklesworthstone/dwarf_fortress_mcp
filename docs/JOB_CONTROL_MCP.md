@@ -1,5 +1,22 @@
 # Job-control MCP integration status
 
+## 2026-10-31 positive native adapter repair
+
+The public control loop already existed, but the real-SDK adapter deliberately
+reported every job unsupported after fictional SDK calls were removed. The new
+closed policy in `JOB_SUSPENSION_CONTROL.md` enables four ordinary furniture-job
+types at completed workshops and restores the sole Boolean setter. The actual
+SDK build succeeds; handler tests cover positive effects as well as refusal and
+replay. Exact R23 source now passes full qualification and verifier; the live10
+public MCP trial proves suspend/resume of one real eligible job under separate
+reviews. Independent native capture, receipt and raw exchange replay are recorded
+in `JOB_SUSPENSION_CONTROL.md`. None of these results grants admission or proves
+later production completion.
+
+The implementation-era unexecuted statements below are historical. R21's full
+workspace qualification covers its exact prior Rust source, not the later native
+adapter or this updated worktree.
+
 ## Session-bound control loop
 
 `dfmcp_mcp::job_control_session::JobControlSession` now connects selected native

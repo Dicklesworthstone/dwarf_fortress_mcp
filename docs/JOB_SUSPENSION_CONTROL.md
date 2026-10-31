@@ -27,10 +27,27 @@ those exact bytes. No count of requirements proves their content or feasibility.
 
 Prepare requires an exact witness and the deterministic plan digest for the
 selected job and desired Boolean. It refuses unless the game is paused, there
-is no assigned worker, the completion timer is -1, DFHack reports a supported job,
-and its holder is a completed workshop or furnace. Every prerequisite is
+is no assigned worker, the completion timer is -1, the closed policy below
+accepts the job, and its holder is a completed workshop. Every prerequisite is
 rechecked at commit by reproducing the exact witness. The caller must inspect
 again after a changed field, tick, job-ID horizon or local sequence.
+
+DFHack 53.16 has no `Job::isSupportedJob` or `Job::getJob` API. The actual adapter
+therefore scans the complete bounded world job list, rejecting nulls, duplicate
+IDs, cycles and more than 65,536 entries. Its positive policy admits only
+`ConstructBed`, `ConstructDoor`, `ConstructThrone` and `ConstructTable`, with no
+custom reaction or specific references and none of the working, fetching,
+special, bringing or item-lost flags. The exact selected pointer must occur in
+its workshop's complete queue of at most ten jobs, with no nulls or duplicate
+IDs. Its complete general-reference vector must contain exactly one resolvable
+`BUILDING_HOLDER` with matching native ID and pointer. Any worker reference,
+including dangling/duplicate references hidden by DFHack's first-match helpers,
+and any extra or conflicting reference refuse. Furnace and all other job classes remain unsupported in this first closed
+policy. This does not claim eligibility for every ordinary DFHack job.
+
+The setter repeats full selected-job eligibility before assigning only the
+suspension bit. Commit still requires the unchanged original witness, current
+native preparation and authenticated authority; eligibility alone grants none.
 
 A stable ASCII idempotency key is 1..128 bytes. Prepare is nonmutating and retains
 its original token when replayed. It does not refresh its 60-second monotonic
@@ -39,9 +56,10 @@ most 4,096 records and refuses new keys at capacity rather than evicting effects
 
 Commit changes only `job->flags.bits.suspend`. Before that sole setter, it retires
 competing older preparations with a monotonically increasing intervention sequence
-and records `Unknown`. This also applies to no-op setters. If the setter throws,
-readback fails, or any other observed field changes, the result stays unknown.
-Only complete same-identity readback can create applied/not-applied evidence.
+and records `Unknown`. This also applies to no-op setters. A throwing setter
+still receives one immediate readback; only complete same-identity evidence can
+prove applied/not-applied. Failed readback or any other observed field change
+leaves Unknown, without another setter attempt.
 A changed/expired precondition produces a retained refusal without dispatch.
 Neither unknown nor refused keys can later be dispatched again.
 
@@ -82,6 +100,40 @@ independently checked with Python hashlib. They are synthetic data with explicit
 DFHack/protobuf doubles, not a captured live fortress.
 
 ## Executed evidence
+
+The 2026-10-31 repair replaces the original SDK-fiction doubles with a linked
+world list and actual enum/field-shaped doubles. The complete handler suite
+passes 397 assertions in nine groups under nonrecovering UBSan, and the separate
+SDK-policy suite exercises four positive job classes, 28 rejection policies,
+post-prepare invalidation, revoked credentials and malformed lists. All three
+existing engine mutations remain rejected. The throwing-setter case now checks
+the unchanged engine's exact immediate readback rule: proven Applied if readback
+fully succeeds, Unknown if it fails; neither result permits redispatch. Checked-in
+historical codec vectors are preserved rather than regenerated for the new type.
+
+The changed plugin also compiles and links against the matching real 53.16-r3
+SDK (`0bf381cc1615656acf756e6e67573fffca715125`). The development binary SHA-256 is
+`da84fea2f1a96d278de7900f58cdece21029de9ec40320d79aca0480da682b8d`.
+That is actual SDK build evidence, not R1, a real-game intervention or admission.
+Exact clean source `7bba4d01debdc7069e081adb824a4ace4fa199b3` now passes
+43 local gates and the full verifier on TRJ: 5,124 debug and 5,124 release tests
+per command, zero failed or ignored. Independent source-receipt replay and all
+2,591 final hashes pass. Earlier failed source runs remain failed.
+
+The actual public MCP live10 replay suspends and resumes real job 3 under two
+separately reviewed keys. Parent checks 127 export hashes, fifteen modern
+exchanges, canonical native observations and both complete native receipt hashes.
+Captured state differs only by suspension `0 → 2 → 0`, with unchanged raw pause
+and game tick. The independent before/after scope is selected job/holder/queue,
+references, attachments, selected filters and world clock, not every game field.
+Operator setup constructs a real workshop and queues the job; it earns no MCP
+construction, produced-item or fortress-competence credit. Artifacts are under
+`target/reality-check-20261030/terra-live10-export`; independent replay is
+`target/bang-for-buck-20261031/live10-parent-review.json`. Development evidence
+does not grant compatibility or runtime admission.
+
+The earlier implementation record below describes its original synthetic run;
+it does not retroactively establish valid real-SDK acquisition.
 
 `python scripts/test_job_suspension_native.py --ubsan` and the same command with
 `--compiler clang++` each passed 397 C++ assertions in nine groups under C++17,
