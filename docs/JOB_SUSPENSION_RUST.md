@@ -1,5 +1,11 @@
 # Rust job-control/1.9 implementation status
 
+The later MCP consumer is documented in `JOB_CONTROL_MCP.md`. Its Rust source
+was included in the exact R21 full workspace qualification. Earlier unexecuted
+statements below retain the implementation-era record. The 2026-10-31 native
+repair enables the closed actual-SDK policy in `JOB_SUSPENSION_CONTROL.md`;
+fresh full-source qualification and real-game intervention remain separate.
+
 This isolated development extension connects the existing native job-suspension
 contract to Rust evidence, fixed RPC and durable coordination. It does not change
 existing native wire generations, read-only runtimes, the production runner map,
