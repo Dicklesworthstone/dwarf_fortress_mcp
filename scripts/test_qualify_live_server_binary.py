@@ -56,6 +56,8 @@ class Fixture:
         root: Path,
         fail_check: str | None = None,
         mutate_source_on_build: bool = False,
+        configured_target: bool = False,
+        fail_build: bool = False,
     ) -> None:
         self.root = root
         self.repo = root / "repo"
@@ -86,6 +88,11 @@ class Fixture:
         (self.repo / "scripts/qualify_live_server_binary.sh").chmod(0o755)
         (self.repo / "scripts/verify_live_server_binary_receipt.py").chmod(0o755)
         (self.repo / ".gitignore").write_text("/target/\n", encoding="utf-8")
+        if configured_target:
+            (self.repo / ".cargo").mkdir()
+            (self.repo / ".cargo/config.toml").write_text(
+                '[build]\ntarget = "fixture-target"\n', encoding="utf-8"
+            )
         run_git(self.repo, "init", "-q")
         run_git(self.repo, "config", "user.email", "fixture@example.invalid")
         run_git(self.repo, "config", "user.name", "Fixture")
@@ -97,7 +104,7 @@ class Fixture:
             self.commit,
         )
         self.write_local_receipt()
-        self.write_fake_tools(fail_check, mutate_source_on_build)
+        self.write_fake_tools(fail_check, mutate_source_on_build, fail_build)
 
     def local_receipt_value(self, failed_gate: str | None = None) -> dict[str, Any]:
         gates = []
@@ -139,6 +146,7 @@ class Fixture:
         self,
         fail_check: str | None,
         mutate_source_on_build: bool,
+        fail_build: bool,
     ) -> None:
         mutation = ""
         if mutate_source_on_build:
@@ -152,13 +160,26 @@ class Fixture:
             "if [ \"$1\" = \"--version\" ]; then echo 'cargo 1.99.0 fixture'; exit 0; fi\n"
             "if [ \"$1\" = \"build\" ]; then\n"
             f"{mutation}"
-            "  mkdir -p \"$PWD/target/release\"\n"
-            "  cat > \"$PWD/target/release/dwarf-fortress-mcp\" <<'EOF'\n"
+            + ("  exit 9\n" if fail_build else "")
+            + "  target_dir=${CARGO_TARGET_DIR:-$PWD/target}\n"
+            "  offline=no\n"
+            "  shift\n"
+            "  while [ $# -gt 0 ]; do\n"
+            "    if [ \"$1\" = \"--target-dir\" ]; then shift; target_dir=$1; fi\n"
+            "    if [ \"$1\" = \"--offline\" ]; then offline=yes; fi\n"
+            "    shift\n"
+            "  done\n"
+            "  echo fixture-offline=$offline\n"
+            "  target=${CARGO_BUILD_TARGET:-}\n"
+            "  if [ -z \"$target\" ] && [ -f .cargo/config.toml ]; then target=fixture-target; fi\n"
+            "  if [ -n \"$target\" ]; then target_dir=$target_dir/$target; fi\n"
+            "  mkdir -p \"$target_dir/release\"\n"
+            "  cat > \"$target_dir/release/dwarf-fortress-mcp\" <<'EOF'\n"
             "#!/bin/sh\n"
             f"if [ \"$1\" = \"{fail_check or '__never__'}\" ]; then echo forced failure >&2; exit 9; fi\n"
             "case \"$1\" in contract|doctor|demo) echo \"fixture-$1\";; *) exit 2;; esac\n"
             "EOF\n"
-            "  chmod 700 \"$PWD/target/release/dwarf-fortress-mcp\"\n"
+            "  chmod 700 \"$target_dir/release/dwarf-fortress-mcp\"\n"
             "  exit 0\n"
             "fi\n"
             "exit 2\n",
@@ -193,6 +214,98 @@ class Fixture:
 
 
 class QualifyLiveServerBinaryTests(unittest.TestCase):
+    def test_repository_qualifiers_are_directly_executable(self) -> None:
+        # Exercise the actual tracked entrypoints, not fixture copies whose modes
+        # are deliberately adjusted during setup. All arguments fail before any
+        # build, receipt publication, or native operation.
+        cases = {
+            "qualify_dfhack_plugin.sh": [],
+            "qualify_dfhack_plugin_v1_1.sh": [],
+            "qualify_live_announcement_source.sh": ["invalid", "arity"],
+            "qualify_live_announcements.sh": [],
+            "qualify_live_read.sh": [],
+            "qualify_live_server_binary.sh": [],
+        }
+        for name, arguments in cases.items():
+            with self.subTest(script=name):
+                script = ROOT / "scripts" / name
+                try:
+                    completed = subprocess.run(
+                        [os.fspath(script), *arguments], cwd=ROOT, text=True,
+                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10,
+                    )
+                except PermissionError as error:
+                    self.fail(f"{name} is not directly executable: {error}")
+                self.assertEqual(completed.returncode, 2, completed.stderr)
+                self.assertIn("Usage:", completed.stderr)
+                self.assertIn(name, completed.stderr)
+
+    @staticmethod
+    def seed_stale_binary(fixture: Fixture) -> Path:
+        binary = fixture.repo / "target/release/dwarf-fortress-mcp"
+        binary.parent.mkdir(parents=True, exist_ok=True)
+        binary.write_text(
+            '#!/bin/sh\ncase "$1" in contract|doctor|demo) echo stale-check;; *) exit 2;; esac\n',
+            encoding="utf-8",
+        )
+        binary.chmod(0o700)
+        return binary
+
+    def assert_no_built_binary(self, fixture: Fixture) -> None:
+        self.assertFalse((fixture.repo / "target/release/dwarf-fortress-mcp").exists())
+        self.assertFalse((fixture.output / "build-target/release/dwarf-fortress-mcp").exists())
+
+    def test_redirected_target_never_qualifies_stale_canonical_binary(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            fixture = Fixture(Path(temp))
+            stale = self.seed_stale_binary(fixture)
+            stale_hash = hashlib.sha256(stale.read_bytes()).hexdigest()
+            env = fixture.environment()
+            env["CARGO_TARGET_DIR"] = os.fspath(fixture.root / "ambient-target")
+            result = run(["bash", "scripts/qualify_live_server_binary.sh",
+                          os.fspath(fixture.local_receipt), os.fspath(fixture.output)],
+                         fixture.repo, env)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            receipt = json.loads((fixture.output / "live-server-binary-receipt.json").read_text())
+            binary = fixture.output / receipt["binary"]["relative_path"]
+            self.assertTrue(binary.is_file())
+            self.assertEqual(receipt["binary"]["sha256"], hashlib.sha256(binary.read_bytes()).hexdigest())
+            self.assertNotEqual(receipt["binary"]["sha256"], stale_hash)
+            self.assertEqual(hashlib.sha256(stale.read_bytes()).hexdigest(), stale_hash)
+            self.assertNotIn("stale-check", (fixture.output / "logs/contract.stdout").read_text())
+            self.assertIn("fixture-offline=yes", (fixture.output / "logs/build.stdout").read_text())
+
+    def test_configured_target_triple_cannot_fall_back_to_stale_binary(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            fixture = Fixture(Path(temp), configured_target=True)
+            self.seed_stale_binary(fixture)
+            result = fixture.qualify()
+            self.assertNotEqual(result.returncode, 0)
+            self.assertFalse((fixture.output / "live-server-binary-receipt.json").exists())
+            self.assertFalse((fixture.output / "logs/contract.stdout").exists())
+
+    def test_failed_build_never_checks_stale_canonical_binary(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            fixture = Fixture(Path(temp), fail_build=True)
+            self.seed_stale_binary(fixture)
+            result = fixture.qualify()
+            self.assertNotEqual(result.returncode, 0)
+            self.assertFalse((fixture.output / "live-server-binary-receipt.json").exists())
+            self.assertFalse((fixture.output / "logs/contract.stdout").exists())
+
+    def test_environment_target_triple_cannot_fall_back_to_stale_binary(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            fixture = Fixture(Path(temp))
+            self.seed_stale_binary(fixture)
+            env = fixture.environment()
+            env["CARGO_BUILD_TARGET"] = "fixture-target"
+            result = run(["bash", "scripts/qualify_live_server_binary.sh",
+                          os.fspath(fixture.local_receipt), os.fspath(fixture.output)],
+                         fixture.repo, env)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertFalse((fixture.output / "live-server-binary-receipt.json").exists())
+            self.assertFalse((fixture.output / "logs/contract.stdout").exists())
+
     def fixture(
         self,
         fail_check: str | None = None,
@@ -226,6 +339,10 @@ class QualifyLiveServerBinaryTests(unittest.TestCase):
                     stat.S_IMODE((fixture.output / "logs").stat().st_mode),
                     0o700,
                 )
+                self.assertEqual(
+                    stat.S_IMODE((fixture.output / "build-target").stat().st_mode),
+                    0o700,
+                )
                 self.assertEqual(stat.S_IMODE(receipt_path.stat().st_mode), 0o600)
                 self.assertEqual(
                     stat.S_IMODE((fixture.output / "SHA256SUMS").stat().st_mode),
@@ -238,7 +355,7 @@ class QualifyLiveServerBinaryTests(unittest.TestCase):
             fixture.output.mkdir()
             result = fixture.qualify()
             self.assertNotEqual(result.returncode, 0)
-            self.assertFalse((fixture.repo / "target/release/dwarf-fortress-mcp").exists())
+            self.assert_no_built_binary(fixture)
 
     def test_dirty_source_is_rejected_before_build(self) -> None:
         temporary, fixture = self.fixture()
@@ -246,7 +363,7 @@ class QualifyLiveServerBinaryTests(unittest.TestCase):
             (fixture.repo / "dirty.txt").write_text("dirty\n", encoding="utf-8")
             result = fixture.qualify()
             self.assertNotEqual(result.returncode, 0)
-            self.assertFalse((fixture.repo / "target/release/dwarf-fortress-mcp").exists())
+            self.assert_no_built_binary(fixture)
 
     def test_assume_unchanged_source_drift_is_rejected_before_build(self) -> None:
         temporary, fixture = self.fixture()
@@ -258,7 +375,7 @@ class QualifyLiveServerBinaryTests(unittest.TestCase):
             result = fixture.qualify()
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("bytes differ from HEAD", result.stderr)
-            self.assertFalse((fixture.repo / "target/release/dwarf-fortress-mcp").exists())
+            self.assert_no_built_binary(fixture)
 
     def test_non_private_local_receipt_is_rejected_before_build(self) -> None:
         temporary, fixture = self.fixture()
@@ -267,7 +384,7 @@ class QualifyLiveServerBinaryTests(unittest.TestCase):
             result = fixture.qualify()
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("mode 0600", result.stderr)
-            self.assertFalse((fixture.repo / "target/release/dwarf-fortress-mcp").exists())
+            self.assert_no_built_binary(fixture)
 
     def test_failed_local_gate_is_rejected_before_build(self) -> None:
         temporary, fixture = self.fixture()
@@ -275,7 +392,7 @@ class QualifyLiveServerBinaryTests(unittest.TestCase):
             fixture.write_local_receipt("clippy")
             result = fixture.qualify()
             self.assertNotEqual(result.returncode, 0)
-            self.assertFalse((fixture.repo / "target/release/dwarf-fortress-mcp").exists())
+            self.assert_no_built_binary(fixture)
 
     def test_source_drift_during_build_prevents_receipt(self) -> None:
         temporary, fixture = self.fixture(mutate_source_on_build=True)
