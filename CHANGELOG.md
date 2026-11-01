@@ -2,6 +2,25 @@
 
 ## 2026-11-01 — Withdraw failed-call item views and bound test setup
 
+- On exact qualified R28, live E exposes a new bed through fresh Wait and
+  same-anchor Query, then withdraws those rows after failed Observe. Independently
+  replay all 139 members, 23 modern exchanges, native journals and complete
+  before/after rosters. Two reviewed runs advance 1,200 and 743 ticks without
+  overshoot; original goal remains Unknown after order disappearance. Actual
+  five-file offline recovery and fresh host cleanup pass. Preserve D's earlier
+  failure and E's two operator diagnostic limitations; no admission follows.
+  Independent CC review accepts the original narrow `.5.2` item-view criteria
+  at R28; broader production and resource-family work remains open.
+- Wire entity-query discovery to a session-scoped entity resource consumer,
+  binding the exact entity generation and complete current anchor. Require
+  Query authority for the requested ID; preserve field presence and refuse
+  stale references or output that exceeds the negotiated bound. Preserve semantic
+  request IDs and pending goal history/custody on successful and denied reads.
+  Four new focused cases and the complete four-case modern stdio MCP target
+  pass, including the new entity lifecycle. Corrected old-production RED
+  detects the missing route; earlier test/setup failures remain retained.
+  Full exact-source qualification is pending. Broader
+  fortress, knowledge and memory resource families remain open.
 - Clean private R28 `e7b93a4` passes all 43 qualification gates and the
   separate verifier on the November 1 nightly: each 5,140 debug plus 5,140
   release cases, 123 targets per profile, zero failed or ignored. Parent

@@ -28,7 +28,7 @@ use crate::server::{
     active_session_count, anchor_json, authorize_entry, lookup_session, next_context,
     parse_session_id_arg, snapshot_json,
 };
-use dfmcp_core::{Capability, RiskTier};
+use dfmcp_core::{Capability, Digest32, EntityId, RiskTier, SessionId, StateAnchor};
 
 /// One template serves every session view. The pinned fastmcp router admits
 /// at most one template per compatible leading literal (`df://session/`), so
@@ -116,6 +116,135 @@ fn template_read_refusal() -> McpError {
     McpError::invalid_request(
         "capability_denied: df:// resources require a concrete session-scoped URI; \
          template URIs carry no authority",
+    )
+}
+
+fn entity_anchor_digest(anchor: StateAnchor) -> dfmcp_core::Result<Digest32> {
+    Ok(dfmcp_core::StateAnchorV2::from_v1(
+        anchor,
+        dfmcp_core::AnchorEpochs::laboratory(anchor.fortress_id),
+    )?
+    .digest())
+}
+
+/// Discovery uses the same complete anchor digest as the resource consumer.
+/// The URI is a reference, not an authority grant or a historical fallback.
+pub(crate) fn link_entity_resources(
+    payload: &mut Value,
+    session_id: SessionId,
+    anchor: StateAnchor,
+) -> dfmcp_core::Result<()> {
+    if payload.get("mode").and_then(Value::as_str) != Some("entities") {
+        return Ok(());
+    }
+    let digest = entity_anchor_digest(anchor)?.to_hex();
+    if let Some(rows) = payload.get_mut("rows").and_then(Value::as_array_mut) {
+        for row in rows {
+            if let (Some(id), Some(generation)) = (
+                row.get("entity_id").and_then(Value::as_str),
+                row.get("generation").and_then(Value::as_u64),
+            ) {
+                row["resource_uri"] = json!(format!(
+                    "df://session/{session_id}/entity-{id}~{generation}~{digest}"
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn session_entity(
+    session_id_hex: &str,
+    uri: &str,
+    view: &str,
+) -> McpResult<Vec<ResourceContent>> {
+    const OPERATION: &str = "df://session/entity";
+    let started = std::time::Instant::now();
+    // At most 20 ID digits, 10 generation digits and one 64-digit digest.
+    if view.len() > 104 {
+        return Err(McpError::invalid_params(
+            "entity reference exceeds its byte bound",
+        ));
+    }
+    let mut fields = view.strip_prefix("entity-").unwrap_or("").split('~');
+    let (Some(raw_id), Some(raw_generation), Some(raw_anchor), None) =
+        (fields.next(), fields.next(), fields.next(), fields.next())
+    else {
+        return Err(McpError::invalid_params(
+            "expected entity-{id}~{generation}~{anchor_digest}",
+        ));
+    };
+    let id = raw_id.parse::<u64>().map(EntityId::new).map_err(|_| {
+        McpError::invalid_params("entity ID must be a canonical nonzero decimal integer")
+    })?;
+    let generation = raw_generation.parse::<u32>().map_err(|_| {
+        McpError::invalid_params("entity generation must be a canonical decimal integer")
+    })?;
+    let requested_anchor = Digest32::from_hex(raw_anchor)
+        .filter(|digest| digest.to_hex() == raw_anchor)
+        .ok_or_else(|| {
+            McpError::invalid_params("entity anchor must be 64 lowercase hexadecimal digits")
+        })?;
+    if id == EntityId::NIL
+        || id.get().to_string() != raw_id
+        || generation.to_string() != raw_generation
+    {
+        return Err(McpError::invalid_params("noncanonical entity identity"));
+    }
+    if session_id_hex.len() != 32 || uri != format!("df://session/{session_id_hex}/{view}") {
+        return Err(McpError::invalid_params("noncanonical session entity URI"));
+    }
+    let session = lookup(session_id_hex, OPERATION)?;
+    crate::server::with_session_read(
+        &session,
+        |error| Err(denial(OPERATION, error)),
+        |guard| {
+            let ctx = crate::server::read_context(guard);
+            // Authorize the requested ID before inspecting its existence or generation.
+            ctx.authorize(Capability::Query, RiskTier::ReadOnly, &[id], None)
+                .map_err(|error| denial(OPERATION, error))?;
+            let snapshot = guard.adapter.snapshot();
+            let anchor = snapshot.anchor();
+            let current = entity_anchor_digest(anchor).map_err(|error| denial(OPERATION, error))?;
+            if current != requested_anchor {
+                return Err(McpError::invalid_request(
+                    "stale_anchor: entity reference does not name the current complete anchor; query fresh references",
+                ));
+            }
+            let entity = snapshot.graph.entities.get(&id).ok_or_else(|| {
+                McpError::invalid_request(
+                    "entity_unavailable: exact entity is unavailable at this anchor",
+                )
+            })?;
+            if entity.generation != generation {
+                return Err(McpError::invalid_request(
+                    "stale_anchor: entity generation changed; query fresh references",
+                ));
+            }
+            let payload = json!({
+                "ok": true, "schema": "dfmcp.lab-entity/1", "resource": uri,
+                "session_id": session_id_hex, "anchor": anchor_json(&anchor),
+                "anchor_digest": current.to_hex(),
+                "entity": crate::observation_projection::entity_json(entity),
+                "coverage": {"status": "complete_for_named_projection",
+                    "domain": "one_current_laboratory_entity", "absence_proof_scope": [],
+                    "live_dwarf_fortress": "unavailable"},
+            });
+            let serialized = payload.to_string();
+            let max_bytes = guard.budget.max_bytes.min(
+                u64::from(guard.budget.max_output_tokens)
+                    .saturating_mul(crate::output_budget::BYTES_PER_TOKEN as u64),
+            );
+            if task_resource_bytes(uri, &serialized) as u64 > max_bytes
+                || started.elapsed()
+                    >= std::time::Duration::from_millis(guard.budget.max_wall_millis)
+            {
+                return Err(McpError::invalid_request(
+                    "budget_exceeded: entity resource exceeds negotiated output bounds; no fields were silently omitted",
+                ));
+            }
+            Ok(text_content(uri, serialized))
+        },
     )
 }
 
@@ -560,7 +689,8 @@ const SESSION_VIEW_DESCRIPTION: &str = "Session views: summary (bounded snapshot
      (dfmcp.replay.bundle/1 of every recorded call for deterministic re-execution), anchor \
      (the session fortress's current canonical anchor), tasks and tasks-{offset} (bounded modern \
      MCP task handles, active first), task-{taskId} (original plan progress, cancellation drains \
-     and final evidence; laboratory process only)";
+     and final evidence; laboratory process only), entity-{id}~{generation}~{anchor_digest} \
+     (one Query-authorized entity at the exact current complete anchor, discovered in entity query rows)";
 
 impl ResourceHandler for SessionViewResource {
     fn definition(&self) -> Resource {
@@ -596,6 +726,7 @@ impl ResourceHandler for SessionViewResource {
             "handoff" => session_handoff(raw, uri),
             "replay" => session_replay(raw, uri),
             "anchor" => session_anchor(raw, uri),
+            entity if entity.starts_with("entity-") => session_entity(raw, uri, entity),
             "tasks" => session_tasks(raw, uri, 0),
             page if page.starts_with("tasks-") => {
                 let offset = page[6..].parse::<usize>().map_err(|_| {
@@ -912,5 +1043,214 @@ mod tests {
         );
         let doctor = DoctorBundleResource.template().expect("doctor template");
         assert_eq!(doctor.uri_template, "df://doctor/{session_id}");
+    }
+
+    fn entity_session() -> (String, Value) {
+        entity_session_at("1")
+    }
+
+    fn entity_session_at(fortress: &str) -> (String, Value) {
+        let opened: Value = serde_json::from_str(&crate::server::open_session_in_scenario(
+            Some(true),
+            Some(fortress.to_owned()),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some("starter_fortress".to_owned()),
+            None,
+            None,
+        ))
+        .expect("open starter session");
+        let session_id = session_id_of(&opened);
+        let page: Value = serde_json::from_str(&fortress_query(
+            Some(session_id.clone()),
+            Some(r#"{"mode":"entities","limit":2}"#.to_owned()),
+        ))
+        .expect("entity query JSON");
+        assert_eq!(page["ok"], true, "{page}");
+        (session_id, page)
+    }
+
+    fn entity_read(session: &str, uri: &str) -> McpResult<Vec<ResourceContent>> {
+        let view = uri.rsplit('/').next().expect("view");
+        session_entity(session, uri, view)
+    }
+
+    #[test]
+    fn entity_resource_discovers_and_reads_the_exact_canonical_record() {
+        let (session_id, page) = entity_session();
+        let row = &page["rows"][0];
+        let uri = row["resource_uri"]
+            .as_str()
+            .expect("query must discover resource");
+        let session = lookup(&session_id, "test").expect("session");
+        let request_before = next_context(&mut session.lock().expect("lock"))
+            .expect("context")
+            .0;
+        let first = entity_read(&session_id, uri).expect("authorized entity");
+        let second = entity_read(&session_id, uri).expect("repeatable read");
+        let request_after = next_context(&mut session.lock().expect("lock"))
+            .expect("context")
+            .0;
+        assert_eq!(
+            request_after,
+            request_before + 1,
+            "resource reads must not consume semantic call IDs"
+        );
+        assert_eq!(first[0].text, second[0].text);
+        let payload: Value =
+            serde_json::from_str(first[0].text.as_deref().expect("resource text")).expect("JSON");
+        let mut canonical = row.clone();
+        canonical
+            .as_object_mut()
+            .expect("row")
+            .remove("resource_uri");
+        assert_eq!(payload["entity"], canonical);
+        assert_eq!(payload["anchor"], page["anchor"]);
+        assert_eq!(payload["coverage"]["live_dwarf_fortress"], "unavailable");
+        assert_eq!(payload["coverage"]["absence_proof_scope"], json!([]));
+    }
+
+    #[test]
+    fn entity_resource_checks_scope_expiry_and_output_before_publishing() {
+        let (session_id, page) = entity_session();
+        let uri = page["rows"][0]["resource_uri"].as_str().expect("resource");
+        let id = EntityId::new(
+            page["rows"][0]["entity_id"]
+                .as_str()
+                .expect("id")
+                .parse()
+                .expect("numeric id"),
+        );
+        let session = lookup(&session_id, "test").expect("session");
+        let original = session.lock().expect("lock").grants.clone();
+        {
+            let mut guard = session.lock().expect("lock");
+            guard.grants.retain(|g| g.capability == Capability::Query);
+            for grant in &mut guard.grants {
+                grant.scope.entity_ids = [id].into();
+            }
+        }
+        assert!(
+            entity_read(&session_id, uri).is_ok(),
+            "exact entity grant must work"
+        );
+        let other = page["rows"][1]["resource_uri"]
+            .as_str()
+            .expect("second resource");
+        assert!(
+            entity_read(&session_id, other)
+                .expect_err("other entity denied")
+                .to_string()
+                .contains("capability_denied")
+        );
+        {
+            let mut guard = session.lock().expect("lock");
+            for grant in &mut guard.grants {
+                grant.expires_at_tick = Some(dfmcp_core::GameTick(0));
+            }
+        }
+        assert!(
+            entity_read(&session_id, uri)
+                .expect_err("expired grant denied")
+                .to_string()
+                .contains("capability_denied")
+        );
+        {
+            let mut guard = session.lock().expect("lock");
+            guard.grants = original;
+            guard.budget.max_bytes = 64;
+        }
+        assert!(
+            entity_read(&session_id, uri)
+                .expect_err("small output budget denied")
+                .to_string()
+                .contains("budget_exceeded")
+        );
+        session.lock().expect("lock").budget.max_bytes = 4 * 1024 * 1024;
+        assert!(
+            entity_read(&session_id, uri).is_ok(),
+            "same reference works when output fits"
+        );
+    }
+
+    #[test]
+    fn entity_resource_refuses_wrong_generation_fortress_epoch_and_malformed_handles() {
+        let (session_id, page) = entity_session();
+        let uri = page["rows"][0]["resource_uri"].as_str().expect("resource");
+        let fields: Vec<&str> = uri.rsplit('/').next().expect("view").split('~').collect();
+        let wrong_generation = format!(
+            "df://session/{session_id}/{}~4294967295~{}",
+            fields[0], fields[2]
+        );
+        assert!(
+            entity_read(&session_id, &wrong_generation)
+                .expect_err("generation denied")
+                .to_string()
+                .contains("stale_anchor")
+        );
+        let (same_fortress, _) = entity_session();
+        assert!(
+            entity_read(&same_fortress, &uri.replace(&session_id, &same_fortress)).is_ok(),
+            "a separately Query-authorized session can read its own identical fortress state"
+        );
+        let (other_session, other_page) = entity_session_at("2");
+        assert_ne!(
+            page["anchor"]["fortress_id"], other_page["anchor"]["fortress_id"],
+            "cross-fortress fixture must actually use different fortress identities"
+        );
+        let cross = uri.replace(&session_id, &other_session);
+        assert!(
+            entity_read(&other_session, &cross)
+                .expect_err("fortress-bound anchor denied")
+                .to_string()
+                .contains("stale_anchor")
+        );
+        for view in [
+            "entity-0~1~bad",
+            "entity-01~1~bad",
+            "entity-1~1",
+            "entity-1~1~bad~extra",
+            &format!("entity-{}", "x".repeat(105)),
+        ] {
+            let bad = format!("df://session/{session_id}/{view}");
+            assert!(entity_read(&session_id, &bad).is_err(), "{view}");
+        }
+        let checkpoint: Value =
+            serde_json::from_str(&fortress_checkpoint(Some(session_id.clone()), None))
+                .expect("checkpoint");
+        let restored: Value = serde_json::from_str(&fortress_restore(
+            Some(session_id.clone()),
+            checkpoint["checkpoint_id"]
+                .as_str()
+                .expect("checkpoint ID")
+                .to_owned(),
+        ))
+        .expect("restore");
+        assert_eq!(restored["ok"], true, "{restored}");
+        assert!(
+            entity_read(&session_id, uri)
+                .expect_err("old epoch denied even for same graph")
+                .to_string()
+                .contains("stale_anchor")
+        );
+        let fresh: Value = serde_json::from_str(&fortress_query(
+            Some(session_id.clone()),
+            Some("entities".to_owned()),
+        ))
+        .expect("fresh query");
+        assert!(
+            entity_read(
+                &session_id,
+                fresh["rows"][0]["resource_uri"]
+                    .as_str()
+                    .expect("fresh URI")
+            )
+            .is_ok()
+        );
     }
 }

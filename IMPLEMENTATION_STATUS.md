@@ -30,7 +30,26 @@ admission, or support. No protocol beyond 1.0 appears in the production runner m
 
 ## Evidence hierarchy
 
-### R28 latest-nightly source qualification and unsuccessful live recheck (2026-11-01)
+### Session entity resource consumer (scoped Rust checked; full qualification pending)
+
+Entity query results now discover session-scoped, generation- and complete-anchor-
+bound resource references. The actual resource handler checks Query authority for
+the requested entity, exact current V2 anchor, generation and wrapped output
+bounds before returning the existing presence-preserving entity projection.
+It has no historical fallback or ambient fortress route. Synchronized inspection
+fences current shared/durable ownership without running objective or persistence
+postludes. Four new component cases pass, including actual durable-file and
+pending-history preservation for successful and denied reads. The four-case
+external modern MCP target also passes, including its new fifteen-request
+entity discovery/read/restore lifecycle. The corrected external case first
+fails against unchanged R28 production at the missing template description.
+Initial catalog-oracle, compilation and fixture failures remain retained;
+no gate, assertion, timeout or source history is weakened. These are scoped
+development runs; exact clean-source full qualification remains pending.
+Broader `.11` resource-family acceptance stays open.
+This is laboratory source, not additional live-game or admission evidence.
+
+### R28 latest-nightly source qualification and bounded live rechecks (2026-11-01)
 
 Clean private `e7b93a40e6a74bcc425c0c6fec5729296907d2af` passes all
 43 qualification gates and the separate verifier on `nightly-2026-11-01`,
@@ -80,6 +99,44 @@ the evidence directory record these limits. Independent review closes only
 the exact repairs `.20`–`.24`; `.5.2`, original-goal proof, autonomous fortress
 competence and all admission work remain open. Operator workshop/manager setup
 is excluded from MCP gameplay credit.
+
+### E positive item publication and withdrawal (2026-11-01; exact R28 only)
+
+On the same qualified R28 source and sealed development executable, Terra's
+prospectively bounded E trial makes one original bed insertion and two separately
+reviewed clock runs. The runs advance 1,200 and 743 ticks with zero overshoot;
+the second stops on target absence. Fresh Wait and same-anchor Query expose
+BED 540, type 8, subtype -1, material 420/163, stack 1, in a complete 535-item
+roster. The complete 536-item baseline contains no bed. Independent Lua agrees
+on the full ID/type/material rosters and separately decodes cherry wood; public
+material classification and production attribution remain unknown; eligibility
+is not assessed.
+
+Late Observe returns the expected changed-source StaleAnchor. Query and Doctor
+then withhold the previously positive item rows, retain the anchor and original
+plan/review, and preserve Unknown for the disappeared original order. No further
+unpause occurs. Parent replay checks all 139 export members, 23 modern exchanges
+and timing records, three creation frames, fifteen clock frames and 42 goal
+frames containing six complete samples. Review-to-commit dispatch takes 8.695
+and 9.135 seconds; causally bounded preparation-to-commit intervals are below
+24 seconds, within the unchanged native 60-second lifetime. This does not
+establish why D's earlier second run was stale.
+
+Six offline exchanges preserve all five actual custody files and expose no
+current goal/items. Fresh parent checks prove stopped owned processes, closed
+port, five restored plugins and both exact 30-file saves. Host scans check all
+35 private values before export with zero matches. One operator configuration
+display violated instructions; those exact bytes also scan clean and are not
+exported. A pre-effect tutorial helper timeout lacks full retained stderr and
+earns no qualification credit. These incidents remain in the evidence.
+
+Exact replay and cleanup are in `target/fresh-eyes-20261101/production-e-parent-review.json`
+and `production-e-parent-cleanup.json`. E establishes bounded positive item
+publication and withdrawal at R28, not original-order completion, global
+quiescence, autonomous fortress competence, later-source or production admission.
+Independent CC review accepts all original `.5.2` criteria at R28; the coordinator
+records that narrow closure after checking its blocker and documentation
+conditions. The original `.5.1` goal and broader project goals remain open.
 
 ### R26 intermediate source qualification (2026-11-01)
 

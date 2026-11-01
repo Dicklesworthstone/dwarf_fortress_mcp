@@ -37,6 +37,21 @@ production artifact, compatibility or runtime admission evidence.
 
 ### R24 item-view qualification and verifier disagreement (2026-10-31)
 
+**Subsequent E result at exact R28:** parent independently replays 139 exports,
+23 modern exchanges and timing records, all native receipt/history chains and
+complete Lua/native rosters. A new BED 540 is visible in fresh Wait and
+same-anchor Query; failed Observe then causes Query and Doctor to withhold it.
+The original order disappears and its goal remains Unknown. Two reviewed runs
+advance 1,200 and 743 ticks without overshoot; actual five-file offline recovery
+and fresh parent host cleanup pass. Native TTL stays 60 seconds. The operator
+displayed a configuration contrary to instruction (exact bytes scan against 35
+private values with zero matches, no config export), and full stderr from one
+pre-effect UI timeout is unavailable. These limits are retained, not turned into
+qualification. D's unsuccessful trial stays unsuccessful; E is neither
+autonomous fortress competence nor later-source/admission evidence.
+Independent CC review accepts the original narrow `.5.2` item-view criteria at
+R28, after current Root blockers and the recorded E documentation are checked.
+
 **Fresh-review correction, November 1:** the R25 positive proof below remains
 valid for its exact bytes, but did not exercise failed Observe, Query regrant or
 all facade publication failures. Five newly executed regressions fail against

@@ -476,6 +476,22 @@ live DFHack campaign or compatibility admission. Current executed validation and
 
 ### Executed public item-view proof
 
+The new E trial at exact qualified R28 proves the positive and withdrawal path:
+fresh Wait and same-anchor Query return BED 540 in a complete 535-item roster;
+the complete 536-item baseline had no bed. Two separately reviewed runs advance
+1,200 and 743 ticks with zero overshoot. After changed-source Observe refuses,
+Query and Doctor preserve the original goal and anchor while returning unknown
+item coverage with no rows. The removed original order remains Unknown, and
+public wood classification/eligibility/attribution remain unproved. Parent
+replay checks 139 exports, all 23 modern exchanges and native receipt/history
+hashes. Six actual-file offline exchanges preserve all five custody hashes;
+fresh host checks prove complete cleanup. The timed client retains full raw
+frames and makes review practical without changing native TTL or automating
+confirmation. Pre-effect configuration-display and UI-timeout diagnostic
+limitations remain explicitly recorded in `IMPLEMENTATION_STATUS.md`.
+Independent CC review accepts the original `.5.2` criteria at this exact R28
+source; this does not close the original-order or broader production goals.
+
 The current source repair is Rust-qualified at clean private R28
 `e7b93a40e6a74bcc425c0c6fec5729296907d2af`, on the November 1 nightly.
 Both required commands pass 5,140 debug and 5,140 release cases each, zero
@@ -490,7 +506,8 @@ false. The positive nonempty item and late changed-source probes remain unachiev
 Six actual-file offline exchanges preserve all five custody hashes and withhold
 current goal/items. Parent replay checks all 105 exports and fresh host cleanup
 confirms owned processes stopped, port closed, five plugins restored and both
-30-file saves exact. `.5.2` remains open. The earlier C result below is historical;
+30-file saves exact. D did not complete `.5.2`; the later E proof above does.
+The earlier C result below is historical;
 neither operator setup nor scoped safety proof establishes fortress competence.
 
 Fresh review on November 1 found failed-call invalidation omissions in R25;
