@@ -461,10 +461,11 @@ qualified goal sample is required. Error and close packets preserve recovery
 identities while withholding copied item rows. The later canonical-observation
 floor guard rejects a reacquisition below a published anchor, a consumed goal
 cursor or native tick before rebinding planning evidence. Three `.23`
-regressions fail on the original source; all 2,825 repaired MCP component cases
-pass, including prepared-runtime reconstruction over memory-backed codecs and
-fresh forward observations. The guard's own exact-source full qualification
-on the newer nightly remains pending; the R26 evidence below does not cover it.
+regressions fail on the original source; all 2,825 R27 MCP component cases pass,
+including prepared-runtime reconstruction over memory-backed codecs and fresh
+forward observations. Its newer-nightly qualifier subsequently fails Clippy
+before full Rust tests or a server build. The next repaired source still needs
+its own full qualification; the R26 evidence below does not cover it.
 
 The component tests execute the real original-plan compiler, semantic/native
 and clock coordinators, durable goal monitor and private-file open modes with

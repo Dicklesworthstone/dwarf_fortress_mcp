@@ -2436,8 +2436,7 @@ pub(crate) fn open_session_in_scenario(
         ("restore".to_owned(), "guarded".to_owned()),
         ("doctor".to_owned(), "read_only".to_owned()),
     ];
-    let requested_caps_raw =
-        requested_capabilities.map_or_else(|| default_caps, |capabilities| capabilities);
+    let requested_caps_raw = requested_capabilities.unwrap_or(default_caps);
     let requested_caps = match parse_capability_request(&requested_caps_raw) {
         Ok(value) => value,
         Err(error) => return dfmcp_error_payload("fortress.open_session", &error),

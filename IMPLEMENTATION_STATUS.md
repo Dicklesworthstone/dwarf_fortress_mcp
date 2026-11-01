@@ -51,6 +51,26 @@ is intentionally reused for the next regression/fix; R26's immutable commit,
 bundle and receipts remain historical. The shared head, native R1, campaign,
 compatibility and production/runtime admission are not qualified by this run.
 
+### R27 latest-nightly qualification failure (2026-11-01)
+
+Clean private `3c84cb136ae8c4d53a8e41efdecf9f859d365ef5` fails the
+warning-denied Clippy gate on separately installed `nightly-2026-11-01`,
+`rustc 1.101.0-nightly (f9ceb4a4d 2026-10-31)`. The diagnostic is an
+unnecessary lazy default-capability selection in laboratory session opening.
+Earlier gates and rustfmt pass; full Rust tests, the separate verifier and
+the server build remain unrun. The final source check still verifies all
+2,592 files and clean HEAD. Failed receipt SHA-256 is
+`6b3f7559c372cd2ebc066f50ef595f1fed7ac96563a0554524e403f125422835`.
+No R27 server artifact is sealed and no live trial starts from that run.
+
+Bead `.24` owns the equivalent eager selection of the already-constructed
+default capability vector. Independent source review confirms omitted,
+explicit-empty and explicit capability requests retain their previous meaning;
+parsing, risk and scope checks are unchanged. No lint suppression, gate,
+budget, profile, dependency or test change is used. The next source requires
+its own complete latest-nightly qualification and verifier. The earlier R26
+receipt remains evidence only for its exact source and older named compiler.
+
 ### Fresh review repairs (2026-11-01; unqualified source changes)
 
 A further source pass identifies canonical Observe reusing an old original
@@ -60,14 +80,15 @@ against unchanged R26 production code and fail: a late error has already
 rolled sequence 2 back to 1, a backwards tick returns a successful view, and
 an observation rebinds old planning evidence below a consumed native tick
 before a monitor exists. The repaired guard rejects before canonical anchor
-assignment, including consumed monitor and native authority floors. The full
-repaired MCP library passes 2,825 cases, zero failed or ignored, including the
+assignment, including consumed monitor and native authority floors. Before the
+later equivalent capability-selection edit, R27's full MCP library passes
+2,825 cases, zero failed or ignored, including the
 three new regressions, failed-monitor consumption and fresh forward progress.
 Legitimate prepared reacquisition includes reconstructing the runtime and
 reopening its real journal/archive code over memory-backed byte fixtures;
-this component case does not establish filesystem durability. A newer nightly
-is available, so the next exact-source full qualification will use a separate
-dated toolchain installation while preserving the shared nightly alias.
+this component case does not establish filesystem durability. Its newer-nightly
+qualification failure is retained above; the next source must pass using the
+separate dated toolchain while preserving the shared nightly alias.
 The frozen R26 qualification above does not cover this later fix. Fresh live
 execution is held until the next repaired source has its own evidence;
 `.5.2` remains open.

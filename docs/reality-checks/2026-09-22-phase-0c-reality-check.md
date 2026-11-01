@@ -41,6 +41,16 @@ and fresh live execution remain pending; R26 covers neither. The prepared
 recovery component uses memory-backed codecs, not a physical-file reopen. See
 `target/fresh-eyes-20261101/TODO.md`; no later-byte admission is inferred.
 
+That next clean R27 source, `3c84cb136ae8c4d53a8e41efdecf9f859d365ef5`,
+fails warning-denied Clippy on the separately installed November 1 nightly.
+The existing laboratory capability default uses a redundant lazy closure.
+All full Rust tests, the separate verifier, server build and live D are unrun;
+the final 2,592-file source check remains clean. The failed receipt and raw
+diagnostic are retained. Bead `.24` changes only the equivalent eager fallback,
+with independently reviewed default/explicit/empty semantics and unchanged
+authority. The next source needs complete checks; no warning, gate, budget,
+profile or test is weakened and no R27 artifact or live proof is invented.
+
 Exact private `2f724b90eab986c3fa913fa99e2fd91bfcae3a29` adds a bounded,
 separately authorized read-only furniture view while preserving the original
 goal policy and history. Twenty focused cases and all 43 qualification gates

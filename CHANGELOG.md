@@ -2,11 +2,18 @@
 
 ## 2026-11-01 — Withdraw failed-call item views and bound test setup
 
+- Preserve the failed R27 latest-nightly Clippy receipt and all raw output;
+  full Rust tests, verifier, server build and live trial are unrun. Replace
+  only the redundant lazy default-capability selection with its equivalent
+  eager fallback. Independent review confirms omitted, explicit-empty and
+  explicit requests retain their meaning. No warning suppression or gate,
+  profile, budget, dependency or test change; next exact-source qualification
+  remains pending.
 - Further review adds a pre-publication cursor/tick/state-identity floor guard
   to canonical Observe, including failed goal-acquisition cursor reservations.
   Three actual original-source regressions fail on late-error cursor rollback,
   backwards tick publication and old planning evidence below a consumed native
-  tick. The repaired MCP library passes all 2,825 cases, zero failed or ignored,
+  tick. R27's repaired MCP library passes all 2,825 cases, zero failed or ignored,
   including prepared-runtime reconstruction over memory-backed codecs and
   forward progress. Its own full qualification on the newer nightly remains
   pending; completed R26 qualification does not cover the later guard and
