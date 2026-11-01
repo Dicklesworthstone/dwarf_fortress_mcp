@@ -17,6 +17,20 @@ are retained as history, with explicit residual work rather than silent completi
 
 ### R24 item-view qualification and verifier disagreement (2026-10-31)
 
+**Fresh-review correction, November 1:** the R25 positive proof below remains
+valid for its exact bytes, but did not exercise failed Observe, Query regrant or
+all facade publication failures. Five newly executed regressions fail against
+unchanged R25 production code with old `complete` item views where `unknown` is
+required. `.5.2` is reopened, blocked by `.22`; `.20` is reopened for direct
+socket-test setup outside its I/O deadline. Current source repairs preserve
+the original goal/history policy and authority, withdraw optional rows across
+failed acquisition/inspection and the real facade's three checkpoints, and
+bound test setup without changing production limits. Eight standalone Python
+reference-checker regressions pass; the additional facade mutant actually fails,
+and restored source passes 2,822 MCP plus 1,292 adapter library tests, zero failed
+or ignored. Full exact-source qualification and fresh live evidence remain pending. See
+`target/fresh-eyes-20261101/TODO.md`; no later-byte admission is inferred.
+
 Exact private `2f724b90eab986c3fa913fa99e2fd91bfcae3a29` adds a bounded,
 separately authorized read-only furniture view while preserving the original
 goal policy and history. Twenty focused cases and all 43 qualification gates

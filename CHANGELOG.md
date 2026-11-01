@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-11-01 — Withdraw failed-call item views and bound test setup
+
+- Preserve five executed regressions failing on unchanged R25 production code:
+  failed Observe/source/budget, Query revocation/regrant, final presentation
+  authority and unverified copied rows. Reopen `.5.2` and `.20` for discovered
+  omissions; keep their prior positive evidence and failures intact.
+- Invalidate optional item rows on failed acquisition, inspection and the real
+  facade's pre/post-dispatch checks. Recheck optional authority after custody
+  I/O and mask copied rows in unverified error/close output. Preserve original
+  goal/history policy, recovery identities, effect authority and native wire.
+- Bound direct TCP fixture setup, including transient nonblocking accept, with
+  unchanged I/O and production limits. Fix the standalone reference checker's
+  rustfmt sensitivity; eight Python source-shape/mutation tests pass. The
+  outer-boundary mutant fails as intended; restored source passes all 2,822 MCP
+  and 1,292 adapter library tests, zero failed or ignored. Full exact-source
+  qualification and fresh live proof remain pending for these unqualified source changes.
+
 ## 2026-10-31 — Prove the public item view against the actual game
 
 - On qualified R25's exact development executable, Terra inserts one reviewed

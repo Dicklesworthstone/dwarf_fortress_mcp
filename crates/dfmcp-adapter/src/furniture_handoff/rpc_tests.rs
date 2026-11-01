@@ -273,20 +273,40 @@ impl Write for PeerIo<'_> {
         self.socket.flush()
     }
 }
-#[test]
-fn peer_io_preserves_partial_reads_and_bounds_cancel_deadline_and_eof() -> io::Result<()> {
+fn connected_test_pair() -> io::Result<(TcpStream, TcpStream)> {
     let listener = TcpListener::bind("127.0.0.1:0")?;
     let address = listener.local_addr()?;
+    listener.set_nonblocking(true)?;
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let stream = TcpStream::connect_timeout(&address, Duration::from_secs(2))?;
+    stream.set_write_timeout(Some(Duration::from_secs(2)))?;
+    loop {
+        if Instant::now() >= deadline {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "test pair setup deadline",
+            ));
+        }
+        match listener.accept() {
+            Ok((socket, _)) => return Ok((stream, socket)),
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                thread::sleep(Duration::from_millis(1))
+            }
+            Err(error) => return Err(error),
+        }
+    }
+}
+#[test]
+fn peer_io_preserves_partial_reads_and_bounds_cancel_deadline_and_eof() -> io::Result<()> {
+    let (mut stream, mut socket) = connected_test_pair()?;
     thread::scope(|scope| {
         let sender = scope.spawn(move || -> io::Result<()> {
-            let mut stream = TcpStream::connect(address)?;
             stream.write_all(b"ab")?;
             thread::sleep(Duration::from_millis(160));
             stream.write_all(b"cd")?;
             thread::sleep(Duration::from_millis(100));
             Ok(())
         });
-        let (mut socket, _) = listener.accept()?;
         let stop = AtomicBool::new(false);
         let mut peer = PeerIo {
             socket: &mut socket,
@@ -308,8 +328,7 @@ fn peer_io_preserves_partial_reads_and_bounds_cancel_deadline_and_eof() -> io::R
             io::ErrorKind::TimedOut
         );
         sender.join().unwrap()?;
-        let mut sender = TcpStream::connect(address)?;
-        let (mut socket, _) = listener.accept()?;
+        let (mut sender, mut socket) = connected_test_pair()?;
         sender.write_all(b"a")?;
         sender.shutdown(std::net::Shutdown::Write)?;
         let mut peer = PeerIo {

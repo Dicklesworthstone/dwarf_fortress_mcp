@@ -5,7 +5,7 @@
 use crate::semantic_work_order_runtime::clock::RunRequest;
 use crate::semantic_work_order_runtime::{
     Config, MAX_BYTES, MAX_GAME_TICKS, MAX_OUTPUT_TOKENS, MAX_WALL_MILLIS, Mode, NativeRuntime,
-    Request, View, digest,
+    Request, Runtime, Shell, View, digest,
 };
 use dfmcp_core::{
     DfmcpError, Digest32, ErrorCode, OperationContext, RequestId, Result, SessionId, WorkBudget,
@@ -75,7 +75,7 @@ impl Action {
     fn may_control_clock(&self) -> bool {
         matches!(self, Self::CommitRun { .. } | Self::CancelRun)
     }
-    fn perform(self, runtime: &mut NativeRuntime, c: &OperationContext) -> Result<View> {
+    fn perform<S: Shell>(self, runtime: &mut Runtime<S>, c: &OperationContext) -> Result<View> {
         match self {
             Self::Observe => runtime.observe(c),
             Self::Inspect => runtime.inspect(c),
@@ -303,6 +303,117 @@ fn render(
     )
 }
 
+struct CallOutcome {
+    request: Option<RequestId>,
+    view: Result<View>,
+    attempted_insertion: bool,
+    attempted_clock: bool,
+}
+
+// The same bounded call boundary is used by the native facade and injected
+// runtime tests. A failed outer check also invalidates optional observations,
+// including when failure precedes dispatch or follows a published transition.
+fn perform_bound_call<S: Shell>(
+    runtime: &mut Runtime<S>,
+    last_view: &mut Option<Value>,
+    started: Instant,
+    wall: Option<u64>,
+    action: impl FnOnce() -> Result<Action>,
+    mut checkpoint: impl FnMut() -> Result<()>,
+) -> CallOutcome {
+    let mut request = None;
+    let mut attempted_insertion = false;
+    let mut attempted_clock = false;
+    let view = (|| -> Result<View> {
+        checkpoint()?;
+        let mut context = runtime.context(false)?;
+        request = Some(context.request_id);
+        let total = wall
+            .unwrap_or(runtime.budget().max_wall_millis)
+            .min(runtime.budget().max_wall_millis);
+        if total == 0 {
+            return Err(error(
+                ErrorCode::InvalidRequest,
+                "wall budget must be nonzero",
+            ));
+        }
+        context.budget.max_wall_millis = context
+            .budget
+            .max_wall_millis
+            .min(remaining_millis(started, total)?);
+        let action = action()?;
+        checkpoint()?;
+        context.budget.max_wall_millis = context
+            .budget
+            .max_wall_millis
+            .min(remaining_millis(started, total)?);
+        attempted_insertion = action.may_insert();
+        attempted_clock = action.may_control_clock();
+        let view = action.perform(runtime, &context)?;
+        // Recovery identities survive a later failed publication check. They
+        // do not retain permission to present old optional observations.
+        *last_view = Some(view.to_json());
+        checkpoint()?;
+        remaining_millis(started, total)?;
+        Ok(view)
+    })();
+    if view.is_err() {
+        runtime.invalidate_item_presentation();
+    }
+    CallOutcome {
+        request,
+        view,
+        attempted_insertion,
+        attempted_clock,
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn test_bound_query<S: Shell>(
+    runtime: &mut Runtime<S>,
+    last_view: &mut Option<Value>,
+    fail_checkpoint: usize,
+) -> String {
+    let mut checks = 0;
+    let outcome = perform_bound_call(
+        runtime,
+        last_view,
+        Instant::now(),
+        None,
+        || Ok(Action::Inspect),
+        || {
+            checks += 1;
+            if checks == fail_checkpoint {
+                Err(error(
+                    ErrorCode::CancellationRequested,
+                    "injected publication checkpoint",
+                ))
+            } else {
+                Ok(())
+            }
+        },
+    );
+    let result = match outcome.view {
+        Ok(view) => {
+            let mut value = view.to_json();
+            value["retained_state_currently_verified"] = json!(true);
+            value
+        }
+        Err(cause) => failure(&cause, outcome.attempted_insertion, outcome.attempted_clock),
+    };
+    packet(
+        "fortress.query",
+        Some(runtime.session_id()),
+        Some(runtime.anchor()),
+        Some(runtime.mode().as_str()),
+        outcome.request,
+        Some(runtime.budget()),
+        result,
+        last_view.clone(),
+        false,
+    )
+}
+
 fn with_session(
     raw: String,
     operation: &str,
@@ -322,55 +433,24 @@ fn with_session(
                     "semantic session absent or closed",
                 )
             })?;
-        let mut request = None;
-        let mut attempted_insertion = false;
-        let mut attempted_clock = false;
-        let outcome = (|| -> Result<View> {
-            runtime_io()?;
-            validate_environment()?;
-            let mut context = state.runtime.context(false)?;
-            request = Some(context.request_id);
-            let total = wall
-                .unwrap_or(state.runtime.budget().max_wall_millis)
-                .min(state.runtime.budget().max_wall_millis);
-            if total == 0 {
-                return Err(error(
-                    ErrorCode::InvalidRequest,
-                    "wall budget must be nonzero",
-                ));
-            }
-            context.budget.max_wall_millis = context
-                .budget
-                .max_wall_millis
-                .min(remaining_millis(started, total)?);
-            let action = action()?;
-            runtime_io()?;
-            validate_environment()?;
-            context.budget.max_wall_millis = context
-                .budget
-                .max_wall_millis
-                .min(remaining_millis(started, total)?);
-            attempted_insertion = action.may_insert();
-            attempted_clock = action.may_control_clock();
-            let view = action.perform(&mut state.runtime, &context)?;
-            // Preserve newly published recovery seals even if the caller is
-            // cancelled before response publication. The error projection will
-            // still mark this cache unverified and cannot authorize control.
-            state.last_view = Some(view.to_json());
-            // A completed effect is not undone when cancellation or authority
-            // changes during the call. Such a response retains uncertainty.
-            runtime_io()?;
-            validate_environment()?;
-            remaining_millis(started, total)?;
-            Ok(view)
-        })();
+        let outcome = perform_bound_call(
+            &mut state.runtime,
+            &mut state.last_view,
+            started,
+            wall,
+            action,
+            || {
+                runtime_io()?;
+                validate_environment()
+            },
+        );
         Ok(render(
             state,
             operation,
-            request,
-            outcome,
-            attempted_insertion,
-            attempted_clock,
+            outcome.request,
+            outcome.view,
+            outcome.attempted_insertion,
+            outcome.attempted_clock,
         ))
     })();
     result.unwrap_or_else(|cause| unbound(operation, &cause))

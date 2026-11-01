@@ -177,11 +177,23 @@ fn next_clock(tool: &str, reason: &str, arguments: Value, confirm: bool) -> Valu
         arguments,
     )
 }
-fn finish(mut turn: Value, result: Value, retained: Option<&Value>, verified: bool) -> String {
+fn finish(mut turn: Value, mut result: Value, retained: Option<&Value>, verified: bool) -> String {
     // The shared builder adds ambient production provenance. This isolated
     // development profile must also remove it from refusals and overflow paths.
     if let Some(briefing) = turn["briefing"].as_object_mut() {
         briefing.remove("admission");
+    }
+    let retained = retained.map(|view| {
+        let mut value = view.clone();
+        if !verified && value.get("item_observations").is_some() {
+            value["item_observations"] =
+                crate::semantic_work_order_runtime::unavailable_item_observations();
+        }
+        value
+    });
+    if !verified && result.get("item_observations").is_some() {
+        result["item_observations"] =
+            crate::semantic_work_order_runtime::unavailable_item_observations();
     }
     json!({"agent_turn":turn,"result":result,"retained_state":retained,
         "retained_state_currently_verified":verified})

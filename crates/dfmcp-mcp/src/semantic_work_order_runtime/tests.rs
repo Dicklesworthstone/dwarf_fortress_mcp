@@ -1082,6 +1082,160 @@ fn changed_item_source_generation_clears_the_previous_presentation() -> Result<(
     );
     Ok(())
 }
+
+fn assert_failed_observe_withdraws_items(budget_failure: bool) -> Result<()> {
+    let resources = Resources::new()?;
+    let mut runtime = start(&resources)?;
+    let prepared = prepare(&mut runtime, "wooden_bed")?;
+    let c = runtime.context(false)?;
+    runtime.commit(prepared.review.as_ref().expect("review").seal(), true, &c)?;
+    resources.item_count.set(1);
+    resources.advance(10, 4)?;
+    let c = runtime.context(false)?;
+    let before = runtime.wait(&c)?;
+    assert_eq!(before.to_json()["item_observations"]["returned"], 1);
+    let mut failed = runtime.context(false)?;
+    if budget_failure {
+        failed.budget.max_bytes = 1;
+    }
+    let error = runtime.observe(&failed).expect_err("failed canonical read");
+    assert_eq!(
+        error.code,
+        if budget_failure {
+            ErrorCode::BudgetExceeded
+        } else {
+            ErrorCode::StaleAnchor
+        }
+    );
+    let c = runtime.context(false)?;
+    let after = runtime.inspect(&c)?;
+    assert_eq!(after.anchor, before.anchor);
+    assert_eq!(after.original, before.original);
+    assert_eq!(
+        after.to_json()["current_goal"],
+        before.to_json()["current_goal"]
+    );
+    assert_eq!(after.to_json()["item_observations"]["coverage"], "unknown");
+    assert_eq!(after.to_json()["item_observations"]["returned"], 0);
+    resources.advance(10, 3)?;
+    let c = runtime.context(false)?;
+    let fresh = runtime.wait(&c)?.to_json();
+    assert_eq!(fresh["item_observations"]["coverage"], "complete");
+    assert_eq!(fresh["item_observations"]["returned"], 1);
+    assert_eq!(resources.native.borrow().commits, 1);
+    Ok(())
+}
+
+#[test]
+fn failed_observe_source_change_withdraws_items_until_a_new_goal_sample() -> Result<()> {
+    assert_failed_observe_withdraws_items(false)
+}
+
+#[test]
+fn failed_observe_budget_withdraws_items_until_a_new_goal_sample() -> Result<()> {
+    assert_failed_observe_withdraws_items(true)
+}
+
+#[test]
+fn query_authority_loss_cannot_revive_items_on_regrant() -> Result<()> {
+    let resources = Resources::new()?;
+    let mut runtime = start(&resources)?;
+    let prepared = prepare(&mut runtime, "wooden_bed")?;
+    let c = runtime.context(false)?;
+    runtime.commit(prepared.review.as_ref().expect("review").seal(), true, &c)?;
+    resources.item_count.set(1);
+    resources.advance(10, 4)?;
+    let c = runtime.context(false)?;
+    assert_eq!(
+        runtime.wait(&c)?.to_json()["item_observations"]["returned"],
+        1
+    );
+    let mut revoked = runtime.context(false)?;
+    revoked
+        .grants
+        .retain(|grant| grant.capability != Capability::Query);
+    assert_eq!(
+        runtime.inspect(&revoked).expect_err("query denied").code,
+        ErrorCode::CapabilityDenied
+    );
+    let c = runtime.context(false)?;
+    let after = runtime.inspect(&c)?.to_json();
+    assert_eq!(after["item_observations"]["coverage"], "unknown");
+    assert_eq!(after["item_observations"]["returned"], 0);
+    assert_eq!(after["original_plan"], prepared.to_json()["original_plan"]);
+    Ok(())
+}
+
+#[test]
+fn final_item_presentation_authority_is_rechecked_after_custody_inspection() -> Result<()> {
+    let resources = Resources::new()?;
+    let mut runtime = start(&resources)?;
+    let prepared = prepare(&mut runtime, "wooden_bed")?;
+    let c = runtime.context(false)?;
+    runtime.commit(prepared.review.as_ref().expect("review").seal(), true, &c)?;
+    resources.item_count.set(1);
+    resources.advance(10, 4)?;
+    let c = runtime.context(false)?;
+    assert_eq!(
+        runtime.wait(&c)?.to_json()["item_observations"]["returned"],
+        1
+    );
+    resources
+        .item_grant_limit
+        .set(resources.item_authorizations.get() + 1);
+    let c = runtime.context(false)?;
+    let after = runtime.inspect(&c)?.to_json();
+    assert_eq!(after["item_observations"]["coverage"], "unknown");
+    assert_eq!(after["item_observations"]["returned"], 0);
+    assert_eq!(after["current_goal_available"], true);
+    Ok(())
+}
+
+#[test]
+fn facade_checkpoint_failures_cannot_revive_items_before_or_after_dispatch() -> Result<()> {
+    for checkpoint in [1, 2, 3] {
+        let resources = Resources::new()?;
+        let mut runtime = start(&resources)?;
+        let prepared = prepare(&mut runtime, "wooden_bed")?;
+        let c = runtime.context(false)?;
+        runtime.commit(prepared.review.as_ref().expect("review").seal(), true, &c)?;
+        resources.item_count.set(1);
+        resources.advance(10, 4)?;
+        let c = runtime.context(false)?;
+        let before = runtime.wait(&c)?.to_json();
+        assert_eq!(before["item_observations"]["returned"], 1);
+        let mut retained = Some(before.clone());
+        let failed: Value =
+            serde_json::from_str(&crate::live_semantic_work_orders_server::test_bound_query(
+                &mut runtime,
+                &mut retained,
+                checkpoint,
+            ))
+            .expect("complete failed packet");
+        assert_eq!(failed["result"]["ok"], false);
+        assert_eq!(failed["retained_state"]["item_observations"]["returned"], 0);
+        assert_eq!(failed["retained_state"]["recovery"], before["recovery"]);
+        let query: Value =
+            serde_json::from_str(&crate::live_semantic_work_orders_server::test_bound_query(
+                &mut runtime,
+                &mut retained,
+                0,
+            ))
+            .expect("complete recovered query");
+        assert_eq!(query["result"]["ok"], true);
+        assert_eq!(query["result"]["item_observations"]["coverage"], "unknown");
+        assert_eq!(query["result"]["item_observations"]["returned"], 0);
+        assert_eq!(query["result"]["original_plan"], before["original_plan"]);
+        resources.advance(10, 3)?;
+        let c = runtime.context(false)?;
+        assert_eq!(
+            runtime.wait(&c)?.to_json()["item_observations"]["returned"],
+            1
+        );
+        assert_eq!(resources.native.borrow().commits, 1);
+    }
+    Ok(())
+}
 #[test]
 fn exact_restart_preserves_historical_achievement_without_current_truth_or_dispatch() -> Result<()>
 {

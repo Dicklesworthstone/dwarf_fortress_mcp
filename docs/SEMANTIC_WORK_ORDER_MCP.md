@@ -464,6 +464,14 @@ live DFHack campaign or compatibility admission. Current executed validation and
 
 ### Executed public item-view proof
 
+Fresh review on November 1 found failed-call invalidation omissions in R25;
+the positive trial below did not exercise those paths. Current source withdraws
+item rows after failed Observe/Query or facade publication checks, and copied
+error/close state exposes no old item rows. Five regressions fail against the
+old production code. Exact qualification and fresh live verification of the
+repair remain pending in `IMPLEMENTATION_STATUS.md`; original-goal proof and
+native authority have not changed.
+
 On exact qualified private R25 `bc5bcdfe28a895f9334fd8a116270be36650ee3a`,
 Terra uses the actual development executable
 `72f29e709a2fe40219e571390070e6e2918e6c19fc7cc52d6c3193a31ea4ba36`

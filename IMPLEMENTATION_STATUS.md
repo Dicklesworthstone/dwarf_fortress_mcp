@@ -30,6 +30,43 @@ admission, or support. No protocol beyond 1.0 appears in the production runner m
 
 ## Evidence hierarchy
 
+### Fresh review repairs (2026-11-01; unqualified source changes)
+
+Fresh review of R25 found that failed canonical Observe and denied Query could
+retain an old complete item view, optional authorization was not repeated after
+custody I/O, and an unverified response could copy old item rows. A separate
+review found outer facade checks could also leave rows available after regrant.
+Five new component cases actually execute against unchanged R25 production code
+and fail at `complete` versus `unknown`; their raw logs are retained under
+`target/fresh-eyes-20261101/`. The original successful R25 checks and C evidence
+remain historical; they did not cover these failed-call paths. Bead `.5.2` is
+reopened and blocked by `.22` rather than retaining the earlier broad closure.
+
+The source repair invalidates optional item presentation on acquisition and
+inspection failure, rechecks presentation authority after custody I/O, and uses
+the same bounded facade call function to invalidate after pre/post-dispatch
+checks fail. Unverified error/close copies withhold rows while preserving exact
+recovery identities. Original goal policy, history, deadlines, effect authority
+and native protocols are unchanged. A sixth component regression exercises all
+three actual facade checkpoints and requires a new qualified sample before rows
+return. Disabling its invalidation makes that sixth test actually fail. Restored
+source passes the full 2,822-case MCP library and 1,292-case adapter library,
+zero failed or ignored; all six new cases execute. These dirty development runs
+are not full exact-source qualification or a fresh live trial.
+
+The direct TCP test setups now bound connect/write and retry nonblocking accept
+only until one fixed setup deadline. Bead `.20` is reopened for this setup gap;
+the existing server-peer and production deadlines and all positive oracles are
+preserved. The standalone, non-aggregate work-order reference checker now accepts
+rustfmt layout while rejecting wrong credential placement and comment/string
+spoofs; eight Python regressions pass. A later raw-string spoof first makes one
+of those eight tests fail, then opaque raw-literal handling fixes it. That
+Python refinement and a strict twenty-second subprocess cap are separately
+exercised on final Python bytes; they differ from the earlier remote green
+input without changing any Rust source. This is lexical/reference evidence only,
+not Rust, MCP or game execution. No current shared-head qualification or native,
+campaign, compatibility or runtime admission follows from these later changes.
+
 ### R25 source qualification and development executable (2026-10-31)
 
 Clean private `bc5bcdfe28a895f9334fd8a116270be36650ee3a` passes all 43
