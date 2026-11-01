@@ -18,8 +18,9 @@ use dfmcp_core::{
 
 use super::rpc::WorkshopSource;
 use super::{
-    WorkshopBinding, WorkshopGoal, WorkshopPhase, WorkshopPlan, WorkshopProgress, WorkshopRecord,
-    WorkshopSelection, MAX_PLAN_BYTES, MAX_PROGRESS_BYTES, MAX_RECORD_BYTES,
+    MAX_PLAN_BYTES, MAX_PROGRESS_BYTES, MAX_RECORD_BYTES, WorkshopBinding, WorkshopGoal,
+    WorkshopPhase, WorkshopPlan, WorkshopProgress, WorkshopRecord, WorkshopSelection,
+    WorkshopUnknown,
 };
 use crate::build_placement::journal::BuildMode;
 use crate::build_placement::journal::private_file::{PrivateBuildFile, open_private_storage};
@@ -28,7 +29,8 @@ use crate::control_effect_journal::EffectJournalStorage;
 pub const MAX_ENTRIES: usize = 16;
 pub const MAX_SAMPLES: u16 = 64;
 pub const MAX_FRAMES: u32 = (MAX_ENTRIES as u32) * (8 + MAX_SAMPLES as u32);
-pub const MAX_BODY_BYTES: usize = 3 + 4 + MAX_PLAN_BYTES + 4 + MAX_RECORD_BYTES + 2 + 4 + MAX_PROGRESS_BYTES;
+pub const MAX_BODY_BYTES: usize =
+    3 + 4 + MAX_PLAN_BYTES + 4 + MAX_RECORD_BYTES + 2 + 4 + MAX_PROGRESS_BYTES + 17;
 pub const MAX_FRAME_BYTES: usize = MAX_BODY_BYTES + 92;
 pub const MAX_JOURNAL_BYTES: usize = 16 * 1024 * 1024;
 pub const RPC_RESERVE: u64 = 64 * 1024;
@@ -142,6 +144,9 @@ impl WorkshopStage {
 /// checkpoint policy and operator gates. Never reconstructed from history or
 /// MCP inputs. Checks repeat after dispatch synchronization, before the writer.
 pub trait WorkshopGuard {
+    /// Synchronize independent custody before any newly sent native mutation.
+    /// Returning success asserts durable acknowledgement, not just a cached pin.
+    fn acknowledge(&mut self, pin: WorkshopPin, context: &OperationContext) -> Result<()>;
     fn check(
         &mut self,
         stage: WorkshopStage,
@@ -212,6 +217,9 @@ pub struct WorkshopEntry {
     cancel_requested: bool,
     samples: u16,
     latest: Option<WorkshopProgress>,
+    high_tick: u64,
+    high_generation: u64,
+    continuity_lost: bool,
 }
 impl WorkshopEntry {
     pub fn plan(&self) -> &WorkshopPlan {
@@ -246,10 +254,24 @@ impl WorkshopEntry {
     }
     /// Verdict of the latest retained sample; `None` means no sample exists.
     pub fn goal(&self) -> Option<WorkshopGoal> {
-        Some(WorkshopGoal::evaluate(self.native.as_ref()?, self.latest.as_ref()?))
+        if self.continuity_lost {
+            return Some(WorkshopGoal::Unknown(
+                WorkshopUnknown::NativeGenerationChanged,
+            ));
+        }
+        Some(WorkshopGoal::evaluate(
+            self.native.as_ref()?,
+            self.latest.as_ref()?,
+        ))
     }
     pub fn goal_complete(&self) -> bool {
         self.goal().is_some_and(WorkshopGoal::satisfied)
+    }
+    pub fn high_tick(&self) -> u64 {
+        self.high_tick
+    }
+    pub fn high_generation(&self) -> u64 {
+        self.high_generation
     }
     pub fn needs_reconciliation(&self) -> bool {
         self.state != WorkshopState::Terminal
@@ -278,6 +300,9 @@ impl WorkshopEntry {
                 .as_ref()
                 .map_or(&[], WorkshopProgress::canonical_bytes),
         );
+        out.extend_from_slice(&self.high_tick.to_be_bytes());
+        out.extend_from_slice(&self.high_generation.to_be_bytes());
+        out.push(u8::from(self.continuity_lost));
         out
     }
     fn decode(bytes: &[u8], binding: &WorkshopBinding) -> Result<Self> {
@@ -307,6 +332,11 @@ impl WorkshopEntry {
         } else {
             Some(WorkshopProgress::decode(latest)?)
         };
+        let high_tick = u64::from_be_bytes(r.array()?);
+        let high_generation = u64::from_be_bytes(r.array()?);
+        let lost = r.byte()?;
+        check(lost <= 1)?;
+        let continuity_lost = lost == 1;
         r.finish()?;
         let phase = native.as_ref().map(WorkshopRecord::phase);
         check(match state {
@@ -338,14 +368,47 @@ impl WorkshopEntry {
             cancel_requested,
             samples,
             latest,
+            high_tick,
+            high_generation,
+            continuity_lost,
         })
+    }
+    fn observed_tick(&self) -> u64 {
+        self.plan
+            .before()
+            .tick()
+            .max(
+                self.native
+                    .as_ref()
+                    .and_then(WorkshopRecord::after)
+                    .map_or(0, |c| c.tick()),
+            )
+            .max(self.latest.as_ref().map_or(0, WorkshopProgress::tick))
+    }
+    fn observed_generation(&self) -> u64 {
+        self.plan
+            .before()
+            .generation()
+            .max(self.latest.as_ref().map_or(0, WorkshopProgress::generation))
     }
 }
 fn transition(old: Option<&WorkshopEntry>, next: &WorkshopEntry) -> Result<()> {
     use WorkshopState::*;
     let Some(old) = old else {
+        check(
+            next.high_tick == next.observed_tick()
+                && next.high_generation == next.observed_generation()
+                && !next.continuity_lost,
+        )?;
         return check(next.state == Intent && next.native.is_none() && next.samples == 0);
     };
+    check(
+        next.high_tick == old.high_tick.max(next.observed_tick())
+            && next.high_generation == old.high_generation.max(next.observed_generation())
+            && next.continuity_lost
+                == (old.continuity_lost
+                    || next.observed_generation() != next.plan.before().generation()),
+    )?;
     check(old.plan == next.plan && old != next)?;
     if old.state == Terminal {
         let (Some(prior), Some(new)) = (&old.native, &next.native) else {
@@ -361,10 +424,9 @@ fn transition(old: Option<&WorkshopEntry>, next: &WorkshopEntry) -> Result<()> {
         check(prior == new && prior.phase() == WorkshopPhase::Placed)?;
         check(!old.goal_complete() && next.samples == old.samples + 1)?;
         let latest = next.latest.as_ref().ok_or_else(corrupt)?;
-        if let Some(previous) = &old.latest
-            && previous.generation() == latest.generation()
-        {
-            check(latest.tick() >= previous.tick())?;
+        check(latest.generation() >= old.high_generation)?;
+        if latest.generation() == old.high_generation {
+            check(latest.tick() >= old.high_tick)?;
         }
         return Ok(());
     }
@@ -402,6 +464,15 @@ pub struct WorkshopInventory {
     pub frames: u32,
     pub byte_len: usize,
     entries: Vec<WorkshopEntry>,
+}
+
+/// Independently retained acknowledgement. A self-consistent prefix cannot
+/// prove descent from this pin. It is rejection evidence, never authority.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WorkshopPin {
+    pub journal_id: Digest32,
+    pub head: Digest32,
+    pub frames: u32,
 }
 impl WorkshopInventory {
     pub fn entries(&self) -> &[WorkshopEntry] {
@@ -538,11 +609,22 @@ pub fn open_private_workshop(
     mode: WorkshopMode,
     expected: Option<WorkshopBinding>,
     nonce: [u8; 32],
+    acknowledged: Option<WorkshopPin>,
 ) -> Result<WorkshopJournal<PrivateBuildFile>> {
+    if expected.is_none() && mode != WorkshopMode::Offline && acknowledged.is_none() {
+        return Err(corrupt());
+    }
     let create = mode == WorkshopMode::Control && expected.is_some();
     let (storage, created, current) =
         open_private_storage(path, context, mode.storage(), create, MAX_JOURNAL_BYTES)?;
-    WorkshopJournal::open(storage, &current, mode, expected, created.then_some(nonce))
+    WorkshopJournal::open(
+        storage,
+        &current,
+        mode,
+        expected,
+        created.then_some(nonce),
+        acknowledged,
+    )
 }
 
 impl<S: EffectJournalStorage> WorkshopJournal<S> {
@@ -554,7 +636,9 @@ impl<S: EffectJournalStorage> WorkshopJournal<S> {
         mode: WorkshopMode,
         expected: Option<WorkshopBinding>,
         nonce: Option<[u8; 32]>,
+        acknowledged: Option<WorkshopPin>,
     ) -> Result<Self> {
+        check(nonce.is_some() || mode == WorkshopMode::Offline || acknowledged.is_some())?;
         let mut work = Work::new(context)?;
         context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
         let mut raw = read(&mut storage, &mut work)?;
@@ -601,6 +685,12 @@ impl<S: EffectJournalStorage> WorkshopJournal<S> {
         )?;
         let mut head = id;
         let mut frames = 0;
+        if let Some(pin) = acknowledged {
+            check(pin.journal_id == id && pin.frames <= MAX_FRAMES)?;
+            if pin.frames == 0 {
+                check(pin.head == head)?;
+            }
+        }
         let mut entries = BTreeMap::new();
         while !r.0.is_empty() {
             work.remaining()?;
@@ -622,6 +712,14 @@ impl<S: EffectJournalStorage> WorkshopJournal<S> {
             entries.insert(next.plan.key().to_owned(), next);
             head = digest;
             frames += 1;
+            if let Some(pin) = acknowledged
+                && frames == pin.frames
+            {
+                check(head == pin.head)?;
+            }
+        }
+        if let Some(pin) = acknowledged {
+            check(frames >= pin.frames)?;
         }
         let journal = Self {
             storage,
@@ -648,6 +746,18 @@ impl<S: EffectJournalStorage> WorkshopJournal<S> {
     pub fn head(&self) -> Digest32 {
         self.head
     }
+    pub fn pin(&self) -> WorkshopPin {
+        WorkshopPin {
+            journal_id: self.id,
+            head: self.head,
+            frames: self.frames,
+        }
+    }
+    /// Pure last-retained memory for the single-goal consumer's failure handoff.
+    /// Not verified custody, current game facts, permission or recovery authority.
+    pub fn unverified_original_reference(&self) -> Option<&WorkshopEntry> {
+        self.entries.values().next()
+    }
     pub fn is_fenced(&self) -> bool {
         self.fenced
     }
@@ -660,17 +770,11 @@ impl<S: EffectJournalStorage> WorkshopJournal<S> {
         self.fresh_key = None;
     }
     pub fn high_tick(&self) -> u64 {
-        self.entries.values().fold(0, |tick, entry| {
-            tick.max(entry.plan.before().tick())
-                .max(
-                    entry
-                        .native
-                        .as_ref()
-                        .and_then(WorkshopRecord::after)
-                        .map_or(0, |c| c.tick()),
-                )
-                .max(entry.latest.as_ref().map_or(0, WorkshopProgress::tick))
-        })
+        self.entries
+            .values()
+            .map(|e| e.high_tick)
+            .max()
+            .unwrap_or(0)
     }
     fn access(&self, context: &OperationContext) -> Result<OperationContext> {
         if context.session_id != self.owner {
@@ -679,7 +783,12 @@ impl<S: EffectJournalStorage> WorkshopJournal<S> {
                 "workshop journal has another session owner",
             ));
         }
-        authorize(context, &self.binding, self.high_tick(), WorkshopStage::Query)
+        authorize(
+            context,
+            &self.binding,
+            self.high_tick(),
+            WorkshopStage::Query,
+        )
     }
     fn online(&self, control: bool) -> Result<()> {
         if self.mode == WorkshopMode::Offline || (control && self.mode != WorkshopMode::Control) {
@@ -728,18 +837,17 @@ impl<S: EffectJournalStorage> WorkshopJournal<S> {
         if old.is_none() {
             // A new key never coexists with unresolved work and never regresses.
             check(entries.len() < MAX_ENTRIES && !entries.values().any(WorkshopEntry::unresolved))?;
-            let tick = entries
-                .values()
-                .map(|e| e.plan.before().tick())
-                .max()
-                .unwrap_or(0);
+            let tick = entries.values().map(|e| e.high_tick).max().unwrap_or(0);
             check(next.plan.before().tick() >= tick)?;
         }
         transition(old, next)
     }
-    fn retain(&mut self, entry: WorkshopEntry, work: &mut Work) -> Result<WorkshopEntry> {
+    fn retain(&mut self, mut entry: WorkshopEntry, work: &mut Work) -> Result<WorkshopEntry> {
         self.online(false)?;
         self.verify(work)?;
+        entry.high_tick = entry.high_tick.max(entry.observed_tick());
+        entry.high_generation = entry.high_generation.max(entry.observed_generation());
+        entry.continuity_lost |= entry.observed_generation() != entry.plan.before().generation();
         let body = entry.encode();
         let entry = WorkshopEntry::decode(&body, &self.binding)?;
         Self::check_next(&self.entries, &entry)?;
@@ -794,7 +902,12 @@ impl<S: EffectJournalStorage> WorkshopJournal<S> {
         }
         Ok(entry.clone())
     }
-    pub fn get(&mut self, key: &str, digest: Digest32, context: &OperationContext) -> Result<WorkshopEntry> {
+    pub fn get(
+        &mut self,
+        key: &str,
+        digest: Digest32,
+        context: &OperationContext,
+    ) -> Result<WorkshopEntry> {
         let mut work = Work::new(context)?;
         self.verify(&mut work)?;
         self.known(key, digest)
@@ -827,7 +940,17 @@ impl<S: EffectJournalStorage> WorkshopJournal<S> {
             df_version: m.df_version.clone(),
             dfhack_version: m.dfhack_version.clone(),
         };
-        self.binding.source_matches(&current, stage.exact_source())
+        self.binding
+            .source_matches(&current, stage.exact_source())?;
+        check(
+            current.generation()
+                >= self
+                    .entries
+                    .values()
+                    .map(|e| e.high_generation)
+                    .max()
+                    .unwrap_or(self.binding.generation()),
+        )
     }
     fn edge<N: WorkshopSource, G: WorkshopGuard>(
         &mut self,
@@ -951,6 +1074,12 @@ impl<S: EffectJournalStorage> WorkshopJournal<S> {
         if let Some(pending) = self.entries.values().find(|e| e.unresolved()) {
             return Err(uncertain(pending.plan.key()));
         }
+        if plan.before().tick() < self.high_tick() {
+            return Err(error(
+                ErrorCode::StaleAnchor,
+                "workshop plan predates consumed source high-water",
+            ));
+        }
         let entry = WorkshopEntry {
             plan: plan.clone(),
             state: WorkshopState::Intent,
@@ -959,6 +1088,9 @@ impl<S: EffectJournalStorage> WorkshopJournal<S> {
             cancel_requested: false,
             samples: 0,
             latest: None,
+            high_tick: plan.before().tick(),
+            high_generation: plan.before().generation(),
+            continuity_lost: false,
         };
         Self::check_next(&self.entries, &entry)?;
         let result = (|| {
@@ -982,10 +1114,12 @@ impl<S: EffectJournalStorage> WorkshopJournal<S> {
                 return Err(exhausted());
             }
             let entry = self.retain(entry, &mut work)?;
+            guard.acknowledge(self.pin(), &work.current()?)?;
             let current = self.edge(source, WorkshopStage::Prepare, plan, &mut work, guard)?;
             let prepared = source.prepare(plan, &current, work.remaining()?)?;
             self.after(source, WorkshopStage::Prepare, plan, &mut work, guard)?;
-            let fresh = !prepared.replayed() && prepared.record().phase() == WorkshopPhase::Prepared;
+            let fresh =
+                !prepared.replayed() && prepared.record().phase() == WorkshopPhase::Prepared;
             let entry = self.accept(entry, prepared.record().clone(), fresh, &mut work)?;
             if fresh {
                 self.fresh_key = Some(plan.key().to_owned());
@@ -1030,7 +1164,9 @@ impl<S: EffectJournalStorage> WorkshopJournal<S> {
             entry.state = WorkshopState::DispatchStarted;
             entry.dispatch_started = true;
             let entry = self.retain(entry, &mut work)?;
-            let current = self.edge(source, WorkshopStage::Commit, &entry.plan, &mut work, guard)?;
+            guard.acknowledge(self.pin(), &work.current()?)?;
+            let current =
+                self.edge(source, WorkshopStage::Commit, &entry.plan, &mut work, guard)?;
             let native = source.commit(
                 WorkshopDispatch {
                     plan: &entry.plan,
@@ -1080,14 +1216,14 @@ impl<S: EffectJournalStorage> WorkshopJournal<S> {
         )?;
         let result = (|| {
             let attempted = entry.dispatch_started
-                || entry
-                    .native
-                    .as_ref()
-                    .is_some_and(WorkshopRecord::attempted);
+                || entry.native.as_ref().is_some_and(WorkshopRecord::attempted);
             if cancel && !attempted && entry.state != WorkshopState::CancelRequested {
                 entry.state = WorkshopState::CancelRequested;
                 entry.cancel_requested = true;
                 entry = self.retain(entry, &mut work)?;
+            }
+            if cancel && !attempted {
+                guard.acknowledge(self.pin(), &work.current()?)?;
             }
             let current = self.edge(source, stage, &entry.plan, &mut work, guard)?;
             let native = if cancel && !attempted {
@@ -1119,7 +1255,12 @@ impl<S: EffectJournalStorage> WorkshopJournal<S> {
         self.online(false)?;
         let mut work = self.begin(context)?;
         let mut entry = self.known(key, digest)?;
-        let Some(insertion) = entry.native.as_ref().and_then(WorkshopRecord::insertion).cloned() else {
+        let Some(insertion) = entry
+            .native
+            .as_ref()
+            .and_then(WorkshopRecord::insertion)
+            .cloned()
+        else {
             return Err(error(
                 ErrorCode::InvalidRequest,
                 "workshop goal has no placed receipt to sample",
@@ -1133,13 +1274,23 @@ impl<S: EffectJournalStorage> WorkshopJournal<S> {
         }
         self.fresh_key = None;
         let result = (|| {
-            let current = self.edge(source, WorkshopStage::Sample, &entry.plan, &mut work, guard)?;
+            let current =
+                self.edge(source, WorkshopStage::Sample, &entry.plan, &mut work, guard)?;
             let progress = source.progress(
                 insertion.building_id(),
                 insertion.item_id(),
                 &current,
                 work.remaining()?,
             )?;
+            if progress.generation() < entry.high_generation
+                || (progress.generation() == entry.high_generation
+                    && progress.tick() < entry.high_tick)
+            {
+                return Err(error(
+                    ErrorCode::StaleAnchor,
+                    "workshop sample regressed consumed source high-water",
+                ));
+            }
             self.after(source, WorkshopStage::Sample, &entry.plan, &mut work, guard)?;
             entry.samples += 1;
             entry.latest = Some(progress);

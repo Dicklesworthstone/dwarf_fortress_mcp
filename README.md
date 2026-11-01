@@ -195,6 +195,12 @@ explicitly authorized labor and workshop setup. See the
 [furniture production walkthrough](docs/CARPENTRY_PRODUCTION.md) and
 [production reserve planning](docs/PRODUCTION_RESERVE_PLANNING.md).
 
+The [original Carpenter workshop workflow](docs/WORKSHOP_CONSTRUCTION_MCP.md)
+documents the separate unadmitted workshop/1.20 native, safe-Rust and registered
+eleven-tool development consumer. Focused execution and an actual-SDK diagnostic
+build do not establish full final-source qualification, native R1, untouched-game
+workshop construction or production admission.
+
 ### Original mining goals
 
 The dedicated `dfmcp-live-semantic-dig-dev-server` joins a paused spatial

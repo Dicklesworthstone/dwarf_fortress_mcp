@@ -5,7 +5,15 @@
   "protobuf_package": "dfmcp.workshop.v1_20",
   "status": "implemented_unadmitted_development_only",
   "separate_from": "furniture/1.19; no shared capture, plan, token, receipt, writer or header bytes",
-  "methods": ["Handshake", "ReadWorkshop", "PrepareWorkshop", "CommitWorkshop", "QueryWorkshop", "CancelWorkshop", "ReadWorkshopProgress"],
+  "methods": [
+    "Handshake",
+    "ReadWorkshop",
+    "PrepareWorkshop",
+    "CommitWorkshop",
+    "QueryWorkshop",
+    "CancelWorkshop",
+    "ReadWorkshopProgress"
+  ],
   "rpc_flags": 0,
   "operator_gates": {
     "opt_in": "DFMCP_ALLOW_UNADMITTED_WORKSHOP_V1_20=1",
@@ -29,10 +37,14 @@
     "paused": true,
     "footprint_cells": 9,
     "footprint_cells_must_be": "visible dry FLOOR, no dig/pile/smooth designation, no building or other occupancy, outside every registered building and zone room rectangle",
-    "helpers_after_full_visibility_only": ["Buildings::checkFreeTiles(corner,3x3,null,false,false,false,false)", "Buildings::hasSupport(corner,3x3)", "Maps::canWalkBetween"],
+    "helpers_after_full_visibility_only": [
+      "Buildings::checkFreeTiles(corner,3x3,null,false,false,false,false)",
+      "Buildings::hasSupport(corner,3x3)",
+      "Maps::canWalkBetween"
+    ],
     "item": "WOOD type, plant WOOD material, on_ground, not in_job, no references, no residual flags except computed bits 28/29, no wear, dry visible floor, walk-group connected to center",
     "worker_census": "complete bounded living active citizens (insane included as an observed fact), at most 32 or explicit incomplete",
-    "eligible_worker": "visible, adult, sane, current CARPENTER labor bit enabled, walk-group connected to center",
+    "eligible_worker": "visible, adult, sane, current CARPENTER labor bit enabled, Units::isValidLabor(CARPENTER), Units::isJobAvailable, walk-group connected to center; no assignment or scheduling guarantee",
     "worker_assignment_predicted": false,
     "connectivity_claim": "Maps::canWalkBetween equal nonzero walk group only; not a route or assignment proof"
   },
@@ -45,10 +57,22 @@
     "worst_case_capture_bytes": 1629,
     "worst_case_record_bytes": 3563,
     "progress_bytes": 1024,
-    "nonce_bytes": [16, 64],
-    "credential_bytes": [32, 256],
-    "key_bytes": [1, 128],
-    "folder_bytes": [1, 512],
+    "nonce_bytes": [
+      16,
+      64
+    ],
+    "credential_bytes": [
+      32,
+      256
+    ],
+    "key_bytes": [
+      1,
+      128
+    ],
+    "folder_bytes": [
+      1,
+      512
+    ],
     "workers": 32,
     "active_units": 8192,
     "buildings": 65536,
@@ -78,12 +102,39 @@
   },
   "optional_request_shapes": {
     "Handshake": [],
-    "ReadWorkshop": [5, 6, 7, 8],
-    "PrepareWorkshop": [5, 6, 7, 8, 9, 10, 11],
-    "CommitWorkshop": [9, 11, 12],
-    "QueryWorkshop": [9, 11],
-    "CancelWorkshop": [9, 11, 12],
-    "ReadWorkshopProgress": [5, 13]
+    "ReadWorkshop": [
+      5,
+      6,
+      7,
+      8
+    ],
+    "PrepareWorkshop": [
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11
+    ],
+    "CommitWorkshop": [
+      9,
+      11,
+      12
+    ],
+    "QueryWorkshop": [
+      9,
+      11
+    ],
+    "CancelWorkshop": [
+      9,
+      11,
+      12
+    ],
+    "ReadWorkshopProgress": [
+      5,
+      13
+    ]
   },
   "reply_fields": {
     "1": "required bool accepted",
@@ -100,17 +151,67 @@
     "12": "optional bool unresolved",
     "13": "optional uint32 retained_records"
   },
-  "successful_reply_always_has": [1, 2, 3, 4, 5, 6, 7, 8, 12, 13],
-  "failure_reply_has_only": [1, 2, 3, 4, 5, 6, 7, 8],
+  "successful_reply_always_has": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    12,
+    13
+  ],
+  "failure_reply_has_only": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8
+  ],
   "placed_oracle": {
     "meaning": "historical stage-zero registration only; never completion",
-    "requires": ["exact expected-after capture before and after verification", "new building ID == captured horizon", "Workshop/Carpenters/custom -1", "exact 3x3 geometry and center", "building material == selected log material", "stage 0 and observed max stage 1..32", "isSettingOccupancy() true and all 9 tiles Planned", "no building refs, relations or contained items; exists flag clear", "one ConstructBuilding job in the complete checked job list at the center with BUILDING_HOLDER", "one Hauled attachment of the exact log and its reverse JOB reference"],
-    "observed_not_assumed": ["building flag word", "design presence", "maximum build stage"]
+    "requires": [
+      "exact expected-after capture before and after verification",
+      "new building ID == captured horizon",
+      "Workshop/Carpenters/custom -1",
+      "exact 3x3 geometry and center",
+      "building material == selected log material",
+      "stage 0 and observed max stage 1..32",
+      "isSettingOccupancy() true and all 9 tiles Planned",
+      "no building refs, relations or contained items; exists flag clear",
+      "one ConstructBuilding job in the complete checked job list at the center with BUILDING_HOLDER",
+      "one Hauled attachment of the exact log and its reverse JOB reference"
+    ],
+    "observed_not_assumed": [
+      "building flag word",
+      "design presence",
+      "maximum build stage"
+    ]
   },
   "completion_oracle": {
     "source": "fresh ReadWorkshopProgress for the original receipt building ID",
-    "requires": ["same fortress folder/site/dimensions as the receipt", "tick not before the receipt", "building present in the complete registry", "Workshop/Carpenters/custom -1", "geometry, center and material equal to the receipt", "maximum stage equal to the receipt", "stage == maximum stage", "no ConstructBuilding job remains"],
-    "not_required": ["original log still available", "worker still idle", "occupancy shape after completion"],
+    "requires": [
+      "same fortress folder/site/dimensions as the receipt",
+      "tick not before the receipt",
+      "building present in the complete registry",
+      "Workshop/Carpenters/custom -1",
+      "geometry, center and material equal to the receipt",
+      "maximum stage equal to the receipt",
+      "stage == maximum stage",
+      "no ConstructBuilding job remains",
+      "original native generation and restore continuity",
+      "full-history consumed clock/generation high-water; no G -> G+1 -> G or same-generation clock regression"
+    ],
+    "not_required": [
+      "original log still available",
+      "worker still idle",
+      "occupancy shape after completion"
+    ],
     "absence": "observed complete-registry absence; never completion",
     "transport_or_source_loss": "unknown"
   },
@@ -136,14 +237,41 @@
     "separator": "NUL"
   },
   "source_paths": [
+    "architecture/workshop_construction_v1_20.json",
+    "bridge/common/retained_snapshot.h",
     "bridge/common/workshop_construction.h",
-    "bridge/dfhack-workshop-v1_20/dfmcp_workshop_v1_20.cpp",
-    "bridge/dfhack-workshop-v1_20/DfmcpWorkshopV1_20.proto",
     "bridge/dfhack-workshop-v1_20/CMakeLists.txt",
+    "bridge/dfhack-workshop-v1_20/DfmcpWorkshopV1_20.proto",
+    "bridge/dfhack-workshop-v1_20/dfmcp_workshop_v1_20.cpp",
+    "crates/dfmcp-adapter/src/lib.rs",
+    "crates/dfmcp-adapter/src/build_placement/rpc/codec.rs",
+    "crates/dfmcp-adapter/src/build_placement/rpc/link.rs",
+    "crates/dfmcp-adapter/src/workshop_construction/mod.rs",
+    "crates/dfmcp-adapter/src/workshop_construction/acknowledgement.rs",
+    "crates/dfmcp-adapter/src/workshop_construction/journal.rs",
+    "crates/dfmcp-adapter/src/workshop_construction/journal_tests.rs",
+    "crates/dfmcp-adapter/src/workshop_construction/rpc.rs",
+    "crates/dfmcp-adapter/src/workshop_construction/rpc_tests.rs",
+    "crates/dfmcp-adapter/src/workshop_construction/tests.rs",
+    "crates/dfmcp-mcp/src/lib.rs",
+    "crates/dfmcp-mcp/src/workshop_construction_server.rs",
+    "crates/dfmcp-mcp/src/workshop_construction_server/runtime.rs",
+    "crates/dfmcp-mcp/src/workshop_construction_server/presentation.rs",
+    "crates/dfmcp-mcp/src/workshop_construction_server/tests.rs",
+    "crates/dfmcp-mcp/src/bin/dfmcp-workshop-v1-20-dev-server.rs",
+    "crates/dfmcp-mcp/tests/workshop_construction_stdio.rs",
     "tests/native/workshop/stubs.h",
     "tests/native/workshop/handler.cpp",
     "tests/native/workshop/vectors.json",
-    "scripts/test_workshop_native.py"
+    "tests/native/workshop/continuity_vectors.json",
+    "tests/stdio/workshop.py",
+    "scripts/read_stable_repository_file.py",
+    "scripts/test_workshop_native.py",
+    "scripts/test_workshop_source_inventory.py",
+    "scripts/check_workshop_construction.py",
+    "scripts/verify.sh",
+    "scripts/qualify_local.sh",
+    "docs/WORKSHOP_CONSTRUCTION_MCP.md"
   ],
   "upstream_api_inspection": {
     "dfhack_revision": "0bf381cc1615656acf756e6e67573fffca715125",
@@ -154,5 +282,92 @@
   "live_fortress_qualified": false,
   "global_controller_fence": false,
   "production_admitted": false,
-  "work_items": ["dfmcp-reality-wiring-proof-4bf.14"]
+  "work_items": [
+    "dfmcp-reality-wiring-proof-4bf.14"
+  ],
+  "native_component_source_paths": [
+    "architecture/workshop_construction_v1_20.json",
+    "bridge/common/workshop_construction.h",
+    "bridge/common/retained_snapshot.h",
+    "bridge/dfhack-workshop-v1_20/dfmcp_workshop_v1_20.cpp",
+    "bridge/dfhack-workshop-v1_20/DfmcpWorkshopV1_20.proto",
+    "bridge/dfhack-workshop-v1_20/CMakeLists.txt",
+    "tests/native/workshop/handler.cpp",
+    "tests/native/workshop/stubs.h",
+    "tests/native/workshop/vectors.json",
+    "tests/native/workshop/continuity_vectors.json",
+    "scripts/test_workshop_native.py",
+    "scripts/read_stable_repository_file.py"
+  ],
+  "mcp_consumer": {
+    "binary": "dfmcp-workshop-v1-20-dev-server",
+    "module": "workshop_construction_server",
+    "session_family": 31,
+    "config": "DFMCP_WORKSHOP_MCP_CONFIG",
+    "tool_names": [
+      "fortress_open_session",
+      "fortress_observe",
+      "fortress_query",
+      "fortress_plan",
+      "fortress_commit",
+      "fortress_wait",
+      "fortress_cancel",
+      "fortress_checkpoint",
+      "fortress_restore",
+      "fortress_explain",
+      "fortress_doctor"
+    ],
+    "canonical_world_adapter": false,
+    "canonical_anchor": null,
+    "canonical_continuity": "unestablished",
+    "candidate_policy": "one operator-pinned original log and 3x3 Carpenter footprint; MCP chooses the exact observed material handle",
+    "source_acceptance_is_admission": false,
+    "new_keys_after_original": false,
+    "checkpoint_default": "required",
+    "disposable_exception": "operator-only disposable-fortress-no-checkpoint before preparation",
+    "game_clock_control": false,
+    "separate_existing_clock": "run/1.13 standalone; independent review/identity; no cross-plugin atomicity, fortress identity or causality claim",
+    "manager_or_activation_provider": false,
+    "finite_bed_output_proven": false
+  },
+  "independent_acknowledgement": {
+    "files": [
+      "workshop.journal",
+      "workshop.ack"
+    ],
+    "external_pin_fields": [
+      "journal_id",
+      "head",
+      "frames"
+    ],
+    "before_writer": [
+      "synchronize DispatchStarted journal frame",
+      "synchronize and verify independent acknowledgement",
+      "revalidate source/authority/scope/lease",
+      "send exact prepared-connection commit once"
+    ],
+    "reopen_requires_external_pin_and_checked_descendant": true,
+    "reopen_restores_dispatch_permission": false,
+    "rollback_of_both_stores_and_all_external_pins_protected": false,
+    "missing_or_torn_history_reinitialized": false,
+    "record_bytes": 140,
+    "version": "DFMWA020"
+  },
+  "focused_test_contract": {
+    "adapter_rust_cases": 23,
+    "mcp_unit_cases": 7,
+    "rust_stdio_cases": 1,
+    "python_stdio_cases": 5,
+    "python_inventory_cases": 7,
+    "native_scenarios": 13,
+    "compiled_mutants": 12,
+    "failed_allowed": 0,
+    "ignored_or_skipped_allowed": 0,
+    "native_evidence": "SDK/protobuf doubles only; no native R1 or game proof",
+    "qualification_wrappers": [
+      "scripts/verify.sh",
+      "scripts/qualify_local.sh"
+    ],
+    "full_qualification_requires_reviewed_frozen_clean_source": true
+  }
 }

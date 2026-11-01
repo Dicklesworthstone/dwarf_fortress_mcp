@@ -60,6 +60,7 @@ mod task_service;
 mod task_store;
 pub mod tasks;
 mod witness;
+pub mod workshop_construction_server;
 mod world_changes;
 
 pub use admission::{AdmissionProvenance, current_admission_provenance, run_live_stdio};

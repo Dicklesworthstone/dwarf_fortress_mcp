@@ -343,6 +343,11 @@ void worker_census_eligibility() {
     for (const auto &change : unavailable) {
         reset(); change();
         { auto c = observed(); CHECK(c.workers.size() == 1 && c.workers[0].labor && c.workers[0].reachable);
+          if (mock::units.front()->civ_permits_carpentry) {
+              CHECK(c.workers[0].labor_valid && !c.workers[0].job_available);
+          } else {
+              CHECK(!c.workers[0].labor_valid && c.workers[0].job_available);
+          }
           CHECK(!c.workers[0].eligible() && !c.eligible()); }
         ineligible();
         // The same transition after preparation is a stale witness, not a dispatch.
@@ -538,6 +543,9 @@ int vectors() {
     mock::contained.push_back(std::make_unique<df::buildingitemst>()); mock::contained.back()->item = &item();
     workshop->contained_items.push_back(mock::contained.back().get()); mock::tick = 13212;
     const auto complete = engine.progress(70, 42, progress).encode();
+    // Original generation and ID horizon survive observed registry removal.
+    world.buildings.all.clear();
+    const auto absent_continuous = engine.progress(70, 42, progress).encode();
     reset(); const auto absent = engine.progress(70, 42, progress).encode();
     reset(); const auto u = prepared(); mock::write_fault = mock::WriteFault::JobOnly;
     const auto uncertain = commit(u).effect;
@@ -548,7 +556,8 @@ int vectors() {
         << "\",\"placed\":\"" << hex(placed) << "\",\"indeterminate\":\"" << hex(uncertain)
         << "\",\"cancelled\":\"" << hex(cancelled) << "\",\"refused\":\"" << hex(refused)
         << "\",\"progress_stage0\":\"" << hex(staged) << "\",\"progress_complete\":\"" << hex(complete)
-        << "\",\"progress_absent\":\"" << hex(absent) << "\"}\n";
+        << "\",\"progress_absent\":\"" << hex(absent)
+        << "\",\"progress_absent_continuous\":\"" << hex(absent_continuous) << "\"}\n";
     cleanup(); return 0;
 }
 } // namespace

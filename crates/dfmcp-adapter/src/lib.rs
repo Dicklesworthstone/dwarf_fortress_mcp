@@ -86,6 +86,7 @@ pub mod work_orders;
 pub mod workforce_analysis;
 pub mod workforce_control;
 pub mod workforce_session;
+pub mod workshop_construction;
 
 pub use announcement_wire::{
     ANNOUNCEMENT_AFTER_ID_FIELD, ANNOUNCEMENT_COMPLETE_THROUGH_LATEST_FIELD,

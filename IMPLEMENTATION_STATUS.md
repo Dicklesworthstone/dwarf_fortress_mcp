@@ -7,8 +7,8 @@ actually establish.
 ## Current phase
 
 **Phase 0D-R0 with implemented but unadmitted read profiles through citizen-inclusive spatial/1.8,
-optional archive-bound durable foreground watches, and an explicitly unadmitted pause-control/1.7
-development slice. No live tuple is currently admitted.**
+optional archive-bound durable foreground watches, and explicitly unadmitted pause-control/1.7
+and original Carpenter workshop/1.20 development slices. No live tuple is currently admitted.**
 
 The repository contains:
 
@@ -23,12 +23,77 @@ The repository contains:
 - a private hash-chained pause-effect coordinator journal whose source records `CommitStarted` before dispatch and terminal evidence before acknowledgement;
 - offline read-only pause-effect discovery without a bridge connection or mutation authority;
 - an explicitly unadmitted furniture/1.19 native, Rust and eleven-tool MCP development path for exact-item bed/chair/table placement, durable single-attempt coordination and original-key recovery;
+- an explicitly unadmitted workshop/1.20 native, safe-Rust and registered eleven-tool MCP development path for one original 3x3 Carpenter workshop using one exact eligible WOOD log;
 - a protocol-bound V2 production ticket and runtime dispatcher whose map still contains only protocol 1.0.
 
 The checked-in compatibility registry remains empty. Source presence does not imply qualification,
 admission, or support. No protocol beyond 1.0 appears in the production runner map.
 
 ## Evidence hierarchy
+
+### Original Carpenter workshop (2026-11-01; unqualified source changes)
+
+The distinct workshop/1.20 native generation implements the closed
+Workshop/Carpenters path through supported DFHack allocation, sizing and
+`constructWithItems` APIs. Its safe-Rust adapter and registered
+`dfmcp-workshop-v1-20-dev-server` connect bounded observation, original planning,
+complete review, one confirmed construction attempt, original-key reconciliation
+and fresh original-building completion evidence through the existing eleven
+modern MCP tools. The one-log policy independently checks exact material,
+outside-footprint origin, all nine floors and observed worker eligibility;
+eligibility does not promise assignment or scheduling.
+
+The coordinator synchronizes DispatchStarted and an independently retained
+acknowledgement before the native writer. Recovery rejects valid-prefix rollback
+and restores no dispatch permission. Full-history generation/clock floors,
+sticky original-continuity loss, same-connection preparation and failure
+withdrawal prevent old seals or replacement identities from reviving authority.
+Agent Turns preserve a null canonical world anchor and explicit unestablished
+world continuity; native source references and verified local custody remain
+separate. Recommendations carry callable Observe/Plan/Commit/Wait arguments and
+terminal reasons. See [the development workflow](docs/WORKSHOP_CONSTRUCTION_MCP.md).
+
+Actual final focused execution on TRJ with `nightly-2026-11-01` passes 23 adapter
+cases, seven MCP unit cases and one Rust integration case running five actual
+modern stdio scenarios against explicit joined native TCP doubles and real
+private custody files. Rust cases have zero failures or ignored tests; the five
+Python scenarios have zero failures, errors or skips. Seven source-inventory
+regressions pass. Warning-denied Clippy across all adapter/MCP targets and
+features, formatting, syntax and diff checks pass. The native component harness
+passes 13 scenarios / 27,596 assertions, verifies 12 byte vectors and rejects all
+12 individually compiled mutants under strict GCC/UBSan. That harness uses
+SDK/protobuf doubles, not a live game or real SDK runtime. The final 35-file
+workshop source map is unchanged across the final Rust execution.
+
+Terra separately configures, generates protobuf and builds/links the actual
+DFHack SDK diagnostic probe with GCC 15.2, `-Wall -Werror`, all three exits zero
+and empty stderr, under `target/workshop-sdk-probe-20261101/`. Its unchanged
+native input SHA-256 values are:
+
+- plugin C++: `af86aa1f6b41816ca0f5f681094b2c27ec733fb63497710dd27b4044398ff883`;
+- workshop header: `b3279b53443a1d2f2c1db98603f1b6cf085791c5bde094a442d00511d87fe525`;
+- protobuf source: `06b6787a4e52800e9759d05a31682cd419bf3a16895681c984d41ed7ad887085`.
+
+The diagnostic ELF is 189,336 bytes, SHA-256
+`583b17aadc48b3ed74dfce5c810b95b39bb66fd53d7a42aacc98dc8a3aa6bc5c`;
+its staged RUNPATH and build output are diagnostic evidence, not an accepted
+native R1 or installed artifact. Raw focused stdout/stderr/exits, source maps
+and earlier failed attempts remain under `target/codex-continuation-20261101a/`;
+final adapter/MCP runs are `20-adapter-final` and `21-mcp-final`. Final stdio
+transcripts and actual crash/prefix custody remain in the owned TRJ directory
+`/scratch/tmp/dfmcp-workshop-stdio-1444705/`. The failed run-16 `chunks_exact`
+Clippy diagnostic remains failed; the equivalent `as_chunks` repair passes
+run 17 and the final focused reruns.
+
+Full clean final-source Rust qualification through both mandatory commands,
+accepted native R1/artifact evidence, untouched-game original-workshop proof
+and live acceptance remain pending. Earlier R28/R29 qualification does not
+transfer. Original `.14` stays open: finite-bed output and its real
+manager/activation prerequisites remain unproved, and operator UI setup earns
+no MCP capability credit. The existing separate bounded run/1.13 development
+profile may supply independently reviewed game intervals; it proves neither
+cross-plugin atomicity nor workshop causality. No registry, production runner,
+deployment floor or runtime admission is widened.
 
 ### Session entity resource consumer (exact R29 full Rust qualification)
 

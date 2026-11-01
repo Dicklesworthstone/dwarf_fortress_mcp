@@ -9,6 +9,7 @@
 //! Decoding evidence never recreates dispatch authority.
 //! Bead: dfmcp-reality-wiring-proof-4bf.14.
 
+pub mod acknowledgement;
 pub mod journal;
 pub mod rpc;
 
@@ -113,7 +114,10 @@ impl WorkshopSelection {
     }
     pub fn canonical_bytes(self) -> Vec<u8> {
         let mut out = vec![1];
-        put(&mut out, [self.item, self.center[0], self.center[1], self.center[2]]);
+        put(
+            &mut out,
+            [self.item, self.center[0], self.center[1], self.center[2]],
+        );
         out
     }
     fn read(r: &mut Reader<'_>) -> Result<Self> {
@@ -333,7 +337,10 @@ impl WorkshopItem {
                     jobs.push(id);
                 }
                 let ground = WorkshopTile::read(r)?;
-                require(ground.visible(), "visible workshop item needs visible ground")?;
+                require(
+                    ground.visible(),
+                    "visible workshop item needs visible ground",
+                )?;
                 let reachable = r.boolean()?;
                 Ok(Self::Visible(VisibleWorkshopItem {
                     position,
@@ -539,7 +546,10 @@ pub struct WorkshopCapture {
 }
 impl WorkshopCapture {
     pub fn decode(bytes: &[u8]) -> Result<Self> {
-        require(bytes.len() <= MAX_CAPTURE_BYTES, "workshop capture exceeds 2 KiB")?;
+        require(
+            bytes.len() <= MAX_CAPTURE_BYTES,
+            "workshop capture exceeds 2 KiB",
+        )?;
         let mut r = Reader(bytes);
         require(r.take(8)? == b"DFMWC020", "not a workshop/1.20 capture")?;
         let generation = r.u64()?;
@@ -880,9 +890,15 @@ pub struct WorkshopInsertion {
 }
 impl WorkshopInsertion {
     fn decode(bytes: &[u8]) -> Result<Self> {
-        require(bytes.len() == INSERTION_BYTES, "invalid workshop insertion width")?;
+        require(
+            bytes.len() == INSERTION_BYTES,
+            "invalid workshop insertion width",
+        )?;
         let mut r = Reader(bytes);
-        require(r.take(8)? == b"DFMWI020", "invalid workshop insertion profile")?;
+        require(
+            r.take(8)? == b"DFMWI020",
+            "invalid workshop insertion profile",
+        )?;
         let building = r.u32()?;
         let job = r.u32()?;
         let item = r.u32()?;
@@ -1055,9 +1071,15 @@ pub struct WorkshopRecord {
 }
 impl WorkshopRecord {
     pub fn decode(bytes: &[u8]) -> Result<Self> {
-        require(bytes.len() <= MAX_RECORD_BYTES, "workshop receipt exceeds 6 KiB")?;
+        require(
+            bytes.len() <= MAX_RECORD_BYTES,
+            "workshop receipt exceeds 6 KiB",
+        )?;
         let mut r = Reader(bytes);
-        require(r.take(8)? == b"DFMWR020", "invalid workshop receipt profile")?;
+        require(
+            r.take(8)? == b"DFMWR020",
+            "invalid workshop receipt profile",
+        )?;
         let key = text(field(&mut r, 128)?, 128)?;
         let before = WorkshopCapture::decode(field(&mut r, MAX_CAPTURE_BYTES)?)?;
         let plan = WorkshopPlan::new(&key, before)?;
@@ -1158,7 +1180,10 @@ impl WorkshopRecord {
         self.receipt
     }
     pub fn verify_plan(&self, plan: &WorkshopPlan) -> Result<()> {
-        require(&self.plan == plan, "workshop record belongs to another plan")
+        require(
+            &self.plan == plan,
+            "workshop record belongs to another plan",
+        )
     }
     /// Prepared may become any outcome; Indeterminate may become only the exact
     /// original Placed receipt; every other outcome is immutable.
@@ -1268,9 +1293,15 @@ pub struct WorkshopProgress {
 }
 impl WorkshopProgress {
     pub fn decode(bytes: &[u8]) -> Result<Self> {
-        require(bytes.len() <= MAX_PROGRESS_BYTES, "workshop progress exceeds 1 KiB")?;
+        require(
+            bytes.len() <= MAX_PROGRESS_BYTES,
+            "workshop progress exceeds 1 KiB",
+        )?;
         let mut r = Reader(bytes);
-        require(r.take(8)? == b"DFMWP020", "not a workshop/1.20 progress read")?;
+        require(
+            r.take(8)? == b"DFMWP020",
+            "not a workshop/1.20 progress read",
+        )?;
         let generation = r.u64()?;
         let tick = r.u64()?;
         let site = r.u32()?;
@@ -1542,6 +1573,7 @@ impl WorkshopBinding {
             "workshop source binding differs",
         )
     }
+    #[cfg(test)]
     pub(crate) fn recovery_generation(&self, generation: u64) -> Result<Self> {
         require(
             generation >= self.generation && generation < u64::MAX,

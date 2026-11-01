@@ -26,7 +26,10 @@ pub const METHODS: [&str; 7] = [
 pub const CONNECT_BYTES: u64 = 1024 * 1024;
 
 fn malformed() -> dfmcp_core::DfmcpError {
-    error(ErrorCode::AdapterRejected, "invalid workshop native envelope")
+    error(
+        ErrorCode::AdapterRejected,
+        "invalid workshop native envelope",
+    )
 }
 fn denied() -> dfmcp_core::DfmcpError {
     error(
@@ -580,6 +583,10 @@ impl WorkshopSource for WorkshopRpc {
     ) -> Result<WorkshopRecord> {
         let result = (|| {
             require(
+                self.prepared.take().as_ref() == Some(permit.plan()),
+                "workshop commit requires this connection's exact fresh preparation",
+            )?;
+            require(
                 permit.journal_head() != Digest32::ZERO,
                 "workshop commit needs a synchronized one-use dispatch",
             )?;
@@ -622,7 +629,10 @@ impl WorkshopSource for WorkshopRpc {
         duration: Duration,
     ) -> Result<WorkshopProgress> {
         let result = (|| {
-            require(building < MAX_ID && item < MAX_ID, "invalid workshop progress request")?;
+            require(
+                building < MAX_ID && item < MAX_ID,
+                "invalid workshop progress request",
+            )?;
             let raw = self
                 .call(Request::Progress { building, item }, context, duration)?
                 .observation

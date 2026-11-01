@@ -1,5 +1,33 @@
 # Changelog
 
+## 2026-11-01 — Connect original Carpenter workshop construction through MCP
+
+- Implement the distinct unadmitted workshop/1.20 native generation, safe-Rust
+  adapter and registered eleven-tool modern MCP consumer for one exact eligible
+  WOOD log and one original 3x3 Carpenter workshop. Preserve complete review,
+  scoped authority/leases, fresh revalidation and one native construction attempt.
+- Synchronize journal dispatch and independent acknowledgement before the writer;
+  reject prefix rollback, source/clock regression and stale or foreign prepared
+  connections. Withdraw old knowledge and preparation after failed calls.
+  Preserve original identity through recovery without redispatch or new keys.
+- Connect callable Observe/Plan/Commit/Wait recommendations and terminal reasons;
+  preserve the full Agent Turn spine, null canonical anchor and explicit unknown
+  world continuity, including errors and bounded overflow.
+- Pass final focused 23 adapter cases, seven MCP unit cases, one integration
+  case running five actual stdio scenarios, and seven source-inventory cases,
+  with zero failures, ignored cases or skips. Strict native component execution
+  passes 13 scenarios / 27,596 assertions, 12 vectors and 12 individual compiled
+  mutation checks using SDK/protobuf doubles. Clippy and formatting pass; retain
+  earlier failed attempts and their raw output.
+- Record Terra's separate actual-SDK configure/protobuf/build-link diagnostic,
+  with exact unchanged C++/header/proto hashes and probe location in
+  `IMPLEMENTATION_STATUS.md`. This is not accepted native R1, game execution,
+  full final-source Rust qualification, artifact or runtime admission.
+- Keep both mandatory full qualification commands and live acceptance pending.
+  Original `.14` and finite-bed manager/activation prerequisites remain open;
+  preserve the production registry, runner and floor. Document the isolated
+  profile in `docs/WORKSHOP_CONSTRUCTION_MCP.md`.
+
 ## 2026-11-01 — Withdraw failed-call item views and bound test setup
 
 - Exact private R29 `b6d0e626` passes both required commands on the November 1

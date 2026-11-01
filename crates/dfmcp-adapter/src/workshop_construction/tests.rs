@@ -3,7 +3,11 @@
 use super::*;
 
 pub(crate) fn vector(name: &str) -> Result<Vec<u8>> {
-    let source = include_str!("../../../../tests/native/workshop/vectors.json");
+    let source = if name == "progress_absent_continuous" {
+        include_str!("../../../../tests/native/workshop/continuity_vectors.json")
+    } else {
+        include_str!("../../../../tests/native/workshop/vectors.json")
+    };
     let prefix = format!("\"{name}\": \"");
     let text = source
         .lines()
@@ -56,10 +60,18 @@ fn actual_native_vectors_decode_into_one_original_plan() -> Result<()> {
     assert_eq!(WorkshopPlan::decode(&plan.canonical_bytes())?, plan);
     let cases = [
         ("prepared", WorkshopPhase::Prepared, WorkshopReason::None),
-        ("indeterminate", WorkshopPhase::Indeterminate, WorkshopReason::NativeFailure),
+        (
+            "indeterminate",
+            WorkshopPhase::Indeterminate,
+            WorkshopReason::NativeFailure,
+        ),
         ("placed", WorkshopPhase::Placed, WorkshopReason::None),
         ("refused", WorkshopPhase::Refused, WorkshopReason::Stale),
-        ("cancelled", WorkshopPhase::Cancelled, WorkshopReason::Cancelled),
+        (
+            "cancelled",
+            WorkshopPhase::Cancelled,
+            WorkshopReason::Cancelled,
+        ),
     ];
     for (name, phase, reason) in cases {
         let r = record(name)?;
@@ -70,15 +82,27 @@ fn actual_native_vectors_decode_into_one_original_plan() -> Result<()> {
     let placed = record("placed")?;
     let after = placed.after().ok_or_else(invalid)?;
     assert_eq!(*after, before.expected_after()?);
-    assert!(after.tiles().iter().all(|t| matches!(t, WorkshopTile::Visible(v)
-        if v.occupied() && v.building_id() == Some(70))));
+    assert!(
+        after
+            .tiles()
+            .iter()
+            .all(|t| matches!(t, WorkshopTile::Visible(v)
+        if v.occupied() && v.building_id() == Some(70)))
+    );
     let insertion = placed.insertion().ok_or_else(invalid)?;
     assert_eq!(
-        (insertion.building_id(), insertion.job_id(), insertion.item_id()),
+        (
+            insertion.building_id(),
+            insertion.job_id(),
+            insertion.item_id()
+        ),
         (70, 90, 42)
     );
     assert_eq!(insertion.geometry(), [14, 14, 16, 16, 2, 15, 15]);
-    assert_eq!((insertion.material(), insertion.material_index()), (420, 163));
+    assert_eq!(
+        (insertion.material(), insertion.material_index()),
+        (420, 163)
+    );
     assert_eq!((insertion.stage(), insertion.max_stage()), (0, 3));
     assert!(insertion.setting_occupancy() && insertion.planned_tiles() == ALL_TILES);
     Ok(())
@@ -90,14 +114,25 @@ fn completion_requires_exact_original_continuity() -> Result<()> {
     let staged = progress("progress_stage0")?;
     assert_eq!(
         WorkshopGoal::evaluate(&placed, &staged),
-        WorkshopGoal::InProgress { stage: 0, max_stage: 3, construct_jobs: 1 }
+        WorkshopGoal::InProgress {
+            stage: 0,
+            max_stage: 3,
+            construct_jobs: 1
+        }
     );
     let complete = progress("progress_complete")?;
     let facts = complete.facts().ok_or_else(invalid)?;
     assert!(facts.item_contained() && facts.exists() && facts.construct_jobs() == 0);
-    assert_eq!(WorkshopGoal::evaluate(&placed, &complete), WorkshopGoal::Complete);
+    assert_eq!(
+        WorkshopGoal::evaluate(&placed, &complete),
+        WorkshopGoal::Complete
+    );
     assert_eq!(
         WorkshopGoal::evaluate(&placed, &progress("progress_absent")?),
+        WorkshopGoal::Unknown(WorkshopUnknown::ClockRegressed)
+    );
+    assert_eq!(
+        WorkshopGoal::evaluate(&placed, &progress("progress_absent_continuous")?),
         WorkshopGoal::Absent
     );
     // Without a Placed receipt nothing can complete, whatever the read says.
@@ -134,16 +169,19 @@ fn completion_requires_exact_original_continuity() -> Result<()> {
     let folder = 40 + 2 + 7;
     let present = folder + 12;
     for (offset, value) in [
-        (present + 1, 0u8),           // not Carpenters
-        (present + 10 + 3, 13),       // x1 differs
-        (present + 38 + 3, 7),        // material type differs
-        (present + 42 + 3, 7),        // material index differs
-        (present + 50 + 3, 4),        // maximum stage differs
+        (present + 1, 0u8),     // not Carpenters
+        (present + 10 + 3, 13), // x1 differs
+        (present + 38 + 3, 7),  // material type differs
+        (present + 42 + 3, 7),  // material index differs
+        (present + 50 + 3, 4),  // maximum stage differs
     ] {
         let mut changed = raw.clone();
         changed[offset] = value;
         let changed = WorkshopProgress::decode(&changed)?;
-        assert_eq!(WorkshopGoal::evaluate(&placed, &changed), WorkshopGoal::Contradicted);
+        assert_eq!(
+            WorkshopGoal::evaluate(&placed, &changed),
+            WorkshopGoal::Contradicted
+        );
     }
     // stage == max with a lingering construction job is still not complete.
     let mut lingering = raw.clone();
@@ -151,7 +189,10 @@ fn completion_requires_exact_original_continuity() -> Result<()> {
     lingering[present + 56] = 1;
     assert!(matches!(
         WorkshopGoal::evaluate(&placed, &WorkshopProgress::decode(&lingering)?),
-        WorkshopGoal::InProgress { construct_jobs: 1, .. }
+        WorkshopGoal::InProgress {
+            construct_jobs: 1,
+            ..
+        }
     ));
     Ok(())
 }
@@ -226,7 +267,10 @@ fn selection_footprint_and_material_overlap_are_explicit() -> Result<()> {
     inside[item..item + 12].copy_from_slice(&[0, 0, 0, 15, 0, 0, 0, 16, 0, 0, 0, 2]);
     let inside = WorkshopCapture::decode(&inside)?;
     assert!(inside.item().available() && inside.item_inside_footprint());
-    assert_eq!(inside.blockers(), vec![WorkshopBlocker::ItemInsideFootprint]);
+    assert_eq!(
+        inside.blockers(),
+        vec![WorkshopBlocker::ItemInsideFootprint]
+    );
     assert!(WorkshopPlan::new("workshop-001", inside).is_err());
     Ok(())
 }
@@ -241,6 +285,14 @@ fn binding_is_canonical_and_exact_for_effects() -> Result<()> {
     binding.source_matches(&later, false)?;
     assert!(binding.source_matches(&later, true).is_err());
     assert!(later.source_matches(&binding, false).is_err());
-    assert!(WorkshopBinding::new("10.0.0.1:5000".parse().map_err(|_| invalid())?, "a", "b", &before).is_err());
+    assert!(
+        WorkshopBinding::new(
+            "10.0.0.1:5000".parse().map_err(|_| invalid())?,
+            "a",
+            "b",
+            &before
+        )
+        .is_err()
+    );
     Ok(())
 }
