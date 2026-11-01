@@ -43,8 +43,69 @@ also proves the intended stopped commit before recovery. The full adapter suite
 then passes 1,292 cases, zero failed or ignored, including the two original
 failures and four new cases. Independent review additionally corrected sender
 threads that could detach on an early test error. No production budget, existing
-positive oracle, gate or profile was relaxed. The repaired source still needs
-both required full commands and its exact artifact before trial C can start.
+positive oracle, gate or profile was relaxed.
+
+Clean R25 `bc5bcdfe28a895f9334fd8a116270be36650ee3a` subsequently passes
+all 43 qualification gates and the separate verifier, each with 5,131 debug and
+5,131 release tests across 123 targets per profile, zero failed or ignored.
+Parent replay consumes the official receipt, counts nine critical cases in both
+profiles and verifies all 2,591 source hashes/modes and clean status before and
+after sealing the actual Cargo-emitted development ELF. Receipt SHA-256 is
+`b1d64f5e86159dc66fb0c7634addd27ee62839adf078709b6dfff24d36d229ba`;
+the 50,348,656-byte development executable SHA-256 is
+`72f29e709a2fe40219e571390070e6e2918e6c19fc7cc52d6c3193a31ea4ba36`.
+Cargo reports cache reuse, not fresh recompilation. `.20` is independently closed.
+
+That executable also performs six actual modern offline exchanges against B's
+unchanged five custody files in place while the game is off. Original plan,
+review, creation and clock identities survive, with current goal unavailable
+and zero stale item rows. This is bounded development recovery; it grants no
+compatibility or runtime admission. The subsequent bounded C result follows.
+Original B goal completion and workshop/fortress competence remain unproved.
+
+### R25 public item-view proof C (2026-10-31; cleanup checked November 1 UTC)
+
+Terra directly plays the actual game through thirteen modern public MCP
+exchanges on exact R25 and executable `72f29e70...`. One original bed insertion
+and one separately reviewed 1,200-tick/30-second run advance 1,031 ticks, zero
+overshoot, stopping at target absence. No second run or changed original goal,
+deadline or key is used. The public fresh item view and same-anchor Query show
+BED 540, type 8, subtype -1, material (420, 163), stack 1 at sequence 4/tick
+12114402. Coverage is complete for the 535-item operations roster, with one
+matching/returned candidate and none omitted. Baseline has 536 items and no BED;
+new output does not imply total inventory increased.
+
+Parent replay checks all 129 export members and canonical native chains:
+three creation frames, six clock frames and twenty-one goal-history frames
+forming three complete samples. It matches the full native/public item tuple
+and complete native/Lua roster IDs, types and materials. Lua independently
+identifies `PLANT:CHERRY:WOOD`, but does not print subtype or stack; its resolved
+position/full flags are not equivalent to native raw position/compact flags.
+Public material classification, eligibility and production attribution remain
+unknown. The original removed order remains Unknown, original goal and semantic
+completion are unproved, and an unrelated Fish job prevents global quiescence.
+There is no item-to-order causal certificate.
+
+Operator SDK workshop construction, normal dwarf completion (571 setup ticks)
+and manager UI setup are excluded from MCP competence. Retained timestamps
+support an observed 149.374-second construction interval; the outer timeout
+guard's script and exact start were not retained. The first client exits on
+outer stdin EOF with zero requests and is preserved/excluded; a PTY client
+performs the actual exchanges, without retrying any effect. Builds/tests used
+NTM Codex and Claude Code; gameplay used Terra directly, not a separate NTM pane.
+
+Both B and C actual five-file custody sets reopen offline in six modern
+exchanges each, preserving historical identities and every file byte, while
+current goal remains unavailable and item rows empty/unknown. Fresh parent
+cleanup checks all recorded PIDs/group absent, port closed, five plugin states
+restored and both save copies matching all thirty original files without extras.
+Host-side export scanning covers twenty-five exact private values before copy.
+Evidence is under `target/bang-for-buck-20261031/`: the frozen C manifest SHA-256
+is `bc572933e6aebb8befb0c59decf30f4fdee62760143f9d60b8da18cbb039600a`, with
+`production-c-parent-review.json` and `production-c-parent-cleanup.json`.
+This closes scoped `.5.2`, not original `.5.1`, parent `.5`, workshop `.14`,
+campaign competence, native R1 or compatibility/runtime admission. Later report
+bytes inherit no source qualification. Earlier failed runs remain failed.
 
 ### R23 prepared-fortress production result (2026-10-31)
 

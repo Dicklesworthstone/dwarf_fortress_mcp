@@ -30,6 +30,61 @@ admission, or support. No protocol beyond 1.0 appears in the production runner m
 
 ## Evidence hierarchy
 
+### R25 source qualification and development executable (2026-10-31)
+
+Clean private `bc5bcdfe28a895f9334fd8a116270be36650ee3a` passes all 43
+local qualification gates and the separate `verify.sh`. Each command passes
+5,131 debug and 5,131 release tests across 123 targets per profile, zero failed
+or ignored. Parent replay checks the official receipt, all nine critical test
+names in both profiles, and all 2,591 source hashes and modes before and after
+artifact review. The private checkout remains clean. Receipt SHA-256 is
+`b1d64f5e86159dc66fb0c7634addd27ee62839adf078709b6dfff24d36d229ba`.
+
+The actual Cargo-emitted development work-order server is 50,348,656 bytes,
+SHA-256 `72f29e709a2fe40219e571390070e6e2918e6c19fc7cc52d6c3193a31ea4ba36`.
+Parent review opens and hashes that exact ELF, seals a private copy and repeats
+source checks. Cargo reports `fresh=true`: this is normal cache reuse, not a
+claim of fresh recompilation. Evidence and the complete source bundle are under
+`target/bang-for-buck-20261031/`; the independent review is
+`r25-parent-review.json`. This is a source-bound **development** executable,
+not production server-artifact qualification or runtime admission.
+
+The same executable reopens B's actual old custody in place while the game is
+off: six modern exchanges preserve the original plan, review, creation receipt
+and two clock identities, with current goal unavailable and no stale item rows.
+All five custody files remain byte-identical. This proves bounded development
+recovery, not registry compatibility admission.
+
+Terra then directly performs thirteen modern public MCP exchanges against the
+same executable and a fresh disposable fortress. One reviewed 1,200-tick,
+30-second run advances 1,031 ticks with zero overshoot and stops on target
+absence. The unchanged original goal remains Unknown: order disappearance is
+not receipt-linked completion. A fresh public item view and same-anchor Query
+expose new BED 540, subtype -1, material (420, 163), stack 1, within a complete
+535-item operations roster. Independent replay matches the full native item
+tuple and all roster IDs/types/materials; separate Lua corroborates the item's
+cherry-wood identity, but does not print subtype or stack. Public material
+classification, eligibility and production attribution correctly remain unknown.
+
+Parent replay verifies all 129 exported members, three creation frames, six
+clock frames and twenty-one goal-history frames forming three complete samples.
+The final anchor is sequence 4, tick 12114402, hash
+`e45e446de8c9708906a7bba3ac8b749cfb3c2b5c3eda3502990b6daa0a7018f3`.
+Offline C then preserves its five custody files and historical identities while
+withholding current goal and stale item rows. The original zero-request client
+exit is retained and excluded. Operator workshop/manager setup earns no MCP
+construction or autonomous-fortress credit; an unrelated Fish job remains.
+There is no item-to-order causal certificate or semantic-completion proof.
+
+The independent replay is `production-c-parent-review.json`; export manifest
+SHA-256 is `bc572933e6aebb8befb0c59decf30f4fdee62760143f9d60b8da18cbb039600a`.
+Fresh parent cleanup verifies all recorded processes and the owned group absent,
+port closed, five plugin states restored and both save copies exactly matching
+their original thirty files. Bead `.5.2` closes only this bounded presentation
+and recovery gap; `.5.1`, `.5` and workshop `.14` remain open. R24's separate
+verifier failure remains failed; later shared/report revisions inherit no
+qualification from R25. No native R1, live-campaign or admission claim follows.
+
 ### R21 source and executable qualification (2026-10-31)
 
 The later exact R23 source qualification and selected real-game job-control
@@ -101,9 +156,9 @@ ignored. Receipt SHA-256 is
 The separately required `verify.sh` then fails its adapter target: 1,286 passed,
 two failed, zero ignored. The failures concern actual-disk lost-commit recovery
 and maximum-roster furniture acquisition. All 2,591 source hashes remain unchanged
-and Git is clean. The driver stops before the development-server build; no R24
-artifact or fresh live item-view proof exists. Bead `.20` owns the test-peer
-diagnostic/lifetime repair, and `.5.2` remains blocked on it. Short peer idle
+and Git is clean. The driver stopped before the development-server build; no R24
+artifact or fresh live item-view proof exists. Bead `.20` owned the test-peer
+diagnostic/lifetime repair, and `.5.2` was held on it. Short peer idle
 timeouts are a hypothesis, not an established cause of the original failures.
 
 The subsequent test-only repair separates 100 ms I/O poll slices from fixed
@@ -114,8 +169,11 @@ The repaired full adapter suite passes 1,292 tests, zero failed or ignored,
 including both original failures and four new regressions. The actual-disk test
 now proves one retained stopped commit before reopening, and peer errors retain
 their stage and event context. Production deadlines, limits and existing positive
-oracles are unchanged. Both required full commands for the repaired clean source,
-the new server artifact and live item-view evidence remain pending.
+oracles are unchanged. Both required full commands and the exact development
+executable now pass at R25 as recorded above. Bead `.20` is closed after
+independent review. Fresh public item-view and offline recovery evidence for
+`.5.2` passes the bounded independent replay recorded above; original-goal
+completion and autonomous workshop construction remain unproved.
 
 On exact R23 source `7bba4d01debdc7069e081adb824a4ace4fa199b3`,
 Terra used actual public MCP to insert one original `wooden_bed` order and

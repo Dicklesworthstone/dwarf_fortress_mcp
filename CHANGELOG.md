@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-10-31 — Prove the public item view against the actual game
+
+- On qualified R25's exact development executable, Terra inserts one reviewed
+  bed order and runs one bounded simulation slice: 1,031 of 1,200 requested ticks,
+  zero overshoot. Thirteen modern MCP exchanges expose BED 540 through a fresh
+  item view and same-anchor Query. Independently replay all 129 export members,
+  native receipt/history chains and complete-roster ID/type/material evidence.
+- Preserve Unknown for the removed original order and for public material
+  classification, eligibility and attribution. Lua separately corroborates
+  cherry wood; it does not independently supply subtype or stack. Operator
+  workshop/manager setup earns no MCP prerequisite or fortress-competence credit.
+- Verify actual B and C offline custody without stale rows, then independently
+  check drained processes, closed port, restored plugins and both thirty-file
+  saves. Close only scoped item-presentation `.5.2`; retain original production,
+  workshop and admission gaps, failed runs and the excluded zero-request client.
+
 ## 2026-10-31 — Preserve bounded TCP test-peer lifetime and intended effects
 
 - Reproduce two short-idle-timeout counterexamples within unchanged caller
@@ -8,9 +24,14 @@
 - Prove exactly one retained stopped commit before disk recovery and retain
   peer error/event diagnostics. Preserve the full maximum-roster, identity,
   attachment, digest, release and no-replay assertions.
-- Pass the full 1,292-case adapter suite, zero failed or ignored. Preserve R24's
-  separate verifier failure; full qualification and verifier checks for the
-  repaired source, a new server artifact and live item-view proof remain pending.
+- Pass the full 1,292-case adapter suite, then qualify exact clean R25
+  `bc5bcdfe28a895f9334fd8a116270be36650ee3a`: 43 gates and the separate verifier,
+  each 5,131 debug plus 5,131 release tests, zero failed or ignored. Independently
+  verify all 2,591 files and seal the exact Cargo-emitted development executable.
+- Reopen actual B custody with that executable while the game is off; preserve
+  all five files and historical identities while withholding current goal and
+  stale item rows. Close scoped test-reliability `.20`; preserve R24's verifier
+  failure. The later bounded C proof is recorded above; no admission follows.
 
 ## 2026-10-31 — Prove bounded real output and retain the completion gap
 

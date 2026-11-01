@@ -461,3 +461,26 @@ injected native responses. They cover original-goal continuation, lost clock
 replies, exact recovery and final-effect revalidation. They do not establish a
 live DFHack campaign or compatibility admission. Current executed validation and its exact scope are recorded in
 [`IMPLEMENTATION_STATUS.md`](../IMPLEMENTATION_STATUS.md).
+
+### Executed public item-view proof
+
+On exact qualified private R25 `bc5bcdfe28a895f9334fd8a116270be36650ee3a`,
+Terra uses the actual development executable
+`72f29e709a2fe40219e571390070e6e2918e6c19fc7cc52d6c3193a31ea4ba36`
+for thirteen modern public exchanges. One reviewed bed insertion and one
+reviewed 1,200-tick/30-second run advance 1,031 ticks without overshoot. Fresh
+Wait and same-anchor Query expose BED 540 within a complete 535-item roster,
+with subtype -1, numeric material (420, 163) and stack 1. Independent native
+replay verifies that tuple; Lua separately corroborates cherry wood, without
+independently supplying subtype or stack. The public view correctly leaves
+material classification, eligibility and production attribution unknown.
+
+The order has disappeared, so its original goal remains Unknown and semantic
+completion is unproved. Operator workshop and manager setup are prerequisites,
+not MCP construction or autonomous-fortress proof. Both the earlier B and new C
+custody reopen offline without changing their five files or exposing stale item
+rows; historical identities survive while current goal is unavailable. Raw
+captures, independent replay and fresh cleanup checks are recorded in
+`target/bang-for-buck-20261031/production-c-parent-review.json` and the
+reality-check report. This is bounded development evidence, not native R1,
+live-campaign qualification or compatibility/runtime admission.
