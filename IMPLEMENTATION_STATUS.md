@@ -85,6 +85,19 @@ transcripts and actual crash/prefix custody remain in the owned TRJ directory
 Clippy diagnostic remains failed; the equivalent `as_chunks` repair passes
 run 17 and the final focused reruns.
 
+Fresh parent execution strengthens the existing production-environment case
+to require a nonzero process exit and finds a launcher defect at `08fca4c`:
+startup is refused before serving or native calls, but the executable exits
+zero. The five real stdio scenarios then report four passes and one failure,
+zero errors or skips. Raw output remains under
+`target/root-recorder-proof-20261101/`; this failure is not an unauthorized
+startup or writer. The corrected launcher returns failure when startup
+validation returns. The same test driver also preserves distinct stdout,
+stderr and exit files for empty, `1.0` and `1.20` production markers instead
+of replacing their dotted suffixes. Execution of the corrected launcher and
+full qualification of this later source are still pending. The frozen
+`08fca4c` full run remains separate and cannot qualify these changes.
+
 Full clean final-source Rust qualification through both mandatory commands,
 accepted native R1/artifact evidence, untouched-game original-workshop proof
 and live acceptance remain pending. Earlier R28/R29 qualification does not

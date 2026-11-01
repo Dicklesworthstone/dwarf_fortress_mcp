@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-11-01 — Preserve workshop startup failure status and distinct test logs
+
+- Return process failure when workshop startup validation refuses the closed
+  environment. The strengthened existing real stdio case detects exit zero on
+  `08fca4c`; retain its four-pass/one-failure result. Corrected-source execution
+  and full qualification remain pending.
+- Append log-file extensions to production markers so `1.0` and `1.20` retain
+  separate stdout, stderr and exit receipts. Keep all five stdio scenarios and
+  their original positive, recovery and refusal assertions.
+
 ## 2026-11-01 — Connect original Carpenter workshop construction through MCP
 
 - Implement the distinct unadmitted workshop/1.20 native generation, safe-Rust

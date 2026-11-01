@@ -522,9 +522,10 @@ class WorkshopStdioTests(unittest.TestCase):
             env["DFMCP_ADMITTED_BRIDGE_PROTOCOL"] = marker
             result = subprocess.run([str(BINARY)], input=b"", capture_output=True, env=env, timeout=5)
             stem = self.directory / f"production-{marker or 'empty'}"
-            stem.with_suffix(".stdout").write_bytes(result.stdout)
-            stem.with_suffix(".stderr").write_bytes(result.stderr)
-            stem.with_suffix(".exit").write_text(str(result.returncode) + "\n")
+            Path(str(stem) + ".stdout").write_bytes(result.stdout)
+            Path(str(stem) + ".stderr").write_bytes(result.stderr)
+            Path(str(stem) + ".exit").write_text(str(result.returncode) + "\n")
+            self.assertNotEqual(result.returncode, 0)
             self.assertEqual(result.stdout, b"")
             self.assertIn(b"production", result.stderr)
         self.assertEqual(self.peer.calls, [])
