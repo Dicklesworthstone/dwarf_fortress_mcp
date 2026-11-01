@@ -548,3 +548,152 @@ fn test_session_resources_resolve_over_stdio() -> Result<(), Box<dyn Error>> {
     assert!(unknown.get("error").is_some(), "{unknown}");
     Ok(())
 }
+
+#[test]
+fn entity_resources_discover_read_and_reject_stale_or_ungranted_references_over_stdio()
+-> Result<(), Box<dyn Error>> {
+    fn rpc(
+        client: &mut StdioClient,
+        id: u64,
+        method: &str,
+        mut params: Value,
+    ) -> Result<Value, Box<dyn Error>> {
+        params["_meta"] = modern_meta();
+        client.send(&json!({"jsonrpc":"2.0", "id":id, "method":method, "params":params}))
+    }
+    fn text(result: &Value, field: &str) -> Result<Value, Box<dyn Error>> {
+        Ok(serde_json::from_str(
+            result["result"][field][0]["text"]
+                .as_str()
+                .ok_or("JSON text missing")?,
+        )?)
+    }
+    let mut client = StdioClient::spawn()?;
+    let discovery = rpc(&mut client, 1, "server/discover", json!({}))?;
+    assert_modern_envelope(&discovery, 1);
+    let listing = rpc(&mut client, 2, "resources/list", json!({}))?;
+    assert_modern_envelope(&listing, 2);
+    assert_eq!(
+        listing["result"]["resources"],
+        json!([]),
+        "session resource families are templates, not ambient exact resources"
+    );
+    let templates = rpc(&mut client, 3, "resources/templates/list", json!({}))?;
+    assert_modern_envelope(&templates, 3);
+    assert!(
+        templates["result"]["resourceTemplates"]
+            .as_array()
+            .ok_or("resource template list")?
+            .iter()
+            .any(|r| r["description"]
+                .as_str()
+                .is_some_and(|s| s.contains("entity-{id}"))),
+        "{templates}"
+    );
+    let opened = rpc(
+        &mut client,
+        4,
+        "tools/call",
+        json!({"name":"fortress_open_session",
+        "arguments":{"scenario":"starter_fortress", "paused":true, "max_output_tokens":32768}}),
+    )?;
+    assert_modern_envelope(&opened, 4);
+    let opened = text(&opened, "content")?;
+    assert_eq!(opened["ok"], true, "{opened}");
+    let session_id = opened["session_id"].as_str().ok_or("session ID")?;
+    let query = rpc(
+        &mut client,
+        5,
+        "tools/call",
+        json!({"name":"fortress_query",
+        "arguments":{"session_id":session_id, "mode":"{\"mode\":\"entities\",\"limit\":1}"}}),
+    )?;
+    assert_modern_envelope(&query, 5);
+    let query = text(&query, "content")?;
+    let row = &query["rows"][0];
+    let uri = row["resource_uri"]
+        .as_str()
+        .ok_or("entity query must discover its resource URI")?;
+    let read = rpc(&mut client, 6, "resources/read", json!({"uri":uri}))?;
+    assert_modern_envelope(&read, 6);
+    let detail = text(&read, "contents")?;
+    assert_eq!(detail["schema"], "dfmcp.lab-entity/1");
+    assert_eq!(detail["anchor"], query["anchor"]);
+    let mut expected = row.clone();
+    expected
+        .as_object_mut()
+        .ok_or("entity row")?
+        .remove("resource_uri");
+    assert_eq!(detail["entity"], expected);
+    assert_eq!(detail["coverage"]["live_dwarf_fortress"], "unavailable");
+    let again = rpc(&mut client, 7, "resources/read", json!({"uri":uri}))?;
+    assert_eq!(again["result"], read["result"]);
+    let restricted = rpc(
+        &mut client,
+        8,
+        "tools/call",
+        json!({"name":"fortress_open_session",
+        "arguments":{"scenario":"starter_fortress", "paused":true,
+            "requested_capabilities":[["observe","read_only"]]}}),
+    )?;
+    let restricted = text(&restricted, "content")?;
+    assert_eq!(restricted["ok"], true, "{restricted}");
+    let restricted_id = restricted["session_id"]
+        .as_str()
+        .ok_or("restricted session ID")?;
+    let denied_uri = uri.replace(session_id, restricted_id);
+    let denied = rpc(&mut client, 9, "resources/read", json!({"uri":denied_uri}))?;
+    assert!(
+        denied["error"]["message"]
+            .as_str()
+            .is_some_and(|s| s.contains("capability_denied")),
+        "{denied}"
+    );
+    let malformed = rpc(
+        &mut client,
+        10,
+        "resources/read",
+        json!({"uri":format!("df://session/{session_id}/entity-1~1~bad")}),
+    )?;
+    assert!(malformed.get("error").is_some(), "{malformed}");
+    let checkpoint = rpc(
+        &mut client,
+        11,
+        "tools/call",
+        json!({"name":"fortress_checkpoint", "arguments":{"session_id":session_id}}),
+    )?;
+    let checkpoint = text(&checkpoint, "content")?;
+    let restored = rpc(
+        &mut client,
+        12,
+        "tools/call",
+        json!({"name":"fortress_restore",
+        "arguments":{"session_id":session_id, "checkpoint_id":checkpoint["checkpoint_id"]}}),
+    )?;
+    let restored = text(&restored, "content")?;
+    assert_eq!(restored["ok"], true, "{restored}");
+    let stale = rpc(&mut client, 13, "resources/read", json!({"uri":uri}))?;
+    assert!(
+        stale["error"]["message"]
+            .as_str()
+            .is_some_and(|s| s.contains("stale_anchor")),
+        "{stale}"
+    );
+    let fresh = rpc(
+        &mut client,
+        14,
+        "tools/call",
+        json!({"name":"fortress_query",
+        "arguments":{"session_id":session_id, "mode":"{\"mode\":\"entities\",\"limit\":1}"}}),
+    )?;
+    let fresh = text(&fresh, "content")?;
+    let current = rpc(
+        &mut client,
+        15,
+        "resources/read",
+        json!({"uri":fresh["rows"][0]["resource_uri"]}),
+    )?;
+    assert_modern_envelope(&current, 15);
+    assert_eq!(text(&current, "contents")?["entity"], detail["entity"]);
+    Ok(())
+}

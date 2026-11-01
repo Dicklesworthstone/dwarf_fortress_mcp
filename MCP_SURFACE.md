@@ -592,6 +592,7 @@ df://session/{id}/capabilities
 df://session/{id}/handoff
 df://session/{id}/tasks
 df://session/{id}/task-{task_id}
+df://session/{id}/entity-{entity_id}~{generation}~{anchor_digest}
 df://fortress/{id}/anchor
 df://fortress/{id}/entity/{entity}
 df://fortress/{id}/map/chunk/{x}/{y}/{z}
@@ -610,6 +611,22 @@ df://doctor/{bundle}
 ```
 
 Resources are capability-checked; URI knowledge does not confer authority.
+
+The laboratory session template serves summary, capabilities, handoff, replay,
+anchor and task views. Entity query rows also discover the session entity URI
+above. It requires `query` for the requested entity ID and an unchanged complete
+V2 anchor digest, including fortress, restore epoch, sequence, tick and state
+root. It returns one existing presence-preserving canonical entity projection;
+changed anchors or generations require fresh discovery, without a historical
+fallback. The resource enforces the negotiated byte and token bounds including
+the resource wrapper; an oversized record is refused without silent field loss.
+Inspection preserves semantic request IDs and does not certify objectives,
+retain versions or run the durable-persistence postlude, including after denial.
+
+The advertised `df://fortress/...`, knowledge and memory families remain
+unimplemented resource targets pending explicit session authority binding.
+The existing doctor resource is `df://doctor/{session_id}`. This laboratory
+resource subset does not establish any live-game or production admission.
 
 ## Error behavior
 

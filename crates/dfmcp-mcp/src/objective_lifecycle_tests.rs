@@ -347,6 +347,142 @@ fn expired_observe_cannot_certify_goal_history_before_or_after_restart() -> Test
 }
 
 #[test]
+fn entity_resources_do_not_certify_history_or_write_custody() -> TestResult {
+    fn files(root: &std::path::Path) -> TestResult<BTreeMap<std::path::PathBuf, Digest32>> {
+        fn visit(
+            root: &std::path::Path,
+            output: &mut BTreeMap<std::path::PathBuf, Digest32>,
+        ) -> TestResult {
+            let entries = match std::fs::read_dir(root) {
+                Ok(entries) => entries,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+                Err(error) => return Err(error.into()),
+            };
+            for entry in entries {
+                let entry = entry?;
+                let kind = entry.file_type()?;
+                if kind.is_dir() {
+                    visit(&entry.path(), output)?;
+                } else {
+                    assert!(
+                        kind.is_file(),
+                        "fixture custody must contain only regular files"
+                    );
+                    assert!(entry.metadata()?.len() <= 32 * 1024 * 1024);
+                    output.insert(
+                        entry.path(),
+                        Digest32::of_bytes(&std::fs::read(entry.path())?),
+                    );
+                    assert!(output.len() <= 128);
+                }
+            }
+            Ok(())
+        }
+        let mut output = BTreeMap::new();
+        visit(root, &mut output)?;
+        Ok(output)
+    }
+    let _serial = serialized_durable_tests();
+    let directory = StateDir::new("entity-resource-read");
+    for (index, (durable, query)) in [(false, true), (false, false), (true, true), (true, false)]
+        .into_iter()
+        .enumerate()
+    {
+        let selector = (7843020 + index).to_string();
+        let session_id = identity(&open(&selector, false, durable, true)?, "session_id")?;
+        let digest = production(&session_id)?;
+        in_session(&session_id, |guard| {
+            for grant in &mut guard.grants {
+                if grant.capability == Capability::Observe {
+                    grant.expires_at_tick = Some(GameTick(0));
+                }
+            }
+            guard.adapter.advance_ticks(200)
+        })?;
+        let session = resolve_session(Some(session_id.clone()))?;
+        let (uri, view, before) = {
+            let mut guard = session.lock().map_err(|_| "session poisoned")?;
+            for grant in &mut guard.grants {
+                if grant.capability == Capability::Observe {
+                    grant.expires_at_tick = None;
+                }
+            }
+            if !query {
+                guard
+                    .grants
+                    .retain(|grant| grant.capability != Capability::Query);
+            }
+            let wanted = Digest32::from_hex(&digest).ok_or("plan digest")?;
+            assert!(objectives::newly_satisfied_objectives(&guard).contains(&wanted));
+            let before = objectives_json(&guard);
+            assert!(before[0]["first_satisfied_anchor"].is_null());
+            let snapshot = guard.adapter.snapshot();
+            let entity = snapshot
+                .graph
+                .entities
+                .values()
+                .next()
+                .ok_or("fixture entity")?;
+            let mut rows = serde_json::json!({"mode":"entities", "rows":[crate::observation_projection::entity_json(entity)]});
+            crate::resources::link_entity_resources(
+                &mut rows,
+                guard.session_id,
+                snapshot.anchor(),
+            )?;
+            let uri = rows["rows"][0]["resource_uri"]
+                .as_str()
+                .ok_or("resource URI")?
+                .to_owned();
+            let view = uri.rsplit('/').next().ok_or("view")?.to_owned();
+            (uri, view, before)
+        };
+        let custody_before = files(&directory.0)?;
+        if durable {
+            assert!(
+                !custody_before.is_empty(),
+                "actual durable custody must exist"
+            );
+        }
+        let result = crate::resources::session_entity(&session_id, &uri, &view);
+        if query {
+            assert!(result.is_ok(), "{result:?}");
+        } else {
+            assert!(
+                result
+                    .expect_err("Query denied")
+                    .to_string()
+                    .contains("capability_denied")
+            );
+        }
+        {
+            let guard = session.lock().map_err(|_| "session poisoned")?;
+            assert_eq!(
+                objectives_json(&guard),
+                before,
+                "an entity read must not certify goal history, including on denial"
+            );
+            assert!(
+                objectives::newly_satisfied_objectives(&guard)
+                    .contains(&Digest32::from_hex(&digest).ok_or("plan digest")?)
+            );
+        }
+        assert_eq!(
+            files(&directory.0)?,
+            custody_before,
+            "an entity read must not write durable custody"
+        );
+        // Ordinary observation still publishes eligible progress through its existing path.
+        assert_eq!(
+            parsed(&fortress_observe(Some(session_id.clone())))?["ok"],
+            true
+        );
+        let guard = session.lock().map_err(|_| "session poisoned")?;
+        assert!(!objectives_json(&guard)[0]["first_satisfied_anchor"].is_null());
+    }
+    Ok(())
+}
+
+#[test]
 fn unresolved_goal_capacity_refuses_before_effects_and_preserves_pending_plan() -> TestResult {
     let session = identity(&open("7843005", false, false, false)?, "session_id")?;
     for index in 0..dfmcp_lab::durable::MAX_OBJECTIVES_PER_FORTRESS {
