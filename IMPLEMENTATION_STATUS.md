@@ -30,24 +30,48 @@ admission, or support. No protocol beyond 1.0 appears in the production runner m
 
 ## Evidence hierarchy
 
-### Session entity resource consumer (scoped Rust checked; full qualification pending)
+### Session entity resource consumer (exact R29 full Rust qualification)
 
-Entity query results now discover session-scoped, generation- and complete-anchor-
-bound resource references. The actual resource handler checks Query authority for
-the requested entity, exact current V2 anchor, generation and wrapped output
-bounds before returning the existing presence-preserving entity projection.
-It has no historical fallback or ambient fortress route. Synchronized inspection
-fences current shared/durable ownership without running objective or persistence
-postludes. Four new component cases pass, including actual durable-file and
-pending-history preservation for successful and denied reads. The four-case
-external modern MCP target also passes, including its new fifteen-request
-entity discovery/read/restore lifecycle. The corrected external case first
-fails against unchanged R28 production at the missing template description.
-Initial catalog-oracle, compilation and fixture failures remain retained;
-no gate, assertion, timeout or source history is weakened. These are scoped
-development runs; exact clean-source full qualification remains pending.
-Broader `.11` resource-family acceptance stays open.
-This is laboratory source, not additional live-game or admission evidence.
+Entity query results discover session-scoped references bound to the entity
+generation and complete current V2 anchor. The registered resource consumer
+checks Query authority for the requested ID before inspecting existence,
+requires the exact anchor/generation, and returns the existing presence-preserving
+projection within wrapped output bounds. There is no historical fallback or
+ambient fortress route. Owner-fenced synchronized inspection preserves semantic
+request IDs and does not certify pending history, retain versions or publish
+durable custody, including after denial.
+
+Clean private `b6d0e626f81330075b33fee3d81cb410a55b07b2` passes both required commands on
+`nightly-2026-11-01`, `rustc 1.101.0-nightly (f9ceb4a4d 2026-10-31)`.
+Each command passes 5,145 debug and 5,145 release tests across 123 targets per
+profile, zero failed or ignored; all 43 qualification gates pass. Parent review
+checks the official receipt, all 31 critical cases in both profiles of both
+commands, all 2,592 source hashes/modes and clean HEAD before and after artifact
+inspection. Receipt SHA-256 is
+`b514bccf4be1bff924b84029455be28a9cc1a37e62f5d4505b57cfb58623eef7`.
+
+The five new Rust cases cover canonical entity discovery/read, scoped/expired
+authority and output bounds, generation/fortress/restore rejection, actual
+pending-history and durable-file preservation on successful/denied reads, and
+fifteen real modern stdio exchanges with a fresh-reference positive after restore.
+The corrected external case first fails against unchanged R28 production at the
+missing template description. Initial catalog-oracle, compilation, fixture and
+operator-interruption failures remain retained; no assertion, gate or production
+budget is weakened. Separate source review finds no further concrete defect.
+
+The emitted release laboratory CLI is 17,987,864 bytes, SHA-256
+`77a1f05cde0e36254239c73160d78b76b613ac34035c939a90abe07ba07d0a53`.
+Cargo reports cache reuse from the just-completed
+test build. Parent opens and hashes the ELF, seals a private copy and repeats
+source checks. Raw logs, the official receipt, complete source bundle and
+`r29-parent-review.json` are under `target/fresh-eyes-20261101/`.
+
+This qualifies exact R29 Rust source and checks one development CLI artifact.
+Later report bytes and the shared head do not inherit that qualification.
+It establishes no new native R1, live campaign, production artifact, registry,
+floor, runner or runtime admission. E remains the earlier bounded operator trial
+with the process-binding limitation below. Broad `.11` resource-family acceptance
+remains open; the current entity route is laboratory-only.
 
 ### R28 latest-nightly source qualification and bounded live rechecks (2026-11-01)
 
@@ -102,9 +126,10 @@ is excluded from MCP gameplay credit.
 
 ### E positive item publication and withdrawal (2026-11-01; exact R28 only)
 
-On the same qualified R28 source and sealed development executable, Terra's
-prospectively bounded E trial makes one original bed insertion and two separately
-reviewed clock runs. The runs advance 1,200 and 743 ticks with zero overshoot;
+E's manifest identifies the qualified R28 source and sealed development
+executable. With the process-binding limits below, Terra's prospectively bounded
+trial makes one original bed insertion and two separately reviewed clock runs.
+The runs advance 1,200 and 743 ticks with zero overshoot;
 the second stops on target absence. Fresh Wait and same-anchor Query expose
 BED 540, type 8, subtype -1, material 420/163, stack 1, in a complete 535-item
 roster. The complete 536-item baseline contains no bed. Independent Lua agrees
@@ -136,7 +161,15 @@ publication and withdrawal at R28, not original-order completion, global
 quiescence, autonomous fortress competence, later-source or production admission.
 Independent CC review accepts all original `.5.2` criteria at R28; the coordinator
 records that narrow closure after checking its blocker and documentation
-conditions. The original `.5.1` goal and broader project goals remain open.
+conditions and accepting the limited binary binding. The export records
+`server_sha256` but retains no launched-executable path/hash receipt or
+independently opened process executable identity. The operator reports a
+contemporaneous launch/preflight and the exported client checks its binary
+argument before spawn; that launch transcript is outside the export. Exported
+bytes alone therefore do not independently bind the process to the sealed
+artifact. This limitation is accepted only for narrow item-view criteria,
+not source-bound process or runtime qualification. The original `.5.1` goal
+and broader project goals remain open.
 
 ### R26 intermediate source qualification (2026-11-01)
 

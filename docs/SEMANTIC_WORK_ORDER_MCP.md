@@ -491,8 +491,20 @@ confirmation. Pre-effect configuration-display and UI-timeout diagnostic
 limitations remain explicitly recorded in `IMPLEMENTATION_STATUS.md`.
 Independent CC review accepts the original `.5.2` criteria at this exact R28
 source; this does not close the original-order or broader production goals.
+The export records the server hash but no raw launched-executable path/hash
+receipt or opened process executable identity. Operator-reported launch and
+preflight records remain outside the export. The coordinator accepts that
+limited binding for the narrow item-view criteria; exported bytes alone do not
+establish source-bound process or runtime qualification.
 
-The current source repair is Rust-qualified at clean private R28
+The separate later laboratory entity consumer is fully Rust-qualified at private
+R29 `b6d0e626`: both required commands each pass 5,145 debug and 5,145 release
+cases across 123 targets per profile, zero failed or ignored, with all 43 gates.
+Its default CLI artifact and current-entity resource route are distinct from
+E's live semantic work-order executable. These source checks do not transfer E
+into later-source live evidence or close the broader production/resource goals.
+
+The earlier item-view source repair is Rust-qualified at clean private R28
 `e7b93a40e6a74bcc425c0c6fec5729296907d2af`, on the November 1 nightly.
 Both required commands pass 5,140 debug and 5,140 release cases each, zero
 failed or ignored across 123 targets per profile. Parent review verifies the

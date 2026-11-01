@@ -15,6 +15,19 @@ it is not a claim that every function or every Markdown document was exhaustivel
 The canonical work item is **dfmcp-reality-wiring-proof-4bf**. Historical closed umbrella beads
 are retained as history, with explicit residual work rather than silent completion credit.
 
+**Newest source recheck, R29:** clean private
+`b6d0e626f81330075b33fee3d81cb410a55b07b2` passes both required commands
+on the November 1 nightly: each 5,145 debug and 5,145 release cases across
+123 targets per profile, zero failed or ignored, all 43 qualification gates.
+Parent checks the official receipt, all 31 critical cases in both profiles,
+all 2,592 source hashes/modes and the actual release laboratory CLI. The new
+entity-query/resource consumer works through real modern stdio and preserves
+pending history and actual durable-file bytes on successful and denied reads.
+The complete evidence is under `target/fresh-eyes-20261101/`. Broader `.11`
+families, original-goal proof, autonomous fortress competence and admission
+remain open. E below is an earlier operator trial with its stated binding limits;
+later report bytes and the shared head do not inherit R29 source qualification.
+
 **November 1 R28 source recheck:** exact clean private
 `e7b93a40e6a74bcc425c0c6fec5729296907d2af` passes all 43 qualifier gates
 and the separate verifier on the November 1 nightly, each with 5,140 debug
@@ -51,6 +64,11 @@ qualification. D's unsuccessful trial stays unsuccessful; E is neither
 autonomous fortress competence nor later-source/admission evidence.
 Independent CC review accepts the original narrow `.5.2` item-view criteria at
 R28, after current Root blockers and the recorded E documentation are checked.
+The coordinator also accepts E's manifest-only exported binary binding for
+these narrow criteria: no raw launched-executable path/hash receipt or opened
+process executable identity is retained. Operator-reported contemporaneous
+launch/preflight is outside the export. No source-bound process/runtime
+qualification follows from these bytes.
 
 **Fresh-review correction, November 1:** the R25 positive proof below remains
 valid for its exact bytes, but did not exercise failed Observe, Query regrant or

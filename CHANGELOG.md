@@ -2,6 +2,12 @@
 
 ## 2026-11-01 — Withdraw failed-call item views and bound test setup
 
+- Exact private R29 `b6d0e626` passes both required commands on the November 1
+  nightly: each 5,145 debug plus 5,145 release cases, 123 targets per profile,
+  zero failed or ignored, all 43 gates. Parent checks the official receipt,
+  all 31 critical cases in both profiles, all 2,592 source files and the emitted
+  release laboratory CLI. Report bytes do not inherit source qualification;
+  no native, live or production/runtime admission follows.
 - On exact qualified R28, live E exposes a new bed through fresh Wait and
   same-anchor Query, then withdraws those rows after failed Observe. Independently
   replay all 139 members, 23 modern exchanges, native journals and complete
@@ -10,7 +16,9 @@
   five-file offline recovery and fresh host cleanup pass. Preserve D's earlier
   failure and E's two operator diagnostic limitations; no admission follows.
   Independent CC review accepts the original narrow `.5.2` item-view criteria
-  at R28; broader production and resource-family work remains open.
+  at R28; broader production and resource-family work remains open. Preserve
+  E's manifest-only exported process-to-binary binding: no opened-executable
+  identity is retained, and no process/runtime qualification follows.
 - Wire entity-query discovery to a session-scoped entity resource consumer,
   binding the exact entity generation and complete current anchor. Require
   Query authority for the requested ID; preserve field presence and refuse
@@ -19,8 +27,8 @@
   Four new focused cases and the complete four-case modern stdio MCP target
   pass, including the new entity lifecycle. Corrected old-production RED
   detects the missing route; earlier test/setup failures remain retained.
-  Full exact-source qualification is pending. Broader
-  fortress, knowledge and memory resource families remain open.
+  Exact R29 full Rust qualification passes as recorded above. Broader
+  fortress, historical, knowledge and memory resource families remain open.
 - Clean private R28 `e7b93a4` passes all 43 qualification gates and the
   separate verifier on the November 1 nightly: each 5,140 debug plus 5,140
   release cases, 123 targets per profile, zero failed or ignored. Parent
