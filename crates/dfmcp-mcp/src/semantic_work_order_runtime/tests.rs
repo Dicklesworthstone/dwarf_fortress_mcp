@@ -1236,6 +1236,157 @@ fn facade_checkpoint_failures_cannot_revive_items_before_or_after_dispatch() -> 
     }
     Ok(())
 }
+
+#[test]
+fn canonical_observe_cannot_reuse_a_published_or_consumed_goal_cursor() -> Result<()> {
+    for failed_sample in [false, true] {
+        let resources = Resources::new()?;
+        let mut runtime = start(&resources)?;
+        let prepared = prepare(&mut runtime, "wooden_bed")?;
+        let original = prepared.original.as_ref().expect("original").anchor;
+        let original_digest = prepared.observation.expect("citizen observation").1;
+        // Exact prepared-plan reacquisition remains a legitimate positive case.
+        let c = runtime.context(false)?;
+        assert_eq!(runtime.observe(&c)?.anchor, original);
+        let handoff = resources.recover(&prepared);
+        drop(runtime);
+        let mut runtime =
+            Runtime::from_shell(handoff, Mode::Control, SessionId::new(42), budget())?;
+        let c = runtime.context(false)?;
+        assert_eq!(runtime.observe(&c)?.anchor, original);
+        let c = runtime.context(false)?;
+        runtime.commit(prepared.review.as_ref().expect("review").seal(), true, &c)?;
+        resources.item_count.set(1);
+        resources.changed_operations_generation.set(failed_sample);
+        let c = runtime.context(false)?;
+        let sample = runtime.wait(&c);
+        if failed_sample {
+            assert!(sample.is_err(), "changed source must not publish a goal");
+        } else {
+            assert!(sample?.anchor.cursor.sequence > original.cursor.sequence);
+        }
+        assert!(
+            runtime
+                .monitor
+                .as_ref()
+                .expect("monitor")
+                .high_cursor()
+                .sequence
+                > original.cursor.sequence
+        );
+        resources.changed_operations_generation.set(false);
+        let c = runtime.context(false)?;
+        let before = runtime.inspect(&c)?;
+        // Queue insertion and a same-tick goal read do not change citizens.
+        assert_eq!(resources.acquire(&c)?.content_digest, original_digest);
+        let c = runtime.context(false)?;
+        let error = runtime
+            .observe(&c)
+            .expect_err("original cursor is below the goal floor");
+        assert_eq!(error.code, ErrorCode::StaleAnchor);
+        assert_eq!(
+            runtime.anchor(),
+            before.anchor,
+            "even a failed call must not roll back its anchor"
+        );
+        let c = runtime.context(false)?;
+        let after = runtime.inspect(&c)?;
+        assert_eq!(after.anchor, before.anchor);
+        assert_eq!(after.original, before.original);
+        assert_eq!(
+            after.to_json()["current_goal"],
+            before.to_json()["current_goal"]
+        );
+        if !failed_sample {
+            resources.advance(10, 4)?;
+            let c = runtime.context(false)?;
+            let fresh = runtime.wait(&c)?;
+            assert!(fresh.anchor.cursor.sequence > before.anchor.cursor.sequence);
+            assert_eq!(fresh.goal.as_ref().expect("goal").anchor, fresh.anchor);
+        }
+        assert_eq!(resources.native.borrow().commits, 1);
+    }
+    Ok(())
+}
+
+#[test]
+fn canonical_observe_cannot_publish_a_backwards_tick_before_planning() -> Result<()> {
+    let resources = Resources::new()?;
+    let mut runtime = start(&resources)?;
+    let c = runtime.context(false)?;
+    let before = runtime.observe(&c)?;
+    let queue = resources.native.borrow().queue.clone();
+    resources.native.borrow_mut().queue = changed_clock(
+        &queue,
+        queue.generation(),
+        queue.sequence(),
+        queue.tick() - 1,
+    )?;
+    let c = runtime.context(false)?;
+    assert_eq!(
+        runtime.observe(&c).expect_err("source tick regressed").code,
+        ErrorCode::StaleAnchor
+    );
+    assert_eq!(runtime.anchor(), before.anchor);
+    resources.native.borrow_mut().queue = changed_clock(
+        &queue,
+        queue.generation(),
+        queue.sequence(),
+        queue.tick() + 1,
+    )?;
+    let c = runtime.context(false)?;
+    let fresh = runtime.observe(&c)?;
+    assert!(fresh.anchor.tick > before.anchor.tick);
+    assert!(fresh.anchor.cursor.sequence > before.anchor.cursor.sequence);
+    assert!(fresh.original.is_none());
+    assert_eq!(resources.native.borrow().commits, 0);
+    Ok(())
+}
+
+#[test]
+fn canonical_observe_respects_consumed_native_tick_before_goal_monitor() -> Result<()> {
+    let resources = Resources::new()?;
+    let mut runtime = start(&resources)?;
+    let c = runtime.context(false)?;
+    let observed = runtime.observe(&c)?;
+    let request = Request::parse(
+        &json!({
+        "expected_observation":observed.observation.expect("observation").0.to_hex(),
+        "recipe":"wooden_bed","amount":5,"deadline_tick":observed.anchor.tick.get()+100,
+        "poll_interval_ticks":10,"stable_samples":2})
+        .to_string(),
+    )?;
+    let queue = resources.native.borrow().queue.clone();
+    resources.advance(1, 5)?;
+    let c = runtime.context(false)?;
+    assert!(runtime.plan(request, &c).is_err());
+    assert!(runtime.monitor.is_none());
+    assert!(runtime.semantic.high_tick() > observed.anchor.tick.get());
+    let original = runtime.original.clone();
+    resources.native.borrow_mut().queue = queue;
+    let c = runtime.context(false)?;
+    assert_eq!(
+        runtime
+            .observe(&c)
+            .expect_err("native authority tick is newer")
+            .code,
+        ErrorCode::StaleAnchor
+    );
+    assert!(
+        runtime.basis.is_none(),
+        "failed read must not rebind an older canonical basis"
+    );
+    assert!(
+        runtime.evidence.is_none(),
+        "failed read must not rebind older planning evidence"
+    );
+    assert_eq!(runtime.anchor(), observed.anchor);
+    assert_eq!(runtime.original, original);
+    assert!(runtime.semantic.high_tick() > observed.anchor.tick.get());
+    assert_eq!(resources.native.borrow().prepares, 0);
+    assert_eq!(resources.native.borrow().commits, 0);
+    Ok(())
+}
 #[test]
 fn exact_restart_preserves_historical_achievement_without_current_truth_or_dispatch() -> Result<()>
 {

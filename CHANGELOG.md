@@ -2,6 +2,15 @@
 
 ## 2026-11-01 — Withdraw failed-call item views and bound test setup
 
+- Further review adds a pre-publication cursor/tick/state-identity floor guard
+  to canonical Observe, including failed goal-acquisition cursor reservations.
+  Three actual original-source regressions fail on late-error cursor rollback,
+  backwards tick publication and old planning evidence below a consumed native
+  tick. The repaired MCP library passes all 2,825 cases, zero failed or ignored,
+  including prepared-runtime reconstruction over memory-backed codecs and
+  forward progress. Its own full qualification on the newer nightly remains
+  pending; completed R26 qualification does not cover the later guard and
+  fresh live execution stays held.
 - Preserve five executed regressions failing on unchanged R25 production code:
   failed Observe/source/budget, Query revocation/regrant, final presentation
   authority and unverified copied rows. Reopen `.5.2` and `.20` for discovered
@@ -14,8 +23,12 @@
   unchanged I/O and production limits. Fix the standalone reference checker's
   rustfmt sensitivity; eight Python source-shape/mutation tests pass. The
   outer-boundary mutant fails as intended; restored source passes all 2,822 MCP
-  and 1,292 adapter library tests, zero failed or ignored. Full exact-source
-  qualification and fresh live proof remain pending for these unqualified source changes.
+  and 1,292 adapter library tests, zero failed or ignored.
+- Clean private R26 `5ce23acd` passes all 43 qualification gates and the
+  separate verifier: each 5,137 debug plus 5,137 release cases, 123 targets
+  per profile, zero failed or ignored. Parent verifies exact source, receipt
+  and emitted development executable. Later anchor changes remain
+  unqualified source changes; fresh live proof remains pending.
 
 ## 2026-10-31 — Prove the public item view against the actual game
 

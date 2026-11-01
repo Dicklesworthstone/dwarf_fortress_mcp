@@ -829,6 +829,26 @@ impl<S: Shell> Runtime<S> {
             ));
         }
 
+        let observed = projection.snapshot.anchor();
+        let below_monitor_floor = self.monitor.as_ref().is_some_and(|monitor| {
+            let floor = monitor.high_cursor();
+            floor.epoch != observed.cursor.epoch
+                || floor.sequence > observed.cursor.sequence
+                || monitor.high_tick() > observed.tick
+        });
+        if observed.cursor.epoch != self.anchor.cursor.epoch
+            || observed.cursor.sequence < self.anchor.cursor.sequence
+            || observed.tick < self.anchor.tick
+            || observed.tick.get() < self.semantic.high_tick()
+            || (observed.cursor == self.anchor.cursor && observed != self.anchor)
+            || below_monitor_floor
+        {
+            return Err(DfmcpError::new(
+                ErrorCode::StaleAnchor,
+                "canonical observation would regress the retained cursor, tick, or state identity",
+            ));
+        }
+
         work.context.anchor = projection.snapshot.anchor();
         self.shell
             .acceptance()

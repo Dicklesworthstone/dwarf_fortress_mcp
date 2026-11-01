@@ -28,7 +28,17 @@ failed acquisition/inspection and the real facade's three checkpoints, and
 bound test setup without changing production limits. Eight standalone Python
 reference-checker regressions pass; the additional facade mutant actually fails,
 and restored source passes 2,822 MCP plus 1,292 adapter library tests, zero failed
-or ignored. Full exact-source qualification and fresh live evidence remain pending. See
+or ignored. Clean private R26 `5ce23acd3660505a58f0534a227c76a6f95d9900`
+subsequently passes all 43 qualification gates and the separate verifier,
+each with 5,137 debug and 5,137 release cases across 123 targets per profile,
+zero failed or ignored. Parent checks the official receipt, all fifteen
+critical cases in both profiles, all 2,592 source hashes/modes and clean HEAD
+before and after sealing the actual
+Cargo-emitted development executable. The later `.23` canonical-anchor repair
+has three actual original-source failures followed by a full 2,825-case MCP
+library pass, zero failed or ignored. Its own latest-nightly full qualification
+and fresh live execution remain pending; R26 covers neither. The prepared
+recovery component uses memory-backed codecs, not a physical-file reopen. See
 `target/fresh-eyes-20261101/TODO.md`; no later-byte admission is inferred.
 
 Exact private `2f724b90eab986c3fa913fa99e2fd91bfcae3a29` adds a bounded,

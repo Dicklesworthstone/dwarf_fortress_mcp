@@ -455,6 +455,17 @@ unavailable coverage is explicitly unknown. Inspecting a retained sample does
 not prove current game freshness. These are additional observations under the
 same eleven tools, with no new bridge fields or output-oriented goal mode.
 
+A denied Query or failed canonical Observe also retires the optional cached
+rows. Regranting authority or issuing another Query cannot revive them; a new
+qualified goal sample is required. Error and close packets preserve recovery
+identities while withholding copied item rows. The later canonical-observation
+floor guard rejects a reacquisition below a published anchor, a consumed goal
+cursor or native tick before rebinding planning evidence. Three `.23`
+regressions fail on the original source; all 2,825 repaired MCP component cases
+pass, including prepared-runtime reconstruction over memory-backed codecs and
+fresh forward observations. The guard's own exact-source full qualification
+on the newer nightly remains pending; the R26 evidence below does not cover it.
+
 The component tests execute the real original-plan compiler, semantic/native
 and clock coordinators, durable goal monitor and private-file open modes with
 injected native responses. They cover original-goal continuation, lost clock
@@ -468,8 +479,12 @@ Fresh review on November 1 found failed-call invalidation omissions in R25;
 the positive trial below did not exercise those paths. Current source withdraws
 item rows after failed Observe/Query or facade publication checks, and copied
 error/close state exposes no old item rows. Five regressions fail against the
-old production code. Exact qualification and fresh live verification of the
-repair remain pending in `IMPLEMENTATION_STATUS.md`; original-goal proof and
+old production code. The repaired source passes clean private R26 qualification
+and its separate verifier, each with 5,137 debug and 5,137 release cases and
+zero failed or ignored across 123 targets per profile. Parent review checks
+the exact source, official receipt and development executable. Fresh live
+verification of those failure paths and qualification of the later anchor
+guard remain pending in `IMPLEMENTATION_STATUS.md`; original-goal proof and
 native authority have not changed.
 
 On exact qualified private R25 `bc5bcdfe28a895f9334fd8a116270be36650ee3a`,

@@ -30,7 +30,47 @@ admission, or support. No protocol beyond 1.0 appears in the production runner m
 
 ## Evidence hierarchy
 
+### R26 intermediate source qualification (2026-11-01)
+
+Clean private `5ce23acd3660505a58f0534a227c76a6f95d9900` passes all
+43 qualification gates and the separate verifier, each with 5,137 debug and
+5,137 release tests across 123 targets per profile, zero failed or ignored.
+Parent replay consumes the official receipt, all fifteen critical cases in
+both profiles and all 2,592 source hashes/modes before and after artifact
+review. Receipt SHA-256 is
+`4646e5db9a70650ac96c8f42aa75186c73da69deb4b673c8475baba0d901b6c1`.
+The actual Cargo-emitted development ELF is 50,359,776 bytes, SHA-256
+`029bed4de0342bf7e7411763a66d2b4644fad5a0f5076fb10fce0f5b195185ab`;
+Cargo reports cache reuse, not fresh recompilation. Raw logs, the sealed ELF,
+receipt and complete source bundle are under `target/fresh-eyes-20261101/`.
+
+This qualifies the failed-call item repair and bounded socket-test setup at
+that exact source. It does not cover the later `.23` anchor guard or a fresh
+live trial. After terminal commands and parent review, the private checkout
+is intentionally reused for the next regression/fix; R26's immutable commit,
+bundle and receipts remain historical. The shared head, native R1, campaign,
+compatibility and production/runtime admission are not qualified by this run.
+
 ### Fresh review repairs (2026-11-01; unqualified source changes)
+
+A further source pass identifies canonical Observe reusing an old original
+cursor after a same-tick goal sample, or accepting a backwards source tick
+before planning. Bead `.23` owns three new regressions that actually execute
+against unchanged R26 production code and fail: a late error has already
+rolled sequence 2 back to 1, a backwards tick returns a successful view, and
+an observation rebinds old planning evidence below a consumed native tick
+before a monitor exists. The repaired guard rejects before canonical anchor
+assignment, including consumed monitor and native authority floors. The full
+repaired MCP library passes 2,825 cases, zero failed or ignored, including the
+three new regressions, failed-monitor consumption and fresh forward progress.
+Legitimate prepared reacquisition includes reconstructing the runtime and
+reopening its real journal/archive code over memory-backed byte fixtures;
+this component case does not establish filesystem durability. A newer nightly
+is available, so the next exact-source full qualification will use a separate
+dated toolchain installation while preserving the shared nightly alias.
+The frozen R26 qualification above does not cover this later fix. Fresh live
+execution is held until the next repaired source has its own evidence;
+`.5.2` remains open.
 
 Fresh review of R25 found that failed canonical Observe and denied Query could
 retain an old complete item view, optional authorization was not repeated after
