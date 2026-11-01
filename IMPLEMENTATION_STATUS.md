@@ -30,6 +30,57 @@ admission, or support. No protocol beyond 1.0 appears in the production runner m
 
 ## Evidence hierarchy
 
+### R28 latest-nightly source qualification and unsuccessful live recheck (2026-11-01)
+
+Clean private `e7b93a40e6a74bcc425c0c6fec5729296907d2af` passes all
+43 qualification gates and the separate verifier on `nightly-2026-11-01`,
+`rustc 1.101.0-nightly (f9ceb4a4d 2026-10-31)`. Each command passes 5,140
+debug and 5,140 release tests across 123 targets per profile, zero failed or
+ignored. Parent review consumes the official receipt, all 26 critical cases
+in both profiles and all 2,592 source hashes/modes before and after artifact
+review. Receipt SHA-256 is
+`e27becb5235762e92abefe2bfa5a442ab860177af50ba11dce5454f20cdbca36`.
+
+The actual Cargo-emitted development executable is 50,483,416 bytes, SHA-256
+`bb7eff6fd811c264bffe5c140bfbc14537e1cbe1d0052d9a7c6905b7bf69482e`.
+Cargo reports cache reuse, not fresh recompilation. Parent opens and hashes
+the ELF, seals a private copy and repeats source checks. The complete source
+bundle, raw logs, receipt and sealed executable are retained under
+`target/fresh-eyes-20261101/`; `r28-parent-review.json` records the exact scope.
+The R27 failure remains failed. R28's qualified checkout stays clean; later
+report bytes and the shared head do not inherit its qualification.
+
+This qualifies the Rust source repair; the source-bound development executable
+was built and used for the bounded trial. It is not native R1, production
+server-artifact qualification, a live campaign,
+compatibility, deployment-floor, production-runner or runtime admission.
+The compatibility registry remains empty and the production map remains 1.0.
+The bounded D live recheck uses this exact executable. Sixteen modern MCP
+exchanges insert exactly one reviewed bed order. The early same-tick Observe
+correctly refuses anchor regression; Query preserves the anchor and the same
+prepared clock run while withholding item rows. The first confirmed run advances
+exactly 1,200 ticks with zero overshoot and stops at its tick limit. The second
+reviewed run is refused as `stale` before any unpause. That reason combines
+several native checks; retained evidence does not establish an expiry cause.
+
+The original order remains at one bed remaining and its goal is false. Both
+independent Lua and complete native rosters contain no bed (538 items before,
+532 after). Thus positive nonempty item publication and the late changed-source
+Observe probe are not achieved. No further unpause or replacement goal occurs.
+Parent replay verifies all 105 export members, three creation frames, nine clock
+frames and 35 goal-history frames containing five complete samples. Six offline
+exchanges reopen the actual five custody files read-only, preserve all five byte
+hashes and expose neither current goal nor stale item rows. Fresh parent host
+checks find no owned processes or listeners, all five original plugin states
+restored, and both original 30-file saves exact with no extras. Host scans check
+all 30 private values before export, finding zero matches.
+
+`production-d-parent-review.json` and `production-d-parent-cleanup.json` under
+the evidence directory record these limits. Independent review closes only
+the exact repairs `.20`–`.24`; `.5.2`, original-goal proof, autonomous fortress
+competence and all admission work remain open. Operator workshop/manager setup
+is excluded from MCP gameplay credit.
+
 ### R26 intermediate source qualification (2026-11-01)
 
 Clean private `5ce23acd3660505a58f0534a227c76a6f95d9900` passes all

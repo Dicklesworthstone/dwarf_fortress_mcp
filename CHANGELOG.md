@@ -2,22 +2,35 @@
 
 ## 2026-11-01 — Withdraw failed-call item views and bound test setup
 
+- Clean private R28 `e7b93a4` passes all 43 qualification gates and the
+  separate verifier on the November 1 nightly: each 5,140 debug plus 5,140
+  release cases, 123 targets per profile, zero failed or ignored. Parent
+  verifies the official receipt, all 26 critical cases, all 2,592 source files
+  and the exact emitted development executable. No native or production/runtime
+  admission follows.
+- Actual live D inserts one reviewed bed order and advances exactly 1,200 ticks
+  without overshoot. The early anchor-floor refusal preserves prepared custody;
+  the second clock run is refused as stale before unpause. No bed is observed in the final rosters,
+  the original goal remains false, and the positive nonempty item and late
+  changed-source probes are unachieved. Preserve this unsuccessful result and
+  undifferentiated refusal cause. Parent replay verifies all 105 exported files;
+  actual five-file offline recovery and fresh full host cleanup pass. Independent
+  review closes the scoped repairs only; `.5.2` and broader goals remain open.
 - Preserve the failed R27 latest-nightly Clippy receipt and all raw output;
   full Rust tests, verifier, server build and live trial are unrun. Replace
   only the redundant lazy default-capability selection with its equivalent
   eager fallback. Independent review confirms omitted, explicit-empty and
   explicit requests retain their meaning. No warning suppression or gate,
-  profile, budget, dependency or test change; next exact-source qualification
-  remains pending.
+  profile, budget, dependency or test change. The subsequent exact R28 source
+  qualification above passes; the R27 attempt remains failed.
 - Further review adds a pre-publication cursor/tick/state-identity floor guard
   to canonical Observe, including failed goal-acquisition cursor reservations.
   Three actual original-source regressions fail on late-error cursor rollback,
   backwards tick publication and old planning evidence below a consumed native
   tick. R27's repaired MCP library passes all 2,825 cases, zero failed or ignored,
   including prepared-runtime reconstruction over memory-backed codecs and
-  forward progress. Its own full qualification on the newer nightly remains
-  pending; completed R26 qualification does not cover the later guard and
-  fresh live execution stays held.
+  forward progress. R27's newer-nightly qualification fails as recorded above;
+  the exact R28 guard passes both full commands and the early live D probe.
 - Preserve five executed regressions failing on unchanged R25 production code:
   failed Observe/source/budget, Query revocation/regrant, final presentation
   authority and unverified copied rows. Reopen `.5.2` and `.20` for discovered
@@ -34,8 +47,8 @@
 - Clean private R26 `5ce23acd` passes all 43 qualification gates and the
   separate verifier: each 5,137 debug plus 5,137 release cases, 123 targets
   per profile, zero failed or ignored. Parent verifies exact source, receipt
-  and emitted development executable. Later anchor changes remain
-  unqualified source changes; fresh live proof remains pending.
+  and emitted development executable. R26 does not qualify the later anchor
+  change; exact R28 and its bounded live result are recorded above.
 
 ## 2026-10-31 — Prove the public item view against the actual game
 

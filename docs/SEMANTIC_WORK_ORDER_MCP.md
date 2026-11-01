@@ -476,6 +476,23 @@ live DFHack campaign or compatibility admission. Current executed validation and
 
 ### Executed public item-view proof
 
+The current source repair is Rust-qualified at clean private R28
+`e7b93a40e6a74bcc425c0c6fec5729296907d2af`, on the November 1 nightly.
+Both required commands pass 5,140 debug and 5,140 release cases each, zero
+failed or ignored across 123 targets per profile. Parent review verifies the
+exact receipt, source and development executable. Actual live D's sixteen modern
+exchanges prove the early anchor-floor refusal preserves the anchor and prepared
+run; the first run advances exactly 1,200 ticks without overshoot. Its second
+reviewed run is refused as stale before unpause, with the precise cause unresolved.
+No bed appears in either the complete native roster or independent Lua (538 items
+before, 532 after); the retained original order has one remaining and its goal is
+false. The positive nonempty item and late changed-source probes remain unachieved.
+Six actual-file offline exchanges preserve all five custody hashes and withhold
+current goal/items. Parent replay checks all 105 exports and fresh host cleanup
+confirms owned processes stopped, port closed, five plugins restored and both
+30-file saves exact. `.5.2` remains open. The earlier C result below is historical;
+neither operator setup nor scoped safety proof establishes fortress competence.
+
 Fresh review on November 1 found failed-call invalidation omissions in R25;
 the positive trial below did not exercise those paths. Current source withdraws
 item rows after failed Observe/Query or facade publication checks, and copied
@@ -483,10 +500,10 @@ error/close state exposes no old item rows. Five regressions fail against the
 old production code. The repaired source passes clean private R26 qualification
 and its separate verifier, each with 5,137 debug and 5,137 release cases and
 zero failed or ignored across 123 targets per profile. Parent review checks
-the exact source, official receipt and development executable. Fresh live
-verification of those failure paths and qualification of the later anchor
-guard remain pending in `IMPLEMENTATION_STATUS.md`; original-goal proof and
-native authority have not changed.
+the exact source, official receipt and development executable. R28 subsequently
+qualifies the anchor guard, and D exercises the early refusal and actual offline
+recovery. Revocation of a nonempty live item view still lacks a successful current
+trial; original-goal proof and native authority have not changed.
 
 On exact qualified private R25 `bc5bcdfe28a895f9334fd8a116270be36650ee3a`,
 Terra uses the actual development executable

@@ -15,6 +15,26 @@ it is not a claim that every function or every Markdown document was exhaustivel
 The canonical work item is **dfmcp-reality-wiring-proof-4bf**. Historical closed umbrella beads
 are retained as history, with explicit residual work rather than silent completion credit.
 
+**November 1 R28 source recheck:** exact clean private
+`e7b93a40e6a74bcc425c0c6fec5729296907d2af` passes all 43 qualifier gates
+and the separate verifier on the November 1 nightly, each with 5,140 debug
+and 5,140 release cases across 123 targets per profile, zero failed or ignored.
+Parent review checks the official receipt, all 26 critical cases in both
+profiles, all 2,592 source hashes/modes and the actual emitted development ELF.
+The exact receipts and complete bundle are in `target/fresh-eyes-20261101/`.
+Actual bounded D replay verifies all 105 exported files and sixteen modern MCP
+exchanges: one bed insertion, early same-tick anchor refusal preserving the same
+prepared run, then exactly 1,200 ticks without overshoot. The second reviewed
+clock run is refused as stale before unpause; its precise cause is unresolved.
+No bed appears, and the original retained order remains false with one remaining.
+The positive nonempty item and late changed-source probes are unachieved.
+Six offline exchanges preserve all five actual custody files and withhold current
+goal/items. Fresh parent host checks verify stopped owned processes, closed port,
+five restored plugins and both exact 30-file saves. Thirty-value host secret scans
+precede export. Independent review closes `.20`–`.24` only; `.5.2` and broader
+production/competence gaps remain open. This is not shared-head, native R1,
+production artifact, compatibility or runtime admission evidence.
+
 ### R24 item-view qualification and verifier disagreement (2026-10-31)
 
 **Fresh-review correction, November 1:** the R25 positive proof below remains
@@ -36,19 +56,19 @@ critical cases in both profiles, all 2,592 source hashes/modes and clean HEAD
 before and after sealing the actual
 Cargo-emitted development executable. The later `.23` canonical-anchor repair
 has three actual original-source failures followed by a full 2,825-case MCP
-library pass, zero failed or ignored. Its own latest-nightly full qualification
-and fresh live execution remain pending; R26 covers neither. The prepared
+library pass, zero failed or ignored. R26 covers neither the later guard nor
+its live execution; exact R28 qualification and bounded D are recorded above. The prepared
 recovery component uses memory-backed codecs, not a physical-file reopen. See
 `target/fresh-eyes-20261101/TODO.md`; no later-byte admission is inferred.
 
 That next clean R27 source, `3c84cb136ae8c4d53a8e41efdecf9f859d365ef5`,
 fails warning-denied Clippy on the separately installed November 1 nightly.
 The existing laboratory capability default uses a redundant lazy closure.
-All full Rust tests, the separate verifier, server build and live D are unrun;
+For that failed R27 attempt, full Rust tests, verifier, server build and live D are unrun;
 the final 2,592-file source check remains clean. The failed receipt and raw
 diagnostic are retained. Bead `.24` changes only the equivalent eager fallback,
 with independently reviewed default/explicit/empty semantics and unchanged
-authority. The next source needs complete checks; no warning, gate, budget,
+authority. Subsequent R28 completes the checks above; no warning, gate, budget,
 profile or test is weakened and no R27 artifact or live proof is invented.
 
 Exact private `2f724b90eab986c3fa913fa99e2fd91bfcae3a29` adds a bounded,
