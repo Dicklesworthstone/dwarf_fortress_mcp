@@ -89,7 +89,7 @@ fn tree_packet_chunked_native_evidence_roundtrips_and_respects_modern_bounds() {
         ContentBlock, CoreResult, FinalCoreResult, ResultPeerEra, decode_typed_complete,
     };
     // Byte-preservation/transport boundaries, not claims of valid native trees.
-    for size in [1, 24_000, 24_001, 30_489, 32_768, 32_769, 128 * 1024] {
+    for size in [1usize, 24_000, 24_001, 30_489, 32_768, 32_769, 128 * 1024] {
         let bytes: Vec<u8> = (0..size).map(|n| n as u8).collect();
         let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
         let reference = json!({"acknowledged":{"journal_id":"j","head":"h","frames":3},"uncertain_effect":true,"original_key":"original"});
@@ -113,7 +113,7 @@ fn tree_packet_chunked_native_evidence_roundtrips_and_respects_modern_bounds() {
         let result: Value = serde_json::from_str(&encoded).expect("complete JSON");
         assert!(result.get("_meta").is_none());
         let outer = json!({"jsonrpc":"2.0","id":"x".repeat(254),"result":result}).to_string();
-        assert!(outer.len() + 1 <= RESPONSE_BYTES as usize);
+        assert!(outer.len() < RESPONSE_BYTES as usize);
         assert_eq!(
             complete.payload.content.len(),
             1 + size.div_ceil(presentation::CHUNK_BYTES)

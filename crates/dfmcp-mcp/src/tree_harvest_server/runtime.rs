@@ -234,7 +234,7 @@ impl Config {
         TreeRpc::connect(
             binding,
             token,
-            nonce(c)?,
+            nonce(c, self.scope)?,
             c,
             BuildCancellation::with_check(Arc::new(runtime_io)),
             Box::new(move |write| {
@@ -254,9 +254,9 @@ impl Config {
         )
     }
 }
-fn nonce(c: &OperationContext) -> Result<[u8; 32]> {
+fn nonce(c: &OperationContext, area: MapCuboid) -> Result<[u8; 32]> {
     runtime_io()?;
-    c.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
+    c.authorize(Capability::Query, RiskTier::ReadOnly, &[], Some(area))?;
     if c.budget.max_bytes < 32 {
         return Err(error(
             ErrorCode::BudgetExceeded,
@@ -430,7 +430,7 @@ impl Runtime {
             Digest32::ZERO,
         );
         let entropy = if config.input.initialize {
-            nonce(&work.reserve(&current, 32)?)?
+            nonce(&work.reserve(&current, 32)?, config.scope)?
         } else {
             [0; 32]
         };

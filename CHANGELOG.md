@@ -25,6 +25,20 @@
 - Check Query authority and the 32-byte budget before Tree entropy I/O, and
   remove the unused Record import. Extend source-boundary mutation checks.
   Corrected-source execution and live gameplay proof remain pending.
+- Preserve direct `8eb7754` test-compilation exit 101 and zero executed cases.
+  Annotate chunk-test sizes as `usize` and write the identical newline-inclusive
+  bound as a strict comparison. Production encoding already compiled; complete
+  corrected-source execution remains pending.
+- Retain J replay's capability-denied result: the new Tree entropy check
+  requested an unscoped Query against a map-scoped grant. Pass the configured
+  area from both callers and enforce those call sites in mutation checks.
+- Integrate both corrections into the private CLI branch. Root reports exact
+  `64fd25f` direct Linux passes: 2842 MCP/wrapper cases, 1330 adapter cases and
+  five Tree plus five workshop subprocess scenarios, all without failures or
+  ignored/filtered cases. Its sealed-executable J replay returns a usable ACK
+  and losslessly reconstructs all 30489 bytes; offline reopening preserves
+  custody without native calls. These results belong to 64fd. The merged CLI
+  candidate, both final full commands and gameplay acceptance remain unproved.
 
 ## 2026-11-02 — Package complete Tree evidence within modern MCP bounds
 

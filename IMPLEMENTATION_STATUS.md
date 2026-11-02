@@ -102,7 +102,16 @@ packet regression exercises that same public codec. Ordinary tools/call uses
 empty metadata: the pinned codec rejects discovery-only server identity there.
 The correction also removes an unused import and checks Query authority plus
 the 32-byte budget before reading Tree entropy, matching the workshop boundary.
-Fresh corrected-source compilation and execution are still required.
+At that checkpoint, fresh corrected-source compilation and execution were required.
+Direct `8eb7754` execution compiled the production library but stopped before
+tests on an ambiguous integer type in the chunk-boundary test. The test sizes
+now explicitly use `usize`; the newline-inclusive bound is equivalently written
+as a strict comparison. This preserves every byte size, assertion and case.
+The first corrected-executable J replay then exposed a scope mismatch in the
+new entropy authorization: Tree's Query grant is map-scoped, so requesting
+`None` correctly fails. Both entropy callers now pass their configured map
+area explicitly. The grant remains unchanged, and the source mutation checks
+cover both scoped call sites. That correction required another actual-capture replay.
 Native Tree/workshop code, protocols, vectors and ground-material policy remain
 byte-identical to cfcc. No production registry/runner/floor is widened.
 
@@ -111,10 +120,22 @@ RCH job 30090363205058940 passes all 1330 adapter cases, and job
 30090363205058942 passes 2838 MCP library cases plus two Rust wrappers driving
 five Tree and five workshop subprocess scenarios, with zero failures/ignored/
 filtered/skipped. Source receipts and sealed development ELFs apply only to cfcc.
-They do not qualify this repair. Its four Tree packet cases (two added) and the
-same five extended stdio cases remain unexecuted until Root runs the corrected
-candidate. Repaired actual J replay, both final full commands, real felling,
-WOOD, original workshop, finite bed, native R1 and admission remain pending.
+They do not qualify this repair. Root subsequently reports direct Linux
+execution on exact `64fd25f7f77a12baa57e9c055b764957b2477e77`: 2840 MCP library
+cases plus two Rust stdio wrappers and all 1330 adapter cases passed, with zero
+failed/ignored/filtered cases. The nested five Tree and five workshop scenarios
+also passed, including large and maximum-2048-cell evidence. Root's replay of
+unchanged J bytes against its sealed 64fd executable returned a session and ACK;
+three chunks reconstructed the exact `8c8b6ec8...1fcc5472` capture. Offline
+reopening used that returned ACK without a new native connection or token and
+preserved the custody bytes. Only Handshake and ReadTreeHarvest were called.
+These are exact-64fd component/replay results, not execution of the merged CLI
+successor or a second live native capture. Root retains a 64fd full-verify
+attempt that failed four packaging fixtures under an explicit build-target
+environment override; no gate or product assertion changes follow from it.
+Both final full commands, real felling, WOOD, original workshop, finite bed,
+native R1 and admission remain pending. Root owns the separately sealed 64fd K
+experiment and its outcome; the CLI integration does not transfer that proof.
 The frozen 08 qualification exit 101 and all prior RED/compiler receipts remain
 preserved. Neither original .14 acceptance criterion is closed.
 
@@ -122,7 +143,8 @@ The repair preflight also retains a broad-validator exit 1: the existing cfcc
 clock fixture uses two forbidden `expect` calls outside a test module. The
 private candidate replaces them with equivalent installed-clock assertions and
 conditional updates. Production clocks, the 10ms request, test cases and source
-validator are unchanged; this narrow correction needs fresh execution too.
+validator are unchanged. The fixture is included in Root's exact-64fd adapter
+pass; the merged CLI source still requires its own execution and qualification.
 
 
 ### Visible-tree supply (2026-11-01; new source, execution pending)
