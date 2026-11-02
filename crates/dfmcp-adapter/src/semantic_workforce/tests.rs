@@ -2,8 +2,10 @@ use super::*;
 
 include!("tests/fixture.rs");
 
-#[path = "tests/evidence_owner.rs"]
-mod evidence_owner;
+mod evidence_owner {
+    include!("tests/evidence_owner.rs");
+    include!("tests/evidence_owner_clock.rs");
+}
 
 #[test]
 fn actual_coordinator_handoff_preserves_original_seal_and_leaves_goals_pending() -> Result<()> {
@@ -646,6 +648,7 @@ fn real_private_association_file_uses_existing_custody_and_query_only_recovery()
     let mut f = fixture()?;
     let review = review(&mut f)?;
     let id = f.owner.associations.native_journal();
+    // ubs:ignore[rust.security.non-crypto-random] — unique test-directory suffix, never an authentication nonce.
     let nonce = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_err(|_| invalid("fixture clock"))?

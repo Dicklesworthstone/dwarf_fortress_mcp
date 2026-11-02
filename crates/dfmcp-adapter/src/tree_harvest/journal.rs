@@ -558,6 +558,10 @@ impl<S: EffectJournalStorage> Journal<S> {
         }
         Ok(())
     }
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "explicit frame fields and separate work/ACK custody keep the write-ahead boundary auditable"
+    )]
     fn append_work(
         &mut self,
         state: State,
@@ -627,6 +631,10 @@ impl<S: EffectJournalStorage> Journal<S> {
             self.dispatch_started && self.native.as_ref().is_none_or(|n| n.phase < 2);
         Ok(())
     }
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "preserve the explicit frame and context/ACK boundary shared with append_work"
+    )]
     fn append(
         &mut self,
         state: State,
@@ -827,6 +835,10 @@ impl<S: EffectJournalStorage> Journal<S> {
         )
     }
 }
+#[allow(
+    clippy::too_many_arguments,
+    reason = "opening pins, initialization policy, nonce and authority remain explicit at each custody caller"
+)]
 pub fn open_private(
     directory: &Path,
     c: &OperationContext,

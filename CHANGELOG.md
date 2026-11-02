@@ -1,5 +1,30 @@
 # Changelog
 
+## 2026-11-02 — Direct compilation and bounded live gameplay evidence
+
+- Direct Linux execution on exact `64fd25f` passes 2,842 MCP/wrapper and 1,330
+  adapter cases. Real J replay returns a usable session and ACK; two raw content
+  blocks reconstruct all 30,489 native bytes.
+- Live K semantic MCP effects designate the observed tree and complete original
+  Carpenter workshop 1. The finite bed order remains inactive/unvalidated, with
+  zero beds after four bounded production intervals. No manager was observed;
+  that is a blocker hypothesis, not a proved sole cause. No flags were forced.
+- Independently replay all 306 exports, six exact 1,200-tick intervals without
+  overshoot and nine unchanged offline custody files. Fresh host checks confirm
+  cleanup, seven original plugin states, both 30-file saves and port closure.
+- Actual standard CLI integration passes on exact `34c8c53`. Its warning-denied
+  Clippy run finds three existing Tree custody APIs over the argument-count
+  style limit. Add three local, reasoned lint annotations, retaining explicit
+  authority/frame/ACK parameters and behavior, and name the test fixture tuple
+  type to resolve the separate type-complexity finding. Final successor qualification
+  and original bed acceptance remain pending; no broad lint/test gate changes.
+- Fix the all-target integration build: shared workforce tests had imported a
+  private unit-test clock from the ordinary production library. Preserve the
+  interrupted-read assertions in the public-API suite and retain deterministic
+  delayed/pre-I/O/unwind assertions in a unit-only include. The test read hook
+  defaults to absent; production clock and code remain unchanged.
+
+
 ## 2026-11-02 — Connect standard CLI to existing gameplay development runtimes
 
 - Add `serve-gameplay-dev <tree|workshop|bounded-clock|finite-bed>` as a closed

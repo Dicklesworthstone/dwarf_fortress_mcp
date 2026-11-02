@@ -31,6 +31,57 @@ admission, or support. No protocol beyond 1.0 appears in the production runner m
 
 ## Evidence hierarchy
 
+### Direct execution and original-save K experiment (2026-11-02)
+
+Exact `64fd25f7f77a12baa57e9c055b764957b2477e77`, compiled directly on Linux
+with latest nightly `3e92e1a2d20b991ef23a6c6064c34d57ee8c98d3`, passes 2,840
+MCP library cases, two Rust stdio wrappers and 1,330 adapter cases, with zero
+failed, ignored or filtered. Five Tree and five workshop subprocess scenarios
+pass, including large and maximum-2,048-cell evidence. Exact real J replay
+returns a usable session and external ACK: content 0 is the packet and two raw
+blocks reconstruct all 30,489 native bytes. Credential-free offline reopening
+preserves custody without native I/O. This is not full workspace qualification.
+
+Separate live K uses sealed 64fd development executables with Classic 53.16 /
+DFHack 53.16-r3 on Linux x86_64. A reviewed Tree designation is followed by
+observed root-predicate absence and ten new eligible ground WOOD items; causal
+item attribution remains unknown. A reviewed construction using ground log 549
+is followed by fresh original Carpenter building 1 completion, independently
+observed at stage 3/3. One reviewed finite wooden-bed order 0 is inserted, but
+remains unvalidated/inactive with one item outstanding and zero BED after four
+1,200-tick bed intervals. No manager was observed among seven citizens. No
+manager, labor, item or order flags were forced. The manager cause is unproved.
+
+Root independently verifies 306 export members / 2,280,694 bytes against
+manifest `0ae0882bf9e244f25e54a11cab40d0bca4af0edcd7ac1605467998d0e81dcf5a`,
+all modern exchange identities and chunk hashes, six bounded intervals totaling
+7,200 requested and observed ticks with zero overshoot, and nine unchanged
+custody files after credential-free offline reopening of all four profiles.
+The export reports 75 exact private values scanned with zero matches. Fresh
+host checks verify seven original plugin states, both exact 30-file saves,
+absent original process births and a closed port; the terminal capture proves
+raw pause and an inactive clock before drain. Raw exports and independent replay
+remain under `target/fresh-eyes-20261101/workshop-k-*`.
+
+Actual standard CLI integration passes on exact
+`34c8c53488078db89df0cd39b21bb336a960fb10`: one Rust case drives three
+subprocess scenarios and the original five Tree/five workshop cases. Its direct
+warning-denied Clippy attempt rejects three existing Tree custody APIs for
+argument count. This successor locally annotates only those style findings with
+reasons, keeping explicit frame, authority, pin and ACK arguments unchanged.
+A named test-fixture tuple resolves the separate type-complexity finding.
+All-target compilation also exposes an unresolved private TestClock import in
+the shared public-API integration file. The successor keeps interrupted-read
+assertions shared, and includes deterministic delayed/pre-I/O/unwind clock
+cases only in the unit module. Its test read hook defaults to absent and runs
+after releasing the fixture borrow. Production code and clock are unchanged.
+Both compilation contexts require new execution; no test is ignored or dropped.
+Both required full commands still need terminal successor evidence. K is a
+bounded partial gameplay experiment, not full campaign qualification, competent
+autonomous production, compatibility or admission. Original `.14` and the MCP
+bug's final qualification remain open.
+
+
 ### Standard gameplay development startup (2026-11-02; source only)
 
 The standard executable now accepts the closed operator startup command
@@ -126,7 +177,7 @@ cases plus two Rust stdio wrappers and all 1330 adapter cases passed, with zero
 failed/ignored/filtered cases. The nested five Tree and five workshop scenarios
 also passed, including large and maximum-2048-cell evidence. Root's replay of
 unchanged J bytes against its sealed 64fd executable returned a session and ACK;
-three chunks reconstructed the exact `8c8b6ec8...1fcc5472` capture. Offline
+two raw chunks reconstructed the exact `8c8b6ec8...1fcc5472` capture. Offline
 reopening used that returned ACK without a new native connection or token and
 preserved the custody bytes. Only Handshake and ReadTreeHarvest were called.
 These are exact-64fd component/replay results, not execution of the merged CLI

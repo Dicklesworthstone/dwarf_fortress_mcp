@@ -147,14 +147,15 @@ impl EffectJournalStorage for Instrumented {
         self.inner.validate_identity()
     }
 }
-fn setup() -> Result<(
+type JournalFixture = (
     Directory,
     Journal<Instrumented>,
     WorkshopAcknowledgements<PrivateBuildFile>,
     Arc<Faults>,
     OperationContext,
     Binding,
-)> {
+);
+fn setup() -> Result<JournalFixture> {
     let dir = Directory::new()?;
     let c = context()?;
     let b = binding("127.0.0.1:5000".parse().map_err(|_| corrupt())?)?;

@@ -5,7 +5,7 @@
 use super::*;
 use crate::semantic_workforce::evidence_owner::{
     CitizenEvidenceIo, CitizenEvidenceLimits, CitizenEvidenceSource, CitizenRpcSource,
-    CitizenWorkforceEvidenceOwner, TestClock,
+    CitizenWorkforceEvidenceOwner,
 };
 use std::cell::Cell;
 
@@ -20,7 +20,7 @@ struct ReadState {
     missing_identity: bool,
     deny_authorization: Option<usize>,
     revoke_on_close: bool,
-    advance_clock_on_read: Duration,
+    after_read: Option<Box<dyn FnMut()>>,
     contexts: Vec<(u8, u64, u64)>,
 }
 struct CitizenSource(Rc<RefCell<ReadState>>);
@@ -51,11 +51,11 @@ impl CitizenEvidenceSource for CitizenSource {
         if data.fail_read == Some(data.reads) {
             return Err(invalid("injected citizen read interruption"));
         }
-        let elapsed = data.advance_clock_on_read;
+        let after_read = data.after_read.take();
         let page = page(&data.capsule, offset, maximum, names);
         drop(data);
-        if !elapsed.is_zero() {
-            TestClock::advance(elapsed);
+        if let Some(mut hook) = after_read {
+            hook();
         }
         Ok(page)
     }
@@ -187,7 +187,7 @@ fn evidence_owner(
         missing_identity: false,
         deny_authorization: None,
         revoke_on_close: false,
-        advance_clock_on_read: Duration::ZERO,
+        after_read: None,
         contexts: Vec::new(),
     }));
     let acquire = Rc::clone(&state);
@@ -209,6 +209,7 @@ fn evidence_owner(
         data.authorizations += 1;
         data.contexts
             .push((2, c.budget.max_wall_millis, c.budget.max_bytes));
+        // ubs:ignore[rust.security.constant-time-compare] — fault-injection call counters, not secrets.
         if data.deny || data.deny_authorization == Some(data.authorizations) {
             return Err(error(
                 ErrorCode::CapabilityDenied,
@@ -520,67 +521,20 @@ fn mismatching_native_capture_refuses_before_canonical_source_connection() -> Re
 }
 
 #[test]
-fn interrupted_or_over_deadline_reads_close_without_retries_or_old_scope() -> Result<()> {
-    for delayed in [false, true] {
-        let _clock = TestClock::start();
-        let f = fixture()?;
-        let (mut owner, state) = evidence_owner(f.observer.capsule, &f.context, small_limits())?;
-        let mut c = f.context.clone();
-        {
-            let mut data = state.borrow_mut();
-            if delayed {
-                data.advance_clock_on_read = Duration::from_millis(11);
-                c.budget.max_wall_millis = 10;
-            } else {
-                data.fail_read = Some(data.reads + 1);
-            }
-        }
-        let before = state.borrow().reads;
-        let opens = state.borrow().opens;
-        let authorizations = state.borrow().authorizations;
-        let failure = owner.refresh(&c).expect_err("injected read must refuse");
-        if delayed {
-            assert_eq!(failure.code, ErrorCode::BudgetExceeded);
-        }
-        assert!(
-            matches!(owner.routing_evidence(), Err(e) if e.code == ErrorCode::AdapterUnavailable)
-        );
-        assert_eq!(state.borrow().reads, before + 1);
-        assert_eq!(state.borrow().opens, opens + 1);
-        assert_eq!(state.borrow().authorizations, authorizations);
-        assert_eq!(state.borrow().active, 0);
-    }
-    Ok(())
-}
-
-#[test]
-fn pre_io_deadline_refusal_withdraws_without_reads_and_clock_restores_on_unwind() -> Result<()> {
-    let _clock = TestClock::start();
+fn interrupted_reads_close_without_retries_or_old_scope() -> Result<()> {
     let f = fixture()?;
     let (mut owner, state) = evidence_owner(f.observer.capsule, &f.context, small_limits())?;
-    let unwound = std::panic::catch_unwind(|| {
-        let _nested = TestClock::start();
-        TestClock::advance(Duration::from_secs(60));
-        panic!("intentional nested fixture clock unwind");
-    });
-    assert!(unwound.is_err());
-    // An unrestored inner clock would expire this original publication.
-    assert!(owner.routing_evidence().is_ok());
-    let before = {
-        let data = state.borrow();
-        (data.opens, data.reads, data.authorizations)
-    };
-    let mut c = f.context.clone();
-    c.budget.max_wall_millis = 10;
-    // The next now establishes the original deadline; subsequent validation
-    // sees expiry, before the source factory or page reader can be called.
-    TestClock::advance_after_next_now(Duration::from_millis(11));
-    let failure = owner.refresh(&c).expect_err("pre-I/O deadline must refuse");
-    assert_eq!(failure.code, ErrorCode::BudgetExceeded);
+    let c = f.context.clone();
+    let before = state.borrow().reads;
+    let opens = state.borrow().opens;
+    let authorizations = state.borrow().authorizations;
+    state.borrow_mut().fail_read = Some(before + 1);
+    owner.refresh(&c).expect_err("injected read must refuse");
     assert!(matches!(owner.routing_evidence(), Err(e) if e.code == ErrorCode::AdapterUnavailable));
-    let data = state.borrow();
-    assert_eq!((data.opens, data.reads, data.authorizations), before);
-    assert_eq!(data.active, 0);
+    assert_eq!(state.borrow().reads, before + 1);
+    assert_eq!(state.borrow().opens, opens + 1);
+    assert_eq!(state.borrow().authorizations, authorizations);
+    assert_eq!(state.borrow().active, 0);
     Ok(())
 }
 
