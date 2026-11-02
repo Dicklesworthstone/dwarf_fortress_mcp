@@ -1,12 +1,126 @@
 # Changelog
 
+## 2026-11-01 — Withdraw failed-call item views and bound test setup
+
+- Exact private R29 `b6d0e626` passes both required commands on the November 1
+  nightly: each 5,145 debug plus 5,145 release cases, 123 targets per profile,
+  zero failed or ignored, all 43 gates. Parent checks the official receipt,
+  all 31 critical cases in both profiles, all 2,592 source files and the emitted
+  release laboratory CLI. Report bytes do not inherit source qualification;
+  no native, live or production/runtime admission follows.
+- On exact qualified R28, live E exposes a new bed through fresh Wait and
+  same-anchor Query, then withdraws those rows after failed Observe. Independently
+  replay all 139 members, 23 modern exchanges, native journals and complete
+  before/after rosters. Two reviewed runs advance 1,200 and 743 ticks without
+  overshoot; original goal remains Unknown after order disappearance. Actual
+  five-file offline recovery and fresh host cleanup pass. Preserve D's earlier
+  failure and E's two operator diagnostic limitations; no admission follows.
+  Independent CC review accepts the original narrow `.5.2` item-view criteria
+  at R28; broader production and resource-family work remains open. Preserve
+  E's manifest-only exported process-to-binary binding: no opened-executable
+  identity is retained, and no process/runtime qualification follows.
+- Wire entity-query discovery to a session-scoped entity resource consumer,
+  binding the exact entity generation and complete current anchor. Require
+  Query authority for the requested ID; preserve field presence and refuse
+  stale references or output that exceeds the negotiated bound. Preserve semantic
+  request IDs and pending goal history/custody on successful and denied reads.
+  Four new focused cases and the complete four-case modern stdio MCP target
+  pass, including the new entity lifecycle. Corrected old-production RED
+  detects the missing route; earlier test/setup failures remain retained.
+  Exact R29 full Rust qualification passes as recorded above. Broader
+  fortress, historical, knowledge and memory resource families remain open.
+- Clean private R28 `e7b93a4` passes all 43 qualification gates and the
+  separate verifier on the November 1 nightly: each 5,140 debug plus 5,140
+  release cases, 123 targets per profile, zero failed or ignored. Parent
+  verifies the official receipt, all 26 critical cases, all 2,592 source files
+  and the exact emitted development executable. No native or production/runtime
+  admission follows.
+- Actual live D inserts one reviewed bed order and advances exactly 1,200 ticks
+  without overshoot. The early anchor-floor refusal preserves prepared custody;
+  the second clock run is refused as stale before unpause. No bed is observed in the final rosters,
+  the original goal remains false, and the positive nonempty item and late
+  changed-source probes are unachieved. Preserve this unsuccessful result and
+  undifferentiated refusal cause. Parent replay verifies all 105 exported files;
+  actual five-file offline recovery and fresh full host cleanup pass. Independent
+  review closes the scoped repairs only; `.5.2` and broader goals remain open.
+- Preserve the failed R27 latest-nightly Clippy receipt and all raw output;
+  full Rust tests, verifier, server build and live trial are unrun. Replace
+  only the redundant lazy default-capability selection with its equivalent
+  eager fallback. Independent review confirms omitted, explicit-empty and
+  explicit requests retain their meaning. No warning suppression or gate,
+  profile, budget, dependency or test change. The subsequent exact R28 source
+  qualification above passes; the R27 attempt remains failed.
+- Further review adds a pre-publication cursor/tick/state-identity floor guard
+  to canonical Observe, including failed goal-acquisition cursor reservations.
+  Three actual original-source regressions fail on late-error cursor rollback,
+  backwards tick publication and old planning evidence below a consumed native
+  tick. R27's repaired MCP library passes all 2,825 cases, zero failed or ignored,
+  including prepared-runtime reconstruction over memory-backed codecs and
+  forward progress. R27's newer-nightly qualification fails as recorded above;
+  the exact R28 guard passes both full commands and the early live D probe.
+- Preserve five executed regressions failing on unchanged R25 production code:
+  failed Observe/source/budget, Query revocation/regrant, final presentation
+  authority and unverified copied rows. Reopen `.5.2` and `.20` for discovered
+  omissions; keep their prior positive evidence and failures intact.
+- Invalidate optional item rows on failed acquisition, inspection and the real
+  facade's pre/post-dispatch checks. Recheck optional authority after custody
+  I/O and mask copied rows in unverified error/close output. Preserve original
+  goal/history policy, recovery identities, effect authority and native wire.
+- Bound direct TCP fixture setup, including transient nonblocking accept, with
+  unchanged I/O and production limits. Fix the standalone reference checker's
+  rustfmt sensitivity; eight Python source-shape/mutation tests pass. The
+  outer-boundary mutant fails as intended; restored source passes all 2,822 MCP
+  and 1,292 adapter library tests, zero failed or ignored.
+- Clean private R26 `5ce23acd` passes all 43 qualification gates and the
+  separate verifier: each 5,137 debug plus 5,137 release cases, 123 targets
+  per profile, zero failed or ignored. Parent verifies exact source, receipt
+  and emitted development executable. R26 does not qualify the later anchor
+  change; exact R28 and its bounded live result are recorded above.
+
+## 2026-10-31 — Prove the public item view against the actual game
+
+- On qualified R25's exact development executable, Terra inserts one reviewed
+  bed order and runs one bounded simulation slice: 1,031 of 1,200 requested ticks,
+  zero overshoot. Thirteen modern MCP exchanges expose BED 540 through a fresh
+  item view and same-anchor Query. Independently replay all 129 export members,
+  native receipt/history chains and complete-roster ID/type/material evidence.
+- Preserve Unknown for the removed original order and for public material
+  classification, eligibility and attribution. Lua separately corroborates
+  cherry wood; it does not independently supply subtype or stack. Operator
+  workshop/manager setup earns no MCP prerequisite or fortress-competence credit.
+- Verify actual B and C offline custody without stale rows, then independently
+  check drained processes, closed port, restored plugins and both thirty-file
+  saves. Close only scoped item-presentation `.5.2`; retain original production,
+  workshop and admission gaps, failed runs and the excluded zero-request client.
+
+## 2026-10-31 — Preserve bounded TCP test-peer lifetime and intended effects
+
+- Reproduce two short-idle-timeout counterexamples within unchanged caller
+  budgets, then separate peer polling from fixed overall deadlines. Preserve
+  partial I/O, cancellation and joined shutdown; add scoped real-socket tests.
+- Prove exactly one retained stopped commit before disk recovery and retain
+  peer error/event diagnostics. Preserve the full maximum-roster, identity,
+  attachment, digest, release and no-replay assertions.
+- Pass the full 1,292-case adapter suite, then qualify exact clean R25
+  `bc5bcdfe28a895f9334fd8a116270be36650ee3a`: 43 gates and the separate verifier,
+  each 5,131 debug plus 5,131 release tests, zero failed or ignored. Independently
+  verify all 2,591 files and seal the exact Cargo-emitted development executable.
+- Reopen actual B custody with that executable while the game is off; preserve
+  all five files and historical identities while withholding current goal and
+  stale item rows. Close scoped test-reliability `.20`; preserve R24's verifier
+  failure. The later bounded C proof is recorded above; no admission follows.
+
 ## 2026-10-31 — Prove bounded real output and retain the completion gap
 
 - Expose bounded source/anchor-bound furniture candidates from the existing
   operations sample, independently of the original order's receipt link.
   Preserve original goal policy and history; withdraw stale or unauthorized
   rows and leave material classification and production attribution unknown.
-  Focused runtime and production packet-renderer regressions await Rust execution.
+  Frozen R24 passes twenty focused cases and all 43 qualification gates with
+  5,127 debug plus 5,127 release tests. Preserve the separate verifier's two
+  adapter failures; the required command set is incomplete and the driver does
+  not build a server or start a new game trial. Strengthen peer diagnostics and
+  intended-effect assertions under Bead `.20` without changing production limits.
 - Through actual public MCP, insert one original bed order and execute two
   reviewed bounded runs on an explicitly operator-prepared fortress. Independent
   replay verifies the insertion, clock receipts, six complete observations and a

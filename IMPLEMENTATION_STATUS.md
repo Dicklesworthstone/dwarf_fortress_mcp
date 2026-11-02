@@ -30,6 +30,300 @@ admission, or support. No protocol beyond 1.0 appears in the production runner m
 
 ## Evidence hierarchy
 
+### Session entity resource consumer (exact R29 full Rust qualification)
+
+Entity query results discover session-scoped references bound to the entity
+generation and complete current V2 anchor. The registered resource consumer
+checks Query authority for the requested ID before inspecting existence,
+requires the exact anchor/generation, and returns the existing presence-preserving
+projection within wrapped output bounds. There is no historical fallback or
+ambient fortress route. Owner-fenced synchronized inspection preserves semantic
+request IDs and does not certify pending history, retain versions or publish
+durable custody, including after denial.
+
+Clean private `b6d0e626f81330075b33fee3d81cb410a55b07b2` passes both required commands on
+`nightly-2026-11-01`, `rustc 1.101.0-nightly (f9ceb4a4d 2026-10-31)`.
+Each command passes 5,145 debug and 5,145 release tests across 123 targets per
+profile, zero failed or ignored; all 43 qualification gates pass. Parent review
+checks the official receipt, all 31 critical cases in both profiles of both
+commands, all 2,592 source hashes/modes and clean HEAD before and after artifact
+inspection. Receipt SHA-256 is
+`b514bccf4be1bff924b84029455be28a9cc1a37e62f5d4505b57cfb58623eef7`.
+
+The five new Rust cases cover canonical entity discovery/read, scoped/expired
+authority and output bounds, generation/fortress/restore rejection, actual
+pending-history and durable-file preservation on successful/denied reads, and
+fifteen real modern stdio exchanges with a fresh-reference positive after restore.
+The corrected external case first fails against unchanged R28 production at the
+missing template description. Initial catalog-oracle, compilation, fixture and
+operator-interruption failures remain retained; no assertion, gate or production
+budget is weakened. Separate source review finds no further concrete defect.
+
+The emitted release laboratory CLI is 17,987,864 bytes, SHA-256
+`77a1f05cde0e36254239c73160d78b76b613ac34035c939a90abe07ba07d0a53`.
+Cargo reports cache reuse from the just-completed
+test build. Parent opens and hashes the ELF, seals a private copy and repeats
+source checks. Raw logs, the official receipt, complete source bundle and
+`r29-parent-review.json` are under `target/fresh-eyes-20261101/`.
+
+This qualifies exact R29 Rust source and checks one development CLI artifact.
+Later report bytes and the shared head do not inherit that qualification.
+It establishes no new native R1, live campaign, production artifact, registry,
+floor, runner or runtime admission. E remains the earlier bounded operator trial
+with the process-binding limitation below. Broad `.11` resource-family acceptance
+remains open; the current entity route is laboratory-only.
+
+### R28 latest-nightly source qualification and bounded live rechecks (2026-11-01)
+
+Clean private `e7b93a40e6a74bcc425c0c6fec5729296907d2af` passes all
+43 qualification gates and the separate verifier on `nightly-2026-11-01`,
+`rustc 1.101.0-nightly (f9ceb4a4d 2026-10-31)`. Each command passes 5,140
+debug and 5,140 release tests across 123 targets per profile, zero failed or
+ignored. Parent review consumes the official receipt, all 26 critical cases
+in both profiles and all 2,592 source hashes/modes before and after artifact
+review. Receipt SHA-256 is
+`e27becb5235762e92abefe2bfa5a442ab860177af50ba11dce5454f20cdbca36`.
+
+The actual Cargo-emitted development executable is 50,483,416 bytes, SHA-256
+`bb7eff6fd811c264bffe5c140bfbc14537e1cbe1d0052d9a7c6905b7bf69482e`.
+Cargo reports cache reuse, not fresh recompilation. Parent opens and hashes
+the ELF, seals a private copy and repeats source checks. The complete source
+bundle, raw logs, receipt and sealed executable are retained under
+`target/fresh-eyes-20261101/`; `r28-parent-review.json` records the exact scope.
+The R27 failure remains failed. R28's qualified checkout stays clean; later
+report bytes and the shared head do not inherit its qualification.
+
+This qualifies the Rust source repair; the source-bound development executable
+was built and used for the bounded trial. It is not native R1, production
+server-artifact qualification, a live campaign,
+compatibility, deployment-floor, production-runner or runtime admission.
+The compatibility registry remains empty and the production map remains 1.0.
+The bounded D live recheck uses this exact executable. Sixteen modern MCP
+exchanges insert exactly one reviewed bed order. The early same-tick Observe
+correctly refuses anchor regression; Query preserves the anchor and the same
+prepared clock run while withholding item rows. The first confirmed run advances
+exactly 1,200 ticks with zero overshoot and stops at its tick limit. The second
+reviewed run is refused as `stale` before any unpause. That reason combines
+several native checks; retained evidence does not establish an expiry cause.
+
+The original order remains at one bed remaining and its goal is false. Both
+independent Lua and complete native rosters contain no bed (538 items before,
+532 after). Thus positive nonempty item publication and the late changed-source
+Observe probe are not achieved. No further unpause or replacement goal occurs.
+Parent replay verifies all 105 export members, three creation frames, nine clock
+frames and 35 goal-history frames containing five complete samples. Six offline
+exchanges reopen the actual five custody files read-only, preserve all five byte
+hashes and expose neither current goal nor stale item rows. Fresh parent host
+checks find no owned processes or listeners, all five original plugin states
+restored, and both original 30-file saves exact with no extras. Host scans check
+all 30 private values before export, finding zero matches.
+
+`production-d-parent-review.json` and `production-d-parent-cleanup.json` under
+the evidence directory record these limits. Independent review closes only
+the exact repairs `.20`–`.24`; `.5.2`, original-goal proof, autonomous fortress
+competence and all admission work remain open. Operator workshop/manager setup
+is excluded from MCP gameplay credit.
+
+### E positive item publication and withdrawal (2026-11-01; exact R28 only)
+
+E's manifest identifies the qualified R28 source and sealed development
+executable. With the process-binding limits below, Terra's prospectively bounded
+trial makes one original bed insertion and two separately reviewed clock runs.
+The runs advance 1,200 and 743 ticks with zero overshoot;
+the second stops on target absence. Fresh Wait and same-anchor Query expose
+BED 540, type 8, subtype -1, material 420/163, stack 1, in a complete 535-item
+roster. The complete 536-item baseline contains no bed. Independent Lua agrees
+on the full ID/type/material rosters and separately decodes cherry wood; public
+material classification and production attribution remain unknown; eligibility
+is not assessed.
+
+Late Observe returns the expected changed-source StaleAnchor. Query and Doctor
+then withhold the previously positive item rows, retain the anchor and original
+plan/review, and preserve Unknown for the disappeared original order. No further
+unpause occurs. Parent replay checks all 139 export members, 23 modern exchanges
+and timing records, three creation frames, fifteen clock frames and 42 goal
+frames containing six complete samples. Review-to-commit dispatch takes 8.695
+and 9.135 seconds; causally bounded preparation-to-commit intervals are below
+24 seconds, within the unchanged native 60-second lifetime. This does not
+establish why D's earlier second run was stale.
+
+Six offline exchanges preserve all five actual custody files and expose no
+current goal/items. Fresh parent checks prove stopped owned processes, closed
+port, five restored plugins and both exact 30-file saves. Host scans check all
+35 private values before export with zero matches. One operator configuration
+display violated instructions; those exact bytes also scan clean and are not
+exported. A pre-effect tutorial helper timeout lacks full retained stderr and
+earns no qualification credit. These incidents remain in the evidence.
+
+Exact replay and cleanup are in `target/fresh-eyes-20261101/production-e-parent-review.json`
+and `production-e-parent-cleanup.json`. E establishes bounded positive item
+publication and withdrawal at R28, not original-order completion, global
+quiescence, autonomous fortress competence, later-source or production admission.
+Independent CC review accepts all original `.5.2` criteria at R28; the coordinator
+records that narrow closure after checking its blocker and documentation
+conditions and accepting the limited binary binding. The export records
+`server_sha256` but retains no launched-executable path/hash receipt or
+independently opened process executable identity. The operator reports a
+contemporaneous launch/preflight and the exported client checks its binary
+argument before spawn; that launch transcript is outside the export. Exported
+bytes alone therefore do not independently bind the process to the sealed
+artifact. This limitation is accepted only for narrow item-view criteria,
+not source-bound process or runtime qualification. The original `.5.1` goal
+and broader project goals remain open.
+
+### R26 intermediate source qualification (2026-11-01)
+
+Clean private `5ce23acd3660505a58f0534a227c76a6f95d9900` passes all
+43 qualification gates and the separate verifier, each with 5,137 debug and
+5,137 release tests across 123 targets per profile, zero failed or ignored.
+Parent replay consumes the official receipt, all fifteen critical cases in
+both profiles and all 2,592 source hashes/modes before and after artifact
+review. Receipt SHA-256 is
+`4646e5db9a70650ac96c8f42aa75186c73da69deb4b673c8475baba0d901b6c1`.
+The actual Cargo-emitted development ELF is 50,359,776 bytes, SHA-256
+`029bed4de0342bf7e7411763a66d2b4644fad5a0f5076fb10fce0f5b195185ab`;
+Cargo reports cache reuse, not fresh recompilation. Raw logs, the sealed ELF,
+receipt and complete source bundle are under `target/fresh-eyes-20261101/`.
+
+This qualifies the failed-call item repair and bounded socket-test setup at
+that exact source. It does not cover the later `.23` anchor guard or a fresh
+live trial. After terminal commands and parent review, the private checkout
+is intentionally reused for the next regression/fix; R26's immutable commit,
+bundle and receipts remain historical. The shared head, native R1, campaign,
+compatibility and production/runtime admission are not qualified by this run.
+
+### R27 latest-nightly qualification failure (2026-11-01)
+
+Clean private `3c84cb136ae8c4d53a8e41efdecf9f859d365ef5` fails the
+warning-denied Clippy gate on separately installed `nightly-2026-11-01`,
+`rustc 1.101.0-nightly (f9ceb4a4d 2026-10-31)`. The diagnostic is an
+unnecessary lazy default-capability selection in laboratory session opening.
+Earlier gates and rustfmt pass; full Rust tests, the separate verifier and
+the server build remain unrun. The final source check still verifies all
+2,592 files and clean HEAD. Failed receipt SHA-256 is
+`6b3f7559c372cd2ebc066f50ef595f1fed7ac96563a0554524e403f125422835`.
+No R27 server artifact is sealed and no live trial starts from that run.
+
+Bead `.24` owns the equivalent eager selection of the already-constructed
+default capability vector. Independent source review confirms omitted,
+explicit-empty and explicit capability requests retain their previous meaning;
+parsing, risk and scope checks are unchanged. No lint suppression, gate,
+budget, profile, dependency or test change is used. The next source requires
+its own complete latest-nightly qualification and verifier. The earlier R26
+receipt remains evidence only for its exact source and older named compiler.
+
+### Fresh review repairs (2026-11-01; unqualified source changes)
+
+A further source pass identifies canonical Observe reusing an old original
+cursor after a same-tick goal sample, or accepting a backwards source tick
+before planning. Bead `.23` owns three new regressions that actually execute
+against unchanged R26 production code and fail: a late error has already
+rolled sequence 2 back to 1, a backwards tick returns a successful view, and
+an observation rebinds old planning evidence below a consumed native tick
+before a monitor exists. The repaired guard rejects before canonical anchor
+assignment, including consumed monitor and native authority floors. Before the
+later equivalent capability-selection edit, R27's full MCP library passes
+2,825 cases, zero failed or ignored, including the
+three new regressions, failed-monitor consumption and fresh forward progress.
+Legitimate prepared reacquisition includes reconstructing the runtime and
+reopening its real journal/archive code over memory-backed byte fixtures;
+this component case does not establish filesystem durability. Its newer-nightly
+qualification failure is retained above; the next source must pass using the
+separate dated toolchain while preserving the shared nightly alias.
+The frozen R26 qualification above does not cover this later fix. Fresh live
+execution is held until the next repaired source has its own evidence;
+`.5.2` remains open.
+
+Fresh review of R25 found that failed canonical Observe and denied Query could
+retain an old complete item view, optional authorization was not repeated after
+custody I/O, and an unverified response could copy old item rows. A separate
+review found outer facade checks could also leave rows available after regrant.
+Five new component cases actually execute against unchanged R25 production code
+and fail at `complete` versus `unknown`; their raw logs are retained under
+`target/fresh-eyes-20261101/`. The original successful R25 checks and C evidence
+remain historical; they did not cover these failed-call paths. Bead `.5.2` is
+reopened and blocked by `.22` rather than retaining the earlier broad closure.
+
+The source repair invalidates optional item presentation on acquisition and
+inspection failure, rechecks presentation authority after custody I/O, and uses
+the same bounded facade call function to invalidate after pre/post-dispatch
+checks fail. Unverified error/close copies withhold rows while preserving exact
+recovery identities. Original goal policy, history, deadlines, effect authority
+and native protocols are unchanged. A sixth component regression exercises all
+three actual facade checkpoints and requires a new qualified sample before rows
+return. Disabling its invalidation makes that sixth test actually fail. Restored
+source passes the full 2,822-case MCP library and 1,292-case adapter library,
+zero failed or ignored; all six new cases execute. These dirty development runs
+are not full exact-source qualification or a fresh live trial.
+
+The direct TCP test setups now bound connect/write and retry nonblocking accept
+only until one fixed setup deadline. Bead `.20` is reopened for this setup gap;
+the existing server-peer and production deadlines and all positive oracles are
+preserved. The standalone, non-aggregate work-order reference checker now accepts
+rustfmt layout while rejecting wrong credential placement and comment/string
+spoofs; eight Python regressions pass. A later raw-string spoof first makes one
+of those eight tests fail, then opaque raw-literal handling fixes it. That
+Python refinement and a strict twenty-second subprocess cap are separately
+exercised on final Python bytes; they differ from the earlier remote green
+input without changing any Rust source. This is lexical/reference evidence only,
+not Rust, MCP or game execution. No current shared-head qualification or native,
+campaign, compatibility or runtime admission follows from these later changes.
+
+### R25 source qualification and development executable (2026-10-31)
+
+Clean private `bc5bcdfe28a895f9334fd8a116270be36650ee3a` passes all 43
+local qualification gates and the separate `verify.sh`. Each command passes
+5,131 debug and 5,131 release tests across 123 targets per profile, zero failed
+or ignored. Parent replay checks the official receipt, all nine critical test
+names in both profiles, and all 2,591 source hashes and modes before and after
+artifact review. The private checkout remains clean. Receipt SHA-256 is
+`b1d64f5e86159dc66fb0c7634addd27ee62839adf078709b6dfff24d36d229ba`.
+
+The actual Cargo-emitted development work-order server is 50,348,656 bytes,
+SHA-256 `72f29e709a2fe40219e571390070e6e2918e6c19fc7cc52d6c3193a31ea4ba36`.
+Parent review opens and hashes that exact ELF, seals a private copy and repeats
+source checks. Cargo reports `fresh=true`: this is normal cache reuse, not a
+claim of fresh recompilation. Evidence and the complete source bundle are under
+`target/bang-for-buck-20261031/`; the independent review is
+`r25-parent-review.json`. This is a source-bound **development** executable,
+not production server-artifact qualification or runtime admission.
+
+The same executable reopens B's actual old custody in place while the game is
+off: six modern exchanges preserve the original plan, review, creation receipt
+and two clock identities, with current goal unavailable and no stale item rows.
+All five custody files remain byte-identical. This proves bounded development
+recovery, not registry compatibility admission.
+
+Terra then directly performs thirteen modern public MCP exchanges against the
+same executable and a fresh disposable fortress. One reviewed 1,200-tick,
+30-second run advances 1,031 ticks with zero overshoot and stops on target
+absence. The unchanged original goal remains Unknown: order disappearance is
+not receipt-linked completion. A fresh public item view and same-anchor Query
+expose new BED 540, subtype -1, material (420, 163), stack 1, within a complete
+535-item operations roster. Independent replay matches the full native item
+tuple and all roster IDs/types/materials; separate Lua corroborates the item's
+cherry-wood identity, but does not print subtype or stack. Public material
+classification, eligibility and production attribution correctly remain unknown.
+
+Parent replay verifies all 129 exported members, three creation frames, six
+clock frames and twenty-one goal-history frames forming three complete samples.
+The final anchor is sequence 4, tick 12114402, hash
+`e45e446de8c9708906a7bba3ac8b749cfb3c2b5c3eda3502990b6daa0a7018f3`.
+Offline C then preserves its five custody files and historical identities while
+withholding current goal and stale item rows. The original zero-request client
+exit is retained and excluded. Operator workshop/manager setup earns no MCP
+construction or autonomous-fortress credit; an unrelated Fish job remains.
+There is no item-to-order causal certificate or semantic-completion proof.
+
+The independent replay is `production-c-parent-review.json`; export manifest
+SHA-256 is `bc572933e6aebb8befb0c59decf30f4fdee62760143f9d60b8da18cbb039600a`.
+Fresh parent cleanup verifies all recorded processes and the owned group absent,
+port closed, five plugin states restored and both save copies exactly matching
+their original thirty files. Bead `.5.2` closes only this bounded presentation
+and recovery gap; `.5.1`, `.5` and workshop `.14` remain open. R24's separate
+verifier failure remains failed; later shared/report revisions inherit no
+qualification from R25. No native R1, live-campaign or admission claim follows.
+
 ### R21 source and executable qualification (2026-10-31)
 
 The later exact R23 source qualification and selected real-game job-control
@@ -92,9 +386,33 @@ observations from the existing complete operations sample, with exact anchor,
 source identity and omission counts. Its separate read-only policy preserves
 the original goal-policy fingerprint and old recovery semantics. Unknown
 material classification, usability and production attribution remain explicit.
-Failed reads, unpause, recovery and authorization loss withhold old rows. New
-focused component/packet-renderer tests are source-only pending exact Rust
-execution; this later increment inherits no R23 qualification or live credit.
+Failed reads, unpause, recovery and authorization loss withhold old rows.
+Frozen private R24 `2f724b90eab986c3fa913fa99e2fd91bfcae3a29` passes
+the twenty focused runtime cases and all 43 local qualification gates, including
+5,127 debug and 5,127 release tests across 123 targets per profile, zero failed or
+ignored. Receipt SHA-256 is
+`6f25a857b5d6d45d02f8a539be886c8c5496a9733a5547ce03e984418e324a91`.
+The separately required `verify.sh` then fails its adapter target: 1,286 passed,
+two failed, zero ignored. The failures concern actual-disk lost-commit recovery
+and maximum-roster furniture acquisition. All 2,591 source hashes remain unchanged
+and Git is clean. The driver stopped before the development-server build; no R24
+artifact or fresh live item-view proof exists. Bead `.20` owned the test-peer
+diagnostic/lifetime repair, and `.5.2` was held on it. Short peer idle
+timeouts are a hypothesis, not an established cause of the original failures.
+
+The subsequent test-only repair separates 100 ms I/O poll slices from fixed
+15-second excavation and sixty-second furniture peer lifetimes. Partial I/O
+progress and cancellation remain bounded; scoped sender threads join on failure.
+Two new allowed-work counterexamples fail against the old peers before repair.
+The repaired full adapter suite passes 1,292 tests, zero failed or ignored,
+including both original failures and four new regressions. The actual-disk test
+now proves one retained stopped commit before reopening, and peer errors retain
+their stage and event context. Production deadlines, limits and existing positive
+oracles are unchanged. Both required full commands and the exact development
+executable now pass at R25 as recorded above. Bead `.20` is closed after
+independent review. Fresh public item-view and offline recovery evidence for
+`.5.2` passes the bounded independent replay recorded above; original-goal
+completion and autonomous workshop construction remain unproved.
 
 On exact R23 source `7bba4d01debdc7069e081adb824a4ace4fa199b3`,
 Terra used actual public MCP to insert one original `wooden_bed` order and

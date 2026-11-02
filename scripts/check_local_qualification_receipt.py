@@ -216,6 +216,7 @@ def check_wrapper() -> None:
     for marker in [
         "umask 077",
         "export PYTHONDONTWRITEBYTECODE=1",
+        "export CARGO_NET_OFFLINE=true",
         'RECEIPT_WRITER="$ROOT/scripts/write_local_qualification_receipt.py"',
         'LOCAL_RECEIPT_CONTRACT="$ROOT/architecture/local_qualification_receipt_v1.json"',
         'SOURCE_SNAPSHOT="$OUT_DIR/source-snapshot.json"',
@@ -250,6 +251,7 @@ def check_wrapper() -> None:
 def check_gate_and_server_binding() -> None:
     verify = VERIFY.read_text(encoding="utf-8")
     for marker in [
+        "export CARGO_NET_OFFLINE=true",
         "python3 scripts/check_local_qualification_receipt.py",
         "python3 scripts/test_local_qualification_receipt.py",
         "python3 scripts/check_implementation_status.py",

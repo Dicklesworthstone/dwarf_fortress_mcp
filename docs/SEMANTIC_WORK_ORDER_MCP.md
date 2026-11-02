@@ -455,9 +455,102 @@ unavailable coverage is explicitly unknown. Inspecting a retained sample does
 not prove current game freshness. These are additional observations under the
 same eleven tools, with no new bridge fields or output-oriented goal mode.
 
+A denied Query or failed canonical Observe also retires the optional cached
+rows. Regranting authority or issuing another Query cannot revive them; a new
+qualified goal sample is required. Error and close packets preserve recovery
+identities while withholding copied item rows. The later canonical-observation
+floor guard rejects a reacquisition below a published anchor, a consumed goal
+cursor or native tick before rebinding planning evidence. Three `.23`
+regressions fail on the original source; all 2,825 R27 MCP component cases pass,
+including prepared-runtime reconstruction over memory-backed codecs and fresh
+forward observations. Its newer-nightly qualifier subsequently fails Clippy
+before full Rust tests or a server build. The next repaired source still needs
+its own full qualification; the R26 evidence below does not cover it.
+
 The component tests execute the real original-plan compiler, semantic/native
 and clock coordinators, durable goal monitor and private-file open modes with
 injected native responses. They cover original-goal continuation, lost clock
 replies, exact recovery and final-effect revalidation. They do not establish a
 live DFHack campaign or compatibility admission. Current executed validation and its exact scope are recorded in
 [`IMPLEMENTATION_STATUS.md`](../IMPLEMENTATION_STATUS.md).
+
+### Executed public item-view proof
+
+The new E trial at exact qualified R28 proves the positive and withdrawal path:
+fresh Wait and same-anchor Query return BED 540 in a complete 535-item roster;
+the complete 536-item baseline had no bed. Two separately reviewed runs advance
+1,200 and 743 ticks with zero overshoot. After changed-source Observe refuses,
+Query and Doctor preserve the original goal and anchor while returning unknown
+item coverage with no rows. The removed original order remains Unknown, and
+public wood classification/eligibility/attribution remain unproved. Parent
+replay checks 139 exports, all 23 modern exchanges and native receipt/history
+hashes. Six actual-file offline exchanges preserve all five custody hashes;
+fresh host checks prove complete cleanup. The timed client retains full raw
+frames and makes review practical without changing native TTL or automating
+confirmation. Pre-effect configuration-display and UI-timeout diagnostic
+limitations remain explicitly recorded in `IMPLEMENTATION_STATUS.md`.
+Independent CC review accepts the original `.5.2` criteria at this exact R28
+source; this does not close the original-order or broader production goals.
+The export records the server hash but no raw launched-executable path/hash
+receipt or opened process executable identity. Operator-reported launch and
+preflight records remain outside the export. The coordinator accepts that
+limited binding for the narrow item-view criteria; exported bytes alone do not
+establish source-bound process or runtime qualification.
+
+The separate later laboratory entity consumer is fully Rust-qualified at private
+R29 `b6d0e626`: both required commands each pass 5,145 debug and 5,145 release
+cases across 123 targets per profile, zero failed or ignored, with all 43 gates.
+Its default CLI artifact and current-entity resource route are distinct from
+E's live semantic work-order executable. These source checks do not transfer E
+into later-source live evidence or close the broader production/resource goals.
+
+The earlier item-view source repair is Rust-qualified at clean private R28
+`e7b93a40e6a74bcc425c0c6fec5729296907d2af`, on the November 1 nightly.
+Both required commands pass 5,140 debug and 5,140 release cases each, zero
+failed or ignored across 123 targets per profile. Parent review verifies the
+exact receipt, source and development executable. Actual live D's sixteen modern
+exchanges prove the early anchor-floor refusal preserves the anchor and prepared
+run; the first run advances exactly 1,200 ticks without overshoot. Its second
+reviewed run is refused as stale before unpause, with the precise cause unresolved.
+No bed appears in either the complete native roster or independent Lua (538 items
+before, 532 after); the retained original order has one remaining and its goal is
+false. The positive nonempty item and late changed-source probes remain unachieved.
+Six actual-file offline exchanges preserve all five custody hashes and withhold
+current goal/items. Parent replay checks all 105 exports and fresh host cleanup
+confirms owned processes stopped, port closed, five plugins restored and both
+30-file saves exact. D did not complete `.5.2`; the later E proof above does.
+The earlier C result below is historical;
+neither operator setup nor scoped safety proof establishes fortress competence.
+
+Fresh review on November 1 found failed-call invalidation omissions in R25;
+the positive trial below did not exercise those paths. Current source withdraws
+item rows after failed Observe/Query or facade publication checks, and copied
+error/close state exposes no old item rows. Five regressions fail against the
+old production code. The repaired source passes clean private R26 qualification
+and its separate verifier, each with 5,137 debug and 5,137 release cases and
+zero failed or ignored across 123 targets per profile. Parent review checks
+the exact source, official receipt and development executable. R28 subsequently
+qualifies the anchor guard, and D exercises the early refusal and actual offline
+recovery. Revocation of a nonempty live item view still lacks a successful current
+trial; original-goal proof and native authority have not changed.
+
+On exact qualified private R25 `bc5bcdfe28a895f9334fd8a116270be36650ee3a`,
+Terra uses the actual development executable
+`72f29e709a2fe40219e571390070e6e2918e6c19fc7cc52d6c3193a31ea4ba36`
+for thirteen modern public exchanges. One reviewed bed insertion and one
+reviewed 1,200-tick/30-second run advance 1,031 ticks without overshoot. Fresh
+Wait and same-anchor Query expose BED 540 within a complete 535-item roster,
+with subtype -1, numeric material (420, 163) and stack 1. Independent native
+replay verifies that tuple; Lua separately corroborates cherry wood, without
+independently supplying subtype or stack. The public view correctly leaves
+material classification, eligibility and production attribution unknown.
+
+The order has disappeared, so its original goal remains Unknown and semantic
+completion is unproved. Operator workshop and manager setup are prerequisites,
+not MCP construction or autonomous-fortress proof. Both the earlier B and new C
+custody reopen offline without changing their five files or exposing stale item
+rows; historical identities survive while current goal is unavailable. Raw
+captures, independent replay and fresh cleanup checks are recorded in
+`target/bang-for-buck-20261031/production-c-parent-review.json` and the
+reality-check report. This is bounded development evidence, not native R1,
+live-campaign qualification or compatibility/runtime admission.

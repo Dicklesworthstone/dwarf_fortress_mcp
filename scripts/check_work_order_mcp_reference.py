@@ -9,15 +9,17 @@ import re
 ROOT = Path(__file__).resolve().parents[1]
 BASE = 16 * 1024
 RECORD = 64 * 1024
+CODE_TOKEN = re.compile(r"[A-Za-z_][A-Za-z_0-9]*|::|==|.")
+RAW_STRING = re.compile(r'(?:r|br|cr)(?P<hashes>#{0,255})"')
 
 
 def json_bytes(value: object) -> int:
     return len(json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode())
 
 
-def lexical_delimiters(text: str) -> None:
+def lexical_delimiters(text: str) -> list[str]:
     """Only comments, string/char extents and delimiters; not a Rust parser."""
-    i, stack = 0, []
+    i, stack, tokens = 0, [], []
     pairs = {")": "(", "]": "[", "}": "{"}
     while i < len(text):
         if text.startswith("//", i):
@@ -30,21 +32,58 @@ def lexical_delimiters(text: str) -> None:
                 elif text.startswith("*/", i): depth, i = depth - 1, i + 2
                 else: i += 1
             assert depth == 0, "unclosed block comment"
+        elif raw := RAW_STRING.match(text, i):
+            closing = '"' + raw['hashes']
+            end = text.find(closing, raw.end())
+            assert end >= 0, "unclosed raw string"
+            end += len(closing)
+            tokens.append(text[i:end]); i = end
         elif text[i] == '"':
+            start = i
             i += 1
             while i < len(text):
                 if text[i] == "\\": i += 2
                 elif text[i] == '"': i += 1; break
                 else: i += 1
             else: raise AssertionError("unclosed string")
+            tokens.append(text[start:i])
         elif text[i] == "'" and (match := re.match(r"'(?:[^'\\\n]|\\(?:[nrt0\\'\"]|x[0-9a-fA-F]{2}|u\{[0-9a-fA-F_]+\}))'", text[i:])):
+            tokens.append(match[0])
             i += len(match[0])
-        elif text[i] in "([{": stack.append(text[i]); i += 1
+        elif text[i] in "([{":
+            tokens.append(text[i]); stack.append(text[i]); i += 1
         elif text[i] in ")]}":
             assert stack and stack.pop() == pairs[text[i]], f"delimiter mismatch at {i}"
+            tokens.append(text[i])
             i += 1
-        else: i += 1
+        elif text[i].isspace(): i += 1
+        else:
+            match = CODE_TOKEN.match(text, i)
+            assert match is not None
+            tokens.append(match[0]); i += len(match[0])
     assert not stack, "unclosed delimiters"
+    return tokens
+
+
+def check_offline_source_branch(source: str) -> None:
+    """Recognize the closed source shape without depending on rustfmt layout."""
+    tokens = lexical_delimiters(source)
+    branch = ['let', 'source', '=', 'if', 'mode', '==', 'JournalMode', '::',
+              'Offline', '{', 'None', '}', 'else', '{']
+    starts = [i for i in range(len(tokens) - len(branch) + 1)
+              if tokens[i:i + len(branch)] == branch]
+    assert len(starts) == 1, 'expected one offline source branch returning None'
+    start = starts[0] + len(branch)
+    depth, end = 1, start
+    while depth:
+        assert end < len(tokens), 'unclosed online source branch'
+        depth += (tokens[end] == '{') - (tokens[end] == '}')
+        end += 1
+    credential = ['configured', '(', '"DFMCP_WORK_ORDERS_TOKEN"']
+    reads = [i for i in range(len(tokens) - len(credential) + 1)
+             if tokens[i:i + len(credential)] == credential]
+    assert len(reads) == 1 and start <= reads[0] < end - 1, \
+        'credential access must occur only inside the online source branch'
 
 
 def pagination_cases() -> int:
@@ -163,7 +202,7 @@ def main() -> None:
     assert source.count('#[tool(') == 11
     assert 'pub mod live_work_orders_server;' in paths[-2].read_text()
     assert 'dfmcp_mcp::live_work_orders_server::run_stdio();' in paths[4].read_text()
-    assert source.index('if mode == JournalMode::Offline { None } else') < source.index('configured("DFMCP_WORK_ORDERS_TOKEN"')
+    check_offline_source_branch(source)
     assert 'self.control.commit(&key, plan, witness, context)' in source
     assert 'commit_prepared(' not in source
     assert '"DFMCP_WORK_ORDERS_ALLOW_PRODUCTION"' in source

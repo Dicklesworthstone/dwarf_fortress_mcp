@@ -15,6 +15,185 @@ it is not a claim that every function or every Markdown document was exhaustivel
 The canonical work item is **dfmcp-reality-wiring-proof-4bf**. Historical closed umbrella beads
 are retained as history, with explicit residual work rather than silent completion credit.
 
+**Newest source recheck, R29:** clean private
+`b6d0e626f81330075b33fee3d81cb410a55b07b2` passes both required commands
+on the November 1 nightly: each 5,145 debug and 5,145 release cases across
+123 targets per profile, zero failed or ignored, all 43 qualification gates.
+Parent checks the official receipt, all 31 critical cases in both profiles,
+all 2,592 source hashes/modes and the actual release laboratory CLI. The new
+entity-query/resource consumer works through real modern stdio and preserves
+pending history and actual durable-file bytes on successful and denied reads.
+The complete evidence is under `target/fresh-eyes-20261101/`. Broader `.11`
+families, original-goal proof, autonomous fortress competence and admission
+remain open. E below is an earlier operator trial with its stated binding limits;
+later report bytes and the shared head do not inherit R29 source qualification.
+
+**November 1 R28 source recheck:** exact clean private
+`e7b93a40e6a74bcc425c0c6fec5729296907d2af` passes all 43 qualifier gates
+and the separate verifier on the November 1 nightly, each with 5,140 debug
+and 5,140 release cases across 123 targets per profile, zero failed or ignored.
+Parent review checks the official receipt, all 26 critical cases in both
+profiles, all 2,592 source hashes/modes and the actual emitted development ELF.
+The exact receipts and complete bundle are in `target/fresh-eyes-20261101/`.
+Actual bounded D replay verifies all 105 exported files and sixteen modern MCP
+exchanges: one bed insertion, early same-tick anchor refusal preserving the same
+prepared run, then exactly 1,200 ticks without overshoot. The second reviewed
+clock run is refused as stale before unpause; its precise cause is unresolved.
+No bed appears, and the original retained order remains false with one remaining.
+The positive nonempty item and late changed-source probes are unachieved.
+Six offline exchanges preserve all five actual custody files and withhold current
+goal/items. Fresh parent host checks verify stopped owned processes, closed port,
+five restored plugins and both exact 30-file saves. Thirty-value host secret scans
+precede export. Independent review closes `.20`–`.24` only; `.5.2` and broader
+production/competence gaps remain open. This is not shared-head, native R1,
+production artifact, compatibility or runtime admission evidence.
+
+### R24 item-view qualification and verifier disagreement (2026-10-31)
+
+**Subsequent E result at exact R28:** parent independently replays 139 exports,
+23 modern exchanges and timing records, all native receipt/history chains and
+complete Lua/native rosters. A new BED 540 is visible in fresh Wait and
+same-anchor Query; failed Observe then causes Query and Doctor to withhold it.
+The original order disappears and its goal remains Unknown. Two reviewed runs
+advance 1,200 and 743 ticks without overshoot; actual five-file offline recovery
+and fresh parent host cleanup pass. Native TTL stays 60 seconds. The operator
+displayed a configuration contrary to instruction (exact bytes scan against 35
+private values with zero matches, no config export), and full stderr from one
+pre-effect UI timeout is unavailable. These limits are retained, not turned into
+qualification. D's unsuccessful trial stays unsuccessful; E is neither
+autonomous fortress competence nor later-source/admission evidence.
+Independent CC review accepts the original narrow `.5.2` item-view criteria at
+R28, after current Root blockers and the recorded E documentation are checked.
+The coordinator also accepts E's manifest-only exported binary binding for
+these narrow criteria: no raw launched-executable path/hash receipt or opened
+process executable identity is retained. Operator-reported contemporaneous
+launch/preflight is outside the export. No source-bound process/runtime
+qualification follows from these bytes.
+
+**Fresh-review correction, November 1:** the R25 positive proof below remains
+valid for its exact bytes, but did not exercise failed Observe, Query regrant or
+all facade publication failures. Five newly executed regressions fail against
+unchanged R25 production code with old `complete` item views where `unknown` is
+required. `.5.2` is reopened, blocked by `.22`; `.20` is reopened for direct
+socket-test setup outside its I/O deadline. Current source repairs preserve
+the original goal/history policy and authority, withdraw optional rows across
+failed acquisition/inspection and the real facade's three checkpoints, and
+bound test setup without changing production limits. Eight standalone Python
+reference-checker regressions pass; the additional facade mutant actually fails,
+and restored source passes 2,822 MCP plus 1,292 adapter library tests, zero failed
+or ignored. Clean private R26 `5ce23acd3660505a58f0534a227c76a6f95d9900`
+subsequently passes all 43 qualification gates and the separate verifier,
+each with 5,137 debug and 5,137 release cases across 123 targets per profile,
+zero failed or ignored. Parent checks the official receipt, all fifteen
+critical cases in both profiles, all 2,592 source hashes/modes and clean HEAD
+before and after sealing the actual
+Cargo-emitted development executable. The later `.23` canonical-anchor repair
+has three actual original-source failures followed by a full 2,825-case MCP
+library pass, zero failed or ignored. R26 covers neither the later guard nor
+its live execution; exact R28 qualification and bounded D are recorded above. The prepared
+recovery component uses memory-backed codecs, not a physical-file reopen. See
+`target/fresh-eyes-20261101/TODO.md`; no later-byte admission is inferred.
+
+That next clean R27 source, `3c84cb136ae8c4d53a8e41efdecf9f859d365ef5`,
+fails warning-denied Clippy on the separately installed November 1 nightly.
+The existing laboratory capability default uses a redundant lazy closure.
+For that failed R27 attempt, full Rust tests, verifier, server build and live D are unrun;
+the final 2,592-file source check remains clean. The failed receipt and raw
+diagnostic are retained. Bead `.24` changes only the equivalent eager fallback,
+with independently reviewed default/explicit/empty semantics and unchanged
+authority. Subsequent R28 completes the checks above; no warning, gate, budget,
+profile or test is weakened and no R27 artifact or live proof is invented.
+
+Exact private `2f724b90eab986c3fa913fa99e2fd91bfcae3a29` adds a bounded,
+separately authorized read-only furniture view while preserving the original
+goal policy and history. Twenty focused cases and all 43 qualification gates
+pass, including 5,127 debug and 5,127 release tests per profile across 123
+targets with zero failed or ignored. Its separate verifier fails the adapter
+target with 1,286 passed and two failed: actual-disk lost-commit recovery and
+maximum-roster furniture acquisition. Source custody remains exact and clean.
+The driver does not build or seal a new server, and live trial C is held.
+
+Independent source review finds that the first test checks native dispatch
+only after its failing recovery assertion, while the second discards peer
+diagnostics on acquisition failure. The test peers' 200 ms and two-second idle
+timeouts are shorter than the callers' five- and sixty-second allowances.
+Those are diagnostic defects and a plausible disconnect mechanism, not proof
+of the original failure cause. Bead `.20` requires stronger effect and failure
+observability plus bounded peer behavior without changing production budgets
+or weakening the existing recovery, roster, identity, digest or release oracles.
+Both required full commands and fresh live evidence remain outstanding.
+
+The two added timing counterexamples each execute one test and fail against the
+old peers, retaining the timeout and last event. The test-only repair uses fixed
+peer deadlines, short cancellation polls and partial-I/O-safe reads/writes; it
+also proves the intended stopped commit before recovery. The full adapter suite
+then passes 1,292 cases, zero failed or ignored, including the two original
+failures and four new cases. Independent review additionally corrected sender
+threads that could detach on an early test error. No production budget, existing
+positive oracle, gate or profile was relaxed.
+
+Clean R25 `bc5bcdfe28a895f9334fd8a116270be36650ee3a` subsequently passes
+all 43 qualification gates and the separate verifier, each with 5,131 debug and
+5,131 release tests across 123 targets per profile, zero failed or ignored.
+Parent replay consumes the official receipt, counts nine critical cases in both
+profiles and verifies all 2,591 source hashes/modes and clean status before and
+after sealing the actual Cargo-emitted development ELF. Receipt SHA-256 is
+`b1d64f5e86159dc66fb0c7634addd27ee62839adf078709b6dfff24d36d229ba`;
+the 50,348,656-byte development executable SHA-256 is
+`72f29e709a2fe40219e571390070e6e2918e6c19fc7cc52d6c3193a31ea4ba36`.
+Cargo reports cache reuse, not fresh recompilation. `.20` is independently closed.
+
+That executable also performs six actual modern offline exchanges against B's
+unchanged five custody files in place while the game is off. Original plan,
+review, creation and clock identities survive, with current goal unavailable
+and zero stale item rows. This is bounded development recovery; it grants no
+compatibility or runtime admission. The subsequent bounded C result follows.
+Original B goal completion and workshop/fortress competence remain unproved.
+
+### R25 public item-view proof C (2026-10-31; cleanup checked November 1 UTC)
+
+Terra directly plays the actual game through thirteen modern public MCP
+exchanges on exact R25 and executable `72f29e70...`. One original bed insertion
+and one separately reviewed 1,200-tick/30-second run advance 1,031 ticks, zero
+overshoot, stopping at target absence. No second run or changed original goal,
+deadline or key is used. The public fresh item view and same-anchor Query show
+BED 540, type 8, subtype -1, material (420, 163), stack 1 at sequence 4/tick
+12114402. Coverage is complete for the 535-item operations roster, with one
+matching/returned candidate and none omitted. Baseline has 536 items and no BED;
+new output does not imply total inventory increased.
+
+Parent replay checks all 129 export members and canonical native chains:
+three creation frames, six clock frames and twenty-one goal-history frames
+forming three complete samples. It matches the full native/public item tuple
+and complete native/Lua roster IDs, types and materials. Lua independently
+identifies `PLANT:CHERRY:WOOD`, but does not print subtype or stack; its resolved
+position/full flags are not equivalent to native raw position/compact flags.
+Public material classification, eligibility and production attribution remain
+unknown. The original removed order remains Unknown, original goal and semantic
+completion are unproved, and an unrelated Fish job prevents global quiescence.
+There is no item-to-order causal certificate.
+
+Operator SDK workshop construction, normal dwarf completion (571 setup ticks)
+and manager UI setup are excluded from MCP competence. Retained timestamps
+support an observed 149.374-second construction interval; the outer timeout
+guard's script and exact start were not retained. The first client exits on
+outer stdin EOF with zero requests and is preserved/excluded; a PTY client
+performs the actual exchanges, without retrying any effect. Builds/tests used
+NTM Codex and Claude Code; gameplay used Terra directly, not a separate NTM pane.
+
+Both B and C actual five-file custody sets reopen offline in six modern
+exchanges each, preserving historical identities and every file byte, while
+current goal remains unavailable and item rows empty/unknown. Fresh parent
+cleanup checks all recorded PIDs/group absent, port closed, five plugin states
+restored and both save copies matching all thirty original files without extras.
+Host-side export scanning covers twenty-five exact private values before copy.
+Evidence is under `target/bang-for-buck-20261031/`: the frozen C manifest SHA-256
+is `bc572933e6aebb8befb0c59decf30f4fdee62760143f9d60b8da18cbb039600a`, with
+`production-c-parent-review.json` and `production-c-parent-cleanup.json`.
+This closes scoped `.5.2`, not original `.5.1`, parent `.5`, workshop `.14`,
+campaign competence, native R1 or compatibility/runtime admission. Later report
+bytes inherit no source qualification. Earlier failed runs remain failed.
+
 ### R23 prepared-fortress production result (2026-10-31)
 
 Terra directly used the actual semantic work-order MCP runtime to insert one
