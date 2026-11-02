@@ -12,8 +12,9 @@
   explicit ordered block/path/length/SHA256 descriptors and preserve every byte
   in separate bounded hex content blocks. Keep dependency, native bytes, eleven
   tools, custody, authority and transport guards unchanged.
-- Check complete serialization with fixed server metadata and worst-case admitted
-  JSON-RPC framing against the existing 512KiB product ceiling. Preserve the
+- Check complete typed serialization with empty ordinary-tool metadata and
+  worst-case admitted JSON-RPC framing against the existing 512KiB product
+  ceiling. Preserve the
   bounded custody/uncertainty fallback. Extend the same five stdio scenarios with
   large/max-cell positives, actual longest-ID envelope and corrupt-block refusal;
   add two registered Rust packet regressions. Repaired-source Rust, new J replay

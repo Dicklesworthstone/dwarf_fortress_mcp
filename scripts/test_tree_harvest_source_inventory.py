@@ -30,7 +30,7 @@ class TreeSourceInventoryTests(unittest.TestCase):
             ("crates/dfmcp-adapter/src/lib.rs", "pub mod tree_harvest;", ""),
             ("crates/dfmcp-adapter/src/tree_harvest/journal.rs", "ack.acknowledge(\n            self.pin(),", "acknowledgement_removed(\n            self.pin(),"),
             ("crates/dfmcp-mcp/src/tree_harvest_server.rs", '"fortress_commit"', '"fortress.commit"'),
-            ("crates/dfmcp-mcp/src/tree_harvest_server/presentation.rs", "ResultMeta::server_generated(identity)", "ResultMeta::empty()"),
+            ("crates/dfmcp-mcp/src/tree_harvest_server/presentation.rs", "ResultMeta::empty()", "unexpected_result_metadata()"),
             ("crates/dfmcp-mcp/src/tree_harvest_server/presentation.rs", "const CHUNK_BYTES: usize = 24_000;", "const CHUNK_BYTES: usize = 48_000;"),
             ("crates/dfmcp-mcp/src/tree_harvest_server.rs", "-> McpResult<CompleteResult<FinalCallToolResult>>", "-> String"),
         ]

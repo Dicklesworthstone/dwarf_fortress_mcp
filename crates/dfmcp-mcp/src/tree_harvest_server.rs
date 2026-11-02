@@ -17,7 +17,6 @@ use std::sync::{
     atomic::{AtomicU64, Ordering},
 };
 const FAMILY: u128 = 31u128 << 57;
-const SERVER_NAME: &str = "dfmcp-tree-harvest-v1-21-dev";
 static NEXT: AtomicU64 = AtomicU64::new(1);
 static SESSION: Mutex<Option<Runtime>> = Mutex::new(None);
 fn spine(
@@ -496,7 +495,7 @@ pub fn run_stdio() {
         eprintln!("{}: {}", e.code.as_str(), e.message);
         return;
     }
-    let server=ServerBuilder::new(SERVER_NAME,env!("CARGO_PKG_VERSION"))
+    let server=ServerBuilder::new("dfmcp-tree-harvest-v1-21-dev",env!("CARGO_PKG_VERSION"))
         .tool(FortressOpenSession).tool(FortressObserve).tool(FortressQuery).tool(FortressPlan).tool(FortressCommit).tool(FortressWait)
         .tool(FortressCancel).tool(FortressExplain).tool(FortressDoctor).tool(FortressCheckpoint).tool(FortressRestore)
         .instructions("Unadmitted tree/1.21: one coordinate/source predicate, no stable plant ID. Observe, plan, review, confirm once, reconcile/prove foreground. markPlant ACK is not wood. Tools are offers, never assigned equipment. Independent ACK precedes dispatch; uncertainty never permits new keys. No clock, workshop construction or production admission. Original .14 remains open.").build();

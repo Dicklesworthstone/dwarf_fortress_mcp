@@ -104,6 +104,7 @@ fn tree_packet_chunked_native_evidence_roundtrips_and_respects_modern_bounds() {
             decode_typed_complete::<FinalCallToolResult>(&encoded, ResultPeerEra::Modern).is_ok()
         );
         let result: Value = serde_json::from_str(&encoded).expect("complete JSON");
+        assert!(result.get("_meta").is_none());
         let outer = json!({"jsonrpc":"2.0","id":"x".repeat(254),"result":result}).to_string();
         assert!(outer.len() + 1 <= RESPONSE_BYTES as usize);
         assert_eq!(

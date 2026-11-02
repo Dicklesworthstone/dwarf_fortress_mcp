@@ -181,9 +181,10 @@ Small-packet consumers retain the Agent Turn and ACK in `content[0]`, but must
 explicitly resolve descriptors when full native evidence is needed.
 
 The pinned transport's 65536-byte string and 1MiB complete-result guards remain
-unchanged. The producer serializes the complete typed result with the same fixed
-server identity metadata as the server, and includes worst-case admitted
-256-byte encoded JSON-RPC ID, framing and newline in the existing 512KiB product
+unchanged. The producer serializes the complete typed result with empty ordinary
+tool-result metadata, matching the pinned dispatch and retained actual wire data.
+It includes the worst-case admitted 256-byte encoded JSON-RPC ID, framing and
+newline in the existing 512KiB product
 ceiling. If remaining metadata cannot fit, the bounded AgentTurnBuilder fallback
 keeps original custody/ACK and uncertainty and explicitly omits full evidence.
 It does not report an effect completed or grant retry permission.

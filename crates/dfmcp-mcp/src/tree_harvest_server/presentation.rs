@@ -1,10 +1,9 @@
 //! Tree-only output packaging; evidence bytes never become control authority.
-use super::{RESPONSE_BYTES, SERVER_NAME, overflow_packet, parse_id};
+use super::{RESPONSE_BYTES, overflow_packet, parse_id};
 use dfmcp_adapter::tree_harvest::MAX_CAPTURE_BYTES;
 use dfmcp_core::{Digest32, RequestId};
 use fastmcp_rust::{
-    CompleteResult, ContentBlock, FinalCallToolResult, Implementation, McpError, McpResult,
-    ResultMeta,
+    CompleteResult, ContentBlock, FinalCallToolResult, McpError, McpResult, ResultMeta,
 };
 use serde_json::{Value, json};
 
@@ -14,17 +13,15 @@ pub(super) const CHUNK_BYTES: usize = 24_000;
 const ENVELOPE_BYTES: usize =
     b"{\"jsonrpc\":\"2.0\",\"id\":".len() + 256 + b",\"result\":".len() + b"}\n".len();
 
-fn complete(texts: Vec<String>) -> McpResult<CompleteResult<FinalCallToolResult>> {
-    let identity = Implementation::try_new(SERVER_NAME, env!("CARGO_PKG_VERSION"))
-        .map_err(|_| McpError::internal_error("invalid Tree server identity"))?;
-    Ok(CompleteResult::new(
+fn complete(texts: Vec<String>) -> CompleteResult<FinalCallToolResult> {
+    CompleteResult::new(
         FinalCallToolResult {
             content: texts.into_iter().map(ContentBlock::text).collect(),
             is_error: false,
             structured_content: None,
         },
-        ResultMeta::server_generated(identity),
-    ))
+        ResultMeta::empty(),
+    )
 }
 
 fn fits(result: &CompleteResult<FinalCallToolResult>) -> bool {
@@ -93,7 +90,7 @@ pub(super) fn present(raw: String) -> McpResult<CompleteResult<FinalCallToolResu
     let mut texts = vec![String::new()];
     if detach(&mut packet, "", &mut texts).is_some() {
         texts[0] = packet.to_string();
-        let result = complete(texts)?;
+        let result = complete(texts);
         if fits(&result) {
             return Ok(result);
         }
@@ -112,7 +109,7 @@ pub(super) fn present(raw: String) -> McpResult<CompleteResult<FinalCallToolResu
         session,
         request,
         original["retained_reference"].clone(),
-    )])?;
+    )]);
     if fits(&fallback) {
         Ok(fallback)
     } else {

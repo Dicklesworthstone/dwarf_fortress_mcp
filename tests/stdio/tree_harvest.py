@@ -511,15 +511,14 @@ class TreeStdioTests(unittest.TestCase):
 
     def positive_flow(self):
         client = self.client(); sid, original, _, plan = self.prepared(client)
-        # Exercise the actual router/envelope, including its metadata and the
-        # longest admitted encoded string ID, with complete large evidence.
+        # Exercise the actual router/envelope and longest admitted encoded
+        # string ID with complete large evidence and ordinary empty metadata.
         longest = "x" * 254
         self.assertEqual(len(json.dumps(longest).encode()), 256)
         response = client.call("tools/call", {"name":"fortress_query", "arguments":{"session_id":sid}}, request_id=longest)
         self.assertEqual(response["id"], longest)
         self.assertLessEqual(client.last_response_bytes, 512 * 1024)
-        identity = response["result"]["_meta"]["io.modelcontextprotocol/serverInfo"]
-        self.assertEqual(identity["name"], "dfmcp-tree-harvest-v1-21-dev")
+        self.assertNotIn("_meta", response["result"])
         viewed = resolve_content(response["result"]["content"])
         self.assertEqual(viewed["result"]["original"]["review_seal"], original["review_seal"])
         self.assertEqual(bytes.fromhex(viewed["result"]["original"]["original_source"]["native_capture_hex"]), self.peer.vectors["capture"])

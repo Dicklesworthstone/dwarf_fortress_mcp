@@ -61,7 +61,7 @@ and its 161 Bead rows stay unchanged. It uses the pinned macro's explicit typed
 modern result API. content[0] keeps the full Agent Turn and custody/ACK, with
 recursive raw-capsule descriptors bound to field paths, ordered separate content
 blocks, byte lengths and complete/per-block SHA256. Complete serialization with
-fixed server identity metadata and worst-case admitted JSON-RPC ID/framing is
+empty ordinary-tool metadata and worst-case admitted JSON-RPC ID/framing is
 bounded by 512KiB; each text remains within the unchanged 65536-byte codec guard.
 The existing bounded fallback preserves original custody and uncertainty.
 Native Tree/workshop code, protocols, vectors and ground-material policy remain
