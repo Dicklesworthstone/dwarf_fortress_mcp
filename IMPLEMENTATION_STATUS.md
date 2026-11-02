@@ -1,5 +1,10 @@
 # Implementation Status
 
+Session and doctor resource handlers now explicitly request private zero-TTL
+responses. Source and regression tests are present; execution and independent
+qualification are pending. This change does not establish native or runtime
+admission.
+
 This file is the authoritative antidote to accidental overclaiming. Prospective architecture prose
 describes the target system; this file describes what the checked-in source and exact evidence
 actually establish.
