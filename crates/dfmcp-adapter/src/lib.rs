@@ -80,6 +80,7 @@ pub mod semantic_workforce;
 pub mod shelter_analysis;
 pub mod spatial_inventory;
 pub mod transceiver;
+pub mod tree_harvest;
 pub mod work_order_control;
 pub mod work_order_progress;
 pub mod work_orders;

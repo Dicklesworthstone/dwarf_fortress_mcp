@@ -8,7 +8,7 @@ actually establish.
 
 **Phase 0D-R0 with implemented but unadmitted read profiles through citizen-inclusive spatial/1.8,
 optional archive-bound durable foreground watches, and explicitly unadmitted pause-control/1.7
-and original Carpenter workshop/1.20 development slices. No live tuple is currently admitted.**
+and original Carpenter workshop/1.20 and visible-tree supply/1.21 development slices. No live tuple is currently admitted.**
 
 The repository contains:
 
@@ -30,6 +30,49 @@ The checked-in compatibility registry remains empty. Source presence does not im
 admission, or support. No protocol beyond 1.0 appears in the production runner map.
 
 ## Evidence hierarchy
+
+### Visible-tree supply (2026-11-01; new source, execution pending)
+
+The isolated tree-harvest/1.21 native generation, safe-Rust adapter and registered
+`dfmcp-tree-harvest-v1-21-dev-server` implement one host-pinned visible mature
+root-coordinate/species intent through supported `Designations::markPlant`.
+The SDK computes the exact southeast designation coordinate after bounded body
+and visibility validation. Worker/tool approach witnesses use that coordinate;
+CUTWOOD eligibility and reciprocal TEMP axe offers do not prove equipment,
+assignment or scheduling. No stable plant ID is invented. PERM Wagon logs remain
+ineligible, and workshop/1.20 ground material semantics and vectors stay unchanged.
+
+The coordinator uses separate 1.21 protocol/hash/custody domains, an independent
+pre-dispatch acknowledgement, original one-use permission and full-history
+frontiers. A fixed maximum 12000-tick monitoring horizon grants no clock runs;
+the existing separately reviewed run/1.13 path retains its per-run limits. A
+historical designation ACK is distinct from a fresh root-predicate absence and
+new eligible ground WOOD observation. Causal log provenance remains unknown.
+Global registry reads require explicit loaded-map read scope; direct designation
+authority/lease cover the tree/halo and touched scheduling block. Canonical world
+anchor remains null and continuity unestablished. See [the development
+workflow](docs/TREE_HARVEST_MCP.md).
+
+The new source registers 14 adapter cases, two MCP packet cases and one Rust
+integration driving five actual-stdio scenarios; **Tree Rust and stdio execution
+remain pending**. Three new Tree and seven existing workshop source-inventory
+regressions actually pass. An earlier stable Tree native SDK-double cut passes
+eight scenarios / 275 assertions, ten original vectors and seven individually
+compiled/killed mutants; its changed contract/source inventory does not qualify
+this later source. The extracted shared native engine previously preserved all
+12 workshop vectors and passed its 13-scenario component harness. All earlier
+failed attempts and raw evidence are retained. These are component evidence,
+not final exact-source SDK, native R1, real felling or admission proof.
+
+Both required full commands on frozen 08 continue separately; debug has 125
+targets / 5176 passing cases, while release/full terminal evidence is pending.
+The 834 startup-status/log correction has independent manual-relink five-case
+stdio evidence, not Cargo/full-source qualification. This new combined source
+inherits neither result. Both final full commands, final matching-SDK builds of
+Tree and workshop, exact artifacts, untouched-game workshop and finite-bed
+acceptance remain pending under original `.14`. No registry, production runner,
+floor, manager state or game is changed by this source work.
+
 
 ### Original Carpenter workshop (2026-11-01; unqualified source changes)
 

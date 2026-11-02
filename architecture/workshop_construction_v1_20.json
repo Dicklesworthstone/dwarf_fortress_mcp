@@ -240,6 +240,7 @@
     "architecture/workshop_construction_v1_20.json",
     "bridge/common/retained_snapshot.h",
     "bridge/common/workshop_construction.h",
+    "bridge/common/one_attempt_native.h",
     "bridge/dfhack-workshop-v1_20/CMakeLists.txt",
     "bridge/dfhack-workshop-v1_20/DfmcpWorkshopV1_20.proto",
     "bridge/dfhack-workshop-v1_20/dfmcp_workshop_v1_20.cpp",
@@ -288,6 +289,7 @@
   "native_component_source_paths": [
     "architecture/workshop_construction_v1_20.json",
     "bridge/common/workshop_construction.h",
+    "bridge/common/one_attempt_native.h",
     "bridge/common/retained_snapshot.h",
     "bridge/dfhack-workshop-v1_20/dfmcp_workshop_v1_20.cpp",
     "bridge/dfhack-workshop-v1_20/DfmcpWorkshopV1_20.proto",
@@ -369,5 +371,10 @@
       "scripts/qualify_local.sh"
     ],
     "full_qualification_requires_reviewed_frozen_clean_source": true
+  },
+  "shared_native_engine": {
+    "source": "bridge/common/one_attempt_native.h",
+    "wire_vectors_unchanged": true,
+    "prior_source_qualification_transferred": false
   }
 }

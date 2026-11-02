@@ -59,6 +59,7 @@ pub mod server;
 mod task_service;
 mod task_store;
 pub mod tasks;
+pub mod tree_harvest_server;
 mod witness;
 pub mod workshop_construction_server;
 mod world_changes;

@@ -201,6 +201,10 @@ eleven-tool development consumer. Focused execution and an actual-SDK diagnostic
 build do not establish full final-source qualification, native R1, untouched-game
 workshop construction or production admission.
 
+The [one visible-tree supply workflow](docs/TREE_HARVEST_MCP.md) documents the
+separate unadmitted 1.21 source path for normal chopping designations and fresh
+ground-WOOD observations. Designation is not wood, and live proof remains pending.
+
 ### Original mining goals
 
 The dedicated `dfmcp-live-semantic-dig-dev-server` joins a paused spatial

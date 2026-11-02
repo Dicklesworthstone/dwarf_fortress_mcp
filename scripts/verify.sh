@@ -50,6 +50,7 @@ ok "Source bundle contract"
 info "Validating repository contracts"
 python3 scripts/validate_repo.py
 python3 scripts/check_workshop_construction.py
+python3 scripts/check_tree_harvest.py
 ok "Repository contracts"
 
 info "Validating the agent operating-model contract"
@@ -144,6 +145,8 @@ python3 scripts/test_admitted_live_launcher.py
 python3 scripts/test_live_admission_ticket.py
 python3 scripts/test_workshop_source_inventory.py
 python3 scripts/test_workshop_native.py --mutations
+python3 scripts/test_tree_harvest_source_inventory.py
+python3 scripts/test_tree_harvest_native.py --mutations
 ok "Python contract tests"
 
 info "Running read-only excavation and blueprint goal regressions"
@@ -226,6 +229,7 @@ python3 -m py_compile \
   scripts/test_live_admission_ticket.py \
   scripts/check_dependency_policy.py
 python3 -m py_compile scripts/check_workshop_construction.py scripts/test_workshop_source_inventory.py scripts/test_workshop_native.py tests/stdio/workshop.py
+python3 -m py_compile scripts/check_tree_harvest.py scripts/test_tree_harvest_source_inventory.py scripts/test_tree_harvest_native.py tests/stdio/tree_harvest.py
 bash -n \
   scripts/bootstrap_github_repo.sh \
   scripts/create_source_bundle.sh \

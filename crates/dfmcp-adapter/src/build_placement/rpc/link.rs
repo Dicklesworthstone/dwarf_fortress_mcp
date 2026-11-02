@@ -53,6 +53,14 @@ const WORKSHOP: Limits = Limits {
     notification_bytes: MAX_BYTES,
 };
 
+// Closed tree/1.21 factory; existing furniture/workshop limits are unchanged.
+const TREE_HARVEST: Limits = Limits {
+    bytes: 8 * 1024 * 1024,
+    calls: 32,
+    reply_bytes: 512 * 1024,
+    notification_bytes: MAX_BYTES,
+};
+
 pub(crate) struct Link {
     socket: TcpStream,
     deadline: Instant,
@@ -122,6 +130,15 @@ impl Link {
         check: &dyn Fn() -> Result<()>,
     ) -> Result<Self> {
         Self::connect_profile(address, timeout, bytes, cancellation, check, WORKSHOP)
+    }
+    pub(crate) fn connect_tree_harvest(
+        address: SocketAddr,
+        timeout: Duration,
+        bytes: u64,
+        cancellation: BuildCancellation,
+        check: &dyn Fn() -> Result<()>,
+    ) -> Result<Self> {
+        Self::connect_profile(address, timeout, bytes, cancellation, check, TREE_HARVEST)
     }
     fn connect_profile(
         address: SocketAddr,

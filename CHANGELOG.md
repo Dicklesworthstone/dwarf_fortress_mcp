@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-11-01 — Add supported one-tree supply development generation
+
+- Add isolated unadmitted tree-harvest/1.21 native, safe-Rust and eleven-tool
+  modern MCP source using SDK `markPlant` at its computed southeast trunk tile.
+  Preserve unknown stable plant identity, complete visible body witnesses,
+  observed CUTWOOD/axe offers and separate designation/supply proof.
+- Share the pure native one-attempt engine while preserving workshop/1.20 wire
+  vectors and ground-only policy. Reject PERM borrowing and forced item/job state.
+- Synchronize independent acknowledgement before one dispatch; withdraw failed
+  preparation, enforce scoped grants and one shrinking budget, preserve consumed
+  source frontiers and refuse rollback or uncertainty-clearing negative history.
+- Register 14 adapter, two MCP packet and one five-scenario actual-stdio Rust
+  integration cases. Execution remains pending. Three Tree and seven workshop
+  inventory regressions pass; earlier native-double cuts retain their exact
+  component scope and failed attempts. Keep both final full commands, exact SDK
+  artifacts, game proof and original `.14` acceptance open. Preserve all 43 gate
+  IDs and production admission boundaries.
+
 ## 2026-11-01 — Preserve workshop startup failure status and distinct test logs
 
 - Return process failure when workshop startup validation refuses the closed

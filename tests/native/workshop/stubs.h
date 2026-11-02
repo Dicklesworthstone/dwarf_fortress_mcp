@@ -25,6 +25,7 @@ inline std::uint32_t tick = 12345;
 inline std::int32_t site = 1, size_x = 64, size_y = 64, size_z = 8;
 inline std::string folder = "region1", df_version = "test-df", dfhack_version = "test-dfhack";
 inline std::int32_t next_building = 70, next_job = 90;
+inline std::int32_t next_item = 1000;
 inline bool helper_arguments_safe = true;
 // Equal nonzero walk groups model Maps::canWalkBetween only; no route or assignment.
 inline std::map<std::tuple<int, int, int>, int> walk_groups;
@@ -37,6 +38,7 @@ struct building;
 struct item;
 struct job;
 struct job_list_link;
+struct plant;
 struct coord {
     std::int32_t x = 0, y = 0, z = 0;
     coord() = default;
@@ -50,20 +52,25 @@ struct coord2d {
     coord2d(int xx, int yy) : x(xx), y(yy) {}
 };
 enum class tiletype { Floor = 1, Wall = 2, Empty = 3, Ramp = 4, RampTop = 5,
-    StairUp = 6, StairDown = 7, StairUpDown = 8, Unclassified = 9, Bad = 99 };
+    StairUp = 6, StairDown = 7, StairUpDown = 8, Unclassified = 9, TreeWall = 10, Bad = 99 };
+enum class tiletype_material { STONE, TREE };
 enum class tiletype_shape { EMPTY, WALL, FLOOR, RAMP, RAMP_TOP, STAIR_UP, STAIR_DOWN, STAIR_UPDOWN, NONE };
 enum class tile_dig_designation : std::uint32_t { No = 0, Default = 1, Channel = 2 };
 enum class tile_building_occ : std::uint32_t { None = 0, Planned = 1, Passable = 2, Impassable = 3 };
-enum class item_type : std::int32_t { NONE = -1, BED = 1, BOULDER = 4, WOOD = 5, BAR = 6, INVALID = 99 };
-enum class building_type : std::int32_t { NONE = -1, Bed = 1, Stockpile = 4, Civzone = 5, Workshop = 6 };
+enum class item_type : std::int32_t { NONE = -1, BED = 1, BOULDER = 4, WOOD = 5, BAR = 6, WEAPON = 7, INVALID = 99 };
+enum class building_type : std::int32_t { NONE = -1, Bed = 1, Stockpile = 4, Civzone = 5, Workshop = 6, Wagon = 7 };
 enum class workshop_type : std::int32_t { Carpenters = 0, Farmers = 1, Masons = 2, Custom = 23 };
-enum class job_type : std::int32_t { ConstructBuilding = 1, DestroyBuilding = 2 };
+enum class job_type : std::int32_t { ConstructBuilding = 1, DestroyBuilding = 2, FellTree = 3, GatherPlants = 4 };
+enum class job_skill { AXE, SWORD };
+struct itemdef_weaponst { job_skill skill_melee = job_skill::AXE; static itemdef_weaponst *find(int subtype) {
+    static itemdef_weaponst axe; return subtype == 0 ? &axe : nullptr;
+} };
 enum class job_role_type : std::int32_t { Hauled = 0, Reagent = 1 };
 enum class specific_ref_type : std::int32_t { NONE = 0, JOB = 1, UNIT = 2 };
 enum class general_ref_type : std::int32_t { NONE = 0, BUILDING_HOLDER = 1, UNIT_WORKER = 2 };
 enum class material_flags : std::int32_t { WOOD = 23, STONE = 24 };
 // Unscoped like the generated enum, so labor arrays index without casts.
-enum unit_labor : std::int16_t { NONE_LABOR = -1, MINE = 0, CARPENTER = 11, MASON = 12, LABOR_COUNT = 94 };
+enum unit_labor : std::int16_t { NONE_LABOR = -1, MINE = 0, CUTWOOD = 10, CARPENTER = 11, MASON = 12, LABOR_COUNT = 94 };
 union tile_designation {
     std::uint32_t whole;
     struct { tile_dig_designation dig : 3; std::uint32_t hidden : 1, flow_size : 3, pile : 1, smooth : 2, other : 22; } bits;
@@ -187,6 +194,7 @@ struct building_actual : building {
     building_design *design = nullptr;
     ~building_actual() override { delete design; }
 };
+struct building_wagonst : building_actual {building_wagonst() {type=building_type::Wagon;}};
 struct building_workshopst : building_actual {
     workshop_type type = workshop_type::Carpenters;
     std::int32_t custom_type = -1;
@@ -201,21 +209,27 @@ struct building_civzonest : building_actual {
     bool isSettingOccupancy() override { return false; }
 };
 struct map_block {
+    union BlockFlags { std::uint32_t whole; struct { std::uint32_t designated:1,other:31; } bits; BlockFlags():whole(0){} } flags;
+    std::array<std::array<std::uint16_t,16>,16> temperature_1{},temperature_2{};
     std::array<std::array<tile_designation, 16>, 16> designation{};
     std::array<std::array<tile_occupancy, 16>, 16> occupancy{};
     std::array<std::array<df::tiletype, 16>, 16> tiletype{};
-    map_block() { for (auto &column : tiletype) column.fill(df::tiletype::Floor); }
+    map_block() { for (auto &column : tiletype) column.fill(df::tiletype::Floor);
+        for(auto &c:temperature_1) {c.fill(10000);}
+        for(auto &c:temperature_2) {c.fill(10000);} }
 };
 struct world {
     struct { std::vector<building *> all; struct { std::vector<building_civzonest *> ANY_ZONE; } other; } buildings;
     struct { std::vector<item *> all; } items;
     struct { std::vector<unit *> active; } units;
     struct { job_list_link list; } jobs;
+    struct { std::vector<plant *> all; } plants;
 };
 namespace global {
 inline df::world *world = nullptr;
 inline void *plotinfo = nullptr;
 inline std::int32_t *building_next_id = &mock::next_building, *job_next_id = &mock::next_job;
+inline std::int32_t *item_next_id = &mock::next_item;
 }
 inline item *item::find(int id) {
     ++mock::game_access;
@@ -279,7 +293,7 @@ inline bool is_valid_enum_item(df::item_type type) { return type != df::item_typ
 inline df::tiletype_shape tileShape(df::tiletype type) {
     switch (type) {
         case df::tiletype::Floor: return df::tiletype_shape::FLOOR;
-        case df::tiletype::Wall: return df::tiletype_shape::WALL;
+        case df::tiletype::Wall: case df::tiletype::TreeWall: return df::tiletype_shape::WALL;
         case df::tiletype::Empty: return df::tiletype_shape::EMPTY;
         case df::tiletype::Ramp: return df::tiletype_shape::RAMP;
         case df::tiletype::RampTop: return df::tiletype_shape::RAMP_TOP;
@@ -289,6 +303,7 @@ inline df::tiletype_shape tileShape(df::tiletype type) {
         default: return df::tiletype_shape::NONE;
     }
 }
+inline df::tiletype_material tileMaterial(df::tiletype type) {return type==df::tiletype::TreeWall?df::tiletype_material::TREE:df::tiletype_material::STONE;}
 namespace Units {
 inline bool isCitizen(df::unit *u, bool include_insane = false) { ++mock::game_access; return u->citizen && (include_insane || u->sane); }
 inline bool isAlive(df::unit *u) { ++mock::game_access; return u->alive; }
@@ -297,7 +312,7 @@ inline bool isSane(df::unit *u) { ++mock::game_access; return u->sane; }
 inline bool isAdult(df::unit *u) { ++mock::game_access; return u->adult; }
 // Inspected SDK semantics: civilization permission only, not the enabled bit.
 inline bool isValidLabor(df::unit *u, df::unit_labor labor) {
-    ++mock::game_access; return labor == df::unit_labor::CARPENTER && u->civ_permits_carpentry;
+    ++mock::game_access; return (labor == df::unit_labor::CARPENTER || labor == df::unit_labor::CUTWOOD) && u->civ_permits_carpentry;
 }
 // Inspected SDK semantics: current job/cage/activity, not scheduler choice.
 inline bool isJobAvailable(df::unit *u, bool preserve_social = false) {
@@ -314,6 +329,7 @@ inline df::map_block *getTileBlock(int x, int y, int z) {
     const auto it = mock::blocks.find(std::make_tuple(x / 16, y / 16, z));
     return it == mock::blocks.end() ? nullptr : it->second.get();
 }
+inline df::map_block *getTileBlock(df::coord p) {return getTileBlock(p.x,p.y,p.z);}
 inline bool canWalkBetween(df::coord a, df::coord b) {
     ++mock::game_access; ++mock::walk_calls;
     const auto first = mock::walk_groups.find({a.x, a.y, a.z}), second = mock::walk_groups.find({b.x, b.y, b.z});

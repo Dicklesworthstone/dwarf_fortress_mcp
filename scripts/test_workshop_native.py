@@ -25,13 +25,14 @@ TRACE_SEQUENCE = 0
 
 ROOT = Path(__file__).resolve().parents[1]
 ENGINE = "bridge/common/workshop_construction.h"
+TRANSACTION = "bridge/common/one_attempt_native.h"
 HANDLER = "bridge/dfhack-workshop-v1_20/dfmcp_workshop_v1_20.cpp"
 TEST = "tests/native/workshop/handler.cpp"
 VECTORS = "tests/native/workshop/vectors.json"
 EXTRA_VECTORS = "tests/native/workshop/continuity_vectors.json"
 INPUTS = [
     "architecture/workshop_construction_v1_20.json",
-    ENGINE, "bridge/common/retained_snapshot.h", HANDLER,
+    ENGINE, TRANSACTION, "bridge/common/retained_snapshot.h", HANDLER,
     "bridge/dfhack-workshop-v1_20/DfmcpWorkshopV1_20.proto",
     "bridge/dfhack-workshop-v1_20/CMakeLists.txt",
     TEST, "tests/native/workshop/stubs.h", VECTORS, EXTRA_VECTORS,
@@ -41,13 +42,13 @@ INPUTS = [
 FLAGS = ["-std=c++17", "-Wall", "-Wextra", "-Werror", "-pedantic", "-g",
          "-fsanitize=undefined", "-fno-sanitize-recover=all"]
 MUTATIONS = {
-    "missing_full_revalidation": (ENGINE, "current.encode() != r.before.encode()", "false"),
-    "missing_uncertainty_fence": (ENGINE,
-        "require(!unresolved_, 8); require(records_.size() < MAX_RECORDS, 5);",
-        "require(records_.size() < MAX_RECORDS, 5);"),
-    "terminal_replay_not_immutable": (ENGINE, "if (r.phase != Phase::Prepared) return r;",
+    "missing_full_revalidation": (TRANSACTION, "current.encode() != r.before.encode()", "false"),
+    "missing_uncertainty_fence": (TRANSACTION,
+        "require(!unresolved_, 8); require(records_.size() < Model::MAX_RECORDS, 5);",
+        "require(records_.size() < Model::MAX_RECORDS, 5);"),
+    "terminal_replay_not_immutable": (TRANSACTION, "if (r.phase != Phase::Prepared) return r;",
         "if (r.phase == Phase::Cancelled || r.phase == Phase::Refused) return r;"),
-    "missing_final_readback": (ENGINE, " || inspect(r.before.selection, read).encode() != expected", ""),
+    "missing_final_readback": (TRANSACTION, " || inspect(r.before.selection, read).encode() != expected", ""),
     "missing_planned_occupancy_oracle": (ENGINE, "&& setting_occupancy && planned_tiles == ALL_TILES", ""),
     "missing_worker_labor": (ENGINE, "return visible && adult && sane && labor && labor_valid && job_available && reachable;",
         "return visible && adult && sane && labor_valid && job_available && reachable;"),

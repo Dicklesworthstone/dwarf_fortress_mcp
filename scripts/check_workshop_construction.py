@@ -17,7 +17,7 @@ MCP = "crates/dfmcp-mcp/src/"
 METHODS = ["Handshake", "ReadWorkshop", "PrepareWorkshop", "CommitWorkshop", "QueryWorkshop", "CancelWorkshop", "ReadWorkshopProgress"]
 TOOLS = ["fortress_" + name for name in ("open_session", "observe", "query", "plan", "commit", "wait", "cancel", "checkpoint", "restore", "explain", "doctor")]
 SOURCES = [
-    "architecture/workshop_construction_v1_20.json", "bridge/common/retained_snapshot.h", "bridge/common/workshop_construction.h",
+    "architecture/workshop_construction_v1_20.json", "bridge/common/retained_snapshot.h", "bridge/common/workshop_construction.h", "bridge/common/one_attempt_native.h",
     "bridge/dfhack-workshop-v1_20/CMakeLists.txt", "bridge/dfhack-workshop-v1_20/DfmcpWorkshopV1_20.proto",
     "bridge/dfhack-workshop-v1_20/dfmcp_workshop_v1_20.cpp", "crates/dfmcp-adapter/src/lib.rs",
     "crates/dfmcp-adapter/src/build_placement/rpc/codec.rs", "crates/dfmcp-adapter/src/build_placement/rpc/link.rs",
