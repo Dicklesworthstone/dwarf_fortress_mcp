@@ -1,5 +1,10 @@
 # Implementation Status
 
+
+The Manager native component runner is now connected to both mandatory scripts.
+Its 12-scenario/270-assertion and three compiled-mutation checks remain pending
+at this source; SDK doubles do not establish ABI, live or admission evidence.
+
 This file is the authoritative antidote to accidental overclaiming. Prospective architecture prose
 describes the target system; this file describes what the checked-in source and exact evidence
 actually establish.
@@ -39,13 +44,20 @@ Full-fortress authority, one review/confirmation, original-key journal and
 independent ACK precede the native assignment/HF/history transaction. Success
 requires the full projected poststate and fresh dual-getter proof without ticks.
 
-Root reports actual SDK configure/build success on native attempt 4. That is
-native build evidence, not game execution. Adapter cut 2 failed actual compilation
-with E0603 and zero executed tests; cut 3 corrects test-module visibility and
-makes full-fortress scope explicit. Rust/Clippy, MCP/CLI subprocess execution,
-full exact-source qualification, actual Manager appointment and the bed chain
-remain pending independent evidence. Source and protocol doubles establish no
-live claim; original `.14` and `.14.2` remain open. See
+Native attempt 4 compiled against the real 53.16 SDK; its 206032-byte plugin
+SHA-256 is `4c6e64a08abf708ac16b186926c694f7f26d3f4caad07e0bb1be96567af17d1d`.
+A separate native-only R trial on the original disposable save appointed the
+Manager, retained byte-identical duplicate-commit/query receipts, and added
+exactly one history event without advancing the paused tick. Root independently
+decoded the full canonical transaction and commitments and checked both external
+role getters, the declared world/HF/history projection and cleanup record.
+The 162-file/479820-byte export manifest is
+`d76796712cf68b35efc05c4ca60da0de82ad3a2d01fb284f75401aa3cf1acc48`;
+76 private values were scanned with zero matches. Native evidence binds only
+the seven unchanged native inputs, not the Rust controller or production admission.
+Adapter cut 2 failed with E0603/zero tests; cut 3 passed 15 scoped tests with
+1331 filtered. Cut 4, MCP/CLI execution, full exact-source qualification and the
+original MCP-only bed chain remain pending. Original `.14` and `.14.2` stay open. See
 `docs/MANAGER_APPOINTMENT_MCP.md` and `architecture/manager_appointment_v1_22.json`.
 Independent Terra source review found two public-adapter stale-tick authority
 issues, without showing an unauthorized actual MCP effect. Cut 4 reauthorizes

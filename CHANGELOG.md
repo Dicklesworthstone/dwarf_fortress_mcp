@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-11-02 — Run Manager native regressions in standard checks
+
+- Record independently replayed native-only R evidence: one Manager appointment,
+  one history event, zero ticks, original-key duplicate/query stability and cleanup.
+  MCP-only bed acceptance and production admission remain unproved.
+- Wire the existing Manager native transaction tests into both mandatory scripts.
+  Preserve exact vectors, independent commitments and three compiled mutation
+  controls; source is present and execution remains pending.
+
 ## 2026-11-02 — Vacant Manager 1.22 development source (.14.2)
 
 - Add the fixed six-method native generation and lossless bounded Rust

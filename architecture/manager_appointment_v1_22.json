@@ -116,12 +116,13 @@
     "scripts/read_stable_repository_file.py",
     "scripts/check_manager_appointment.py",
     "scripts/test_manager_source_inventory.py",
+    "scripts/test_manager_native.py",
     "docs/MANAGER_APPOINTMENT_MCP.md",
     "scripts/verify.sh",
     "scripts/qualify_local.sh"
   ],
   "claims_not_established": [
-    "current live Manager appointment",
+    "current MCP-only Manager appointment",
     "bed production",
     "full Rust qualification",
     "compatibility or runtime admission"
@@ -145,5 +146,32 @@
     "manager_prepare_requires_authority_at_capture_tick_without_prior_observe",
     "manager_plan_recovery_edges_preserve_observed_tick_high_water",
     "manager_dispatch_guard_and_writer_use_retained_tick_for_actual_lease"
-  ]
+  ],
+  "native_component_source_paths": [
+    "architecture/manager_appointment_v1_22.json",
+    "bridge/common/manager_appointment.h",
+    "bridge/common/one_attempt_native.h",
+    "bridge/common/workshop_construction.h",
+    "bridge/common/retained_snapshot.h",
+    "bridge/dfhack-manager-v1_22/dfmcp_manager_v1_22.cpp",
+    "bridge/dfhack-manager-v1_22/DfmcpManagerV1_22.proto",
+    "bridge/dfhack-manager-v1_22/CMakeLists.txt",
+    "tests/native/manager/handler.cpp",
+    "tests/native/manager/stubs.h",
+    "tests/fixtures/manager_v1_22_component.json",
+    "scripts/test_manager_native.py",
+    "scripts/read_stable_repository_file.py"
+  ],
+  "native_mutants": [
+    "empty_event_flag_storage",
+    "missing_history_link",
+    "terminal_replay_not_immutable"
+  ],
+  "native_component_expected": {
+    "scenarios": 12,
+    "assertions": 270,
+    "ignored": 0,
+    "sdk_doubles_only": true,
+    "live_game": false
+  }
 }

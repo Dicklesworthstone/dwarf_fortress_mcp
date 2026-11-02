@@ -159,13 +159,21 @@ identity/source/epoch, closed candidate/role arguments, confirmation, budgets
 and production-state refusal. The Rust wrappers assert exact test counts and
 retain stdout/stderr separately.
 
-Root reported actual SDK configure/build success on its attempt 4; that is
-native source-build evidence only, not a live appointment. Adapter cut 2 had an
-actual E0603 compile failure and zero executed tests. Cut 3 fixes that visibility
-error and full-fortress scope; execution remains pending at this writing.
-MCP/direct CLI execution, full exact-source Rust qualification, disposable-game
-Manager proof and the bed chain require independent execution. No admission,
-release or feature closure is claimed here.
+The real-SDK attempt-4 plugin (206032 bytes, SHA-256
+`4c6e64a08abf708ac16b186926c694f7f26d3f4caad07e0bb1be96567af17d1d`)
+completed a separate native-only R appointment on the disposable original save.
+Root independently decoded the complete canonical before/after and records,
+recomputed their commitments and checked both external role getters: one
+Manager, one added history event, zero ticks, byte-identical original-key query
+and duplicate commit. Export manifest
+`d76796712cf68b35efc05c4ca60da0de82ad3a2d01fb284f75401aa3cf1acc48`
+binds 162 files/479820 bytes; the 76-value scan found zero matches. Cleanup
+records raw pause, process drain, port closure, plugin restoration and both
+30-file saves. This is development evidence for seven unchanged native inputs;
+it does not qualify the Rust/MCP controller, the bed chain or admission.
+Adapter cut 2 failed compilation with zero tests; cut 3 passed 15 scoped tests
+(1331 filtered). Cut 4, MCP/direct CLI execution and full qualification remain
+pending. No release or feature closure is claimed here.
 
 Independent Terra source review subsequently identified stale-caller-tick
 checks at public adapter boundaries: a direct prepare could use an expired
@@ -176,3 +184,13 @@ component regressions cover direct prepare without prior observe, recovery
 edges after a later observation, and a real lease check that refuses before
 any writer/commit frame while the permitted pair commits once. These new Rust
 regressions remain unexecuted by the author pending Root's direct build.
+
+The mandatory verification and qualification scripts now execute
+`scripts/test_manager_native.py --mutations`: the real native translation unit
+with explicit SDK/protobuf doubles, 12 scenarios/270 assertions, byte-identical
+retained vectors and independent hashlib commitments. Three compiled mutations
+cover the observed event-flag storage defect, omitted history insertion and
+replayed terminal mutation. The runner preserves raw command output and checks
+its complete source inventory before and after. These are component checks;
+their execution at this revision remains pending, and they grant no SDK, live,
+Rust, compatibility or runtime qualification.

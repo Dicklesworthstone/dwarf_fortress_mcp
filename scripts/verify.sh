@@ -148,6 +148,7 @@ python3 scripts/test_workshop_source_inventory.py
 python3 scripts/test_workshop_native.py --mutations
 python3 scripts/test_tree_harvest_source_inventory.py
 python3 scripts/test_manager_source_inventory.py
+python3 scripts/test_manager_native.py --mutations
 python3 scripts/test_tree_harvest_native.py --mutations
 ok "Python contract tests"
 
@@ -232,7 +233,7 @@ python3 -m py_compile \
   scripts/check_dependency_policy.py
 python3 -m py_compile scripts/check_workshop_construction.py scripts/test_workshop_source_inventory.py scripts/test_workshop_native.py tests/stdio/workshop.py
 python3 -m py_compile scripts/check_tree_harvest.py scripts/test_tree_harvest_source_inventory.py scripts/test_tree_harvest_native.py tests/stdio/tree_harvest.py
-python3 -m py_compile scripts/check_manager_appointment.py scripts/test_manager_source_inventory.py tests/stdio/manager_appointment.py
+python3 -m py_compile scripts/check_manager_appointment.py scripts/test_manager_source_inventory.py scripts/test_manager_native.py tests/stdio/manager_appointment.py
 bash -n \
   scripts/bootstrap_github_repo.sh \
   scripts/create_source_bundle.sh \

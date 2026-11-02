@@ -36,7 +36,7 @@ SOURCES = [
     "crates/dwarf-fortress-mcp/src/main.rs", "crates/dwarf-fortress-mcp/tests/manager_gameplay_cli.rs",
     "tests/native/manager/stubs.h", "tests/native/manager/handler.cpp", "tests/fixtures/manager_v1_22_component.json",
     "tests/stdio/manager_appointment.py", "scripts/read_stable_repository_file.py",
-    "scripts/check_manager_appointment.py", "scripts/test_manager_source_inventory.py",
+    "scripts/check_manager_appointment.py", "scripts/test_manager_source_inventory.py", "scripts/test_manager_native.py",
     "docs/MANAGER_APPOINTMENT_MCP.md", "scripts/verify.sh", "scripts/qualify_local.sh",
 ]
 
@@ -91,6 +91,9 @@ def check(root=ROOT):
     for name, declaration in ((A + "lib.rs", "pub mod manager_appointment;"), (M + "src/lib.rs", "pub mod manager_appointment_server;")):
         if declaration not in texts[name]:
             raise ValueError("Manager module unregistered")
+    for name in ("scripts/verify.sh", "scripts/qualify_local.sh"):
+        if "python3 scripts/test_manager_native.py --mutations" not in texts[name]:
+            raise ValueError("Manager native regression gate missing: " + name)
     return {"schema": "dfmcp.manager-source-check/1", "status": "passed_static_only", "source_sha256": hashes,
             "source_files": len(SOURCES), "adapter_modules": 8, "rust_executed": False, "sdk_or_game_executed": False}
 
