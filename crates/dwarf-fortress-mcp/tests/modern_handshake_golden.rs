@@ -533,6 +533,8 @@ fn test_session_resources_resolve_over_stdio() -> Result<(), Box<dyn Error>> {
             "params": { "_meta": modern_meta(), "uri": uri }
         }))?;
         assert_modern_envelope(&read, id);
+        assert_eq!(read["result"]["ttlMs"], 0, "{uri}: {read}");
+        assert_eq!(read["result"]["cacheScope"], "private");
         let body: Value = serde_json::from_str(
             read["result"]["contents"][0]["text"]
                 .as_str()
@@ -541,6 +543,26 @@ fn test_session_resources_resolve_over_stdio() -> Result<(), Box<dyn Error>> {
         assert_eq!(body["ok"], true, "{uri}: {body}");
         assert_eq!(body["session_id"], session_id.as_str());
     }
+    let doctor_uri = format!("df://doctor/{session_id}");
+    let doctor = client.send(&json!({
+        "jsonrpc":"2.0", "id":6, "method":"resources/read",
+        "params":{"_meta":modern_meta(), "uri":doctor_uri}
+    }))?;
+    assert_modern_envelope(&doctor, 6);
+    assert_eq!(doctor["result"]["ttlMs"], 0);
+    assert_eq!(doctor["result"]["cacheScope"], "private");
+    let doctor_body: Value = serde_json::from_str(
+        doctor["result"]["contents"][0]["text"]
+            .as_str()
+            .ok_or("doctor text")?,
+    )?;
+    assert_eq!(doctor_body["ok"], true);
+    assert_eq!(doctor_body["session_id"], session_id);
+    let template = client.send(&json!({
+        "jsonrpc":"2.0", "id":7, "method":"resources/read",
+        "params":{"_meta":modern_meta(), "uri":"df://session/{session_id}/{view}"}
+    }))?;
+    assert!(template.get("error").is_some(), "{template}");
     let unknown = client.send(&json!({
         "jsonrpc": "2.0", "id": 9, "method": "resources/read",
         "params": { "_meta": modern_meta(), "uri": format!("df://session/{session_id}/secrets") }
@@ -616,6 +638,8 @@ fn entity_resources_discover_read_and_reject_stale_or_ungranted_references_over_
         .ok_or("entity query must discover its resource URI")?;
     let read = rpc(&mut client, 6, "resources/read", json!({"uri":uri}))?;
     assert_modern_envelope(&read, 6);
+    assert_eq!(read["result"]["ttlMs"], 0);
+    assert_eq!(read["result"]["cacheScope"], "private");
     let detail = text(&read, "contents")?;
     assert_eq!(detail["schema"], "dfmcp.lab-entity/1");
     assert_eq!(detail["anchor"], query["anchor"]);
@@ -694,6 +718,8 @@ fn entity_resources_discover_read_and_reject_stale_or_ungranted_references_over_
         json!({"uri":fresh["rows"][0]["resource_uri"]}),
     )?;
     assert_modern_envelope(&current, 15);
+    assert_eq!(current["result"]["ttlMs"], 0);
+    assert_eq!(current["result"]["cacheScope"], "private");
     assert_eq!(text(&current, "contents")?["entity"], detail["entity"]);
     Ok(())
 }

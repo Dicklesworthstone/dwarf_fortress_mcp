@@ -18,9 +18,12 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use dfmcp_adapter::GameAdapter;
-use fastmcp_rust::ResourceTemplate;
 use fastmcp_rust::prelude::{
     McpContext, McpError, McpResult, Resource, ResourceContent, ResourceHandler,
+};
+use fastmcp_rust::{
+    CacheTtl, CompleteResult, FinalReadResourceResult, FinalResourceReadCacheHintProvenance,
+    ResourceTemplate,
 };
 use serde_json::{Value, json};
 
@@ -117,6 +120,16 @@ fn template_read_refusal() -> McpError {
         "capability_denied: df:// resources require a concrete session-scoped URI; \
          template URIs carry no authority",
     )
+}
+
+// Session resources reflect current authority and state, even when their URI
+// names an immutable anchor. A client must ask the server again on every read.
+fn uncached_resource_contents(
+    contents: Vec<ResourceContent>,
+) -> McpResult<CompleteResult<FinalReadResourceResult>> {
+    let mut result = fastmcp_server::promote_legacy_resource_contents(contents)?;
+    result.payload.ttl_ms = CacheTtl::milliseconds(0);
+    Ok(result)
 }
 
 fn entity_anchor_digest(anchor: StateAnchor) -> dfmcp_core::Result<Digest32> {
@@ -668,6 +681,19 @@ impl ResourceHandler for DoctorBundleResource {
         Err(template_read_refusal())
     }
 
+    fn final_resource_read_cache_hint_provenance(&self) -> FinalResourceReadCacheHintProvenance {
+        FinalResourceReadCacheHintProvenance::Explicit
+    }
+
+    fn read_final_with_uri(
+        &self,
+        ctx: &McpContext,
+        uri: &str,
+        params: &HashMap<String, String>,
+    ) -> McpResult<CompleteResult<FinalReadResourceResult>> {
+        uncached_resource_contents(self.read_with_uri(ctx, uri, params)?)
+    }
+
     fn read_with_uri(
         &self,
         _ctx: &McpContext,
@@ -711,6 +737,19 @@ impl ResourceHandler for SessionViewResource {
 
     fn read(&self, _ctx: &McpContext) -> McpResult<Vec<ResourceContent>> {
         Err(template_read_refusal())
+    }
+
+    fn final_resource_read_cache_hint_provenance(&self) -> FinalResourceReadCacheHintProvenance {
+        FinalResourceReadCacheHintProvenance::Explicit
+    }
+
+    fn read_final_with_uri(
+        &self,
+        ctx: &McpContext,
+        uri: &str,
+        params: &HashMap<String, String>,
+    ) -> McpResult<CompleteResult<FinalReadResourceResult>> {
+        uncached_resource_contents(self.read_with_uri(ctx, uri, params)?)
     }
 
     fn read_with_uri(
@@ -1022,6 +1061,32 @@ mod tests {
                 "malformed id {malformed:?} must be refused"
             );
         }
+    }
+
+    #[test]
+    fn session_and_doctor_resources_recheck_revoked_grants() {
+        let id = session_id_of(&open_with_caps(&[
+            ("observe", "read_only"),
+            ("doctor", "read_only"),
+        ]));
+        let summary_uri = format!("df://session/{id}/summary");
+        let doctor_uri = format!("df://doctor/{id}");
+        assert!(session_summary(&id, &summary_uri).is_ok());
+        assert!(doctor_bundle(&id, &doctor_uri).is_ok());
+        let session = lookup(&id, "test").expect("session");
+        session.lock().expect("lock").grants.clear();
+        assert!(
+            session_summary(&id, &summary_uri)
+                .expect_err("revoked observe grant")
+                .to_string()
+                .contains("capability_denied")
+        );
+        assert!(
+            doctor_bundle(&id, &doctor_uri)
+                .expect_err("revoked doctor grant")
+                .to_string()
+                .contains("capability_denied")
+        );
     }
 
     #[test]

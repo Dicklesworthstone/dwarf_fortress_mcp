@@ -31,6 +31,12 @@
   Final Rust/MCP execution, live Manager/bed acceptance and qualification remain
   pending. No registry, production runner, admission or item closure changes.
 
+## 2026-11-02 — Revalidate session resources on every read
+
+- Session and doctor resource responses now specify a private zero TTL, so
+  clients are not invited to reuse state or authority after it changes. Modern
+  stdio and grant-revocation regressions are added; execution remains pending.
+
 ## 2026-11-02 — Direct compilation and bounded live gameplay evidence
 
 - Direct Linux execution on exact `64fd25f` passes 2,842 MCP/wrapper and 1,330
