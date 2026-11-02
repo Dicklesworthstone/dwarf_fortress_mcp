@@ -29,7 +29,8 @@ fn invalid() -> DfmcpError {
         "allocation TCP test peer failed",
     )
 }
-fn io_error(_: io::Error) -> DfmcpError {
+fn io_error(error: io::Error) -> DfmcpError {
+    eprintln!("furniture TCP peer I/O error: {error:?}");
     invalid()
 }
 fn require(value: bool) -> Result<()> {
@@ -208,20 +209,156 @@ fn header(method: i16, count: i32) -> [u8; 8] {
     out[4..].copy_from_slice(&count.to_le_bytes());
     out
 }
-fn read_request(stream: &mut TcpStream) -> Result<Option<(i16, Fields)>> {
+struct PeerIo<'a> {
+    socket: &'a mut TcpStream,
+    stop: &'a AtomicBool,
+    deadline: Instant,
+}
+impl PeerIo<'_> {
+    fn poll_timeout(&self) -> io::Result<Duration> {
+        if self.stop.load(Ordering::Acquire) {
+            return Err(io::Error::new(
+                io::ErrorKind::ConnectionAborted,
+                "peer stopped",
+            ));
+        }
+        let remaining = self
+            .deadline
+            .checked_duration_since(Instant::now())
+            .filter(|duration| !duration.is_zero())
+            .ok_or_else(|| io::Error::new(io::ErrorKind::TimedOut, "peer deadline"))?;
+        Ok(remaining.min(Duration::from_millis(100)))
+    }
+}
+impl Read for PeerIo<'_> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        loop {
+            self.socket.set_read_timeout(Some(self.poll_timeout()?))?;
+            match self.socket.read(buf) {
+                Err(e)
+                    if matches!(
+                        e.kind(),
+                        io::ErrorKind::WouldBlock
+                            | io::ErrorKind::TimedOut
+                            | io::ErrorKind::Interrupted
+                    ) =>
+                {
+                    continue;
+                }
+                result => return result,
+            }
+        }
+    }
+}
+impl Write for PeerIo<'_> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        loop {
+            self.socket.set_write_timeout(Some(self.poll_timeout()?))?;
+            match self.socket.write(buf) {
+                Err(e)
+                    if matches!(
+                        e.kind(),
+                        io::ErrorKind::WouldBlock
+                            | io::ErrorKind::TimedOut
+                            | io::ErrorKind::Interrupted
+                    ) =>
+                {
+                    continue;
+                }
+                result => return result,
+            }
+        }
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        self.socket.flush()
+    }
+}
+fn connected_test_pair() -> io::Result<(TcpStream, TcpStream)> {
+    let listener = TcpListener::bind("127.0.0.1:0")?;
+    let address = listener.local_addr()?;
+    listener.set_nonblocking(true)?;
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let stream = TcpStream::connect_timeout(&address, Duration::from_secs(2))?;
+    stream.set_write_timeout(Some(Duration::from_secs(2)))?;
+    loop {
+        if Instant::now() >= deadline {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "test pair setup deadline",
+            ));
+        }
+        match listener.accept() {
+            Ok((socket, _)) => return Ok((stream, socket)),
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                thread::sleep(Duration::from_millis(1))
+            }
+            Err(error) => return Err(error),
+        }
+    }
+}
+#[test]
+fn peer_io_preserves_partial_reads_and_bounds_cancel_deadline_and_eof() -> io::Result<()> {
+    let (mut stream, mut socket) = connected_test_pair()?;
+    thread::scope(|scope| {
+        let sender = scope.spawn(move || -> io::Result<()> {
+            stream.write_all(b"ab")?;
+            thread::sleep(Duration::from_millis(160));
+            stream.write_all(b"cd")?;
+            thread::sleep(Duration::from_millis(100));
+            Ok(())
+        });
+        let stop = AtomicBool::new(false);
+        let mut peer = PeerIo {
+            socket: &mut socket,
+            stop: &stop,
+            deadline: Instant::now() + Duration::from_secs(2),
+        };
+        let mut bytes = [0; 4];
+        peer.read_exact(&mut bytes)?;
+        assert_eq!(&bytes, b"abcd");
+        stop.store(true, Ordering::Release);
+        assert_eq!(
+            peer.read(&mut bytes).unwrap_err().kind(),
+            io::ErrorKind::ConnectionAborted
+        );
+        stop.store(false, Ordering::Release);
+        peer.deadline = Instant::now();
+        assert_eq!(
+            peer.read(&mut bytes).unwrap_err().kind(),
+            io::ErrorKind::TimedOut
+        );
+        sender.join().unwrap()?;
+        let (mut sender, mut socket) = connected_test_pair()?;
+        sender.write_all(b"a")?;
+        sender.shutdown(std::net::Shutdown::Write)?;
+        let mut peer = PeerIo {
+            socket: &mut socket,
+            stop: &stop,
+            deadline: Instant::now() + Duration::from_secs(2),
+        };
+        assert_eq!(
+            peer.read_exact(&mut bytes).unwrap_err().kind(),
+            io::ErrorKind::UnexpectedEof
+        );
+        assert_eq!(bytes[0], b'a');
+        Ok(())
+    })
+}
+fn read_request(stream: &mut PeerIo<'_>) -> Result<Option<(i16, Fields)>> {
     let mut frame = [0; 8];
-    match stream.read_exact(&mut frame) {
-        Ok(()) => {}
+    match stream.read(&mut frame[..1]) {
+        Ok(0) => return Ok(None),
+        Ok(_) => {}
+        Err(error) if error.kind() == io::ErrorKind::ConnectionReset => return Ok(None),
         Err(error)
-            if matches!(
-                error.kind(),
-                io::ErrorKind::UnexpectedEof | io::ErrorKind::ConnectionReset
-            ) =>
+            if error.kind() == io::ErrorKind::ConnectionAborted
+                && stream.stop.load(Ordering::Acquire) =>
         {
             return Ok(None);
         }
         Err(error) => return Err(io_error(error)),
     }
+    stream.read_exact(&mut frame[1..]).map_err(io_error)?;
     require(frame[2..4] == [0; 2])?;
     let method = i16::from_le_bytes([frame[0], frame[1]]);
     let count = i32::from_le_bytes(frame[4..8].try_into().map_err(|_| invalid())?);
@@ -257,6 +394,7 @@ struct Options {
     revoke: Option<(Event, Arc<AtomicBool>)>,
     cancel: Option<(Event, BuildCancellation)>,
     notifications: usize,
+    page_sent: Option<Arc<AtomicBool>>,
 }
 #[derive(Debug, Default)]
 struct Report {
@@ -277,19 +415,22 @@ impl Peer {
         let stopped = stop.clone();
         let join = thread::spawn(move || {
             let mut report = Report::default();
-            while !stopped.load(Ordering::Acquire) {
+            let deadline = Instant::now() + Duration::from_secs(60);
+            while !stopped.load(Ordering::Acquire) && Instant::now() < deadline {
                 match listener.accept() {
                     Ok((mut stream, _)) => {
                         report.connections += 1;
                         require(report.connections == 1)?;
-                        stream
-                            .set_read_timeout(Some(Duration::from_secs(2)))
-                            .map_err(io_error)?;
-                        stream
-                            .set_write_timeout(Some(Duration::from_secs(2)))
-                            .map_err(io_error)?;
                         stream.set_nodelay(true).map_err(io_error)?;
-                        serve(&mut stream, &capture, &options, &mut report)?;
+                        let mut peer = PeerIo {
+                            socket: &mut stream,
+                            stop: &stopped,
+                            deadline,
+                        };
+                        if let Err(error) = serve(&mut peer, &capture, &options, &mut report) {
+                            eprintln!("furniture TCP peer failure: {error:?}; report: {report:?}");
+                            return Err(error);
+                        }
                     }
                     Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
                         thread::sleep(Duration::from_millis(1))
@@ -362,7 +503,7 @@ fn validate_request(event: Event, method: i16, fields: &Fields) -> Result<()> {
     )
 }
 fn serve(
-    stream: &mut TcpStream,
+    stream: &mut PeerIo<'_>,
     capture: &[u8],
     options: &Options,
     report: &mut Report,
@@ -454,9 +595,15 @@ fn serve(
         let mut frame = header(-1, raw.len() as i32).to_vec();
         frame.extend(raw);
         for chunk in frame.chunks(503) {
-            if stream.write_all(chunk).is_err() {
+            if let Err(error) = stream.write_all(chunk) {
+                eprintln!("furniture TCP peer write error: {error:?}; report: {report:?}");
                 return Ok(());
             }
+        }
+        if event == Event::Page(capture.len().div_ceil(PAGE) - 1)
+            && let Some(signal) = &options.page_sent
+        {
+            signal.store(true, Ordering::Release);
         }
     }
     Ok(())
@@ -501,6 +648,57 @@ fn complete_maximum_roster_keeps_native_identity_and_last_attachment() -> Result
     assert_eq!(snapshot.graph.entities.len(), MAX_ENTITIES as usize);
     assert_eq!(snapshot.anchor().tick, GameTick(TICK));
     assert!(snapshot.hash_is_valid());
+    Ok(())
+}
+
+#[test]
+fn authorized_work_after_final_page_can_outlast_peer_idle_timeout() -> Result<()> {
+    let raw = capture(2, false, "region1", TICK);
+    let digest = Digest32::of_bytes(&raw);
+    let pages = raw.len().div_ceil(PAGE);
+    let page_sent = Arc::new(AtomicBool::new(false));
+    let paused = Arc::new(AtomicBool::new(false));
+    let peer = Peer::start(
+        raw,
+        Options {
+            page_sent: Some(page_sent.clone()),
+            ..Options::default()
+        },
+    )?;
+    let pause_once = paused.clone();
+    let permission: ReadPermission = Box::new(move || {
+        if page_sent.load(Ordering::Acquire) && !pause_once.swap(true, Ordering::AcqRel) {
+            thread::sleep(Duration::from_millis(2500));
+        }
+        Ok(())
+    });
+    let result = acquire_trusted(
+        peer.endpoint,
+        &fortress()?,
+        TOKEN.to_vec(),
+        NONCE,
+        &context()?,
+        BuildCancellation::default(),
+        permission,
+    );
+    let report = peer.finish();
+    assert!(
+        paused.load(Ordering::Acquire),
+        "authorized check must pause after final page was sent"
+    );
+    let report = report?;
+    let state = result?;
+    assert_eq!(report.connections, 1);
+    assert_eq!(report.events, events(pages));
+    let observation = state.observation().ok_or_else(invalid)?;
+    assert_eq!(observation.jobs.bridge_generation, 987);
+    assert_eq!(observation.items.len(), 2);
+    assert_eq!(observation.attachments.len(), 1);
+    assert_eq!(observation.attachments[0].item_native_id, 0);
+    assert_eq!(
+        Digest32::of_bytes(&observation.encode_profile(OperationsProfile::PagedV1_4)?),
+        digest
+    );
     Ok(())
 }
 

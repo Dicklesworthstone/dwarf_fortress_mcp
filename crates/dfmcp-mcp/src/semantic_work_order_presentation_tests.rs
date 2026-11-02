@@ -27,6 +27,55 @@ fn retained() -> Value {
 fn success() -> Value {
     json!({"ok":true,"development_production_enabled":true})
 }
+
+#[test]
+fn unverified_packets_withdraw_item_rows_but_preserve_exact_recovery() {
+    let mut view = retained();
+    view["item_observations"] = json!({"coverage":"complete","freshness":"as_of_anchor",
+        "returned":1,"items":[{"native_item_id":540,"type_key":"BED"}]});
+    for result in [
+        json!({"ok":false,"error":{"code":"stale_anchor"}}),
+        json!({"ok":true,"closed":true,"effects_cancelled":false}),
+        json!({"ok":true,"retained_state_currently_verified":false,
+            "item_observations":view["item_observations"]}),
+    ] {
+        let packet = output("fortress.observe", "control", result, view.clone(), false);
+        assert_eq!(packet["retained_state_currently_verified"], false);
+        assert_eq!(packet["retained_state"]["recovery"], view["recovery"]);
+        assert_eq!(packet["retained_state"]["review"], view["review"]);
+        assert_eq!(
+            packet["retained_state"]["item_observations"]["coverage"],
+            "unknown"
+        );
+        assert_eq!(packet["retained_state"]["item_observations"]["returned"], 0);
+        assert!(
+            packet["retained_state"]["item_observations"]["items"]
+                .as_array()
+                .expect("rows")
+                .is_empty()
+        );
+        if packet["result"].get("item_observations").is_some() {
+            assert_eq!(packet["result"]["item_observations"]["coverage"], "unknown");
+            assert_eq!(packet["result"]["item_observations"]["returned"], 0);
+        }
+    }
+    let packet = output(
+        "fortress.query",
+        "control",
+        view.clone(),
+        view.clone(),
+        false,
+    );
+    assert_eq!(packet["retained_state_currently_verified"], true);
+    assert_eq!(
+        packet["result"]["item_observations"],
+        view["item_observations"]
+    );
+    assert_eq!(
+        packet["retained_state"]["item_observations"],
+        view["item_observations"]
+    );
+}
 fn output(operation: &str, mode: &str, result: Value, view: Value, uncertain: bool) -> Value {
     serde_json::from_str(&packet(
         operation,
