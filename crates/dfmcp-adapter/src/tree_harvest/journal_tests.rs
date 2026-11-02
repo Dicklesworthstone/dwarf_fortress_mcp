@@ -242,7 +242,12 @@ fn tree_journal_header_and_private_open_charge_one_total_budget() -> Result<()> 
             faults: faults.clone(),
         };
         let mut limited = c.clone();
-        limited.budget.max_bytes = header as u64 * if sufficient { 2 } else { 1 };
+        // Core's final authorization requires a nonzero remaining context.
+        limited.budget.max_bytes = if sufficient {
+            2 * header as u64 + 1
+        } else {
+            header as u64
+        };
         let result = Journal::open(
             storage,
             &limited,
