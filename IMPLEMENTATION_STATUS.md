@@ -54,7 +54,7 @@ anchor remains null and continuity unestablished. See [the development
 workflow](docs/TREE_HARVEST_MCP.md).
 
 The new source registers 14 adapter cases, two MCP packet cases and one Rust
-integration driving five actual-stdio scenarios; **Tree Rust and stdio execution
+integration driving five actual-stdio scenarios; **Tree Rust tests and stdio execution
 remain pending**. Three new Tree and seven existing workshop source-inventory
 regressions actually pass. An earlier stable Tree native SDK-double cut passes
 eight scenarios / 275 assertions, ten original vectors and seven individually
@@ -63,6 +63,16 @@ this later source. The extracted shared native engine previously preserved all
 12 workshop vectors and passed its 13-scenario component harness. All earlier
 failed attempts and raw evidence are retained. These are component evidence,
 not final exact-source SDK, native R1, real felling or admission proof.
+
+The first admitted ts1 all-adapter compile on exact `45b2a4e` exits 101 with
+two compiler errors and **zero tests run**: an unconstrained dispatch-closure
+error type and a TCP-test peer factory shadowed by its local handle. The RCH
+worker verifies the source-content receipt, and the clean 2644-file source
+snapshots match before/after. Raw output remains under
+`target/root-ts1-45b-adapter-b/`. The private successor gives the closure its
+existing `Result<Record>` type and renames the factory and all five callers;
+guards, indeterminate classification, joins, assertions and case counts stay
+unchanged. Corrected-source Rust execution remains pending.
 
 Frozen `08fca4c` finishes `verify.sh` with exit 0: 125 targets / 5176 passing
 cases in each debug and release profile, zero failed, ignored or filtered. Its

@@ -708,7 +708,7 @@ impl<S: EffectJournalStorage> Journal<S> {
             &mut work,
             ack,
         )?;
-        let result = (|| {
+        let result: Result<Record> = (|| {
             guard(&work.current()?)?;
             Self::authorize(&work.current()?, &requested, true, true, self.high_tick)?;
             let record = writer(

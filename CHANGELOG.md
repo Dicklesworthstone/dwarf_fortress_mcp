@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-11-02 — Fix the first executed Tree adapter compiler errors
+
+- Preserve exact `45b2a4e`'s admitted ts1 compiler exit 101, worker-verified
+  source-content receipt and matching clean before/after source snapshots.
+  Zero tests ran. Keep this RED separate from transport/admission refusals.
+- Annotate the post-ack dispatch closure as `Result<Record>` and rename the
+  TCP peer factory and all callers to avoid handle shadowing. Preserve guards,
+  indeterminate key/cause mapping, peer joins, assertions and all test counts.
+  Corrected-source execution and final full qualification remain pending.
+
 ## 2026-11-01 — Make citizen deadline regressions deterministic
 
 - Retain frozen `08fca4c` verifier exit 0 and qualification exit 101. Debug and

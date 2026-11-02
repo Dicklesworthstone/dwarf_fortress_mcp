@@ -121,7 +121,7 @@ fn response(generation: u64, retained: u64) -> Vec<u8> {
     number(&mut raw, 13, retained);
     raw
 }
-fn peer(dialogues: Vec<Vec<Step>>, generation: u64) -> Result<Peer> {
+fn start_peer(dialogues: Vec<Vec<Step>>, generation: u64) -> Result<Peer> {
     let listener = TcpListener::bind("127.0.0.1:0").map_err(io_error)?;
     let endpoint = listener.local_addr().map_err(io_error)?;
     listener.set_nonblocking(true).map_err(io_error)?;
@@ -221,7 +221,7 @@ fn connect(peer: &Peer, c: &OperationContext, generation: u64) -> Result<TreeRpc
 fn tree_actual_tcp_exact_scope_and_returned_tick_expiry() -> Result<()> {
     let cap = capture()?;
     let p = plan()?;
-    let peer = peer(
+    let peer = start_peer(
         vec![vec![
             Step::observed(1, vector("capture")?),
             Step::new(2, Some("prepared"))?,
@@ -234,7 +234,7 @@ fn tree_actual_tcp_exact_scope_and_returned_tick_expiry() -> Result<()> {
     assert_eq!(rpc.prepare(&p, &c)?.phase, 0);
     drop(rpc);
     assert_eq!(peer.finish()?, [1, 2]);
-    let peer = peer(vec![vec![]], cap.generation)?;
+    let peer = start_peer(vec![vec![]], cap.generation)?;
     let mut rpc = connect(&peer, &c, cap.generation)?;
     let mut outside = c.clone();
     for grant in &mut outside.grants {
@@ -255,7 +255,7 @@ fn tree_actual_tcp_exact_scope_and_returned_tick_expiry() -> Result<()> {
             vector("capture")?
         };
         observed[24..32].copy_from_slice(&(cap.tick + 1).to_be_bytes());
-        let peer = peer(
+        let peer = start_peer(
             vec![vec![Step::observed(if progress { 6 } else { 1 }, observed)]],
             cap.generation,
         )?;
@@ -284,7 +284,7 @@ fn tree_actual_tcp_exact_scope_and_returned_tick_expiry() -> Result<()> {
 #[test]
 fn tree_actual_tcp_payload_generation_cannot_borrow_envelope_identity() -> Result<()> {
     let cap = capture()?;
-    let peer = peer(
+    let peer = start_peer(
         vec![vec![Step::observed(6, vector("progress_supply")?)]],
         cap.generation + 1,
     )?;
@@ -339,7 +339,7 @@ fn tree_actual_tcp_same_connection_permit_and_cleared_or_cross_connection_refusa
             2 => vec![steps, vec![]],
             _ => vec![steps, vec![Step::new(2, Some("prepared"))?]],
         };
-        let peer = peer(dialogues, cap.generation)?;
+        let peer = start_peer(dialogues, cap.generation)?;
         let c = context()?;
         let mut rpc = connect(&peer, &c, cap.generation)?;
         let directory = Directory::new()?;
