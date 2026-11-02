@@ -212,7 +212,9 @@
       "test_crash_lost_reply_reopen_and_ack_prefix_rollback",
       "test_closed_request_session_scope_authority_and_bounds",
       "test_production_environment_refused_with_nine_raw_logs",
-      "test_stale_tree_worker_tool_and_source_no_writer"
+      "test_stale_tree_worker_tool_and_source_no_writer",
+      "test_default_budget_allows_delayed_review_on_original_connection",
+      "test_expired_preparation_does_not_record_or_send_dispatch"
     ],
     "python_inventory_cases": [
       "test_registered_consumer_and_fixed_source_inventory_agree",
@@ -243,5 +245,13 @@
     "transport_limits_changed": false,
     "jsonrpc_numeric_id_bytes_max": 4096
   },
-  "presentation_repair_bead": "dfmcp-reality-wiring-proof-4bf.14.1"
+  "presentation_repair_bead": "dfmcp-reality-wiring-proof-4bf.14.1",
+  "prepared_review_budget": {
+    "bead": "dfmcp-reality-wiring-proof-4bf.14.3",
+    "default_wall_millis": 60000,
+    "maximum_wall_millis": 60000,
+    "connection_deadline_renewal": false,
+    "pre_dispatch_expiry": "reject before durable dispatch; consume local permission; retain original preparation custody for reconciliation",
+    "after_dispatch_failure": "indeterminate original effect; no automatic retry"
+  }
 }

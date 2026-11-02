@@ -94,6 +94,20 @@ def check(root=ROOT):
     for name in ("scripts/verify.sh", "scripts/qualify_local.sh"):
         if "python3 scripts/test_manager_native.py --mutations" not in texts[name]:
             raise ValueError("Manager native regression gate missing: " + name)
+    expected_review_budget = {
+        "bead": "dfmcp-reality-wiring-proof-4bf.14.3",
+        "default_wall_millis": 60000, "maximum_wall_millis": 60000,
+        "connection_deadline_renewal": False,
+        "pre_dispatch_expiry": "reject before durable dispatch; consume local permission; retain original preparation custody for reconciliation",
+        "after_dispatch_failure": "indeterminate original effect; no automatic retry",
+    }
+    if contract.get("prepared_review_budget") != expected_review_budget:
+        raise ValueError("prepared review budget contract differs")
+    if "unwrap_or(60000)" not in texts["crates/dfmcp-mcp/src/manager_appointment_server.rs"]:
+        raise ValueError("prepared review default differs")
+    runtime = texts["crates/dfmcp-mcp/src/manager_appointment_server/runtime.rs"]
+    if runtime.index("source.preflight_commit(") >= runtime.index("let record = self.journal.dispatch("):
+        raise ValueError("prepared connection preflight must precede durable dispatch")
     return {"schema": "dfmcp.manager-source-check/1", "status": "passed_static_only", "source_sha256": hashes,
             "source_files": len(SOURCES), "adapter_modules": 8, "rust_executed": False, "sdk_or_game_executed": False}
 

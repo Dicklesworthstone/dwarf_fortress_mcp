@@ -391,6 +391,32 @@ impl ManagerRpc {
         self.prepared = Some(p.clone());
         Ok(record)
     }
+    /// Check the held preparation before the journal records dispatch. This
+    /// performs no RPC and never renews the original connection deadline or permit.
+    /// Commit repeats these checks at the actual send; later failure is uncertain.
+    pub fn preflight_commit(&mut self, p: &Plan, c: &OperationContext) -> Result<()> {
+        let result = (|| {
+            require(!self.fenced, "manager connection fenced")?;
+            require(
+                self.prepared.as_ref() == Some(p),
+                "manager commit lacks exact same-connection preparation",
+            )?;
+            let mut current = c.clone();
+            current.anchor.tick =
+                dfmcp_core::GameTick(c.anchor.tick.get().max(self.high_tick).max(p.before.tick));
+            self.high_tick = current.anchor.tick.get();
+            (self.permission)(true)?;
+            authorize(&current, &self.binding, Some(p))?;
+            self.link.narrow(
+                Duration::from_millis(c.budget.max_wall_millis),
+                c.budget.max_bytes,
+            )
+        })();
+        if result.is_err() {
+            self.fence();
+        }
+        result
+    }
     pub fn commit(
         &mut self,
         permit: super::journal::Dispatch<'_>,

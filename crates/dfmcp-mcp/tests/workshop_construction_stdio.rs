@@ -41,7 +41,7 @@ fn workshop_construction_server_actual_modern_stdio_positive_negative_and_crash_
     let summary = String::from_utf8(output.stdout)?;
     let report: serde_json::Value =
         serde_json::from_str(summary.lines().last().ok_or("missing test counters")?)?;
-    assert_eq!(report["tests"], 5);
+    assert_eq!(report["tests"], 7);
     assert_eq!(report["failed"], 0);
     assert_eq!(report["errors"], 0);
     assert_eq!(report["skipped"], 0);

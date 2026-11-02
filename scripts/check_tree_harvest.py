@@ -123,6 +123,20 @@ def check(root: Path = ROOT) -> dict:
     for wrapper in ("scripts/verify.sh", "scripts/qualify_local.sh"):
         if any(name not in texts[wrapper] for name in ("check_tree_harvest.py", "test_tree_harvest_source_inventory.py", "test_tree_harvest_native.py --mutations", "tests/stdio/tree_harvest.py")):
             raise ValueError("tree mandatory gate wiring absent")
+    expected_review_budget = {
+        "bead": "dfmcp-reality-wiring-proof-4bf.14.3",
+        "default_wall_millis": 60000, "maximum_wall_millis": 60000,
+        "connection_deadline_renewal": False,
+        "pre_dispatch_expiry": "reject before durable dispatch; consume local permission; retain original preparation custody for reconciliation",
+        "after_dispatch_failure": "indeterminate original effect; no automatic retry",
+    }
+    if contract.get("prepared_review_budget") != expected_review_budget:
+        raise ValueError("prepared review budget contract differs")
+    if "unwrap_or(60000)" not in texts["crates/dfmcp-mcp/src/tree_harvest_server.rs"]:
+        raise ValueError("prepared review default differs")
+    runtime = texts["crates/dfmcp-mcp/src/tree_harvest_server/runtime.rs"]
+    if runtime.index("source.preflight_commit(") >= runtime.index("let record = self.journal.dispatch("):
+        raise ValueError("prepared connection preflight must precede durable dispatch")
     return {"status": "passed_static_only", "source_sha256": hashes, "rust_executed": False, "sdk_or_game_executed": False, "production_admitted": False}
 
 

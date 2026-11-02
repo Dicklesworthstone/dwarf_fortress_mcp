@@ -173,5 +173,13 @@
     "ignored": 0,
     "sdk_doubles_only": true,
     "live_game": false
+  },
+  "prepared_review_budget": {
+    "bead": "dfmcp-reality-wiring-proof-4bf.14.3",
+    "default_wall_millis": 60000,
+    "maximum_wall_millis": 60000,
+    "connection_deadline_renewal": false,
+    "pre_dispatch_expiry": "reject before durable dispatch; consume local permission; retain original preparation custody for reconciliation",
+    "after_dispatch_failure": "indeterminate original effect; no automatic retry"
   }
 }

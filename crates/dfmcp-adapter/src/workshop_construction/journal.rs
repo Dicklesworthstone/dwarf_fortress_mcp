@@ -1159,8 +1159,14 @@ impl<S: EffectJournalStorage> WorkshopJournal<S> {
             return Err(uncertain(key));
         }
         self.fresh_key = None; // Failure at ANY later boundary cannot restore eligibility.
+        // Fresh revalidation precedes any dispatch latch. A failed read (for
+        // example an expired held connection) is not a writer outcome. The
+        // local permit stays consumed; reconciliation can retire preparation.
+        if let Err(e) = self.fresh(source, &entry.plan, &mut work, guard) {
+            source.fence();
+            return Err(e);
+        }
         let result = (|| {
-            self.fresh(source, &entry.plan, &mut work, guard)?;
             entry.state = WorkshopState::DispatchStarted;
             entry.dispatch_started = true;
             let entry = self.retain(entry, &mut work)?;

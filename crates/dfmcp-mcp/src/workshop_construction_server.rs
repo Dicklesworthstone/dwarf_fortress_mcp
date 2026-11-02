@@ -68,7 +68,7 @@ fn id(raw: &str) -> Result<SessionId> {
 }
 fn budgets(wall: Option<u64>, bytes: Option<u64>, output: Option<u32>) -> Result<WorkBudget> {
     let b = WorkBudget {
-        max_wall_millis: wall.unwrap_or(5000),
+        max_wall_millis: wall.unwrap_or(60000),
         max_bytes: bytes.unwrap_or(128 * 1024 * 1024),
         max_output_tokens: output.unwrap_or(32768),
         max_entities: 128,
@@ -173,7 +173,7 @@ fn with_session(raw: String, operation: &str, action: Action) -> String {
 }
 
 #[tool(
-    description = "Open one explicitly unadmitted workshop/1.20 goal. mode=control initializes exact operator-pinned sources; recover/offline require both original custody files and an externally held acknowledged pin. No opening advances time. Request max_wall_millis=60000 if human review needs the existing 60-second prepared connection lifetime."
+    description = "Open one explicitly unadmitted workshop/1.20 goal. mode=control initializes exact operator-pinned sources; recover/offline require both original custody files and an externally held acknowledged pin. No opening advances time. The default wall budget is 60000ms; the original prepared connection deadline is never renewed."
 )]
 pub fn fortress_open_session(
     mode: String,

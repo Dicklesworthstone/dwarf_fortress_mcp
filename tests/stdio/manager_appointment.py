@@ -145,6 +145,7 @@ class Peer:
         self.listener.bind(("127.0.0.1", 0))
         self.listener.listen(4)
         self.listener.settimeout(.1)
+        self.request_timeout = 5
         self.endpoint = f"127.0.0.1:{self.listener.getsockname()[1]}"
         self.calls, self.errors = [], []
         self.stop, self.entered, self.release_commit = threading.Event(), threading.Event(), threading.Event()
@@ -167,7 +168,7 @@ class Peer:
                     continue
                 self.active = stream
                 with stream:
-                    stream.settimeout(5)
+                    stream.settimeout(self.request_timeout)
                     assert receive(stream, 12) == b"DFHack?\n\x01\0\0\0"
                     stream.sendall(b"DFHack!\n\x01\0\0\0")
                     bound = 0
@@ -331,12 +332,15 @@ class Client:
         assert step["tool"].startswith("fortress_")
         return self.tool(step["tool"][len("fortress_"):], **step["arguments"])
 
-    def open(self, mode="control"):
+    def open(self, mode="control", max_wall_millis=None):
         self.call("server/discover", {})
         tools = self.call("tools/list", {})["result"]["tools"]
         assert len(tools) == 11
         assert {tool["name"] for tool in tools} == {"fortress_" + name for name in ("open_session", "observe", "query", "plan", "commit", "wait", "cancel", "explain", "doctor", "checkpoint", "restore")}
-        return self.tool("open_session", mode=mode, max_wall_millis=60000)
+        arguments = {"mode": mode}
+        if max_wall_millis is not None:
+            arguments["max_wall_millis"] = max_wall_millis
+        return self.tool("open_session", **arguments)
 
     def close(self, crash=False):
         if self.closed: return
@@ -394,8 +398,8 @@ class ManagerStdioTests(unittest.TestCase):
     def tearDown(self): drain_owned(self.clients,self.peer)
     def client(self,value=None,suffix="server"):
         c=Client(self.directory,config(self.directory,self.peer) if value is None else value,suffix);self.clients.append(c);return c
-    def prepared(self,c):
-        opened=c.open();self.assertTrue(opened["result"]["ok"],opened);sid=opened["agent_turn"]["session_id"]
+    def prepared(self,c, **open_arguments):
+        opened=c.open(**open_arguments);self.assertTrue(opened["result"]["ok"],opened);sid=opened["agent_turn"]["session_id"]
         self.assertEqual(bytes.fromhex(opened["result"]["observation"]["native_capture_hex"]),VECTORS["capture"])
         self.assertTrue(opened["result"]["observation"]["eligible_at_anchor"]);self.assertEqual(opened["agent_turn"]["recommendations"][0]["tool"],"fortress_plan")
         planned=c.execute_next(opened);self.assertTrue(planned["result"]["ok"],planned);o=planned["result"]["original"]
@@ -459,6 +463,47 @@ class ManagerStdioTests(unittest.TestCase):
         self.assertEqual(self.peer.calls,[])
 
 
+    def test_default_budget_allows_delayed_review_on_original_connection(self):
+        # A real agent took >9s to review an S plan. Omit the wall argument:
+        # explicit 60000 in older tests masked the unusable 5000ms default.
+        self.peer.request_timeout = 15
+        client = self.client()
+        sid, original, planned = self.prepared(client)
+        start = time.monotonic()
+        time.sleep(5.2)
+        self.assertGreater(time.monotonic() - start, 5)
+        committed = client.execute_next(planned)
+        self.assertTrue(committed["result"]["ok"], committed)
+        self.assertEqual(committed["result"]["original"]["native_phase"], 2)
+        self.assertEqual(self.peer.writer_count, 1)
+        self.assertEqual(self.peer.calls.count(2), 1)
+        self.assertEqual(self.peer.calls.count(3), 1)
+
+    def test_expired_preparation_does_not_record_or_send_dispatch(self):
+        self.peer.request_timeout = 15
+        client = self.client()
+        sid, original, planned = self.prepared(client, max_wall_millis=5000)
+        custody = self.directory / "custody"
+        before = {p.name: p.read_bytes() for p in custody.iterdir()}
+        time.sleep(5.2)
+        failed = client.execute_next(planned)
+        self.assertFalse(failed["result"]["ok"], failed)
+        self.assertEqual(failed["result"]["error"]["code"], "budget_exceeded")
+        self.assertEqual(self.peer.writer_count, 0)
+        self.assertNotIn(3, self.peer.calls)
+        self.assertEqual(before, {p.name: p.read_bytes() for p in custody.iterdir()})
+        # A new call budget must not restore the original single-use permit.
+        again = client.execute_next(planned)
+        self.assertFalse(again["result"]["ok"], again)
+        self.assertNotIn(3, self.peer.calls)
+        self.assertEqual(before, {p.name: p.read_bytes() for p in custody.iterdir()})
+        retained = client.tool("query", session_id=sid)
+        self.assertTrue(retained["result"]["ok"], retained)
+        self.assertEqual(retained["result"]["original"]["review_seal"], original["review_seal"])
+        self.assertFalse(retained["result"]["custody"]["dispatch_started"])
+        self.assertFalse(retained["result"]["custody"]["uncertain_effect"])
+        self.assertFalse(retained["result"]["original"]["prepared_in_this_connection"])
+
 def main():
     global BINARY, LOGS, VECTORS, SERVER_ARGS
     parser = argparse.ArgumentParser(description=__doc__)
@@ -480,7 +525,7 @@ def main():
     print(json.dumps({"schema":"dfmcp.manager-stdio-component/1", "tests":result.testsRun, "failed":len(result.failures),
         "errors":len(result.errors), "skipped":len(result.skipped), "actual_modern_stdio":True,
         "loopback_peers_are_doubles":True, "live_game":False}))
-    raise SystemExit(0 if result.wasSuccessful() and result.testsRun == 5 and not result.skipped else 1)
+    raise SystemExit(0 if result.wasSuccessful() and result.testsRun == 7 and not result.skipped else 1)
 
 
 if __name__ == "__main__": main()

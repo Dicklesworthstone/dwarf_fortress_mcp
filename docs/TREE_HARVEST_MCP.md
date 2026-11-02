@@ -99,7 +99,7 @@ There is no checkpoint provider or automatic rollback.
 
 ## One original attempt and foreground proof
 
-Open control, observe the fixed offer, and call `fortress_plan` with a JSON
+Open control (default wall budget 60000ms), observe the fixed offer, and call `fortress_plan` with a JSON
 `request` containing only `kind="fell_one_visible_tree"`, exact
 `expected_observation`, and `deadline_tick`. Review root/species/body, computed
 target, source, worker/tool offers, effects, lease and the exact review seal.
@@ -107,7 +107,11 @@ Preparation does not change the game. The original horizon is at most 12000
 ticks and cannot be renewed. A monitoring horizon advances no clock.
 
 Confirm exactly that seal with `fortress_commit(..., confirmed=true)` on the
-original prepared connection. The journal synchronizes Dispatched, then the
+original prepared connection. The held connection is preflighted before any Dispatched record; an already
+expired deadline returns `budget_exceeded` with original custody intact and no
+writer frame. This consumes local permission and never renews the connection.
+A deadline race after durable dispatch remains indeterminate. The journal
+synchronizes Dispatched, then the
 independently retained acknowledgement, then rechecks authority/lease/guard
 before one native dispatch. Dispatch consumes local permission before any
 fallible entry check. Failed budgets, cancellation, revoked grants or transport
@@ -208,7 +212,7 @@ or proves causality. No new clock implementation is added.
 
 Both mandatory full commands retain all 43 gate IDs and add Tree checks inside
 existing gates. The machine contract and static checker bind exact source/test
-names, original vectors and native mutants. Cargo registers the actual five-case
+names, original vectors and native mutants. Cargo registers the actual seven-case
 modern stdio subprocess suite in debug and release. Native component tests use
 SDK/protobuf doubles, not DF. Matching real-SDK builds of both Tree and workshop
 are required because they share the extracted one-attempt engine. Source/focused

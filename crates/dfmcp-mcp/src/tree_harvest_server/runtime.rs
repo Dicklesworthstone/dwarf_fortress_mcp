@@ -694,6 +694,9 @@ impl Runtime {
                         }
                         Ok(())
                     };
+                    // Reject an already expired original connection before claiming
+                    // dispatch. No deadline/permit is renewed by this preflight.
+                    source.preflight_commit(&original.plan, &work.reserve(&c, CONNECT_BYTES)?)?;
                     let record = self.journal.dispatch(
                         seal,
                         &work.reserve(&c, 32 * 1024 * 1024)?,

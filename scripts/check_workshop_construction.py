@@ -107,6 +107,19 @@ def check(root: Path = ROOT) -> dict:
     }
     if any(contract["focused_test_contract"][key] != value for key, value in actual_counts.items()):
         raise ValueError(f"workshop exact registered test count differs: {actual_counts}")
+    expected_review_budget = {
+        "bead": "dfmcp-reality-wiring-proof-4bf.14.3",
+        "default_wall_millis": 60000, "maximum_wall_millis": 60000,
+        "connection_deadline_renewal": False,
+        "pre_dispatch_expiry": "reject before durable dispatch; consume local permission; retain original preparation custody for reconciliation",
+        "after_dispatch_failure": "indeterminate original effect; no automatic retry",
+    }
+    if contract.get("prepared_review_budget") != expected_review_budget:
+        raise ValueError("prepared review budget contract differs")
+    if "unwrap_or(60000)" not in text["crates/dfmcp-mcp/src/workshop_construction_server.rs"]:
+        raise ValueError("prepared review default differs")
+    if journal.index("ifletErr(e)=self.fresh(source,&entry.plan,&mutwork,guard)") >= dispatch:
+        raise ValueError("fresh read must precede durable dispatch")
     return {"status": "passed_static_only", "source_sha256": hashes, "rust_executed": False,
             "sdk_or_game_executed": False, "production_admitted": False}
 

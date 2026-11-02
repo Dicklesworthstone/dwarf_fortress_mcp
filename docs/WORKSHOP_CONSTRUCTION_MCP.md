@@ -90,9 +90,8 @@ is forced by this profile.
 ## Original plan and one attempt
 
 1. Call `fortress_open_session` with `mode="control"`. Review the complete source
-   and returned acknowledgement. Default wall work is 5 seconds. Explicit
-   `max_wall_millis=60000` permits the existing native prepared-connection review
-   lifetime; it cannot extend that original connection or native TTL afterward.
+   and returned acknowledgement. Default wall work is 60 seconds, the existing
+   maximum; it cannot extend that original connection or native TTL afterward.
 2. Call `fortress_plan` with the session ID and a closed JSON `request` containing
    `kind="carpenters"`, the exact `expected_observation` and observed `material`
    handle. Preparation is side-effect free with respect to game construction.
@@ -103,6 +102,9 @@ is forced by this profile.
    original prepared connection, repeats source and authority/lease checks, then
    synchronizes `DispatchStarted` in `workshop.journal` and an independent
    acknowledgement in `workshop.ack` before sending the one native writer.
+   An expired connection or failed fresh read before that latch returns its
+   typed cause with no dispatch record. Local permission remains consumed;
+   later post-latch failures remain indeterminate.
 5. Inspect the original insertion receipt. `Placed` certifies historical
    stage-zero building/job registration and selected Hauled item/reverse links,
    not completed construction. `building_occupied_at_anchor` is the capture's

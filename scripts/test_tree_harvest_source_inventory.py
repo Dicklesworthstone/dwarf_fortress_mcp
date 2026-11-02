@@ -26,6 +26,8 @@ class TreeSourceInventoryTests(unittest.TestCase):
 
     def test_missing_unregistered_ack_and_wire_tool_mutations_refuse(self):
         mutations = [
+            ("crates/dfmcp-mcp/src/tree_harvest_server.rs", "unwrap_or(60000)", "unwrap_or(5000)"),
+            ("crates/dfmcp-mcp/src/tree_harvest_server/runtime.rs", "source.preflight_commit(", "source.skipped_preflight("),
             ("crates/dfmcp-adapter/src/tree_harvest/rpc_tests.rs", None, None),
             ("crates/dfmcp-adapter/src/lib.rs", "pub mod tree_harvest;", ""),
             ("crates/dfmcp-adapter/src/tree_harvest/journal.rs", "ack.acknowledge(\n            self.pin(),", "acknowledgement_removed(\n            self.pin(),"),

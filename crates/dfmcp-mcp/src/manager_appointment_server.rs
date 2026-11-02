@@ -279,7 +279,7 @@ pub fn fortress_open_session(
                 _ => return Err(error(ErrorCode::InvalidRequest, "unknown manager mode")),
             };
             let budget = WorkBudget {
-                max_wall_millis: max_wall_millis.unwrap_or(5000),
+                max_wall_millis: max_wall_millis.unwrap_or(60000),
                 max_bytes: max_bytes.unwrap_or(256 * 1024 * 1024),
                 max_output_tokens: max_output_tokens.unwrap_or(131072),
                 max_entities: 4096,

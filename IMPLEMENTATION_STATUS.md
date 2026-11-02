@@ -1,5 +1,13 @@
 # Implementation Status
 
+Prepared Tree, workshop and Manager profiles now default to the existing
+60000ms ceiling. Tree/Manager preflight held connections before dispatch custody;
+workshop preserves the typed cause of failed pre-dispatch revalidation. This
+repairs the real S trial's expired five-second review budget without renewing
+original connection/native deadlines or one-use authority. Delayed-review and
+expired-no-dispatch subprocess regressions are added; execution on this source
+is pending. The real S uncertainty and failed T startup remain negative evidence.
+
 
 The Manager native component runner is now connected to both mandatory scripts.
 Its 12-scenario/270-assertion and three compiled-mutation checks remain pending

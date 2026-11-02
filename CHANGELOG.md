@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-11-02 — Prepared control review deadlines (.14.3)
+
+- Use the existing 60-second ceiling by default for Tree, workshop and Manager
+  review; preserve shrinking original deadlines and the native prepare expiry.
+- Reject already expired Tree/Manager connections before recording dispatch;
+  preserve typed workshop pre-dispatch read failures and original custody.
+- Add actual MCP delayed-review/default and expired/no-dispatch regressions,
+  including consumed permission on a later call. Execution remains pending.
+
 ## 2026-11-02 — Exact-source verification follow-up
 
 - Record all 43 qualification gates and 5198 tests in each Rust profile on clean

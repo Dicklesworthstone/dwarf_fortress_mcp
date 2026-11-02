@@ -359,7 +359,7 @@
     "adapter_rust_cases": 23,
     "mcp_unit_cases": 7,
     "rust_stdio_cases": 1,
-    "python_stdio_cases": 5,
+    "python_stdio_cases": 7,
     "python_inventory_cases": 7,
     "native_scenarios": 13,
     "compiled_mutants": 12,
@@ -376,5 +376,13 @@
     "source": "bridge/common/one_attempt_native.h",
     "wire_vectors_unchanged": true,
     "prior_source_qualification_transferred": false
+  },
+  "prepared_review_budget": {
+    "bead": "dfmcp-reality-wiring-proof-4bf.14.3",
+    "default_wall_millis": 60000,
+    "maximum_wall_millis": 60000,
+    "connection_deadline_renewal": false,
+    "pre_dispatch_expiry": "reject before durable dispatch; consume local permission; retain original preparation custody for reconciliation",
+    "after_dispatch_failure": "indeterminate original effect; no automatic retry"
   }
 }

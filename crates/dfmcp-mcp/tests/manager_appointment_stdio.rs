@@ -49,7 +49,7 @@ fn manager_appointment_server_actual_modern_stdio_positive_negative_and_crash_re
             .last()
             .ok_or("missing actual test counters")?,
     )?;
-    assert_eq!(report["tests"], 5);
+    assert_eq!(report["tests"], 7);
     assert_eq!(report["failed"], 0);
     assert_eq!(report["errors"], 0);
     assert_eq!(report["skipped"], 0);

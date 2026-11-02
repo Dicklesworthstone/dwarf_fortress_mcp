@@ -71,7 +71,7 @@ not compatibility admission or an artifact attestation.
 
 1. `fortress_open_session(mode="control")` returns the host-offered citizen,
    exact native capture and eligibility, software/source identity and independent
-   ACK. Opening performs no appointment. Defaults are 5 seconds wall time,
+   ACK. Opening performs no appointment. Defaults are 60 seconds wall time,
    256 MiB logical byte work, one action and zero game ticks. The ceiling is
    60 seconds/512 MiB with a bounded 512 KiB complete response.
 2. Follow its `fortress_plan` recommendation. The closed request string contains
@@ -83,7 +83,10 @@ not compatibility admission or an artifact attestation.
    single history event and exact `review_seal`. The native preparation expires
    after 60 seconds; replay never renews it.
 4. `fortress_commit(session_id, review_seal, confirmed=true)` consumes that
-   original connection's permission once. The complete write-ahead journal and
+   original connection's permission once. An already expired connection fails
+   preflight with `budget_exceeded` before any Dispatched record or writer frame.
+   The permit is not restored, and no original deadline is renewed. Later races
+   after dispatch remain indeterminate. The complete write-ahead journal and
    independent ACK synchronize before the native writer. Native revalidation,
    transaction and readback occur under `CoreSuspender`.
 5. Inspect the returned original receipt. `appointment_proved=true` requires
@@ -151,7 +154,7 @@ existing repository static/test batches.
 The eight adapter modules contain codec, native-vector, real-file custody and
 joined-TCP tests. Corrected native component vector bytes come from Root's
 flags-green cut; they are explicitly component output, not live fixtures.
-`tests/stdio/manager_appointment.py` drives five actual Rust subprocess cases
+`tests/stdio/manager_appointment.py` drives seven actual Rust subprocess cases
 through either the dedicated binary or standard CLI, using joined protocol
 doubles. It checks one complete appointment, unchanged tick, replay without an
 extra event/writer, offline custody, lost-reply/crash recovery, changed vacancy,
