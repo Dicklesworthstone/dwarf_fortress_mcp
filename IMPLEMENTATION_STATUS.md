@@ -77,6 +77,11 @@ Direct `8eb7754` execution compiled the production library but stopped before
 tests on an ambiguous integer type in the chunk-boundary test. The test sizes
 now explicitly use `usize`; the newline-inclusive bound is equivalently written
 as a strict comparison. This preserves every byte size, assertion and case.
+The first corrected-executable J replay then exposed a scope mismatch in the
+new entropy authorization: Tree's Query grant is map-scoped, so requesting
+`None` correctly fails. Both entropy callers now pass their configured map
+area explicitly. The grant remains unchanged, and the source mutation checks
+cover both scoped call sites. Large actual-capture delivery still needs replay.
 Native Tree/workshop code, protocols, vectors and ground-material policy remain
 byte-identical to cfcc. No production registry/runner/floor is widened.
 

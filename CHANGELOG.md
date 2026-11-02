@@ -13,6 +13,9 @@
   Annotate chunk-test sizes as `usize` and write the identical newline-inclusive
   bound as a strict comparison. Production encoding already compiled; complete
   corrected-source execution remains pending.
+- Retain J replay's capability-denied result: the new Tree entropy check
+  requested an unscoped Query against a map-scoped grant. Pass the configured
+  area from both callers and enforce those call sites in mutation checks.
 
 ## 2026-11-02 — Package complete Tree evidence within modern MCP bounds
 
