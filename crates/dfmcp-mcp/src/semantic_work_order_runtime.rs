@@ -230,6 +230,12 @@ pub struct View {
     pub clock: Option<ClockView>,
     pub clock_control_enabled: bool,
 }
+
+pub(crate) fn unavailable_item_observations() -> Value {
+    json!({"coverage":"unknown", "freshness":"unavailable", "items":[],
+        "returned":0, "omitted":null, "material_classification":"unknown",
+        "production_attribution":"unknown"})
+}
 fn anchor_json(a: StateAnchor) -> Value {
     json!({"fortress_id":a.fortress_id.get().to_string(),"epoch":a.cursor.epoch,
         "sequence":a.cursor.sequence,"tick":a.tick.get(),"state_hash":a.state_hash.to_hex()})
@@ -290,10 +296,7 @@ impl View {
             "recovery":recovery,
             "native_state":self.native.as_ref().map(|n|n.state().as_str()),"insertion":insertion,
             "current_goal":goal,"current_goal_available":self.goal.is_some(),
-            "item_observations":self.item_observations.clone().unwrap_or_else(|| json!({
-                "coverage":"unknown", "freshness":"unavailable", "items":[],
-                "returned":0, "omitted":null, "material_classification":"unknown",
-                "production_attribution":"unknown"})),
+            "item_observations":self.item_observations.clone().unwrap_or_else(unavailable_item_observations),
             "first_satisfied_anchor":self.first_satisfied_anchor.map(anchor_json),
             "historical_obligation":self.historical_obligation.as_ref().map(|s|format!("{s:?}")),
             "history":{"events":self.history_events,"bytes":self.history_bytes,"fenced":self.history_fenced},
@@ -660,8 +663,7 @@ impl<S: Shell> Runtime<S> {
         }
         Ok(())
     }
-    fn view(&mut self, c: &OperationContext) -> Result<View> {
-        self.shell.check_environment()?;
+    fn withhold_unauthorized_items(&mut self, c: &OperationContext) {
         if self.item_observations.is_some()
             && (c
                 .authorize(Capability::Query, RiskTier::ReadOnly, &[], None)
@@ -674,6 +676,20 @@ impl<S: Shell> Runtime<S> {
             // the original goal, and a later grant cannot revive the old view.
             self.item_observations = None;
         }
+    }
+    pub(crate) fn invalidate_item_presentation(&mut self) {
+        self.item_observations = None;
+    }
+    fn view(&mut self, c: &OperationContext) -> Result<View> {
+        let result = self.checked_view(c);
+        if result.is_err() {
+            self.item_observations = None;
+        }
+        result
+    }
+    fn checked_view(&mut self, c: &OperationContext) -> Result<View> {
+        self.shell.check_environment()?;
+        self.withhold_unauthorized_items(c);
         let mut work = Work::new(c)?;
         if let Some(archive) = &mut self.archive {
             let original = archive.recover(&work.reserve(ARCHIVE_BYTES)?)?;
@@ -717,6 +733,9 @@ impl<S: Shell> Runtime<S> {
             None
         };
         self.shell.check_environment()?;
+        // Custody inspection performs I/O. Optional presentation authority must
+        // still hold at publication, not only before that work started.
+        self.withhold_unauthorized_items(c);
         Ok(View {
             mode: self.mode,
             anchor: self.anchor,
@@ -761,10 +780,17 @@ impl<S: Shell> Runtime<S> {
         })
     }
     pub fn inspect(&mut self, c: &OperationContext) -> Result<View> {
-        self.check(c, false)?;
+        // A denied Query must also make regrant require a new qualified sample.
+        if let Err(error) = self.check(c, false) {
+            self.item_observations = None;
+            return Err(error);
+        }
         self.view(c)
     }
     pub fn observe(&mut self, c: &OperationContext) -> Result<View> {
+        // A new acquisition attempt invalidates the optional old sample even
+        // when authority, its budget or source validation later refuses.
+        self.item_observations = None;
         self.check(c, false)?;
         if self.mode == Mode::Offline {
             return Err(denied(
@@ -800,6 +826,26 @@ impl<S: Shell> Runtime<S> {
             return Err(DfmcpError::new(
                 ErrorCode::StaleAnchor,
                 "original semantic source changed; no rebase or new insertion is permitted",
+            ));
+        }
+
+        let observed = projection.snapshot.anchor();
+        let below_monitor_floor = self.monitor.as_ref().is_some_and(|monitor| {
+            let floor = monitor.high_cursor();
+            floor.epoch != observed.cursor.epoch
+                || floor.sequence > observed.cursor.sequence
+                || monitor.high_tick() > observed.tick
+        });
+        if observed.cursor.epoch != self.anchor.cursor.epoch
+            || observed.cursor.sequence < self.anchor.cursor.sequence
+            || observed.tick < self.anchor.tick
+            || observed.tick.get() < self.semantic.high_tick()
+            || (observed.cursor == self.anchor.cursor && observed != self.anchor)
+            || below_monitor_floor
+        {
+            return Err(DfmcpError::new(
+                ErrorCode::StaleAnchor,
+                "canonical observation would regress the retained cursor, tick, or state identity",
             ));
         }
 

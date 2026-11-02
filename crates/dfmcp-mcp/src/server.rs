@@ -615,12 +615,53 @@ pub(crate) fn with_session<T>(
     with_session_admitted(session, poisoned, body)
 }
 
+/// Synchronized inspection fences ownership exactly as a tool call does, but
+/// cannot update objective history, retain a version or publish durable custody.
+pub(crate) fn with_session_read<T>(
+    session: &Arc<Mutex<LabSession>>,
+    unavailable: impl FnOnce(DfmcpError) -> T,
+    body: impl FnOnce(&LabSession) -> T,
+) -> T {
+    let _admission = match LAB_ADMISSION.read() {
+        Ok(guard) => guard,
+        Err(_) => {
+            return unavailable(DfmcpError::new(
+                ErrorCode::InternalInvariantViolation,
+                "laboratory read admission poisoned",
+            ));
+        }
+    };
+    if let Err(error) = ensure_durable_owner(session) {
+        return unavailable(error);
+    }
+    with_session_view(
+        session,
+        || {
+            unavailable(DfmcpError::new(
+                ErrorCode::InternalInvariantViolation,
+                "laboratory read session poisoned",
+            ))
+        },
+        |guard| body(guard),
+        false,
+    )
+}
+
 /// Opening already holds the write admission guard and uses this helper to
 /// avoid recursively acquiring a read guard.
 fn with_session_admitted<T>(
     session: &Arc<Mutex<LabSession>>,
     poisoned: impl FnOnce() -> T,
     body: impl FnOnce(&mut LabSession) -> T,
+) -> T {
+    with_session_view(session, poisoned, body, true)
+}
+
+fn with_session_view<T>(
+    session: &Arc<Mutex<LabSession>>,
+    poisoned: impl FnOnce() -> T,
+    body: impl FnOnce(&mut LabSession) -> T,
+    publish_progress: bool,
 ) -> T {
     let shared = match session.lock() {
         Ok(guard) => guard.shared.clone(),
@@ -635,6 +676,7 @@ fn with_session_admitted<T>(
         Ok(guard) => guard,
         Err(_) => return poisoned(),
     };
+    let prior_shared_members = guard.shared_members;
     if let Some(world) = world.as_mut() {
         std::mem::swap(&mut guard.adapter, &mut world.adapter);
         std::mem::swap(&mut guard.leases, &mut world.leases);
@@ -647,8 +689,10 @@ fn with_session_admitted<T>(
         guard.shared_members = world.members.len();
     }
     let output = body(&mut guard);
-    persist_durable_head(&mut guard);
-    remember_version(&mut guard);
+    if publish_progress {
+        persist_durable_head(&mut guard);
+        remember_version(&mut guard);
+    }
     if let Some(world) = world.as_mut() {
         std::mem::swap(&mut guard.adapter, &mut world.adapter);
         std::mem::swap(&mut guard.leases, &mut world.leases);
@@ -658,6 +702,9 @@ fn with_session_admitted<T>(
         std::mem::swap(&mut guard.durability_fault, &mut world.durability_fault);
         std::mem::swap(&mut guard.objectives, &mut world.objectives);
         std::mem::swap(&mut guard.objective_restore, &mut world.objective_restore);
+    }
+    if !publish_progress {
+        guard.shared_members = prior_shared_members;
     }
     output
 }
@@ -1715,12 +1762,9 @@ impl PlanSource {
             _ => Ok(None),
         };
         match reserve_until {
-            Ok(Some(until)) => plan_forecast::forecast_plan_with_reserve(
-                adapter,
-                plan,
-                context,
-                Some(until),
-            ),
+            Ok(Some(until)) => {
+                plan_forecast::forecast_plan_with_reserve(adapter, plan, context, Some(until))
+            }
             Ok(None) => forecast_plan(adapter, plan, context),
             Err(error) => json!({
                 "epistemic_state": "predicted",
@@ -2109,6 +2153,11 @@ pub(crate) fn next_context(session: &mut LabSession) -> Result<(u128, OperationC
     Ok((request_id, context_for(session, request_id)))
 }
 
+/// Resource inspection uses current authority without consuming a semantic call ID.
+pub(crate) fn read_context(session: &LabSession) -> OperationContext {
+    context_for(session, session.next_request_id)
+}
+
 /// Entry-level authorization gate (CAPABILITIES.md enforcement point: MCP
 /// intake). Deterministic denial BEFORE any state is read or any effect is
 /// prepared. `ctx` carries exactly the session's negotiated grants —
@@ -2439,8 +2488,7 @@ pub(crate) fn open_session_in_scenario(
         ("restore".to_owned(), "guarded".to_owned()),
         ("doctor".to_owned(), "read_only".to_owned()),
     ];
-    let requested_caps_raw =
-        requested_capabilities.map_or_else(|| default_caps, |capabilities| capabilities);
+    let requested_caps_raw = requested_capabilities.unwrap_or(default_caps);
     let requested_caps = match parse_capability_request(&requested_caps_raw) {
         Ok(value) => value,
         Err(error) => return dfmcp_error_payload("fortress.open_session", &error),
@@ -2872,6 +2920,13 @@ pub fn fortress_query(session_id: Option<String>, mode: Option<String>) -> Strin
                 let snapshot = guard.adapter.snapshot();
                 return match crate::lab_world::query(snapshot, &mode) {
                     Ok(mut payload) => {
+                        if let Err(error) = crate::resources::link_entity_resources(
+                            &mut payload,
+                            guard.session_id,
+                            snapshot.anchor(),
+                        ) {
+                            return dfmcp_error_payload("fortress.query", &error);
+                        }
                         payload["ok"] = json!(true);
                         payload["session_id"] = json!(format!("{}", guard.session_id));
                         payload["anchor"] = anchor_json(&snapshot.anchor());
@@ -4463,7 +4518,11 @@ fn wait_progress_error(
         payload["durability_pending"] = json!(session.durability_fault.is_some());
         if !session.carried.is_empty() {
             payload["carried_obligations"] = json!(
-                session.carried.iter().map(CarriedStep::to_json).collect::<Vec<_>>()
+                session
+                    .carried
+                    .iter()
+                    .map(CarriedStep::to_json)
+                    .collect::<Vec<_>>()
             );
         }
         if let Some(action_id) = session.last_action {

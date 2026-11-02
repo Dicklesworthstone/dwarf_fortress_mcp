@@ -100,7 +100,10 @@ impl TerrainGraph {
             if !candidates[current] {
                 continue;
             }
-            let position = map.region.position(current).ok_or(MapError::InvalidRegion)?;
+            let position = map
+                .region
+                .position(current)
+                .ok_or(MapError::InvalidRegion)?;
             for axis in 0..3 {
                 for increase in [false, true] {
                     work.charge()?;
@@ -142,7 +145,11 @@ impl TerrainGraph {
             }
             adjacent[current].sort_unstable();
         }
-        Ok(Self { adjacent, candidates, edges })
+        Ok(Self {
+            adjacent,
+            candidates,
+            edges,
+        })
     }
 }
 
@@ -173,9 +180,22 @@ struct Network {
 impl Network {
     fn add(&mut self, from: usize, to: usize, meaning: Meaning) -> usize {
         let link = self.links.len();
-        self.links.push(Link { from, to, flow: false, meaning });
-        self.adjacent[from].push(Arc { target: to, link, reverse: false });
-        self.adjacent[to].push(Arc { target: from, link, reverse: true });
+        self.links.push(Link {
+            from,
+            to,
+            flow: false,
+            meaning,
+        });
+        self.adjacent[from].push(Arc {
+            target: to,
+            link,
+            reverse: false,
+        });
+        self.adjacent[to].push(Arc {
+            target: from,
+            link,
+            reverse: true,
+        });
         link
     }
 
@@ -231,7 +251,11 @@ impl Network {
     ) -> Result<Vec<Option<Arc>>, MapError> {
         let mut parent = vec![None; self.adjacent.len()];
         // The root's sentinel is never interpreted as an edge.
-        parent[self.source] = Some(Arc { target: self.source, link: 0, reverse: false });
+        parent[self.source] = Some(Arc {
+            target: self.source,
+            link: 0,
+            reverse: false,
+        });
         let mut queue = VecDeque::from([self.source]);
         while let Some(current) = queue.pop_front() {
             work.charge()?;
@@ -305,14 +329,20 @@ fn verify<F: FnMut() -> Result<(), MapError>>(
         return Err(MapError::InvalidRegion);
     }
     if excluded {
-        return if report.paths.is_empty() { Ok(()) } else { Err(MapError::InvalidRegion) };
+        return if report.paths.is_empty() {
+            Ok(())
+        } else {
+            Err(MapError::InvalidRegion)
+        };
     }
     let mut used_edges = BTreeSet::new();
     let mut used_tiles = BTreeSet::new();
     for path in &report.paths {
         work.charge()?;
-        if path.len() < 2 || path.len() > graph.adjacent.len()
-            || path.first() != Some(&source) || path.last() != Some(&target)
+        if path.len() < 2
+            || path.len() > graph.adjacent.len()
+            || path.first() != Some(&source)
+            || path.last() != Some(&target)
         {
             return Err(MapError::InvalidRegion);
         }
@@ -331,7 +361,9 @@ fn verify<F: FnMut() -> Result<(), MapError>>(
                 }
             }
             if report.disjointness == Disjointness::InternalTiles
-                && tile != source && tile != target && !used_tiles.insert(tile)
+                && tile != source
+                && tile != target
+                && !used_tiles.insert(tile)
             {
                 return Err(MapError::InvalidRegion);
             }
@@ -344,15 +376,18 @@ fn verify<F: FnMut() -> Result<(), MapError>>(
         match *cut {
             CutElement::Tile(tile) => {
                 if report.disjointness != Disjointness::InternalTiles
-                    || tile == source || tile == target
-                    || tile >= graph.adjacent.len() || !graph.candidates[tile]
+                    || tile == source
+                    || tile == target
+                    || tile >= graph.adjacent.len()
+                    || !graph.candidates[tile]
                 {
                     return Err(MapError::InvalidRegion);
                 }
                 removed_tiles.insert(tile);
             }
             CutElement::Edge([a, b]) => {
-                if a >= b || b >= graph.adjacent.len()
+                if a >= b
+                    || b >= graph.adjacent.len()
                     || graph.adjacent[a].binary_search(&b).is_err()
                     || (report.disjointness == Disjointness::InternalTiles
                         && [a, b] != edge(source, target))
@@ -373,7 +408,8 @@ fn verify<F: FnMut() -> Result<(), MapError>>(
         }
         for &next in &graph.adjacent[current] {
             work.charge()?;
-            if !seen[next] && !removed_tiles.contains(&next)
+            if !seen[next]
+                && !removed_tiles.contains(&next)
                 && !removed_edges.contains(&edge(current, next))
             {
                 seen[next] = true;
@@ -411,14 +447,22 @@ pub fn analyze_with_check<F: FnMut() -> Result<(), MapError>>(
     if source == target {
         return Err(MapError::InvalidRegion);
     }
-    let mut work = Work { used: 0, maximum: maximum_work, check };
+    let mut work = Work {
+        used: 0,
+        maximum: maximum_work,
+        check,
+    };
     let graph = TerrainGraph::build(map, &mut work)?;
     let mut report = RouteResilience {
-        start, goal, disjointness: mode,
+        start,
+        goal,
+        disjointness: mode,
         endpoint_excluded: !graph.candidates[source] || !graph.candidates[target],
-        paths: Vec::new(), minimum_cut: Vec::new(),
+        paths: Vec::new(),
+        minimum_cut: Vec::new(),
         candidate_tiles: graph.candidates.iter().filter(|&&v| v).count() as u32,
-        candidate_edges: graph.edges, work_units: 0,
+        candidate_edges: graph.edges,
+        work_units: 0,
     };
     if !report.endpoint_excluded {
         let mut net = Network::build(&graph, source, target, mode, &mut work)?;
@@ -458,15 +502,20 @@ pub fn analyze_with_check<F: FnMut() -> Result<(), MapError>>(
             }
             let cut = match link.meaning {
                 Meaning::Tile(tile) => CutElement::Tile(tile),
-                Meaning::Step(a, b) if mode == Disjointness::Edges
-                    || edge(a, b) == edge(source, target) => CutElement::Edge(edge(a, b)),
+                Meaning::Step(a, b)
+                    if mode == Disjointness::Edges || edge(a, b) == edge(source, target) =>
+                {
+                    CutElement::Edge(edge(a, b))
+                }
                 Meaning::Step(a, b) => {
                     // A unit-capacity movement cut can be moved onto either
                     // internal endpoint. Packing + separator verification below
                     // proves that deduplication has not lowered its cardinality.
-                    let tile = [a, b].into_iter()
+                    let tile = [a, b]
+                        .into_iter()
                         .filter(|&tile| tile != source && tile != target)
-                        .min().ok_or(MapError::InvalidRegion)?;
+                        .min()
+                        .ok_or(MapError::InvalidRegion)?;
                     CutElement::Tile(tile)
                 }
             };
@@ -508,12 +557,22 @@ pub fn verify_certificate(
     if maximum_work == 0 || maximum_work > MAX_ROUTE_WORK {
         return Err(MapError::BudgetExceeded);
     }
-    let source = map.region.index(report.start).ok_or(MapError::OutsideRegion)?;
-    let target = map.region.index(report.goal).ok_or(MapError::OutsideRegion)?;
+    let source = map
+        .region
+        .index(report.start)
+        .ok_or(MapError::OutsideRegion)?;
+    let target = map
+        .region
+        .index(report.goal)
+        .ok_or(MapError::OutsideRegion)?;
     if source == target {
         return Err(MapError::InvalidRegion);
     }
-    let mut work = Work { used: 0, maximum: maximum_work, check: || Ok(()) };
+    let mut work = Work {
+        used: 0,
+        maximum: maximum_work,
+        check: || Ok(()),
+    };
     let graph = TerrainGraph::build(map, &mut work)?;
     verify(&graph, source, target, report, &mut work)
 }

@@ -9,9 +9,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use dfmcp_core::{
-    Capability, DfmcpError, Digest32, EdgeId, EntityId, ErrorCode, FortressId, GameTick,
-    IntentId, MapCoord, MapCuboid, ObservationCursor, PlanId, Result, RiskTier, StateAnchor,
-    StepId,
+    Capability, DfmcpError, Digest32, EdgeId, EntityId, ErrorCode, FortressId, GameTick, IntentId,
+    MapCoord, MapCuboid, ObservationCursor, PlanId, Result, RiskTier, StateAnchor, StepId,
 };
 use dfmcp_world::{CompareOp, EdgeKind, EntityKind, Predicate, Value};
 
@@ -44,8 +43,12 @@ pub struct ArchiveLimits {
 }
 impl Default for ArchiveLimits {
     fn default() -> Self {
-        Self { max_bytes: MAX_ARCHIVE_BYTES, max_steps: MAX_ARCHIVE_STEPS,
-            max_nodes: MAX_NODES, max_depth: MAX_DEPTH }
+        Self {
+            max_bytes: MAX_ARCHIVE_BYTES,
+            max_steps: MAX_ARCHIVE_STEPS,
+            max_nodes: MAX_NODES,
+            max_depth: MAX_DEPTH,
+        }
     }
 }
 impl ArchiveLimits {
@@ -73,7 +76,10 @@ fn invalid(message: &str) -> DfmcpError {
     DfmcpError::new(ErrorCode::InvalidPlan, message).retryable(false)
 }
 fn exhausted() -> DfmcpError {
-    DfmcpError::new(ErrorCode::BudgetExceeded, "prepared-plan archive exceeds its bounded profile")
+    DfmcpError::new(
+        ErrorCode::BudgetExceeded,
+        "prepared-plan archive exceeds its bounded profile",
+    )
 }
 fn object_digest(bytes: &[u8]) -> Digest32 {
     let mut preimage = Vec::with_capacity(DOMAIN.len() + bytes.len());
@@ -101,7 +107,12 @@ pub fn encode_with_check<F: FnMut() -> Result<()>>(
 ) -> Result<(Vec<u8>, PlanArchiveSeal)> {
     limits.validate()?;
     check()?;
-    let mut writer = Writer { bytes: Vec::new(), limits, nodes: 0, check: &mut check };
+    let mut writer = Writer {
+        bytes: Vec::new(),
+        limits,
+        nodes: 0,
+        check: &mut check,
+    };
     writer.raw(MAGIC)?;
     writer.u32(0)?;
     writer.plan(plan)?;
@@ -114,13 +125,23 @@ pub fn encode_with_check<F: FnMut() -> Result<()>>(
     let object_digest = object_digest(&bytes);
     bytes.extend_from_slice(object_digest.as_bytes());
     check()?;
-    Ok((bytes, PlanArchiveSeal { plan_digest: plan.digest, object_digest }))
+    Ok((
+        bytes,
+        PlanArchiveSeal {
+            plan_digest: plan.digest,
+            object_digest,
+        },
+    ))
 }
 
 /// Decode exact original content, not a recompiled/rebased plan. Current game,
 /// policy, capability, checkpoint and idempotency checks remain the coordinator's
 /// responsibility even when this function succeeds on an expired historical plan.
-pub fn decode(bytes: &[u8], expected: PlanArchiveSeal, limits: ArchiveLimits) -> Result<PreparedPlan> {
+pub fn decode(
+    bytes: &[u8],
+    expected: PlanArchiveSeal,
+    limits: ArchiveLimits,
+) -> Result<PreparedPlan> {
     decode_with_check(bytes, expected, limits, || Ok(()))
 }
 
@@ -132,11 +153,17 @@ pub fn decode_with_check<F: FnMut() -> Result<()>>(
 ) -> Result<PreparedPlan> {
     limits.validate()?;
     check()?;
-    if bytes.len() > limits.max_bytes { return Err(exhausted()); }
-    if bytes.len() <= OVERHEAD || &bytes[..8] != MAGIC
-        || expected.plan_digest == Digest32::ZERO || expected.object_digest == Digest32::ZERO
+    if bytes.len() > limits.max_bytes {
+        return Err(exhausted());
+    }
+    if bytes.len() <= OVERHEAD
+        || &bytes[..8] != MAGIC
+        || expected.plan_digest == Digest32::ZERO
+        || expected.object_digest == Digest32::ZERO
     {
-        return Err(invalid("invalid prepared-plan archive header or expected identity"));
+        return Err(invalid(
+            "invalid prepared-plan archive header or expected identity",
+        ));
     }
     let mut length = [0; 4];
     length.copy_from_slice(&bytes[8..12]);
@@ -150,10 +177,17 @@ pub fn decode_with_check<F: FnMut() -> Result<()>>(
         return Err(invalid("prepared-plan archive object identity differs"));
     }
     check()?;
-    let mut reader = Reader { bytes: &bytes[12..end], limits, nodes: 0, check: &mut check };
+    let mut reader = Reader {
+        bytes: &bytes[12..end],
+        limits,
+        nodes: 0,
+        check: &mut check,
+    };
     let plan = reader.plan()?;
     if !reader.bytes.is_empty() || plan.digest != expected.plan_digest {
-        return Err(invalid("prepared-plan archive has trailing fields or a different semantic identity"));
+        return Err(invalid(
+            "prepared-plan archive has trailing fields or a different semantic identity",
+        ));
     }
     check()?;
     // Bounded decode has finished before invoking recursive canonical validation.
@@ -169,76 +203,126 @@ pub fn decode_with_check<F: FnMut() -> Result<()>>(
 }
 
 struct Writer<'a, F> {
-    bytes: Vec<u8>, limits: ArchiveLimits, nodes: usize, check: &'a mut F,
+    bytes: Vec<u8>,
+    limits: ArchiveLimits,
+    nodes: usize,
+    check: &'a mut F,
 }
 impl<F: FnMut() -> Result<()>> Writer<'_, F> {
     fn raw(&mut self, bytes: &[u8]) -> Result<()> {
         (self.check)()?;
-        if self.bytes.len().checked_add(bytes.len()).is_none_or(|n| n > self.limits.max_bytes - 32) {
+        if self
+            .bytes
+            .len()
+            .checked_add(bytes.len())
+            .is_none_or(|n| n > self.limits.max_bytes - 32)
+        {
             return Err(exhausted());
         }
-        self.bytes.try_reserve(bytes.len()).map_err(|_| exhausted())?;
+        self.bytes
+            .try_reserve(bytes.len())
+            .map_err(|_| exhausted())?;
         self.bytes.extend_from_slice(bytes);
         Ok(())
     }
     fn node(&mut self, depth: usize) -> Result<()> {
-        if depth > self.limits.max_depth { return Err(exhausted()); }
+        if depth > self.limits.max_depth {
+            return Err(exhausted());
+        }
         self.claim(1)
     }
     fn claim(&mut self, count: usize) -> Result<()> {
         self.nodes = self.nodes.checked_add(count).ok_or_else(exhausted)?;
-        if self.nodes > self.limits.max_nodes { return Err(exhausted()); }
+        if self.nodes > self.limits.max_nodes {
+            return Err(exhausted());
+        }
         (self.check)()
     }
     fn count(&mut self, count: usize, maximum: usize) -> Result<()> {
-        if count > maximum { return Err(exhausted()); }
+        if count > maximum {
+            return Err(exhausted());
+        }
         self.claim(count)?;
         self.u32(u32::try_from(count).map_err(|_| exhausted())?)
     }
     fn text(&mut self, text: &str, maximum: usize) -> Result<()> {
-        if text.len() > maximum || text.as_bytes().contains(&0) { return Err(exhausted()); }
+        if text.len() > maximum || text.as_bytes().contains(&0) {
+            return Err(exhausted());
+        }
         self.u32(u32::try_from(text.len()).map_err(|_| exhausted())?)?;
         self.raw(text.as_bytes())
     }
     fn blob(&mut self, bytes: &[u8]) -> Result<()> {
-        if bytes.len() > MAX_TEXT { return Err(exhausted()); }
+        if bytes.len() > MAX_TEXT {
+            return Err(exhausted());
+        }
         self.u32(u32::try_from(bytes.len()).map_err(|_| exhausted())?)?;
         self.raw(bytes)
     }
-    fn byte(&mut self, value: u8) -> Result<()> { self.raw(&[value]) }
-    fn boolean(&mut self, value: bool) -> Result<()> { self.byte(u8::from(value)) }
-    fn u32(&mut self, value: u32) -> Result<()> { self.raw(&value.to_be_bytes()) }
-    fn u64(&mut self, value: u64) -> Result<()> { self.raw(&value.to_be_bytes()) }
-    fn u128(&mut self, value: u128) -> Result<()> { self.raw(&value.to_be_bytes()) }
-    fn i32(&mut self, value: i32) -> Result<()> { self.raw(&value.to_be_bytes()) }
-    fn i64(&mut self, value: i64) -> Result<()> { self.raw(&value.to_be_bytes()) }
+    fn byte(&mut self, value: u8) -> Result<()> {
+        self.raw(&[value])
+    }
+    fn boolean(&mut self, value: bool) -> Result<()> {
+        self.byte(u8::from(value))
+    }
+    fn u32(&mut self, value: u32) -> Result<()> {
+        self.raw(&value.to_be_bytes())
+    }
+    fn u64(&mut self, value: u64) -> Result<()> {
+        self.raw(&value.to_be_bytes())
+    }
+    fn u128(&mut self, value: u128) -> Result<()> {
+        self.raw(&value.to_be_bytes())
+    }
+    fn i32(&mut self, value: i32) -> Result<()> {
+        self.raw(&value.to_be_bytes())
+    }
+    fn i64(&mut self, value: i64) -> Result<()> {
+        self.raw(&value.to_be_bytes())
+    }
 }
 
 struct Reader<'a, 'c, F> {
-    bytes: &'a [u8], limits: ArchiveLimits, nodes: usize, check: &'c mut F,
+    bytes: &'a [u8],
+    limits: ArchiveLimits,
+    nodes: usize,
+    check: &'c mut F,
 }
 impl<'a, F: FnMut() -> Result<()>> Reader<'a, '_, F> {
     fn raw(&mut self, count: usize) -> Result<&'a [u8]> {
         (self.check)()?;
-        let value = self.bytes.get(..count).ok_or_else(|| invalid("truncated prepared-plan archive"))?;
+        let value = self
+            .bytes
+            .get(..count)
+            .ok_or_else(|| invalid("truncated prepared-plan archive"))?;
         self.bytes = &self.bytes[count..];
         Ok(value)
     }
     fn array<const N: usize>(&mut self) -> Result<[u8; N]> {
-        let mut value = [0; N]; value.copy_from_slice(self.raw(N)?); Ok(value)
+        let mut value = [0; N];
+        value.copy_from_slice(self.raw(N)?);
+        Ok(value)
     }
     fn node(&mut self, depth: usize) -> Result<()> {
-        if depth > self.limits.max_depth { return Err(exhausted()); }
+        if depth > self.limits.max_depth {
+            return Err(exhausted());
+        }
         self.claim(1)
     }
     fn claim(&mut self, count: usize) -> Result<()> {
         self.nodes = self.nodes.checked_add(count).ok_or_else(exhausted)?;
-        if self.nodes > self.limits.max_nodes { return Err(exhausted()); }
+        if self.nodes > self.limits.max_nodes {
+            return Err(exhausted());
+        }
         (self.check)()
     }
     fn count(&mut self, maximum: usize, minimum_bytes: usize) -> Result<usize> {
         let count = self.u32()? as usize;
-        if count > maximum || count.checked_mul(minimum_bytes).is_none_or(|n| n > self.bytes.len()) {
+        if count > maximum
+            || count
+                .checked_mul(minimum_bytes)
+                .is_none_or(|n| n > self.bytes.len())
+        {
             return Err(exhausted());
         }
         self.claim(count)?;
@@ -246,23 +330,46 @@ impl<'a, F: FnMut() -> Result<()>> Reader<'a, '_, F> {
     }
     fn text(&mut self, maximum: usize) -> Result<String> {
         let length = self.u32()? as usize;
-        if length > maximum { return Err(exhausted()); }
-        let text = std::str::from_utf8(self.raw(length)?).map_err(|_| invalid("archive text is not UTF-8"))?;
-        if text.as_bytes().contains(&0) { return Err(invalid("archive text contains NUL")); }
+        if length > maximum {
+            return Err(exhausted());
+        }
+        let text = std::str::from_utf8(self.raw(length)?)
+            .map_err(|_| invalid("archive text is not UTF-8"))?;
+        if text.as_bytes().contains(&0) {
+            return Err(invalid("archive text contains NUL"));
+        }
         Ok(text.to_owned())
     }
     fn blob(&mut self) -> Result<Vec<u8>> {
         let length = self.u32()? as usize;
-        if length > MAX_TEXT { return Err(exhausted()); }
+        if length > MAX_TEXT {
+            return Err(exhausted());
+        }
         Ok(self.raw(length)?.to_vec())
     }
-    fn byte(&mut self) -> Result<u8> { Ok(self.array::<1>()?[0]) }
-    fn boolean(&mut self) -> Result<bool> {
-        match self.byte()? { 0 => Ok(false), 1 => Ok(true), _ => Err(invalid("invalid archive boolean")) }
+    fn byte(&mut self) -> Result<u8> {
+        Ok(self.array::<1>()?[0])
     }
-    fn u32(&mut self) -> Result<u32> { Ok(u32::from_be_bytes(self.array()?)) }
-    fn u64(&mut self) -> Result<u64> { Ok(u64::from_be_bytes(self.array()?)) }
-    fn u128(&mut self) -> Result<u128> { Ok(u128::from_be_bytes(self.array()?)) }
-    fn i32(&mut self) -> Result<i32> { Ok(i32::from_be_bytes(self.array()?)) }
-    fn i64(&mut self) -> Result<i64> { Ok(i64::from_be_bytes(self.array()?)) }
+    fn boolean(&mut self) -> Result<bool> {
+        match self.byte()? {
+            0 => Ok(false),
+            1 => Ok(true),
+            _ => Err(invalid("invalid archive boolean")),
+        }
+    }
+    fn u32(&mut self) -> Result<u32> {
+        Ok(u32::from_be_bytes(self.array()?))
+    }
+    fn u64(&mut self) -> Result<u64> {
+        Ok(u64::from_be_bytes(self.array()?))
+    }
+    fn u128(&mut self) -> Result<u128> {
+        Ok(u128::from_be_bytes(self.array()?))
+    }
+    fn i32(&mut self) -> Result<i32> {
+        Ok(i32::from_be_bytes(self.array()?))
+    }
+    fn i64(&mut self) -> Result<i64> {
+        Ok(i64::from_be_bytes(self.array()?))
+    }
 }

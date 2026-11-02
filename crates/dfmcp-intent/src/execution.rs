@@ -29,10 +29,14 @@ pub fn deferred_step_decision(
     dependency_state: impl FnMut(StepId) -> Option<CommitState>,
 ) -> DeferredStepDecision {
     PredicateEvidence::untrusted(snapshot)
-        .and_then(|evidence| deferred_step_decision_with_evidence(step, &evidence, dependency_state))
-        .unwrap_or_else(|error| DeferredStepDecision::Failed(format!(
-            "observation evidence is invalid; this step was not dispatched: {error}"
-        )))
+        .and_then(|evidence| {
+            deferred_step_decision_with_evidence(step, &evidence, dependency_state)
+        })
+        .unwrap_or_else(|error| {
+            DeferredStepDecision::Failed(format!(
+                "observation evidence is invalid; this step was not dispatched: {error}"
+            ))
+        })
 }
 
 /// Decide with source and completeness rights supplied by the observing shell.
@@ -57,8 +61,12 @@ pub fn deferred_step_decision_with_evidence(
         }
     }
     if let Some(obligation) = &step.obligation {
-        if obligation.failure.as_ref()
-            .map(|predicate| evidence.establishes(predicate)).transpose()?.unwrap_or(false)
+        if obligation
+            .failure
+            .as_ref()
+            .map(|predicate| evidence.establishes(predicate))
+            .transpose()?
+            .unwrap_or(false)
         {
             return Ok(DeferredStepDecision::Failed(
                 "obligation failure predicate observed before dispatch; this step was not dispatched"
@@ -78,7 +86,8 @@ pub fn deferred_step_decision_with_evidence(
     for predicate in &step.preconditions {
         if !evidence.establishes(predicate)? {
             return Ok(DeferredStepDecision::Failed(
-                "preconditions are no longer established true; this step was not dispatched".to_owned(),
+                "preconditions are no longer established true; this step was not dispatched"
+                    .to_owned(),
             ));
         }
     }
@@ -98,7 +107,9 @@ mod tests {
         dependency_state: impl FnMut(StepId) -> Option<CommitState>,
     ) -> DeferredStepDecision {
         PredicateEvidence::laboratory(snapshot)
-            .and_then(|evidence| deferred_step_decision_with_evidence(step, &evidence, dependency_state))
+            .and_then(|evidence| {
+                deferred_step_decision_with_evidence(step, &evidence, dependency_state)
+            })
             .unwrap_or_else(|error| DeferredStepDecision::Failed(error.to_string()))
     }
 

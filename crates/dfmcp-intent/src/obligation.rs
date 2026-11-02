@@ -262,8 +262,13 @@ impl ObligationRuntime {
                     "obligation observation changed lineage, regressed, or forked a cursor",
                 ));
             }
-            let failure = obligation.spec.failure.as_ref()
-                .map(|predicate| evidence.establishes(predicate)).transpose()?.unwrap_or(false);
+            let failure = obligation
+                .spec
+                .failure
+                .as_ref()
+                .map(|predicate| evidence.establishes(predicate))
+                .transpose()?
+                .unwrap_or(false);
             let satisfied = evidence.establishes(&obligation.spec.terminal)?;
             predicates.insert(obligation.action_id, (failure, satisfied));
         }
@@ -285,7 +290,9 @@ impl ObligationRuntime {
 
             // Failure evidence takes precedence even between scheduled polls or
             // when a second observation at the same game tick changes the facts.
-            let (failure, satisfied) = predicates.get(&obligation.action_id).copied()
+            let (failure, satisfied) = predicates
+                .get(&obligation.action_id)
+                .copied()
                 .unwrap_or((false, false));
             if failure {
                 obligation.status = ObligationStatus::Failed {

@@ -8,7 +8,10 @@ use dfmcp_core::{DfmcpError, EntityId, ErrorCode, Result};
 use dfmcp_intent::{
     DwarfLaborProfile, LaborAllocationLimits, LaborAllocator, LaborDemand, RequestedAction,
 };
-use serde::{Deserialize, Deserializer, de::{MapAccess, Visitor}};
+use serde::{
+    Deserialize, Deserializer,
+    de::{MapAccess, Visitor},
+};
 
 const MAX_ROSTER: usize = 64;
 const MAX_DEMANDS: usize = 16;
@@ -49,18 +52,25 @@ fn invalid(message: impl Into<String>) -> DfmcpError {
     DfmcpError::new(ErrorCode::InvalidRequest, message)
 }
 
-fn unique_skills<'de, D: Deserializer<'de>>(deserializer: D) -> std::result::Result<BTreeMap<String, u32>, D::Error> {
+fn unique_skills<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> std::result::Result<BTreeMap<String, u32>, D::Error> {
     struct Skills;
     impl<'de> Visitor<'de> for Skills {
         type Value = BTreeMap<String, u32>;
         fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             f.write_str("at most 256 distinct skill keys and unsigned ratings")
         }
-        fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> std::result::Result<Self::Value, A::Error> {
+        fn visit_map<A: MapAccess<'de>>(
+            self,
+            mut map: A,
+        ) -> std::result::Result<Self::Value, A::Error> {
             let mut skills = BTreeMap::new();
             while let Some((key, value)) = map.next_entry::<String, u32>()? {
                 if skills.len() == MAX_PROFILE_TOKENS || skills.insert(key, value).is_some() {
-                    return Err(serde::de::Error::custom("duplicate skill or too many skill entries"));
+                    return Err(serde::de::Error::custom(
+                        "duplicate skill or too many skill entries",
+                    ));
                 }
             }
             Ok(skills)
@@ -70,20 +80,37 @@ fn unique_skills<'de, D: Deserializer<'de>>(deserializer: D) -> std::result::Res
 }
 
 fn entity(raw: &str) -> Result<EntityId> {
-    if raw.is_empty() || raw.len() > 20 || raw.starts_with('0') || !raw.bytes().all(|b| b.is_ascii_digit()) {
-        return Err(invalid("workforce IDs must be nonzero canonical decimal u64 strings"));
+    if raw.is_empty()
+        || raw.len() > 20
+        || raw.starts_with('0')
+        || !raw.bytes().all(|b| b.is_ascii_digit())
+    {
+        return Err(invalid(
+            "workforce IDs must be nonzero canonical decimal u64 strings",
+        ));
     }
-    raw.parse::<u64>().map(EntityId::new).map_err(|_| invalid("workforce ID exceeds u64"))
+    raw.parse::<u64>()
+        .map(EntityId::new)
+        .map_err(|_| invalid("workforce ID exceeds u64"))
 }
 
 pub(super) fn parse(raw: &str) -> Result<Vec<RequestedAction>> {
     if raw.len() > super::MAX_ACTIONS_JSON_BYTES {
-        return Err(DfmcpError::new(ErrorCode::BudgetExceeded, "labor workflow exceeds the action request byte limit"));
+        return Err(DfmcpError::new(
+            ErrorCode::BudgetExceeded,
+            "labor workflow exceeds the action request byte limit",
+        ));
     }
     let Workflow::LaborAllocation { roster, demands } = serde_json::from_str(raw)
         .map_err(|e| invalid(format!("invalid labor_allocation_v1 request: {e}")))?;
-    if roster.is_empty() || roster.len() > MAX_ROSTER || demands.is_empty() || demands.len() > MAX_DEMANDS {
-        return Err(invalid("labor workflow requires 1..64 citizens and 1..16 demands"));
+    if roster.is_empty()
+        || roster.len() > MAX_ROSTER
+        || demands.is_empty()
+        || demands.len() > MAX_DEMANDS
+    {
+        return Err(invalid(
+            "labor workflow requires 1..64 citizens and 1..16 demands",
+        ));
     }
     let mut rows = Vec::with_capacity(roster.len());
     for row in roster {
@@ -96,20 +123,35 @@ pub(super) fn parse(raw: &str) -> Result<Vec<RequestedAction>> {
             return Err(invalid("duplicate declared labor assignment"));
         }
         rows.push(DwarfLaborProfile {
-            id: entity(&row.id)?, skills: row.skills, stress_level: row.stress_level, assigned_labors,
+            id: entity(&row.id)?,
+            skills: row.skills,
+            stress_level: row.stress_level,
+            assigned_labors,
         });
     }
-    let roles: Vec<_> = demands.into_iter().map(|d| LaborDemand {
-        labor: d.labor, skill: d.skill, workers: d.workers,
-        minimum_skill: d.minimum_skill, priority: d.priority,
-    }).collect();
+    let roles: Vec<_> = demands
+        .into_iter()
+        .map(|d| LaborDemand {
+            labor: d.labor,
+            skill: d.skill,
+            workers: d.workers,
+            minimum_skill: d.minimum_skill,
+            priority: d.priority,
+        })
+        .collect();
     let limits = LaborAllocationLimits {
-        max_roster: MAX_ROSTER, max_demands: MAX_DEMANDS, max_positions: MAX_ROSTER,
-        max_actions: super::MAX_LAB_STEPS, ..LaborAllocationLimits::default()
+        max_roster: MAX_ROSTER,
+        max_demands: MAX_DEMANDS,
+        max_positions: MAX_ROSTER,
+        max_actions: super::MAX_LAB_STEPS,
+        ..LaborAllocationLimits::default()
     };
     let compiled = LaborAllocator.compile_execution(&rows, &roles, limits)?;
     if compiled.encoded_bytes() > MAX_COMPILED_BYTES {
-        return Err(DfmcpError::new(ErrorCode::BudgetExceeded, "labor workflow expands beyond its compiled byte bound"));
+        return Err(DfmcpError::new(
+            ErrorCode::BudgetExceeded,
+            "labor workflow expands beyond its compiled byte bound",
+        ));
     }
     compiled.into_requested_actions()
 }

@@ -34,9 +34,7 @@ pub(super) fn validate_transition(old: &BuildEntry, next: &BuildEntry) -> Result
     let proved = BuildRecord::decode(next.canonical_bytes())?;
     previous.verify_plan(&old.plan)?;
     proved.verify_plan(&old.plan)?;
-    check(
-        previous.phase() == BuildPhase::Indeterminate && proved.phase() == BuildPhase::Placed,
-    )
+    check(previous.phase() == BuildPhase::Indeterminate && proved.phase() == BuildPhase::Placed)
 }
 
 impl<S: EffectJournalStorage> BuildJournal<S> {
@@ -63,9 +61,7 @@ impl<S: EffectJournalStorage> BuildJournal<S> {
             self.online(false)?;
             // Legacy journals may not have reserved a recovery frame. Refuse
             // before query can update native evidence if custody cannot hold it.
-            if self.frames >= MAX_FRAMES
-                || self.raw.len() > MAX_JOURNAL_BYTES - MAX_FRAME_BYTES
-            {
+            if self.frames >= MAX_FRAMES || self.raw.len() > MAX_JOURNAL_BYTES - MAX_FRAME_BYTES {
                 return Err(exhausted());
             }
             self.binding.source_matches(source.binding(), true)?;

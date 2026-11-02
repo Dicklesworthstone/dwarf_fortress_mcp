@@ -21,14 +21,14 @@ pub(crate) use durability::{WatchJournalGuard, attach as attach_journal};
 pub(super) mod batch;
 #[path = "query_watch_construction.rs"]
 mod construction;
-#[path = "query_watch_shelter.rs"]
-mod shelter;
 #[path = "query_watch_count.rs"]
 mod counts;
 #[path = "query_condition_evaluation.rs"]
 mod inspection;
 #[path = "query_watch_replay.rs"]
 mod replay;
+#[path = "query_watch_shelter.rs"]
+mod shelter;
 pub(super) use replay::Replay as HistoricalWatchReplay;
 
 pub(super) fn extend_count_schema(schema: Value) -> Result<Value> {

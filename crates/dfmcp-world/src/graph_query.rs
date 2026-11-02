@@ -14,8 +14,8 @@ use crate::{EdgeKind, WorldSnapshot};
 
 mod dominance;
 pub use dominance::{
-    DOMINANCE_POLICY, DominanceAnalysis, DominanceQuery, DominatorRecord,
-    analyze_dominators, analyze_dominators_with_check,
+    DOMINANCE_POLICY, DominanceAnalysis, DominanceQuery, DominatorRecord, analyze_dominators,
+    analyze_dominators_with_check,
 };
 
 const MAX_VERTICES: usize = 100_000;

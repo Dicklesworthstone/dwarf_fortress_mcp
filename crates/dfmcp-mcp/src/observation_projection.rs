@@ -303,9 +303,24 @@ mod tests {
     #[test]
     fn objective_projection_distinguishes_established_false_unknown_and_invalid() {
         for (truth, status, epistemic, predicate_truth) in [
-            (PredicateTruth::True, "achieved", "certified_derived", "true"),
-            (PredicateTruth::False, "not_yet_observed", "certified_derived", "false"),
-            (PredicateTruth::Unknown, "not_yet_observed", "unknown", "unknown"),
+            (
+                PredicateTruth::True,
+                "achieved",
+                "certified_derived",
+                "true",
+            ),
+            (
+                PredicateTruth::False,
+                "not_yet_observed",
+                "certified_derived",
+                "false",
+            ),
+            (
+                PredicateTruth::Unknown,
+                "not_yet_observed",
+                "unknown",
+                "unknown",
+            ),
         ] {
             let shown = laboratory_objective_evidence(Ok(truth));
             assert_eq!(shown["status"], status);
@@ -321,7 +336,10 @@ mod tests {
         assert_eq!(shown["status"], "not_yet_observed");
         assert_eq!(shown["epistemic_state"], "unknown");
         assert_eq!(shown["predicate_truth"], "unknown");
-        assert_eq!(shown["observation_error"]["code"], dfmcp_core::ErrorCode::ChecksumMismatch.as_str());
+        assert_eq!(
+            shown["observation_error"]["code"],
+            dfmcp_core::ErrorCode::ChecksumMismatch.as_str()
+        );
     }
 
     #[test]
@@ -330,19 +348,38 @@ mod tests {
         let id = EntityId::new(1);
         let make = |source| {
             let entity = EntityRecord {
-                id, generation: 1, revision: 1, kind: EntityKind::Unit,
+                id,
+                generation: 1,
+                revision: 1,
+                kind: EntityKind::Unit,
                 label: "goal subject".to_owned(),
-                fields: BTreeMap::from([("ready".to_owned(), Fact::known(
-                    Value::Bool(true), GameTick(20), source, Digest32::ZERO,
-                ))]),
+                fields: BTreeMap::from([(
+                    "ready".to_owned(),
+                    Fact::known(Value::Bool(true), GameTick(20), source, Digest32::ZERO),
+                )]),
             };
-            WorldSnapshot::new(FortressId::new(7), GameTick(20), ObservationCursor::ORIGIN,
-                true, WorldGraph { entities: BTreeMap::from([(id, entity)]), ..WorldGraph::default() })
+            WorldSnapshot::new(
+                FortressId::new(7),
+                GameTick(20),
+                ObservationCursor::ORIGIN,
+                true,
+                WorldGraph {
+                    entities: BTreeMap::from([(id, entity)]),
+                    ..WorldGraph::default()
+                },
+            )
         };
-        let predicate = Predicate::FieldCompare { entity_id: id, field: "ready".to_owned(),
-            op: CompareOp::Eq, value: Value::Bool(true) };
-        for source in [FactSource::AgentAssertion("claimed ready".to_owned()),
-            FactSource::Replay, FactSource::Derived("unregistered".to_owned())] {
+        let predicate = Predicate::FieldCompare {
+            entity_id: id,
+            field: "ready".to_owned(),
+            op: CompareOp::Eq,
+            value: Value::Bool(true),
+        };
+        for source in [
+            FactSource::AgentAssertion("claimed ready".to_owned()),
+            FactSource::Replay,
+            FactSource::Derived("unregistered".to_owned()),
+        ] {
             let snapshot = make(source);
             assert!(dfmcp_world::evaluate(&snapshot, &predicate));
             let evidence = PredicateEvidence::laboratory(&snapshot)?;
@@ -352,8 +389,10 @@ mod tests {
         }
         let snapshot = make(FactSource::Derived("dfmcp.lab-scenario/1".to_owned()));
         let evidence = PredicateEvidence::laboratory(&snapshot)?;
-        assert_eq!(laboratory_objective_evidence(evidence.evaluate(&predicate))["status"], "achieved");
+        assert_eq!(
+            laboratory_objective_evidence(evidence.evaluate(&predicate))["status"],
+            "achieved"
+        );
         Ok(())
     }
-
 }

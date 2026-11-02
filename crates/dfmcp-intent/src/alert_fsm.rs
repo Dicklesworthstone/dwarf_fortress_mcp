@@ -108,7 +108,9 @@ impl CivilianAlertFsm {
             || !(1..=1_000_000).contains(&recovery_policy.minimum_clear_ticks)
             || !(1..=1_000_000).contains(&recovery_policy.maximum_sample_gap_ticks)
         {
-            return Err(invalid("alert recovery policy exceeds fixed positive bounds"));
+            return Err(invalid(
+                "alert recovery policy exceeds fixed positive bounds",
+            ));
         }
         Ok(Self {
             current_level: ThreatLevel::Peace,
@@ -195,7 +197,9 @@ impl CivilianAlertFsm {
             || observation.anchor.state_hash == Digest32::ZERO
             || observation.source_scope == Digest32::ZERO
         {
-            return Err(invalid("alert observation requires nonzero source and anchor identity"));
+            return Err(invalid(
+                "alert observation requires nonzero source and anchor identity",
+            ));
         }
         let mut continuous = false;
         if let Some((previous, previous_civilians)) = &self.last_observation {
@@ -314,7 +318,10 @@ impl CivilianAlertFsm {
             self.current_level,
             ThreatLevel::EmergencyLockdown | ThreatLevel::Recovering
         );
-        if matches!(observed_level, ThreatLevel::EmergencyLockdown | ThreatLevel::Recovering) {
+        if matches!(
+            observed_level,
+            ThreatLevel::EmergencyLockdown | ThreatLevel::Recovering
+        ) {
             self.emergency_seen = true;
             if !was_protected {
                 self.reset_clearance();
@@ -334,11 +341,16 @@ fn invalid(message: &str) -> DfmcpError {
 
 fn canonical_units(units: &[EntityId]) -> Result<Vec<EntityId>> {
     if units.len() > MAX_ALERT_UNITS {
-        return Err(DfmcpError::new(ErrorCode::BudgetExceeded, "alert roster exceeds 512 units"));
+        return Err(DfmcpError::new(
+            ErrorCode::BudgetExceeded,
+            "alert roster exceeds 512 units",
+        ));
     }
     let unique: BTreeSet<_> = units.iter().copied().collect();
     if unique.len() != units.len() || unique.contains(&EntityId::NIL) {
-        return Err(invalid("alert roster requires unique nonzero unit identities"));
+        return Err(invalid(
+            "alert roster requires unique nonzero unit identities",
+        ));
     }
     Ok(unique.into_iter().collect())
 }
@@ -375,22 +387,41 @@ mod tests {
     }
 
     fn releases(decision: &AlertDecision) -> bool {
-        decision.actions.iter().any(|action| matches!(action,
-            Action::SetBurrowMembership { assigned: false, .. }
-        ))
+        decision.actions.iter().any(|action| {
+            matches!(
+                action,
+                Action::SetBurrowMembership {
+                    assigned: false,
+                    ..
+                }
+            )
+        })
     }
 
     #[test]
     fn test_alert_lockdown_and_recovery_cycle() -> Result<()> {
         let mut fsm = fsm()?;
         let civilians = [EntityId::new(1), EntityId::new(2)];
-        assert_eq!(fsm.transition_to(ThreatLevel::EmergencyLockdown, &civilians)?.len(), 2);
+        assert_eq!(
+            fsm.transition_to(ThreatLevel::EmergencyLockdown, &civilians)?
+                .len(),
+            2
+        );
         assert_eq!(fsm.current_level(), ThreatLevel::Peace);
         fsm.confirm_observed_level(ThreatLevel::EmergencyLockdown);
         let recovery = fsm.transition_to(ThreatLevel::Recovering, &civilians)?;
-        assert!(matches!(&recovery[0], Action::SetBurrowMembership { assigned: true, .. }));
+        assert!(matches!(
+            &recovery[0],
+            Action::SetBurrowMembership { assigned: true, .. }
+        ));
         let peace = fsm.transition_to(ThreatLevel::Peace, &civilians)?;
-        assert!(matches!(&peace[0], Action::SetBurrowMembership { assigned: false, .. }));
+        assert!(matches!(
+            &peace[0],
+            Action::SetBurrowMembership {
+                assigned: false,
+                ..
+            }
+        ));
         Ok(())
     }
 
@@ -398,7 +429,8 @@ mod tests {
     fn only_advancing_complete_clear_window_can_release() -> Result<()> {
         let mut fsm = fsm()?;
         let civilians = [EntityId::new(1)];
-        let danger = fsm.plan_observation(observation(1, 0, ThreatAssessment::Present), &civilians)?;
+        let danger =
+            fsm.plan_observation(observation(1, 0, ThreatAssessment::Present), &civilians)?;
         assert_eq!(danger.target_level, ThreatLevel::EmergencyLockdown);
         assert_eq!(fsm.current_level(), ThreatLevel::Peace);
         let first = observation(2, 1, ThreatAssessment::Clear);
@@ -406,14 +438,14 @@ mod tests {
         assert_eq!(recovery.target_level, ThreatLevel::Recovering);
         assert!(!releases(&recovery));
         assert_eq!(fsm.plan_observation(first, &civilians)?, recovery);
-        let ready = fsm.plan_observation(observation(3, 11, ThreatAssessment::Clear), &civilians)?;
+        let ready =
+            fsm.plan_observation(observation(3, 11, ThreatAssessment::Clear), &civilians)?;
         assert!(ready.release_ready && releases(&ready));
         assert_eq!(ready.clear_samples, 2);
         assert_eq!(fsm.current_level(), ThreatLevel::Peace);
         fsm.confirm_observed_level(ThreatLevel::Peace);
-        let peaceful = fsm.plan_observation(
-            observation(4, 12, ThreatAssessment::Clear), &civilians,
-        )?;
+        let peaceful =
+            fsm.plan_observation(observation(4, 12, ThreatAssessment::Clear), &civilians)?;
         assert!(peaceful.actions.is_empty());
         Ok(())
     }
@@ -433,7 +465,8 @@ mod tests {
             let decision = fsm.plan_observation(broken, &civilians)?;
             assert!(!decision.release_ready && !releases(&decision));
             assert_eq!(decision.clear_samples, 0);
-            let fresh = fsm.plan_observation(observation(3, 20, ThreatAssessment::Clear), &civilians)?;
+            let fresh =
+                fsm.plan_observation(observation(3, 20, ThreatAssessment::Clear), &civilians)?;
             assert_eq!(fresh.clear_samples, 1);
             assert!(!releases(&fresh));
         }
@@ -468,7 +501,8 @@ mod tests {
         let mut fsm = fsm()?;
         fsm.confirm_observed_level(ThreatLevel::EmergencyLockdown);
         for sequence in 1..10 {
-            let result = fsm.plan_observation(observation(sequence, 0, ThreatAssessment::Clear), &[])?;
+            let result =
+                fsm.plan_observation(observation(sequence, 0, ThreatAssessment::Clear), &[])?;
             assert_eq!(result.clear_samples, 1);
             assert!(!result.release_ready);
         }
@@ -509,8 +543,10 @@ mod tests {
         all.push(EntityId::new(2));
         let decision = fsm.plan_observation(observation(2, 1, ThreatAssessment::Unknown), &all)?;
         assert_eq!(decision.target_level, ThreatLevel::EmergencyLockdown);
-        assert!(matches!(&decision.actions[0], Action::SetBurrowMembership { units, assigned: true, .. }
-            if units == &vec![EntityId::new(1), EntityId::new(2), EntityId::new(3)]));
+        assert!(
+            matches!(&decision.actions[0], Action::SetBurrowMembership { units, assigned: true, .. }
+            if units == &vec![EntityId::new(1), EntityId::new(2), EntityId::new(3)])
+        );
         Ok(())
     }
 
@@ -533,13 +569,24 @@ mod tests {
 
     #[test]
     fn policy_and_roster_bounds_are_enforced() -> Result<()> {
-        assert!(CivilianAlertFsm::with_recovery_policy(EntityId::new(1), vec![], AlertRecoveryPolicy {
-            minimum_clear_samples: 1, ..AlertRecoveryPolicy::default()
-        }).is_err());
+        assert!(
+            CivilianAlertFsm::with_recovery_policy(
+                EntityId::new(1),
+                vec![],
+                AlertRecoveryPolicy {
+                    minimum_clear_samples: 1,
+                    ..AlertRecoveryPolicy::default()
+                }
+            )
+            .is_err()
+        );
         let mut fsm = fsm()?;
         let observation = observation(1, 0, ThreatAssessment::Present);
         assert!(fsm.plan_observation(observation, &[EntityId::NIL]).is_err());
-        assert!(fsm.plan_observation(observation, &[EntityId::new(1); 2]).is_err());
+        assert!(
+            fsm.plan_observation(observation, &[EntityId::new(1); 2])
+                .is_err()
+        );
         let too_many: Vec<_> = (1..=513).map(EntityId::new).collect();
         assert!(fsm.plan_observation(observation, &too_many).is_err());
         Ok(())

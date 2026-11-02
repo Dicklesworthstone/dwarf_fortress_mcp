@@ -3,9 +3,9 @@
 //! production feasibility, causal necessity, or complete-world absence.
 
 use super::{
-    DfmcpError, Digest32, EdgeKind, EntityId, ErrorCode, GraphBudget, GraphDirection,
-    GraphWitness, Index, MAX_VERTICES, Result, WorldSnapshot, budget_error, invariant,
-    put_bytes, put_str, put_u64,
+    DfmcpError, Digest32, EdgeKind, EntityId, ErrorCode, GraphBudget, GraphDirection, GraphWitness,
+    Index, MAX_VERTICES, Result, WorldSnapshot, budget_error, invariant, put_bytes, put_str,
+    put_u64,
 };
 
 pub const DOMINANCE_POLICY: &str = "observed-directed-dominators-rpo/1";
@@ -125,7 +125,9 @@ impl<F: FnMut() -> Result<()>> Run<F> {
             };
             let parent = parents[*cursor];
             if parent == NONE || rank[parent] >= rank[*cursor] {
-                return Err(invariant("dominator intersection does not approach the root"));
+                return Err(invariant(
+                    "dominator intersection does not approach the root",
+                ));
             }
             *cursor = parent;
         }

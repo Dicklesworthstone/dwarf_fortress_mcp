@@ -22,13 +22,25 @@ fn invalid(message: &str) -> DfmcpError {
     DfmcpError::new(ErrorCode::InvalidRequest, message)
 }
 fn exhausted() -> DfmcpError {
-    DfmcpError::new(ErrorCode::BudgetExceeded, "civilian protection exceeds its call allowance")
+    DfmcpError::new(
+        ErrorCode::BudgetExceeded,
+        "civilian protection exceeds its call allowance",
+    )
 }
 fn eq(id: EntityId, field: String, value: Value) -> Predicate {
-    Predicate::FieldCompare { entity_id: id, field, op: CompareOp::Eq, value }
+    Predicate::FieldCompare {
+        entity_id: id,
+        field,
+        op: CompareOp::Eq,
+        value,
+    }
 }
 fn membership(id: EntityId, burrow: EntityId) -> Predicate {
-    eq(id, format!("{}{}", effects::BURROW_FIELD_PREFIX, burrow.get()), Value::Bool(true))
+    eq(
+        id,
+        format!("{}{}", effects::BURROW_FIELD_PREFIX, burrow.get()),
+        Value::Bool(true),
+    )
 }
 
 /// Current configuration at exactly one authorized observation. Membership
@@ -61,18 +73,28 @@ impl CivilianProtectionPlan {
             return Err(exhausted());
         }
         let unique: BTreeSet<_> = civilians.iter().copied().collect();
-        if burrow == EntityId::NIL || unique.contains(&EntityId::NIL)
-            || unique.contains(&burrow) || unique.len() != civilians.len()
+        if burrow == EntityId::NIL
+            || unique.contains(&EntityId::NIL)
+            || unique.contains(&burrow)
+            || unique.len() != civilians.len()
         {
-            return Err(invalid("protection requires a distinct burrow and unique nonzero civilians"));
+            return Err(invalid(
+                "protection requires a distinct burrow and unique nonzero civilians",
+            ));
         }
         let civilians: Vec<_> = unique.into_iter().collect();
         let mut guards = vec![
             Predicate::Paused(true),
-            Predicate::EntityKind { entity_id: burrow, kind: EntityKind::Burrow },
+            Predicate::EntityKind {
+                entity_id: burrow,
+                kind: EntityKind::Burrow,
+            },
         ];
         for id in &civilians {
-            guards.push(Predicate::EntityKind { entity_id: *id, kind: EntityKind::Unit });
+            guards.push(Predicate::EntityKind {
+                entity_id: *id,
+                kind: EntityKind::Unit,
+            });
             guards.push(eq(*id, "alive".to_owned(), Value::Bool(true)));
         }
         let guard = Predicate::All(guards).normalized();
@@ -80,10 +102,13 @@ impl CivilianProtectionPlan {
         target.extend(civilians.iter().map(|id| membership(*id, burrow)));
         let membership_goal = Predicate::All(target).normalized();
         let restriction = Action::SetStandingOrder {
-            key: CIVILIAN_RESTRICTION.to_owned(), value: "ACTIVE".to_owned(),
+            key: CIVILIAN_RESTRICTION.to_owned(),
+            value: "ACTIVE".to_owned(),
         };
         let assignment = Action::SetBurrowMembership {
-            units: civilians.clone(), burrow, assigned: true,
+            units: civilians.clone(),
+            burrow,
+            assigned: true,
         };
         let steps = vec![
             RequestedAction {
@@ -108,45 +133,76 @@ impl CivilianProtectionPlan {
             },
         ];
         let mut encoded_bytes = 4096 + civilians.len() * 32;
-        for predicate in steps.iter().flat_map(|step| {
-            step.preconditions.iter().chain(&step.postconditions)
-        }).chain(std::iter::once(&membership_goal)) {
+        for predicate in steps
+            .iter()
+            .flat_map(|step| step.preconditions.iter().chain(&step.postconditions))
+            .chain(std::iter::once(&membership_goal))
+        {
             predicate.validate_shape()?;
             encoded_bytes += predicate.canonical_bytes().len();
         }
         // Reserve duplicated goal/step representations plus generated defaults.
         encoded_bytes = encoded_bytes.checked_mul(4).ok_or_else(exhausted)?;
-        if encoded_bytes > MAX_PROTECTION_BYTES { return Err(exhausted()); }
-        Ok(Self { burrow, civilians, steps, membership_goal, encoded_bytes })
+        if encoded_bytes > MAX_PROTECTION_BYTES {
+            return Err(exhausted());
+        }
+        Ok(Self {
+            burrow,
+            civilians,
+            steps,
+            membership_goal,
+            encoded_bytes,
+        })
     }
 
     #[must_use]
-    pub fn civilians(&self) -> &[EntityId] { &self.civilians }
+    pub fn civilians(&self) -> &[EntityId] {
+        &self.civilians
+    }
     #[must_use]
-    pub const fn burrow(&self) -> EntityId { self.burrow }
+    pub const fn burrow(&self) -> EntityId {
+        self.burrow
+    }
     #[must_use]
-    pub fn requested_actions(&self) -> &[RequestedAction] { &self.steps }
+    pub fn requested_actions(&self) -> &[RequestedAction] {
+        &self.steps
+    }
     #[must_use]
-    pub const fn encoded_bytes(&self) -> usize { self.encoded_bytes }
+    pub const fn encoded_bytes(&self) -> usize {
+        self.encoded_bytes
+    }
 
     /// For the existing MCP action-intent compiler, which constructs its
     /// terminal from all action defaults. The last step additionally preserves
     /// every named citizen's liveness, kind, membership and paused-world proof.
     #[must_use]
-    pub fn into_requested_actions(self) -> Vec<RequestedAction> { self.steps }
+    pub fn into_requested_actions(self) -> Vec<RequestedAction> {
+        self.steps
+    }
 
     /// Pure goal composition for an already authorized observation shell. This
     /// predicate grants no source eligibility, read capability or effect authority.
     #[must_use]
     pub fn configuration_goal(&self, fortress: FortressId) -> Predicate {
         let mut predicates = vec![self.membership_goal.clone()];
-        predicates.extend(effects::default_postconditions(&self.steps[0].action, "", fortress));
+        predicates.extend(effects::default_postconditions(
+            &self.steps[0].action,
+            "",
+            fortress,
+        ));
         Predicate::All(predicates).normalized()
     }
 
-    fn authorize(&self, evidence: &PredicateEvidence<'_>, context: &OperationContext) -> Result<()> {
+    fn authorize(
+        &self,
+        evidence: &PredicateEvidence<'_>,
+        context: &OperationContext,
+    ) -> Result<()> {
         if context.anchor != evidence.snapshot().anchor() {
-            return Err(DfmcpError::new(ErrorCode::StaleAnchor, "protection requires one exact current anchor"));
+            return Err(DfmcpError::new(
+                ErrorCode::StaleAnchor,
+                "protection requires one exact current anchor",
+            ));
         }
         if self.civilians.len() + 2 > context.budget.max_entities as usize
             || self.encoded_bytes as u64 > context.budget.max_bytes
@@ -163,17 +219,29 @@ impl CivilianProtectionPlan {
     /// Effect grants, checkpoint policy, idempotency and dispatch stay with the
     /// ordinary planner/adapter. No native bridge or alternate authority exists.
     pub fn prepare(
-        &self, id: IntentId, summary: String, evidence: &PredicateEvidence<'_>,
+        &self,
+        id: IntentId,
+        summary: String,
+        evidence: &PredicateEvidence<'_>,
         context: &OperationContext,
     ) -> Result<PreparedPlan> {
         self.authorize(evidence, context)?;
-        if context.budget.max_actions < self.steps.len() as u32 { return Err(exhausted()); }
+        if context.budget.max_actions < self.steps.len() as u32 {
+            return Err(exhausted());
+        }
         let goal = self.configuration_goal(evidence.snapshot().fortress_id);
         let mut steps = self.steps.clone();
         steps[1].postconditions = vec![goal.clone()];
-        let risk = steps.iter().map(|step| step.action.risk()).max().ok_or_else(exhausted)?;
+        let risk = steps
+            .iter()
+            .map(|step| step.action.risk())
+            .max()
+            .ok_or_else(exhausted)?;
         let intent = Intent {
-            id, anchor: evidence.snapshot().anchor(), summary, terminal_condition: goal,
+            id,
+            anchor: evidence.snapshot().anchor(),
+            summary,
+            terminal_condition: goal,
             constraints: vec![Constraint::MaxRisk(risk), Constraint::KeepPaused],
             requested_actions: steps,
         };
@@ -183,13 +251,19 @@ impl CivilianProtectionPlan {
     /// Read current truth without changing the world, remembering a clear
     /// streak, confirming an FSM level, or granting release authority.
     pub fn evaluate(
-        &self, evidence: &PredicateEvidence<'_>, context: &OperationContext,
+        &self,
+        evidence: &PredicateEvidence<'_>,
+        context: &OperationContext,
     ) -> Result<ProtectionProgress> {
         self.authorize(evidence, context)?;
         let mut progress = ProtectionProgress {
-            anchor: context.anchor, requested_civilians: self.civilians.len(), assigned: 0,
-            unassigned: 0, unknown_memberships: 0,
-            configuration: evidence.evaluate(&self.configuration_goal(context.anchor.fortress_id))?,
+            anchor: context.anchor,
+            requested_civilians: self.civilians.len(),
+            assigned: 0,
+            unassigned: 0,
+            unknown_memberships: 0,
+            configuration: evidence
+                .evaluate(&self.configuration_goal(context.anchor.fortress_id))?,
         };
         for id in &self.civilians {
             match evidence.evaluate(&membership(*id, self.burrow))? {

@@ -66,6 +66,8 @@ struct Memory {
     pos: u64,
     syncs: Arc<AtomicUsize>,
     fail_at: Arc<AtomicUsize>,
+    pause_sync: Arc<AtomicUsize>,
+    paused: Arc<AtomicBool>,
 }
 impl Read for Memory {
     fn read(&mut self, out: &mut [u8]) -> io::Result<usize> {
@@ -105,6 +107,10 @@ impl Seek for Memory {
 impl EffectJournalStorage for Memory {
     fn sync(&mut self) -> io::Result<()> {
         let n = self.syncs.fetch_add(1, Ordering::SeqCst) + 1;
+        if n == self.pause_sync.load(Ordering::SeqCst) {
+            self.paused.store(true, Ordering::SeqCst);
+            thread::sleep(Duration::from_millis(350));
+        }
         if n == self.fail_at.load(Ordering::SeqCst) {
             return Err(io::Error::other("injected sync"));
         }
@@ -135,6 +141,142 @@ struct Server {
     stop: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
 }
+// Poll timeouts bound shutdown latency; only this fixed deadline bounds lifetime.
+struct PeerIo<'a> {
+    socket: &'a mut TcpStream,
+    stop: &'a AtomicBool,
+    deadline: Instant,
+}
+impl PeerIo<'_> {
+    fn poll_timeout(&self) -> io::Result<Duration> {
+        if self.stop.load(Ordering::Acquire) {
+            return Err(io::Error::new(
+                io::ErrorKind::ConnectionAborted,
+                "peer stopped",
+            ));
+        }
+        let remaining = self
+            .deadline
+            .checked_duration_since(Instant::now())
+            .filter(|duration| !duration.is_zero())
+            .ok_or_else(|| io::Error::new(io::ErrorKind::TimedOut, "peer deadline"))?;
+        Ok(remaining.min(Duration::from_millis(100)))
+    }
+}
+impl Read for PeerIo<'_> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        loop {
+            self.socket.set_read_timeout(Some(self.poll_timeout()?))?;
+            match self.socket.read(buf) {
+                Err(e)
+                    if matches!(
+                        e.kind(),
+                        io::ErrorKind::WouldBlock
+                            | io::ErrorKind::TimedOut
+                            | io::ErrorKind::Interrupted
+                    ) =>
+                {
+                    continue;
+                }
+                result => return result,
+            }
+        }
+    }
+}
+impl Write for PeerIo<'_> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        loop {
+            self.socket.set_write_timeout(Some(self.poll_timeout()?))?;
+            match self.socket.write(buf) {
+                Err(e)
+                    if matches!(
+                        e.kind(),
+                        io::ErrorKind::WouldBlock
+                            | io::ErrorKind::TimedOut
+                            | io::ErrorKind::Interrupted
+                    ) =>
+                {
+                    continue;
+                }
+                result => return result,
+            }
+        }
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        self.socket.flush()
+    }
+}
+fn connected_test_pair() -> io::Result<(TcpStream, TcpStream)> {
+    let listener = TcpListener::bind("127.0.0.1:0")?;
+    let address = listener.local_addr()?;
+    listener.set_nonblocking(true)?;
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let stream = TcpStream::connect_timeout(&address, Duration::from_secs(2))?;
+    stream.set_write_timeout(Some(Duration::from_secs(2)))?;
+    loop {
+        if Instant::now() >= deadline {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "test pair setup deadline",
+            ));
+        }
+        match listener.accept() {
+            Ok((socket, _)) => return Ok((stream, socket)),
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                thread::sleep(Duration::from_millis(1))
+            }
+            Err(error) => return Err(error),
+        }
+    }
+}
+#[test]
+fn peer_io_preserves_partial_reads_and_bounds_cancel_deadline_and_eof() -> io::Result<()> {
+    let (mut stream, mut socket) = connected_test_pair()?;
+    thread::scope(|scope| {
+        let sender = scope.spawn(move || -> io::Result<()> {
+            stream.write_all(b"ab")?;
+            thread::sleep(Duration::from_millis(160));
+            stream.write_all(b"cd")?;
+            thread::sleep(Duration::from_millis(100));
+            Ok(())
+        });
+        let stop = AtomicBool::new(false);
+        let mut peer = PeerIo {
+            socket: &mut socket,
+            stop: &stop,
+            deadline: Instant::now() + Duration::from_secs(2),
+        };
+        let mut bytes = [0; 4];
+        peer.read_exact(&mut bytes)?;
+        assert_eq!(&bytes, b"abcd");
+        stop.store(true, Ordering::Release);
+        assert_eq!(
+            peer.read(&mut bytes).unwrap_err().kind(),
+            io::ErrorKind::ConnectionAborted
+        );
+        stop.store(false, Ordering::Release);
+        peer.deadline = Instant::now();
+        assert_eq!(
+            peer.read(&mut bytes).unwrap_err().kind(),
+            io::ErrorKind::TimedOut
+        );
+        sender.join().unwrap()?;
+        let (mut sender, mut socket) = connected_test_pair()?;
+        sender.write_all(b"a")?;
+        sender.shutdown(std::net::Shutdown::Write)?;
+        let mut peer = PeerIo {
+            socket: &mut socket,
+            stop: &stop,
+            deadline: Instant::now() + Duration::from_secs(2),
+        };
+        assert_eq!(
+            peer.read_exact(&mut bytes).unwrap_err().kind(),
+            io::ErrorKind::UnexpectedEof
+        );
+        assert_eq!(bytes[0], b'a');
+        Ok(())
+    })
+}
 impl Server {
     fn new(behavior: Behavior) -> Self {
         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
@@ -151,14 +293,18 @@ impl Server {
             while !stopping.load(Ordering::Acquire) && Instant::now() < deadline {
                 match listener.accept() {
                     Ok((mut socket, _)) => {
-                        socket
-                            .set_read_timeout(Some(Duration::from_millis(200)))
-                            .unwrap();
-                        socket
-                            .set_write_timeout(Some(Duration::from_millis(200)))
-                            .unwrap();
                         socket.set_nodelay(true).unwrap();
-                        let _ = Self::serve(&mut socket, &s, &log, &stopping);
+                        let mut peer = PeerIo {
+                            socket: &mut socket,
+                            stop: &stopping,
+                            deadline,
+                        };
+                        if let Err(error) = Self::serve(&mut peer, &s, &log, &stopping) {
+                            eprintln!(
+                                "excavation TCP peer error: {error:?}; calls: {:?}",
+                                *log.lock().unwrap()
+                            );
+                        }
                     }
                     Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
                         thread::sleep(Duration::from_millis(1))
@@ -176,7 +322,7 @@ impl Server {
         }
     }
     fn serve(
-        socket: &mut TcpStream,
+        socket: &mut PeerIo<'_>,
         state: &Mutex<Behavior>,
         calls: &Mutex<Vec<usize>>,
         stop: &AtomicBool,
@@ -455,6 +601,34 @@ fn coordinator_joins_real_tcp_start_to_synced_dispatch() -> Result<()> {
     assert_eq!(owner.pending_count(), 0);
     let replay = ExcavationCoordinator::open(memory, p.before().fortress(), &c)?;
     assert_eq!(replay.entry(p.key()).unwrap().native(), Some(&result));
+    Ok(())
+}
+#[test]
+fn synced_dispatch_can_outlast_peer_idle_timeout_within_caller_budget() -> Result<()> {
+    let memory = Memory::default();
+    memory.pause_sync.store(4, Ordering::SeqCst);
+    let server = Server::new(Behavior {
+        required_syncs: Some(memory.syncs.clone()),
+        ..Behavior::default()
+    });
+    let mut source = server.connect(false)?;
+    let p = plan()?;
+    let c = context()?;
+    let mut owner = ExcavationCoordinator::create(memory.clone(), source.binding().clone(), &c)?;
+    let result = owner.start(&mut source, p.clone(), p.digest(), &c);
+    assert!(memory.paused.load(Ordering::SeqCst));
+    assert_eq!(server.count(2), 1, "prepare must precede dispatch sync");
+    let result = result?;
+    assert!(result.resolved());
+    assert_eq!(server.count(3), 1);
+    assert_eq!(owner.pending_count(), 0);
+    assert_eq!(
+        ExcavationCoordinator::open(memory, p.before().fortress(), &c)?
+            .entry(p.key())
+            .unwrap()
+            .native(),
+        Some(&result)
+    );
     Ok(())
 }
 #[test]
@@ -739,6 +913,15 @@ fn actual_tcp_commit_loss_recovers_from_actual_private_disk_journal() -> Result<
         let mut owner = create_private_excavation(&candidate, source.binding().clone(), &c)?;
         assert!(owner.start(&mut source, p.clone(), p.digest(), &c).is_err());
     }
+    assert_eq!(
+        server.count(3),
+        1,
+        "lost reply must follow exactly one commit"
+    );
+    assert_eq!(
+        server.behavior.lock().unwrap().record.as_deref(),
+        Some(stopped()?.canonical_bytes())
+    );
     assert_eq!(
         inspect_private_excavation(&candidate, p.before().fortress(), &c)?.pending_count(),
         1
