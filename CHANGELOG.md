@@ -9,6 +9,10 @@
 - Check Query authority and the 32-byte budget before Tree entropy I/O, and
   remove the unused Record import. Extend source-boundary mutation checks.
   Corrected-source execution and live gameplay proof remain pending.
+- Preserve direct `8eb7754` test-compilation exit 101 and zero executed cases.
+  Annotate chunk-test sizes as `usize` and write the identical newline-inclusive
+  bound as a strict comparison. Production encoding already compiled; complete
+  corrected-source execution remains pending.
 
 ## 2026-11-02 — Package complete Tree evidence within modern MCP bounds
 

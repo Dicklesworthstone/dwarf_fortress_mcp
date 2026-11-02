@@ -73,6 +73,10 @@ empty metadata: the pinned codec rejects discovery-only server identity there.
 The correction also removes an unused import and checks Query authority plus
 the 32-byte budget before reading Tree entropy, matching the workshop boundary.
 Fresh corrected-source compilation and execution are still required.
+Direct `8eb7754` execution compiled the production library but stopped before
+tests on an ambiguous integer type in the chunk-boundary test. The test sizes
+now explicitly use `usize`; the newline-inclusive bound is equivalently written
+as a strict comparison. This preserves every byte size, assertion and case.
 Native Tree/workshop code, protocols, vectors and ground-material policy remain
 byte-identical to cfcc. No production registry/runner/floor is widened.
 
