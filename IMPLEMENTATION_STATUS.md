@@ -1,5 +1,10 @@
 # Implementation Status
 
+Tree envelope accounting now reserves 4096 bytes for admitted numeric request IDs.
+The source, contract, mutation check and boundary regression are updated; Rust
+execution remains pending. This repairs project-budget accounting and does not
+claim a reproduced native 1MiB transport failure.
+
 Session and doctor resource handlers now explicitly request private zero-TTL
 responses. Source and regression tests are present; execution and independent
 qualification are pending. This change does not establish native or runtime

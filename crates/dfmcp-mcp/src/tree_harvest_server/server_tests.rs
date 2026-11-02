@@ -216,3 +216,111 @@ fn tree_packet_remaining_metadata_overflow_preserves_ack_and_uncertainty() {
     assert_eq!(value["retained_reference"], reference);
     assert_eq!(value["result"]["custody"], reference);
 }
+
+#[test]
+fn tree_packet_numeric_id_full_envelope_preserves_chunks_at_budget_boundary() {
+    use dfmcp_core::Digest32;
+    use fastmcp_rust::{
+        ContentBlock, CoreResult, FinalCoreResult, JsonRpcMessage, JsonRpcResponse,
+        RequestId as WireRequestId, ResultPeerEra, decode_strict_jsonrpc_message,
+        decode_strict_jsonrpc_response, decode_typed_complete,
+    };
+    // Synthetic byte-preservation and envelope accounting, not native tree facts.
+    // Search the real packet/presentation boundary, rather than constructing an
+    // unproducible CompleteResult or checking a small response only.
+    let left = "a5".repeat(120_000);
+    let right = "5a".repeat(120_000);
+    let reference = json!({"acknowledged":{"journal_id":"original-journal","head":"original-head","frames":3},"original_key":"original","uncertain_effect":true});
+    let mut low = 0usize;
+    let mut high = 65_536usize;
+    let mut best = None;
+    while low <= high {
+        let padding = low + (high - low) / 2;
+        let raw = packet(
+            "fortress.wait",
+            None,
+            None,
+            json!({"ok":true,"left":{"native_capture_hex":left},"right":{"native_capture_hex":right},"padding":"x".repeat(padding)}),
+            reference.clone(),
+        );
+        let complete = presentation::present(raw).expect("bounded real presentation");
+        if complete.payload.content.len() == 11 {
+            best = Some(complete);
+            low = padding + 1;
+        } else if padding == 0 {
+            break;
+        } else {
+            high = padding - 1;
+        }
+    }
+    let complete = best.expect("large lossless presentation fits");
+    let ContentBlock::Text { text, .. } = &complete.payload.content[0] else {
+        panic!("Agent Turn text")
+    };
+    let packet: Value = serde_json::from_str(text).expect("complete Agent Turn");
+    spine(&packet);
+    assert_eq!(packet["retained_reference"], reference);
+    for (name, expected, byte) in [("left", &left, 0xa5), ("right", &right, 0x5a)] {
+        let descriptor = &packet["result"][name]["native_capture_hex"];
+        assert_eq!(descriptor["byte_length"], 120_000);
+        assert_eq!(
+            descriptor["sha256"],
+            Digest32::of_bytes(&vec![byte; 120_000]).to_hex()
+        );
+        let mut joined = String::new();
+        for part in descriptor["blocks"].as_array().expect("ordered blocks") {
+            assert_eq!(part["offset_bytes"], joined.len() / 2);
+            let index = part["content_index"].as_u64().expect("content index") as usize;
+            let ContentBlock::Text { text, .. } = &complete.payload.content[index] else {
+                panic!("native evidence text")
+            };
+            assert_eq!(part["byte_length"], text.len() / 2);
+            assert_eq!(
+                part["sha256"],
+                Digest32::of_bytes(&vec![byte; text.len() / 2]).to_hex()
+            );
+            joined.push_str(text);
+        }
+        assert_eq!(&joined, expected);
+    }
+    let digits = "9".repeat(4096);
+    let request = format!(
+        r#"{{"jsonrpc":"2.0","id":{digits},"method":"tools/call","params":{{"name":"fortress.wait","arguments":{{}}}}}}"#
+    );
+    let JsonRpcMessage::Request(request) =
+        decode_strict_jsonrpc_message(request.as_bytes(), 1024 * 1024).expect("maximum numeric ID")
+    else {
+        panic!("request")
+    };
+    let id = request.id.expect("request ID");
+    assert!(matches!(&id, WireRequestId::Integer(value) if value == &digits));
+    let encoded = CoreResult::Final(FinalCoreResult::ToolsCall {
+        result: complete,
+        diagnostic: None,
+    })
+    .encode()
+    .expect("modern complete result");
+    let result: Value = serde_json::from_str(&encoded).expect("result JSON");
+    let wire = serde_json::to_vec(&JsonRpcResponse::success(id, result)).expect("response wire");
+    assert!(wire.len() + 1 <= RESPONSE_BYTES as usize);
+    assert!(
+        wire.len() + 1 > RESPONSE_BYTES as usize - 64,
+        "fixture must reach the actual budget boundary"
+    );
+    let admitted = decode_strict_jsonrpc_response(&wire, 1024 * 1024).expect("modern response");
+    assert!(
+        matches!(admitted.response().id.as_ref(), Some(WireRequestId::Integer(value)) if value == &digits)
+    );
+    assert!(
+        decode_typed_complete::<FinalCallToolResult>(
+            admitted.raw_result().expect("raw result"),
+            ResultPeerEra::Modern,
+        )
+        .is_ok()
+    );
+    let overlong = format!(
+        r#"{{"jsonrpc":"2.0","id":{},"method":"ping"}}"#,
+        "9".repeat(4097)
+    );
+    assert!(decode_strict_jsonrpc_message(overlong.as_bytes(), 1024 * 1024).is_err());
+}

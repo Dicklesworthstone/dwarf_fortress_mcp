@@ -59,7 +59,7 @@ def check(root: Path = ROOT) -> dict:
         A + "tree_harvest/journal.rs": ["pub(crate)modjournal_tests;", "ack.acknowledge(self.pin(),&w.reserve(crate::workshop_construction::acknowledgement::WORK_BYTESasusize)?,)?;", "letpermitted=self.dispatchable();self.permit=false;"],
         A + "tree_harvest/rpc.rs": ["modrpc_tests;", "self.prepared.take().as_ref()==Some(p)", "progress.generation==self.binding.generation", "consumed_tree_tick"],
         M + "src/tree_harvest_server.rs": ["modserver_tests;", "modpresentation;", "spine(operation,session,request)", "\"fortress_plan\"", "\"fortress_commit\"", "reference[\"uncertain_effect\"]==true"],
-        M + "src/tree_harvest_server/presentation.rs": ["constCHUNK_BYTES:usize=24_000;", "ResultMeta::empty()", "CoreResult::Final(FinalCoreResult::ToolsCall{", ".encode()", "ENVELOPE_BYTES", "\"dfmcp.tree-native-capture/1\"", "Digest32::of_bytes(chunk)", "overflow_packet("],
+        M + "src/tree_harvest_server/presentation.rs": ["constCHUNK_BYTES:usize=24_000;", "ResultMeta::empty()", "CoreResult::Final(FinalCoreResult::ToolsCall{", ".encode()", "ENVELOPE_BYTES", ".len()+4096+", "\"dfmcp.tree-native-capture/1\"", "Digest32::of_bytes(chunk)", "overflow_packet("],
         M + "src/tree_harvest_server/runtime.rs": ["self.withdraw();", "acks.latest()", "work.reserve(&current,32*1024*1024)", "journal::open_private(", "c.authorize(Capability::Query,RiskTier::ReadOnly,&[],Some(area))?;", "nonce(c,self.scope)?", "nonce(&work.reserve(&current,32)?,config.scope)?", "c.budget.max_bytes<32"],
         M + "src/bin/dfmcp-tree-harvest-v1-21-dev-server.rs": ["dfmcp_mcp::tree_harvest_server::run_stdio();", "std::process::ExitCode::FAILURE"],
     }
@@ -75,7 +75,7 @@ def check(root: Path = ROOT) -> dict:
     packaging = {
         "schema": "dfmcp.tree-native-capture/1", "content_zero": "complete_agent_turn_ack_and_descriptors",
         "encoding": "hex", "raw_chunk_bytes": 24000, "result_string_bytes_max": 65536,
-        "complete_jsonrpc_bytes_max": 524288, "jsonrpc_encoded_string_id_bytes_max": 256,
+        "complete_jsonrpc_bytes_max": 524288, "jsonrpc_encoded_string_id_bytes_max": 256, "jsonrpc_numeric_id_bytes_max": 4096,
         "binding": ["field_path", "byte_length", "sha256", "ordered_content_index", "offset_bytes", "chunk_byte_length", "chunk_sha256"],
         "consumer_must_verify_all_blocks": True, "transport_limits_changed": False,
     }

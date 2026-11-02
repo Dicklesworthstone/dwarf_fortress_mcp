@@ -201,7 +201,8 @@
       "tree_packet_pre_effect_errors_have_no_invented_work_or_null_references",
       "tree_packet_output_overflow_keeps_full_spine_and_original_uncertainty",
       "tree_packet_chunked_native_evidence_roundtrips_and_respects_modern_bounds",
-      "tree_packet_remaining_metadata_overflow_preserves_ack_and_uncertainty"
+      "tree_packet_remaining_metadata_overflow_preserves_ack_and_uncertainty",
+      "tree_packet_numeric_id_full_envelope_preserves_chunks_at_budget_boundary"
     ],
     "rust_stdio_cases": [
       "tree_harvest_server_actual_modern_stdio_positive_negative_and_crash_recovery"
@@ -239,7 +240,8 @@
       "chunk_sha256"
     ],
     "consumer_must_verify_all_blocks": true,
-    "transport_limits_changed": false
+    "transport_limits_changed": false,
+    "jsonrpc_numeric_id_bytes_max": 4096
   },
   "presentation_repair_bead": "dfmcp-reality-wiring-proof-4bf.14.1"
 }

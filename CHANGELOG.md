@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-02 — Account for maximum numeric MCP request IDs
+
+- Tree result sizing now reserves the pinned codec's 4096-byte numeric ID bound,
+  alongside framing and newline. A new full-envelope/chunk-preservation regression
+  targets the actual 512KiB boundary; Rust execution is pending.
+
 ## 2026-11-02 — Revalidate session resources on every read
 
 - Session and doctor resource responses now specify a private zero TTL, so

@@ -183,9 +183,9 @@ explicitly resolve descriptors when full native evidence is needed.
 The pinned transport's 65536-byte string and 1MiB complete-result guards remain
 unchanged. The producer serializes the complete typed result with empty ordinary
 tool-result metadata, matching the pinned dispatch and retained actual wire data.
-It includes the worst-case admitted 256-byte encoded JSON-RPC ID, framing and
-newline in the existing 512KiB product
-ceiling. If remaining metadata cannot fit, the bounded AgentTurnBuilder fallback
+It reserves the larger admitted ID representation: a 4096-byte integer lexeme
+(string IDs allow 256 encoded bytes), plus framing and newline, inside the
+existing 512KiB product ceiling. If remaining metadata cannot fit, the bounded AgentTurnBuilder fallback
 keeps original custody/ACK and uncertainty and explicitly omits full evidence.
 It does not report an effect completed or grant retry permission.
 
