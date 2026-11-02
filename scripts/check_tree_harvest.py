@@ -26,6 +26,7 @@ SOURCES = [
     A + "build_placement/journal/private_file.rs", A + "workshop_construction/acknowledgement.rs",
     *[A + "tree_harvest/" + n for n in ("mod.rs", "rpc.rs", "journal.rs", "tests.rs", "rpc_tests.rs", "journal_tests.rs")],
     M + "src/lib.rs", M + "src/tree_harvest_server.rs", M + "src/tree_harvest_server/runtime.rs",
+    M + "src/tree_harvest_server/presentation.rs",
     M + "src/tree_harvest_server/server_tests.rs", M + "src/bin/dfmcp-tree-harvest-v1-21-dev-server.rs",
     M + "tests/tree_harvest_stdio.rs", "tests/native/workshop/stubs.h",
     *["tests/native/tree_harvest/" + n for n in ("stubs.h", "handler.cpp", "vectors.json")],
@@ -57,7 +58,8 @@ def check(root: Path = ROOT) -> dict:
         A + "tree_harvest/mod.rs": ["pubmodjournal;", "pubmodrpc;", "pub(crate)modtests;"],
         A + "tree_harvest/journal.rs": ["pub(crate)modjournal_tests;", "ack.acknowledge(self.pin(),&w.reserve(crate::workshop_construction::acknowledgement::WORK_BYTESasusize)?,)?;", "letpermitted=self.dispatchable();self.permit=false;"],
         A + "tree_harvest/rpc.rs": ["modrpc_tests;", "self.prepared.take().as_ref()==Some(p)", "progress.generation==self.binding.generation", "consumed_tree_tick"],
-        M + "src/tree_harvest_server.rs": ["modserver_tests;", "spine(operation,session,request)", "\"fortress_plan\"", "\"fortress_commit\"", "reference[\"uncertain_effect\"]==true"],
+        M + "src/tree_harvest_server.rs": ["modserver_tests;", "modpresentation;", "spine(operation,session,request)", "\"fortress_plan\"", "\"fortress_commit\"", "reference[\"uncertain_effect\"]==true"],
+        M + "src/tree_harvest_server/presentation.rs": ["constCHUNK_BYTES:usize=24_000;", "ResultMeta::server_generated(identity)", "serde_json::to_string(result)", "ENVELOPE_BYTES", "\"dfmcp.tree-native-capture/1\"", "Digest32::of_bytes(chunk)", "overflow_packet("],
         M + "src/tree_harvest_server/runtime.rs": ["self.withdraw();", "acks.latest()", "work.reserve(&current,32*1024*1024)", "journal::open_private("],
         M + "src/bin/dfmcp-tree-harvest-v1-21-dev-server.rs": ["dfmcp_mcp::tree_harvest_server::run_stdio();", "std::process::ExitCode::FAILURE"],
     }
@@ -68,6 +70,17 @@ def check(root: Path = ROOT) -> dict:
     handlers = re.findall(r"pub fn (fortress_\w+)\(", server)
     if len(handlers) != 11 or set(handlers) != set(TOOLS):
         raise ValueError("tree eleven handlers differ")
+    if server.count("-> McpResult<CompleteResult<FinalCallToolResult>>") != 11:
+        raise ValueError("tree tools must return explicit typed modern results")
+    packaging = {
+        "schema": "dfmcp.tree-native-capture/1", "content_zero": "complete_agent_turn_ack_and_descriptors",
+        "encoding": "hex", "raw_chunk_bytes": 24000, "result_string_bytes_max": 65536,
+        "complete_jsonrpc_bytes_max": 524288, "jsonrpc_encoded_string_id_bytes_max": 256,
+        "binding": ["field_path", "byte_length", "sha256", "ordered_content_index", "offset_bytes", "chunk_byte_length", "chunk_sha256"],
+        "consumer_must_verify_all_blocks": True, "transport_limits_changed": False,
+    }
+    if contract.get("mcp_result_packaging") != packaging:
+        raise ValueError("tree result packaging contract differs")
     for name in ("OpenSession", "Observe", "Query", "Plan", "Commit", "Wait", "Cancel", "Checkpoint", "Restore", "Explain", "Doctor"):
         if f".tool(Fortress{name})" not in compact[M + "src/tree_harvest_server.rs"]:
             raise ValueError("unregistered tree tool")

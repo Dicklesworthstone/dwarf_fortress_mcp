@@ -6,6 +6,7 @@ This exercises Rust handlers/transport/custody, never a real game or native R1.
 """
 from __future__ import annotations
 import argparse
+import copy
 import hashlib
 import json
 import os
@@ -74,8 +75,8 @@ def fields(raw):
     return out
 
 
-def keyed(name, key):
-    original = VECTORS[name]
+def keyed(name, key, vectors=None):
+    original = (VECTORS if vectors is None else vectors)[name]
     old_len = int.from_bytes(original[8:10], "big")
     key = key.encode()
     raw = bytearray(original[:8] + len(key).to_bytes(2, "big") + key + original[10 + old_len:])
@@ -84,6 +85,99 @@ def keyed(name, key):
     raw[plan_at + 32:plan_at + 48] = hashlib.sha256(b"dfmcp-tree-harvest-token/1\0" + len(key).to_bytes(2, "big") + key + plan).digest()[:16]
     raw[-32:] = hashlib.sha256(b"dfmcp-tree-harvest-receipt/1\0" + raw[:-32]).digest()
     return bytes(raw)
+
+
+def large_vectors(width):
+    """Independent canonical fixtures, never rewrites native golden vectors.
+
+    Width 13 is representative; width 14 exercises all 2048 supported cells.
+    Both capsules' hex exceeds the pinned single-string ceiling. This is a
+    protocol double, not native/game capture or causal wood evidence.
+    """
+    base = VECTORS["capture"]
+    assert len(base) == 1090 and base[:8] == b"DFMTC021" and width in (13, 14)
+    old_body = int.from_bytes(base[107:109], "big")
+    at = 109 + old_body * 2
+    old_cells = int.from_bytes(base[at:at + 2], "big"); at += 2
+    tail = base[at + old_cells * 36:]
+    assert len(tail) == 61
+    header = bytearray(base[:107])
+    header[36:48] = struct.pack(">III", 64, 64, 16)
+    header[78:90] = struct.pack(">III", width, width, 8)
+    header[90:102] = struct.pack(">III", 16, 15, 2)
+    body = [0] * (width * width * 8)
+    for z in range(8):
+        body[(z * width + width // 2) * width + width // 2] = 1
+        body[(z * width + width // 2) * width + width // 2 + 1] = 1
+    cells = bytearray(); x1 = y1 = 15 - width // 2
+    for z in range(2, 10):
+        for y in range(y1 - 1, y1 + width + 1):
+            for x in range(x1 - 1, x1 + width + 1):
+                cells += struct.pack(">III", x, y, z) + base[at + 12:at + 36]
+    capture = bytes(header) + struct.pack(">H", len(body)) + struct.pack(">" + "H" * len(body), *body)
+    capture += struct.pack(">H", len(cells) // 36) + cells + tail
+    assert len(capture) <= 128 * 1024 and len(capture.hex()) > 65536
+    assert len(cells) // 36 == (width + 2) ** 2 * 8 <= 2048
+    after = bytearray(capture); after[16:24] = (1).to_bytes(8, "big")
+    cell_at = 111 + len(body) * 2
+    for i in range(len(cells) // 36):
+        pos = cell_at + i * 36
+        x, y, z = struct.unpack(">III", after[pos:pos + 12])
+        if [x, y, z] == [16, 15, 2]: after[pos + 33] = 1
+        if z == 2 and x // 16 == 1 and y // 16 == 0: after[pos + 35] = 1
+    plan = hashlib.sha256(b"dfmcp-tree-harvest-plan/1\0" + struct.pack(">III", 15, 15, 2) + hashlib.sha256(capture).digest()).digest()
+    key = b"tree-001"
+    token = hashlib.sha256(b"dfmcp-tree-harvest-token/1\0" + struct.pack(">H", len(key)) + key + plan).digest()[:16]
+    proof = b"DFMTI021" + struct.pack(">IIIIIIiB", 15, 15, 2, 16, 15, 2, 3, 1)
+    vectors = {**VECTORS, "capture": capture, "plan": plan}
+    for name, phase, reason in (("prepared", 0, 0), ("indeterminate", 1, 5), ("designated", 2, 0), ("refused", 3, 1), ("cancelled", 4, 4)):
+        raw = b"DFMTR021" + struct.pack(">H", len(key)) + key + plan + token + struct.pack(">I", len(capture)) + capture
+        raw += bytes([phase, reason, int(name == "designated")])
+        if name == "designated": raw += struct.pack(">I", len(after)) + after
+        raw += bytes([int(name == "designated")])
+        if name == "designated": raw += proof
+        vectors[name] = raw + hashlib.sha256(b"dfmcp-tree-harvest-receipt/1\0" + raw).digest()
+    progress = bytearray(vectors["progress_supply"]); progress[36:48] = struct.pack(">III", 64, 64, 16)
+    vectors["progress_supply"] = bytes(progress)
+    return vectors
+
+
+def resolve_content(content):
+    """Verify every explicit block binding before exposing complete evidence."""
+    assert isinstance(content, list) and content
+    for block in content:
+        assert block["type"] == "text" and len(block["text"].encode()) <= 65536
+    value = json.loads(content[0]["text"])
+    next_index = 1
+    def walk(node, path):
+        nonlocal next_index
+        if isinstance(node, dict):
+            for key, child in list(node.items()):
+                field = path + "/" + key.replace("~", "~0").replace("/", "~1")
+                if key != "native_capture_hex":
+                    walk(child, field); continue
+                assert isinstance(child, dict) and child["schema"] == "dfmcp.tree-native-capture/1"
+                assert child["field_path"] == field and child["encoding"] == "hex"
+                assert 0 < child["byte_length"] <= 128 * 1024 and child["blocks"]
+                raw = bytearray()
+                for part in child["blocks"]:
+                    index = part["content_index"]
+                    assert index == next_index and index < len(content)
+                    next_index += 1
+                    text = content[index]["text"]
+                    assert 0 < len(text) <= 48000 and len(text) % 2 == 0
+                    assert all(c in "0123456789abcdef" for c in text)
+                    chunk = bytes.fromhex(text)
+                    assert part["offset_bytes"] == len(raw) and part["byte_length"] == len(chunk)
+                    assert part["sha256"] == hashlib.sha256(chunk).hexdigest()
+                    raw.extend(chunk)
+                assert len(raw) == child["byte_length"] and child["sha256"] == hashlib.sha256(raw).hexdigest()
+                node[key] = raw.hex()
+        elif isinstance(node, list):
+            for i, child in enumerate(node): walk(child, path + "/" + str(i))
+    walk(value, "")
+    assert next_index == len(content), "unreferenced/duplicated evidence block"
+    return value
 
 
 def receive(stream, n):
@@ -98,8 +192,9 @@ def receive(stream, n):
 
 class Peer:
     """Joined protocol double using the unmodified native component vectors."""
-    def __init__(self, directory):
+    def __init__(self, directory, vectors=None):
         self.directory = directory
+        self.vectors = VECTORS if vectors is None else vectors
         self.listener = socket.socket()
         self.listener.bind(("127.0.0.1", 0))
         self.listener.listen(4)
@@ -146,7 +241,7 @@ class Peer:
                         self.calls.append(op)
                         with (self.directory / "native-calls.jsonl").open("a") as log:
                             log.write(json.dumps({"op": METHODS[op], "fields": sorted(request)}) + "\n")
-                        generation = int.from_bytes(VECTORS["capture"][8:16], "big")
+                        generation = int.from_bytes(self.vectors["capture"][8:16], "big")
                         if op == 1 and self.stale == "source": generation += 1
                         raw = number(1, 1) + number(2, 0) + blob(3, request[2]) + number(4, 1) + number(5, 21)
                         raw += number(6, generation) + blob(7, b"test-df") + blob(8, b"test-dfhack")
@@ -154,7 +249,7 @@ class Peer:
                             assert set(request) == {1, 2, 3, 4, 6, 7, 8}
                             assert [request[t] for t in (6, 7, 8)] == [15, 15, 2]
                             self.reads += 1
-                            capture = bytearray(VECTORS["capture"])
+                            capture = bytearray(self.vectors["capture"])
                             if self.stale in {"tree", "worker", "tool"}:
                                 # Mutate an actual witness byte, leaving the canonical source vector untouched.
                                 pos = {"tree": 77, "worker": -38, "tool": -1}[self.stale]
@@ -163,13 +258,13 @@ class Peer:
                             raw += blob(9, capture)
                         elif op == 2:
                             assert set(request) == {1, 2, 3, 4, 6, 7, 8, 9, 10, 11}
-                            assert request[10] == hashlib.sha256(VECTORS["capture"]).digest() and request[11] == VECTORS["plan"]
+                            assert request[10] == hashlib.sha256(self.vectors["capture"]).digest() and request[11] == self.vectors["plan"]
                             self.key = request[9].decode(); self.record = "prepared"
-                            raw += blob(10, keyed("prepared", self.key)) + number(11, 0)
+                            raw += blob(10, keyed("prepared", self.key, self.vectors)) + number(11, 0)
                         elif op == 3:
                             assert set(request) == {1, 2, 3, 4, 9, 11, 12}
-                            assert request[9].decode() == self.key and request[11] == VECTORS["plan"]
-                            prepared = keyed("prepared", self.key); token_at = 10 + len(self.key.encode()) + 32
+                            assert request[9].decode() == self.key and request[11] == self.vectors["plan"]
+                            prepared = keyed("prepared", self.key, self.vectors); token_at = 10 + len(self.key.encode()) + 32
                             assert request[12] == prepared[token_at:token_at + 16]
                             ack = (self.directory / "custody/tree-harvest.ack").read_bytes()
                             assert len(ack) >= 140 and len(ack) % 140 == 0 and int.from_bytes(ack[-68:-64], "big") >= 3
@@ -179,20 +274,20 @@ class Peer:
                                 while not self.release_commit.wait(.01):
                                     if self.stop.is_set(): return
                                 break
-                            raw += blob(10, keyed("designated", self.key))
+                            raw += blob(10, keyed("designated", self.key, self.vectors))
                         elif op == 4:
                             assert set(request) == {1, 2, 3, 4, 9, 11}
-                            if self.record: raw += blob(10, keyed(self.record, request[9].decode()))
+                            if self.record: raw += blob(10, keyed(self.record, request[9].decode(), self.vectors))
                         elif op == 5:
                             assert set(request) == {1, 2, 3, 4, 9, 11, 12}
-                            assert request[9].decode() == self.key and request[11] == VECTORS["plan"]
-                            prepared = keyed("prepared", self.key); token_at = 10 + len(self.key.encode()) + 32
+                            assert request[9].decode() == self.key and request[11] == self.vectors["plan"]
+                            prepared = keyed("prepared", self.key, self.vectors); token_at = 10 + len(self.key.encode()) + 32
                             assert request[12] == prepared[token_at:token_at + 16]
-                            self.record = "cancelled"; raw += blob(10, keyed("cancelled", request[9].decode()))
+                            self.record = "cancelled"; raw += blob(10, keyed("cancelled", request[9].decode(), self.vectors))
                         elif op == 6:
                             assert set(request) == {1, 2, 3, 4, 6, 7, 8, 13, 14}
                             assert [request[t] for t in (6, 7, 8, 13, 14)] == [15, 15, 2, 1000, 3]
-                            raw += blob(9, VECTORS["progress_supply"])
+                            raw += blob(9, self.vectors["progress_supply"])
                         raw += number(12, 0) + number(13, int(self.record is not None))
                         self.reply(stream, raw)
                 self.active = None
@@ -214,11 +309,13 @@ class Peer:
 
 
 def config(directory, peer, **changes):
+    dimensions = list(struct.unpack(">III", peer.vectors["capture"][36:48]))
+    scope = [0, 0, 0] + [n - 1 for n in dimensions]
     value = {"schema": "dfmcp.tree-harvest-mcp-development/1", "directory": str(directory / "custody"),
              "endpoint": peer.endpoint, "initialize": True, "acknowledged": None,
              "world_folder": "region1", "site_id": 1, "df_version": "test-df", "dfhack_version": "test-dfhack", "generation": 7,
-             "recovery_generation": None, "map_dimensions": [64, 64, 8], "root": [15, 15, 2],
-             "read_scope": [0, 0, 0, 63, 63, 7], "scope": [0, 0, 0, 63, 63, 7], "protected": [],
+             "recovery_generation": None, "map_dimensions": dimensions, "root": [15, 15, 2],
+             "read_scope": scope, "scope": scope, "protected": [],
              "authority_expires_tick": 1000000, "lease_ticks": 1200, "checkpoint": "disposable-fortress-no-checkpoint"}
     value.update(changes)
     return value
@@ -245,17 +342,18 @@ class Client:
         self.selector = selectors.DefaultSelector()
         self.selector.register(self.process.stdout, selectors.EVENT_READ)
 
-    def send(self, method, params):
+    def send(self, method, params, request_id=None):
         self.n += 1
-        request = {"jsonrpc": "2.0", "id": self.n, "method": method, "params": {**params, "_meta": META}}
+        self.request_id = self.n if request_id is None else request_id
+        request = {"jsonrpc": "2.0", "id": self.request_id, "method": method, "params": {**params, "_meta": META}}
         raw = json.dumps(request).encode() + b"\n"
         self.requests.write(raw)
         self.requests.flush()
         self.process.stdin.write(raw)
         self.process.stdin.flush()
 
-    def call(self, method, params):
-        self.send(method, params)
+    def call(self, method, params, request_id=None):
+        self.send(method, params, request_id)
         end = time.monotonic() + 15
         while time.monotonic() < end:
             while b"\n" not in self.pending:
@@ -271,14 +369,16 @@ class Client:
             self.stdout.write(raw)
             self.stdout.flush()
             response = json.loads(raw)
-            if response.get("id") == self.n:
+            if response.get("id") == self.request_id:
+                self.last_response_bytes = len(raw)
                 return response
         raise AssertionError("no matching modern response")
 
     def tool(self, name, **arguments):
         response = self.call("tools/call", {"name": "fortress_" + name, "arguments": arguments})
         assert "result" in response, response
-        return json.loads(response["result"]["content"][0]["text"])
+        self.last_content = response["result"]["content"]
+        return resolve_content(self.last_content)
 
     def execute_next(self, packet):
         step = packet["agent_turn"]["recommendations"][0]
@@ -360,6 +460,21 @@ class TreeStdioTests(unittest.TestCase):
     def prepared(self, client):
         opened = client.open()
         self.assertTrue(opened["result"]["ok"], opened)
+        self.assertTrue(opened["result"]["custody"]["acknowledged"])
+        client.initial_acknowledged = copy.deepcopy(opened["result"]["custody"]["acknowledged"])
+        self.assertEqual(bytes.fromhex(opened["result"]["observation"]["native_capture_hex"]), self.peer.vectors["capture"])
+        self.assertGreater(len(client.last_content), 1)
+        # A consumer must reject incomplete, reordered, duplicated or tampered
+        # evidence before presenting the complete capsule as verified.
+        mutations = []
+        missing = copy.deepcopy(client.last_content); missing.pop(); mutations.append(missing)
+        duplicate = copy.deepcopy(client.last_content); duplicate.append(duplicate[-1]); mutations.append(duplicate)
+        tampered = copy.deepcopy(client.last_content); text = tampered[1]["text"]
+        tampered[1]["text"] = ("0" if text[0] != "0" else "1") + text[1:]; mutations.append(tampered)
+        if len(client.last_content) > 2:
+            reordered = copy.deepcopy(client.last_content); reordered[1], reordered[2] = reordered[2], reordered[1]; mutations.append(reordered)
+        for content in mutations:
+            with self.assertRaises(AssertionError): resolve_content(content)
         sid = opened["agent_turn"]["session_id"]
         observation = opened["result"]["observation"]
         self.assertTrue(observation["eligible_at_anchor"], opened)
@@ -368,6 +483,7 @@ class TreeStdioTests(unittest.TestCase):
         planned = client.execute_next(opened)
         self.assertTrue(planned["result"]["ok"], planned)
         original = planned["result"]["original"]
+        self.assertEqual(bytes.fromhex(original["original_source"]["native_capture_hex"]), self.peer.vectors["capture"])
         self.assertIsNone(planned["agent_turn"]["anchor"])
         self.assertEqual(original["causal_item_provenance"], "unknown")
         self.assertTrue(original["prepared_in_this_connection"])
@@ -375,7 +491,38 @@ class TreeStdioTests(unittest.TestCase):
         return sid, original, planned["result"]["custody"]["acknowledged"], planned
 
     def test_modern_stdio_positive_designation_supply_and_offline(self):
+        saved_directory, saved_peer = self.directory, self.peer
+        for name, width in (("small", None), ("large", 13), ("maximum-cells", 14)):
+            with self.subTest(capsule=name):
+                if width is not None:
+                    self.directory = saved_directory / name; self.directory.mkdir(mode=0o700)
+                    (self.directory / "custody").mkdir(mode=0o700)
+                    vectors = large_vectors(width)
+                    self.peer = Peer(self.directory, vectors)
+                    (self.directory / "capture.bin").write_bytes(vectors["capture"])
+                    (self.directory / "fixture.json").write_text(json.dumps({"scope":"independent canonical protocol double", "capture_bytes":len(vectors["capture"]), "capture_sha256":hashlib.sha256(vectors["capture"]).hexdigest(), "cells":(width+2)**2*8})+"\n")
+                first = len(self.clients)
+                try:
+                    self.positive_flow()
+                finally:
+                    if width is not None:
+                        try: drain_owned(self.clients[first:], self.peer)
+                        finally: self.directory, self.peer = saved_directory, saved_peer
+
+    def positive_flow(self):
         client = self.client(); sid, original, _, plan = self.prepared(client)
+        # Exercise the actual router/envelope, including its metadata and the
+        # longest admitted encoded string ID, with complete large evidence.
+        longest = "x" * 254
+        self.assertEqual(len(json.dumps(longest).encode()), 256)
+        response = client.call("tools/call", {"name":"fortress_query", "arguments":{"session_id":sid}}, request_id=longest)
+        self.assertEqual(response["id"], longest)
+        self.assertLessEqual(client.last_response_bytes, 512 * 1024)
+        identity = response["result"]["_meta"]["io.modelcontextprotocol/serverInfo"]
+        self.assertEqual(identity["name"], "dfmcp-tree-harvest-v1-21-dev")
+        viewed = resolve_content(response["result"]["content"])
+        self.assertEqual(viewed["result"]["original"]["review_seal"], original["review_seal"])
+        self.assertEqual(bytes.fromhex(viewed["result"]["original"]["original_source"]["native_capture_hex"]), self.peer.vectors["capture"])
         committed = client.execute_next(plan)
         self.assertTrue(committed["result"]["ok"], committed)
         self.assertEqual(committed["result"]["original"]["native_phase"], 2)
@@ -401,7 +548,18 @@ class TreeStdioTests(unittest.TestCase):
         self.assertEqual(self.peer.calls, calls_before_offline)
         self.assertTrue(opened["result"]["ok"], opened)
         self.assertEqual(opened["result"]["original"]["plan_digest"], original["plan_digest"])
+        self.assertEqual(bytes.fromhex(opened["result"]["original"]["original_source"]["native_capture_hex"]), self.peer.vectors["capture"])
         self.assertFalse(opened["result"]["original"]["fresh_supply_observed"])
+        self.assertEqual(before, {p.name: p.read_bytes() for p in (self.directory / "custody").iterdir()})
+        self.assertEqual(self.peer.writer_count, 1)
+        offline.tool("cancel", session_id=opened["agent_turn"]["session_id"], scope="session"); offline.close()
+        # The pin actually handed out by the original open remains usable as
+        # checked-prefix evidence of the later durable history, never authority.
+        initial_pin = self.client(config(self.directory, self.peer, initialize=False, acknowledged=client.initial_acknowledged), "offline-initial-pin")
+        resumed = initial_pin.open("offline")
+        self.assertTrue(resumed["result"]["ok"], resumed)
+        self.assertEqual(resumed["result"]["original"]["plan_digest"], original["plan_digest"])
+        self.assertEqual(self.peer.calls, calls_before_offline)
         self.assertEqual(before, {p.name: p.read_bytes() for p in (self.directory / "custody").iterdir()})
         self.assertEqual(self.peer.writer_count, 1)
 

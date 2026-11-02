@@ -120,6 +120,7 @@
     "crates/dfmcp-mcp/src/lib.rs",
     "crates/dfmcp-mcp/src/tree_harvest_server.rs",
     "crates/dfmcp-mcp/src/tree_harvest_server/runtime.rs",
+    "crates/dfmcp-mcp/src/tree_harvest_server/presentation.rs",
     "crates/dfmcp-mcp/src/tree_harvest_server/server_tests.rs",
     "crates/dfmcp-mcp/src/bin/dfmcp-tree-harvest-v1-21-dev-server.rs",
     "crates/dfmcp-mcp/tests/tree_harvest_stdio.rs",
@@ -198,7 +199,9 @@
     ],
     "mcp_unit_cases": [
       "tree_packet_pre_effect_errors_have_no_invented_work_or_null_references",
-      "tree_packet_output_overflow_keeps_full_spine_and_original_uncertainty"
+      "tree_packet_output_overflow_keeps_full_spine_and_original_uncertainty",
+      "tree_packet_chunked_native_evidence_roundtrips_and_respects_modern_bounds",
+      "tree_packet_remaining_metadata_overflow_preserves_ack_and_uncertainty"
     ],
     "rust_stdio_cases": [
       "tree_harvest_server_actual_modern_stdio_positive_negative_and_crash_recovery"
@@ -217,5 +220,26 @@
     ]
   },
   "failed_or_ignored_or_skipped_allowed": 0,
-  "qualification_gate_ids_changed": false
+  "qualification_gate_ids_changed": false,
+  "mcp_result_packaging": {
+    "schema": "dfmcp.tree-native-capture/1",
+    "content_zero": "complete_agent_turn_ack_and_descriptors",
+    "encoding": "hex",
+    "raw_chunk_bytes": 24000,
+    "result_string_bytes_max": 65536,
+    "complete_jsonrpc_bytes_max": 524288,
+    "jsonrpc_encoded_string_id_bytes_max": 256,
+    "binding": [
+      "field_path",
+      "byte_length",
+      "sha256",
+      "ordered_content_index",
+      "offset_bytes",
+      "chunk_byte_length",
+      "chunk_sha256"
+    ],
+    "consumer_must_verify_all_blocks": true,
+    "transport_limits_changed": false
+  },
+  "presentation_repair_bead": "dfmcp-reality-wiring-proof-4bf.14.1"
 }

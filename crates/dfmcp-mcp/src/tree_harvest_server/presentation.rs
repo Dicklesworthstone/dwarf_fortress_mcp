@@ -1,0 +1,123 @@
+//! Tree-only output packaging; evidence bytes never become control authority.
+use super::{RESPONSE_BYTES, SERVER_NAME, overflow_packet, parse_id};
+use dfmcp_adapter::tree_harvest::MAX_CAPTURE_BYTES;
+use dfmcp_core::{Digest32, RequestId};
+use fastmcp_rust::{
+    CompleteResult, ContentBlock, FinalCallToolResult, Implementation, McpError, McpResult,
+    ResultMeta,
+};
+use serde_json::{Value, json};
+
+pub(super) const CHUNK_BYTES: usize = 24_000;
+// The pinned JSON-RPC codec admits at most 256 encoded bytes for a string ID.
+// Include the complete outer framing and newline, even when the real ID is smaller.
+const ENVELOPE_BYTES: usize =
+    b"{\"jsonrpc\":\"2.0\",\"id\":".len() + 256 + b",\"result\":".len() + b"}\n".len();
+
+fn complete(texts: Vec<String>) -> McpResult<CompleteResult<FinalCallToolResult>> {
+    let identity = Implementation::try_new(SERVER_NAME, env!("CARGO_PKG_VERSION"))
+        .map_err(|_| McpError::internal_error("invalid Tree server identity"))?;
+    Ok(CompleteResult::new(
+        FinalCallToolResult {
+            content: texts.into_iter().map(ContentBlock::text).collect(),
+            is_error: false,
+            structured_content: None,
+        },
+        ResultMeta::server_generated(identity),
+    ))
+}
+
+fn fits(result: &CompleteResult<FinalCallToolResult>) -> bool {
+    // Serialize the typed modern result, including metadata, JSON escaping and
+    // content counts. Its serializer also enforces the pinned 1MiB/64KiB guards.
+    serde_json::to_string(result).is_ok_and(|s| s.len() + ENVELOPE_BYTES <= RESPONSE_BYTES as usize)
+}
+
+fn decode_hex(value: &str) -> Option<Vec<u8>> {
+    if value.is_empty() || value.len() > 2 * MAX_CAPTURE_BYTES || !value.len().is_multiple_of(2) {
+        return None;
+    }
+    let nibble = |b| match b {
+        b'0'..=b'9' => Some(b - b'0'),
+        b'a'..=b'f' => Some(b - b'a' + 10),
+        _ => None,
+    };
+    value
+        .as_bytes()
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|p| Some((nibble(p[0])? << 4) | nibble(p[1])?))
+        .collect()
+}
+
+fn detach(value: &mut Value, path: &str, blocks: &mut Vec<String>) -> Option<()> {
+    match value {
+        Value::Object(object) => {
+            for (key, child) in object {
+                let path = format!("{path}/{}", key.replace('~', "~0").replace('/', "~1"));
+                if key == "native_capture_hex" {
+                    let text = child.as_str()?;
+                    let bytes = decode_hex(text)?;
+                    let mut parts = Vec::new();
+                    for (index, chunk) in bytes.chunks(CHUNK_BYTES).enumerate() {
+                        let offset = index * CHUNK_BYTES;
+                        parts.push(json!({"content_index":blocks.len(),"offset_bytes":offset,
+                            "byte_length":chunk.len(),"sha256":Digest32::of_bytes(chunk).to_hex()}));
+                        blocks.push(text[offset * 2..(offset + chunk.len()) * 2].to_owned());
+                    }
+                    *child = json!({"schema":"dfmcp.tree-native-capture/1","field_path":path,
+                        "encoding":"hex","byte_length":bytes.len(),"sha256":Digest32::of_bytes(&bytes).to_hex(),"blocks":parts});
+                } else {
+                    detach(child, &path, blocks)?;
+                }
+            }
+        }
+        Value::Array(array) => {
+            for (index, child) in array.iter_mut().enumerate() {
+                detach(child, &format!("{path}/{index}"), blocks)?;
+            }
+        }
+        _ => {}
+    }
+    Some(())
+}
+
+pub(super) fn present(raw: String) -> McpResult<CompleteResult<FinalCallToolResult>> {
+    let mut packet: Value =
+        serde_json::from_str(&raw).map_err(|_| McpError::internal_error("invalid Tree packet"))?;
+    // Reserve content[0] for the entire Agent Turn, ACK and evidence descriptors.
+    // Walk every object/array occurrence; extracting only observation would miss
+    // the original source retained through commit, recovery and offline queries.
+    let original = packet.clone();
+    let mut texts = vec![String::new()];
+    if detach(&mut packet, "", &mut texts).is_some() {
+        texts[0] = packet.to_string();
+        let result = complete(texts)?;
+        if fits(&result) {
+            return Ok(result);
+        }
+    }
+    // Remaining metadata can itself exceed a string/envelope bound. Use the
+    // same bounded AgentTurnBuilder fallback; preserve the original ACK/key and
+    // uncertainty without claiming omitted evidence was delivered or verified.
+    let turn = &original["agent_turn"];
+    let session = turn["session_id"].as_str().and_then(|s| parse_id(s).ok());
+    let request = turn["request_id"]
+        .as_str()
+        .and_then(|s| u128::from_str_radix(s, 16).ok())
+        .map(RequestId::new);
+    let fallback = complete(vec![overflow_packet(
+        turn["operation"].as_str().unwrap_or("fortress.query"),
+        session,
+        request,
+        original["retained_reference"].clone(),
+    )])?;
+    if fits(&fallback) {
+        Ok(fallback)
+    } else {
+        Err(McpError::internal_error(
+            "Tree custody reference exceeds output bound",
+        ))
+    }
+}

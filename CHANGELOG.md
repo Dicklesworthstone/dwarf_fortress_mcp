@@ -1,5 +1,29 @@
 # Changelog
 
+## 2026-11-02 — Package complete Tree evidence within modern MCP bounds
+
+- Preserve Live I's rejected open and original custody, and independent old-cfcc
+  replay RED of J's unchanged 30489-byte canonical capture. Its 60978 hex
+  characters fit individually; complete Agent Turn wrapping crosses the pinned
+  result-string bound. A separate valid 67676-byte protocol-double capture also
+  reproduces the old failure with header-only custody and zero writers.
+- Return typed modern complete results with the full Agent Turn, independent ACK
+  and original uncertainty in content[0]. Recursively replace raw capsules with
+  explicit ordered block/path/length/SHA256 descriptors and preserve every byte
+  in separate bounded hex content blocks. Keep dependency, native bytes, eleven
+  tools, custody, authority and transport guards unchanged.
+- Check complete serialization with fixed server metadata and worst-case admitted
+  JSON-RPC framing against the existing 512KiB product ceiling. Preserve the
+  bounded custody/uncertainty fallback. Extend the same five stdio scenarios with
+  large/max-cell positives, actual longest-ID envelope and corrupt-block refusal;
+  add two registered Rust packet regressions. Repaired-source Rust, new J replay
+  and full qualification are pending. Original .14 and owned bug .14.1 stay open.
+- Preserve the broad validator RED for two forbidden `expect` calls in the
+  existing test-only citizen clock seam. Use an equivalent installed-clock
+  assertion and conditional update; production time, deadlines and cases stay
+  unchanged. Keep the validator and its forbidden-call rule intact.
+
+
 ## 2026-11-02 — Fix the first executed Tree adapter compiler errors
 
 - Preserve exact `45b2a4e`'s admitted ts1 compiler exit 101, worker-verified

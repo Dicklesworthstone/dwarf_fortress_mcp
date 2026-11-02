@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 //! Dedicated, explicitly unadmitted tree-harvest/1.21 modern stdio consumer.
+mod presentation;
 mod runtime;
 #[cfg(test)]
 mod server_tests;
@@ -8,6 +9,7 @@ use dfmcp_adapter::tree_harvest::journal::Mode;
 use dfmcp_core::{ErrorCode, RequestId, Result, SessionId, WorkBudget};
 use fastmcp_rust::modern::ServerBuilder;
 use fastmcp_rust::prelude::*;
+use fastmcp_rust::{CompleteResult, FinalCallToolResult};
 use runtime::{Action, Config, RESPONSE_BYTES, Runtime, error};
 use serde_json::{Value, json};
 use std::sync::{
@@ -15,6 +17,7 @@ use std::sync::{
     atomic::{AtomicU64, Ordering},
 };
 const FAMILY: u128 = 31u128 << 57;
+const SERVER_NAME: &str = "dfmcp-tree-harvest-v1-21-dev";
 static NEXT: AtomicU64 = AtomicU64::new(1);
 static SESSION: Mutex<Option<Runtime>> = Mutex::new(None);
 fn spine(
@@ -165,11 +168,29 @@ fn packet(
     if out.len() as u64 <= RESPONSE_BYTES {
         return out;
     }
+    overflow_packet(operation, session, request, reference)
+}
+fn overflow_packet(
+    operation: &str,
+    session: Option<SessionId>,
+    request: Option<RequestId>,
+    reference: Value,
+) -> String {
+    let references = if reference.is_object() {
+        vec![reference.clone()]
+    } else {
+        vec![]
+    };
+    let indeterminate = if reference.is_object() && reference["uncertain_effect"] == true {
+        vec![reference.clone()]
+    } else {
+        vec![]
+    };
     let minimal=spine(operation,session,request).briefing(json!({"runtime_admitted":false,"mutation_admissible":false,"current_goal_available":false,"canonical_world_anchor_available":false}))
         .active_work(json!({"pending_plans":[],"actions":[],"obligations":[],"cancellation_drains":[],"indeterminate_effects":indeterminate,"publications":[],"confirmations":[]}))
         .uncertainty(vec![json!({"uncertainty_id":"output_bound","epistemic_state":"indeterminate","statement":"Evidence output exceeded its bound. Preserve the original custody and reconcile; never redispatch."})])
         .coverage(json!({"status":"unavailable","omitted_domains":["full_native_evidence"]})).references(references).build();
-    json!({"agent_turn":minimal,"result":{"ok":false,"error":{"code":"budget_exceeded"}},"retained_reference":reference}).to_string()
+    json!({"agent_turn":minimal,"result":{"ok":false,"error":{"code":"budget_exceeded"},"custody":reference},"retained_reference":reference}).to_string()
 }
 fn failed(
     operation: &str,
@@ -251,124 +272,140 @@ pub fn fortress_open_session(
     max_wall_millis: Option<u64>,
     max_bytes: Option<u64>,
     max_output_tokens: Option<u32>,
-) -> String {
-    let result = (|| {
-        let start = std::time::Instant::now();
-        runtime::runtime_io()?;
-        let mode = match mode.as_deref().unwrap_or("offline") {
-            "control" => Mode::Control,
-            "recover" => Mode::Recover,
-            "offline" => Mode::Offline,
-            _ => return Err(error(ErrorCode::InvalidRequest, "unknown tree mode")),
-        };
-        let budget = WorkBudget {
-            max_wall_millis: max_wall_millis.unwrap_or(5000),
-            max_bytes: max_bytes.unwrap_or(256 * 1024 * 1024),
-            max_output_tokens: max_output_tokens.unwrap_or(131072),
-            max_entities: 4096,
-            max_actions: 1,
-            max_game_ticks: 0,
-        };
-        budget.validate()?;
-        if budget.max_wall_millis > 60000
-            || budget.max_bytes < 64 * 1024 * 1024
-            || budget.max_bytes > 512 * 1024 * 1024
-            || budget.max_output_tokens < 131072
-            || budget.max_output_tokens > 131072
-        {
-            return Err(error(
-                ErrorCode::BudgetExceeded,
-                "tree profile work/output limits",
-            ));
-        }
-        let config = Config::load()?;
-        let mut guard = SESSION
-            .try_lock()
-            .map_err(|_| error(ErrorCode::Conflict, "tree session busy"))?;
-        if guard.is_some() {
-            return Err(error(
-                ErrorCode::Conflict,
-                "close the original tree session first",
-            ));
-        }
-        let sequence = NEXT
-            .try_update(Ordering::AcqRel, Ordering::Acquire, |n| {
-                (n < (1u64 << 57)).then_some(n + 1)
-            })
-            .map_err(|_| {
-                error(
+) -> McpResult<CompleteResult<FinalCallToolResult>> {
+    presentation::present({
+        let result = (|| {
+            let start = std::time::Instant::now();
+            runtime::runtime_io()?;
+            let mode = match mode.as_deref().unwrap_or("offline") {
+                "control" => Mode::Control,
+                "recover" => Mode::Recover,
+                "offline" => Mode::Offline,
+                _ => return Err(error(ErrorCode::InvalidRequest, "unknown tree mode")),
+            };
+            let budget = WorkBudget {
+                max_wall_millis: max_wall_millis.unwrap_or(5000),
+                max_bytes: max_bytes.unwrap_or(256 * 1024 * 1024),
+                max_output_tokens: max_output_tokens.unwrap_or(131072),
+                max_entities: 4096,
+                max_actions: 1,
+                max_game_ticks: 0,
+            };
+            budget.validate()?;
+            if budget.max_wall_millis > 60000
+                || budget.max_bytes < 64 * 1024 * 1024
+                || budget.max_bytes > 512 * 1024 * 1024
+                || budget.max_output_tokens < 131072
+                || budget.max_output_tokens > 131072
+            {
+                return Err(error(
                     ErrorCode::BudgetExceeded,
-                    "tree session identities exhausted",
+                    "tree profile work/output limits",
+                ));
+            }
+            let config = Config::load()?;
+            let mut guard = SESSION
+                .try_lock()
+                .map_err(|_| error(ErrorCode::Conflict, "tree session busy"))?;
+            if guard.is_some() {
+                return Err(error(
+                    ErrorCode::Conflict,
+                    "close the original tree session first",
+                ));
+            }
+            let sequence = NEXT
+                .try_update(Ordering::AcqRel, Ordering::Acquire, |n| {
+                    (n < (1u64 << 57)).then_some(n + 1)
+                })
+                .map_err(|_| {
+                    error(
+                        ErrorCode::BudgetExceeded,
+                        "tree session identities exhausted",
+                    )
+                })?;
+            let session = SessionId::new((1u128 << 127) | FAMILY | u128::from(sequence));
+            let (runtime, value) = Runtime::open(config, mode, session, budget, start)?;
+            *guard = Some(runtime);
+            let runtime = guard.as_mut().ok_or_else(|| {
+                error(
+                    ErrorCode::InternalInvariantViolation,
+                    "tree runtime not retained",
                 )
             })?;
-        let session = SessionId::new((1u128 << 127) | FAMILY | u128::from(sequence));
-        let (runtime, value) = Runtime::open(config, mode, session, budget, start)?;
-        *guard = Some(runtime);
-        let runtime = guard.as_mut().ok_or_else(|| {
-            error(
-                ErrorCode::InternalInvariantViolation,
-                "tree runtime not retained",
-            )
-        })?;
-        let reference = runtime.reference();
-        let request = Some(runtime.last_request_id());
-        Ok(packet(
-            "fortress.open_session",
-            Some(session),
-            request,
-            value,
-            reference,
-        ))
-    })();
-    match result {
-        Ok(v) => v,
-        Err(e) => failed("fortress.open_session", None, None, e, Value::Null),
-    }
+            let reference = runtime.reference();
+            let request = Some(runtime.last_request_id());
+            Ok(packet(
+                "fortress.open_session",
+                Some(session),
+                request,
+                value,
+                reference,
+            ))
+        })();
+        match result {
+            Ok(v) => v,
+            Err(e) => failed("fortress.open_session", None, None, e, Value::Null),
+        }
+    })
 }
 #[tool(
     name = "fortress_observe",
     description = "Read one exact visible root, computed southeast designation, complete bounded visible body, approach, CUTWOOD worker and axe-offer witness. No stable plant ID or scheduling guarantee."
 )]
-pub fn fortress_observe(session_id: String) -> String {
-    call("fortress.observe", session_id, Action::Observe)
+pub fn fortress_observe(session_id: String) -> McpResult<CompleteResult<FinalCallToolResult>> {
+    presentation::present(call("fortress.observe", session_id, Action::Observe))
 }
 #[tool(
     name = "fortress_query",
     description = "Verify and inspect original local tree custody; no native call, designation or clock."
 )]
-pub fn fortress_query(session_id: String) -> String {
-    call("fortress.query", session_id, Action::Query)
+pub fn fortress_query(session_id: String) -> McpResult<CompleteResult<FinalCallToolResult>> {
+    presentation::present(call("fortress.query", session_id, Action::Query))
 }
 #[tool(
     name = "fortress_plan",
     description = "Prepare one original root-predicate intent. Closed request: kind=fell_one_visible_tree, expected_observation, deadline_tick within 12000 ticks. No automatic clock runs or renewal; each external run remains separately confirmed and bounded. Returns exact review seal without game writes."
 )]
-pub fn fortress_plan(session_id: String, request: String) -> String {
-    call("fortress.plan", session_id, Action::Plan(request))
+pub fn fortress_plan(
+    session_id: String,
+    request: String,
+) -> McpResult<CompleteResult<FinalCallToolResult>> {
+    presentation::present(call("fortress.plan", session_id, Action::Plan(request)))
 }
 #[tool(
     name = "fortress_commit",
     description = "Confirm the exact original tree seal once on its prepared connection. Journal and independent ACK sync before supported markPlant. Lost replies never permit another writer."
 )]
-pub fn fortress_commit(session_id: String, review_seal: String, confirmed: bool) -> String {
-    call(
+pub fn fortress_commit(
+    session_id: String,
+    review_seal: String,
+    confirmed: bool,
+) -> McpResult<CompleteResult<FinalCallToolResult>> {
+    presentation::present(call(
         "fortress.commit",
         session_id,
         Action::Commit(review_seal, confirmed),
-    )
+    ))
 }
 #[tool(
     name = "fortress_wait",
     description = "One foreground original-key reconciliation or fresh root-predicate/job/new-ground-WOOD sample. No redispatch, polling loop or clock. Designation, root absence and supply remain separate claims."
 )]
-pub fn fortress_wait(session_id: String) -> String {
-    call("fortress.wait", session_id, Action::Wait)
+pub fn fortress_wait(session_id: String) -> McpResult<CompleteResult<FinalCallToolResult>> {
+    presentation::present(call("fortress.wait", session_id, Action::Wait))
 }
 #[tool(
     name = "fortress_cancel",
     description = "scope=goal retires only undispatched native preparation or inspects original uncertainty. Never undesignates or undoes felling. scope=session releases local sockets and locks while preserving custody."
 )]
-pub fn fortress_cancel(session_id: String, scope: Option<String>) -> String {
+pub fn fortress_cancel(
+    session_id: String,
+    scope: Option<String>,
+) -> McpResult<CompleteResult<FinalCallToolResult>> {
+    presentation::present(cancel_packet(session_id, scope))
+}
+
+fn cancel_packet(session_id: String, scope: Option<String>) -> String {
     if scope.as_deref().unwrap_or("goal") == "goal" {
         return call("fortress.cancel", session_id, Action::Cancel);
     }
@@ -405,33 +442,34 @@ pub fn fortress_cancel(session_id: String, scope: Option<String>) -> String {
         Err(e) => failed("fortress.cancel", None, None, e, Value::Null),
     }
 }
+
 #[tool(
     name = "fortress_explain",
     description = "Inspect original tree plan, exact evidence, tool/scheduling uncertainty and recovery identity without native work."
 )]
-pub fn fortress_explain(session_id: String) -> String {
-    call("fortress.explain", session_id, Action::Query)
+pub fn fortress_explain(session_id: String) -> McpResult<CompleteResult<FinalCallToolResult>> {
+    presentation::present(call("fortress.explain", session_id, Action::Query))
 }
 #[tool(
     name = "fortress_doctor",
     description = "Inspect original tree custody and explicit unadmitted limitations without native work."
 )]
-pub fn fortress_doctor(session_id: String) -> String {
-    call("fortress.doctor", session_id, Action::Query)
+pub fn fortress_doctor(session_id: String) -> McpResult<CompleteResult<FinalCallToolResult>> {
+    presentation::present(call("fortress.doctor", session_id, Action::Query))
 }
 #[tool(
     name = "fortress_checkpoint",
     description = "This isolated profile has no checkpoint provider; retain the original custody and operator-owned disposable-save evidence."
 )]
-pub fn fortress_checkpoint(session_id: String) -> String {
-    unsupported("fortress.checkpoint", session_id)
+pub fn fortress_checkpoint(session_id: String) -> McpResult<CompleteResult<FinalCallToolResult>> {
+    presentation::present(unsupported("fortress.checkpoint", session_id))
 }
 #[tool(
     name = "fortress_restore",
     description = "This isolated profile cannot restore a world or carry original tree identity across epochs. Preserve and reconcile original custody."
 )]
-pub fn fortress_restore(session_id: String) -> String {
-    unsupported("fortress.restore", session_id)
+pub fn fortress_restore(session_id: String) -> McpResult<CompleteResult<FinalCallToolResult>> {
+    presentation::present(unsupported("fortress.restore", session_id))
 }
 fn unsupported(operation: &str, id: String) -> String {
     let session = parse_id(&id).ok();
@@ -458,7 +496,7 @@ pub fn run_stdio() {
         eprintln!("{}: {}", e.code.as_str(), e.message);
         return;
     }
-    let server=ServerBuilder::new("dfmcp-tree-harvest-v1-21-dev",env!("CARGO_PKG_VERSION"))
+    let server=ServerBuilder::new(SERVER_NAME,env!("CARGO_PKG_VERSION"))
         .tool(FortressOpenSession).tool(FortressObserve).tool(FortressQuery).tool(FortressPlan).tool(FortressCommit).tool(FortressWait)
         .tool(FortressCancel).tool(FortressExplain).tool(FortressDoctor).tool(FortressCheckpoint).tool(FortressRestore)
         .instructions("Unadmitted tree/1.21: one coordinate/source predicate, no stable plant ID. Observe, plan, review, confirm once, reconcile/prove foreground. markPlant ACK is not wood. Tools are offers, never assigned equipment. Independent ACK precedes dispatch; uncertainty never permits new keys. No clock, workshop construction or production admission. Original .14 remains open.").build();

@@ -31,6 +31,61 @@ admission, or support. No protocol beyond 1.0 appears in the production runner m
 
 ## Evidence hierarchy
 
+### Tree result-size repair (2026-11-02; source and replay evidence only)
+
+Live I's exact cfcc Tree executable rejected a correctly formed modern open with
+`-32603 invalid tools/call result for Modern2026` after initial journal/ACK
+creation. No external session/ACK, plan, designation or clock was sent. Original
+I custody remains untouched. Root independently verified the scanned I export
+(manifest `7e35ec7ab4c8575191898d595f4d2e686d9aba4d6e72f8f039269764bd68d371`).
+Fresh J performed native Handshake+Read only and preserved pause, plugins and
+saves. Its distinct canonical capture is 30489 bytes, SHA256
+`8c8b6ec8e3b8e19e1ab8e30a152580a4fb38455677bd4dfdfaee90df1fcc5472`.
+Its hex alone is 60978 characters and fits the pinned single-string limit.
+Root's unchanged-J replay against old cfcc reproduces the rejected complete
+result with header-only custody/zero ACK frames and no native mutation call.
+This is component replay, not recovered I bytes or another live MCP execution.
+
+A separate actual-stdio protocol-double reproduction uses the same sealed cfcc
+binary (`608c8e914743fe48d0705c733ec5b9151f9792a8c45e4caba6c53029afa69a5f`).
+The 1090-byte native-vector control returns a session and independent ACK; the
+valid 67676-byte fixture returns the expected `-32603`. Both call only Handshake
+and ReadTreeHarvest and retain header-only journal plus 140-byte ACK. The first
+attempt stopped on a faulty fixed header-length assertion before the large
+case; preserve it separately from the corrected driver exit 0, which proves
+reproduction of a defect, not a product pass. Raw records are retained under
+`target/large-result-repair-20261102a/old-cfcc-reproduction[-b]`.
+
+The private repair branch adopts only owned bug `.14.1`; the frozen cfcc checkout
+and its 161 Bead rows stay unchanged. It uses the pinned macro's explicit typed
+modern result API. content[0] keeps the full Agent Turn and custody/ACK, with
+recursive raw-capsule descriptors bound to field paths, ordered separate content
+blocks, byte lengths and complete/per-block SHA256. Complete serialization with
+fixed server identity metadata and worst-case admitted JSON-RPC ID/framing is
+bounded by 512KiB; each text remains within the unchanged 65536-byte codec guard.
+The existing bounded fallback preserves original custody and uncertainty.
+Native Tree/workshop code, protocols, vectors and ground-material policy remain
+byte-identical to cfcc. No production registry/runner/floor is widened.
+
+Prior exact cfcc component execution is now independently consumed by Root:
+RCH job 30090363205058940 passes all 1330 adapter cases, and job
+30090363205058942 passes 2838 MCP library cases plus two Rust wrappers driving
+five Tree and five workshop subprocess scenarios, with zero failures/ignored/
+filtered/skipped. Source receipts and sealed development ELFs apply only to cfcc.
+They do not qualify this repair. Its four Tree packet cases (two added) and the
+same five extended stdio cases remain unexecuted until Root runs the corrected
+candidate. Repaired actual J replay, both final full commands, real felling,
+WOOD, original workshop, finite bed, native R1 and admission remain pending.
+The frozen 08 qualification exit 101 and all prior RED/compiler receipts remain
+preserved. Neither original .14 acceptance criterion is closed.
+
+The repair preflight also retains a broad-validator exit 1: the existing cfcc
+clock fixture uses two forbidden `expect` calls outside a test module. The
+private candidate replaces them with equivalent installed-clock assertions and
+conditional updates. Production clocks, the 10ms request, test cases and source
+validator are unchanged; this narrow correction needs fresh execution too.
+
+
 ### Visible-tree supply (2026-11-01; new source, execution pending)
 
 The isolated tree-harvest/1.21 native generation, safe-Rust adapter and registered

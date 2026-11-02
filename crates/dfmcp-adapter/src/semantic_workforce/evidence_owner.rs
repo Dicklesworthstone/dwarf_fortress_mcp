@@ -61,14 +61,20 @@ impl TestClock {
     }
     pub(super) fn advance(elapsed: Duration) {
         TEST_CLOCK.with(|clock| {
-            let (now, pending) = clock.get().expect("fixture clock is installed");
-            clock.set(Some((now + elapsed, pending)));
+            let installed = clock.get();
+            assert!(installed.is_some(), "fixture clock is installed");
+            if let Some((now, pending)) = installed {
+                clock.set(Some((now + elapsed, pending)));
+            }
         });
     }
     pub(super) fn advance_after_next_now(elapsed: Duration) {
         TEST_CLOCK.with(|clock| {
-            let (now, _) = clock.get().expect("fixture clock is installed");
-            clock.set(Some((now, Some(elapsed))));
+            let installed = clock.get();
+            assert!(installed.is_some(), "fixture clock is installed");
+            if let Some((now, _)) = installed {
+                clock.set(Some((now, Some(elapsed))));
+            }
         });
     }
 }

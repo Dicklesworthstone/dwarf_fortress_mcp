@@ -81,3 +81,130 @@ fn tree_packet_output_overflow_keeps_full_spine_and_original_uncertainty() {
         json!(["full_native_evidence"])
     );
 }
+
+#[test]
+fn tree_packet_chunked_native_evidence_roundtrips_and_respects_modern_bounds() {
+    use dfmcp_core::Digest32;
+    use fastmcp_rust::{ContentBlock, ResultPeerEra, decode_typed_complete};
+    // Byte-preservation/transport boundaries, not claims of valid native trees.
+    for size in [1, 24_000, 24_001, 30_489, 32_768, 32_769, 128 * 1024] {
+        let bytes: Vec<u8> = (0..size).map(|n| n as u8).collect();
+        let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+        let reference = json!({"acknowledged":{"journal_id":"j","head":"h","frames":3},"uncertain_effect":true,"original_key":"original"});
+        let raw = packet(
+            "fortress.wait",
+            None,
+            None,
+            json!({"ok":true,"original":{"original_source":{"native_capture_hex":hex}}}),
+            reference.clone(),
+        );
+        let complete = presentation::present(raw).expect("bounded complete result");
+        let encoded = serde_json::to_string(&complete).expect("typed result serialization");
+        assert!(
+            decode_typed_complete::<FinalCallToolResult>(&encoded, ResultPeerEra::Modern).is_ok()
+        );
+        let result: Value = serde_json::from_str(&encoded).expect("complete JSON");
+        let outer = json!({"jsonrpc":"2.0","id":"x".repeat(254),"result":result}).to_string();
+        assert!(outer.len() + 1 <= RESPONSE_BYTES as usize);
+        assert_eq!(
+            complete.payload.content.len(),
+            1 + size.div_ceil(presentation::CHUNK_BYTES)
+        );
+        let texts: Vec<&str> = complete
+            .payload
+            .content
+            .iter()
+            .map(|block| {
+                let ContentBlock::Text { text, .. } = block else {
+                    panic!("text content")
+                };
+                assert!(text.len() <= 65_536);
+                text.as_str()
+            })
+            .collect();
+        let value: Value = serde_json::from_str(texts[0]).expect("small complete packet");
+        spine(&value);
+        assert_eq!(value["retained_reference"], reference);
+        let descriptor = &value["result"]["original"]["original_source"]["native_capture_hex"];
+        assert_eq!(descriptor["schema"], "dfmcp.tree-native-capture/1");
+        assert_eq!(
+            descriptor["field_path"],
+            "/result/original/original_source/native_capture_hex"
+        );
+        assert_eq!(descriptor["byte_length"], size);
+        assert_eq!(descriptor["sha256"], Digest32::of_bytes(&bytes).to_hex());
+        let mut joined = String::new();
+        for (index, part) in descriptor["blocks"]
+            .as_array()
+            .expect("parts")
+            .iter()
+            .enumerate()
+        {
+            assert_eq!(part["content_index"], index + 1);
+            assert_eq!(part["offset_bytes"], joined.len() / 2);
+            let text = texts[index + 1];
+            assert_eq!(part["byte_length"], text.len() / 2);
+            let offset = joined.len() / 2;
+            assert_eq!(
+                part["sha256"],
+                Digest32::of_bytes(&bytes[offset..offset + text.len() / 2]).to_hex()
+            );
+            joined.push_str(text);
+        }
+        assert_eq!(joined, hex);
+    }
+    // Every occurrence is extracted, including arrays, without sharing block IDs.
+    let raw = packet(
+        "fortress.query",
+        None,
+        None,
+        json!({"nested":[{"native_capture_hex":"0001"},{"deeper":{"native_capture_hex":"0203"}}]}),
+        Value::Null,
+    );
+    let result = presentation::present(raw).expect("nested evidence");
+    assert_eq!(result.payload.content.len(), 3);
+    let ContentBlock::Text { text, .. } = &result.payload.content[0] else {
+        panic!("packet")
+    };
+    let value: Value = serde_json::from_str(text).expect("nested packet");
+    assert_eq!(
+        value["result"]["nested"][0]["native_capture_hex"]["field_path"],
+        "/result/nested/0/native_capture_hex"
+    );
+    assert_eq!(
+        value["result"]["nested"][1]["deeper"]["native_capture_hex"]["blocks"][0]["content_index"],
+        2
+    );
+}
+
+#[test]
+fn tree_packet_remaining_metadata_overflow_preserves_ack_and_uncertainty() {
+    use fastmcp_rust::ContentBlock;
+    let session = SessionId::new((1u128 << 127) | FAMILY | 1);
+    let request = RequestId::new(19);
+    let reference = json!({"acknowledged":{"journal_id":"j","head":"h","frames":3},"uncertain_effect":true,"original_key":"original"});
+    // Below the product packet ceiling, above the pinned single-string ceiling.
+    let raw = packet(
+        "fortress.commit",
+        Some(session),
+        Some(request),
+        json!({"ok":true,"other_metadata":"x".repeat(70_000)}),
+        reference.clone(),
+    );
+    let complete = presentation::present(raw).expect("fallback");
+    assert_eq!(complete.payload.content.len(), 1);
+    let ContentBlock::Text { text, .. } = &complete.payload.content[0] else {
+        panic!("packet")
+    };
+    let value: Value = serde_json::from_str(text).expect("fallback packet");
+    spine(&value);
+    assert_eq!(value["result"]["error"]["code"], "budget_exceeded");
+    assert_eq!(value["agent_turn"]["session_id"], session.to_string());
+    assert_eq!(value["agent_turn"]["request_id"], request.to_string());
+    assert_eq!(
+        value["agent_turn"]["active_work"]["indeterminate_effects"],
+        json!([reference.clone()])
+    );
+    assert_eq!(value["retained_reference"], reference);
+    assert_eq!(value["result"]["custody"], reference);
+}

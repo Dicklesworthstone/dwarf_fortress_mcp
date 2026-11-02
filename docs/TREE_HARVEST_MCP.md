@@ -144,6 +144,58 @@ verified local custody are separate. A pre-effect invalid request has no invente
 indeterminate effect or null reference. Actual dispatch uncertainty retains its
 original key, seal and no-retry requirement.
 
+## Bounded modern result evidence
+
+Each tool returns a typed modern complete result. `content[0]` is a complete
+Agent Turn packet with its session, original key, independent ACK and recovery
+references. Native capsule bytes occupy subsequent text content blocks, each
+at most 48000 lowercase hex characters (24000 decoded bytes). They are separate
+MCP blocks, never chunks hidden inside a single oversized text value.
+
+Every `native_capture_hex` occurrence, including the retained original source,
+is replaced with an explicit descriptor. For example:
+
+```json
+{
+  "schema": "dfmcp.tree-native-capture/1",
+  "field_path": "/result/observation/native_capture_hex",
+  "encoding": "hex",
+  "byte_length": 30489,
+  "sha256": "<SHA256 of the complete canonical native bytes>",
+  "blocks": [
+    {"content_index": 1, "offset_bytes": 0, "byte_length": 24000,
+     "sha256": "<SHA256 of this decoded block>"},
+    {"content_index": 2, "offset_bytes": 24000, "byte_length": 6489,
+     "sha256": "<SHA256 of this decoded block>"}
+  ]
+}
+```
+
+`field_path` uses JSON Pointer escaping. Indices address this response's content
+array and are allocated in serialized field traversal order. A consumer must
+verify the path, strict ordered indices, contiguous offsets, exact lengths,
+lowercase hex, per-block hashes and complete hash before exposing reassembled
+canonical bytes. Missing, reordered, duplicated, unreferenced or tampered blocks
+fail verification. These descriptors supply evidence, never mutation authority.
+Small-packet consumers retain the Agent Turn and ACK in `content[0]`, but must
+explicitly resolve descriptors when full native evidence is needed.
+
+The pinned transport's 65536-byte string and 1MiB complete-result guards remain
+unchanged. The producer serializes the complete typed result with the same fixed
+server identity metadata as the server, and includes worst-case admitted
+256-byte encoded JSON-RPC ID, framing and newline in the existing 512KiB product
+ceiling. If remaining metadata cannot fit, the bounded AgentTurnBuilder fallback
+keeps original custody/ACK and uncertainty and explicitly omits full evidence.
+It does not report an effect completed or grant retry permission.
+
+Live I's rejected result and its initial custody remain untouched. Independent
+old-cfcc replay of unchanged J's 30489-byte native capsule reproduces `-32603`;
+its 60978 hex characters fit individually, while the complete packet does not.
+A separate valid 67676-byte protocol-double capsule also reproduces the old
+failure; this is component replay, not a recovered I response or another game
+run. Repaired-source Rust/stdio execution and new J replay remain pending until
+their exact-source receipts exist. Neither replay proves felling or wood supply.
+
 ## Clock and qualification boundaries
 
 Broader world evolution and future falling-tree consequences require separately
