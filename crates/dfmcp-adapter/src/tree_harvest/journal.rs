@@ -108,7 +108,12 @@ impl Work {
                 "tree custody operation cancelled",
             ));
         }
-        check((1..=60000).contains(&c.budget.max_wall_millis))?;
+        if c.budget.max_wall_millis > 60000 {
+            return Err(error(
+                ErrorCode::BudgetExceeded,
+                "tree custody deadline exceeds the fixed profile bound",
+            ));
+        }
         Ok(Self {
             start: Instant::now(),
             left: c.budget.max_bytes,

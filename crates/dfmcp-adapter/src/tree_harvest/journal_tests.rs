@@ -350,7 +350,7 @@ fn tree_journal_header_and_private_open_charge_one_total_budget() -> Result<()> 
 }
 #[test]
 fn tree_journal_cancelled_revoked_and_invalid_dispatch_withdraw_permit() -> Result<()> {
-    for variant in 0..5 {
+    for variant in 0..6 {
         let (_dir, mut j, mut a, f, c, _) = setup()?;
         let o = prepare(&mut j, &mut a, &c)?;
         let mut denied = c.clone();
@@ -361,7 +361,8 @@ fn tree_journal_cancelled_revoked_and_invalid_dispatch_withdraw_permit() -> Resu
             3 => denied
                 .grants
                 .retain(|g| g.capability != Capability::Designate),
-            _ => denied.budget.max_wall_millis = 0,
+            4 => denied.budget.max_wall_millis = 0,
+            _ => denied.budget.max_wall_millis = 60001,
         }
         let before = counters(&f);
         let mut writers = 0;
@@ -370,13 +371,17 @@ fn tree_journal_cancelled_revoked_and_invalid_dispatch_withdraw_permit() -> Resu
             guards.set(guards.get() + 1);
             Ok(())
         };
-        assert!(
-            j.dispatch(o.seal(), &denied, &mut a, &mut guard, |_, _| {
-                writers += 1;
-                record("designated")
-            })
-            .is_err()
-        );
+        let failure = j.dispatch(o.seal(), &denied, &mut a, &mut guard, |_, _| {
+            writers += 1;
+            record("designated")
+        });
+        assert!(failure.is_err());
+        if variant == 5 {
+            assert_eq!(
+                failure.err().map(|e| e.code),
+                Some(ErrorCode::BudgetExceeded)
+            );
+        }
         assert_eq!(counters(&f), before);
         assert_eq!(guards.get(), 0);
         assert_eq!(writers, 0);
