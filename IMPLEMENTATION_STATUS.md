@@ -1,5 +1,15 @@
 # Implementation Status
 
+Manager 1.23 cache-bearing development source is being integrated. U proved the
+1.22 base assignment/HF/history transaction; V independently observed the game
+production-responsibility cache still empty. The normal UI reappointment probe
+did not complete, so its causal repair is not claimed. This successor witnesses
+and updates the cache with distinct wire/custody identity, leaving 1.22 intact.
+Native components report 13 scenarios/308 assertions and four killed mutants,
+with unchanged 1.22 vectors. A target-library-matched SDK build exists. Rust,
+actual 1.23 MCP, live production and full successor qualification remain pending.
+The development source grants no compatibility or production admission.
+
 Full verification at `57410a1` exposed a missed nested CLI test denominator:
 the Tree and workshop subprocess suites each passed seven, while their standard
 CLI caller still expected five. The caller now requires seven and retains all

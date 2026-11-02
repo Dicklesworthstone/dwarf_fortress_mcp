@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-11-02 — Manager 1.23 cache integration (early development cut)
+
+- Witness group/civ responsibility caches and include the selected Manager
+  assignment in MANAGE_PRODUCTION during the same native transaction.
+- Preserve legacy 1.22 wire/vectors; add distinct 1.23 startup, package, native
+  identity, codecs, custody and scoped public cache-proof field.
+- Add native component/mutation and Rust cache/custody regression sources.
+  Rust execution and live 1.23 production remain pending.
+
 ## 2026-11-02 — Keep standard CLI suite counts exact
 
 - Correct the nested Tree/workshop standard CLI caller to require seven tests

@@ -5,7 +5,7 @@ mod runtime;
 #[cfg(test)]
 mod server_tests;
 use crate::agent_turn::{AgentPhase, AgentTurnBuilder, ContinuityStatus, recommendation};
-use dfmcp_adapter::manager_appointment::journal::Mode;
+use dfmcp_adapter::manager_appointment::{ManagerProtocol, journal::Mode};
 use dfmcp_core::{ErrorCode, RequestId, Result, SessionId, WorkBudget};
 use fastmcp_rust::modern::ServerBuilder;
 use fastmcp_rust::prelude::*;
@@ -13,10 +13,22 @@ use fastmcp_rust::{CompleteResult, FinalCallToolResult};
 use runtime::{Action, Config, RESPONSE_BYTES, Runtime, error};
 use serde_json::{Value, json};
 use std::sync::{
-    Mutex,
+    Mutex, OnceLock,
     atomic::{AtomicU64, Ordering},
 };
-const FAMILY: u128 = 22u128 << 57;
+static PROTOCOL: OnceLock<ManagerProtocol> = OnceLock::new();
+fn protocol() -> ManagerProtocol {
+    PROTOCOL.get().copied().unwrap_or(ManagerProtocol::V1_22)
+}
+fn family() -> u128 {
+    u128::from(protocol().minor()) << 57
+}
+fn profile_name() -> &'static str {
+    match protocol() {
+        ManagerProtocol::V1_22 => "manager/1.22",
+        ManagerProtocol::V1_23 => "manager/1.23",
+    }
+}
 static NEXT: AtomicU64 = AtomicU64::new(1);
 static SESSION: Mutex<Option<Runtime>> = Mutex::new(None);
 fn spine(
@@ -140,14 +152,14 @@ fn packet(
     }
     let has_work = reference["original_key"].is_string();
     let mut turn=spine(operation,session,request)
-        .briefing(json!({"profile":"manager/1.22","runtime_admitted":false,"mutation_admissible":false,"development_commit_available":prepared,
+        .briefing(json!({"profile":profile_name(),"runtime_admitted":false,"mutation_admissible":false,"development_commit_available":prepared,
             "canonical_world_anchor_available":false,"native_projection_anchor":reference["native_anchor"],"appointment_proved":proved,"clock_advanced":false}))
         .active_work(json!({"pending_plans":if prepared{vec![active.clone()]}else{vec![]},"actions":if has_work{vec![active.clone()]}else{vec![]},"obligations":[],"cancellation_drains":[],"indeterminate_effects":uncertain,
             "publications":[],"confirmations":if prepared{vec![json!({"review_seal":original["review_seal"],"required":true,"confirmed":false})]}else{vec![]}}))
         .affordances(if verified && result["observation"]["eligible_at_anchor"]==true {vec![json!({"intent":"appoint_vacant_manager","unit_id":result["observation"]["unit_id"],"histfig_id":result["observation"]["histfig_id"],"capability":"configure_production","risk":"irreversible","confirmation_required":true,"grants_authority":false})]}else{vec![]})
         .recommendations(next)
-        .uncertainty(vec![json!({"uncertainty_id":"projection_scope","epistemic_state":"unknown","statement":"Exact evidence covers the declared stable native projection, not all game fields or canonical world continuity. Historical appointment proof is not current scheduling, order activation or bed production."}),json!({"uncertainty_id":"admission","epistemic_state":"unknown","statement":"Protocol 1.22 is unadmitted development only. Original .14 and .14.2 require independent positive evidence."})])
-        .coverage(json!({"status":"partial","source":"manager/1.22","canonical_world_adapter":false,"retained_custody_verified":verified,"native_projection_anchor":reference["native_anchor"]}))
+        .uncertainty(vec![json!({"uncertainty_id":"projection_scope","epistemic_state":"unknown","statement":"Exact evidence covers the declared stable native projection, not all game fields or canonical world continuity. Historical appointment proof is not current scheduling, order activation or bed production."}),json!({"uncertainty_id":"admission","epistemic_state":"unknown","statement":"This Manager generation is unadmitted development only. Native responsibility cache proof requires 1.23. Original .14 and .14.2 require independent positive evidence."})])
+        .coverage(json!({"status":"partial","source":profile_name(),"canonical_world_adapter":false,"retained_custody_verified":verified,"native_projection_anchor":reference["native_anchor"]}))
         .budget(json!({"max_output_bytes":RESPONSE_BYTES,"max_game_ticks":0})).references(refs).build();
     if let Some(b) = turn["briefing"].as_object_mut() {
         b.remove("admission");
@@ -210,7 +222,10 @@ fn parse_id(raw: &str) -> Result<SessionId> {
     let n = u128::from_str_radix(raw, 16)
         .map_err(|_| error(ErrorCode::InvalidRequest, "invalid manager session ID"))?;
     let id = SessionId::new(n);
-    if id.get() != n || !id.is_process_scoped_live() || (n & ((1u128 << 62) - 1)) >> 57 != 22 {
+    if id.get() != n
+        || !id.is_process_scoped_live()
+        || (n & ((1u128 << 62) - 1)) >> 57 != u128::from(protocol().minor())
+    {
         return Err(error(
             ErrorCode::SessionNotFound,
             "foreign manager session handle",
@@ -260,7 +275,7 @@ fn call(operation: &str, id: String, action: Action) -> String {
 }
 #[tool(
     name = "fortress_open_session",
-    description = "Open one isolated manager/1.22 vacant MANAGER appointment. Default offline. Control requires host source/candidate pins, disposable-fortress permission and fresh journal/ACK custody. Opening never appoints or advances time."
+    description = "Open one host-pinned isolated Manager development appointment. Default offline. Control requires host source/candidate pins, disposable-fortress permission and fresh journal/ACK custody. Opening never appoints or advances time."
 )]
 pub fn fortress_open_session(
     mode: Option<String>,
@@ -318,7 +333,7 @@ pub fn fortress_open_session(
                         "manager session identities exhausted",
                     )
                 })?;
-            let session = SessionId::new((1u128 << 127) | FAMILY | u128::from(sequence));
+            let session = SessionId::new((1u128 << 127) | family() | u128::from(sequence));
             let (runtime, value) = Runtime::open(config, mode, session, budget, start)?;
             *guard = Some(runtime);
             let runtime = guard.as_mut().ok_or_else(|| {
@@ -490,13 +505,31 @@ fn unsupported(operation: &str, id: String) -> String {
     )
 }
 pub fn run_stdio() {
+    run_stdio_for_protocol(ManagerProtocol::V1_22);
+}
+pub(crate) fn run_stdio_for_protocol(selected: ManagerProtocol) {
+    // Reject production state before pinning or entering either development runtime.
+    if std::env::var_os("DFMCP_ADMITTED_BRIDGE_PROTOCOL").is_some()
+        || crate::current_admission_provenance().is_some()
+    {
+        eprintln!("capability_denied: Manager development refuses production launch state");
+        return;
+    }
+    if PROTOCOL.set(selected).is_err() {
+        eprintln!("capability_denied: Manager process generation was already pinned");
+        return;
+    }
     if let Err(e) = runtime::environment() {
         eprintln!("{}: {}", e.code.as_str(), e.message);
         return;
     }
-    let server=ServerBuilder::new("dfmcp-manager-appointment-v1-22-dev",env!("CARGO_PKG_VERSION"))
+    let name = match selected {
+        ManagerProtocol::V1_22 => "dfmcp-manager-appointment-v1-22-dev",
+        ManagerProtocol::V1_23 => "dfmcp-manager-appointment-v1-23-dev",
+    };
+    let server=ServerBuilder::new(name,env!("CARGO_PKG_VERSION"))
         .tool(FortressOpenSession).tool(FortressObserve).tool(FortressQuery).tool(FortressPlan).tool(FortressCommit).tool(FortressWait)
         .tool(FortressCancel).tool(FortressExplain).tool(FortressDoctor).tool(FortressCheckpoint).tool(FortressRestore)
-        .instructions("Unadmitted manager/1.22: one current Expedition Leader for vacant MANAGER. Observe, prepare, review and confirm once, reconcile original key. Independent ACK precedes the full native assignment/HF/history transaction. Success requires exact poststate and dual getters with unchanged tick. No displacement, arbitrary roles, clock, order activation or production admission. Original .14 and .14.2 remain open for independent verification.").build();
+        .instructions("Unadmitted host-pinned Manager generation: one current Expedition Leader for vacant MANAGER. Observe, prepare, review and confirm once, reconcile original key. Independent ACK precedes the full native assignment/HF/history transaction. Success requires exact poststate and dual getters with unchanged tick. No displacement, arbitrary roles, clock, order activation or production admission. Original .14 and .14.2 remain open for independent verification.").build();
     crate::run_modern_stdio(server);
 }

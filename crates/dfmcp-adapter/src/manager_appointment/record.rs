@@ -32,16 +32,20 @@ impl Plan {
         &self.key
     }
     pub fn encode(&self) -> Vec<u8> {
-        let mut b = b"DFMML022".to_vec();
+        let mut b = self.before.protocol.magic(b'L').to_vec();
         field(&mut b, self.key.as_bytes());
         blob(&mut b, self.before.bytes());
         b
     }
     pub fn decode(bytes: &[u8]) -> Result<Self> {
         let mut r = Reader(bytes);
-        require(r.take(8)? == b"DFMML022", "not manager plan")?;
+        let protocol = ManagerProtocol::decode_magic(r.take(8)?, b'L')?;
         let key = text(&mut r, 128)?;
         let before = Capture::decode(read_blob(&mut r, MAX_CAPTURE_BYTES)?)?;
+        require(
+            before.protocol == protocol,
+            "manager plan generation differs",
+        )?;
         r.finish()?;
         Self::new(&key, before)
     }
@@ -58,7 +62,10 @@ pub struct Insertion {
 }
 impl Insertion {
     fn read(r: &mut Reader<'_>, p: &Plan) -> Result<Self> {
-        require(r.take(8)? == b"DFMMI022", "not manager proof")?;
+        require(
+            r.take(8)? == p.before.protocol.magic(b'I'),
+            "manager proof generation differs",
+        )?;
         let out = Self {
             unit: r.u32()?,
             figure: r.u32()?,
@@ -104,7 +111,7 @@ impl Record {
         require(receipt.as_bytes() == checksum, "manager record checksum")?;
         let mut r = Reader(body);
         require(
-            r.take(8)? == b"DFMMR022" && text(&mut r, 128)? == plan.key(),
+            r.take(8)? == plan.before.protocol.magic(b'R') && text(&mut r, 128)? == plan.key(),
             "manager record original key",
         )?;
         require(

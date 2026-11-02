@@ -8,7 +8,9 @@ use crate::build_placement::journal::private_file::{
 use crate::control_effect_journal::EffectJournalStorage;
 pub use crate::workshop_construction::journal::WorkshopMode as Mode;
 use crate::workshop_construction::{
-    acknowledgement::{WorkshopAcknowledgements, open_private_manager_acknowledgements},
+    acknowledgement::{
+        WorkshopAcknowledgements, open_private_manager_acknowledgements_for_protocol,
+    },
     journal::{WorkshopMode, WorkshopPin},
 };
 use dfmcp_core::{Capability, GameTick, OperationContext, RiskTier, SessionId};
@@ -61,16 +63,20 @@ impl Original {
         })
     }
     pub fn encode(&self) -> Vec<u8> {
-        let mut out = b"DFMMO022".to_vec();
+        let mut out = self.plan.before.protocol.magic(b'O').to_vec();
         out.extend_from_slice(&self.deadline_tick.to_be_bytes());
         blob(&mut out, &self.plan.encode());
         out
     }
     pub fn decode(raw: &[u8]) -> Result<Self> {
         let mut r = Reader(raw);
-        require(r.take(8)? == b"DFMMO022", "not original manager intent")?;
+        let protocol = ManagerProtocol::decode_magic(r.take(8)?, b'O')?;
         let deadline = r.u64()?;
         let plan = Plan::decode(read_blob(&mut r, MAX_CAPTURE_BYTES + 256)?)?;
+        require(
+            plan.before.protocol == protocol,
+            "manager original generation differs",
+        )?;
         r.finish()?;
         Self::new(plan, deadline)
     }
@@ -259,7 +265,7 @@ impl<S: EffectJournalStorage> Journal<S> {
         Ok(())
     }
     fn header(binding: &Binding, selection: Selection, nonce: [u8; 32]) -> Vec<u8> {
-        let mut out = b"DFMMJ022".to_vec();
+        let mut out = binding.protocol.magic(b'J').to_vec();
         blob(&mut out, &binding.encode());
         out.extend(selection.encode());
         out.extend_from_slice(&nonce);
@@ -315,7 +321,7 @@ impl<S: EffectJournalStorage> Journal<S> {
             check(pin.is_some())?;
         }
         let mut r = Reader(&raw);
-        check(r.take(8)? == b"DFMMJ022")?;
+        check(r.take(8)? == binding.protocol.magic(b'J'))?;
         check(read_blob(&mut r, 2048)? == binding.encode())?;
         check(Selection::read(&mut r)? == selection)?;
         check(r.take(32)? != [0; 32])?;
@@ -329,7 +335,7 @@ impl<S: EffectJournalStorage> Journal<S> {
             pin.is_some_and(|p| p.journal_id == id && p.frames == 0 && p.head == id);
         while !r.0.is_empty() {
             w.current()?;
-            check(frames < MAX_FRAMES && r.take(8)? == b"DFMMF022")?;
+            check(frames < MAX_FRAMES && r.take(8)? == binding.protocol.magic(b'F'))?;
             let n = r.u32()? as usize;
             check(n <= MAX_BODY)?;
             w.charge(n.saturating_mul(8))?;
@@ -341,7 +347,7 @@ impl<S: EffectJournalStorage> Journal<S> {
                     && digest
                         == hash(
                             b"dfmcp-manager-frame/1",
-                            &Self::frame_prefix(frames + 1, head, &body),
+                            &Self::frame_prefix(binding.protocol, frames + 1, head, &body),
                         ),
             )?;
             frames += 1;
@@ -395,8 +401,13 @@ impl<S: EffectJournalStorage> Journal<S> {
         Self::authorize(&w.current()?, &self.binding, false, false, self.high_tick)?;
         Ok(())
     }
-    fn frame_prefix(sequence: u32, head: Digest32, body: &[u8]) -> Vec<u8> {
-        let mut out = b"DFMMF022".to_vec();
+    fn frame_prefix(
+        protocol: ManagerProtocol,
+        sequence: u32,
+        head: Digest32,
+        body: &[u8],
+    ) -> Vec<u8> {
+        let mut out = protocol.magic(b'F').to_vec();
         out.extend_from_slice(&(body.len() as u32).to_be_bytes());
         out.extend_from_slice(&sequence.to_be_bytes());
         out.extend_from_slice(head.as_bytes());
@@ -521,7 +532,8 @@ impl<S: EffectJournalStorage> Journal<S> {
         self.fenced = true;
         self.permit = false;
         self.apply(&body)?;
-        let mut frame = Self::frame_prefix(self.frames + 1, self.head, &body);
+        let mut frame =
+            Self::frame_prefix(self.binding.protocol, self.frames + 1, self.head, &body);
         let head = hash(b"dfmcp-manager-frame/1", &frame);
         frame.extend_from_slice(head.as_bytes());
         frame.extend_from_slice(b"DFMMEND1");
@@ -695,17 +707,18 @@ pub fn open_private(
         false,
         c.anchor.tick.get(),
     )?;
-    let mut ack = open_private_manager_acknowledgements(
-        &directory.join("manager-appointment.ack"),
+    let mut ack = open_private_manager_acknowledgements_for_protocol(
+        &directory.join(binding.protocol.ack_name()),
         &work.reserve(crate::workshop_construction::acknowledgement::WORK_BYTES as usize)?,
         mode,
         initialize,
         external,
         scope,
+        binding.protocol,
     )?;
     work.current()?;
     let (storage, created, _) = open_private_storage_scoped(
-        &directory.join("manager-appointment.journal"),
+        &directory.join(binding.protocol.journal_name()),
         &work.reserve(8192)?,
         match mode {
             WorkshopMode::Control => crate::build_placement::journal::BuildMode::Control,

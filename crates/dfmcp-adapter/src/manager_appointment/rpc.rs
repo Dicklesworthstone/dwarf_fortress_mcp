@@ -20,6 +20,7 @@ pub const CONNECT_BYTES: u64 = 8 * 1024 * 1024;
 pub type Permission = Box<dyn Fn(bool) -> Result<()> + Send>;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Binding {
+    pub protocol: ManagerProtocol,
     pub endpoint: SocketAddr,
     pub source: FortressIdentity,
     pub generation: u64,
@@ -74,7 +75,7 @@ impl Binding {
         )
     }
     pub fn encode(&self) -> Vec<u8> {
-        let mut out = b"DFMMB022".to_vec();
+        let mut out = self.protocol.magic(b'B').to_vec();
         field(&mut out, self.endpoint.to_string().as_bytes());
         out.extend_from_slice(&self.generation.to_be_bytes());
         out.extend_from_slice(&self.source.site().to_be_bytes());
@@ -100,7 +101,8 @@ impl Binding {
     pub fn capture(&self, c: &Capture) -> Result<()> {
         self.validate()?;
         require(
-            c.source == self.source
+            c.protocol == self.protocol
+                && c.source == self.source
                 && c.dimensions == self.dimensions
                 && c.generation == self.generation
                 && c.selection == self.selection,
@@ -193,9 +195,21 @@ impl ManagerRpc {
         for (i, name) in METHODS.iter().enumerate() {
             let mut request = Vec::new();
             bytes(&mut request, 1, name.as_bytes());
-            bytes(&mut request, 2, b"dfmcp.manager.v1_22.Request");
-            bytes(&mut request, 3, b"dfmcp.manager.v1_22.Reply");
-            bytes(&mut request, 4, b"dfmcp_manager_v1_22");
+            let (request_type, reply_type, plugin) = match binding.protocol {
+                ManagerProtocol::V1_22 => (
+                    b"dfmcp.manager.v1_22.Request".as_slice(),
+                    b"dfmcp.manager.v1_22.Reply".as_slice(),
+                    b"dfmcp_manager_v1_22".as_slice(),
+                ),
+                ManagerProtocol::V1_23 => (
+                    b"dfmcp.manager.v1_23.Request".as_slice(),
+                    b"dfmcp.manager.v1_23.Reply".as_slice(),
+                    b"dfmcp_manager_v1_23".as_slice(),
+                ),
+            };
+            bytes(&mut request, 2, request_type);
+            bytes(&mut request, 3, reply_type);
+            bytes(&mut request, 4, plugin);
             let raw = link.frame_bounded(0, &request, 64, &check)?;
             let reply = Message::parse(&raw, 1)?;
             reply.exact(&[1])?;
@@ -264,7 +278,7 @@ impl ManagerRpc {
             bytes(&mut request, 1, &self.secret);
             bytes(&mut request, 2, &self.nonce);
             number(&mut request, 3, 1);
-            number(&mut request, 4, 22);
+            number(&mut request, 4, self.binding.protocol.minor());
             number(&mut request, 5, current.budget.max_wall_millis);
             if let Some(s) = selection {
                 number(&mut request, 6, u64::from(s.unit));
@@ -285,7 +299,9 @@ impl ManagerRpc {
                 .frame_bounded(self.methods[index], &request, 256 * 1024, &check)?;
             let reply = Message::parse_manager(&raw, 13)?;
             require(
-                reply.bytes(3)? == self.nonce && reply.number(4)? == 1 && reply.number(5)? == 22,
+                reply.bytes(3)? == self.nonce
+                    && reply.number(4)? == 1
+                    && reply.number(5)? == self.binding.protocol.minor(),
                 "manager reply profile/nonce",
             )?;
             if !reply.boolean(1)? {

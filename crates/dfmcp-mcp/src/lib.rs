@@ -48,6 +48,7 @@ pub mod live_work_order_progress_server;
 pub mod live_work_orders_server;
 pub mod live_workforce_server;
 pub mod manager_appointment_server;
+pub mod manager_appointment_v1_23_server;
 mod observation_projection;
 mod output_budget;
 pub mod replay;

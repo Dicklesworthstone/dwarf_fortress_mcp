@@ -47,6 +47,7 @@ pub(crate) fn context() -> Result<OperationContext> {
 pub(crate) fn binding(endpoint: std::net::SocketAddr) -> Result<Binding> {
     let c = capture()?;
     Ok(Binding {
+        protocol: super::super::ManagerProtocol::V1_22,
         endpoint,
         source: c.source.clone(),
         generation: c.generation,

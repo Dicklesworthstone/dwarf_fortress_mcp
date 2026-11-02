@@ -1,0 +1,92 @@
+{
+  "schema": "dfmcp.manager-cache-development/1",
+  "status": "implemented_unadmitted_development_only",
+  "bead": "dfmcp-reality-wiring-proof-4bf.14.4",
+  "protocol": [
+    1,
+    23
+  ],
+  "production_admitted": false,
+  "production_runner_changed": false,
+  "native_plugin": "dfmcp_manager_v1_23",
+  "native_package": "dfmcp.manager.v1_23",
+  "native_methods": [
+    "Handshake",
+    "ReadManager",
+    "PrepareManager",
+    "CommitManager",
+    "QueryManager",
+    "CancelManager"
+  ],
+  "tool_names": [
+    "fortress_open_session",
+    "fortress_observe",
+    "fortress_query",
+    "fortress_plan",
+    "fortress_commit",
+    "fortress_wait",
+    "fortress_cancel",
+    "fortress_checkpoint",
+    "fortress_restore",
+    "fortress_explain",
+    "fortress_doctor"
+  ],
+  "role": "MANAGER",
+  "responsibility": {
+    "index": 4,
+    "name": "MANAGE_PRODUCTION",
+    "exact_definition_responsibilities": [
+      4
+    ]
+  },
+  "role_cache": {
+    "entities": [
+      "group",
+      "civ"
+    ],
+    "bucket_order": "native_enum_order",
+    "entry_order": "observed_vector_order",
+    "ids": "same_entity_assignment_ids",
+    "buckets_max": 128,
+    "per_bucket_max": 256,
+    "total_entries_max": 4096,
+    "group_civ_domain_equal": true,
+    "duplicate_or_foreign_or_null_refused": true,
+    "pointers_serialized": false
+  },
+  "transaction": {
+    "before": "both production buckets empty and exact vacant original assignment",
+    "write": "append selected existing assignment to initially empty group production bucket with assignment/HF/history writes",
+    "preserve": "all other group buckets and all civ buckets",
+    "preallocate_before_world_writes": true,
+    "double_capture_expected_poststate": true,
+    "writer_calls_per_original_key": 1,
+    "partial_failure": "indeterminate_no_retry"
+  },
+  "magic_suffix": "023",
+  "custody_filenames": [
+    "manager-appointment-v1-23.journal",
+    "manager-appointment-v1-23.ack"
+  ],
+  "host_environment": [
+    "DFMCP_ALLOW_UNADMITTED_MANAGER_V1_23",
+    "DFMCP_MANAGER_V1_23_TOKEN",
+    "DFMCP_MANAGER_V1_23_ALLOW_APPOINT",
+    "DFMCP_MANAGER_V1_23_MCP_CONFIG"
+  ],
+  "host_config_schema": "dfmcp.manager-appointment-mcp-development/2",
+  "standard_cli": [
+    "serve-gameplay-dev",
+    "manager-v1-23"
+  ],
+  "native_component_expected": {
+    "scenarios": 13,
+    "assertions": 308,
+    "ignored": 0,
+    "sdk_doubles_only": true,
+    "live_game": false
+  },
+  "legacy_1_22_vectors_unchanged": true,
+  "source_inventory_and_full_gate_registration": "pending_on_early_cut",
+  "runtime_admitted": false
+}

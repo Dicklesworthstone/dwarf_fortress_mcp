@@ -11,6 +11,70 @@ pub use crate::order_run::FortressIdentity;
 pub use capture::*;
 use dfmcp_core::{Digest32, ErrorCode, Result};
 pub use record::*;
+/// Host-selected, explicitly versioned Manager wire and custody generation.
+/// This is never selected through an agent tool argument.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ManagerProtocol {
+    V1_22,
+    V1_23,
+}
+impl ManagerProtocol {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::V1_22 => "manager/1.22",
+            Self::V1_23 => "manager/1.23",
+        }
+    }
+    pub const fn minor(self) -> u64 {
+        match self {
+            Self::V1_22 => 22,
+            Self::V1_23 => 23,
+        }
+    }
+    pub(crate) const fn magic(self, kind: u8) -> [u8; 8] {
+        [
+            b'D',
+            b'F',
+            b'M',
+            b'M',
+            kind,
+            b'0',
+            b'2',
+            match self {
+                Self::V1_22 => b'2',
+                Self::V1_23 => b'3',
+            },
+        ]
+    }
+    pub(crate) const fn journal_name(self) -> &'static str {
+        match self {
+            Self::V1_22 => "manager-appointment.journal",
+            Self::V1_23 => "manager-appointment-v1-23.journal",
+        }
+    }
+    pub(crate) const fn ack_name(self) -> &'static str {
+        match self {
+            Self::V1_22 => "manager-appointment.ack",
+            Self::V1_23 => "manager-appointment-v1-23.ack",
+        }
+    }
+    pub(crate) fn decode_magic(raw: &[u8], kind: u8) -> Result<Self> {
+        if raw == Self::V1_22.magic(kind) {
+            Ok(Self::V1_22)
+        } else if raw == Self::V1_23.magic(kind) {
+            Ok(Self::V1_23)
+        } else {
+            Err(error(
+                ErrorCode::AdapterRejected,
+                "unknown Manager generation",
+            ))
+        }
+    }
+}
+pub const MAX_ROLE_BUCKETS: usize = 128;
+pub const MAX_ROLE_ENTRIES: usize = 256;
+pub const MAX_TOTAL_ROLE_ENTRIES: usize = 4096;
+pub const MANAGE_PRODUCTION: usize = 4;
 pub const MAX_CAPTURE_BYTES: usize = 65536;
 pub const MAX_RECORD_BYTES: usize = 2 * MAX_CAPTURE_BYTES + 1024;
 pub(crate) fn u16(r: &mut Reader<'_>) -> Result<usize> {
@@ -50,3 +114,6 @@ pub(crate) fn put(out: &mut Vec<u8>, values: impl IntoIterator<Item = i32>) {
 }
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod tests_v1_23;

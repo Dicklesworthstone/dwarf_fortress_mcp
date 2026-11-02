@@ -57,7 +57,7 @@ fn run() -> Result<(), Box<dyn Error>> {
 /// An operator chooses one existing guarded runtime before stdio starts.
 /// This does not combine sessions, change environment or grant authority.
 fn serve_gameplay_dev(mut args: impl Iterator<Item = String>) -> Result<(), Box<dyn Error>> {
-    const USAGE: &str = "usage: dwarf-fortress-mcp serve-gameplay-dev <tree|workshop|manager|bounded-clock|finite-bed>";
+    const USAGE: &str = "usage: dwarf-fortress-mcp serve-gameplay-dev <tree|workshop|manager|manager-v1-23|bounded-clock|finite-bed>";
     let profile = args.next().ok_or(USAGE)?;
     if args.next().is_some() {
         return Err(USAGE.into());
@@ -66,6 +66,7 @@ fn serve_gameplay_dev(mut args: impl Iterator<Item = String>) -> Result<(), Box<
         "tree" => dfmcp_mcp::tree_harvest_server::run_stdio(),
         "workshop" => dfmcp_mcp::workshop_construction_server::run_stdio(),
         "manager" => dfmcp_mcp::manager_appointment_server::run_stdio(),
+        "manager-v1-23" => dfmcp_mcp::manager_appointment_v1_23_server::run_stdio(),
         "bounded-clock" => dfmcp_mcp::live_run_server::run_stdio(),
         "finite-bed" => dfmcp_mcp::live_semantic_work_orders_server::run_stdio(),
         _ => return Err(USAGE.into()),
@@ -151,7 +152,7 @@ COMMANDS:
     bridge      Authenticate to dfmcp_bridge and publish one canonical live read
     serve       Run the deterministic laboratory MCP server
     serve-live  Run the authenticated read-only live MCP server
-    serve-gameplay-dev <tree|workshop|manager|bounded-clock|finite-bed>
+    serve-gameplay-dev <tree|workshop|manager|manager-v1-23|bounded-clock|finite-bed>
                 Run one existing guarded, unadmitted gameplay development profile
     replay      Re-execute a laboratory replay bundle and report the first divergence
     evaluate    Score a policy on a laboratory scenario: evaluate <scenario> <policy> <ticks>
@@ -199,7 +200,7 @@ transport: mcp/2026-07-28 (modern-only) over stdio via the owned fastmcp_rust si
 server_modes:
   laboratory: serve
   authenticated_live_read_only: serve-live
-  unadmitted_gameplay_development: serve-gameplay-dev <tree|workshop|manager|bounded-clock|finite-bed>
+  unadmitted_gameplay_development: serve-gameplay-dev <tree|workshop|manager|manager-v1-23|bounded-clock|finite-bed>
 bridge_read_protocol: dfmcp.bridge.v1 over DFHack native protobuf RPC
 bridge_read_methods:
   - Handshake

@@ -19,6 +19,7 @@ enum Protocol {
     Workshop,
     Tree,
     Manager,
+    ManagerV1_23,
 }
 impl Protocol {
     fn magic(self) -> &'static [u8; 8] {
@@ -26,13 +27,14 @@ impl Protocol {
             Self::Workshop => b"DFMWA020",
             Self::Tree => b"DFMTA021",
             Self::Manager => b"DFMMA022",
+            Self::ManagerV1_23 => b"DFMMA023",
         }
     }
     fn domain(self) -> &'static [u8] {
         match self {
             Self::Workshop => b"dfmcp-workshop-acknowledgement/1\0",
             Self::Tree => b"dfmcp-tree-harvest-acknowledgement/1\0",
-            Self::Manager => b"dfmcp-manager-acknowledgement/1\0",
+            Self::Manager | Self::ManagerV1_23 => b"dfmcp-manager-acknowledgement/1\0",
         }
     }
 }
@@ -140,6 +142,33 @@ pub fn open_private_manager_acknowledgements(
         initialize,
         external,
         Protocol::Manager,
+        Some(scope),
+    )
+}
+/// A host-pinned Manager generation selects distinct custody bytes. No tool
+/// argument or journal contents may select a generation on the caller's behalf.
+pub fn open_private_manager_acknowledgements_for_protocol(
+    path: &Path,
+    context: &OperationContext,
+    mode: WorkshopMode,
+    initialize: bool,
+    external: Option<WorkshopPin>,
+    scope: MapCuboid,
+    protocol: crate::manager_appointment::ManagerProtocol,
+) -> Result<WorkshopAcknowledgements<PrivateBuildFile>> {
+    check(!initialize || (mode == WorkshopMode::Control && external.is_none()))?;
+    check(initialize || external.is_some())?;
+    let protocol = match protocol {
+        crate::manager_appointment::ManagerProtocol::V1_22 => Protocol::Manager,
+        crate::manager_appointment::ManagerProtocol::V1_23 => Protocol::ManagerV1_23,
+    };
+    open_private_for(
+        path,
+        context,
+        mode,
+        initialize,
+        external,
+        protocol,
         Some(scope),
     )
 }

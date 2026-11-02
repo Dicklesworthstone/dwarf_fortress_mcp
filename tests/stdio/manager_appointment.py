@@ -28,6 +28,12 @@ BINARY: Path
 SERVER_ARGS: list[str] = []
 LOGS: Path
 VECTORS = {}
+PROFILE = "1.22"
+MINOR = 22
+
+def custody_name(suffix):
+    return "manager-appointment" + ("-v1-23" if MINOR == 23 else "") + "." + suffix
+
 
 
 def varint(n):
@@ -86,6 +92,44 @@ def keyed(name, key, vectors=None):
     raw[plan_at + 32:plan_at + 48] = hashlib.sha256(b"dfmcp-manager-token/1\0" + len(key).to_bytes(2, "big") + key + plan).digest()[:16]
     raw[-32:] = hashlib.sha256(b"dfmcp-manager-receipt/1\0" + raw[:-32]).digest()
     return bytes(raw)
+
+
+def cache_bucket_offset(capture, entity_index, target=4):
+    """Locate a 1.23 bucket in a native vector without guessing fixed offsets."""
+    assert capture[:8] == b"DFMMC023" and entity_index in (0, 1)
+    pos = 56
+    folder = int.from_bytes(capture[pos:pos+2], "big"); pos += 2 + folder + 8
+    for entity in range(2):
+        pos += 48
+        count = int.from_bytes(capture[pos:pos+2], "big"); pos += 2
+        for _ in range(count):
+            pos += 44
+            size = int.from_bytes(capture[pos:pos+2], "big"); pos += 2 + size
+            claims = int.from_bytes(capture[pos:pos+2], "big"); pos += 2 + claims * 4
+        buckets = int.from_bytes(capture[pos:pos+2], "big"); pos += 2
+        assert target < buckets <= 128
+        for bucket in range(buckets):
+            at = pos
+            size = int.from_bytes(capture[pos:pos+2], "big"); pos += 2 + size * 4
+            assert size <= 256 and pos <= len(capture)
+            if entity == entity_index and bucket == target: return at
+    raise AssertionError("bucket missing")
+
+
+def assigned_without_cache(record):
+    """Produce a checksum-valid protocol-double contradiction, never native evidence."""
+    assert record[:8] == b"DFMMR023"
+    key_len = int.from_bytes(record[8:10], "big")
+    at = 10 + key_len + 48
+    before_len = int.from_bytes(record[at:at+4], "big"); at += 4 + before_len
+    assert record[at:at+3] == bytes([2, 0, 1]); at += 3
+    length_at = at; size = int.from_bytes(record[at:at+4], "big"); at += 4
+    after = bytearray(record[at:at+size]); bucket = cache_bucket_offset(after, 0)
+    assert after[bucket:bucket+6] == b"\x00\x01" + (600).to_bytes(4, "big")
+    after[bucket:bucket+6] = b"\x00\x00"
+    body = bytearray(record[:-32]); body[at:at+size] = after
+    body[length_at:length_at+4] = len(after).to_bytes(4, "big")
+    return bytes(body) + hashlib.sha256(b"dfmcp-manager-receipt/1\0" + body).digest()
 
 
 def resolve_content(content):
@@ -150,6 +194,7 @@ class Peer:
         self.calls, self.errors = [], []
         self.stop, self.entered, self.release_commit = threading.Event(), threading.Event(), threading.Event()
         self.record = self.key = self.stale = self.active = None
+        self.bad_after = False
         self.drop_commit = False
         self.writer_count = 0
         self.reads = 0
@@ -180,24 +225,27 @@ class Peer:
                         except EOFError:
                             break
                         if method == 0:
-                            assert request == {1: METHODS[bound].encode(), 2: b"dfmcp.manager.v1_22.Request", 3: b"dfmcp.manager.v1_22.Reply", 4: b"dfmcp_manager_v1_22"}
+                            assert request == {1: METHODS[bound].encode(), 2: f"dfmcp.manager.v1_{MINOR}.Request".encode(), 3: f"dfmcp.manager.v1_{MINOR}.Reply".encode(), 4: f"dfmcp_manager_v1_{MINOR}".encode()}
                             self.reply(stream, number(1, bound + 2)); bound += 1; continue
                         assert bound == 6
                         op = method - 2
-                        assert 0 <= op < 6 and request[1] == b"t" * 32 and len(request[2]) == 32 and request[3] == 1 and request[4] == 22
+                        assert 0 <= op < 6 and request[1] == b"t" * 32 and len(request[2]) == 32 and request[3] == 1 and request[4] == MINOR
                         assert 1 <= request[5] <= 60000
                         self.calls.append(op)
                         with (self.directory / "native-calls.jsonl").open("a") as log:
                             log.write(json.dumps({"op": METHODS[op], "fields": sorted(request)}) + "\n")
                         generation = int.from_bytes(self.vectors["capture"][8:16], "big")
                         if op == 1 and self.stale == "source": generation += 1
-                        raw = number(1, 1) + number(2, 0) + blob(3, request[2]) + number(4, 1) + number(5, 22)
+                        raw = number(1, 1) + number(2, 0) + blob(3, request[2]) + number(4, 1) + number(5, MINOR)
                         raw += number(6, generation) + blob(7, b"test-df") + blob(8, b"test-dfhack")
                         if op == 1:
                             assert set(request) == {1, 2, 3, 4, 5, 6, 7}
                             assert [request[t] for t in (6, 7)] == [256, 361]
                             self.reads += 1
                             capture = bytearray(self.vectors["capture"])
+                            if self.stale == "cache":
+                                at = cache_bucket_offset(capture, 0); assert capture[at:at+2] == b"\x00\x00"
+                                capture[at:at+2] = b"\x00\x01" + (600).to_bytes(4, "big")
                             if self.stale == "identity": capture[-6] = 0
                             if self.stale == "epoch": capture[8:16] = struct.pack(">Q", generation + 1)
                             if self.stale == "vacancy":
@@ -220,7 +268,7 @@ class Peer:
                             assert request[9].decode() == self.key and request[11] == self.vectors["plan"]
                             prepared = keyed("prepared", self.key, self.vectors); token_at = 10 + len(self.key.encode()) + 32
                             assert request[12] == prepared[token_at:token_at + 16]
-                            ack = (self.directory / "custody/manager-appointment.ack").read_bytes()
+                            ack = (self.directory / "custody" / custody_name("ack")).read_bytes()
                             assert len(ack) >= 140 and len(ack) % 140 == 0 and int.from_bytes(ack[-68:-64], "big") >= 3
                             self.writer_count += 1; assert self.writer_count == 1
                             self.record = "assigned"; self.entered.set()
@@ -228,7 +276,8 @@ class Peer:
                                 while not self.release_commit.wait(.01):
                                     if self.stop.is_set(): return
                                 break
-                            raw += blob(10, keyed("assigned", self.key, self.vectors))
+                            assigned = keyed("assigned", self.key, self.vectors)
+                            raw += blob(10, assigned_without_cache(assigned) if self.bad_after else assigned)
                         elif op == 4:
                             assert set(request) == {1, 2, 3, 4, 5, 9, 11}
                             if self.record: raw += blob(10, keyed(self.record, request[9].decode(), self.vectors))
@@ -261,7 +310,7 @@ class Peer:
 def config(directory, peer, **changes):
     dimensions=list(struct.unpack(">III",peer.vectors["capture"][44:56]))
     scope=[0,0,0]+[n-1 for n in dimensions]
-    value={"schema":"dfmcp.manager-appointment-mcp-development/1","directory":str(directory/"custody"),"endpoint":peer.endpoint,
+    value={"schema":"dfmcp.manager-appointment-mcp-development/" + ("2" if MINOR == 23 else "1"),"directory":str(directory/"custody"),"endpoint":peer.endpoint,
         "initialize":True,"acknowledged":None,"world_folder":"region1","site_id":38,"df_version":"test-df","dfhack_version":"test-dfhack","generation":7,
         "map_dimensions":dimensions,"unit_id":256,"histfig_id":361,"read_scope":scope,"scope":scope,
         "authority_expires_tick":30*403200+16800+12000,"lease_ticks":1200,"checkpoint":"disposable-fortress-no-checkpoint"}
@@ -270,8 +319,12 @@ def config(directory, peer, **changes):
 
 def environment(value):
     env = {k: v for k, v in os.environ.items() if not k.startswith("DFMCP_")}
-    env.update(DFMCP_ALLOW_UNADMITTED_MANAGER_V1_22="1", DFMCP_MANAGER_ALLOW_APPOINT="1",
-               DFMCP_MANAGER_TOKEN="t" * 32, DFMCP_MANAGER_MCP_CONFIG=json.dumps(value))
+    if MINOR == 23:
+        env.update(DFMCP_ALLOW_UNADMITTED_MANAGER_V1_23="1", DFMCP_MANAGER_V1_23_ALLOW_APPOINT="1",
+                   DFMCP_MANAGER_V1_23_TOKEN="t" * 32, DFMCP_MANAGER_V1_23_MCP_CONFIG=json.dumps(value))
+    else:
+        env.update(DFMCP_ALLOW_UNADMITTED_MANAGER_V1_22="1", DFMCP_MANAGER_ALLOW_APPOINT="1",
+                   DFMCP_MANAGER_TOKEN="t" * 32, DFMCP_MANAGER_MCP_CONFIG=json.dumps(value))
     return env
 
 
@@ -408,7 +461,16 @@ class ManagerStdioTests(unittest.TestCase):
     def test_positive_full_appointment_once_and_offline_original_custody(self):
         c=self.client();sid,o,planned=self.prepared(c)
         result=c.execute_next(planned);self.assertTrue(result["result"]["ok"],result);done=result["result"]["original"]
+        if MINOR == 23:
+            self.assertEqual(result["result"]["source_profile"], "manager/1.23")
+            self.assertEqual(done["original_source"]["group_role_buckets"][4], [])
+            self.assertEqual(done["after"]["group_role_buckets"][4], [600])
+            self.assertEqual(done["original_source"]["civ_role_buckets"], done["after"]["civ_role_buckets"])
+            before_buckets = done["original_source"]["group_role_buckets"]
+            after_buckets = done["after"]["group_role_buckets"]
+            self.assertEqual(before_buckets[:4] + before_buckets[5:], after_buckets[:4] + after_buckets[5:])
         self.assertTrue(done["appointment_proved"]);self.assertEqual(done["native_phase"],2)
+        if MINOR == 23: self.assertTrue(done["production_manager_cache_proved"])
         after=done["after"];self.assertEqual(after["tick"],done["original_source"]["tick"]);self.assertTrue(after["paused"])
         self.assertTrue(after["dual_getters_agree"]);self.assertEqual(after["lookup_unit"],256);self.assertEqual(after["manager_links"],1)
         self.assertEqual(after["assignment_id"],600);self.assertEqual(after["assignment_index"],3);self.assertEqual(after["manager_position_id"],1000);self.assertEqual(after["manager_position_index"],2)
@@ -423,7 +485,7 @@ class ManagerStdioTests(unittest.TestCase):
         self.assertEqual(self.peer.calls,calls);self.assertEqual(before,{p.name:p.read_bytes() for p in (self.directory/"custody").iterdir()})
     def test_crash_lost_reply_reconciles_original_without_redispatch(self):
         c=self.client();sid,o,planned=self.prepared(c);external=planned["result"]["custody"]["acknowledged"]
-        journal=self.directory/"custody/manager-appointment.journal";prefix=journal.read_bytes();self.peer.drop_commit=True
+        journal=self.directory/"custody"/custody_name("journal");prefix=journal.read_bytes();self.peer.drop_commit=True
         c.send("tools/call",{"name":"fortress_commit","arguments":{"session_id":sid,"review_seal":o["review_seal"],"confirmed":True}})
         self.assertTrue(self.peer.entered.wait(10),self.peer.errors);c.close(crash=True);self.peer.release_commit.set();self.assertGreater(len(journal.read_bytes()),len(prefix))
         recovery=self.client(config(self.directory,self.peer,initialize=False,acknowledged=external),"recover");opened=recovery.open("recover")
@@ -435,7 +497,7 @@ class ManagerStdioTests(unittest.TestCase):
         bad=self.client(config(self.directory,self.peer,initialize=False,acknowledged=external),"rollback").open("recover")
         self.assertFalse(bad["result"]["ok"],bad);self.assertEqual(bad["result"]["error"]["code"],"corrupt_ledger");self.assertEqual(len(self.peer.calls),calls)
     def test_changed_vacancy_HF_source_epoch_refuse_before_prepare(self):
-        for kind in ("vacancy","identity","source","epoch"):
+        for kind in (("vacancy","identity","source","epoch","cache") if MINOR == 23 else ("vacancy","identity","source","epoch")):
             directory=self.directory/kind;directory.mkdir(mode=0o700);(directory/"custody").mkdir(mode=0o700);peer=Peer(directory);child=Client(directory,config(directory,peer))
             try:
                 opened=child.open();self.assertTrue(opened["result"]["ok"],opened);peer.stale=kind
@@ -504,16 +566,37 @@ class ManagerStdioTests(unittest.TestCase):
         self.assertFalse(retained["result"]["custody"]["uncertain_effect"])
         self.assertFalse(retained["result"]["original"]["prepared_in_this_connection"])
 
+class ManagerV123CacheTests(ManagerStdioTests):
+    # Only this new method is loaded for 1.23; inherited cases run separately.
+    def test_bad_checksum_valid_after_cache_cannot_complete_or_redispatch(self):
+        c=self.client(); sid,original,planned=self.prepared(c); self.peer.bad_after=True
+        failed=c.execute_next(planned)
+        self.assertFalse(failed["result"]["ok"],failed)
+        self.assertEqual(self.peer.writer_count,1)
+        retained=c.tool("query",session_id=sid)
+        self.assertTrue(retained["result"]["ok"],retained)
+        self.assertTrue(retained["result"]["custody"]["uncertain_effect"])
+        self.assertFalse(retained["result"]["original"]["appointment_proved"])
+        self.assertFalse(retained["result"]["original"]["production_manager_cache_proved"])
+        self.assertEqual(retained["result"]["original"]["key"],original["key"])
+        self.assertEqual(self.peer.writer_count,1)
+        again=c.execute_next(planned)
+        self.assertFalse(again["result"]["ok"],again)
+        self.assertEqual(self.peer.writer_count,1)
+
+
 def main():
-    global BINARY, LOGS, VECTORS, SERVER_ARGS
+    global BINARY, LOGS, VECTORS, SERVER_ARGS, PROFILE, MINOR
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", type=Path, required=True)
     parser.add_argument("--logs", type=Path, required=True)
     parser.add_argument("--server-arg", action="append", default=[])
+    parser.add_argument("--profile", choices=("1.22", "1.23"), default="1.22")
     args = parser.parse_args()
+    PROFILE = args.profile; MINOR = int(PROFILE.split(".")[1])
     SERVER_ARGS = args.server_arg
     LOGS = args.logs; LOGS.mkdir(mode=0o700)
-    VECTORS = {k: bytes.fromhex(v) for k,v in json.loads((ROOT / "tests/fixtures/manager_v1_22_component.json").read_text()).items()}
+    VECTORS = {k: bytes.fromhex(v) for k,v in json.loads((ROOT / f"tests/fixtures/manager_v1_{MINOR}_component.json").read_text()).items()}
     # Only the three original vectors are native component output. Other phases
     # are explicit protocol-double responses, never represented as native/live captures.
     base=VECTORS["prepared"]; key_len=int.from_bytes(base[8:10],"big"); at=10+key_len+48+4+len(VECTORS["capture"])
@@ -521,11 +604,13 @@ def main():
         body=bytearray(base[:-32]);body[at:at+2]=bytes([phase,reason]);VECTORS[name]=bytes(body)+hashlib.sha256(b"dfmcp-manager-receipt/1\0"+body).digest()
     for name in ("prepared","assigned"): assert keyed(name,"manager-001")==VECTORS[name],name
     BINARY = args.binary.resolve(strict=True)
-    result = unittest.TextTestRunner(verbosity=2).run(unittest.defaultTestLoader.loadTestsFromTestCase(ManagerStdioTests))
+    suite = unittest.defaultTestLoader.loadTestsFromTestCase(ManagerStdioTests)
+    if MINOR == 23: suite.addTest(ManagerV123CacheTests("test_bad_checksum_valid_after_cache_cannot_complete_or_redispatch"))
+    result = unittest.TextTestRunner(verbosity=2).run(suite)
     print(json.dumps({"schema":"dfmcp.manager-stdio-component/1", "tests":result.testsRun, "failed":len(result.failures),
         "errors":len(result.errors), "skipped":len(result.skipped), "actual_modern_stdio":True,
         "loopback_peers_are_doubles":True, "live_game":False}))
-    raise SystemExit(0 if result.wasSuccessful() and result.testsRun == 7 and not result.skipped else 1)
+    raise SystemExit(0 if result.wasSuccessful() and result.testsRun == (8 if MINOR == 23 else 7) and not result.skipped else 1)
 
 
 if __name__ == "__main__": main()

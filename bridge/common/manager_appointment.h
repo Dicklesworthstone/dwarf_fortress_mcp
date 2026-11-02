@@ -1,5 +1,6 @@
 #pragma once
 #include "workshop_construction.h"
+#include <algorithm>
 
 // Manager/1.22. Value evidence only: no addresses, arbitrary roles or commands.
 // DFHack objects are handled by the separately tested SDK transaction shell.
@@ -15,6 +16,8 @@ using dfmcp_workshop::hash;
 using dfmcp_workshop::key_valid;
 constexpr std::size_t MAX_CAPTURE_BYTES=65536, MAX_RECORD_BYTES=2*MAX_CAPTURE_BYTES+1024;
 constexpr std::size_t MAX_ASSIGNMENTS=256, MAX_POSITIONS=256, MAX_LINKS=256;
+constexpr std::size_t MAX_ROLE_BUCKETS=128, MAX_ROLE_ENTRIES=256, MAX_TOTAL_ROLE_ENTRIES=4096;
+constexpr std::size_t MANAGE_PRODUCTION=4;
 constexpr std::size_t MAX_HISTORY=65536, MAX_UNITS=8192, MAX_FIGURES=65536;
 struct Selection {
     std::uint32_t unit=0, figure=0;
@@ -45,12 +48,28 @@ struct Entity {
     // Complete ordered position definitions under a declared stable field projection.
     std::string positions_digest;
     std::vector<Assignment> assignments;
-    std::string encode() const {
+    std::vector<std::vector<std::int32_t>> role_buckets;
+    std::string encode(unsigned minor=22) const {
         require(id>=0 && index>=0 && next_position>=0 && next_assignment>=0
             && positions_digest.size()==32 && assignments.size()<=MAX_ASSIGNMENTS,5);
         std::string out;for(auto n:{id,index,next_position,next_assignment})i32(out,n);out+=positions_digest;
         u16(out,static_cast<std::uint16_t>(assignments.size()));std::int32_t previous=-1;
         for(const auto &a:assignments){require(a.id>previous,5);previous=a.id;out+=a.encode();}
+        if(minor==23){
+            require(role_buckets.size()<=MAX_ROLE_BUCKETS,5);
+            u16(out,static_cast<std::uint16_t>(role_buckets.size()));
+            std::size_t total=0;
+            for(const auto &bucket:role_buckets){
+                require(bucket.size()<=MAX_ROLE_ENTRIES,5);total+=bucket.size();require(total<=MAX_TOTAL_ROLE_ENTRIES,5);
+                u16(out,static_cast<std::uint16_t>(bucket.size()));
+                std::vector<std::int32_t> seen;
+                for(auto id:bucket){
+                    require(std::find(seen.begin(),seen.end(),id)==seen.end(),5);
+                    require(std::any_of(assignments.begin(),assignments.end(),[&](const Assignment &a){return a.id==id;}),5);
+                    seen.push_back(id);i32(out,id);
+                }
+            }
+        } else require(minor==22,5);
         return out;
     }
 };
@@ -81,6 +100,7 @@ inline std::string extend_history(const std::string &prior,const Event &event) {
     require(prior.size()==32,5);return hash("dfmcp-manager-history-projection/1",prior+event.encode());
 }
 struct Capture {
+    unsigned minor=22;
     std::uint64_t generation=0, sequence=0, tick=0;
     std::uint32_t site=0, year=0, year_tick=0;
     std::array<std::uint32_t,3> dimensions{};
@@ -101,10 +121,12 @@ struct Capture {
             && dfmcp_workshop::utf8(folder,512) && site<INT32_MAX && manager_links<=1
             && next_event<INT32_MAX && history_count<=MAX_HISTORY && links.size()<=MAX_LINKS
             && history_digest.size()==32 && roster_digest.size()==32 && entity_domain_digest.size()==32,5);
-        std::string out="DFMMC022";for(auto n:{generation,sequence,tick})u64(out,n);
+        require(minor==22 || minor==23,5);
+        if(minor==23){require(group.role_buckets.size()==civ.role_buckets.size(),5);std::size_t total=0;for(const auto *e:{&group,&civ})for(const auto &b:e->role_buckets)total+=b.size();require(total<=MAX_TOTAL_ROLE_ENTRIES,5);}
+        std::string out=minor==23?"DFMMC023":"DFMMC022";for(auto n:{generation,sequence,tick})u64(out,n);
         for(auto n:{site,year,year_tick}){u32(out,n);}
         for(auto n:dimensions){require(n && n<=32768,5);u32(out,n);}
-        field(out,folder);out+=selection.encode();out+=group.encode();out+=civ.encode();
+        field(out,folder);out+=selection.encode();out+=group.encode(minor);out+=civ.encode(minor);
         for(auto n:{manager_position,manager_index,lookup_unit})i32(out,n);
         for(auto n:{manager_links,next_event,history_count})u32(out,n);
         out+=history_digest;out+=roster_digest;out+=entity_domain_digest;
@@ -121,6 +143,8 @@ struct Capture {
     bool eligible() const {
         (void)encode();const auto *a=target();
         return paused && active && citizen && adult && sane && identity && member && role_eligible && expedition_leader && ui_quiescent
+            && (minor==22 || (group.role_buckets.size()>MANAGE_PRODUCTION && civ.role_buckets.size()>MANAGE_PRODUCTION
+                && group.role_buckets[MANAGE_PRODUCTION].empty() && civ.role_buckets[MANAGE_PRODUCTION].empty()))
             && dual_getters && lookup_unit==-1 && manager_links==0 && group.id!=civ.id
             && a && a->ordinary_active() && a->figure==-1 && a->last_figure==-1 && a->cache==-1 && a->claims.empty()
             && a->squad==-1 && a->site==-1 && a->abstract_building==-1
@@ -140,6 +164,7 @@ struct Capture {
     Capture expected_after() const {
         require(eligible(),4);auto out=*this;++out.sequence;
         for(auto &a:out.group.assignments)if(a.position==manager_position){a.figure=static_cast<std::int32_t>(selection.figure);a.last_figure=a.figure;a.cache=manager_index;}
+        if(minor==23)out.group.role_buckets[MANAGE_PRODUCTION].push_back(target()->id);
         Link link;link.type=10;link.entity=group.id;link.entity_cache=group.index;link.strength=100;
         link.assignment=target()->id;link.assignment_cache=static_cast<std::int32_t>(target()-group.assignments.data());
         link.start_year=static_cast<std::int32_t>(year);out.links.push_back(link);
@@ -156,8 +181,8 @@ struct Insertion {
         return unit==c.selection.unit && figure==c.selection.figure && group==c.group.id
             && c.target() && assignment==c.target()->id && event==static_cast<std::int32_t>(c.next_event) && lookup && noble;
     }
-    std::string encode() const {
-        std::string out="DFMMI022";u32(out,unit);u32(out,figure);for(auto n:{group,assignment,event})i32(out,n);flag(out,lookup);flag(out,noble);return out;
+    std::string encode(unsigned minor=22) const {
+        require(minor==22 || minor==23,5);std::string out=minor==23?"DFMMI023":"DFMMI022";u32(out,unit);u32(out,figure);for(auto n:{group,assignment,event})i32(out,n);flag(out,lookup);flag(out,noble);return out;
     }
 };
 enum class Phase:unsigned char {Prepared=0,Indeterminate=1,Placed=2,Refused=3,Cancelled=4};
@@ -169,10 +194,10 @@ struct Record {
     std::string key,plan,token;Capture before;std::optional<Capture> after;std::optional<Insertion> insertion;
     Phase phase=Phase::Prepared;Reason reason=Reason::None;std::uint64_t created_ms=0;
     std::string encode() const {
-        key_valid(key);require(plan.size()==32 && token.size()==16,5);std::string out="DFMMR022";field(out,key);out+=plan;out+=token;
+        key_valid(key);require(plan.size()==32 && token.size()==16,5);std::string out=before.minor==23?"DFMMR023":"DFMMR022";field(out,key);out+=plan;out+=token;
         const auto b=before.encode();u32(out,static_cast<std::uint32_t>(b.size()));out+=b;out.push_back(static_cast<char>(phase));out.push_back(static_cast<char>(reason));
-        flag(out,after.has_value());if(after){const auto a=after->encode();u32(out,static_cast<std::uint32_t>(a.size()));out+=a;}
-        flag(out,insertion.has_value());if(insertion)out+=insertion->encode();out+=hash("dfmcp-manager-receipt/1",out);require(out.size()<=MAX_RECORD_BYTES,5);return out;
+        flag(out,after.has_value());if(after){require(after->minor==before.minor,5);const auto a=after->encode();u32(out,static_cast<std::uint32_t>(a.size()));out+=a;}
+        flag(out,insertion.has_value());if(insertion)out+=insertion->encode(before.minor);out+=hash("dfmcp-manager-receipt/1",out);require(out.size()<=MAX_RECORD_BYTES,5);return out;
     }
 };
 struct Model {

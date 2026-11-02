@@ -3,7 +3,7 @@ use dfmcp_adapter::build_placement::{
     journal::private_file::PrivateBuildFile, rpc::BuildCancellation,
 };
 use dfmcp_adapter::manager_appointment::{
-    Capture, FortressIdentity, Plan, Selection,
+    Capture, FortressIdentity, ManagerProtocol, Plan, Selection,
     journal::{self, Journal, Mode, Original, State},
     rpc::{Binding, CONNECT_BYTES, ManagerRpc},
 };
@@ -27,6 +27,37 @@ const OPT: &str = "DFMCP_ALLOW_UNADMITTED_MANAGER_V1_22";
 // ubs:ignore[rust.security.hardcoded-secrets] — environment-variable name; credentials come from the host.
 const TOKEN: &str = "DFMCP_MANAGER_TOKEN";
 const WRITE: &str = "DFMCP_MANAGER_ALLOW_APPOINT";
+fn config_name() -> &'static str {
+    match super::protocol() {
+        ManagerProtocol::V1_22 => CONFIG,
+        ManagerProtocol::V1_23 => "DFMCP_MANAGER_V1_23_MCP_CONFIG",
+    }
+}
+fn opt_name() -> &'static str {
+    match super::protocol() {
+        ManagerProtocol::V1_22 => OPT,
+        ManagerProtocol::V1_23 => "DFMCP_ALLOW_UNADMITTED_MANAGER_V1_23",
+    }
+}
+fn token_name() -> &'static str {
+    match super::protocol() {
+        ManagerProtocol::V1_22 => TOKEN,
+        ManagerProtocol::V1_23 => "DFMCP_MANAGER_V1_23_TOKEN",
+    }
+}
+fn write_name() -> &'static str {
+    match super::protocol() {
+        ManagerProtocol::V1_22 => WRITE,
+        ManagerProtocol::V1_23 => "DFMCP_MANAGER_V1_23_ALLOW_APPOINT",
+    }
+}
+fn config_schema() -> &'static str {
+    match super::protocol() {
+        ManagerProtocol::V1_22 => "dfmcp.manager-appointment-mcp-development/1",
+        ManagerProtocol::V1_23 => "dfmcp.manager-appointment-mcp-development/2",
+    }
+}
+
 pub(super) fn error(code: ErrorCode, message: &str) -> DfmcpError {
     DfmcpError::new(code, message)
 }
@@ -47,22 +78,24 @@ pub(super) fn digest(s: &str) -> Result<Digest32> {
     Digest32::from_hex(s).ok_or_else(|| error(ErrorCode::InvalidRequest, "invalid manager digest"))
 }
 pub(super) fn environment() -> Result<()> {
-    if std::env::var(OPT).ok().as_deref() != Some("1")
+    if std::env::var(opt_name()).ok().as_deref() != Some("1")
         || std::env::var_os("DFMCP_ADMITTED_BRIDGE_PROTOCOL").is_some()
         || crate::current_admission_provenance().is_some()
     {
         return Err(denied(
-            "manager/1.22 requires isolated unadmitted opt-in and refuses production provenance",
+            "Manager development requires isolated exact-generation opt-in and refuses production provenance",
         ));
     }
-    if std::env::var_os(WRITE).is_some_and(|v| v.to_str() != Some("1")) {
+    if std::env::var_os(write_name()).is_some_and(|v| v.to_str() != Some("1")) {
         return Err(denied(
             "manager appointment gate must be absent or exactly 1",
         ));
     }
     for (name, _) in std::env::vars_os() {
         let name = name.to_string_lossy();
-        if name.starts_with("DFMCP_") && ![CONFIG, OPT, TOKEN, WRITE].contains(&name.as_ref()) {
+        if name.starts_with("DFMCP_")
+            && ![config_name(), opt_name(), token_name(), write_name()].contains(&name.as_ref())
+        {
             return Err(denied(
                 "manager profile refuses other DFMCP and production launch state",
             ));
@@ -151,7 +184,7 @@ impl Config {
             .to_str()
             .ok_or_else(|| denied("manager custody path must be UTF-8"))?;
         let d = i.map_dimensions;
-        if i.schema != "dfmcp.manager-appointment-mcp-development/1"
+        if i.schema != config_schema()
             || !i.directory.is_absolute()
             || path.len() < 2
             || path.len() > 3800
@@ -178,6 +211,7 @@ impl Config {
         }
         let scope = area(i.scope, d)?;
         let binding = Binding {
+            protocol: super::protocol(),
             endpoint,
             source: FortressIdentity::new(&i.world_folder, i.site_id)?,
             generation: i.generation,
@@ -210,13 +244,18 @@ impl Config {
     pub(super) fn load() -> Result<Self> {
         environment()?;
         Self::parse(
-            &std::env::var(CONFIG).map_err(|_| denied("manager operator configuration missing"))?,
+            &std::env::var(config_name())
+                .map_err(|_| denied("manager operator configuration missing"))?,
         )
     }
     fn current(&self) -> Result<()> {
         runtime_io()?;
         environment()?;
-        let raw = std::env::var(CONFIG).map_err(|_| denied("manager configuration withdrawn"))?;
+        if self.binding.protocol != super::protocol() {
+            return Err(denied("Manager process generation changed"));
+        }
+        let raw =
+            std::env::var(config_name()).map_err(|_| denied("manager configuration withdrawn"))?;
         if Digest32::of_bytes(raw.as_bytes()) != self.hash {
             return Err(denied(
                 "manager source or authority changed; original permission withdrawn",
@@ -226,7 +265,7 @@ impl Config {
     }
     fn connect(&self, c: &OperationContext, mode: Mode) -> Result<ManagerRpc> {
         self.current()?;
-        let token = std::env::var(TOKEN)
+        let token = std::env::var(token_name())
             .map_err(|_| denied("manager credential unavailable"))?
             .into_bytes();
         let pinned = token.clone();
@@ -240,13 +279,18 @@ impl Config {
             BuildCancellation::with_check(Arc::new(runtime_io)),
             Box::new(move |write| {
                 config.current()?;
-                if std::env::var(TOKEN).ok().map(String::into_bytes).as_ref() != Some(&pinned) {
+                if std::env::var(token_name())
+                    .ok()
+                    .map(String::into_bytes)
+                    .as_ref()
+                    != Some(&pinned)
+                {
                     return Err(denied("manager credential changed"));
                 }
                 if write
                     && (mode != Mode::Control
                         || !config.input.initialize
-                        || std::env::var(WRITE).ok().as_deref() != Some("1"))
+                        || std::env::var(write_name()).ok().as_deref() != Some("1"))
                 {
                     return Err(denied("manager appointment permission denied"));
                 }
@@ -532,7 +576,7 @@ impl Runtime {
         if write {
             if self.mode != Mode::Control
                 || !self.config.input.initialize
-                || std::env::var(WRITE).ok().as_deref() != Some("1")
+                || std::env::var(write_name()).ok().as_deref() != Some("1")
             {
                 return Err(denied("manager appointment authority unavailable"));
             }
@@ -695,7 +739,7 @@ impl Runtime {
                             Some(scope),
                         )?;
                         leases.verify_exclusive_spatial(lease, session, scope, edge.anchor.tick)?;
-                        if std::env::var(WRITE).ok().as_deref() != Some("1") {
+                        if std::env::var(write_name()).ok().as_deref() != Some("1") {
                             return Err(denied("manager appointment gate revoked"));
                         }
                         Ok(())
@@ -790,7 +834,7 @@ impl Runtime {
             "original_key":self.journal.original.as_ref().map(|o|o.plan.key()),"original_review_seal":self.journal.original.as_ref().map(|o|o.seal().to_hex()),
             "original_plan_digest":self.journal.original.as_ref().map(|o|o.plan.digest.to_hex()),
             "native_phase":self.journal.native.as_ref().map(|n|n.phase),
-            "source_identity":{"protocol":"1.22","endpoint":self.config.binding.endpoint.to_string(),"world_folder":self.config.binding.source.folder(),"site_id":self.config.binding.source.site(),"generation":self.config.binding.generation,"df_version":self.config.binding.df_version,"dfhack_version":self.config.binding.dfhack_version,"unit_id":self.config.binding.selection.unit,"histfig_id":self.config.binding.selection.figure},
+            "source_identity":{"protocol":format!("1.{}", self.config.binding.protocol.minor()),"endpoint":self.config.binding.endpoint.to_string(),"world_folder":self.config.binding.source.folder(),"site_id":self.config.binding.source.site(),"generation":self.config.binding.generation,"df_version":self.config.binding.df_version,"dfhack_version":self.config.binding.dfhack_version,"unit_id":self.config.binding.selection.unit,"histfig_id":self.config.binding.selection.figure},
             "native_anchor":self.journal.native.as_ref().and_then(|n|n.after.as_ref()).or(self.observation.as_ref()).or(self.journal.original.as_ref().map(|o|&o.plan.before)).map(|c|json!({"schema":"dfmcp.manager-native-projection-anchor/1","fortress_id":c.source.fortress_id().to_string(),"generation":c.generation,"sequence":c.sequence,"game_tick":c.tick,"state_hash":c.witness().to_hex(),"canonical_world_anchor":false})),
             "dispatch_started":self.journal.dispatch_started,"uncertain_effect":self.journal.effect_uncertain,
             "consumed_tick_floor":self.high_tick.max(self.journal.high_tick),"automatic_redispatch":false})
@@ -802,8 +846,9 @@ impl Runtime {
             "native_phase":self.journal.native.as_ref().map(|n|n.phase),"native_receipt":self.journal.native.as_ref().map(|n|n.receipt.to_hex()),
             "prepared_in_this_connection":self.journal.dispatchable()&&self.source.is_some(),"unresolved":matches!(self.journal.state,State::Intent|State::Dispatched|State::Tracking),
             "appointment_proved":self.journal.native.as_ref().is_some_and(|n|n.complete()),
+            "production_manager_cache_proved":self.config.binding.protocol==ManagerProtocol::V1_23 && self.journal.native.as_ref().is_some_and(|n|n.complete()),
             "after":self.journal.native.as_ref().and_then(|n|n.after.as_ref()).map(capture_json),"fresh_observation":fresh}));
-        json!({"ok":true,"source_profile":"manager/1.22","mode":self.mode.as_str(),"retained_state_currently_verified":true,"original":original,
+        json!({"ok":true,"source_profile":super::profile_name(),"mode":self.mode.as_str(),"retained_state_currently_verified":true,"original":original,
             "observation":if self.journal.original.is_none(){self.observation.as_ref().map(capture_json)}else{None},
             "recommended_deadline_tick":self.observation.as_ref().map(|c|(c.tick+journal::MAX_HORIZON_TICKS).min(self.config.input.authority_expires_tick)),
             "custody":self.reference(),"canonical_world_anchor":null,"canonical_world_continuity":"unestablished",
@@ -815,12 +860,12 @@ fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|n| format!("{n:02x}")).collect()
 }
 fn capture_json(c: &Capture) -> Value {
-    json!({"profile":"manager/1.22","witness":c.witness().to_hex(),"native_capture_hex":hex(c.bytes()),"generation":c.generation,"sequence":c.sequence,"tick":c.tick,
+    json!({"profile":c.protocol.label(),"witness":c.witness().to_hex(),"native_capture_hex":hex(c.bytes()),"generation":c.generation,"sequence":c.sequence,"tick":c.tick,
         "world_folder":c.source.folder(),"site_id":c.source.site(),"map_dimensions":c.dimensions,"unit_id":c.selection.unit,"histfig_id":c.selection.figure,
         "manager_position_id":c.manager_position,"manager_position_index":c.manager_index,"assignment_id":c.target().map(|(_,a)|a.id),
         "assignment_index":c.target().map(|(i,_)|i),"assignment_flags_hex":c.target().map(|(_,a)|hex(&a.flags)),"eligible_at_anchor":c.eligible(),
         "paused":c.paused,"year":c.year,"year_tick":c.year_tick,"history_count":c.history_count,"next_event_id":c.next_event,"lookup_unit":c.lookup_unit,
-        "dual_getters_agree":c.dual_getters,"manager_links":c.manager_links,"existing_expedition_leader":c.expedition_leader,
+        "dual_getters_agree":c.dual_getters,"manager_links":c.manager_links,"group_role_buckets":if c.protocol==ManagerProtocol::V1_23{Some(&c.group.role_buckets)}else{None},"civ_role_buckets":if c.protocol==ManagerProtocol::V1_23{Some(&c.civ.role_buckets)}else{None},"responsibility_cache_coverage":if c.protocol==ManagerProtocol::V1_23{"bounded_native_projection"}else{"unavailable_in_1_22"},"existing_expedition_leader":c.expedition_leader,
         "coverage":"stable projected group/civ assignments and definitions, selected HF links, history projection, roster and entity-domain digest; not all-game-field equivalence"})
 }
 

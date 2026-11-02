@@ -104,9 +104,10 @@ pub struct Entity {
     pub next_assignment: i32,
     pub positions_digest: Digest32,
     pub assignments: Vec<Assignment>,
+    pub role_buckets: Vec<Vec<i32>>,
 }
 impl Entity {
-    fn read(r: &mut Reader<'_>) -> Result<Self> {
+    fn read(r: &mut Reader<'_>, protocol: ManagerProtocol) -> Result<Self> {
         let mut e = Self {
             id: i32(r)?,
             index: i32(r)?,
@@ -114,6 +115,7 @@ impl Entity {
             next_assignment: i32(r)?,
             positions_digest: Digest32::from_bytes(r.array()?),
             assignments: vec![],
+            role_buckets: vec![],
         };
         let n = u16(r)?;
         require(
@@ -128,9 +130,32 @@ impl Entity {
             )?;
             e.assignments.push(a);
         }
+        if protocol == ManagerProtocol::V1_23 {
+            let count = u16(r)?;
+            require(count <= MAX_ROLE_BUCKETS, "manager role bucket bound")?;
+            let mut total = 0;
+            for _ in 0..count {
+                let n = u16(r)?;
+                total += n;
+                require(
+                    n <= MAX_ROLE_ENTRIES && total <= MAX_TOTAL_ROLE_ENTRIES,
+                    "manager role entry bound",
+                )?;
+                let mut bucket = Vec::with_capacity(n);
+                for _ in 0..n {
+                    let id = i32(r)?;
+                    require(
+                        !bucket.contains(&id) && e.assignments.iter().any(|a| a.id == id),
+                        "manager role entry is duplicate or foreign",
+                    )?;
+                    bucket.push(id);
+                }
+                e.role_buckets.push(bucket);
+            }
+        }
         Ok(e)
     }
-    fn append(&self, out: &mut Vec<u8>) {
+    fn append(&self, out: &mut Vec<u8>, protocol: ManagerProtocol) {
         put(
             out,
             [
@@ -144,6 +169,13 @@ impl Entity {
         out.extend_from_slice(&(self.assignments.len() as u16).to_be_bytes());
         for a in &self.assignments {
             a.append(out);
+        }
+        if protocol == ManagerProtocol::V1_23 {
+            out.extend_from_slice(&(self.role_buckets.len() as u16).to_be_bytes());
+            for bucket in &self.role_buckets {
+                out.extend_from_slice(&(bucket.len() as u16).to_be_bytes());
+                put(out, bucket.iter().copied());
+            }
         }
     }
 }
@@ -245,6 +277,7 @@ impl Event {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Capture {
+    pub protocol: ManagerProtocol,
     pub(super) raw: Vec<u8>,
     pub generation: u64,
     pub sequence: u64,
@@ -283,7 +316,7 @@ impl Capture {
     pub fn decode(bytes: &[u8]) -> Result<Self> {
         require(bytes.len() <= MAX_CAPTURE_BYTES, "manager capture bound")?;
         let mut r = Reader(bytes);
-        require(r.take(8)? == b"DFMMC022", "not manager/1.22 capture")?;
+        let protocol = ManagerProtocol::decode_magic(r.take(8)?, b'C')?;
         let generation = r.u64()?;
         let sequence = r.u64()?;
         let tick = r.u64()?;
@@ -293,8 +326,23 @@ impl Capture {
         let dimensions = [r.u32()?, r.u32()?, r.u32()?];
         let source = FortressIdentity::new(&text(&mut r, 512)?, site)?;
         let selection = Selection::read(&mut r)?;
-        let group = Entity::read(&mut r)?;
-        let civ = Entity::read(&mut r)?;
+        let group = Entity::read(&mut r, protocol)?;
+        let civ = Entity::read(&mut r, protocol)?;
+        require(
+            group
+                .role_buckets
+                .iter()
+                .chain(&civ.role_buckets)
+                .map(Vec::len)
+                .sum::<usize>()
+                <= MAX_TOTAL_ROLE_ENTRIES,
+            "manager total role entry bound",
+        )?;
+        require(
+            protocol != ManagerProtocol::V1_23
+                || group.role_buckets.len() == civ.role_buckets.len(),
+            "manager role domains differ",
+        )?;
         let manager_position = i32(&mut r)?;
         let manager_index = i32(&mut r)?;
         let lookup_unit = i32(&mut r)?;
@@ -316,6 +364,7 @@ impl Capture {
             links.push(Link::read(&mut r)?);
         }
         let out = Self {
+            protocol,
             raw: bytes.to_vec(),
             generation,
             sequence,
@@ -368,7 +417,7 @@ impl Capture {
         Ok(out)
     }
     pub(super) fn encode(&self) -> Vec<u8> {
-        let mut out = b"DFMMC022".to_vec();
+        let mut out = self.protocol.magic(b'C').to_vec();
         for n in [self.generation, self.sequence, self.tick] {
             out.extend_from_slice(&n.to_be_bytes());
         }
@@ -380,8 +429,8 @@ impl Capture {
         }
         field(&mut out, self.source.folder().as_bytes());
         out.extend(self.selection.encode());
-        self.group.append(&mut out);
-        self.civ.append(&mut out);
+        self.group.append(&mut out, self.protocol);
+        self.civ.append(&mut out, self.protocol);
         put(
             &mut out,
             [self.manager_position, self.manager_index, self.lookup_unit],
@@ -443,7 +492,24 @@ impl Capture {
         }
     }
     pub fn eligible(&self) -> bool {
-        self.paused
+        let caches_vacant = match self.protocol {
+            ManagerProtocol::V1_22 => {
+                self.group.role_buckets.is_empty() && self.civ.role_buckets.is_empty()
+            }
+            ManagerProtocol::V1_23 => {
+                self.group
+                    .role_buckets
+                    .get(MANAGE_PRODUCTION)
+                    .is_some_and(Vec::is_empty)
+                    && self
+                        .civ
+                        .role_buckets
+                        .get(MANAGE_PRODUCTION)
+                        .is_some_and(Vec::is_empty)
+            }
+        };
+        caches_vacant
+            && self.paused
             && self.active
             && self.citizen
             && self.adult
@@ -482,6 +548,9 @@ impl Capture {
         out.group.assignments[index].figure = self.selection.figure as i32;
         out.group.assignments[index].last_figure = self.selection.figure as i32;
         out.group.assignments[index].cache = self.manager_index;
+        if self.protocol == ManagerProtocol::V1_23 {
+            out.group.role_buckets[MANAGE_PRODUCTION].push(a.id);
+        }
         out.links.push(Link {
             kind: 10,
             entity: self.group.id,
