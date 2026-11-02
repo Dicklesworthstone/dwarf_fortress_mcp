@@ -25,6 +25,7 @@ META = {"io.modelcontextprotocol/protocolVersion": "2026-07-28",
         "io.modelcontextprotocol/clientInfo": {"name": "tree-component", "version": "1"}}
 METHODS = ["Handshake", "ReadTreeHarvest", "PrepareTreeHarvest", "CommitTreeHarvest", "QueryTreeHarvest", "CancelTreeHarvest", "ReadTreeHarvestProgress"]
 BINARY: Path
+SERVER_ARGS: list[str] = []
 LOGS: Path
 VECTORS = {}
 
@@ -329,12 +330,12 @@ def environment(value):
 
 
 class Client:
-    def __init__(self, directory, value, suffix="server", env=None):
+    def __init__(self, directory, value, suffix="server", env=None, server_args=None):
         self.directory = directory
         self.stderr = (directory / f"{suffix}.stderr").open("xb")
         self.stdout = (directory / f"{suffix}.stdout").open("xb")
         self.requests = (directory / f"{suffix}.requests").open("xb")
-        self.process = subprocess.Popen([str(BINARY)], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+        self.process = subprocess.Popen([str(BINARY), *(SERVER_ARGS if server_args is None else server_args)], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                         stderr=self.stderr, env=environment(value) if env is None else env)
         self.n = 0
         self.closed = False
@@ -633,7 +634,7 @@ class TreeStdioTests(unittest.TestCase):
     def test_production_environment_refused_with_nine_raw_logs(self):
         for marker in ("", "1.0", "1.21"):
             env = environment(config(self.directory, self.peer)); env["DFMCP_ADMITTED_BRIDGE_PROTOCOL"] = marker
-            result = subprocess.run([str(BINARY)], input=b"", capture_output=True, env=env, timeout=5)
+            result = subprocess.run([str(BINARY), *SERVER_ARGS], input=b"", capture_output=True, env=env, timeout=5)
             stem = self.directory / f"production-{marker or 'empty'}"
             Path(str(stem)+".stdout").write_bytes(result.stdout); Path(str(stem)+".stderr").write_bytes(result.stderr)
             Path(str(stem)+".exit").write_text(str(result.returncode)+"\n")
@@ -657,11 +658,13 @@ class TreeStdioTests(unittest.TestCase):
 
 
 def main():
-    global BINARY, LOGS, VECTORS
+    global BINARY, LOGS, VECTORS, SERVER_ARGS
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", type=Path, required=True)
     parser.add_argument("--logs", type=Path, required=True)
+    parser.add_argument("--server-arg", action="append", default=[])
     args = parser.parse_args()
+    SERVER_ARGS = args.server_arg
     LOGS = args.logs; LOGS.mkdir(mode=0o700)
     VECTORS = {k: bytes.fromhex(v) for k,v in json.loads((ROOT / "tests/native/tree_harvest/vectors.json").read_text()).items()}
     # Independent key/receipt checks against exact checked-in native vectors.

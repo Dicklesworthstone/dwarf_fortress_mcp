@@ -31,6 +31,36 @@ admission, or support. No protocol beyond 1.0 appears in the production runner m
 
 ## Evidence hierarchy
 
+### Standard gameplay development startup (2026-11-02; source only)
+
+The standard executable now accepts the closed operator startup command
+`serve-gameplay-dev <tree|workshop|bounded-clock|finite-bed>`. It calls the
+existing Tree/1.21, workshop/1.20, standalone run/1.13 or semantic finite-order
+stdio server directly in the same process. Profile selection creates no grant,
+changes no environment, spawns no process and adds no bridge method. Each
+selected runtime retains its existing opt-in, closed configuration, source pins,
+eleven modern tools, typed preparation/confirmation, original keys and recovery.
+The finite-order entry now invokes its existing environment guard before stdio
+startup too. Unknown/missing profiles and extra arguments refuse; production
+launch state remains refused. The production runner/registry and frozen 1.0/1.1
+wire semantics remain unchanged.
+
+This makes existing mutation-capable backends reachable from the standard CLI.
+It is one profile per process, without a shared cross-profile session, automatic
+Tree-to-workshop-to-bed controller or claim that those original gameplay goals
+have succeeded. The `finite-bed` alias retains the existing finite furniture
+recipes and amount bounds; the original task uses `wooden_bed`, amount 1.
+
+One new Rust integration case drives three CLI subprocess scenarios: closed
+argument rejection, exact modern discovery/authority refusal on all four
+profiles, and the original five Tree plus five workshop component scenarios
+through standard CLI startup. Existing cases and assertions remain intact.
+Only scoped static/syntax/UBS checks are run by the source author; actual Rust,
+CLI subprocess execution, final qualification and gameplay are pending Root's
+execution on this exact successor. Earlier candidate evidence is retained with
+its own source identity. Original .14 remains open.
+
+
 ### Tree result-size repair (2026-11-02; source and replay evidence only)
 
 Live I's exact cfcc Tree executable rejected a correctly formed modern open with

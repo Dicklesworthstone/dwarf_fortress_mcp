@@ -24,6 +24,7 @@ META = {"io.modelcontextprotocol/protocolVersion": "2026-07-28",
         "io.modelcontextprotocol/clientInfo": {"name": "workshop-component", "version": "1"}}
 METHODS = ["Handshake", "ReadWorkshop", "PrepareWorkshop", "CommitWorkshop", "QueryWorkshop", "CancelWorkshop", "ReadWorkshopProgress"]
 BINARY: Path
+SERVER_ARGS: list[str] = []
 LOGS: Path
 VECTORS = {}
 
@@ -258,7 +259,7 @@ class Client:
         self.stderr = (directory / f"{suffix}.stderr").open("xb")
         self.stdout = (directory / f"{suffix}.stdout").open("xb")
         self.requests = (directory / f"{suffix}.requests").open("xb")
-        self.process = subprocess.Popen([str(BINARY)], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+        self.process = subprocess.Popen([str(BINARY), *SERVER_ARGS], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                         stderr=self.stderr, env=environment(value) if env is None else env)
         self.n = 0
         self.closed = False
@@ -520,7 +521,7 @@ class WorkshopStdioTests(unittest.TestCase):
         for marker in ("", "1.0", "1.20"):
             env = environment(config(self.directory, self.peer))
             env["DFMCP_ADMITTED_BRIDGE_PROTOCOL"] = marker
-            result = subprocess.run([str(BINARY)], input=b"", capture_output=True, env=env, timeout=5)
+            result = subprocess.run([str(BINARY), *SERVER_ARGS], input=b"", capture_output=True, env=env, timeout=5)
             stem = self.directory / f"production-{marker or 'empty'}"
             Path(str(stem) + ".stdout").write_bytes(result.stdout)
             Path(str(stem) + ".stderr").write_bytes(result.stderr)
@@ -532,12 +533,14 @@ class WorkshopStdioTests(unittest.TestCase):
 
 
 def main():
-    global BINARY, LOGS, VECTORS
+    global BINARY, LOGS, VECTORS, SERVER_ARGS
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", type=Path)
     parser.add_argument("--budget-unit", type=Path)
     parser.add_argument("--logs", type=Path, required=True)
+    parser.add_argument("--server-arg", action="append", default=[])
     args = parser.parse_args()
+    SERVER_ARGS = args.server_arg
     LOGS = args.logs
     LOGS.mkdir(mode=0o700)
     VECTORS = {k: bytes.fromhex(v) for k, v in json.loads((ROOT / "tests/native/workshop/vectors.json").read_text()).items()}

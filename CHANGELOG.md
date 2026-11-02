@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-11-02 — Connect standard CLI to existing gameplay development runtimes
+
+- Add `serve-gameplay-dev <tree|workshop|bounded-clock|finite-bed>` as a closed
+  operator startup choice. Invoke the existing guarded runtime in-process;
+  preserve its eleven modern tools, plans, confirmation, custody and authority.
+  Unknown/missing profiles and extra arguments refuse before startup.
+- Apply the finite-order runtime's existing environment guard before stdio
+  startup as well as on requests. Production state remains refused; no native
+  generation, production registry or protocol-1.0/1.1 mutation route changes.
+- Add one Rust integration target driving three actual CLI scenarios. Reuse the
+  existing five Tree and five workshop subprocess cases via optional test-only
+  server arguments; retain their assertions and counts. Execution is pending
+  Root's direct build. This selects one runtime per process; shared cross-profile
+  sessions, original .14 gameplay acceptance and final qualification remain open.
+
+
 ## 2026-11-02 — Correct Tree result encoding and entropy authorization
 
 - Preserve candidate `527587a` compiler exit 101 and zero executed tests.
