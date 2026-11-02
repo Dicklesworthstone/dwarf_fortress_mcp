@@ -85,7 +85,9 @@ fn tree_packet_output_overflow_keeps_full_spine_and_original_uncertainty() {
 #[test]
 fn tree_packet_chunked_native_evidence_roundtrips_and_respects_modern_bounds() {
     use dfmcp_core::Digest32;
-    use fastmcp_rust::{ContentBlock, ResultPeerEra, decode_typed_complete};
+    use fastmcp_rust::{
+        ContentBlock, CoreResult, FinalCoreResult, ResultPeerEra, decode_typed_complete,
+    };
     // Byte-preservation/transport boundaries, not claims of valid native trees.
     for size in [1, 24_000, 24_001, 30_489, 32_768, 32_769, 128 * 1024] {
         let bytes: Vec<u8> = (0..size).map(|n| n as u8).collect();
@@ -99,7 +101,12 @@ fn tree_packet_chunked_native_evidence_roundtrips_and_respects_modern_bounds() {
             reference.clone(),
         );
         let complete = presentation::present(raw).expect("bounded complete result");
-        let encoded = serde_json::to_string(&complete).expect("typed result serialization");
+        let encoded = CoreResult::Final(FinalCoreResult::ToolsCall {
+            result: complete.clone(),
+            diagnostic: None,
+        })
+        .encode()
+        .expect("guarded modern tools/call encoding");
         assert!(
             decode_typed_complete::<FinalCallToolResult>(&encoded, ResultPeerEra::Modern).is_ok()
         );

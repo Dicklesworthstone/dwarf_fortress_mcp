@@ -3,7 +3,8 @@ use super::{RESPONSE_BYTES, overflow_packet, parse_id};
 use dfmcp_adapter::tree_harvest::MAX_CAPTURE_BYTES;
 use dfmcp_core::{Digest32, RequestId};
 use fastmcp_rust::{
-    CompleteResult, ContentBlock, FinalCallToolResult, McpError, McpResult, ResultMeta,
+    CompleteResult, ContentBlock, CoreResult, FinalCallToolResult, FinalCoreResult, McpError,
+    McpResult, ResultMeta,
 };
 use serde_json::{Value, json};
 
@@ -25,9 +26,15 @@ fn complete(texts: Vec<String>) -> CompleteResult<FinalCallToolResult> {
 }
 
 fn fits(result: &CompleteResult<FinalCallToolResult>) -> bool {
-    // Serialize the typed modern result, including metadata, JSON escaping and
-    // content counts. Its serializer also enforces the pinned 1MiB/64KiB guards.
-    serde_json::to_string(result).is_ok_and(|s| s.len() + ENVELOPE_BYTES <= RESPONSE_BYTES as usize)
+    // Use the same guarded modern codec as tools/call dispatch. CompleteResult
+    // deliberately has no Serde serializer; the codec enforces metadata,
+    // content ordering and the pinned 1MiB/64KiB guards before measuring bytes.
+    CoreResult::Final(FinalCoreResult::ToolsCall {
+        result: result.clone(),
+        diagnostic: None,
+    })
+    .encode()
+    .is_ok_and(|s| s.len() + ENVELOPE_BYTES <= RESPONSE_BYTES as usize)
 }
 
 fn decode_hex(value: &str) -> Option<Vec<u8>> {

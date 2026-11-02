@@ -64,6 +64,15 @@ blocks, byte lengths and complete/per-block SHA256. Complete serialization with
 empty ordinary-tool metadata and worst-case admitted JSON-RPC ID/framing is
 bounded by 512KiB; each text remains within the unchanged 65536-byte codec guard.
 The existing bounded fallback preserves original custody and uncertainty.
+The first executed repair candidate `527587a` failed compilation before tests:
+`CompleteResult<FinalCallToolResult>` deliberately does not implement Serde
+serialization. The correction measures the actual guarded
+`CoreResult::Final(FinalCoreResult::ToolsCall { .. }).encode()` wire, and the
+packet regression exercises that same public codec. Ordinary tools/call uses
+empty metadata: the pinned codec rejects discovery-only server identity there.
+The correction also removes an unused import and checks Query authority plus
+the 32-byte budget before reading Tree entropy, matching the workshop boundary.
+Fresh corrected-source compilation and execution are still required.
 Native Tree/workshop code, protocols, vectors and ground-material policy remain
 byte-identical to cfcc. No production registry/runner/floor is widened.
 

@@ -59,8 +59,8 @@ def check(root: Path = ROOT) -> dict:
         A + "tree_harvest/journal.rs": ["pub(crate)modjournal_tests;", "ack.acknowledge(self.pin(),&w.reserve(crate::workshop_construction::acknowledgement::WORK_BYTESasusize)?,)?;", "letpermitted=self.dispatchable();self.permit=false;"],
         A + "tree_harvest/rpc.rs": ["modrpc_tests;", "self.prepared.take().as_ref()==Some(p)", "progress.generation==self.binding.generation", "consumed_tree_tick"],
         M + "src/tree_harvest_server.rs": ["modserver_tests;", "modpresentation;", "spine(operation,session,request)", "\"fortress_plan\"", "\"fortress_commit\"", "reference[\"uncertain_effect\"]==true"],
-        M + "src/tree_harvest_server/presentation.rs": ["constCHUNK_BYTES:usize=24_000;", "ResultMeta::empty()", "serde_json::to_string(result)", "ENVELOPE_BYTES", "\"dfmcp.tree-native-capture/1\"", "Digest32::of_bytes(chunk)", "overflow_packet("],
-        M + "src/tree_harvest_server/runtime.rs": ["self.withdraw();", "acks.latest()", "work.reserve(&current,32*1024*1024)", "journal::open_private("],
+        M + "src/tree_harvest_server/presentation.rs": ["constCHUNK_BYTES:usize=24_000;", "ResultMeta::empty()", "CoreResult::Final(FinalCoreResult::ToolsCall{", ".encode()", "ENVELOPE_BYTES", "\"dfmcp.tree-native-capture/1\"", "Digest32::of_bytes(chunk)", "overflow_packet("],
+        M + "src/tree_harvest_server/runtime.rs": ["self.withdraw();", "acks.latest()", "work.reserve(&current,32*1024*1024)", "journal::open_private(", "c.authorize(Capability::Query,RiskTier::ReadOnly,&[],None)?;", "c.budget.max_bytes<32"],
         M + "src/bin/dfmcp-tree-harvest-v1-21-dev-server.rs": ["dfmcp_mcp::tree_harvest_server::run_stdio();", "std::process::ExitCode::FAILURE"],
     }
     for name, tokens in required.items():

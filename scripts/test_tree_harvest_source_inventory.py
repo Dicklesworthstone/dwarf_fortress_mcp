@@ -31,6 +31,9 @@ class TreeSourceInventoryTests(unittest.TestCase):
             ("crates/dfmcp-adapter/src/tree_harvest/journal.rs", "ack.acknowledge(\n            self.pin(),", "acknowledgement_removed(\n            self.pin(),"),
             ("crates/dfmcp-mcp/src/tree_harvest_server.rs", '"fortress_commit"', '"fortress.commit"'),
             ("crates/dfmcp-mcp/src/tree_harvest_server/presentation.rs", "ResultMeta::empty()", "unexpected_result_metadata()"),
+            ("crates/dfmcp-mcp/src/tree_harvest_server/presentation.rs", "CoreResult::Final(FinalCoreResult::ToolsCall", "unadmitted_codec_bypass"),
+            ("crates/dfmcp-mcp/src/tree_harvest_server/runtime.rs", "c.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;", ""),
+            ("crates/dfmcp-mcp/src/tree_harvest_server/runtime.rs", "c.budget.max_bytes < 32", "c.budget.max_bytes < 0"),
             ("crates/dfmcp-mcp/src/tree_harvest_server/presentation.rs", "const CHUNK_BYTES: usize = 24_000;", "const CHUNK_BYTES: usize = 48_000;"),
             ("crates/dfmcp-mcp/src/tree_harvest_server.rs", "-> McpResult<CompleteResult<FinalCallToolResult>>", "-> String"),
         ]

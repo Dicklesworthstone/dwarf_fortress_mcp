@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-11-02 — Correct Tree result encoding and entropy authorization
+
+- Preserve candidate `527587a` compiler exit 101 and zero executed tests.
+  Measure complete results through the pinned public modern tools/call codec;
+  use it in the packet regression as well. Keep empty ordinary metadata and
+  all existing response, string, evidence and custody limits.
+- Check Query authority and the 32-byte budget before Tree entropy I/O, and
+  remove the unused Record import. Extend source-boundary mutation checks.
+  Corrected-source execution and live gameplay proof remain pending.
+
 ## 2026-11-02 — Package complete Tree evidence within modern MCP bounds
 
 - Preserve Live I's rejected open and original custody, and independent old-cfcc

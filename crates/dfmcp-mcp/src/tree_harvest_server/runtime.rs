@@ -3,7 +3,7 @@ use dfmcp_adapter::build_placement::{
     journal::private_file::PrivateBuildFile, rpc::BuildCancellation,
 };
 use dfmcp_adapter::tree_harvest::{
-    Capture, FortressIdentity, Plan, Progress, Record,
+    Capture, FortressIdentity, Plan, Progress,
     journal::{self, Journal, Mode, Original, State},
     rpc::{Binding, CONNECT_BYTES, TreeRpc},
 };
@@ -24,6 +24,7 @@ use std::time::Instant;
 pub(super) const RESPONSE_BYTES: u64 = 512 * 1024;
 const CONFIG: &str = "DFMCP_TREE_HARVEST_MCP_CONFIG";
 const OPT: &str = "DFMCP_ALLOW_UNADMITTED_TREE_HARVEST_V1_21";
+// ubs:ignore[rust.security.hardcoded-secrets] — environment-variable name; credentials come from the host.
 const TOKEN: &str = "DFMCP_TREE_HARVEST_TOKEN";
 const WRITE: &str = "DFMCP_TREE_HARVEST_ALLOW_DESIGNATE";
 pub(super) fn error(code: ErrorCode, message: &str) -> DfmcpError {
@@ -255,6 +256,13 @@ impl Config {
 }
 fn nonce(c: &OperationContext) -> Result<[u8; 32]> {
     runtime_io()?;
+    c.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
+    if c.budget.max_bytes < 32 {
+        return Err(error(
+            ErrorCode::BudgetExceeded,
+            "tree entropy budget exhausted",
+        ));
+    }
     let mut out = [0; 32];
     std::fs::File::open("/dev/urandom")
         .and_then(|mut f| f.read_exact(&mut out))
