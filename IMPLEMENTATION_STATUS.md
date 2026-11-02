@@ -39,6 +39,15 @@ transaction remains the game evidence described below. The original MCP-only
 bed trial is still pending; this integrated successor has no inherited full
 qualification or production admission.
 
+Clean `f922921f` passed all three actual modern subprocess suites (7/7 each),
+plus 14 Tree, 23 workshop and 18 Manager adapter cases. Root independently
+compared every source input and consumed their raw terminal output; the peers
+remain protocol doubles. The same new Tree suite against the sealed old 64fd
+binary passed five cases and failed exactly the two deadline regressions.
+Strict latest-nightly Clippy then stopped before both full scripts on the
+numeric-ID test's `int_plus_one` lint. The equivalent strict inequality now
+retains the identical newline-inclusive bound; successor qualification is pending.
+
 This file is the authoritative antidote to accidental overclaiming. Prospective architecture prose
 describes the target system; this file describes what the checked-in source and exact evidence
 actually establish.

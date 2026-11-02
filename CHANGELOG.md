@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-11-02 — Deadline regression execution and strict Clippy repair
+
+- Record exact f922 focused GREEN: seven actual MCP cases per prepared profile,
+  and 14/23/18 Tree/workshop/Manager adapter cases. Old sealed Tree reproduces
+  exactly both new failures (five passed, two failed).
+- Preserve latest-nightly Clippy failure and use an equivalent strict inequality
+  for the newline-inclusive numeric-ID test bound. Full successor checks pending.
+
 ## 2026-11-02 — Prepared control review deadlines (.14.3)
 
 - Use the existing 60-second ceiling by default for Tree, workshop and Manager

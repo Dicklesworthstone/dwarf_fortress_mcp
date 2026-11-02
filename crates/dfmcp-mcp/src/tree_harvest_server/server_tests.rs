@@ -302,7 +302,7 @@ fn tree_packet_numeric_id_full_envelope_preserves_chunks_at_budget_boundary() {
     .expect("modern complete result");
     let result: Value = serde_json::from_str(&encoded).expect("result JSON");
     let wire = serde_json::to_vec(&JsonRpcResponse::success(id, result)).expect("response wire");
-    assert!(wire.len() + 1 <= RESPONSE_BYTES as usize);
+    assert!(wire.len() < RESPONSE_BYTES as usize);
     assert!(
         wire.len() + 1 > RESPONSE_BYTES as usize - 64,
         "fixture must reach the actual budget boundary"
