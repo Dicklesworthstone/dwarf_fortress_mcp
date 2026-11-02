@@ -47,6 +47,9 @@ impl<'a> Message<'a> {
     pub(crate) fn parse_tree_harvest(data: &'a [u8], maximum: u32) -> Result<Self> {
         Self::parse_bounded(data, maximum, 512 * 1024)
     }
+    pub(crate) fn parse_manager(data: &'a [u8], maximum: u32) -> Result<Self> {
+        Self::parse_bounded(data, maximum, 256 * 1024)
+    }
     fn parse_bounded(data: &'a [u8], maximum: u32, bound: usize) -> Result<Self> {
         require(
             data.len() <= bound && maximum <= 13,

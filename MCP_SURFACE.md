@@ -252,6 +252,16 @@ remain in each handoff. Operator-selected `completion-recover` and
 original-file loss while withholding verified construction claims. These are
 unadmitted development modes, separate from production protocol negotiation.
 
+The isolated [Manager/1.22 development profile](docs/MANAGER_APPOINTMENT_MCP.md)
+uses these same eleven names. `serve-gameplay-dev manager` observes one
+host-offered eligible current Expedition Leader for vacant MANAGER, prepares
+an exact assignment/HF/history witness, reviews and confirms once, and proves
+the complete unchanged-tick transaction through both native noble getters.
+Original-key lookup, independent journal/ACK custody and errors preserve
+uncertainty without redispatch. Role/candidate/path/method selection is not an
+MCP argument. Full fortress authority is required; production admission and
+canonical world continuity remain unestablished. Focused execution is pending.
+
 ### `fortress.open_session`
 
 Negotiates fortress, versions, compatibility, requested capability scopes, observation profile,

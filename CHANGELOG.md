@@ -1,5 +1,27 @@
 # Changelog
 
+## 2026-11-02 — Vacant Manager 1.22 development source (.14.2)
+
+- Add the fixed six-method native generation and lossless bounded Rust
+  capture/plan/receipt codec for one vacant MANAGER appointment, preserving raw
+  assignment flags and the generated event constructor's one-zero-byte flags.
+- Reuse one-attempt journal/independent ACK custody and same-connection permission.
+  Revalidation, the complete assignment/HF/history transaction and dual-getter
+  proof are required; uncertain effects retain the original key without retry.
+- Wire the existing eleven tools and `serve-gameplay-dev manager`, with full
+  fortress authority, one explicit review/confirmation and zero game ticks.
+  Add native-vector, custody, TCP, MCP presentation and actual subprocess test
+  sources; these are not live-game evidence.
+- Correct public-adapter stale-tick authority after independent source review:
+  retain the connection's observed tick floor, reauthorize all native plan
+  edges at max caller/plan/observed time, and give both dispatch guards and the
+  writer the journal's retained tick. Add paired TCP/real-lease regressions;
+  keep one shrinking budget and post-dispatch uncertainty unchanged.
+- Root reports native SDK attempt 4 build success. Retain actual Rust cut 2
+  E0603/zero-test evidence; cut 3 corrects test visibility and scope policy.
+  Final Rust/MCP execution, live Manager/bed acceptance and qualification remain
+  pending. No registry, production runner, admission or item closure changes.
+
 ## 2026-11-02 — Direct compilation and bounded live gameplay evidence
 
 - Direct Linux execution on exact `64fd25f` passes 2,842 MCP/wrapper and 1,330

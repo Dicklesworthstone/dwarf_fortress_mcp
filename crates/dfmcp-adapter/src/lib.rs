@@ -63,6 +63,7 @@ pub mod live_session;
 pub mod live_session_v1_1;
 pub mod live_spatial;
 pub mod live_version;
+pub mod manager_appointment;
 pub mod operations_analysis;
 pub mod operations_journal;
 pub mod order_progress;

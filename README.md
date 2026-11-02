@@ -178,12 +178,14 @@ also accepts one closed startup profile:
 ```text
 dwarf-fortress-mcp serve-gameplay-dev tree
 dwarf-fortress-mcp serve-gameplay-dev workshop
+dwarf-fortress-mcp serve-gameplay-dev manager
 dwarf-fortress-mcp serve-gameplay-dev bounded-clock
 dwarf-fortress-mcp serve-gameplay-dev finite-bed
 ```
 
 These select the existing [Tree 1.21](docs/TREE_HARVEST_MCP.md),
 [workshop 1.20](docs/WORKSHOP_CONSTRUCTION_MCP.md),
+[vacant Manager 1.22](docs/MANAGER_APPOINTMENT_MCP.md),
 [standalone clock 1.13](docs/BOUNDED_SIMULATION_MCP.md), or
 [finite furniture-order](docs/SEMANTIC_WORK_ORDER_MCP.md) server in the same
 process. Configure the selected profile's existing opt-in, source pins,

@@ -18,18 +18,21 @@ use std::time::{Duration, Instant};
 enum Protocol {
     Workshop,
     Tree,
+    Manager,
 }
 impl Protocol {
     fn magic(self) -> &'static [u8; 8] {
         match self {
             Self::Workshop => b"DFMWA020",
             Self::Tree => b"DFMTA021",
+            Self::Manager => b"DFMMA022",
         }
     }
     fn domain(self) -> &'static [u8] {
         match self {
             Self::Workshop => b"dfmcp-workshop-acknowledgement/1\0",
             Self::Tree => b"dfmcp-tree-harvest-acknowledgement/1\0",
+            Self::Manager => b"dfmcp-manager-acknowledgement/1\0",
         }
     }
 }
@@ -117,6 +120,26 @@ pub fn open_private_tree_acknowledgements(
         initialize,
         external,
         Protocol::Tree,
+        Some(scope),
+    )
+}
+pub fn open_private_manager_acknowledgements(
+    path: &Path,
+    context: &OperationContext,
+    mode: WorkshopMode,
+    initialize: bool,
+    external: Option<WorkshopPin>,
+    scope: MapCuboid,
+) -> Result<WorkshopAcknowledgements<PrivateBuildFile>> {
+    check(!initialize || (mode == WorkshopMode::Control && external.is_none()))?;
+    check(initialize || external.is_some())?;
+    open_private_for(
+        path,
+        context,
+        mode,
+        initialize,
+        external,
+        Protocol::Manager,
         Some(scope),
     )
 }

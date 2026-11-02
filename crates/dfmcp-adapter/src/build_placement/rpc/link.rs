@@ -61,6 +61,13 @@ const TREE_HARVEST: Limits = Limits {
     notification_bytes: MAX_BYTES,
 };
 
+const MANAGER: Limits = Limits {
+    bytes: 8 * 1024 * 1024,
+    calls: 32,
+    reply_bytes: 256 * 1024,
+    notification_bytes: MAX_BYTES,
+};
+
 pub(crate) struct Link {
     socket: TcpStream,
     deadline: Instant,
@@ -139,6 +146,15 @@ impl Link {
         check: &dyn Fn() -> Result<()>,
     ) -> Result<Self> {
         Self::connect_profile(address, timeout, bytes, cancellation, check, TREE_HARVEST)
+    }
+    pub(crate) fn connect_manager(
+        address: SocketAddr,
+        timeout: Duration,
+        bytes: u64,
+        cancellation: BuildCancellation,
+        check: &dyn Fn() -> Result<()>,
+    ) -> Result<Self> {
+        Self::connect_profile(address, timeout, bytes, cancellation, check, MANAGER)
     }
     fn connect_profile(
         address: SocketAddr,

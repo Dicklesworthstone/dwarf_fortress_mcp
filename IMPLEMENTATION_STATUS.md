@@ -29,6 +29,31 @@ The repository contains:
 The checked-in compatibility registry remains empty. Source presence does not imply qualification,
 admission, or support. No protocol beyond 1.0 appears in the production runner map.
 
+## Manager appointment 1.22 source (2026-11-02; .14.2)
+
+The isolated Manager generation adds eight adapter modules for exact capture,
+codec, one-attempt RPC/custody and focused tests, plus an eleven-tool MCP
+consumer reachable with `serve-gameplay-dev manager`. It offers only the exact
+host-pinned eligible current Expedition Leader for an existing vacant MANAGER.
+Full-fortress authority, one review/confirmation, original-key journal and
+independent ACK precede the native assignment/HF/history transaction. Success
+requires the full projected poststate and fresh dual-getter proof without ticks.
+
+Root reports actual SDK configure/build success on native attempt 4. That is
+native build evidence, not game execution. Adapter cut 2 failed actual compilation
+with E0603 and zero executed tests; cut 3 corrects test-module visibility and
+makes full-fortress scope explicit. Rust/Clippy, MCP/CLI subprocess execution,
+full exact-source qualification, actual Manager appointment and the bed chain
+remain pending independent evidence. Source and protocol doubles establish no
+live claim; original `.14` and `.14.2` remain open. See
+`docs/MANAGER_APPOINTMENT_MCP.md` and `architecture/manager_appointment_v1_22.json`.
+Independent Terra source review found two public-adapter stale-tick authority
+issues, without showing an unauthorized actual MCP effect. Cut 4 reauthorizes
+every plan edge at the maximum caller/plan/observed tick and passes the retained
+journal frontier through both injected guards and the writer. Paired TCP/lease
+regressions are source-present, with execution pending Root's direct build.
+The production map and empty registry are unchanged.
+
 ## Evidence hierarchy
 
 ### Direct execution and original-save K experiment (2026-11-02)
