@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-11-02 — Exact-source verification follow-up
+
+- Record all 43 qualification gates and 5198 tests in each Rust profile on clean
+  `924037df`; this qualification does not transfer to later source.
+- Response-safety `cd3ef967` passes 11 resource, 5 Tree packet and 4 modern
+  subprocess cases, including numeric-ID budget and zero-TTL behavior.
+- Manager `63548fa7` dedicated and standard CLI executables each pass five
+  actual modern subprocess scenarios with explicit native doubles. Real-game
+  MCP bed acceptance and full integrated-head qualification remain pending.
+
 ## 2026-11-02 — Run Manager native regressions in standard checks
 
 - Record independently replayed native-only R evidence: one Manager appointment,

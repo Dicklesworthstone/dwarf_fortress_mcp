@@ -15,6 +15,22 @@ responses. Source and regression tests are present; execution and independent
 qualification are pending. This change does not establish native or runtime
 admission.
 
+Exact execution follow-up (2026-11-02): clean `924037df` completed both required
+scripts, with all 43 qualification gates passed and 5198 debug plus 5198 release
+cases across 128 targets per profile (zero failed, ignored or filtered). Receipt
+SHA-256: `af4da048c5881c0dbb1b6dae68c3030550b1820e42976847a40356482c399bbd`.
+The later response-only `cd3ef967` passed 11 resource cases (2831 filtered),
+5 Tree packet cases (2837 filtered), and all 4 modern handshake/resource subprocess
+cases. The maximum numeric-ID envelope regression is included. All had zero
+failures or ignored cases; these are focused checks, not a new full qualification.
+
+Clean Manager source `63548fa7` now also built its dedicated and standard CLI
+executables; each passed the actual five-case modern MCP subprocess suite.
+Those native peers are explicit doubles. The separate native-only real-game R
+transaction remains the game evidence described below. The original MCP-only
+bed trial is still pending; this integrated successor has no inherited full
+qualification or production admission.
+
 This file is the authoritative antidote to accidental overclaiming. Prospective architecture prose
 describes the target system; this file describes what the checked-in source and exact evidence
 actually establish.
