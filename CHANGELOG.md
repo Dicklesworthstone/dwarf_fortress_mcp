@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-11-01 — Make citizen deadline regressions deterministic
+
+- Retain frozen `08fca4c` verifier exit 0 and qualification exit 101. Debug and
+  verifier release profiles each pass 5176 cases across 125 targets; qualification
+  release stops at 1314 passes / one failed citizen deadline case. Preserve the
+  failed official receipt, all raw output and exact-source snapshots.
+- Add a test-only per-thread monotonic clock with RAII unwind restoration.
+  Keep the existing 10ms request and exact one-read/no-retry assertion; expire
+  the fake source only after recording read entry. Require released resources,
+  withdrawn old scope and no final authorization/publication. Add one registered
+  pre-I/O expiry/unwind case requiring zero I/O. Production time and budgets are
+  unchanged. Focused execution and both final full commands remain pending.
+
 ## 2026-11-01 — Add supported one-tree supply development generation
 
 - Add isolated unadmitted tree-harvest/1.21 native, safe-Rust and eleven-tool

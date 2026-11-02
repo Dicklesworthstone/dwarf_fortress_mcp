@@ -64,8 +64,30 @@ this later source. The extracted shared native engine previously preserved all
 failed attempts and raw evidence are retained. These are component evidence,
 not final exact-source SDK, native R1, real felling or admission proof.
 
-Both required full commands on frozen 08 continue separately; debug has 125
-targets / 5176 passing cases, while release/full terminal evidence is pending.
+Frozen `08fca4c` finishes `verify.sh` with exit 0: 125 targets / 5176 passing
+cases in each debug and release profile, zero failed, ignored or filtered. Its
+separate `qualify_local.sh` exits 101 at release-tests after all 5176 debug cases
+pass. The first release target reports 1314 passes and one failure in
+`interrupted_or_over_deadline_reads_close_without_retries_or_old_scope`:
+its expected one read can be precluded by legitimate expiry of the unchanged
+10ms budget before I/O. The raw failure does not identify the loop iteration.
+The failed official receipt records 37 passed gates, one failed and five
+unreached of 43, with exact clean source and matching before/after snapshots:
+`target/qualification/2026-11-02T03-02-46Z-08fca4c3076e/qualification-receipt.json`,
+SHA-256 `fd65be96fad92a8bbe0d6c765f3b679d2ca84fe8a80fcfd5d5faed74d3b3eb11`.
+Raw streams and terminal summary remain in `target/full-08fca4c-20261101a/`.
+This is failed qualification, not a full-source pass.
+
+The private successor adds a test-only per-thread fixture clock with unwind
+restoration; production retains actual monotonic `Instant`. The existing
+in-flight expiry case keeps its 10ms request and exact one-read/no-retry oracle,
+advancing the clock only after read entry and checking no authorization or
+publication. One additional registered case,
+`pre_io_deadline_refusal_withdraws_without_reads_and_clock_restores_on_unwind`,
+requires zero opens/reads/authorizations, released sources and withdrawn prior
+scope, and verifies nested clock restoration on panic. **Execution of this
+repair remains pending**; the frozen 08 failure is retained unchanged.
+
 The 834 startup-status/log correction has independent manual-relink five-case
 stdio evidence, not Cargo/full-source qualification. This new combined source
 inherits neither result. Both final full commands, final matching-SDK builds of

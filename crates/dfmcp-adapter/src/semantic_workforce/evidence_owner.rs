@@ -40,6 +40,56 @@ const LOCAL_BASE_BYTES: u64 = 64 * 1024;
 const LOCAL_CITIZEN_BYTES: u64 = 64 * 1024;
 const ROUTING_VIEWS: u8 = 2;
 
+// Tests own an absolute clock on their current thread. The guard cannot move
+// between threads and restores the previous fixture even during unwinding.
+#[cfg(test)]
+std::thread_local! {
+    static TEST_CLOCK: Cell<Option<(Instant, Option<Duration>)>> = const { Cell::new(None) };
+}
+#[cfg(test)]
+pub(super) struct TestClock {
+    previous: Option<(Instant, Option<Duration>)>,
+    _thread: std::marker::PhantomData<Rc<()>>,
+}
+#[cfg(test)]
+impl TestClock {
+    pub(super) fn start() -> Self {
+        Self {
+            previous: TEST_CLOCK.replace(Some((Instant::now(), None))),
+            _thread: std::marker::PhantomData,
+        }
+    }
+    pub(super) fn advance(elapsed: Duration) {
+        TEST_CLOCK.with(|clock| {
+            let (now, pending) = clock.get().expect("fixture clock is installed");
+            clock.set(Some((now + elapsed, pending)));
+        });
+    }
+    pub(super) fn advance_after_next_now(elapsed: Duration) {
+        TEST_CLOCK.with(|clock| {
+            let (now, _) = clock.get().expect("fixture clock is installed");
+            clock.set(Some((now, Some(elapsed))));
+        });
+    }
+}
+#[cfg(test)]
+impl Drop for TestClock {
+    fn drop(&mut self) {
+        TEST_CLOCK.set(self.previous);
+    }
+}
+fn monotonic_now() -> Instant {
+    #[cfg(test)]
+    if let Some(now) = TEST_CLOCK.with(|clock| {
+        let (now, advance) = clock.get()?;
+        clock.set(Some((now + advance.unwrap_or(Duration::ZERO), None)));
+        Some(now)
+    }) {
+        return now;
+    }
+    Instant::now()
+}
+
 fn error(code: ErrorCode, message: &str) -> DfmcpError {
     DfmcpError::new(code, message)
 }
@@ -168,7 +218,7 @@ impl<S: CitizenEvidenceIo> BoundedIo<S> {
         let current = self.allowance.get();
         let left = current
             .deadline
-            .checked_duration_since(Instant::now())
+            .checked_duration_since(monotonic_now())
             .filter(|left| !left.is_zero())
             .ok_or_else(|| {
                 io::Error::new(io::ErrorKind::TimedOut, "citizen RPC deadline expired")
@@ -236,7 +286,7 @@ impl<S: CitizenEvidenceIo> CitizenRpcSource<S> {
     ) -> Result<Self> {
         context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
         config.validate()?;
-        if Instant::now() >= end {
+        if monotonic_now() >= end {
             return Err(exhausted());
         }
         let allowance = Rc::new(Cell::new(WireAllowance {
@@ -254,7 +304,7 @@ impl<S: CitizenEvidenceIo> CitizenRpcSource<S> {
             &config.client_name,
             &config.client_version,
         )?;
-        if Instant::now() >= allowance.get().deadline {
+        if monotonic_now() >= allowance.get().deadline {
             return Err(exhausted());
         }
         Ok(Self {
@@ -274,7 +324,7 @@ impl CitizenRpcSource<TcpStream> {
         config.validate()?;
         let end = deadline(context)?;
         let left = end
-            .checked_duration_since(Instant::now())
+            .checked_duration_since(monotonic_now())
             .ok_or_else(exhausted)?;
         let stream = TcpStream::connect_timeout(&config.endpoint, config.connect_timeout.min(left))
             .map_err(|_| {
@@ -322,7 +372,7 @@ impl<S: CitizenEvidenceIo> CitizenEvidenceSource for CitizenRpcSource<S> {
         let page = self
             .client
             .read_observation(offset, maximum, include_names)?;
-        if Instant::now() >= self.allowance.get().deadline {
+        if monotonic_now() >= self.allowance.get().deadline {
             return Err(exhausted());
         }
         context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
@@ -335,13 +385,13 @@ fn deadline(context: &OperationContext) -> Result<Instant> {
     if context.budget.max_wall_millis == 0 || context.budget.max_bytes == 0 {
         return Err(exhausted());
     }
-    Instant::now()
+    monotonic_now()
         .checked_add(Duration::from_millis(context.budget.max_wall_millis))
         .ok_or_else(exhausted)
 }
 fn remaining_millis(end: Instant) -> Result<u64> {
     let millis = end
-        .checked_duration_since(Instant::now())
+        .checked_duration_since(monotonic_now())
         .ok_or_else(exhausted)?
         .as_millis();
     if millis == 0 {
@@ -683,7 +733,7 @@ where
                 "citizen evidence must be refreshed",
             )
         })?;
-        if Instant::now() >= current.deadline || current.views.get() >= ROUTING_VIEWS {
+        if monotonic_now() >= current.deadline || current.views.get() >= ROUTING_VIEWS {
             return Err(exhausted());
         }
         current.views.set(current.views.get() + 1);
@@ -692,7 +742,7 @@ where
             &current.projection,
             &current.capsule,
         )?;
-        if Instant::now() >= current.deadline {
+        if monotonic_now() >= current.deadline {
             return Err(exhausted());
         }
         Ok(evidence)
