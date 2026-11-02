@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-02 — Keep standard CLI suite counts exact
+
+- Correct the nested Tree/workshop standard CLI caller to require seven tests
+  after adding both deadline regressions. Preserve every zero-failure/error/skip
+  assertion; retain the failed574 verification as evidence of the missed caller.
+
 ## 2026-11-02 — Deadline regression execution and strict Clippy repair
 
 - Record exact f922 focused GREEN: seven actual MCP cases per prepared profile,

@@ -1,5 +1,11 @@
 # Implementation Status
 
+Full verification at `57410a1` exposed a missed nested CLI test denominator:
+the Tree and workshop subprocess suites each passed seven, while their standard
+CLI caller still expected five. The caller now requires seven and retains all
+zero-failure/error/skip assertions. That full verification failed and qualification
+did not start; both required commands remain pending on this successor.
+
 Prepared Tree, workshop and Manager profiles now default to the existing
 60000ms ceiling. Tree/Manager preflight held connections before dispatch custody;
 workshop preserves the typed cause of failed pre-dispatch revalidation. This

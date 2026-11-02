@@ -103,7 +103,7 @@ class GameplayCliTests(unittest.TestCase):
                 retain(self.directory / profile, result)
                 self.assertEqual(result.returncode, 0, result.stderr.decode(errors="replace"))
                 report = json.loads(result.stdout.splitlines()[-1])
-                self.assertEqual(report["tests"], 5)
+                self.assertEqual(report["tests"], 7)
                 for key in ("failed", "errors", "skipped"):
                     self.assertEqual(report[key], 0)
                 self.assertTrue(report["actual_modern_stdio"])
