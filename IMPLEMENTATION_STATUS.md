@@ -5,6 +5,11 @@ The Manager native component runner is now connected to both mandatory scripts.
 Its 12-scenario/270-assertion and three compiled-mutation checks remain pending
 at this source; SDK doubles do not establish ABI, live or admission evidence.
 
+Tree envelope accounting now reserves 4096 bytes for admitted numeric request IDs.
+The source, contract, mutation check and boundary regression are updated; Rust
+execution remains pending. This repairs project-budget accounting and does not
+claim a reproduced native 1MiB transport failure.
+
 Session and doctor resource handlers now explicitly request private zero-TTL
 responses. Source and regression tests are present; execution and independent
 qualification are pending. This change does not establish native or runtime

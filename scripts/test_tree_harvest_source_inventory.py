@@ -39,6 +39,7 @@ class TreeSourceInventoryTests(unittest.TestCase):
             ("crates/dfmcp-mcp/src/tree_harvest_server/presentation.rs", "const CHUNK_BYTES: usize = 24_000;", "const CHUNK_BYTES: usize = 48_000;"),
             ("crates/dfmcp-mcp/src/tree_harvest_server.rs", "-> McpResult<CompleteResult<FinalCallToolResult>>", "-> String"),
         ]
+        mutations.append(("crates/dfmcp-mcp/src/tree_harvest_server/presentation.rs", ".len() + 4096 +", ".len() + 256 +"))
         for name, before, after in mutations:
             with self.subTest(name=name), tempfile.TemporaryDirectory() as folder:
                 root = Path(folder)

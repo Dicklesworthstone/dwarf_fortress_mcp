@@ -9,10 +9,10 @@ use fastmcp_rust::{
 use serde_json::{Value, json};
 
 pub(super) const CHUNK_BYTES: usize = 24_000;
-// The pinned JSON-RPC codec admits at most 256 encoded bytes for a string ID.
-// Include the complete outer framing and newline, even when the real ID is smaller.
+// The pinned codec admits 4,096 raw bytes for an integer ID; encoded string IDs
+// are limited to 256. Reserve the larger ID plus outer framing and newline.
 const ENVELOPE_BYTES: usize =
-    b"{\"jsonrpc\":\"2.0\",\"id\":".len() + 256 + b",\"result\":".len() + b"}\n".len();
+    b"{\"jsonrpc\":\"2.0\",\"id\":".len() + 4096 + b",\"result\":".len() + b"}\n".len();
 
 fn complete(texts: Vec<String>) -> CompleteResult<FinalCallToolResult> {
     CompleteResult::new(
