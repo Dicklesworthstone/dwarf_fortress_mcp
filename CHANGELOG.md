@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-11-03 — Resource inspection and cancellation review
+
+- Keep resource reads from certifying objectives, recording observation events,
+  consuming request IDs or publishing custody. Apply current shared-world
+  authority and durable-owner fences to replay and capabilities inspection.
+- Use one state-resource wall deadline through projection and escaped output
+  accounting. Add allowed/denied process/durable, owner replacement, shared-clock
+  expiry and deterministic deadline regressions; Rust execution is pending.
+- Retain the clean e227 full release failure in Tasks cancellation. Track the
+  minimized upstream race as fastmcp_rust#100; no new qualification is claimed.
+
 ## 2026-11-03 — Real wooden bed and main integration
 
 - Record independently replayed W: real MCP Tree supply, completed original

@@ -16,8 +16,8 @@ use crate::agent_turn::{
     AgentPhase, AgentTurnBuilder, ContinuityStatus, ObservationProfile, empty_active_work,
 };
 use crate::server::{
-    anchor_json, authorize_entry, next_context, parse_session_id_arg, resolve_session,
-    retained_resource_snapshot, with_session,
+    anchor_json, authorize_entry, parse_session_id_arg, read_context, resolve_session,
+    retained_resource_snapshot, with_session_read,
 };
 
 const OPERATION: &str = "resources.read.state";
@@ -134,7 +134,30 @@ fn refusal(
     result
 }
 
-pub(super) fn read(session_id: &str, uri: &str, view: &str) -> McpResult<Vec<ResourceContent>> {
+pub(crate) fn read(session_id: &str, uri: &str, view: &str) -> McpResult<Vec<ResourceContent>> {
+    let started = std::time::Instant::now();
+    read_with_elapsed(session_id, uri, view, || started.elapsed())
+}
+
+fn check_deadline(
+    budget: WorkBudget,
+    elapsed: &mut impl FnMut() -> std::time::Duration,
+) -> Result<()> {
+    if elapsed() >= std::time::Duration::from_millis(budget.max_wall_millis) {
+        return Err(DfmcpError::new(
+            ErrorCode::BudgetExceeded,
+            "state resource exceeded its negotiated wall budget",
+        ));
+    }
+    Ok(())
+}
+
+fn read_with_elapsed(
+    session_id: &str,
+    uri: &str,
+    view: &str,
+    mut elapsed: impl FnMut() -> std::time::Duration,
+) -> McpResult<Vec<ResourceContent>> {
     if uri.len() > 192 || uri != format!("df://session/{session_id}/{view}") {
         return Err(refusal(
             session_id,
@@ -146,23 +169,16 @@ pub(super) fn read(session_id: &str, uri: &str, view: &str) -> McpResult<Vec<Res
     // resolve_session checks the durable-owner fence as well as session identity.
     let session =
         resolve_session(Some(session_id.to_owned())).map_err(|e| refusal(session_id, e, None))?;
-    with_session(
+    with_session_read(
         &session,
-        || {
-            Err(refusal(
-                session_id,
-                DfmcpError::new(
-                    ErrorCode::InternalInvariantViolation,
-                    "state resource session is unavailable",
-                ),
-                None,
-            ))
-        },
+        |error| Err(refusal(session_id, error, None)),
         |guard| {
-            let (_, ctx) = next_context(guard).map_err(|e| refusal(session_id, e, None))?;
+            let ctx = read_context(guard);
             authorize_entry(&ctx, Capability::Observe, RiskTier::ReadOnly)
                 .map_err(|e| refusal(session_id, e, None))?;
             let current = ctx.anchor;
+            check_deadline(guard.budget, &mut elapsed)
+                .map_err(|e| refusal(session_id, e, Some(current)))?;
             let snapshot = retained_resource_snapshot(guard, target.hash)
                 .map_err(|e| refusal(session_id, e, Some(current)))?;
             if snapshot.fortress_id != current.fortress_id {
@@ -178,6 +194,7 @@ pub(super) fn read(session_id: &str, uri: &str, view: &str) -> McpResult<Vec<Res
                 Some((section, offset)) => page(snapshot, section, offset, guard.budget),
             }
             .and_then(|payload| {
+                check_deadline(guard.budget, &mut elapsed)?;
                 render(
                     payload,
                     &canonical_session,
@@ -185,6 +202,7 @@ pub(super) fn read(session_id: &str, uri: &str, view: &str) -> McpResult<Vec<Res
                     snapshot,
                     current,
                     guard.budget,
+                    &mut elapsed,
                 )
             });
             payload
@@ -290,6 +308,7 @@ fn render(
     snapshot: &WorldSnapshot,
     current: StateAnchor,
     budget: WorkBudget,
+    elapsed: &mut impl FnMut() -> std::time::Duration,
 ) -> Result<String> {
     let anchor = snapshot.anchor();
     let hash = snapshot.state_hash.to_hex();
@@ -335,7 +354,9 @@ fn render(
                 json!({"kind": "active_work", "uri": format!("df://session/{session_id}/handoff")})])
             .build();
         let serialized = payload.to_string();
-        if response_bytes(uri, &serialized) as u64 <= max_bytes {
+        let response_size = response_bytes(uri, &serialized) as u64;
+        check_deadline(budget, elapsed)?;
+        if response_size <= max_bytes {
             return Ok(serialized);
         }
         let Some(rows) = payload["rows"].as_array_mut() else {

@@ -2101,6 +2101,12 @@ pub(crate) fn replay_bundle_for(session_id: &str) -> Result<serde_json::Value> {
     Ok(crate::replay::bundle_json(&guard.replay))
 }
 
+/// Resource callers already hold the current, owner-fenced read view. Keep
+/// authorization and replay inspection within that single admission boundary.
+pub(crate) fn resource_replay_bundle(session: &LabSession) -> serde_json::Value {
+    crate::replay::bundle_json(&session.replay)
+}
+
 pub(crate) fn resolve_session(session_id: Option<String>) -> Result<Arc<Mutex<LabSession>>> {
     if let Some(id_str) = session_id {
         let parsed = parse_session_id_arg(&id_str)?;

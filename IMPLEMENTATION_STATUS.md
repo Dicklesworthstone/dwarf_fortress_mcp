@@ -1,5 +1,22 @@
 # Implementation Status
 
+Fresh review repairs laboratory resource reads that could publish objective
+history or durable custody as a side effect. State, task, summary, handoff,
+anchor, replay, capabilities and doctor reads now share the owner-fenced
+immutable session view; summary observation also preserves the adapter
+transcript. Replay authorizes against the current shared-world clock. State
+projection and escaped-response publication share one wall deadline. New
+regressions cover 30 process/durable allowed/denied cases, replaced ownership,
+shared-clock expiry, and three deadline checkpoints. These source changes have
+not yet executed as Rust tests.
+
+The complete clean `e227a076` verification failed in release Tasks cancellation:
+5237 debug tests passed, while release had 5236 passed and one failed. No full
+qualification receipt was generated. An isolated rerun passed; subsequent
+deterministic upstream tests reproduce the cancellation-intent/readback race.
+The narrow FastMCP repair is tracked at upstream issue #100; integration and
+new exact-source qualification remain pending. The failed run is retained.
+
 This integration candidate combines the Manager 1.23 successor with public main
 `bad8eea`, preserving the current entity-resource consumer, immutable state pages,
 and both job-control repairs. The job policy now combines eight explicit native

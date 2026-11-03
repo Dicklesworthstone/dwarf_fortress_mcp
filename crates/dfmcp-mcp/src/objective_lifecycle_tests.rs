@@ -748,3 +748,177 @@ fn achieved_quiet_goals_cannot_free_capacity_after_consumption_or_lost_stock_evi
     }
     Ok(())
 }
+
+#[test]
+fn read_only_resources_do_not_certify_or_write_custody() -> TestResult {
+    fn files(root: &std::path::Path) -> TestResult<BTreeMap<std::path::PathBuf, Digest32>> {
+        fn visit(
+            root: &std::path::Path,
+            output: &mut BTreeMap<std::path::PathBuf, Digest32>,
+        ) -> TestResult {
+            let entries = match std::fs::read_dir(root) {
+                Ok(entries) => entries,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+                Err(error) => return Err(error.into()),
+            };
+            for entry in entries {
+                let entry = entry?;
+                if entry.file_type()?.is_dir() {
+                    visit(&entry.path(), output)?;
+                } else {
+                    assert!(entry.file_type()?.is_file());
+                    assert!(entry.metadata()?.len() <= 32 * 1024 * 1024);
+                    output.insert(
+                        entry.path(),
+                        Digest32::of_bytes(&std::fs::read(entry.path())?),
+                    );
+                    assert!(output.len() <= 128);
+                }
+            }
+            Ok(())
+        }
+        let mut output = BTreeMap::new();
+        visit(root, &mut output)?;
+        Ok(output)
+    }
+    let _serial = serialized_durable_tests();
+    let cases = [
+        ("state", None),
+        ("state", Some(Capability::Observe)),
+        ("tasks", None),
+        ("tasks", Some(Capability::Observe)),
+        ("summary", None),
+        ("summary", Some(Capability::Observe)),
+        ("handoff", None),
+        ("handoff", Some(Capability::Observe)),
+        ("anchor", None),
+        ("anchor", Some(Capability::Observe)),
+        ("replay", None),
+        ("replay", Some(Capability::Observe)),
+        ("doctor", None),
+        ("doctor", Some(Capability::Doctor)),
+        ("capabilities", None),
+    ];
+    for (index, (durable, (view, denied))) in [false, true]
+        .into_iter()
+        .flat_map(|durable| cases.into_iter().map(move |case| (durable, case)))
+        .enumerate()
+    {
+        let directory = StateDir::new(&format!("resource-read-{index}"));
+        let session_id = identity(
+            &open(&(7843100 + index).to_string(), false, durable, true)?,
+            "session_id",
+        )?;
+        let digest = production(&session_id)?;
+        in_session(&session_id, |guard| {
+            for grant in &mut guard.grants {
+                if grant.capability == Capability::Observe {
+                    grant.expires_at_tick = Some(GameTick(0));
+                }
+            }
+            guard.adapter.advance_ticks(200)
+        })?;
+        let session = resolve_session(Some(session_id.clone()))?;
+        let (before, grants, request_id, transcript) = {
+            let mut guard = session.lock().map_err(|_| "session poisoned")?;
+            for grant in &mut guard.grants {
+                if grant.capability == Capability::Observe {
+                    grant.expires_at_tick = None;
+                }
+            }
+            let grants = guard.grants.clone();
+            let wanted = Digest32::from_hex(&digest).ok_or("plan digest")?;
+            assert!(objectives::newly_satisfied_objectives(&guard).contains(&wanted));
+            assert!(objectives_json(&guard)[0]["first_satisfied_anchor"].is_null());
+            if let Some(capability) = denied {
+                guard.grants.retain(|grant| grant.capability != capability);
+            }
+            if denied == Some(Capability::Doctor) {
+                assert!(
+                    objectives::newly_satisfied_objectives(&guard).contains(&wanted),
+                    "Doctor denial must retain an eligible Observe goal"
+                );
+            }
+            let before = objectives_json(&guard);
+            (
+                before,
+                grants,
+                guard.next_request_id,
+                guard.adapter.transcript().clone(),
+            )
+        };
+        let custody_before = files(&directory.0)?;
+        if durable {
+            assert!(!custody_before.is_empty());
+        }
+        let uri = if view == "doctor" {
+            format!("df://doctor/{session_id}")
+        } else {
+            format!("df://session/{session_id}/{view}")
+        };
+        let result = match view {
+            "state" => crate::resources::state::read(&session_id, &uri, view),
+            "tasks" => crate::resources::session_tasks(&session_id, &uri, 0),
+            "summary" => crate::resources::session_summary(&session_id, &uri),
+            "handoff" => crate::resources::session_handoff(&session_id, &uri),
+            "anchor" => crate::resources::session_anchor(&session_id, &uri),
+            "replay" => crate::resources::session_replay(&session_id, &uri),
+            "doctor" => crate::resources::doctor_bundle(&session_id, &uri),
+            "capabilities" => crate::resources::session_capabilities(&session_id, &uri),
+            _ => return Err("unknown test resource".into()),
+        };
+        if denied.is_none() {
+            assert!(result.is_ok(), "{view}: {result:?}");
+        } else {
+            assert!(
+                result
+                    .expect_err("capability denied")
+                    .to_string()
+                    .contains("capability_denied"),
+                "{view}"
+            );
+        }
+        {
+            let mut guard = session.lock().map_err(|_| "session poisoned")?;
+            assert_eq!(objectives_json(&guard), before);
+            assert_eq!(guard.next_request_id, request_id);
+            assert_eq!(guard.adapter.transcript(), &transcript);
+            guard.grants = grants;
+            assert!(
+                objectives::newly_satisfied_objectives(&guard)
+                    .contains(&Digest32::from_hex(&digest).ok_or("plan digest")?)
+            );
+        }
+        assert_eq!(files(&directory.0)?, custody_before);
+        assert_eq!(
+            parsed(&fortress_observe(Some(session_id.clone())))?["ok"],
+            true
+        );
+        assert!(!objectives_json(&session.lock().map_err(|_| "session poisoned")?)[0]["first_satisfied_anchor"].is_null());
+    }
+    Ok(())
+}
+
+#[test]
+fn replaced_durable_owner_cannot_read_capabilities_or_replay_resources() -> TestResult {
+    let _serial = serialized_durable_tests();
+    let _directory = StateDir::new("resource-owner-fence");
+    let first = identity(&open("7843199", false, true, true)?, "session_id")?;
+    let second = identity(&open("7843199", false, true, true)?, "session_id")?;
+    assert_ne!(first, second);
+    for view in ["capabilities", "replay"] {
+        let first_uri = format!("df://session/{first}/{view}");
+        let second_uri = format!("df://session/{second}/{view}");
+        let read = |id: &str, uri: &str| match view {
+            "capabilities" => crate::resources::session_capabilities(id, uri),
+            _ => crate::resources::session_replay(id, uri),
+        };
+        let error = read(&first, &first_uri).expect_err("superseded owner must be fenced");
+        assert!(error.to_string().contains("conflict"), "{error}");
+        assert!(
+            read(&second, &second_uri).is_ok(),
+            "current owner reads {view}"
+        );
+    }
+    Ok(())
+}

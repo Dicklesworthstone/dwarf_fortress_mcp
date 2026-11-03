@@ -1,6 +1,7 @@
 //! `dfmcp-reality-wiring-proof-4bf.11`: the resource consumer, not a parallel renderer.
 
 use super::*;
+use crate::server::with_session;
 use std::collections::{BTreeMap, BTreeSet};
 
 use dfmcp_core::{Digest32, EntityId, FortressId, GameTick, ObservationCursor};
@@ -401,4 +402,31 @@ fn contradictory_unknown_facts_are_refused_without_revealing_retained_values() {
         "invalid_request",
     );
     assert!(!data.to_string().contains("must not escape an unknown fact"));
+}
+
+#[test]
+fn state_wall_budget_is_not_renewed_across_projection_and_publication() {
+    use std::time::Duration;
+    let id = open(390_011, 16_384);
+    let snapshot = fixture(390_011, 1, 1);
+    let hash = snapshot.state_hash.to_hex();
+    install(&id, snapshot);
+    let view = format!("state-{hash}~entities~0");
+    let uri = format!("df://session/{id}/{view}");
+    let session = resolve_session(Some(id.clone())).expect("session");
+    let wall = session.lock().expect("lock").budget.max_wall_millis;
+    for expire_at in 0..3 {
+        let mut calls = 0;
+        let result = read_with_elapsed(&id, &uri, &view, || {
+            let expired = calls >= expire_at;
+            calls += 1;
+            Duration::from_millis(if expired { wall } else { 0 })
+        });
+        error_data(
+            result.expect_err("expired state read must not publish"),
+            "budget_exceeded",
+        );
+        assert_eq!(calls, expire_at + 1);
+    }
+    assert!(read_with_elapsed(&id, &uri, &view, || Duration::ZERO).is_ok());
 }

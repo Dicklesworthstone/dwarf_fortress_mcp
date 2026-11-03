@@ -19,7 +19,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use dfmcp_adapter::GameAdapter;
 use fastmcp_rust::prelude::{
     McpContext, McpError, McpResult, Resource, ResourceContent, ResourceHandler,
 };
@@ -30,12 +29,12 @@ use fastmcp_rust::{
 use serde_json::{Value, json};
 
 use crate::server::{
-    active_session_count, anchor_json, authorize_entry, lookup_session, next_context,
-    parse_session_id_arg, snapshot_json,
+    active_session_count, anchor_json, authorize_entry, lookup_session, parse_session_id_arg,
+    read_context, snapshot_json,
 };
 use dfmcp_core::{Capability, Digest32, EntityId, RiskTier, SessionId, StateAnchor};
 
-mod state;
+pub(crate) mod state;
 
 /// One template serves every session view. The pinned fastmcp router admits
 /// at most one template per compatible leading literal (`df://session/`), so
@@ -105,10 +104,13 @@ fn denial(operation: &str, error: dfmcp_core::DfmcpError) -> McpError {
     ))
 }
 
-fn poisoned(operation: &str) -> McpError {
-    McpError::internal_error(format!(
-        "internal_invariant_violation: {operation} session mutex poisoned"
-    ))
+fn inspect_session<T>(
+    raw: &str,
+    operation: &str,
+    body: impl FnOnce(&crate::server::LabSession) -> McpResult<T>,
+) -> McpResult<T> {
+    let session = lookup(raw, operation)?;
+    crate::server::with_session_read(&session, |error| Err(denial(operation, error)), body)
 }
 
 fn text_content(uri: &str, payload: String) -> Vec<ResourceContent> {
@@ -274,41 +276,36 @@ pub(crate) fn session_entity(
 /// Requires the session's negotiated `observe` capability.
 pub(crate) fn session_summary(session_id_hex: &str, uri: &str) -> McpResult<Vec<ResourceContent>> {
     let operation = "df://session/summary";
-    let session = lookup(session_id_hex, operation)?;
-    crate::server::with_session(
-        &session,
-        || Err(poisoned(operation)),
-        |guard| {
-            let (_, ctx) = next_context(guard).map_err(|error| denial(operation, error))?;
-            if let Err(error) = authorize_entry(&ctx, Capability::Observe, RiskTier::ReadOnly) {
-                return Err(denial(operation, error));
-            }
-            let request = dfmcp_adapter::ObservationRequest {
-                since: None,
-                projection: dfmcp_adapter::Projection::Summary,
-                interest: dfmcp_adapter::InterestSet::default(),
-                max_entities: guard.budget.max_entities,
-                max_bytes: guard.budget.max_bytes,
-                max_output_tokens: guard.budget.max_output_tokens,
-                continuation: None,
-            };
-            match guard.adapter.observe(&request, &ctx) {
-                Ok(frame) => match frame.payload {
-                    dfmcp_adapter::ObservationPayload::Snapshot(snapshot) => {
-                        let mut payload = snapshot_json(&snapshot);
-                        payload["projection"] = json!("summary");
-                        payload["session_id"] = json!(format!("{}", guard.session_id));
-                        payload["resource"] = json!(uri);
-                        Ok(text_content(uri, payload.to_string()))
-                    }
-                    _ => Err(McpError::internal_error(
-                        "internal_invariant_violation: summary observation returned a non-snapshot payload",
-                    )),
-                },
-                Err(error) => Err(denial(operation, error)),
-            }
-        },
-    )
+    inspect_session(session_id_hex, operation, |guard| {
+        let ctx = read_context(guard);
+        if let Err(error) = authorize_entry(&ctx, Capability::Observe, RiskTier::ReadOnly) {
+            return Err(denial(operation, error));
+        }
+        let request = dfmcp_adapter::ObservationRequest {
+            since: None,
+            projection: dfmcp_adapter::Projection::Summary,
+            interest: dfmcp_adapter::InterestSet::default(),
+            max_entities: guard.budget.max_entities,
+            max_bytes: guard.budget.max_bytes,
+            max_output_tokens: guard.budget.max_output_tokens,
+            continuation: None,
+        };
+        match guard.adapter.observe_readonly(&request, &ctx) {
+            Ok(frame) => match frame.payload {
+                dfmcp_adapter::ObservationPayload::Snapshot(snapshot) => {
+                    let mut payload = snapshot_json(&snapshot);
+                    payload["projection"] = json!("summary");
+                    payload["session_id"] = json!(format!("{}", guard.session_id));
+                    payload["resource"] = json!(uri);
+                    Ok(text_content(uri, payload.to_string()))
+                }
+                _ => Err(McpError::internal_error(
+                    "internal_invariant_violation: summary observation returned a non-snapshot payload",
+                )),
+            },
+            Err(error) => Err(denial(operation, error)),
+        }
+    })
 }
 
 /// `df://session/{session_id}/capabilities` — the session's own negotiation
@@ -319,85 +316,80 @@ pub(crate) fn session_capabilities(
     uri: &str,
 ) -> McpResult<Vec<ResourceContent>> {
     let operation = "df://session/capabilities";
-    let session = lookup(session_id_hex, operation)?;
-    let guard = session.lock().map_err(|_| poisoned(operation))?;
-    let payload = json!({
-        "ok": true,
-        "session_id": format!("{}", guard.session_id),
-        "fortress_id": format!("{}", guard.fortress_id),
-        "granted_capabilities": guard
-            .grants
-            .iter()
-            .map(|grant| json!({
-                "capability": grant.capability.as_str(),
-                "max_risk": grant.max_risk.as_str(),
-            }))
-            .collect::<Vec<_>>(),
-        "budget": {
-            "max_wall_millis": guard.budget.max_wall_millis,
-            "max_game_ticks": guard.budget.max_game_ticks,
-            "max_entities": guard.budget.max_entities,
-            "max_bytes": guard.budget.max_bytes,
-            "max_output_tokens": guard.budget.max_output_tokens,
-            "max_actions": guard.budget.max_actions,
-        },
-        "negotiation": guard.negotiation.to_json(),
-        "note": "self-description of the session's own authority; confers nothing",
-        "resource": uri,
-    });
-    Ok(text_content(uri, payload.to_string()))
+    inspect_session(session_id_hex, operation, |guard| {
+        let payload = json!({
+            "ok": true,
+            "session_id": format!("{}", guard.session_id),
+            "fortress_id": format!("{}", guard.fortress_id),
+            "granted_capabilities": guard
+                .grants
+                .iter()
+                .map(|grant| json!({
+                    "capability": grant.capability.as_str(),
+                    "max_risk": grant.max_risk.as_str(),
+                }))
+                .collect::<Vec<_>>(),
+            "budget": {
+                "max_wall_millis": guard.budget.max_wall_millis,
+                "max_game_ticks": guard.budget.max_game_ticks,
+                "max_entities": guard.budget.max_entities,
+                "max_bytes": guard.budget.max_bytes,
+                "max_output_tokens": guard.budget.max_output_tokens,
+                "max_actions": guard.budget.max_actions,
+            },
+            "negotiation": guard.negotiation.to_json(),
+            "note": "self-description of the session's own authority; confers nothing",
+            "resource": uri,
+        });
+        Ok(text_content(uri, payload.to_string()))
+    })
 }
 
 /// `df://doctor/{session_id}` — doctor report bundle for the session.
 /// Requires the session's negotiated `doctor` capability.
 pub(crate) fn doctor_bundle(session_id_hex: &str, uri: &str) -> McpResult<Vec<ResourceContent>> {
     let operation = "df://doctor";
-    let session = lookup(session_id_hex, operation)?;
-    crate::server::with_session(
-        &session,
-        || Err(poisoned(operation)),
-        |guard| {
-            let (_, ctx) = next_context(guard).map_err(|error| denial(operation, error))?;
-            if let Err(error) = authorize_entry(&ctx, Capability::Doctor, RiskTier::ReadOnly) {
-                return Err(denial(operation, error));
-            }
-            let health_res = guard.adapter.health(&ctx);
-            let health_opt = health_res.as_ref().ok();
-            let report = crate::doctor::DoctorInspector.generate_report(
-                active_session_count(),
-                health_opt,
-                None,
-                0,
-                0,
-            );
-            let payload = match health_res {
-                Ok(health) => json!({
-                    "ok": true,
-                    "session_id": format!("{}", guard.session_id),
-                    "status": if report.is_healthy { "healthy" } else { "degraded" },
-                    "active_sessions_count": report.active_sessions_count,
-                    "adapter": health.identity.name,
-                    "compatibility": format!("{:?}", health.identity.compatibility),
-                    "fortress_loaded": health.fortress_loaded,
-                    "findings": report.findings,
-                    "warnings": health.warnings,
-                    "current_anchor": health.current_anchor.as_ref().map(anchor_json),
-                    "resource": uri,
-                }),
-                Err(error) => json!({
-                    "ok": false,
-                    "error": {
-                        "operation": operation,
-                        "code": error.code.as_str(),
-                        "message": error.message,
-                        "retryable": error.retryable,
-                    },
-                    "resource": uri,
-                }),
-            };
-            Ok(text_content(uri, payload.to_string()))
-        },
-    )
+    inspect_session(session_id_hex, operation, |guard| {
+        let ctx = read_context(guard);
+        if let Err(error) = authorize_entry(&ctx, Capability::Doctor, RiskTier::ReadOnly) {
+            return Err(denial(operation, error));
+        }
+        let health_res = guard.adapter.health_readonly(&ctx);
+        let health_opt = health_res.as_ref().ok();
+        let report = crate::doctor::DoctorInspector.generate_report(
+            active_session_count(),
+            health_opt,
+            None,
+            0,
+            0,
+        );
+        let payload = match health_res {
+            Ok(health) => json!({
+                "ok": true,
+                "session_id": format!("{}", guard.session_id),
+                "status": if report.is_healthy { "healthy" } else { "degraded" },
+                "active_sessions_count": report.active_sessions_count,
+                "adapter": health.identity.name,
+                "compatibility": format!("{:?}", health.identity.compatibility),
+                "fortress_loaded": health.fortress_loaded,
+                "findings": report.findings,
+                "warnings": health.warnings,
+                "current_anchor": health.current_anchor.as_ref().map(anchor_json),
+                "resource": uri,
+            }),
+            Err(error) => json!({
+                "ok": false,
+                "error": {
+                    "operation": operation,
+                    "code": error.code.as_str(),
+                    "message": error.message,
+                    "retryable": error.retryable,
+                },
+                "resource": uri,
+            }),
+        };
+        Ok(text_content(uri, payload.to_string()))
+    })
 }
 
 /// `df://session/{session_id}/handoff` — resumable handoff packet: anchor,
@@ -406,20 +398,15 @@ pub(crate) fn doctor_bundle(session_id_hex: &str, uri: &str) -> McpResult<Vec<Re
 /// it never polls, dispatches, or changes state.
 pub(crate) fn session_handoff(session_id_hex: &str, uri: &str) -> McpResult<Vec<ResourceContent>> {
     let operation = "df://session/handoff";
-    let session = lookup(session_id_hex, operation)?;
-    crate::server::with_session(
-        &session,
-        || Err(poisoned(operation)),
-        |guard| {
-            let (_, ctx) = next_context(guard).map_err(|error| denial(operation, error))?;
-            if let Err(error) = authorize_entry(&ctx, Capability::Observe, RiskTier::ReadOnly) {
-                return Err(denial(operation, error));
-            }
-            let mut payload = crate::server::handoff_json(guard);
-            payload["resource"] = json!(uri);
-            Ok(text_content(uri, payload.to_string()))
-        },
-    )
+    inspect_session(session_id_hex, operation, |guard| {
+        let ctx = read_context(guard);
+        if let Err(error) = authorize_entry(&ctx, Capability::Observe, RiskTier::ReadOnly) {
+            return Err(denial(operation, error));
+        }
+        let mut payload = crate::server::handoff_json(guard);
+        payload["resource"] = json!(uri);
+        Ok(text_content(uri, payload.to_string()))
+    })
 }
 
 /// `df://session/{session_id}/anchor` — the session fortress's current
@@ -428,63 +415,54 @@ pub(crate) fn session_handoff(session_id_hex: &str, uri: &str) -> McpResult<Vec<
 /// Requires `observe`; never changes state.
 pub(crate) fn session_anchor(session_id_hex: &str, uri: &str) -> McpResult<Vec<ResourceContent>> {
     let operation = "df://session/anchor";
-    let session = lookup(session_id_hex, operation)?;
-    crate::server::with_session(
-        &session,
-        || Err(poisoned(operation)),
-        |guard| {
-            let (_, ctx) = next_context(guard).map_err(|error| denial(operation, error))?;
-            if let Err(error) = authorize_entry(&ctx, Capability::Observe, RiskTier::ReadOnly) {
-                return Err(denial(operation, error));
-            }
-            let snapshot = guard.adapter.snapshot();
-            let v2 = dfmcp_core::StateAnchorV2::from_v1(
-                snapshot.anchor(),
-                dfmcp_core::AnchorEpochs::laboratory(snapshot.fortress_id),
-            )
-            .map_err(|error| denial(operation, error))?;
-            let payload = json!({
-                "ok": true,
-                "resource": uri,
-                "fortress_id": snapshot.fortress_id.get().to_string(),
-                "anchor": anchor_json(&snapshot.anchor()),
-                "anchor_v2": {
-                    "fortress_lineage": v2.fortress_lineage.to_hex(),
-                    "observation_epoch": v2.observation_epoch,
-                    "snapshot_sequence": v2.snapshot_sequence,
-                    "game_tick": v2.game_tick.map(|tick| tick.0),
-                    "bridge_generation": v2.bridge_generation,
-                    "bridge_protocol": v2.bridge_protocol,
-                    "adapter_epoch": v2.adapter_epoch,
-                    "schema_epoch": v2.schema_epoch,
-                    "policy_epoch": v2.policy_epoch,
-                    "semantic_world_root": v2.semantic_world_root.to_hex(),
-                    "digest": v2.digest().to_hex(),
-                    "note": "complete version tuple; a changed observation_epoch invalidates every older handle",
-                },
-                "paused": snapshot.paused,
-            });
-            Ok(text_content(uri, payload.to_string()))
-        },
-    )
+    inspect_session(session_id_hex, operation, |guard| {
+        let ctx = read_context(guard);
+        if let Err(error) = authorize_entry(&ctx, Capability::Observe, RiskTier::ReadOnly) {
+            return Err(denial(operation, error));
+        }
+        let snapshot = guard.adapter.snapshot();
+        let v2 = dfmcp_core::StateAnchorV2::from_v1(
+            snapshot.anchor(),
+            dfmcp_core::AnchorEpochs::laboratory(snapshot.fortress_id),
+        )
+        .map_err(|error| denial(operation, error))?;
+        let payload = json!({
+            "ok": true,
+            "resource": uri,
+            "fortress_id": snapshot.fortress_id.get().to_string(),
+            "anchor": anchor_json(&snapshot.anchor()),
+            "anchor_v2": {
+                "fortress_lineage": v2.fortress_lineage.to_hex(),
+                "observation_epoch": v2.observation_epoch,
+                "snapshot_sequence": v2.snapshot_sequence,
+                "game_tick": v2.game_tick.map(|tick| tick.0),
+                "bridge_generation": v2.bridge_generation,
+                "bridge_protocol": v2.bridge_protocol,
+                "adapter_epoch": v2.adapter_epoch,
+                "schema_epoch": v2.schema_epoch,
+                "policy_epoch": v2.policy_epoch,
+                "semantic_world_root": v2.semantic_world_root.to_hex(),
+                "digest": v2.digest().to_hex(),
+                "note": "complete version tuple; a changed observation_epoch invalidates every older handle",
+            },
+            "paused": snapshot.paused,
+        });
+        Ok(text_content(uri, payload.to_string()))
+    })
 }
 
 /// `df://session/{session_id}/replay` — the session's deterministic replay
 /// bundle. Requires the negotiated `observe` capability; never changes state.
 pub(crate) fn session_replay(session_id_hex: &str, uri: &str) -> McpResult<Vec<ResourceContent>> {
     let operation = "df://session/replay";
-    let session = lookup(session_id_hex, operation)?;
-    let (_, ctx) = {
-        let mut guard = session.lock().map_err(|_| poisoned(operation))?;
-        next_context(&mut guard).map_err(|error| denial(operation, error))?
-    };
-    if let Err(error) = authorize_entry(&ctx, Capability::Observe, RiskTier::ReadOnly) {
-        return Err(denial(operation, error));
-    }
-    let mut payload = crate::server::replay_bundle_for(session_id_hex)
-        .map_err(|error| denial(operation, error))?;
-    payload["resource"] = json!(uri);
-    Ok(text_content(uri, payload.to_string()))
+    inspect_session(session_id_hex, operation, |guard| {
+        let ctx = read_context(guard);
+        authorize_entry(&ctx, Capability::Observe, RiskTier::ReadOnly)
+            .map_err(|error| denial(operation, error))?;
+        let mut payload = crate::server::resource_replay_bundle(guard);
+        payload["resource"] = json!(uri);
+        Ok(text_content(uri, payload.to_string()))
+    })
 }
 
 /// Modern Tasks have no tasks/list method. Discovery stays in the existing
@@ -500,13 +478,13 @@ fn task_resource_bytes(uri: &str, serialized: &str) -> usize {
         .saturating_add(128 + 4096)
 }
 
-fn session_tasks(
+pub(crate) fn session_tasks(
     session_id_hex: &str,
     uri: &str,
     offset: usize,
 ) -> McpResult<Vec<ResourceContent>> {
     let operation = "df://session/tasks";
-    // This enters with_session so a shared world's current clock and grants
+    // This enters the read-only session view so the current world clock and grants
     // govern the read. Reading a task must not consume a semantic request ID.
     let budget = crate::server::task_session::read_budget(session_id_hex)
         .map_err(|error| denial(operation, error))?;
@@ -816,6 +794,7 @@ pub fn register_all(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::server::next_context;
     use crate::server::{
         fortress_cancel, fortress_checkpoint, fortress_commit, fortress_doctor, fortress_explain,
         fortress_observe, fortress_open_session, fortress_plan, fortress_query, fortress_restore,
@@ -1120,6 +1099,67 @@ mod tests {
         );
         let doctor = DoctorBundleResource.template().expect("doctor template");
         assert_eq!(doctor.uri_template, "df://doctor/{session_id}");
+    }
+
+    #[test]
+    fn replay_resource_checks_expiry_against_the_shared_world_tick() {
+        fn open_shared() -> String {
+            let raw = crate::server::open_session_in_scenario(
+                Some(true),
+                Some("390021".to_owned()),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                Some("empty".to_owned()),
+                Some(true),
+                Some(false),
+            );
+            let value: Value = serde_json::from_str(&raw).expect("shared session");
+            assert_eq!(value["ok"], true, "{value}");
+            session_id_of(&value)
+        }
+        let reader_id = open_shared();
+        let controller_id = open_shared();
+        let reader = lookup(&reader_id, "test").expect("reader");
+        {
+            let mut guard = reader.lock().expect("reader lock");
+            for grant in &mut guard.grants {
+                if grant.capability == Capability::Observe {
+                    grant.expires_at_tick = Some(dfmcp_core::GameTick(2));
+                }
+            }
+        }
+        let uri = format!("df://session/{reader_id}/replay");
+        assert!(session_replay(&reader_id, &uri).is_ok());
+        let controller = lookup(&controller_id, "test").expect("controller");
+        crate::server::with_session(
+            &controller,
+            || panic!("controller unavailable"),
+            |guard| {
+                guard
+                    .adapter
+                    .advance_ticks(10)
+                    .expect("advance shared world")
+            },
+        );
+        assert_eq!(
+            reader
+                .lock()
+                .expect("reader lock")
+                .adapter
+                .snapshot()
+                .tick
+                .0,
+            1,
+            "the reader cache must actually lag the shared world"
+        );
+        let denied = session_replay(&reader_id, &uri).expect_err("expired observe grant");
+        assert!(denied.to_string().contains("capability_denied"), "{denied}");
+        crate::server::release_shared_world(dfmcp_core::FortressId::new(390021));
     }
 
     fn entity_session() -> (String, Value) {
