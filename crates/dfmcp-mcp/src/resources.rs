@@ -1,13 +1,15 @@
 //! Read-only `df://` resource families (MCP_SURFACE.md §Resources),
 //! laboratory slice.
 //!
-//! Session-scoped URIs carry their own authority: the `{session_id}` slot
+//! Session-scoped URIs identify an authority lookup: the `{session_id}` slot
 //! names the session whose negotiated grants gate the read. Fortress-scoped
 //! families (`df://fortress/{id}/anchor`, map chunks, events, …) stay
-//! unimplemented on purpose until `resources/read` gains a session-binding
+//! unregistered until `resources/read` gains a transport session-binding
 //! design: a fortress URI without a session slot could only be authorized
 //! from the transport context, and transport identity grants nothing
 //! (CAPABILITIES.md: no ambient authority).
+//! Session-bound immutable state pages already expose retained entities,
+//! relations, map chunks, and event records without ambient authority.
 //!
 //! Facade note: the pinned `fastmcp_rust` facade does not re-export
 //! `UriParams`, so template handlers spell the parameter type as the
@@ -33,19 +35,22 @@ use crate::server::{
 };
 use dfmcp_core::{Capability, Digest32, EntityId, RiskTier, SessionId, StateAnchor};
 
+mod state;
+
 /// One template serves every session view. The pinned fastmcp router admits
 /// at most one template per compatible leading literal (`df://session/`), so
 /// separate per-view templates would be silently dropped; dispatching on the
 /// `view` capture keeps the documented URIs exactly.
 const SESSION_VIEW_TEMPLATE: &str = "df://session/{session_id}/{view}";
 /// Views served under `df://session/{session_id}/{view}`.
-pub const SESSION_VIEWS: [&str; 6] = [
+pub const SESSION_VIEWS: [&str; 7] = [
     "summary",
     "capabilities",
     "handoff",
     "replay",
     "anchor",
     "tasks",
+    "state",
 ];
 const DOCTOR_BUNDLE_TEMPLATE: &str = "df://doctor/{session_id}";
 
@@ -486,11 +491,13 @@ pub(crate) fn session_replay(session_id_hex: &str, uri: &str) -> McpResult<Vec<R
 /// capability-checked session resource waist.
 fn task_resource_bytes(uri: &str, serialized: &str) -> usize {
     // Resource text is JSON inside a JSON-RPC result. Count its escaping and
-    // the resource wrapper, with room for the bounded outer request envelope.
+    // the resource wrapper. The pinned protocol preserves numeric request IDs
+    // of up to 4096 bytes; the handler sees no original ID, so reserve that
+    // maximum as well as the fixed result/cache/envelope metadata.
     json!({"contents": [{"uri": uri, "mimeType": "application/json", "text": serialized}]})
         .to_string()
         .len()
-        .saturating_add(128)
+        .saturating_add(128 + 4096)
 }
 
 fn session_tasks(
@@ -716,7 +723,9 @@ const SESSION_VIEW_DESCRIPTION: &str = "Session views: summary (bounded snapshot
      (the session fortress's current canonical anchor), tasks and tasks-{offset} (bounded modern \
      MCP task handles, active first), task-{taskId} (original plan progress, cancellation drains \
      and final evidence; laboratory process only), entity-{id}~{generation}~{anchor_digest} \
-     (one Query-authorized entity at the exact current complete anchor, discovered in entity query rows)";
+     (one Query-authorized entity at the exact current complete anchor, discovered in entity query rows), state (current world manifest), \
+     state-{state_hash} (exact retained manifest), state-{state_hash}~{section}~{offset} \
+     (immutable bounded entities, relations, chunks, or events page; requires observe)";
 
 impl ResourceHandler for SessionViewResource {
     fn definition(&self) -> Resource {
@@ -767,6 +776,8 @@ impl ResourceHandler for SessionViewResource {
             "anchor" => session_anchor(raw, uri),
             entity if entity.starts_with("entity-") => session_entity(raw, uri, entity),
             "tasks" => session_tasks(raw, uri, 0),
+            "state" => state::read(raw, uri, view),
+            page if page.starts_with("state-") => state::read(raw, uri, page),
             page if page.starts_with("tasks-") => {
                 let offset = page[6..].parse::<usize>().map_err(|_| {
                     McpError::invalid_params("task page offset must be a nonnegative integer")
@@ -1103,7 +1114,8 @@ mod tests {
                 "handoff",
                 "replay",
                 "anchor",
-                "tasks"
+                "tasks",
+                "state"
             ]
         );
         let doctor = DoctorBundleResource.template().expect("doctor template");
@@ -1241,6 +1253,31 @@ mod tests {
             entity_read(&session_id, uri).is_ok(),
             "same reference works when output fits"
         );
+    }
+
+    #[test]
+    fn entity_resource_budget_includes_the_largest_numeric_wire_id() {
+        let (session_id, page) = entity_session();
+        let uri = page["rows"][0]["resource_uri"].as_str().expect("resource");
+        let contents = entity_read(&session_id, uri).expect("initial entity");
+        let text = contents[0].text.as_deref().expect("resource text");
+        let id: Value = serde_json::from_str(&"9".repeat(4096)).expect("exact protocol ID");
+        let wire = json!({"jsonrpc":"2.0", "id":id, "result":{
+            "contents":[{"uri":uri,"mimeType":"application/json","text":text}],
+            "ttlMs":0,"cacheScope":"private"}})
+        .to_string();
+        let reserved = task_resource_bytes(uri, text);
+        assert!(reserved >= wire.len());
+        let session = lookup(&session_id, "test").expect("session");
+        session.lock().expect("lock").budget.max_bytes = (wire.len() - 1) as u64;
+        assert!(
+            entity_read(&session_id, uri)
+                .expect_err("wire budget refused")
+                .to_string()
+                .contains("budget_exceeded")
+        );
+        session.lock().expect("lock").budget.max_bytes = reserved as u64;
+        assert!(entity_read(&session_id, uri).is_ok());
     }
 
     #[test]

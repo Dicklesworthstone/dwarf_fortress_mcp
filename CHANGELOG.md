@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-11-03 — Real wooden bed and main integration
+
+- Record independently replayed W: real MCP Tree supply, completed original
+  Carpenter, Manager 1.23 cache appointment, one finite order and newly observed
+  PECAN-wood BED561 after 1200 bed ticks. Keep the disappeared original order's
+  goal Unknown; do not infer causal linkage. Fresh host cleanup checks pass.
+- Reconcile public main's immutable resource and job-control work with the
+  gameplay branch, preserving entity references and the stronger guards from
+  both job policies. Native job doubles pass 863/13 plus the 287-check guard and
+  all five compiled mutants; require these checks in both standard scripts.
+- Reserve the largest numeric wire ID for entity/task/state resource budgets
+  once, and add a real entity-resource budget refusal/positive regression.
+- Direct gameplay documentation to `manager-v1-23`; retain the legacy Manager
+  route with its missing-cache limitation. Merged-source Rust checks are pending.
+
 ## 2026-11-03 — Manager append capacity and actual MCP follow-up
 
 - Reserve HF-link/cache capacity before Manager 1.23 preparation and accept the
@@ -441,6 +456,39 @@
   old unreconciled Prepared record. Source/artifact qualification grants no
   native campaign, registry, production-runner or runtime admission, and does
   not transfer to the later shared checkout or report updates.
+
+## 2026-10-30 — Add immutable world resource consumers
+
+- Expose current and exact retained world manifests plus bounded entity,
+  relation, map-chunk and event pages through the existing session resource
+  template, reusing canonical presence-aware observation rendering.
+- Keep continuations on their original source hash, distinguish current from
+  historical anchors, and explicitly refuse unknown or collected versions.
+- Recheck current session authority and expiry on every historical read;
+  enforce source/output budgets and truthful partial/absence coverage.
+- Override the transport's default resource cache lifetime with private
+  zero-lifetime hints so changing grants and continuity are checked afresh.
+- Add ten focused unit cases, a real modern-stdio traversal/authority/budget
+  regression, and an exact implemented/deferred URI inventory. Rust execution
+  remains blocked by host memory exhaustion during the actual dependency build;
+  no live qualification or production admission is claimed.
+- Pass the complete production adapter Rust check on latest nightly. Attempt
+  both required repository commands; each stops at nine existing bridge-contract
+  findings in unchanged paths, without weakening those gates.
+
+## 2026-10-30 — Restore guarded workshop and furnace job control
+
+- Replace refusal-only native job suspension with a closed eight-type policy
+  using actual DFHack job, holder, posting and activity fields. Restrict writes
+  to idle, unposted, unclaimed jobs in completed matching production buildings.
+- Validate the complete bounded job list and exact holder queue membership before
+  the sole suspension-bit setter; retain stale-plan refusal, original-key replay
+  and immediate exact readback without retrying uncertain effects.
+- Replace fictional SDK test helpers and `BrewDrink` enum assumptions with
+  SDK-shaped lists and real enum values. Pass 863 handler/engine assertions under
+  UBSan, 26 independent SDK-guard assertions, and reject five safety mutations.
+- Retain explicit source/test scope: matching-SDK build, live MCP execution and
+  full Rust qualification remain open. No bridge method or admission is added.
 
 ## 2026-10-30 — Repair executable wiring and prove a bounded live run
 

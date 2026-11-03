@@ -67,3 +67,13 @@ diagnostics were fixed forward. These results do not qualify the newer append
 boundary source. Live production, full current-source qualification and admission
 remain pending. SDK-double output is not game evidence.
 The registry and production protocol map remain unchanged.
+
+Separate real W evidence on clean `e899a442` and native ELF `74d011e0…` proves
+one actual MCP cache transaction, duplicate original receipt and credential-free
+offline reopen, then observes a new PECAN-wood BED after the completed original
+Carpenter and finite order. Root independently replayed its canonical Manager
+capsules, journal/ACK and MCP bindings plus complete inventory/native readback.
+The original order disappeared, so its semantic goal remains Unknown and causal
+attribution is unproved. Offline pre/post file hashes were not captured. The
+later append-bound SDK artifact `8fe393ed…` and this integration source do not
+inherit W's exact-binary live evidence.

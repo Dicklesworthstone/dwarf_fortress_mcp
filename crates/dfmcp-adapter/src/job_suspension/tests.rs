@@ -62,24 +62,25 @@ fn native_observation_and_applied_receipt_are_byte_exact() -> Result<()> {
     assert_eq!(o.tick(), 42_336_003);
     assert_eq!((o.job_id(), o.next_job_id(), o.site_id()), (3, 10, 1));
     assert_eq!(o.holder_id(), Some(20));
-    assert_eq!(o.holder_type(), Some(1));
+    assert_eq!(o.holder_type(), Some(13));
     assert_eq!(o.worker_id(), None);
     assert_eq!(o.position(), [1, 2, 5]);
     assert_eq!(o.world_folder(), "region1");
-    assert_eq!(o.type_key(), "BrewDrink");
+    assert_eq!(o.job_type(), 69);
+    assert_eq!(o.type_key(), "ConstructBed");
     assert_eq!(o.reaction(), "");
     assert!(o.eligible() && o.repeating() && !o.suspended());
     assert_eq!(
         o.witness().to_hex(),
-        "5c7a7bf9ecef8a6a8026082bba1c326f233d294e3930360b41d82c07b9abd613"
+        "214229e957502aa40ea3aac89da6663b69df398f3b04f937bd940b4e4c994d8b"
     );
     assert_eq!(
         plan.digest().to_hex(),
-        "4173fb3e7bcaf7e907f509a36be6a8d0868dcd93b159ef32c904d8623830acd6"
+        "fc5a8453e275677b8cd1d6e334343432f6fa842602ffbdc420f9cb647a04d51d"
     );
     assert_eq!(
         plan.prepare_token().as_slice(),
-        &hex("d001cf4cf833637c7703c69c9772079d")?
+        &hex("d6551a2008151ec2fbe1277e62133469")?
     );
     let effect = SuspensionEffect::decode(&hex(EFFECT)?, &plan)?;
     assert_eq!(effect.state(), SuspensionState::Applied);

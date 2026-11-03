@@ -1,5 +1,38 @@
 # Implementation Status
 
+This integration candidate combines the Manager 1.23 successor with public main
+`bad8eea`, preserving the current entity-resource consumer, immutable state pages,
+and both job-control repairs. The job policy now combines eight explicit native
+type/holder pairs with exact holder references, hidden-worker refusal, unposted
+and unclaimed restrictions, and complete list/back-reference/horizon validation.
+Its SDK-double suite passes 863 assertions in 13 groups, all five compiled
+mutants, and a separate 287-check guard. Prior live10 evidence does not qualify
+this changed policy; the old capture did not record posting index. Those job
+checks are now required by both standard scripts. Merged-source Rust execution
+and full qualification remain pending.
+
+Real W on clean `e899a442` and native Manager ELF `74d011e0…` reached a completed
+original Carpenter workshop and a newly observed PECAN-wood BED 561 through the
+actual modern MCP loop. Root independently verified all 343 export members,
+the Manager 1.23 canonical transaction and journal/ACK chain, and the public
+inventory against independent paused native readback. Four reviewed clock runs
+advanced 94/1200/1200/1200 ticks (3694 total), with zero overshoot; the bed interval
+used 1200 ticks. Fresh Root-authored host checks verified both 30-file saves,
+eight restored plugin states, drained owned game identities and a closed port.
+The original finite order disappeared: its semantic goal remains Unknown and
+causal production attribution remains unknown. Separate pre/post offline file
+hashes were not captured. These limits and retirement work remain tracked in
+`.14.5`; parent `.14`, `.14.2` and `.14.4` remain open under their written criteria.
+
+The append-bound Manager native source separately builds against the matching
+SDK as ELF SHA-256
+`8fe393edd76a0c84520d16627f313852a892f3e29db82f6eaa8f8ffd12899e6f`.
+Root checked all 31 native inputs against this integration source. That build
+is not the W executable and has no inherited live qualification. Resource
+output accounting also now shares one complete 4096-byte numeric-request-ID
+reserve across entity, task and state views; the new boundary regression has
+not yet executed on this merged source.
+
 Independent clean-source follow-up: `82f9a6cde52a58d65475c19ba4686c09397cd6cc`
 completed both mandatory scripts, all 43 qualification gates, and 5227 tests in
 each Rust profile across 131 targets, with zero failed/ignored/measured/filtered.
@@ -936,6 +969,69 @@ failed; passing identical tests on another worker does not reclassify them or
 establish their sole cause. The scoped job-control defect is complete; later
 report/Bead edits inherit no qualification. No R1, broad fortress competence,
 productive output, production server-artifact or runtime admission follows.
+
+### Read immutable world records through authorized MCP resources (2026-10-30)
+
+The laboratory session resource template now exposes `state`, exact retained
+`state-{hash}` manifests, and paginated entities, relations, map chunks and
+events. Every page uses the existing presence-aware `research-full` canonical
+projection and carries the original source hash and complete version identity.
+Continuations stay on that version while the current world changes; collected
+or unknown versions return `stale_anchor` without substituting newer records.
+
+Each read resolves the session's durable-owner fence and checks current Observe
+authority under the shared-world lock, including current-tick expiry for old
+versions. Narrow grants cannot acquire whole-world coverage. Source work and
+escaped transport output are budgeted, rows remain indivisible, and clipped
+pages retract full-domain and absence claims. Session resources explicitly
+return private zero-lifetime cache hints so grants and current continuity are
+rechecked. The frozen eleven tools and production admission remain unchanged.
+
+Ten focused resource unit tests and one real modern-stdio integration test are
+present, covering immutable traversal through an intervening plan/commit,
+canonical records, retention, authority, coverage and response bounds. They
+have not executed in this session: the actual pinned runtime dependency build
+was killed by the shared host's memory limit before project diagnostics. Static
+review and formatting do not establish Rust execution or live qualification.
+Both required repository commands were attempted: `verify.sh` and a documented
+development-dirty `qualify_local.sh` run pass repository/source/Agent Turn checks
+before stopping at the same nine existing DFHack bridge-contract findings.
+The three reported paths are unchanged by these feature commits; no gate was
+weakened to turn those failures into qualification.
+The complete URI inventory and deferred fortress/knowledge/memory consumers
+are recorded in [`RESOURCE_URIS.md`](docs/RESOURCE_URIS.md). Bead
+`dfmcp-reality-wiring-proof-4bf.11` remains open for the broader surface and its
+executed acceptance evidence.
+
+### Restore positive job suspension with actual SDK fields (2026-10-30)
+
+The existing job-control/1.9 handler now implements an explicit eight-type
+eligibility policy instead of refusing every job after the removal of fictional
+DFHack APIs. The allowed workshop and furnace jobs must be idle, unposted,
+unclaimed, in a completed holder, and free of active item handling or special
+references. The complete bounded world job list and holder queue must agree on
+the exact selected job. Preparation and the sole suspension setter both retain
+the existing witness, authority, idempotency and immediate-readback boundaries.
+
+The actual handler and engine pass 863 assertions in 13 groups with nonrecovering
+UBSan and warnings denied against explicit SDK-shaped doubles. All five mutations
+removing witness, replay, eligibility, complete-list or closed-policy checks are
+rejected. The independent SDK guard passes 26 assertions. The regenerated wire
+fixtures use actual `ConstructBed=69` and `Workshop=13` enum values; the earlier
+synthetic `BrewDrink` fixture and its fictional helper methods do not establish
+SDK compatibility. Python independently verifies the new witness/plan/token/
+receipt chain and rejects altered or incomplete journal histories.
+
+These are source and executed boundary-double results, not a matching-SDK build
+or live-fortress trial. An attempted full adapter Rust unit-test build was killed
+before tests ran on the original resource-exhausted host. A subsequent actual
+`cargo check --locked --offline -p dfmcp-adapter --lib` passes on latest nightly
+with the complete original core/world/intent/adapter production composition.
+This is type-checking evidence, not Rust test execution. Full workspace, native
+and live qualification remain separate. Bead `dfmcp-reality-wiring-proof-4bf.8`
+remains open for its real-SDK and real-MCP acceptance requirements. The existing
+wire generation, five methods, production runner map and empty compatibility
+registry are unchanged. See [`JOB_SUSPENSION_CONTROL.md`](docs/JOB_SUSPENSION_CONTROL.md).
 
 ### Execute original labor and work-order plans through the native owners (2026-10-30)
 

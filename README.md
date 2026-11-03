@@ -178,14 +178,14 @@ also accepts one closed startup profile:
 ```text
 dwarf-fortress-mcp serve-gameplay-dev tree
 dwarf-fortress-mcp serve-gameplay-dev workshop
-dwarf-fortress-mcp serve-gameplay-dev manager
+dwarf-fortress-mcp serve-gameplay-dev manager-v1-23
 dwarf-fortress-mcp serve-gameplay-dev bounded-clock
 dwarf-fortress-mcp serve-gameplay-dev finite-bed
 ```
 
 These select the existing [Tree 1.21](docs/TREE_HARVEST_MCP.md),
 [workshop 1.20](docs/WORKSHOP_CONSTRUCTION_MCP.md),
-[vacant Manager 1.22](docs/MANAGER_APPOINTMENT_MCP.md),
+[cache-bearing Manager 1.23](docs/MANAGER_APPOINTMENT_V1_23.md),
 [standalone clock 1.13](docs/BOUNDED_SIMULATION_MCP.md), or
 [finite furniture-order](docs/SEMANTIC_WORK_ORDER_MCP.md) server in the same
 process. Configure the selected profile's existing opt-in, source pins,
@@ -195,6 +195,12 @@ refuse; production launch state remains refused. Each runtime preserves its
 own eleven modern tools and typed plan/review/confirmation/recovery contract.
 `finite-bed` retains the finite-order runtime's existing bounded furniture
 recipes; request `wooden_bed` and amount 1 for the original bed objective.
+
+The legacy `manager` startup still selects [Manager 1.22](docs/MANAGER_APPOINTMENT_MCP.md).
+That generation proves its assignment/HF/history projection but omits the
+production-responsibility cache; a completed appointment can therefore leave
+work orders asking for a Manager. Use `manager-v1-23` with its distinct host
+configuration, credentials and custody when testing production control.
 
 This is one selected runtime per process, not a shared cross-profile session or
 an automatic Tree-to-workshop-to-bed controller. Changing profile requires a
