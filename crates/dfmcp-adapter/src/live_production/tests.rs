@@ -995,6 +995,80 @@ mod actual {
         Ok(())
     }
     #[test]
+    fn original_evidence_refresh_is_scoped_and_failure_withdraws_preparation() -> Result<()> {
+        let mut f = ProductionFixture::new(1)?;
+        let Executor {
+            original,
+            workforce,
+            orders,
+            evidence,
+            factory,
+            ..
+        } = f.executor;
+        f.c.grants.push(CapabilityGrant {
+            capability: Capability::Observe,
+            scope: CapabilityScope {
+                fortress_id: Some(f.c.anchor.fortress_id),
+                ..CapabilityScope::default()
+            },
+            max_risk: RiskTier::ReadOnly,
+            expires_at_tick: None,
+            remaining_uses: None,
+        });
+        f.executor = Executor::new(original, workforce, orders, evidence, factory, &f.c)?;
+        let mut refreshed = false;
+        f.executor
+            .refresh_original_evidence(&f.c, |owner, current| {
+                assert_eq!(current.session_id, f.c.session_id);
+                assert_eq!(current.anchor, f.c.anchor);
+                assert!(current.budget.max_wall_millis <= f.c.budget.max_wall_millis);
+                assert!(current.budget.max_bytes < f.c.budget.max_bytes);
+                assert_eq!(
+                    WorkforceEvidenceOwner::routing_evidence(owner)?.anchor(),
+                    f.c.anchor
+                );
+                refreshed = true;
+                Ok(())
+            })?;
+        assert!(refreshed);
+        assert_eq!(f.workforce.data.borrow().calls, [0; 5]);
+        assert_eq!(f.orders.borrow().reads, 0);
+        let mut denied = f.c.clone();
+        denied
+            .grants
+            .retain(|grant| grant.capability != Capability::Observe);
+        let mut cancelled = f.c.clone();
+        cancelled.cancellation_requested = true;
+        let mut foreign = f.c.clone();
+        foreign.session_id = SessionId::new(9);
+        let mut exhausted = f.c.clone();
+        exhausted.budget.max_bytes = 1;
+        for rejected in [denied, cancelled, foreign, exhausted] {
+            let mut reached = false;
+            assert!(
+                f.executor
+                    .refresh_original_evidence(&rejected, |_, _| {
+                        reached = true;
+                        Ok(())
+                    })
+                    .is_err()
+            );
+            assert!(!reached, "denied refresh must not enter the effect shell");
+        }
+        let preparation = f.prepare(0)?;
+        assert!(
+            f.executor
+                .refresh_original_evidence(&f.c, |_, _| {
+                    Err(invalid("injected original evidence refresh failure"))
+                })
+                .is_err()
+        );
+        assert!(f.commit(0, preparation).is_err());
+        assert_eq!(f.workforce.data.borrow().calls[2], 0);
+        Ok(())
+    }
+
+    #[test]
     fn decoded_future_queue_expiring_query_is_retained_by_executor_and_durable_handoff()
     -> Result<()> {
         let mut f = ProductionFixture::new(1)?;

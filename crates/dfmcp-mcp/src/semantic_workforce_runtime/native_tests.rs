@@ -59,6 +59,7 @@ fn closed_config_preserves_independent_sources_and_exact_recovery() -> Result<()
         "history_present":true
     });
     let recovered = Config::parse(&raw.to_string())?;
+    assert!(recovered.validate_combined_custody().is_err());
     assert!(
         recovered
             .recovery
@@ -79,6 +80,38 @@ fn closed_config_preserves_independent_sources_and_exact_recovery() -> Result<()
     assert!(
         Config::parse(&raw.to_string()).is_err(),
         "reopen needs external journal identity"
+    );
+    Ok(())
+}
+
+#[test]
+fn combined_shell_retains_trusted_checkpoint_and_excludes_standalone_clock() -> Result<()> {
+    let mut raw = fixture();
+    let mut config = Config::parse(&raw.to_string())?;
+    config.validate_combined_custody()?;
+    assert!(NativeShell::from_combined_config(config.clone()).is_err());
+    let authority = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let retained = Arc::clone(&authority);
+    config.combined_check = Some(Arc::new(move || {
+        if retained.load(Ordering::SeqCst) {
+            Ok(())
+        } else {
+            Err(denied("combined authority revoked"))
+        }
+    }));
+    let cloned = config.clone();
+    authority.store(false, Ordering::SeqCst);
+    assert!(cloned.current().is_err());
+    let cause = match NativeShell::from_combined_config(config) {
+        Ok(_) => panic!("revoked combined authority was accepted"),
+        Err(cause) => cause,
+    };
+    assert_eq!(cause.message, "combined authority revoked");
+    raw["clock"] = json!({"generation":50});
+    assert!(
+        Config::parse(&raw.to_string())?
+            .validate_combined_custody()
+            .is_err()
     );
     Ok(())
 }

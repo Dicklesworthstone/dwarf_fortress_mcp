@@ -181,13 +181,15 @@ dwarf-fortress-mcp serve-gameplay-dev workshop
 dwarf-fortress-mcp serve-gameplay-dev manager-v1-23
 dwarf-fortress-mcp serve-gameplay-dev bounded-clock
 dwarf-fortress-mcp serve-gameplay-dev finite-bed
+dwarf-fortress-mcp serve-gameplay-dev labor-order
 ```
 
 These select the existing [Tree 1.21](docs/TREE_HARVEST_MCP.md),
 [workshop 1.20](docs/WORKSHOP_CONSTRUCTION_MCP.md),
 [cache-bearing Manager 1.23](docs/MANAGER_APPOINTMENT_V1_23.md),
 [standalone clock 1.13](docs/BOUNDED_SIMULATION_MCP.md), or
-[finite furniture-order](docs/SEMANTIC_WORK_ORDER_MCP.md) server in the same
+[finite furniture-order](docs/SEMANTIC_WORK_ORDER_MCP.md) server, or the
+[combined labor/order host](docs/COMBINED_PRODUCTION_MCP.md), in the same
 process. Configure the selected profile's existing opt-in, source pins,
 credentials, write authority and private recovery custody before startup.
 Selection grants no authority. Unknown/missing profiles and extra arguments
@@ -202,8 +204,12 @@ production-responsibility cache; a completed appointment can therefore leave
 work orders asking for a Manager. Use `manager-v1-23` with its distinct host
 configuration, credentials and custody when testing production control.
 
-This is one selected runtime per process, not a shared cross-profile session or
-an automatic Tree-to-workshop-to-bed controller. Changing profile requires a
+The `labor-order` profile owns one original labor step and a dependent finite
+furniture-order insertion in a single session. Its per-step confirmations,
+strict historical labor receipt and retained original custody control advancement;
+insertion does not prove produced goods or original-goal completion.
+Each process selects one runtime. A complete Tree-to-workshop-to-bed controller
+remains unfinished. Changing profile requires a
 separate configured process and preserves the previous original custody.
 Actual gameplay acceptance, full qualification and admission remain separate;
 original `.14` stays open. `serve` and `serve-live` keep their existing meanings.

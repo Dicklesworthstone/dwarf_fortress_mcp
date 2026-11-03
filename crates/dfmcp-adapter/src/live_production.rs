@@ -367,6 +367,33 @@ where
     pub fn latest_step_evidence(&self) -> Option<&StepEvidence> {
         self.latest.as_ref()
     }
+    /// Refresh the host-owned original citizen evidence before canonical unit
+    /// resolution. The trusted host supplies its existing evidence owner's
+    /// refresh; this grants no native preparation or dispatch permission.
+    pub fn refresh_original_evidence(
+        &mut self,
+        c: &OperationContext,
+        refresh: impl FnOnce(&mut E, &OperationContext) -> Result<()>,
+    ) -> Result<()> {
+        let result = (|| {
+            let call = self.call(c)?;
+            let current = call.current()?;
+            current.authorize(Capability::Observe, RiskTier::ReadOnly, &[], None)?;
+            let evidence = self.evidence.as_mut().ok_or_else(|| {
+                error(
+                    ErrorCode::CapabilityDenied,
+                    "original canonical evidence owner is unavailable",
+                )
+            })?;
+            refresh(evidence, &current)?;
+            call.current()?
+                .authorize(Capability::Observe, RiskTier::ReadOnly, &[], None)
+        })();
+        if result.is_err() {
+            self.abandon_preparation();
+        }
+        result
+    }
     /// A failed enclosing response may withdraw only the local permission. The
     /// durable native records and their exact recovery identities remain owned.
     pub fn abandon_preparation(&mut self) {

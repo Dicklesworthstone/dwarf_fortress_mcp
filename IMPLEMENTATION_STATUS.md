@@ -1,5 +1,49 @@
 # Implementation Status
 
+## Combined labor/order host under development
+
+Bead `df-dfhack-bridge-plane-c-pic.4.1` now has source for a public combined
+MCP host and standard `serve-gameplay-dev labor-order` startup route. The real
+production executor and durable frontier own one complete labor-then-finite-order
+plan, native family sessions and original archive/citizen custody. Each step
+requires its current paired review and confirmation; only an exact verified
+historical labor receipt can release the order dependency. There is no clock,
+goal monitor or inference from queue insertion to produced goods.
+
+The initial diagnostic builds and real stdio runs exposed compiler integration,
+nested-budget, recommendation-name/session and initial evidence-priming defects.
+They are fixed without widening native limits or weakening custody checks.
+The resulting Linux CLI, SHA-256
+`4b105196d32b13119b3a3ae1e2e6a4928c11c2218ddaefaa124728e8d20210c7`,
+was built locked/offline with nightly rustc
+`1c3a6506966e21845b31de0b075d2527660db132` (commit date 2026-11-02).
+Its exact dirty source manifest is
+`789a6c7a7431209481397952fc44e87b2f4941da681c2c783b2f6e5a019ccf24`.
+Root verified all 2,725 snapshot entries against current local bytes and modes;
+only two later documentation/contract files differ, with all Rust/scripts/tests
+matching the tested snapshot.
+
+The actual modern stdio component suite passes eight of eight cases, zero
+failures/errors/skips. Root separately reran all eight against the same sealed
+executable. It follows returned tool recommendations, confirms both exact native
+reviews, applies labor then the dependent finite order, preserves offline custody
+bytes/modes, reconciles a lost reply under its original key without redispatch,
+and checks missing custody, replaced generation, unknown environment, absent
+credential and unconfirmed/restarted seal refusals. The peers are joined TCP
+doubles, not Dwarf Fortress. Fifteen focused MCP Rust cases also pass, with
+2,867 other cases filtered; these are not a full workspace run.
+The scoped adapter refresh regression passes one case (1,357 filtered), and
+both existing native-shell filters pass 11 and five cases. The actual Rust CLI
+test wrapper also passes and requires all eight subprocess cases. Strict scoped
+Clippy found one collapsible conditional; its local syntax-only repair preserves
+the inventory read order and remains subject to the clean-source full gates.
+
+Full clean-source qualification and a real-game trial of this new host remain
+pending. Earlier test-link storage-quota failures and diagnostic RED runs are
+retained. Existing qualified binaries and AG's single-job proof below do not
+transfer to it. The scoped bead and broad parent tasks remain open. The registry
+is empty and production admission is unchanged.
+
 ## Latest exact-source qualification
 
 Clean code revision `4ed1091f0718f1f331e1ab65528c802c107de64a` passed both
@@ -76,8 +120,8 @@ This closes `.8.1` for **one of eight policy classes**, using a disclosed
 operator-created normal-game fixture. The other seven classes remain live
 unproven. It does not prove workshop production through this job profile,
 original production-goal completion, broad fortress competence or admission.
-The CLI still selects separate gameplay runtimes; the combined production
-executor has no public MCP host, owned by `df-dfhack-bridge-plane-c-pic.4`.
+That proof used a separate gameplay runtime. The combined labor/order host is
+new development work described above; it has not inherited AG's live evidence.
 
 ### Earlier partial and failed trials
 

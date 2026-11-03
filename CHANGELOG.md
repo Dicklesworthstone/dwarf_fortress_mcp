@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-11-03 — Combined labor/order development MCP host
+
+- Connect the real production executor and durable dispatcher to the eleven
+  tools and standard `serve-gameplay-dev labor-order` profile. Retain one full
+  original labor-then-order plan, exact keys, family sessions and parent custody.
+- Seal all three operator configurations, keep independent family authority and
+  source pins, and verify original archive/identity at child evidence boundaries.
+  Lost replies retain original-key recovery; restart never restores a commit
+  permit. No clock, original-goal proof or production admission is added.
+- Fix compiler integration, nested budget, returned tool names/session IDs and
+  first-labor canonical-evidence priming found through actual compiled execution.
+  The Linux CLI passes eight public modern stdio component cases, separately
+  rerun by Root, and 15 focused Rust cases. Loopback peers remain doubles;
+  full clean qualification and new-host live execution are pending. Scoped
+  `.4.1` and broader parents stay open.
+
 ## 2026-11-03 — Independently replayed current-source job-control pair
 
 - Prove real modern MCP suspend/resume by GPT-6.1 Terra medium under NTM on

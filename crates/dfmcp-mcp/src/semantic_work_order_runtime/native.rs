@@ -121,6 +121,7 @@ pub struct Config {
     clock: Option<ClockConfig>,
     environment_digest: Digest32,
     runtime_check: Option<fn() -> Result<()>>,
+    combined_check: Option<Arc<dyn Fn() -> Result<()> + Send + Sync>>,
 }
 impl Config {
     /// Bounded JSON in operator environment, not an MCP parameter or path to a
@@ -204,9 +205,22 @@ impl Config {
             clock,
             environment_digest: Digest32::of_bytes(raw.as_bytes()),
             runtime_check: None,
+            combined_check: None,
         })
     }
     pub fn validate_environment() -> Result<()> {
+        Self::validate_family_environment()?;
+        for (key, _) in std::env::vars_os() {
+            let key = key.to_string_lossy();
+            if key.starts_with("DFMCP_") && !ALLOWED.contains(&key.as_ref()) {
+                return Err(denied(
+                    "isolated semantic runtime rejects production launch and other DFMCP profile state",
+                ));
+            }
+        }
+        Ok(())
+    }
+    fn validate_family_environment() -> Result<()> {
         if std::env::var(OPT_IN).ok().as_deref() != Some("1") {
             return Err(denied(
                 "explicit unadmitted semantic work-order development opt-in is required",
@@ -228,15 +242,40 @@ impl Config {
             ));
         }
 
-        for (key, _) in std::env::vars_os() {
-            let key = key.to_string_lossy();
-            if key.starts_with("DFMCP_") && !ALLOWED.contains(&key.as_ref()) {
-                return Err(denied(
-                    "isolated semantic runtime rejects production launch and other DFMCP profile state",
-                ));
-            }
+        Ok(())
+    }
+    pub(crate) fn from_combined_environment(
+        combined_check: Arc<dyn Fn() -> Result<()> + Send + Sync>,
+        runtime_check: fn() -> Result<()>,
+    ) -> Result<Self> {
+        runtime_check()?;
+        combined_check()?;
+        Self::validate_family_environment()?;
+        let raw = std::env::var(CONFIG)
+            .map_err(|_| denied("operator semantic runtime configuration is missing"))?;
+        let mut config = Self::parse(&raw)?;
+        config.validate_combined_custody()?;
+        config.runtime_check = Some(runtime_check);
+        config.combined_check = Some(combined_check);
+        config.current()?;
+        Ok(config)
+    }
+    fn validate_combined_custody(&self) -> Result<()> {
+        if self.clock.is_some() || self.recovery.is_some() {
+            return Err(denied(
+                "combined work orders exclude standalone clock and recovery",
+            ));
         }
         Ok(())
+    }
+    pub(crate) fn custody_directory(&self) -> &std::path::Path {
+        &self.directory
+    }
+    pub(crate) fn endpoint(&self) -> SocketAddr {
+        self.endpoint
+    }
+    pub(crate) fn initializing(&self) -> bool {
+        self.initialize
     }
     pub fn production_enabled() -> bool {
         std::env::var(PRODUCTION).ok().as_deref() == Some("1")
@@ -248,7 +287,12 @@ impl Config {
         if let Some(check) = self.runtime_check {
             check()?;
         }
-        Self::validate_environment()?;
+        if let Some(check) = &self.combined_check {
+            check()?;
+            Self::validate_family_environment()?;
+        } else {
+            Self::validate_environment()?;
+        }
         let raw = std::env::var(CONFIG)
             .map_err(|_| denied("operator source configuration was removed"))?;
         if raw.len() > MAX_CONFIG_BYTES
@@ -379,8 +423,20 @@ type CitizenAuthorizer = Box<
         + Send,
 >;
 pub type NativeEvidence = CitizenWorkforceEvidenceOwner<CitizenFactory, CitizenAuthorizer>;
+#[derive(Clone)]
 pub struct NativeShell {
     config: Arc<Config>,
+}
+impl NativeShell {
+    pub(crate) fn from_combined_config(config: Config) -> Result<Self> {
+        if config.combined_check.is_none() {
+            return Err(denied("combined work-order environment was not installed"));
+        }
+        config.current()?;
+        Ok(Self {
+            config: Arc::new(config),
+        })
+    }
 }
 pub type NativeRuntime = Runtime<NativeShell>;
 impl NativeRuntime {
@@ -711,6 +767,14 @@ mod runtime_checkpoint_tests {
             }
         });
         let config = Config::parse(&raw.to_string())?;
+        assert!(config.validate_combined_custody().is_err());
+        let mut revoked = config.clone();
+        revoked.combined_check = Some(Arc::new(reject_runtime));
+        rejected(NativeShell::from_combined_config(revoked));
+        raw["clock"] = Value::Null;
+        let plain = Config::parse(&raw.to_string())?;
+        plain.validate_combined_custody()?;
+        assert!(NativeShell::from_combined_config(plain).is_err());
         assert!(config.runtime_check.is_none());
         raw["runtime_check"] = json!("client-selected");
         assert!(Config::parse(&raw.to_string()).is_err());
@@ -753,7 +817,7 @@ mod runtime_checkpoint_tests {
         rejected(shell.acquire(&c));
         rejected(shell.progress(&c));
         rejected(shell.operations(&c));
-        assert_eq!(CHECKS.load(Ordering::SeqCst), 8);
+        assert_eq!(CHECKS.load(Ordering::SeqCst), 9);
         assert!(!directory.exists(), "no private custody was created");
         assert!(
             matches!(listener.accept(), Err(cause) if cause.kind() == std::io::ErrorKind::WouldBlock)

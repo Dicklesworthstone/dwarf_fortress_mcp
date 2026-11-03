@@ -120,6 +120,7 @@ pub struct Config {
     clock: Option<ClockConfig>,
     environment_digest: Digest32,
     runtime_check: Option<fn() -> Result<()>>,
+    combined_check: Option<Arc<dyn Fn() -> Result<()> + Send + Sync>>,
 }
 impl Config {
     pub fn from_environment() -> Result<Self> {
@@ -207,9 +208,22 @@ impl Config {
             clock,
             environment_digest: Digest32::of_bytes(raw.as_bytes()),
             runtime_check: None,
+            combined_check: None,
         })
     }
     pub fn validate_environment() -> Result<()> {
+        Self::validate_family_environment()?;
+        for (key, _) in std::env::vars_os() {
+            let key = key.to_string_lossy();
+            if key.starts_with("DFMCP_") && !ALLOWED.contains(&key.as_ref()) {
+                return Err(denied(
+                    "isolated semantic workforce rejects production launch and other DFMCP profile state",
+                ));
+            }
+        }
+        Ok(())
+    }
+    fn validate_family_environment() -> Result<()> {
         if std::env::var(OPT_IN).ok().as_deref() != Some("1") {
             return Err(denied(
                 "explicit unadmitted semantic workforce opt-in is required",
@@ -229,15 +243,40 @@ impl Config {
                 "operator clock enablement must be absent or exactly 1",
             ));
         }
-        for (key, _) in std::env::vars_os() {
-            let key = key.to_string_lossy();
-            if key.starts_with("DFMCP_") && !ALLOWED.contains(&key.as_ref()) {
-                return Err(denied(
-                    "isolated semantic workforce rejects production launch and other DFMCP profile state",
-                ));
-            }
+        Ok(())
+    }
+    pub(crate) fn from_combined_environment(
+        combined_check: Arc<dyn Fn() -> Result<()> + Send + Sync>,
+        runtime_check: fn() -> Result<()>,
+    ) -> Result<Self> {
+        runtime_check()?;
+        combined_check()?;
+        Self::validate_family_environment()?;
+        let raw = std::env::var(CONFIG)
+            .map_err(|_| denied("operator semantic workforce configuration is missing"))?;
+        let mut config = Self::parse(&raw)?;
+        config.validate_combined_custody()?;
+        config.runtime_check = Some(runtime_check);
+        config.combined_check = Some(combined_check);
+        config.current()?;
+        Ok(config)
+    }
+    fn validate_combined_custody(&self) -> Result<()> {
+        if self.clock.is_some() || self.recovery.is_some() {
+            return Err(denied(
+                "combined workforce excludes standalone clock and recovery",
+            ));
         }
         Ok(())
+    }
+    pub(crate) fn custody_directory(&self) -> &std::path::Path {
+        &self.directory
+    }
+    pub(crate) fn endpoint(&self) -> SocketAddr {
+        self.endpoint
+    }
+    pub(crate) fn initializing(&self) -> bool {
+        self.initialize
     }
     pub fn labor_enabled() -> bool {
         std::env::var(LABOR).ok().as_deref() == Some("1")
@@ -249,7 +288,12 @@ impl Config {
         if let Some(check) = self.runtime_check {
             check()?;
         }
-        Self::validate_environment()?;
+        if let Some(check) = &self.combined_check {
+            check()?;
+            Self::validate_family_environment()?;
+        } else {
+            Self::validate_environment()?;
+        }
         let raw = std::env::var(CONFIG)
             .map_err(|_| denied("operator workforce source configuration was removed"))?;
         if raw.len() > MAX_CONFIG_BYTES
@@ -428,8 +472,20 @@ type CitizenAuthorizer = Box<
         + Send,
 >;
 pub type NativeEvidence = CitizenWorkforceEvidenceOwner<CitizenFactory, CitizenAuthorizer>;
+#[derive(Clone)]
 pub struct NativeShell {
     config: Arc<Config>,
+}
+impl NativeShell {
+    pub(crate) fn from_combined_config(config: Config) -> Result<Self> {
+        if config.combined_check.is_none() {
+            return Err(denied("combined workforce environment was not installed"));
+        }
+        config.current()?;
+        Ok(Self {
+            config: Arc::new(config),
+        })
+    }
 }
 pub type NativeRuntime = Runtime<NativeShell>;
 impl NativeRuntime {

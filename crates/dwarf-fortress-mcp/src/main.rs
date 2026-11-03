@@ -54,10 +54,10 @@ fn run() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-/// An operator chooses one existing guarded runtime before stdio starts.
-/// This does not combine sessions, change environment or grant authority.
+/// An operator chooses one guarded runtime before stdio starts.
+/// Profile selection never changes environment or grants authority.
 fn serve_gameplay_dev(mut args: impl Iterator<Item = String>) -> Result<(), Box<dyn Error>> {
-    const USAGE: &str = "usage: dwarf-fortress-mcp serve-gameplay-dev <tree|workshop|manager|manager-v1-23|bounded-clock|finite-bed>";
+    const USAGE: &str = "usage: dwarf-fortress-mcp serve-gameplay-dev <tree|workshop|manager|manager-v1-23|bounded-clock|finite-bed|labor-order>";
     let profile = args.next().ok_or(USAGE)?;
     if args.next().is_some() {
         return Err(USAGE.into());
@@ -69,6 +69,7 @@ fn serve_gameplay_dev(mut args: impl Iterator<Item = String>) -> Result<(), Box<
         "manager-v1-23" => dfmcp_mcp::manager_appointment_v1_23_server::run_stdio(),
         "bounded-clock" => dfmcp_mcp::live_run_server::run_stdio(),
         "finite-bed" => dfmcp_mcp::live_semantic_work_orders_server::run_stdio(),
+        "labor-order" => dfmcp_mcp::live_production_server::run_stdio(),
         _ => return Err(USAGE.into()),
     }
     // Serving owns the process until exit. A returning entry refused startup.
@@ -152,8 +153,8 @@ COMMANDS:
     bridge      Authenticate to dfmcp_bridge and publish one canonical live read
     serve       Run the deterministic laboratory MCP server
     serve-live  Run the authenticated read-only live MCP server
-    serve-gameplay-dev <tree|workshop|manager|manager-v1-23|bounded-clock|finite-bed>
-                Run one existing guarded, unadmitted gameplay development profile
+    serve-gameplay-dev <tree|workshop|manager|manager-v1-23|bounded-clock|finite-bed|labor-order>
+                Run one guarded, unadmitted gameplay development profile
     replay      Re-execute a laboratory replay bundle and report the first divergence
     evaluate    Score a policy on a laboratory scenario: evaluate <scenario> <policy> <ticks>
     bench       Laboratory SLO-001..015 scorecard: bench [iterations]
@@ -181,8 +182,10 @@ STATUS:
     the bridge registers no mutation methods.
 
     `serve-gameplay-dev` selects one development runtime at operator startup.
-    Each keeps its own eleven tools, opt-in, source pins, authority and custody.
-    This is not a unified cross-profile session or production admission.
+    Each keeps eleven tools, exact opt-ins, source pins, authority and custody.
+    `labor-order` combines labor and a dependent finite order in one original
+    two-step plan. Other profiles keep separate sessions. Development execution
+    does not grant production admission or prove the original production goal.
 ",
         version = env!("CARGO_PKG_VERSION")
     );
@@ -200,7 +203,7 @@ transport: mcp/2026-07-28 (modern-only) over stdio via the owned fastmcp_rust si
 server_modes:
   laboratory: serve
   authenticated_live_read_only: serve-live
-  unadmitted_gameplay_development: serve-gameplay-dev <tree|workshop|manager|manager-v1-23|bounded-clock|finite-bed>
+  unadmitted_gameplay_development: serve-gameplay-dev <tree|workshop|manager|manager-v1-23|bounded-clock|finite-bed|labor-order>
 bridge_read_protocol: dfmcp.bridge.v1 over DFHack native protobuf RPC
 bridge_read_methods:
   - Handshake
