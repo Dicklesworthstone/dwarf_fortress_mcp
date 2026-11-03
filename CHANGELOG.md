@@ -1,5 +1,36 @@
 # Changelog
 
+## 2026-11-03 — Independently replayed current-source job-control pair
+
+- Prove real modern MCP suspend/resume by GPT-6.1 Terra medium under NTM on
+  exact `4ed1091`, server `df7617d4…` and native plugin `e7a3f934…`. Root's
+  unchanged strict auditors pass all 18 exchanges, six journal frames and
+  both Applied receipts. Independent native captures show job 5 flags
+  `0 → 2 → 0`, posting -1, all other captured fields unchanged and zero ticks.
+- Verify exact offline preservation of the original 2894-byte journal, all
+  347 export/supplement members, native/server/source identities, final pause
+  and fresh host restoration/drain. Disclose the optional missing screenshot.
+- Close `.8.1` for one live job class; seven other classes, unified MCP host,
+  broader fortress competence and production admission remain unproved.
+- Retain AD's incomplete pair, AE's expiry refusal and AF's operator error
+  separately. No later documentation head inherits `4ed1091` qualification.
+
+## 2026-11-03 — Preparation expiry and client workflow
+
+- Independently replay AE's terminal refusal and unchanged real job: at least
+  80.129179611 seconds elapsed after Plan returned, beyond native preparation's
+  60-second lifetime. Preserve its negative result; AE did not close `.8.1`.
+- Document reviewing Plan's complete effect and immediate Commit, followed by
+  Explain. Their effect objects are identical; no native expiry or authority
+  check is relaxed. A pipe-only relay is still unintegrated development work.
+- Verify the complete 326-member export/supplement, canonical refusal receipt,
+  exact offline journal preservation and paused owned cleanup. These later
+  documentation changes do not inherit `4ed1091` qualification.
+- Preserve AF's failed operator setup, including Root's incorrect header-X
+  identification and the resulting queued demolition. Verify all 365 export
+  members and cleanup; no MCP request occurred. Use the verified supported UI
+  input route and leave the workshop panel open in the next trial.
+
 ## 2026-11-03 — Current-source live job suspension and harness repairs
 
 - Prove one real MCP suspension on qualified `4ed1091`, source-matched native

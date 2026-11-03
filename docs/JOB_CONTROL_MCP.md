@@ -1,5 +1,26 @@
 # Job-control MCP integration status
 
+## Current evidence and preparation lifetime
+
+The composed eight-class policy and exact `4ed1091` Rust source are described
+in `IMPLEMENTATION_STATUS.md`; the four-class live10 result below is historical.
+AG now proves one real current-source `ConstructBed` suspend/resume pair through
+modern MCP, using actual GPT-6.1 Terra medium under NTM. Root independently
+replayed 18 exchanges, six canonical journal frames and both Applied receipts;
+native captures show flags `0 → 2 → 0`, all other captured fields unchanged
+and zero ticks. Offline bytes and complete host cleanup were also checked.
+Bead `.8.1` closes only this one-class live scope; seven policy classes remain
+live unproven, and neither fortress competence nor production admission follows.
+
+AD's resume remains historically Prepared and uncommitted. AE separately
+refused an expired preparation: its retained timing proves at least 80.129
+seconds between the plan response and commit dispatch, beyond native 60 seconds.
+Their partial/negative evidence remains separate from the AG pair.
+
+The dotted names below are logical names. This profile's actual MCP wire names
+use underscores (`fortress_plan`, `fortress_commit`, and so on); use the exact
+names returned by `tools/list`.
+
 ## 2026-10-31 positive native adapter repair
 
 The public control loop already existed, but the real-SDK adapter deliberately
@@ -58,12 +79,12 @@ six presentation/cursor scenarios and seven runtime policy/wiring/context scenar
 They cover sealed replay, failed refresh, authority and budgets, cancellation,
 ambiguous dispatch, Query-only restart recovery, absent receipts, cursor rebinding,
 output reservation, development gates and inherited runtime restrictions.
-**They have not been compiled or executed:** Rust, Cargo and rustfmt are unavailable
-in the implementation environment. Local Python checks covered lexical/source
-wiring, identity agreement with the native fixture, 189 independent pagination
-reference cases and independent worst-case JSON sizing. The modeled maximal record
-was 7,747 bytes, below its 12 KiB reservation. These are not execution of Rust
-serialization, MCP, filesystem custody, native DFHack or a live game.
+At implementation time these groups were unexecuted because Rust, Cargo and
+rustfmt were unavailable there. The later exact `4ed1091` full qualification
+executes the workspace. The original Python-only checks separately covered
+lexical/source wiring, native-fixture identity, 189 pagination reference cases
+and modeled worst-case JSON sizing: 7,747 bytes below the 12 KiB reservation.
+Those Python results remain distinct from Rust, MCP, custody and live evidence.
 
 ## Recovery discovery foundation
 
@@ -145,6 +166,22 @@ of an uncommitted preparation after reopening requires selecting the same exact
 job evidence before commit; changed evidence requires a different plan, not a
 rewritten digest. Native preparation expiry remains authoritative.
 
+Review the complete `effect` returned by Plan: its exact key, digest, expected
+witness, desired suspension and original native observation. Plan and Explain
+render that same record; Explain supplies no additional commit authority.
+After that review, commit promptly within the native **60-second** preparation
+lifetime. Replaying Plan does not renew it. An additional model reasoning turn
+for Explain can exhaust the lifetime, as AE demonstrated. Explain can instead
+inspect the retained receipt after Commit or recover a known preparation when
+its original reply was lost.
+
+Clients that automate this short critical section must validate the actual
+Plan response and original intent before sending the exact Commit request.
+They must stop on mismatched identity, witness, desired value, ineligible or
+unpaused observations, unexpected errors or uncertain responses. They must
+never extend a preparation, invent success, or retry an indeterminate effect
+under another key. Native expiry, revalidation and authority remain decisive.
+
 `fortress.wait` performs ONE bounded foreground receipt query for an exact key and
 digest. It never sleeps, polls in a loop, dispatches, or treats absence as proof of
 non-application. `fortress.cancel` with `scope="effect"` requires an exact key/digest
@@ -178,6 +215,8 @@ Otherwise the anchor is absent and uncertainty is explicit. Native terminal rece
 prove their bounded historical outcome, not current live state, work completion,
 production goals, or permission for another operation.
 
-The native wire generations, production runner map, dependency graph and
-compatibility registry are unchanged. No native build, live campaign, complete
-repository qualification or admission is established by this increment.
+The original integration increment left native wire generations, the production
+runner map, dependencies and registry unchanged. It did not itself establish
+native build, live campaign, full repository qualification or admission.
+The exact later qualification and narrow live evidence are recorded above;
+production admission remains absent.

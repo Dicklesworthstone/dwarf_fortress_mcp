@@ -32,8 +32,8 @@ job-control executable SHA-256
 10,749,152 bytes. Its actual non-test compiler artifact reported `fresh=false`,
 meaning it was compiled rather than reused; all source bytes remained exact.
 This is not a production server receipt or admission. The current composed
-job policy's new real-game proof is tracked separately by `.8.1`; historical
-live10 evidence does not qualify its posting and claim restrictions.
+job policy's one-class real-game proof is recorded under `.8.1` below;
+historical live10 evidence does not qualify its posting and claim restrictions.
 
 The compatibility registry remains empty, the production runner map remains
 protocol 1.0 only, and no live tuple or game mutation is production-admitted.
@@ -42,6 +42,44 @@ named artifacts; neither source qualification nor that experiment proves broad
 fortress autonomy or the retired original order's completion.
 
 ## Current job-control development evidence
+
+AG completed the current-source suspend/resume pair on real DF v0.53.16
+Linux64 ITCH with DFHack 53.16-r3. Actual GPT-6.1 Terra medium under NTM used
+the exact development executable above and native job plugin
+`e7a3f93449dd79d0e1adb6948510834ceba0436e635f188482e194536da282e1`.
+Root independently replayed all 18 modern MCP exchanges, six canonical journal
+frames, both native receipts and three nonce-bound native captures. Real
+`ConstructBed` job 5 changed flags `0 → 2 → 0` at tick 12114576; posting index
+remained -1 and all other captured fields were identical. No game tick advanced
+during those effects.
+
+Suspend receipt: `6182a9380dcffdba49315e9e7df8f7045fd1ce44653fd69dcc473a9567d1ac1b`.
+Resume receipt: `48bbe7ee301ec07f2af9e540da3eb5a3b8dcb5fc310ce7d7f4ad91f7b82f02ba`.
+Plan-response-to-Commit-dispatch intervals were 18.182097514 and 11.299098499
+seconds after removing the redundant pre-commit Explain step. Native lifetime
+and revalidation remained unchanged.
+
+Offline discovery returned both Applied records and preserved the original
+2894-byte, mode-0600 journal with SHA-256
+`44ff5305e1b5c09bdb3441e17833a8af07a482d37a01dee84b48c35bdb0636a1`.
+Root checked every member of the 324-file primary export and 23-file supplement;
+their manifests are `f0a0362b9c47c8c313dd98be09c0f33cb1453cf85e4cf54e17c5d8672ed821d2`
+and `6761b3e426f25fcd470a17aad41671003754e7fd4a4ab5f8764f093a6be70e4c`.
+Both passed the 126-value private scan. One optional workshop screenshot was
+not captured. Opened game/plugin/library bytes, the server image, all five
+native source inputs, final pause/log/map identity and cleanup were verified.
+A fresh read-only host check additionally confirmed both 30-file save sets,
+the original plugin bytes/mode, empty owned game groups, both MCP server
+identities drained and port 5000 closed.
+
+This closes `.8.1` for **one of eight policy classes**, using a disclosed
+operator-created normal-game fixture. The other seven classes remain live
+unproven. It does not prove workshop production through this job profile,
+original production-goal completion, broad fortress competence or admission.
+The CLI still selects separate gameplay runtimes; the combined production
+executor has no public MCP host, owned by `df-dfhack-bridge-plane-c-pic.4`.
+
+### Earlier partial and failed trials
 
 AD used that exact development executable and the source-matched native job
 plugin `e7a3f93449dd79d0e1adb6948510834ceba0436e635f188482e194536da282e1`.
@@ -59,7 +97,33 @@ returned both, and the before/after journal identity was unchanged. The
 game was paused and drained and the plugin and both saves restored. The
 278-file export and 19-file supplement matched their manifests; process
 metadata displayed before its dedicated scan remains a disclosed ordering
-violation. Bead `.8.1` remains open for the complete suspend/resume pair.
+violation. AD did not prove the complete pair; its Prepared resume remains
+historical evidence and was not combined with AG to claim success.
+
+AE separately prepared the same kind of job but spent at least 80.129179611
+seconds between the complete Plan response and Commit dispatch. Plan performs
+native preparation before replying; the native lifetime is 60 seconds. Its
+canonical three-frame journal ends Refused, and independent raw captures show
+the job unchanged at tick 12114542. The capture filename `resumed` labels only
+that post-refusal read; no resume happened. Root verified all 307 export and
+19 supplement members, the refusal receipt, request-payload-bound timing,
+read-only offline discovery, unchanged 1490-byte journal identity, final pause
+and cleanup evidence. This is negative evidence, not gameplay success.
+
+The client workflow now calls for reviewing the complete effect in Plan and
+committing immediately, with Explain afterward. Plan and Explain returned
+identical 15-field effects in AE; an extra reasoning turn exhausted the native
+window without adding evidence. Native expiry, revalidation and authority are
+unchanged. A prepared pipe-only relay is not integrated or live-qualified.
+
+AF ended during operator setup with no MCP requests. Root misidentified the
+workshop header X as a panel-close control; its normal UI handler instead
+removed the bed task and queued demolition. The game stayed paused, and cleanup
+had begun before a repair instruction arrived. The 325-file export and 40-file
+supplement preserve this incident and match their manifests. The supported GUI
+input route had successfully removed an earlier incorrect task and created
+the intended bed; future setup leaves the panel open and verifies tooltips.
+No job-control or production-success credit is assigned to AF.
 
 The live investigation also fixed an operator-harness defect: Lua `print`
 wrote evidence to the RPC reply while supervisors read the game log. Bounded,
