@@ -4,7 +4,8 @@
 
 Clean code revision `4ed1091f0718f1f331e1ab65528c802c107de64a` passed both
 `./scripts/verify.sh` and `./scripts/qualify_local.sh` on Linux x86_64 with
-latest nightly rustc `3e92e1a2d20b991ef23a6c6064c34d57ee8c98d3`.
+nightly rustc `3e92e1a2d20b991ef23a6c6064c34d57ee8c98d3`
+(commit date 2026-11-01).
 All 43 qualification gates passed. Each script's debug and release suites
 separately passed 5255 tests across 134 result blocks, with zero failed,
 ignored, measured or filtered cases. Root independently validated the receipt,
@@ -39,6 +40,33 @@ protocol 1.0 only, and no live tuple or game mutation is production-admitted.
 The bounded W wooden-bed experiment below remains exact to `e899a442` and its
 named artifacts; neither source qualification nor that experiment proves broad
 fortress autonomy or the retired original order's completion.
+
+## Current job-control development evidence
+
+AD used that exact development executable and the source-matched native job
+plugin `e7a3f93449dd79d0e1adb6948510834ceba0436e635f188482e194536da282e1`.
+Actual GPT-6.1 Terra under NTM observed and suspended real `ConstructBed` job 5
+through modern MCP. Root independently verified the canonical Applied receipt
+`66d206f5ed467667f5a97e4286d9dd2ef5760edeb7e5dbea45668acedeec22ed`,
+MCP process-image identity, and native captures with flags `0 → 2` at unchanged
+tick 12114541. Posting index remained -1; holder, queue, filters, worker and
+all other captured fields were unchanged.
+
+This is a **partial** trial. Its second key, `ad-job5-resume`, remains
+historically Prepared, with no resume commit. The four-frame journal contains
+one Applied suspension and that preparation. Offline discovery truthfully
+returned both, and the before/after journal identity was unchanged. The
+game was paused and drained and the plugin and both saves restored. The
+278-file export and 19-file supplement matched their manifests; process
+metadata displayed before its dedicated scan remains a disclosed ordering
+violation. Bead `.8.1` remains open for the complete suspend/resume pair.
+
+The live investigation also fixed an operator-harness defect: Lua `print`
+wrote evidence to the RPC reply while supervisors read the game log. Bounded,
+checked `io.write`/flush producers now match those consumers, including the
+independent selected-job capture. A real read-only DFHack nonce probe verified
+the two output channels. Fixture preparation, UI dismissal and these probes
+are operator work; they are not MCP production competence or admission.
 
 ## Historical intermediate findings
 

@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-11-03 — Current-source live job suspension and harness repairs
+
+- Prove one real MCP suspension on qualified `4ed1091`, source-matched native
+  plugin `e7a3f934…` and development server `df7617d4…`: independent captures
+  show job 5 flags `0 → 2` at the same paused tick with other captured fields
+  unchanged. Preserve the uncommitted Prepared resume and keep `.8.1` open.
+- Verify original-journal offline discovery and unchanged before/after bytes;
+  retain cleanup evidence and the disclosed metadata scan-order violation.
+- Repair the operator Lua evidence channel and independently verify it in
+  actual DFHack. Keep failed startup, UI-pause and deadline attempts distinct
+  from gameplay success, and preserve the production admission boundary.
+
 ## 2026-11-03 — Qualified cancellation and resource repairs
 
 - Qualify clean `4ed1091`: both mandatory scripts pass, all 43 gates, and
