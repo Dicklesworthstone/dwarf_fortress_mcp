@@ -61,7 +61,7 @@ dfmcp-lab (now) → DFHack bridge (later phases)
 MCP but refuses `dfmcp/0` gets a session that can observe and plan nothing.
 
 The current framework pin uses published Asupersync 0.5.0 and explicit
-`run_stdio_with_cx` startup. The four stdio composition roots share one private
+`run_stdio_with_cx` startup. The stdio composition roots share one private
 runtime owner in `dfmcp-mcp`: one scheduler worker, a platform reactor, and at
 most sixteen on-demand blocking workers. The blocking pool keeps the receive
 pump off the scheduler worker. An inherited caller context retains its identity,
@@ -72,11 +72,16 @@ They do not change production tickets, protocol dispatch, or DFHack admission.
 
 ## 4. Tool mapping
 
-Logical registry names keep their dots (`fortress.open_session`); MCP wire names render the dot
-as an underscore because the wire name is an identifier, not an identity. Schemas in `schemas/`
-and all registries use the logical names.
+Logical registry names keep their dots (`fortress.open_session`). The laboratory server uses
+the underscore wire names in the table below. Some live development profiles, including
+spatial/1.8, explicitly register dotted wire names such as `fortress.open_session`;
+others, including job-control/1.9, retain underscore wire names.
+Use `tools/list` from the exact executable/profile and send its returned names unchanged;
+clients must not replace dots with underscores. Both spellings represent the same frozen
+eleven-tool logical waist, with profile-specific schemas and authority. A development profile's
+presence does not establish production admission.
 
-| Logical tool | MCP name | Laboratory status (WP-13 gate 1) |
+| Logical tool | Laboratory MCP name | Laboratory status (WP-13 gate 1) |
 |---|---|---|
 | `fortress.open_session` | `fortress_open_session` | implemented over `MemoryAdapter` |
 | `fortress.observe` | `fortress_observe` | implemented (summary projection) |
@@ -116,7 +121,8 @@ modern-only. Every request must supply modern era markers in `params._meta`:
 }
 ```
 
-These examples target the exact `180a7c8` pin. The real subprocess lifecycle test
+These laboratory examples target the exact
+`13461caf1f23bef675e0588b5e0c5ba8cf81b9f8` pin. The real subprocess lifecycle test
 now covers discovery followed by all eleven tools, plan/commit and idempotent
 replay; it is no longer ignored. Historical v0.8.0 findings, including omitted
 `clientInfo`, remain recorded in `docs/DOGFOODING_FASTMCP.md` with their exact
@@ -218,8 +224,10 @@ scope are in [`LAB_MCP_TASKS.md`](LAB_MCP_TASKS.md).
    observable asynchronous drain stages remain future work.
 4. **Gate 4: Streamable HTTP.** Same dfmcp semantics over the facade's HTTP transport, still
    modern-only, localhost-first.
-5. **Gate 5 (WP-21): conformance evidence.** The MCP 2026-07-28 conformance suite runs in CI on
-   the pinned revision; results recorded in `docs/DOGFOODING_FASTMCP.md`.
+5. **Gate 5 (WP-21): conformance evidence.** Run the MCP 2026-07-28 conformance suite in local
+   or self-hosted qualification on the exact pinned revision; results are recorded in
+   `docs/DOGFOODING_FASTMCP.md`. Workflow files are portable execution specifications,
+   not correctness or release authority.
 
 ## 6. Security posture
 

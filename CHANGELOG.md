@@ -10,6 +10,9 @@
 - Build a fresh non-test development job server, SHA-256 `df7617d4…`, bound
   to all 2695 exact source files. Track the composed policy live trial as `.8.1`;
   do not inherit the older live10 receipt or imply production admission.
+- Correct the integration guide's tool-name scope: laboratory underscore names
+  and explicit live-profile dotted names must be discovered and sent unchanged.
+  Update the quickstart pin and describe local/self-hosted conformance authority.
 - This later documentation and tracker update has no new full-source receipt;
   the qualification remains exact to `4ed1091`.
 
