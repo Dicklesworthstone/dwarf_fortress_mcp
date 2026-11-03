@@ -894,7 +894,8 @@ fn read_only_resources_do_not_certify_or_write_custody() -> TestResult {
             parsed(&fortress_observe(Some(session_id.clone())))?["ok"],
             true
         );
-        assert!(!objectives_json(&session.lock().map_err(|_| "session poisoned")?)[0]["first_satisfied_anchor"].is_null());
+        let guard = session.lock().map_err(|_| "session poisoned")?;
+        assert!(!objectives_json(&guard)[0]["first_satisfied_anchor"].is_null());
     }
     Ok(())
 }

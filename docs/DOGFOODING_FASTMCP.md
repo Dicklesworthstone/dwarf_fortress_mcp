@@ -183,7 +183,16 @@ logic and tests. Four deterministic upstream regressions execute at the old
 pin with 1 passed/3 failed and at the repaired pin with 4 passed/0 failed,
 zero ignored in both runs. The tests include nine hostile successor controls
 and verify that acknowledgement/refusal leaves durable worker state unchanged.
-Raw evidence is retained on TS1 under `/tmp/dfmcp-fastmcp-cancel-evidence-red3-20261102`
+The first GREEN used pre-rustfmt test bytes (`fae818a9…`). Root checked the
+complete diff: six formatting-only hunks in the new test block, with production
+bytes identical. The published `13461` source was then executed separately:
+4 passed, 0 failed/ignored, 2105 filtered; source SHA-256
+`f372ec67d0c3cf34b07391de6c2a115db471cbe7e35e91f13174baa2aef14470`
+unchanged before/after and clean upstream Git. That exact rerun, rather than
+formatting equivalence, supplies the committed-source test result. Raw evidence
+is retained under `/tmp/dfmcp-fastmcp-cancel-evidence-exact13461-20261102`.
+
+Original RED/GREEN evidence is retained on TS1 under `/tmp/dfmcp-fastmcp-cancel-evidence-red3-20261102`
 and `/tmp/dfmcp-fastmcp-cancel-evidence-green-20261102`.
 
 A separate downstream release Tasks run uses an explicit local path override

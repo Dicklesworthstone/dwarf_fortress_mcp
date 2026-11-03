@@ -2,6 +2,8 @@
 
 ## 2026-11-03 — Resource inspection and cancellation review
 
+- Correct the mutex-guard binding in the new objective regression after a clean
+  build refused it before running tests; retain that failed attempt.
 - Keep resource reads from certifying objectives, recording observation events,
   consuming request IDs or publishing custody. Apply current shared-world
   authority and durable-owner fences to replay and capabilities inspection.

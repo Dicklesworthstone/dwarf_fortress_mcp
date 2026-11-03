@@ -1,5 +1,12 @@
 # Implementation Status
 
+Clean `7a1abc12` exact-pin metadata passed, then the first focused Rust build
+refused a mutex-guard coercion in a new objective regression (E0308). Zero
+tests executed; handshake, Tasks, Manager and both mandatory scripts were
+unrun. The regression now binds the guard explicitly; assertions are unchanged.
+The published FastMCP source separately passes all four deterministic tests
+with exact file SHA `f372ec67…` stable before and after.
+
 Fresh review repairs laboratory resource reads that could publish objective
 history or durable custody as a side effect. State, task, summary, handoff,
 anchor, replay, capabilities and doctor reads now share the owner-fenced
