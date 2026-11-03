@@ -131,7 +131,7 @@ These source costs are reported in `source_work`.
 Bounded entity, task and state consumers share the same complete numeric-ID
 reserve. State pages do not add it twice. The entity boundary regression checks
 refusal below the actual escaped maximum-ID response and acceptance with the
-complete reserve; its merged-source execution remains pending.
+complete reserve. This regression passed on exact qualified `4ed1091`.
 
 Resource reads do not pin history. The normal retention rules apply: recent
 session versions and versions retained by active roots such as pending plans
@@ -144,7 +144,7 @@ that occurs; do not concatenate pages from different source hashes.
 Addresses use a closed grammar: exactly 64 lowercase hexadecimal hash digits,
 one of the four section names, and a canonical nonnegative decimal record
 offset (no leading zeroes except `0`, signs, query strings or extra segments).
-Out-of-range offsets are refused. Resource errors include
+Out-of-range offsets are refused. State-resource errors include
 `dfmcp.resource-error/1` in JSON-RPC error data, the semantic error code,
 `effect_may_have_occurred: false`, and an Agent Turn with no claimed complete
 domains. Authorization refusals do not disclose a current anchor.
@@ -167,14 +167,15 @@ The `.11` roadmap bead consequently remains open.
 
 ## Verification
 
-**Execution status for this change:** the tests below are registered regression
-coverage, not a claim of a passing run. The full production
-`cargo check -p dfmcp-mcp --lib --locked --offline` attempt was terminated by
-the shared container's out-of-memory limit while compiling the pinned
-`asupersync` dependency, before project-source diagnostics. The new Rust unit
-and stdio tests consequently remain unexecuted in this session. Formatting and
-`git diff --check` passed; no dependency, runtime module or source was replaced
-or excluded to work around the compilation limit.
+**Execution status:** exact clean `4ed1091` passed 26 resource tests and all
+11 objective-lifecycle tests, including the 30 process/durable allowed/denied
+resource-read cases. The five-case actual modern-handshake subprocess suite
+also passed. Both mandatory scripts and all 43 qualification gates passed,
+with 5255 tests in each debug/release profile. Receipt SHA-256:
+`6e2da780f6e02faa460888324f0e24b01820305f894b58f5ad36ae3bf3898e0d`.
+These are laboratory consumer results, not live DFHack qualification or admission.
+Earlier container OOM and refused intermediate builds remain historical failed
+attempts. A later documentation commit does not inherit the source receipt.
 
 `resources::state::tests` exercises canonical grammar, source projection reuse,
 every section, immutable traversal across state changes, escaped byte budgets,
@@ -187,5 +188,5 @@ template listing, current and retained resources, all four paginated sections,
 an intervening semantic plan/commit, malformed/unknown addresses, and
 capability denial. Its assertions check actual JSON-RPC response sizes,
 maximum-length string/integer request IDs, private zero-TTL cache hints, and
-Agent Turn identity. On a successful run these checks would establish the
-laboratory consumer contract; they are not live bridge admission evidence.
+Agent Turn identity. The passing run establishes this laboratory consumer
+contract; it is not live bridge admission evidence.

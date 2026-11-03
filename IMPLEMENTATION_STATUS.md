@@ -1,5 +1,51 @@
 # Implementation Status
 
+## Latest exact-source qualification
+
+Clean code revision `4ed1091f0718f1f331e1ab65528c802c107de64a` passed both
+`./scripts/verify.sh` and `./scripts/qualify_local.sh` on Linux x86_64 with
+latest nightly rustc `3e92e1a2d20b991ef23a6c6064c34d57ee8c98d3`.
+All 43 qualification gates passed. Each script's debug and release suites
+separately passed 5255 tests across 134 result blocks, with zero failed,
+ignored, measured or filtered cases. Root independently validated the receipt,
+all 2695 Git file bytes and executable semantics, source stability, source
+snapshot, exact FastMCP Git dependencies and raw test counts.
+
+Qualification receipt SHA-256:
+`6e2da780f6e02faa460888324f0e24b01820305f894b58f5ad36ae3bf3898e0d`.
+Source snapshot digest:
+`1dc7ebf128f6f23b8d1607b52ce05e23360708e5f4b71a9a75b1aae96dfec666`.
+This qualifies that exact revision. Later unqualified source changes, including
+this evidence-documentation update, do not inherit the receipt.
+
+The narrow FastMCP cancellation repair at `13461caf` passed four deterministic
+upstream tests and seven actual downstream release Tasks cases. Bead `.25`
+is closed for that proven bug. Resource authority and read-side-effect fixes
+also executed: 26 resource tests and 11 objective-lifecycle tests passed,
+including the 30-case process/durable read regression. Broader `.11` remains
+open for resource families still unavailable.
+
+A separate fresh release build produced the source-bound **development-only**
+job-control executable SHA-256
+`df7617d4379fb1e390984d8e0f049438b37c03d5abd7f499d0875610f803c9cb`,
+10,749,152 bytes. Its actual non-test compiler artifact reported `fresh=false`,
+meaning it was compiled rather than reused; all source bytes remained exact.
+This is not a production server receipt or admission. The current composed
+job policy's new real-game proof is tracked separately by `.8.1`; historical
+live10 evidence does not qualify its posting and claim restrictions.
+
+The compatibility registry remains empty, the production runner map remains
+protocol 1.0 only, and no live tuple or game mutation is production-admitted.
+The bounded W wooden-bed experiment below remains exact to `e899a442` and its
+named artifacts; neither source qualification nor that experiment proves broad
+fortress autonomy or the retired original order's completion.
+
+## Historical intermediate findings
+
+The following notes preserve earlier cuts and failed or pending attempts.
+Their pending statements are superseded only by the exact evidence above;
+no failed receipt is erased.
+
 Clean `7a1abc12` exact-pin metadata passed, then the first focused Rust build
 refused a mutex-guard coercion in a new objective regression (E0308). Zero
 tests executed; handshake, Tasks, Manager and both mandatory scripts were

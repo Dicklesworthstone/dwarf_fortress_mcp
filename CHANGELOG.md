@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-11-03 — Qualified cancellation and resource repairs
+
+- Qualify clean `4ed1091`: both mandatory scripts pass, all 43 gates, and
+  5255 tests per debug/release profile across 134 result blocks. Independent
+  receipt, source and raw-log replay pass; receipt SHA-256 `6e2da780…`.
+- Close the scoped cancellation bug `.25` after exact upstream and downstream
+  conformance. Keep the broader resource and gameplay proof tasks open.
+- Build a fresh non-test development job server, SHA-256 `df7617d4…`, bound
+  to all 2695 exact source files. Track the composed policy live trial as `.8.1`;
+  do not inherit the older live10 receipt or imply production admission.
+- This later documentation and tracker update has no new full-source receipt;
+  the qualification remains exact to `4ed1091`.
+
 ## 2026-11-03 — Resource inspection and cancellation review
 
 - Reauthorize task candidates at owner-fenced publication after fetching them
