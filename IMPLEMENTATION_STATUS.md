@@ -7,6 +7,16 @@ unrun. The regression now binds the guard explicitly; assertions are unchanged.
 The published FastMCP source separately passes all four deterministic tests
 with exact file SHA `f372ec67…` stable before and after.
 
+A second review closes the task-resource precheck/fetch race. Task discovery,
+detail and evidence fetch candidates outside world/session locks, then
+reauthorize and render under the current owner-fenced view. Candidate errors
+also wait for that final authority check. New deterministic component cases
+cover shared-clock expiry and durable-owner replacement on all three routes;
+detail/evidence use explicit synthetic task fixtures. No task-store lock is
+acquired under the world/session lock. These new tests are not yet executed.
+The now-test-only diagnostic replay helper is excluded from production builds,
+addressing the warning observed in the intermediate e347 build.
+
 Fresh review repairs laboratory resource reads that could publish objective
 history or durable custody as a side effect. State, task, summary, handoff,
 anchor, replay, capabilities and doctor reads now share the owner-fenced

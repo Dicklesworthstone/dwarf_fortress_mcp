@@ -2093,6 +2093,7 @@ pub(crate) fn lookup_session_str(session_id: &str) -> Result<Arc<Mutex<LabSessio
 }
 
 /// The replay bundle of a session's recorded calls.
+#[cfg(test)]
 pub(crate) fn replay_bundle_for(session_id: &str) -> Result<serde_json::Value> {
     let session = lookup_session_str(session_id)?;
     let guard = session

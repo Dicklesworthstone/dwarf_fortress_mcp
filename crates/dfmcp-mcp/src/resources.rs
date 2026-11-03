@@ -478,55 +478,93 @@ fn task_resource_bytes(uri: &str, serialized: &str) -> usize {
         .saturating_add(128 + 4096)
 }
 
+// Fetch the immutable candidate without world/session locks. Reauthorize and
+// render under one owner-fenced view so publication cannot outlive authority.
+fn task_candidate<T>(
+    session_id: &str,
+    operation: &str,
+    after_precheck: impl FnOnce(),
+    fetch: impl FnOnce() -> McpResult<T>,
+    render: impl FnOnce(T, dfmcp_core::WorkBudget) -> McpResult<Vec<ResourceContent>>,
+) -> McpResult<Vec<ResourceContent>> {
+    crate::server::task_session::read_budget(session_id)
+        .map_err(|error| denial(operation, error))?;
+    after_precheck();
+    let candidate = fetch();
+    inspect_session(session_id, operation, |guard| {
+        let ctx = read_context(guard);
+        authorize_entry(&ctx, Capability::Observe, RiskTier::ReadOnly)
+            .map_err(|error| denial(operation, error))?;
+        render(candidate?, guard.budget)
+    })
+}
+
 pub(crate) fn session_tasks(
     session_id_hex: &str,
     uri: &str,
     offset: usize,
 ) -> McpResult<Vec<ResourceContent>> {
-    let operation = "df://session/tasks";
-    // This enters the read-only session view so the current world clock and grants
-    // govern the read. Reading a task must not consume a semantic request ID.
-    let budget = crate::server::task_session::read_budget(session_id_hex)
-        .map_err(|error| denial(operation, error))?;
-    let mut payload = crate::task_service::session_tasks(session_id_hex, offset);
-    payload["ok"] = json!(payload.get("unavailable").is_none());
-    payload["schema"] = json!("dfmcp.lab-tasks/1");
-    payload["session_id"] = json!(session_id_hex);
-    payload["resource"] = json!(uri);
-    payload["max_active"] = json!(1);
-    payload["max_retained"] = json!(crate::task_store::MAX_RETAINED_TASKS);
-    payload["retention"] = json!("process_lifetime");
-    payload["scope"] = json!("laboratory_process_only");
-    let max_bytes = budget.max_bytes.min(
-        u64::from(budget.max_output_tokens)
-            .saturating_mul(crate::output_budget::BYTES_PER_TOKEN as u64),
-    );
-    loop {
-        let serialized = payload.to_string();
-        if task_resource_bytes(uri, &serialized) as u64 <= max_bytes {
-            return Ok(text_content(uri, serialized));
-        }
-        let Some(tasks) = payload.get_mut("tasks").and_then(Value::as_array_mut) else {
-            return Err(McpError::invalid_params(
-                "task diagnostics exceed the negotiated output budget",
-            ));
-        };
-        if tasks.len() <= 1 {
-            return Err(McpError::invalid_params(format!(
-                "task discovery requires {} bytes, exceeding the negotiated {max_bytes}-byte output bound; no active handle or drain evidence was silently omitted",
-                task_resource_bytes(uri, &serialized)
-            )));
-        }
-        // Active work sorts first. Trimming only the last history handle
-        // preserves the sole active monitor, with an explicit continuation.
-        tasks.pop();
-        let end = offset + tasks.len();
-        payload["complete"] = json!(false);
-        payload["next"] = json!(format!("df://session/{session_id_hex}/tasks-{end}"));
-        payload["output_budget"] = json!({"max_bytes": max_bytes,
+    session_tasks_with(
+        session_id_hex,
+        uri,
+        offset,
+        || {},
+        || Ok(crate::task_service::session_tasks(session_id_hex, offset)),
+    )
+}
+fn session_tasks_with(
+    session_id_hex: &str,
+    uri: &str,
+    offset: usize,
+    after_precheck: impl FnOnce(),
+    fetch: impl FnOnce() -> McpResult<Value>,
+) -> McpResult<Vec<ResourceContent>> {
+    task_candidate(
+        session_id_hex,
+        "df://session/tasks",
+        after_precheck,
+        fetch,
+        |mut payload, budget| {
+            payload["ok"] = json!(payload.get("unavailable").is_none());
+            payload["schema"] = json!("dfmcp.lab-tasks/1");
+            payload["session_id"] = json!(session_id_hex);
+            payload["resource"] = json!(uri);
+            payload["max_active"] = json!(1);
+            payload["max_retained"] = json!(crate::task_store::MAX_RETAINED_TASKS);
+            payload["retention"] = json!("process_lifetime");
+            payload["scope"] = json!("laboratory_process_only");
+            let max_bytes = budget.max_bytes.min(
+                u64::from(budget.max_output_tokens)
+                    .saturating_mul(crate::output_budget::BYTES_PER_TOKEN as u64),
+            );
+            loop {
+                let serialized = payload.to_string();
+                if task_resource_bytes(uri, &serialized) as u64 <= max_bytes {
+                    return Ok(text_content(uri, serialized));
+                }
+                let Some(tasks) = payload.get_mut("tasks").and_then(Value::as_array_mut) else {
+                    return Err(McpError::invalid_params(
+                        "task diagnostics exceed the negotiated output budget",
+                    ));
+                };
+                if tasks.len() <= 1 {
+                    return Err(McpError::invalid_params(format!(
+                        "task discovery requires {} bytes, exceeding the negotiated {max_bytes}-byte output bound; no active handle or drain evidence was silently omitted",
+                        task_resource_bytes(uri, &serialized)
+                    )));
+                }
+                // Active work sorts first. Trimming only the last history handle
+                // preserves the sole active monitor, with an explicit continuation.
+                tasks.pop();
+                let end = offset + tasks.len();
+                payload["complete"] = json!(false);
+                payload["next"] = json!(format!("df://session/{session_id_hex}/tasks-{end}"));
+                payload["output_budget"] = json!({"max_bytes": max_bytes,
             "max_output_tokens": budget.max_output_tokens, "clipped": true,
             "reason": "terminal history continues in the next resource page"});
-    }
+            }
+        },
+    )
 }
 
 fn session_task_detail(
@@ -534,23 +572,40 @@ fn session_task_detail(
     uri: &str,
     task_id: &str,
 ) -> McpResult<Vec<ResourceContent>> {
-    let operation = "df://session/task-detail";
-    let budget = crate::server::task_session::read_budget(session_id_hex)
-        .map_err(|error| denial(operation, error))?;
-    let mut payload = crate::task_service::task_detail(session_id_hex, task_id)?;
-    payload["ok"] = json!(true);
-    payload["schema"] = json!("dfmcp.lab-task-detail/1");
-    payload["session_id"] = json!(session_id_hex);
-    payload["resource"] = json!(uri);
-    let mut serialized = payload.to_string();
-    let max_bytes = budget.max_bytes.min(
-        u64::from(budget.max_output_tokens)
-            .saturating_mul(crate::output_budget::BYTES_PER_TOKEN as u64),
-    );
-    if task_resource_bytes(uri, &serialized) as u64 > max_bytes {
-        let (source, evidence) = task_evidence_document(&payload);
-        let progress = &payload["progress"];
-        payload = json!({"ok": true, "schema": "dfmcp.lab-task-detail/1",
+    session_task_detail_with(
+        session_id_hex,
+        uri,
+        task_id,
+        || {},
+        || crate::task_service::task_detail(session_id_hex, task_id),
+    )
+}
+fn session_task_detail_with(
+    session_id_hex: &str,
+    uri: &str,
+    task_id: &str,
+    after_precheck: impl FnOnce(),
+    fetch: impl FnOnce() -> McpResult<Value>,
+) -> McpResult<Vec<ResourceContent>> {
+    task_candidate(
+        session_id_hex,
+        "df://session/task-detail",
+        after_precheck,
+        fetch,
+        |mut payload, budget| {
+            payload["ok"] = json!(true);
+            payload["schema"] = json!("dfmcp.lab-task-detail/1");
+            payload["session_id"] = json!(session_id_hex);
+            payload["resource"] = json!(uri);
+            let mut serialized = payload.to_string();
+            let max_bytes = budget.max_bytes.min(
+                u64::from(budget.max_output_tokens)
+                    .saturating_mul(crate::output_budget::BYTES_PER_TOKEN as u64),
+            );
+            if task_resource_bytes(uri, &serialized) as u64 > max_bytes {
+                let (source, evidence) = task_evidence_document(&payload);
+                let progress = &payload["progress"];
+                payload = json!({"ok": true, "schema": "dfmcp.lab-task-detail/1",
             "session_id": session_id_hex, "resource": uri, "task_id": task_id,
             "plan_digest": payload["plan_digest"], "scope": "laboratory_process_only",
             "task": {"taskId": task_id, "status": payload["task"]["status"]},
@@ -564,14 +619,16 @@ fn session_task_detail(
                 "next": format!("df://session/{session_id_hex}/task-{task_id}~evidence-0")},
             "output_budget": {"max_bytes": max_bytes, "max_output_tokens": budget.max_output_tokens,
                 "clipped": true, "omitted": "full proof continues in digest-checked evidence pages"}});
-        serialized = payload.to_string();
-        if task_resource_bytes(uri, &serialized) as u64 > max_bytes {
-            return Err(McpError::invalid_params(
-                "task detail summary exceeds the negotiated output budget; no proof was silently omitted",
-            ));
-        }
-    }
-    Ok(text_content(uri, serialized))
+                serialized = payload.to_string();
+                if task_resource_bytes(uri, &serialized) as u64 > max_bytes {
+                    return Err(McpError::invalid_params(
+                        "task detail summary exceeds the negotiated output budget; no proof was silently omitted",
+                    ));
+                }
+            }
+            Ok(text_content(uri, serialized))
+        },
+    )
 }
 
 fn task_evidence_document(detail: &Value) -> (&'static str, String) {
@@ -588,43 +645,65 @@ fn session_task_evidence(
     task_id: &str,
     offset: usize,
 ) -> McpResult<Vec<ResourceContent>> {
-    let budget = crate::server::task_session::read_budget(session_id_hex)
-        .map_err(|error| denial("df://session/task-evidence", error))?;
-    let detail = crate::task_service::task_detail(session_id_hex, task_id)?;
-    let (source, evidence) = task_evidence_document(&detail);
-    if offset > evidence.len() || !evidence.is_char_boundary(offset) {
-        return Err(McpError::invalid_params(
-            "task evidence offset must be a valid UTF-8 boundary inside the retained document",
-        ));
-    }
-    let digest = dfmcp_core::Digest32::of_bytes(evidence.as_bytes()).to_hex();
-    let max_bytes = budget.max_bytes.min(
-        u64::from(budget.max_output_tokens)
-            .saturating_mul(crate::output_budget::BYTES_PER_TOKEN as u64),
-    );
-    let mut end = offset.saturating_add(16 * 1024).min(evidence.len());
-    loop {
-        while !evidence.is_char_boundary(end) {
-            end -= 1;
-        }
-        let payload = json!({"ok": true, "schema": "dfmcp.lab-task-evidence-page/1",
+    session_task_evidence_with(
+        session_id_hex,
+        uri,
+        task_id,
+        offset,
+        || {},
+        || crate::task_service::task_detail(session_id_hex, task_id),
+    )
+}
+fn session_task_evidence_with(
+    session_id_hex: &str,
+    uri: &str,
+    task_id: &str,
+    offset: usize,
+    after_precheck: impl FnOnce(),
+    fetch: impl FnOnce() -> McpResult<Value>,
+) -> McpResult<Vec<ResourceContent>> {
+    task_candidate(
+        session_id_hex,
+        "df://session/task-evidence",
+        after_precheck,
+        fetch,
+        |detail, budget| {
+            let (source, evidence) = task_evidence_document(&detail);
+            if offset > evidence.len() || !evidence.is_char_boundary(offset) {
+                return Err(McpError::invalid_params(
+                    "task evidence offset must be a valid UTF-8 boundary inside the retained document",
+                ));
+            }
+            let digest = dfmcp_core::Digest32::of_bytes(evidence.as_bytes()).to_hex();
+            let max_bytes = budget.max_bytes.min(
+                u64::from(budget.max_output_tokens)
+                    .saturating_mul(crate::output_budget::BYTES_PER_TOKEN as u64),
+            );
+            let mut end = offset.saturating_add(16 * 1024).min(evidence.len());
+            loop {
+                while !evidence.is_char_boundary(end) {
+                    end -= 1;
+                }
+                let payload = json!({"ok": true, "schema": "dfmcp.lab-task-evidence-page/1",
             "session_id": session_id_hex, "resource": uri, "task_id": task_id, "source": source,
             "encoding": "json_utf8", "digest": digest, "total_bytes": evidence.len(), "offset": offset,
             "part": &evidence[offset..end], "complete": end == evidence.len(),
             "next": (end < evidence.len()).then(|| format!("df://session/{session_id_hex}/task-{task_id}~evidence-{end}")),
             "reassembly": "concatenate part strings in offset order, require one unchanged digest, then parse the complete JSON document",
             "scope": "laboratory_process_only"});
-        let serialized = payload.to_string();
-        if task_resource_bytes(uri, &serialized) as u64 <= max_bytes {
-            return Ok(text_content(uri, serialized));
-        }
-        if end <= offset + 4 {
-            return Err(McpError::invalid_params(
-                "task evidence page metadata exceeds the negotiated output budget",
-            ));
-        }
-        end = offset + (end - offset) / 2;
-    }
+                let serialized = payload.to_string();
+                if task_resource_bytes(uri, &serialized) as u64 <= max_bytes {
+                    return Ok(text_content(uri, serialized));
+                }
+                if end <= offset + 4 {
+                    return Err(McpError::invalid_params(
+                        "task evidence page metadata exceeds the negotiated output budget",
+                    ));
+                }
+                end = offset + (end - offset) / 2;
+            }
+        },
+    )
 }
 
 fn read_param_or_refuse(
@@ -1394,5 +1473,151 @@ mod tests {
             )
             .is_ok()
         );
+    }
+
+    // Synthetic task payloads exercise the same final authorization and render
+    // boundary as the store-backed routes; they are not live-game evidence.
+    fn task_fixture_read(
+        kind: &str,
+        session: &str,
+        after_precheck: impl FnOnce(),
+        fetched: &std::cell::Cell<bool>,
+    ) -> McpResult<Vec<ResourceContent>> {
+        let uri = format!("df://session/{session}/{kind}");
+        let fetch = || {
+            fetched.set(true);
+            if kind == "tasks" {
+                Ok(crate::task_service::session_tasks(session, 0))
+            } else {
+                Ok(
+                    json!({"task": {"status": "working"}, "plan_digest": "fixture",
+                    "progress": {"stage": "working"}, "final_evidence": null}),
+                )
+            }
+        };
+        match kind {
+            "tasks" => session_tasks_with(session, &uri, 0, after_precheck, fetch),
+            "detail" => session_task_detail_with(session, &uri, "fixture", after_precheck, fetch),
+            "evidence" => {
+                session_task_evidence_with(session, &uri, "fixture", 0, after_precheck, fetch)
+            }
+            _ => Err(McpError::invalid_params("invalid test route")),
+        }
+    }
+
+    fn task_test_open(selector: &str, shared: bool, durable: bool) -> String {
+        let raw = crate::server::open_session_in_scenario(
+            Some(true),
+            Some(selector.to_owned()),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some("empty".to_owned()),
+            Some(shared),
+            Some(durable),
+        );
+        let value: Value = serde_json::from_str(&raw).expect("session JSON");
+        assert_eq!(value["ok"], true, "{value}");
+        session_id_of(&value)
+    }
+
+    #[test]
+    fn task_resource_candidates_reauthorize_after_shared_tick_advance() {
+        for (index, kind) in ["tasks", "detail", "evidence"].into_iter().enumerate() {
+            let selector = (390100 + index).to_string();
+            let reader_id = task_test_open(&selector, true, false);
+            let controller_id = task_test_open(&selector, true, false);
+            let reader = lookup(&reader_id, "test").expect("reader");
+            {
+                let mut guard = reader.lock().expect("reader lock");
+                for grant in &mut guard.grants {
+                    if grant.capability == Capability::Observe {
+                        grant.expires_at_tick = Some(dfmcp_core::GameTick(2));
+                    }
+                }
+            }
+            let fetched = std::cell::Cell::new(false);
+            assert!(
+                task_fixture_read(kind, &reader_id, || {}, &fetched).is_ok(),
+                "{kind}"
+            );
+            assert!(fetched.replace(false));
+            let controller = lookup(&controller_id, "test").expect("controller");
+            let denied = task_fixture_read(
+                kind,
+                &reader_id,
+                || {
+                    crate::server::with_session(
+                        &controller,
+                        || panic!("controller unavailable"),
+                        |guard| {
+                            guard
+                                .adapter
+                                .advance_ticks(10)
+                                .expect("advance shared world")
+                        },
+                    );
+                },
+                &fetched,
+            )
+            .expect_err("expired authority must not publish candidate");
+            assert!(
+                fetched.get(),
+                "candidate must actually be fetched for {kind}"
+            );
+            assert!(denied.to_string().contains("capability_denied"), "{denied}");
+            crate::server::release_shared_world(dfmcp_core::FortressId::new(390100 + index as u64));
+        }
+    }
+
+    #[test]
+    fn task_resource_candidates_reauthorize_after_durable_owner_replacement() {
+        struct DurableDir(std::path::PathBuf);
+        impl Drop for DurableDir {
+            fn drop(&mut self) {
+                crate::server::simulate_durable_restart(None);
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        let _serial = crate::server::serialized_durable_tests();
+        for (index, kind) in ["tasks", "detail", "evidence"].into_iter().enumerate() {
+            let path = std::env::temp_dir().join(format!(
+                "dfmcp-task-candidate-{}-{index}",
+                std::process::id()
+            ));
+            let _ = std::fs::remove_dir_all(&path);
+            crate::server::simulate_durable_restart(Some(path.clone()));
+            let _directory = DurableDir(path);
+            let selector = (390110 + index).to_string();
+            let old = task_test_open(&selector, false, true);
+            let fetched = std::cell::Cell::new(false);
+            assert!(
+                task_fixture_read(kind, &old, || {}, &fetched).is_ok(),
+                "{kind}"
+            );
+            assert!(fetched.replace(false));
+            let new_owner = std::cell::RefCell::new(None);
+            let denied = task_fixture_read(
+                kind,
+                &old,
+                || {
+                    *new_owner.borrow_mut() = Some(task_test_open(&selector, false, true));
+                },
+                &fetched,
+            )
+            .expect_err("superseded owner must not publish candidate");
+            assert!(
+                fetched.get(),
+                "candidate must actually be fetched for {kind}"
+            );
+            assert!(denied.to_string().contains("conflict"), "{denied}");
+            let current = new_owner.into_inner().expect("replacement owner");
+            assert_ne!(old, current);
+            assert!(task_fixture_read(kind, &current, || {}, &std::cell::Cell::new(false)).is_ok());
+        }
     }
 }

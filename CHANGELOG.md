@@ -2,6 +2,10 @@
 
 ## 2026-11-03 — Resource inspection and cancellation review
 
+- Reauthorize task candidates at owner-fenced publication after fetching them
+  outside world/session locks. Add deterministic expiry/replacement component
+  regressions for discovery, detail and evidence; execution is pending.
+- Keep the replay test export test-only after resources adopt the fenced helper.
 - Correct the mutex-guard binding in the new objective regression after a clean
   build refused it before running tests; retain that failed attempt.
 - Keep resource reads from certifying objectives, recording observation events,

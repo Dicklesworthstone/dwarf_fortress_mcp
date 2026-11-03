@@ -27,7 +27,10 @@ Resource inspection does not advance objective history, record adapter
 observation events, consume semantic request IDs, retain another world version,
 or publish durable custody. Replay and capabilities inspection use the same
 current shared-world view and durable-owner fence. State pages use one wall
-deadline through projection and escaped-response size accounting.
+deadline through projection and escaped-response size accounting. Task resources
+fetch their retained candidate without world/session locks, then reauthorize
+Observe and render under the current owner-fenced view. Expiry or owner
+replacement during the fetch refuses publication, including candidate errors.
 
 Session views explicitly return private `ttlMs: 0` cache hints. This overrides
 the pinned transport's default one-hour legacy promotion: current aliases,
