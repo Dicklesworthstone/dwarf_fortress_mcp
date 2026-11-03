@@ -1,12 +1,11 @@
 //! Cache-bearing native vectors and custody. These are component doubles, not DF.
 use super::*;
 fn vector23(name: &str) -> Result<Vec<u8>> {
-    let values: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../../tests/fixtures/manager_v1_23_component.json"
-    ))
-    .map_err(|_| error(ErrorCode::AdapterRejected, "Manager/1.23 fixture JSON"))?;
-    let text = values[name]
-        .as_str()
+    let prefix = format!("\"{name}\": \"");
+    let text = include_str!("../../../../tests/fixtures/manager_v1_23_component.json")
+        .lines()
+        .find_map(|line| line.trim().strip_prefix(&prefix))
+        .and_then(|value| value.split('"').next())
         .ok_or_else(|| error(ErrorCode::AdapterRejected, "missing Manager/1.23 fixture"))?;
     require(text.len().is_multiple_of(2), "Manager/1.23 fixture hex")?;
     text.as_bytes()
