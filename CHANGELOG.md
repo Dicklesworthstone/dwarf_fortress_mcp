@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-11-02 — Full qualification of the preceding repairs
+
+- Clean `82f9a6c` passes both required scripts, all 43 gates and 5227 tests
+  per Rust profile across 131 targets, zero failures or ignored cases.
+- Record exact source/receipt scope; this evidence does not transfer to 1.23.
+- Connect the new 1.23 source, native mutation gate and both eight-case actual
+  MCP subprocess wrappers to the existing qualification path. Execution pending.
+
 ## 2026-11-02 — Manager 1.23 cache integration (early development cut)
 
 - Witness group/civ responsibility caches and include the selected Manager

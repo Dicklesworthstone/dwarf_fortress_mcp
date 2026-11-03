@@ -1,5 +1,12 @@
 # Vacant Manager appointment (unadmitted 1.22 development)
 
+Known gameplay limitation: the real U/V trials verify this generation's base
+assignment/HF/history and dual-getter proof, while the game's production
+responsibility cache remains empty. Work orders can still report no Manager.
+This generation therefore does not establish a functional production Manager.
+The separately versioned [1.23 successor](MANAGER_APPOINTMENT_V1_23.md) adds a
+witnessed cache transaction; its live production proof remains pending.
+
 This is one bounded prerequisite for a separately reviewed finite production
 order: appoint the observed current Expedition Leader to an existing vacant
 `MANAGER` assignment. It uses the existing eleven modern MCP tools. There is no
