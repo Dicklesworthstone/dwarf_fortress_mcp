@@ -80,6 +80,13 @@ fn encode(
     };
     let recommendation = if session.is_none() || result["closed"] == true {
         None
+    } else if uncertain && mode == Some("offline") {
+        Some((
+            "fortress_cancel",
+            "Retain the original recovery reference, close this offline session, and reopen in reconcile mode; closing does not cancel the effect.",
+            false,
+            json!({"scope":"session"}),
+        ))
     } else if uncertain {
         Some((
             "fortress_wait",
@@ -333,6 +340,35 @@ mod tests {
                 .as_array()
                 .expect("recommendations")
                 .is_empty()
+        );
+    }
+    #[test]
+    fn offline_uncertainty_offers_close_and_reconcile_not_a_nonprogressing_wait() {
+        let session = SessionId::new((1u128 << 127) | (24u128 << 57) | 1);
+        let view = json!({"frontier":{"needs_reconciliation":true,"entries":[{"step_id":0,"phase":"indeterminate"}]}});
+        let (raw, overflow) = packet(
+            "fortress.query",
+            Some(session),
+            None,
+            Some("offline"),
+            None,
+            None,
+            json!({"ok":true}),
+            Some(&view),
+            true,
+            true,
+        );
+        assert!(!overflow);
+        let value: Value = serde_json::from_str(&raw).expect("packet JSON");
+        let next = &value["agent_turn"]["recommendations"][0];
+        assert_eq!(next["tool"], "fortress_cancel");
+        assert_eq!(next["arguments"]["scope"], "session");
+        assert_eq!(next["arguments"]["session_id"], session.to_string());
+        assert!(
+            next["reason"]
+                .as_str()
+                .expect("reason")
+                .contains("reconcile")
         );
     }
     #[test]

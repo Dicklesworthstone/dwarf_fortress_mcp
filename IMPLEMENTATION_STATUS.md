@@ -19,9 +19,9 @@ was built locked/offline with nightly rustc
 `1c3a6506966e21845b31de0b075d2527660db132` (commit date 2026-11-02).
 Its exact dirty source manifest is
 `789a6c7a7431209481397952fc44e87b2f4941da681c2c783b2f6e5a019ccf24`.
-Root verified all 2,725 snapshot entries against current local bytes and modes;
-only two later documentation/contract files differ, with all Rust/scripts/tests
-matching the tested snapshot.
+Root verified all 2,725 snapshot entries against local bytes and modes at that
+cut; all Rust/scripts/tests matched, with only two later documentation/contract
+files differing. The subsequent response-path fixes below are newer source.
 
 The actual modern stdio component suite passes eight of eight cases, zero
 failures/errors/skips. Root separately reran all eight against the same sealed
@@ -38,8 +38,29 @@ test wrapper also passes and requires all eight subprocess cases. Strict scoped
 Clippy found one collapsible conditional; its local syntax-only repair preserves
 the inventory read order and remains subject to the clean-source full gates.
 
-Full clean-source qualification and a real-game trial of this new host remain
-pending. Earlier test-link storage-quota failures and diagnostic RED runs are
+Clean revision `043a066a6179073e671980669f901496d4e0ffd1` passed the full debug
+workspace suite: 5,273 tests across 135 result blocks, zero failed, ignored,
+measured or filtered cases. Warning-denied workspace Clippy also passed.
+Its full verification and qualification remain in progress; these partial
+results are not a full-source receipt.
+
+Independent fresh-eyes source review found two further response defects:
+successful serialization lacked a final cancellation/deadline check, and an
+offline uncertain session recommended Wait although it cannot reconcile live.
+The latter is reproduced against the earlier executable by extending the
+eight-case suite: seven pass and one fails at the incorrect recommendation.
+New source checks cancellation and the original wall deadline after rendering,
+withdraws the local review on failure, and recommends closing an offline session
+with retained recovery before reopening in Reconcile mode. Those fixes and the
+extended positive recovery path still require compilation and execution.
+
+The agent also cannot discover eligible native single-labor detail choices
+before compiling the original plan. Bead `.4.2` owns this information gap.
+An operator read-only workforce scout can stage the bounded trial but is not
+evidence that the MCP agent chose a valid intent unaided.
+
+Full clean-source qualification of the final source and a real-game trial of
+this new host remain pending. Earlier test-link storage-quota failures and diagnostic RED runs are
 retained. Existing qualified binaries and AG's single-job proof below do not
 transfer to it. The scoped bead and broad parent tasks remain open. The registry
 is empty and production admission is unchanged.

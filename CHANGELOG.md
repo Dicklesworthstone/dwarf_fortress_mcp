@@ -15,6 +15,12 @@
   rerun by Root, and 15 focused Rust cases. Loopback peers remain doubles;
   full clean qualification and new-host live execution are pending. Scoped
   `.4.1` and broader parents stay open.
+- Fix two further fresh-eyes findings in source: check cancellation/deadline
+  after successful response rendering and withdraw the review on failure;
+  direct offline uncertainty to close-and-reopen reconciliation. The expanded
+  eight-case suite reproduces the latter on the prior binary (seven pass, one
+  intended failure). Corrected-source execution is pending. Track missing
+  pre-plan workforce choices in `.4.2`; operator scouting is not agent competence.
 
 ## 2026-11-03 — Independently replayed current-source job-control pair
 

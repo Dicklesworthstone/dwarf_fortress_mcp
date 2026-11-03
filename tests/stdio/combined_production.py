@@ -426,7 +426,44 @@ class CombinedProduction(unittest.TestCase):
         self.assertTrue(self.peer.workforce_applied)
         self.assertEqual(self.peer.workforce_plan['key'], original_key)
         self.assertEqual(sum(op == 'CommitAssignment' for _, op in self.peer.calls), 1)
-        reconciled = self.client.tool('wait', session_id=sid)
+        recovery = result['retained_reference']['recovery']
+        self.assertTrue(recovery['frontier']['head'])
+        workforce_id = step['native_custody']['workforce_journal_id']
+        self.client.close(crash=True)
+        before = custody_files(self.directory)
+        self.assertTrue(before)
+        self.assertTrue(all(mode == 0o600 for _, mode, _ in before.values()))
+        calls = list(self.peer.calls)
+        offline_env = reopen_environment(self.env, recovery, workforce_id)
+        for name in ('DFMCP_SEMANTIC_WORKFORCE_CITIZEN_TOKEN', 'DFMCP_SEMANTIC_WORKFORCE_TOKEN',
+                     'DFMCP_SEMANTIC_WORK_ORDER_CITIZEN_TOKEN', 'DFMCP_SEMANTIC_WORK_ORDER_ORDER_TOKEN',
+                     'DFMCP_SEMANTIC_WORK_ORDER_PROGRESS_TOKEN', 'DFMCP_SEMANTIC_WORK_ORDER_OPERATIONS_TOKEN',
+                     'DFMCP_SEMANTIC_WORKFORCE_ALLOW_LABOR', 'DFMCP_SEMANTIC_WORK_ORDER_ALLOW_PRODUCTION'):
+            offline_env.pop(name, None)
+        self.client = stdio.Client(self.directory, {}, suffix='uncertain-offline', env=offline_env)
+        offline = self.client.open(mode='offline', max_wall_millis=60000)
+        self.assertTrue(offline['ok'], offline)
+        self.assertTrue(offline['frontier']['needs_reconciliation'])
+        self.assertEqual(offline['frontier']['entries'][0]['idempotency_key'], original_key)
+        self.assertFalse(offline['original_goal_proven'])
+        self.assertFalse(offline['labor_control_enabled'])
+        self.assertFalse(offline['production_control_enabled'])
+        recommendations = offline['agent_turn']['recommendations']
+        self.assertTrue(recommendations)
+        self.assertNotIn('fortress_wait', [item['tool'] for item in recommendations])
+        self.assertEqual(recommendations[0]['tool'], 'fortress_cancel')
+        self.assertEqual(recommendations[0]['arguments'], {'session_id': offline['agent_turn']['session_id'], 'scope': 'session'})
+        closed = self.client.execute_next(offline)
+        self.assertTrue(closed['ok'], closed)
+        self.assertEqual(calls, self.peer.calls)
+        self.assertEqual(before, custody_files(self.directory))
+        self.client.close()
+        reconcile_env = reopen_environment(self.env, offline['recovery'], workforce_id)
+        self.client = stdio.Client(self.directory, {}, suffix='uncertain-reconcile', env=reconcile_env)
+        reopened = self.client.open(mode='reconcile', max_wall_millis=60000)
+        self.assertTrue(reopened['ok'], reopened)
+        self.assertTrue(reopened['frontier']['needs_reconciliation'])
+        reconciled = self.client.tool('wait', session_id=reopened['agent_turn']['session_id'])
         self.assertTrue(reconciled['ok'], reconciled)
         first = reconciled['frontier']['entries'][0]
         self.assertEqual(first['idempotency_key'], original_key)

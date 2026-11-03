@@ -87,6 +87,11 @@ a proven preparation; it does not undo an Applied effect. `scope="session"`
 releases local ownership while preserving custody and makes no native
 cancellation claim. Checkpoint and Restore return explicit capability refusals.
 
+The current observation does not expose native work-detail and labor options
+before planning. Selecting a valid labor therefore still requires separate
+operator knowledge; bead `.4.2` tracks this missing agent-facing observation.
+Do not count a read-only operator scout as the agent discovering a valid intent.
+
 The returned `frontier.all_applied` means both historical native effects were
 proved at their respective boundaries. It does not mean current labor, produced
 goods, workshop/material feasibility or the original terminal predicate is true.
@@ -112,6 +117,11 @@ Prepared step without its process-local review can be reconciled or cancelled,
 but this host cannot renew its commit permit. Lost custody,
 changed source or an inconsistent native/frontier record refuses rather than
 inventing success or replacing a journal.
+An uncertain Offline response recommends `fortress_cancel` with
+`scope="session"`: retain its recovery object, close that local owner, then reopen
+in Reconcile mode with the operator's native configuration. Offline Wait only
+inspects custody and cannot resolve live uncertainty. Closing does not cancel
+or settle the native effect.
 
 The parent archive and citizen identity are verified before and after each
 child evidence refresh, including the order's post-dispatch-marker refresh.
@@ -129,6 +139,10 @@ Errors withdraw local reviews. Recovery references preserve the newest known
 frontier head and authority floor, but any copied frontier is explicitly stale.
 Failure to publish a successful response does not erase a possible effect.
 Reconcile the original key before deciding what is safe next.
+Successful responses receive a final owned cancellation and wall-deadline check
+after rendering. A failed final check discards that success, withdraws the
+review and returns a failure with retained recovery; it does not undo a possible
+native effect.
 Query verifies the parent archive/identity and durable frontier. Native family
 custody and effects are rechecked through their owners at preparation, commit
 and reconciliation boundaries; Query is not a new native effect observation.

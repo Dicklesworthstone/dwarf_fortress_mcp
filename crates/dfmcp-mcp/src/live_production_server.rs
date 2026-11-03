@@ -205,6 +205,18 @@ fn remaining(start: Instant, total: u64) -> Result<u64> {
             )
         })
 }
+/// A completed packet is not published until its final cancellation/deadline
+/// check succeeds. The rejection path withdraws any process-local review.
+fn checked_publication(
+    output: String,
+    check: impl FnOnce() -> Result<()>,
+    reject: impl FnOnce(DfmcpError) -> String,
+) -> String {
+    match check() {
+        Ok(()) => output,
+        Err(cause) => reject(cause),
+    }
+}
 fn failure(cause: &DfmcpError, may_dispatch: bool) -> Value {
     json!({"ok":false,"error":{"code":cause.code.as_str(),"message":cause.message,"retryable":false},
         "runtime_admitted":false,"automatic_redispatch":false,
@@ -311,13 +323,13 @@ fn with_session(
         let mut request = None;
         let mut dispatched = false;
         let mut may_need_reconciliation = false;
+        let total = wall
+            .unwrap_or(state.runtime.budget().max_wall_millis)
+            .min(state.runtime.budget().max_wall_millis);
         let outcome = (|| -> Result<View> {
             runtime_io()?;
             let mut context = state.runtime.context(false)?;
             request = Some(context.request_id);
-            let total = wall
-                .unwrap_or(state.runtime.budget().max_wall_millis)
-                .min(state.runtime.budget().max_wall_millis);
             if total == 0 {
                 return Err(error(
                     ErrorCode::InvalidRequest,
@@ -343,7 +355,23 @@ fn with_session(
             state.uncertain |= may_need_reconciliation;
             state.withdraw_and_retain();
         }
-        Ok(render(state, operation, request, outcome, dispatched))
+        let successful = outcome.is_ok();
+        let output = render(state, operation, request, outcome, dispatched);
+        if !successful {
+            return Ok(output);
+        }
+        Ok(checked_publication(
+            output,
+            || {
+                runtime_io()?;
+                remaining(started, total).map(|_| ())
+            },
+            |cause| {
+                state.uncertain |= may_need_reconciliation;
+                state.withdraw_and_retain();
+                render(state, operation, request, Err(cause), dispatched)
+            },
+        ))
     })();
     result.unwrap_or_else(|cause| unbound(operation, &cause))
 }
@@ -434,12 +462,21 @@ pub fn fortress_open_session(
         if outcome.is_err() {
             state.withdraw_and_retain();
         }
-        Ok(render(
-            state,
-            "fortress.open_session",
-            request,
-            outcome,
-            false,
+        let successful = outcome.is_ok();
+        let output = render(state, "fortress.open_session", request, outcome, false);
+        if !successful {
+            return Ok(output);
+        }
+        Ok(checked_publication(
+            output,
+            || {
+                runtime_io()?;
+                remaining(started, display.max_wall_millis).map(|_| ())
+            },
+            |cause| {
+                state.withdraw_and_retain();
+                render(state, "fortress.open_session", request, Err(cause), false)
+            },
         ))
     })();
     result.unwrap_or_else(|cause| unbound("fortress.open_session", &cause))
@@ -595,6 +632,74 @@ mod tests {
         assert_eq!(value["frontier"]["entries"][0]["phase"], "dispatch_started");
         assert!(value["frontier"]["review"].is_null());
         assert!(value["review"].is_null());
+    }
+
+    #[test]
+    fn final_guard_failure_withdraws_rendered_review_and_retains_new_recovery() {
+        let seal = "a".repeat(64);
+        let session = SessionId::new((1u128 << 127) | FAMILY | 1);
+        for code in [ErrorCode::CancellationRequested, ErrorCode::BudgetExceeded] {
+            let mut retained = Some(json!({"recovery":{"frontier":{"authority_tick_floor":3}},
+                "frontier":{"entries":[{"step_id":0,"idempotency_key":"original","phase":"prepared"}],
+                    "review":{"paired_seal":seal}}, "review":{"paired_seal":seal}}));
+            let published = packet(
+                "fortress.plan",
+                Some(session),
+                None,
+                Some("control"),
+                None,
+                None,
+                json!({"ok":true,"review":{"paired_seal":seal}}),
+                retained.as_ref(),
+                true,
+                false,
+            )
+            .0;
+            assert!(
+                published.contains(&seal),
+                "precondition: review was fully rendered"
+            );
+            let out = checked_publication(
+                published,
+                || Err(error(code, "late guard failed")),
+                |cause| {
+                    merge_recovery(
+                        &mut retained,
+                        &json!({"recovery":{"frontier":{"authority_tick_floor":8}}}),
+                    );
+                    let mut failure = failure(&cause, false);
+                    failure["retained_reference"] = retained
+                        .as_ref()
+                        .map(presentation::compact)
+                        .unwrap_or(Value::Null);
+                    packet(
+                        "fortress.plan",
+                        Some(session),
+                        None,
+                        Some("control"),
+                        None,
+                        None,
+                        failure,
+                        retained.as_ref(),
+                        false,
+                        true,
+                    )
+                    .0
+                },
+            );
+            let result: Value = serde_json::from_str(&out).expect("failure packet");
+            assert_eq!(result["ok"], false);
+            assert_eq!(
+                result["retained_reference"]["recovery"]["frontier"]["authority_tick_floor"],
+                8
+            );
+            assert_eq!(
+                result["retained_reference"]["frontier"]["entries"][0]["idempotency_key"],
+                "original"
+            );
+            assert!(!out.contains(&seal), "withdrawn review is not exposed");
+            assert!(retained.as_ref().expect("retained")["review"].is_null());
+        }
     }
 
     #[test]
