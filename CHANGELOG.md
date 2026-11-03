@@ -9,7 +9,10 @@
   accounting. Add allowed/denied process/durable, owner replacement, shared-clock
   expiry and deterministic deadline regressions; Rust execution is pending.
 - Retain the clean e227 full release failure in Tasks cancellation. Track the
-  minimized upstream race as fastmcp_rust#100; no new qualification is claimed.
+  minimized upstream race as fastmcp_rust#100 and take its reviewed narrow exact
+  Git pin `13461caf` in all three dependencies, the lockfile and allowlist.
+  Deterministic upstream regressions pass 4/4; downstream conformance and full
+  qualification are pending. No new qualification is claimed.
 
 ## 2026-11-03 — Real wooden bed and main integration
 

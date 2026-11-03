@@ -14,8 +14,12 @@ The complete clean `e227a076` verification failed in release Tasks cancellation:
 5237 debug tests passed, while release had 5236 passed and one failed. No full
 qualification receipt was generated. An isolated rerun passed; subsequent
 deterministic upstream tests reproduce the cancellation-intent/readback race.
-The narrow FastMCP repair is tracked at upstream issue #100; integration and
-new exact-source qualification remain pending. The failed run is retained.
+The narrow FastMCP repair is tracked at upstream issue #100 and consumed at
+exact Git pin `13461caf1f23bef675e0588b5e0c5ba8cf81b9f8`, a direct child of
+old `180a7c8` changing only upstream `tasks.rs`. Deterministic upstream tests
+are RED 1 passed/3 failed and GREEN 4 passed/0 failed, including nine hostile
+successors. Exact-pin subprocess conformance and new full qualification remain
+pending. The failed run is retained.
 
 This integration candidate combines the Manager 1.23 successor with public main
 `bad8eea`, preserving the current entity-resource consumer, immutable state pages,
