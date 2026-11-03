@@ -509,6 +509,16 @@ impl Capture {
             }
         };
         caches_vacant
+            && (self.protocol == ManagerProtocol::V1_22 || self.links.len() < 256)
+            && (self.protocol == ManagerProtocol::V1_22
+                || self
+                    .group
+                    .role_buckets
+                    .iter()
+                    .chain(&self.civ.role_buckets)
+                    .map(Vec::len)
+                    .sum::<usize>()
+                    < MAX_TOTAL_ROLE_ENTRIES)
             && self.paused
             && self.active
             && self.citizen

@@ -30,6 +30,14 @@ INPUTS = [
 FLAGS = ["-std=c++17", "-Wall", "-Wextra", "-Werror", "-pedantic", "-g",
          "-fsanitize=undefined", "-fno-sanitize-recover=all"]
 MUTATIONS = {
+    "terminal_link_bound_off_by_one": (HANDLER,
+        "hf->entity_links.size()<=ma::MAX_LINKS", "hf->entity_links.size()<ma::MAX_LINKS"),
+    "missing_link_capacity_before_prepare": (ENGINE,
+        "minor==22 || links.size()<MAX_LINKS", "minor==22 || links.size()<=MAX_LINKS"),
+    "terminal_history_bound_off_by_one": (HANDLER,
+        "world->history.events.size()<=ma::MAX_HISTORY", "world->history.events.size()<ma::MAX_HISTORY"),
+    "missing_cache_capacity_before_prepare": (ENGINE,
+        "minor==22 || role_entries<MAX_TOTAL_ROLE_ENTRIES", "minor==22 || role_entries<=MAX_TOTAL_ROLE_ENTRIES"),
     "missing_production_cache": (HANDLER, "production.push_back(a);", "(void)production;"),
     "empty_event_flag_storage": (ENGINE, "e.flags=std::string(1,'\\0');", "e.flags=std::string();"),
     "missing_history_link": (HANDLER,
@@ -92,7 +100,7 @@ def check(compiler, mutations, output):
     if compiler is None:
         raise ValueError("requested C++ compiler is unavailable")
     before = inventory(ROOT)
-    expected = {"scenarios": 13, "assertions": 308, "ignored": 0,
+    expected = {"scenarios": 15, "assertions": 343, "ignored": 0,
                 "sdk_doubles_only": True, "live_game": False}
     sequence = 0
 

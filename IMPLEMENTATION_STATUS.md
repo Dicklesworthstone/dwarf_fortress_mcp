@@ -12,9 +12,19 @@ Manager 1.23 cache-bearing development source is being integrated. U proved the
 production-responsibility cache still empty. The normal UI reappointment probe
 did not complete, so its causal repair is not claimed. This successor witnesses
 and updates the cache with distinct wire/custody identity, leaving 1.22 intact.
-Native components report 13 scenarios/308 assertions and four killed mutants,
-with unchanged 1.22 vectors. A target-library-matched SDK build exists. Rust,
-actual 1.23 MCP, live production and full successor qualification remain pending.
+The preceding native component reported 13 scenarios/308 assertions and four
+killed mutants, with unchanged 1.22 vectors; a target-library-matched SDK build
+exists. Clean `e899a442` passed 23 adapter cases and actual modern MCP suites of
+8 dedicated 1.23, 8 CLI 1.23 and 7 legacy cases, using native doubles. Strict
+Clippy found stale test-family references and a hex-parser lint; both are fixed
+forward. Fresh review also found terminal HF-link/history off-by-one limits and
+missing cache append capacity. The newer source reserves append room before
+preparation and observes the complete terminal limits, with focused regressions
+and compiled mutants. Full qualification of this successor and live 1.23
+production remain pending; neither earlier component result transfers silently.
+The corrected native SDK-double run passed 15 scenarios/343 assertions and all
+eight compiled mutants; legacy 1.22 passed 12/270 and its three mutants with
+unchanged vectors. These are component checks, not a new SDK build or game run.
 The development source grants no compatibility or production admission.
 
 Full verification at `57410a1` exposed a missed nested CLI test denominator:

@@ -27,6 +27,9 @@ class ManagerV123InventoryTests(unittest.TestCase):
 
     def test_generation_guard_and_both_standard_gates_are_required(self):
         cases = [
+            ('bridge/dfhack-manager-v1_23/dfmcp_manager_v1_23.cpp', 'hf->entity_links.size()<=ma::MAX_LINKS', 'hf->entity_links.size()<ma::MAX_LINKS'),
+            ('bridge/dfhack-manager-v1_23/dfmcp_manager_v1_23.cpp', 'world->history.events.size()<=ma::MAX_HISTORY', 'world->history.events.size()<ma::MAX_HISTORY'),
+            ('bridge/common/manager_appointment.h', 'minor==22 || role_entries<MAX_TOTAL_ROLE_ENTRIES', 'minor==22 || role_entries<=MAX_TOTAL_ROLE_ENTRIES'),
             ('bridge/common/manager_appointment.h', 'MAX_TOTAL_ROLE_ENTRIES=4096', 'MAX_TOTAL_ROLE_ENTRIES=8192'),
             ('crates/dfmcp-adapter/src/manager_appointment/mod.rs', 'MAX_ROLE_ENTRIES: usize = 256;', 'MAX_ROLE_ENTRIES: usize = 512;'),
             ('bridge/dfhack-manager-v1_23/dfmcp_manager_v1_23.cpp', '"DFMCP_MANAGER_V1_23_TOKEN"', '"DFMCP_MANAGER_TOKEN"'),

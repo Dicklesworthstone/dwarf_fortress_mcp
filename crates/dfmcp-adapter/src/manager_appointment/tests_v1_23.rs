@@ -24,6 +24,95 @@ fn plan23() -> Result<Plan> {
     Plan::new("manager-001", Capture::decode(&vector23("capture")?)?)
 }
 #[test]
+fn manager_v1_23_link_capacity_reserves_one_append_and_retains_terminal() -> Result<()> {
+    let p = plan23()?;
+    for n in [255, 256, 257] {
+        let mut before = p.before.clone();
+        before.links.resize(n, before.links[0].clone());
+        before.raw = before.encode();
+        if n == 257 {
+            assert!(Capture::decode(before.bytes()).is_err());
+        } else {
+            let before = Capture::decode(before.bytes())?;
+            assert_eq!(before.eligible(), n == 255);
+            if n == 255 {
+                let after = before.expected_after()?;
+                assert_eq!(after.links.len(), 256);
+                assert_eq!(Capture::decode(after.bytes())?, after);
+            } else {
+                assert!(Plan::new("no-link-capacity", before).is_err());
+            }
+        }
+    }
+    Ok(())
+}
+#[test]
+fn manager_v1_23_cache_capacity_reserves_one_append() -> Result<()> {
+    let p = plan23()?;
+    for n in [4095, 4096, 4097] {
+        let mut before = p.before.clone();
+        while before.group.assignments.len() < 256 {
+            let mut a = before.group.assignments[0].clone();
+            a.id = 600 + before.group.assignments.len() as i32;
+            before.group.assignments.push(a);
+        }
+        let mut remaining = n;
+        for (i, bucket) in before.group.role_buckets.iter_mut().enumerate() {
+            if i == MANAGE_PRODUCTION {
+                continue;
+            }
+            for a in &before.group.assignments {
+                if remaining == 0 {
+                    break;
+                }
+                bucket.push(a.id);
+                remaining -= 1;
+            }
+        }
+        assert_eq!(remaining, 0);
+        before.raw = before.encode();
+        if n == 4097 {
+            assert!(Capture::decode(before.bytes()).is_err());
+        } else {
+            let before = Capture::decode(before.bytes())?;
+            assert_eq!(before.eligible(), n == 4095);
+            if n == 4095 {
+                let after = before.expected_after()?;
+                assert_eq!(
+                    after.group.role_buckets.iter().map(Vec::len).sum::<usize>(),
+                    4096
+                );
+            } else {
+                assert!(Plan::new("no-cache-capacity", before).is_err());
+            }
+        }
+    }
+    Ok(())
+}
+#[test]
+fn manager_v1_23_history_capacity_retains_the_final_admitted_event() -> Result<()> {
+    let p = plan23()?;
+    for n in [65535, 65536, 65537] {
+        let mut before = p.before.clone();
+        before.history_count = n;
+        before.raw = before.encode();
+        if n == 65537 {
+            assert!(Capture::decode(before.bytes()).is_err());
+        } else {
+            let before = Capture::decode(before.bytes())?;
+            assert_eq!(before.eligible(), n == 65535);
+            if n == 65535 {
+                let after = before.expected_after()?;
+                assert_eq!(after.history_count, 65536);
+                assert_eq!(Capture::decode(after.bytes())?, after);
+            } else {
+                assert!(Plan::new("no-history-capacity", before).is_err());
+            }
+        }
+    }
+    Ok(())
+}
+#[test]
 fn manager_v1_23_native_vectors_require_cache_in_full_transaction() -> Result<()> {
     let p = plan23()?;
     assert_eq!(p.before.protocol, ManagerProtocol::V1_23);

@@ -33,7 +33,7 @@ NATIVE = [
     'tests/native/manager_v1_23/stubs.h', 'tests/fixtures/manager_v1_23_component.json',
     'scripts/test_manager_v1_23_native.py', 'scripts/read_stable_repository_file.py',
 ]
-MUTANTS = ['missing_production_cache', 'empty_event_flag_storage', 'missing_history_link', 'terminal_replay_not_immutable']
+MUTANTS = ['terminal_link_bound_off_by_one', 'missing_link_capacity_before_prepare', 'terminal_history_bound_off_by_one', 'missing_cache_capacity_before_prepare', 'missing_production_cache', 'empty_event_flag_storage', 'missing_history_link', 'terminal_replay_not_immutable']
 
 
 def check(root=ROOT):
@@ -51,7 +51,7 @@ def check(root=ROOT):
         raise ValueError('Manager 1.23 protocol or waist differs')
     if c['status'] != 'implemented_unadmitted_development_only' or c['production_admitted'] is not False or c['runtime_admitted'] is not False or c['production_runner_changed'] is not False:
         raise ValueError('Manager 1.23 cannot grant admission')
-    if c['native_component_expected'] != {'scenarios': 13, 'assertions': 308, 'ignored': 0, 'sdk_doubles_only': True, 'live_game': False}:
+    if c['native_component_expected'] != {'scenarios': 15, 'assertions': 343, 'ignored': 0, 'sdk_doubles_only': True, 'live_game': False}:
         raise ValueError('Manager 1.23 component denominator differs')
     if hashes['tests/fixtures/manager_v1_23_component.json'] != c['component_vector_file_sha256']:
         raise ValueError('Manager 1.23 retained vectors differ')
@@ -93,6 +93,17 @@ def check(root=ROOT):
         raise ValueError('Manager 1.23 cache semantics differ')
     cpp = texts['bridge/common/manager_appointment.h']
     rust = texts['crates/dfmcp-adapter/src/manager_appointment/mod.rs']
+    append_bounds = {'selected_hf_links_before_max': 255, 'selected_hf_links_after_max': 256,
+        'role_entries_before_max': 4095, 'role_entries_after_max': 4096,
+        'history_events_before_max': 65535, 'history_events_after_max': 65536}
+    if any(c['transaction'].get(name) != value for name, value in append_bounds.items()):
+        raise ValueError('Manager 1.23 append capacity semantics differ')
+    for required in ('minor==22 || links.size()<MAX_LINKS', 'minor==22 || role_entries<MAX_TOTAL_ROLE_ENTRIES'):
+        if required not in cpp:
+            raise ValueError('Manager 1.23 append capacity guard missing')
+    for required in ('hf->entity_links.size()<=ma::MAX_LINKS', 'world->history.events.size()<=ma::MAX_HISTORY'):
+        if required not in native:
+            raise ValueError('Manager 1.23 terminal collection readback bound differs')
     for name, value in [('MAX_ROLE_BUCKETS', 128), ('MAX_ROLE_ENTRIES', 256),
                         ('MAX_TOTAL_ROLE_ENTRIES', 4096), ('MANAGE_PRODUCTION', 4)]:
         if not re.search(r'\b'+name+r'\s*=\s*'+str(value)+r'\b', cpp):

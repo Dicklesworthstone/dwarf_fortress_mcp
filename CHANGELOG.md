@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-11-03 — Manager append capacity and actual MCP follow-up
+
+- Reserve HF-link/cache capacity before Manager 1.23 preparation and accept the
+  last valid HF-link/history append during native terminal observation. Preserve
+  legacy 1.22 native behavior; add boundary regressions and compiled mutants.
+- Native SDK doubles pass 15 scenarios/343 assertions and eight compiled mutants;
+  legacy passes 12/270 and three mutants with unchanged vectors.
+- Record clean e899 focused execution: 23 adapter cases and actual dedicated/CLI
+  1.23 suites of eight each plus seven legacy cases, using native doubles.
+- Fix the test-only undeclared JSON import, stale session-family test constant
+  and strict-Clippy hex parser diagnostic. Full current-source checks and real
+  1.23 bed production remain pending.
+
 ## 2026-11-02 — Full qualification of the preceding repairs
 
 - Clean `82f9a6c` passes both required scripts, all 43 gates and 5227 tests

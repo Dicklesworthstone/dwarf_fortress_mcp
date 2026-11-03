@@ -170,7 +170,7 @@ ma::Capture capture(const ma::Selection &selected,const Work &work) {
     auto *nemesis=Units::getNemesis(unit);
     out.identity=unit->hist_figure_id==hf->id && hf->unit_id==unit->id && nemesis && nemesis->figure==hf && unit->civ_id==civ->id;
     out.active=Units::isActive(unit);out.citizen=Units::isCitizen(unit);out.adult=Units::isAdult(unit);out.sane=Units::isSane(unit);
-    ma::require(hf->entity_links.size()<ma::MAX_LINKS,5);bool group_member=false,civ_member=false;
+    ma::require(hf->entity_links.size()<=ma::MAX_LINKS,5);bool group_member=false,civ_member=false;
     for(auto *link:hf->entity_links){
         work.check();ma::require(link,5);ma::Link l;l.type=static_cast<std::int32_t>(link->getType());l.entity=link->entity_id;l.entity_cache=link->entity_vector_idx;l.strength=link->link_strength;
         if(auto *p=strict_virtual_cast<df::histfig_entity_link_positionst>(link)){l.assignment=p->assignment_id;l.assignment_cache=p->assignment_vector_idx;l.start_year=p->start_year;}
@@ -200,7 +200,7 @@ ma::Capture capture(const ma::Selection &selected,const Work &work) {
     out.expedition_leader=leaders==1 && Units::getUnitByNobleRole("EXPEDITION_LEADER")==unit;
     out.dual_getters=(target->figure==-1 && !lookup && managers==0 && out.manager_links==0)
         || (target->figure==hf->id && lookup==unit && managers==1 && out.manager_links==1);
-    ma::require(world->history.events.size()<ma::MAX_HISTORY,5);out.history_digest=ma::hash("dfmcp-manager-history-projection/1","");std::int32_t previous=-1;
+    ma::require(world->history.events.size()<=ma::MAX_HISTORY,5);out.history_digest=ma::hash("dfmcp-manager-history-projection/1","");std::int32_t previous=-1;
     for(auto *e:world->history.events){work.check();auto row=event_view(e);ma::require(row.id>previous && row.id<*df::global::hist_event_next_id,5);previous=row.id;
         out.history_digest=ma::extend_history(out.history_digest,row);out.last_event=row;}
     out.history_count=static_cast<std::uint32_t>(world->history.events.size());work.check();return out;

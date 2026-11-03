@@ -184,6 +184,35 @@ void responsibility_cache_guards_and_partial_reconciliation(){
         CHECK(f.commit().phase==ma::Phase::Indeterminate);CHECK(f.appointment.histfig==361 && f.world.history.events.size()==3);
         CHECK(f.commit().phase==ma::Phase::Indeterminate);CHECK(f.world.history.events.size()==3);}
 }
+void link_capacity_is_reserved_before_prepare_and_terminal_is_observable(){
+    for(unsigned count:{255u,256u,257u}){Fixture f;
+        while(f.figure.entity_links.size()<count){auto*l=new df::histfig_entity_link_memberst();l->entity_id=12;l->entity_vector_idx=0;l->link_strength=100;f.figure.entity_links.push_back(l);}
+        if(count==255){f.prepare();const auto&r=f.commit();CHECK(r.phase==ma::Phase::Placed);CHECK(r.after && r.after->links.size()==256);CHECK(f.world.history.events.size()==3);}
+        else if(count==256){auto r=f.read();CHECK(r.accepted);f.request.mask=31;f.request.witness=dfmcp_snapshot::sha256(r.observation);f.request.plan=ma::plan_digest({256,361},f.request.witness);PrepareManager(f.output,&f.request,&r);CHECK(!r.accepted);CHECK(f.appointment.histfig==-1 && f.world.history.events.size()==2);CHECK(mock::allocations==0);}
+        else {CHECK(!f.read().accepted);CHECK(f.appointment.histfig==-1 && mock::allocations==0);}
+    }
+}
+void cache_and_history_append_bounds_are_observable(){
+    {Fixture f;const auto original=f.prepare().before;
+        for(unsigned count:{4095u,4096u,4097u}){auto before=original;
+            while(before.group.assignments.size()<256){auto a=before.group.assignments.front();a.id=600+static_cast<std::int32_t>(before.group.assignments.size());before.group.assignments.push_back(a);}
+            unsigned remaining=count;
+            for(std::size_t i=0;i<before.group.role_buckets.size() && remaining;++i){if(i==ma::MANAGE_PRODUCTION)continue;
+                for(const auto&a:before.group.assignments){if(!remaining)break;before.group.role_buckets[i].push_back(a.id);--remaining;}}
+            if(count==4095){CHECK(before.eligible());CHECK(!before.expected_after().encode().empty());}
+            else if(count==4096){CHECK(!before.eligible());}
+            else {bool rejected=false;try{(void)before.encode();}catch(const dfmcp_workshop::Failure&){rejected=true;}CHECK(rejected);}
+        }
+    }
+    for(unsigned count:{65535u,65536u,65537u}){Fixture f;
+        for(auto*e:f.world.history.events){delete e;}f.world.history.events.clear();
+        for(unsigned i=0;i<count;++i){auto*e=new df::history_event();e->id=static_cast<std::int32_t>(i);e->year=1;f.world.history.events.push_back(e);}
+        mock::next_event=static_cast<std::int32_t>(count);
+        if(count==65535){f.prepare();const auto&r=f.commit();CHECK(r.phase==ma::Phase::Placed);CHECK(r.after && r.after->history_count==65536);CHECK(f.world.history.events.size()==65536);CHECK(mock::next_event==65536);}
+        else if(count==65536){auto r=f.read();CHECK(r.accepted);f.request.mask=31;f.request.witness=dfmcp_snapshot::sha256(r.observation);f.request.plan=ma::plan_digest({256,361},f.request.witness);PrepareManager(f.output,&f.request,&r);CHECK(!r.accepted);CHECK(f.world.history.events.size()==65536 && f.appointment.histfig==-1);CHECK(mock::allocations==0);}
+        else {CHECK(!f.read().accepted);}
+    }
+}
 std::string hex(const std::string&s){static const char*d="0123456789abcdef";std::string out;for(unsigned char c:s){out+=d[c>>4];out+=d[c&15];}return out;}
 } // namespace
 int main(int argc,char**argv){
@@ -191,6 +220,8 @@ int main(int argc,char**argv){
         if(argc==2 && std::string(argv[1])=="--vectors"){Fixture f;const auto&r=f.prepare();const auto capture=r.before.encode(),prepared=r.encode(),plan=r.plan,token=r.token;const auto assigned=f.commit().encode();std::cout<<"{\"capture\":\""<<hex(capture)<<"\",\"prepared\":\""<<hex(prepared)<<"\",\"plan\":\""<<hex(plan)<<"\",\"token\":\""<<hex(token)<<"\",\"assigned\":\""<<hex(assigned)<<"\"}\n";return 0;}
         closed_rpc_and_authority_gates();full_transaction_distinct_ids_and_indices();stale_identity_source_epoch_refuse();occupied_nonleader_and_membership_refuse();active_and_pending_ui_refuse();allocation_and_budget_fail_before_world_writes();repeated_key_cancel_and_lost_reply_no_extra_event();failed_readback_retains_uncertainty_and_recovers_once();stale_history_flags_links_and_position_definition_refuse();encoding_bounds_and_source_domains();
         sdk_event_flag_storage_and_assignment_bytes_are_preserved();inactive_temporary_or_nonordinary_assignment_refuses();responsibility_cache_guards_and_partial_reconciliation();
-        std::cout<<"{\"scenarios\":13,\"assertions\":"<<assertions<<",\"ignored\":0,\"sdk_doubles_only\":true,\"live_game\":false}\n";return 0;
+        link_capacity_is_reserved_before_prepare_and_terminal_is_observable();
+        cache_and_history_append_bounds_are_observable();
+        std::cout<<"{\"scenarios\":15,\"assertions\":"<<assertions<<",\"ignored\":0,\"sdk_doubles_only\":true,\"live_game\":false}\n";return 0;
     }catch(const std::exception&e){std::cerr<<e.what()<<'\n';return 1;}
 }

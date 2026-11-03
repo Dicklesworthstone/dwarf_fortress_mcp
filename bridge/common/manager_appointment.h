@@ -142,7 +142,11 @@ struct Capture {
     }
     bool eligible() const {
         (void)encode();const auto *a=target();
+        std::size_t role_entries=0;
+        if(minor==23)for(const auto *e:{&group,&civ})for(const auto &bucket:e->role_buckets)role_entries+=bucket.size();
         return paused && active && citizen && adult && sane && identity && member && role_eligible && expedition_leader && ui_quiescent
+            && (minor==22 || links.size()<MAX_LINKS)
+            && (minor==22 || role_entries<MAX_TOTAL_ROLE_ENTRIES)
             && (minor==22 || (group.role_buckets.size()>MANAGE_PRODUCTION && civ.role_buckets.size()>MANAGE_PRODUCTION
                 && group.role_buckets[MANAGE_PRODUCTION].empty() && civ.role_buckets[MANAGE_PRODUCTION].empty()))
             && dual_getters && lookup_unit==-1 && manager_links==0 && group.id!=civ.id

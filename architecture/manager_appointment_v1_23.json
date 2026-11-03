@@ -61,7 +61,13 @@
     "preallocate_before_world_writes": true,
     "double_capture_expected_poststate": true,
     "writer_calls_per_original_key": 1,
-    "partial_failure": "indeterminate_no_retry"
+    "partial_failure": "indeterminate_no_retry",
+    "selected_hf_links_before_max": 255,
+    "selected_hf_links_after_max": 256,
+    "role_entries_before_max": 4095,
+    "role_entries_after_max": 4096,
+    "history_events_before_max": 65535,
+    "history_events_after_max": 65536
   },
   "magic_suffix": "023",
   "custody_filenames": [
@@ -80,8 +86,8 @@
     "manager-v1-23"
   ],
   "native_component_expected": {
-    "scenarios": 13,
-    "assertions": 308,
+    "scenarios": 15,
+    "assertions": 343,
     "ignored": 0,
     "sdk_doubles_only": true,
     "live_game": false
@@ -167,6 +173,10 @@
     "scripts/read_stable_repository_file.py"
   ],
   "native_mutants": [
+    "terminal_link_bound_off_by_one",
+    "missing_link_capacity_before_prepare",
+    "terminal_history_bound_off_by_one",
+    "missing_cache_capacity_before_prepare",
     "missing_production_cache",
     "empty_event_flag_storage",
     "missing_history_link",

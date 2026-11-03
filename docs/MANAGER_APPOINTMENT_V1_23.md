@@ -44,6 +44,13 @@ precedes the assignment/HF/history/cache transaction under CoreSuspender.
 Two fresh captures and exact expected-poststate comparison precede success.
 Post-writer failure stays indeterminate; same-key replay cannot invoke a writer.
 
+Preparation reserves room for the new HF link, responsibility-cache entry and
+history event: at most 255 HF links, 4095 total cache entries and 65535 history
+events before the write. Terminal observation accepts the corresponding maxima
+of 256, 4096 and 65536. The legacy 1.22 native limits remain unchanged. Boundary
+regressions exercise the last eligible append, full refusal before writing and
+oversized observations; compiled mutants restore the faulty limits.
+
 Custody filenames are `manager-appointment-v1-23.journal` and
 `manager-appointment-v1-23.ack`; old files cannot be adopted or interpreted as
 new preparation. Review, 60-second shrinking deadlines, one-use local permission,
@@ -52,7 +59,11 @@ write-ahead independent ACK, reconciliation and offline retention remain require
 1.23 terminal record. Legacy 1.22 exposes no observed role-cache rows and cannot
 prove this predicate. Empty legacy data must not be interpreted as absence.
 
-Native SDK-double checks and a matching-SDK development build exist; Rust, actual
-1.23 MCP, live production, full current-source qualification and admission remain
-pending on this early integrated cut. SDK-double output is not game evidence.
+Native SDK-double checks and a matching-SDK development build exist for the
+preceding cache source. Clean `e899a442` passed 23 adapter cases and actual modern
+MCP suites of 8 dedicated 1.23, 8 CLI 1.23 and 7 legacy cases. Native peers in those
+suites are doubles. Its test-only import error and the later strict-Clippy test
+diagnostics were fixed forward. These results do not qualify the newer append
+boundary source. Live production, full current-source qualification and admission
+remain pending. SDK-double output is not game evidence.
 The registry and production protocol map remain unchanged.
