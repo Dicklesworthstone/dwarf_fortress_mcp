@@ -14,6 +14,16 @@ long-lived civilization rather than a keyboard-and-screen toy.**
 > [`IMPLEMENTATION_STATUS.md`](IMPLEMENTATION_STATUS.md) before interpreting target architecture as
 > deployed behavior.
 
+For gameplay development on Linux, the standard CLI also offers
+[`serve-gameplay-dev labor-order`](docs/COMBINED_PRODUCTION_MCP.md). Its public
+observation exposes advisory citizen/labor choices; one original plan can apply
+a labor assignment and insert a dependent finite furniture order. A real
+Terra/NTM trial exercised that sequence from public choices and recovered both
+receipts offline. It is unadmitted development behavior: production, goal
+completion and broad fortress competence remain unproved. Exact evidence and
+the still-open restart-timeout and qualification issues are recorded in
+[`IMPLEMENTATION_STATUS.md`](IMPLEMENTATION_STATUS.md).
+
 The motivating problem is not merely “let a model press keys.” Dwarf Fortress is an unusually rich
 long-horizon environment, but a naive automation layer would expose incomplete observations,
 command acknowledgements mistaken for success, unsafe retries, version drift, unbounded output,

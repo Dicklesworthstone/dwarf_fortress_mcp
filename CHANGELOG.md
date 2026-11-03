@@ -1,5 +1,24 @@
 # Changelog
 
+## 2026-11-03 — Real control chosen through public workforce observations
+
+- Exercise exact `a515efb` / executable `0e514de8…` with fresh Terra medium
+  under NTM: choose MINE/citizen 252 through MCP, apply the assignment and its
+  dependent finite bed-order insertion, and recover both receipts offline.
+  Root replays all 15 exchanges, recomputes all choices against complete native
+  before data, verifies both journals, unchanged seven-file recovery and fresh
+  process/plugin/save cleanup. No ticks, produced bed, goal proof or admission.
+- Retain two actor render-before-scan departures and the incomplete loading
+  capture. The malformed-request negative is generic, not field-specific.
+- Pass scoped warning-denied Clippy, 23 Linux cases and a separate eleven-case
+  public stdio run. Preserve the subsequent Cargo wrapper's restart timeout;
+  a passing traced diagnostic does not explain or erase it. Nonauthoring raw
+  review independently agrees with the bounded live result; full qualification
+  remains pending, with no task closure.
+- Plant a cached-observation implementation in a disposable build: the positive
+  control case still passes and both new stale-source/floor cases fail with
+  zero setup errors or skips. The candidate source is untouched.
+
 ## 2026-11-03 — Observed workforce choices and real combined control
 
 - Replay a real Terra/NTM combined development run: one MINE membership/labor

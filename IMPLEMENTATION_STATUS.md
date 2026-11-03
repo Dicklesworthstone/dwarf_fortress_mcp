@@ -1,5 +1,74 @@
 # Implementation Status
 
+## Latest combined development trial: public choices and two real effects
+
+Exact source `a515efb44ed64097a4fc080100aa471e12698549`, debug executable
+SHA-256 `0e514de89a82bf18c07d561836e94d9725df6ec85001fb43ba814d0a55e3560a`,
+was exercised by a fresh GPT-6.1 Terra medium session under NTM on real DF
+v0.53.16 Linux64 ITCH / DFHack 53.16-r3. The operator's independent before
+measurements were withheld from the player. Terra selected MINE and canonical
+citizen 252 from `observation.workforce_choices`, then confirmed the two steps
+of one original labor-and-finite-bed-order plan. Both returned Applied.
+
+Root separately replayed all 15 modern MCP exchanges (12 online, three offline),
+recomputed the complete public option projection and its witness from the
+independent seven-citizen, 94-labor-column, eleven-detail capture, and verified
+both native journals and original keys. Exactly one MINE bit and its intended
+membership changed; other captured native fields were identical apart from the
+mutation sequence. The queue gained order 0, ConstructBed, total/remaining 1/1,
+status 0. Review-to-Commit intervals were 2.194651036 and 4.306740033 seconds.
+The planted corrupted native receipt was rejected by the separate replay.
+
+Offline reopening retained both Applied receipts, disabled effect controls and
+preserved all seven custody files, including exact 0600 modes. Root verified
+all 207 export members (208 physical files, 16,550,424 member bytes) against
+manifest SHA-256
+`573b065922fc275c4e049973d710f60f917c614913f1cf38de5c2008ebc9da44`,
+and independently scanned all three actual private values before copying: zero
+matches. Fresh host checks confirmed the game, player and both MCP processes
+and owned groups absent, port 5000 closed, three plugins restored to their
+original absence, and both 30-file save sets matching the immutable baseline.
+The game was stopped before offline reopening; its bounded drain included
+SIGTERM/SIGKILL. Both MCP children reaped with status 0 and no escalation.
+
+This remains **unadmitted development execution**. No game ticks advanced and no
+produced bed or original-goal/current-state proof was established. Two player
+diagnostic renderings were printed before the newly formatted bytes were
+separately scanned. Later complete scanning found no private values; those
+ordering departures remain failures. One early roster attempt during loading
+was refused and retained. The malformed Plan omitted required fields, so it
+proves a generic request refusal, not isolated unknown-field rejection.
+A nonauthoring NTM Codex reviewer independently checked the raw manifest,
+exchanges, four offered choices, archive digest, both native journals, native
+diff, custody and cleanup, reaching the same bounded conclusion. Its initial
+archive-header assertion used a wrong layout assumption; it corrected that
+analysis against the actual digest suffix/object checksum. This agreement is
+not qualification. Full exact-source qualification remains pending.
+
+On the same frozen source, warning-denied scoped Linux Clippy and 23 focused
+Rust cases pass (zero failed/ignored, 2,867 filtered). Root's separate actual
+eleven-case public stdio run passes all eleven, with no failures/errors/skips.
+The subsequent Cargo CLI wrapper **failed**: its restart/reconcile-open case
+exceeded the 15-second public-client wait and the peer recorded a timeout.
+A successful open reply was retained during teardown. All 23 native requests
+have replies; the final native read was recorded about 17.496 seconds after
+the public request. A single unchanged restart rerun under syscall tracing
+passes in 5.128 seconds, without proving the original cause or replacing the
+failed wrapper. No timeout, assertion or native preparation lifetime was
+relaxed. The exact-source Mac diagnostic passes 22 portable cases with an
+older dated nightly and ten existing platform warnings; it is not full
+latest-nightly qualification. `.4.1`, `.4.2` and their broader parents remain
+open. Earlier qualification and live results below do not transfer to this
+source or executable, and this trial does not confer production admission.
+
+A separate disposable source variant makes a second pre-plan Observe return
+the cached view. It builds successfully and still passes the positive public
+labor/order case, but the unchanged source-drift and consumed-floor cases both
+fail at their expected refusal assertions (three cases, two failures, zero
+errors/skips). This checks the new tests' sensitivity to omitted fresh reads;
+the mutant executable is not a game or qualification artifact. Its earlier
+driver-path preflight failure and command-guard refusal are retained separately.
+
 ## Combined real-game development experiment and remaining qualification
 
 Actual GPT-6.1 Terra medium under NTM exercised the public combined eleven-tool
