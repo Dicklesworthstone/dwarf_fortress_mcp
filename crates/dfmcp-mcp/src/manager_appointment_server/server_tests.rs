@@ -1,5 +1,6 @@
 //! Packet production, including the actual output-overflow branch.
 use super::*;
+const FAMILY: u128 = 22u128 << 57;
 fn spine(value: &Value) {
     let contract: Value = serde_json::from_str(include_str!(
         "../../../../architecture/agent_turn_contract.json"

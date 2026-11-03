@@ -9,7 +9,9 @@ fn vector23(name: &str) -> Result<Vec<u8>> {
         .ok_or_else(|| error(ErrorCode::AdapterRejected, "missing Manager/1.23 fixture"))?;
     require(text.len().is_multiple_of(2), "Manager/1.23 fixture hex")?;
     text.as_bytes()
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| {
             let pair = std::str::from_utf8(pair)
                 .map_err(|_| error(ErrorCode::AdapterRejected, "fixture UTF-8"))?;
