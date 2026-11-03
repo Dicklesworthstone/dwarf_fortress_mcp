@@ -80,6 +80,38 @@ fn machine_host_contract_preserves_bounded_development_scope() -> Result<()> {
         json!(["original.plan", "original.citizens", "execution.journal"])
     );
     assert_eq!(host["tool_names"].as_array().map(Vec::len), Some(11));
+    let choices = &host["workforce_choices"];
+    assert_eq!(choices["schema"], "dfmcp.combined-workforce-choices/1");
+    assert_eq!(choices["options_max"], super::choices::MAX_CHOICES);
+    assert_eq!(
+        choices["selected_citizens_max"],
+        dfmcp_adapter::workforce_control::MAX_UNITS
+    );
+    for flag in [
+        "source_tick_pause_and_exact_selection_checked",
+        "consumed_observation_tick_floor_retained_on_error",
+        "source_witness_and_coverage_omissions_explicit",
+        "query_and_observe_required",
+        "native_preparation_and_commit_revalidate",
+    ] {
+        assert_eq!(choices[flag], true, "{flag}");
+    }
+    for flag in [
+        "mutating_precondition_evidence",
+        "mutation_authority",
+        "retained_after_original_plan",
+        "restored_by_recovery",
+    ] {
+        assert_eq!(choices[flag], false, "{flag}");
+    }
+    let paths = host["source_paths"]
+        .as_array()
+        .ok_or_else(|| invalid("missing source inventory"))?;
+    for file in ["choices.rs", "choices_tests.rs"] {
+        assert!(paths.contains(&json!(format!(
+            "crates/dfmcp-mcp/src/live_production_runtime/{file}"
+        ))));
+    }
     for field in [
         "recovery_restores_commit_permit",
         "wait_dispatches_or_advances_time",

@@ -116,6 +116,7 @@ class Peer:
         self.order_plan = None
         self.workforce_applied = False
         self.workforce_generation = WGEN
+        self.workforce_tick = TICK
         self.order_created = False
         self.drop_workforce_reply = False
         self.acceptor = threading.Thread(target=self.accept, name='combined-peer')
@@ -172,6 +173,7 @@ class Peer:
             if op == 'ObserveWorkforce':
                 capture = bytearray(workforce_capture())
                 capture[8:16] = self.workforce_generation.to_bytes(8, 'big')
+                capture[24:32] = self.workforce_tick.to_bytes(8, 'big')
                 response += blob(9, bytes(capture))
             if op == 'PrepareAssignment':
                 self.workforce_plan = wf.make_plan(req[5].decode(), req[6], bool(req[7]), workforce_capture())
@@ -313,11 +315,21 @@ class CombinedProduction(unittest.TestCase):
         self.assertEqual(opened['agent_turn']['recommendations'][0]['arguments']['session_id'], sid)
         observed = self.client.execute_next(opened)
         self.assertTrue(observed['ok'], observed)
-        request = {'expected_observation': observed['observation']['seal'], 'units': ['43'],
-                   'labor': 'MINE', 'enabled': True, 'recipe': 'wooden_bed', 'amount': 1,
+        choices = observed['observation']['workforce_choices']
+        self.assertTrue(choices['native_observed'])
+        self.assertFalse(choices['mutation_authority'])
+        self.assertFalse(choices['mutation_precondition_evidence'])
+        self.assertTrue(choices['revalidation_required'])
+        self.assertEqual(choices['canonical_observation_seal'], observed['observation']['seal'])
+        offers = [(option['labor'], unit) for option in choices['options'] for unit in option['enable_candidates']]
+        self.assertEqual(offers, [('MINE', '43')])
+        labor, unit = offers[0]
+        request = {'expected_observation': observed['observation']['seal'], 'units': [unit],
+                   'labor': labor, 'enabled': True, 'recipe': 'wooden_bed', 'amount': 1,
                    'deadline_tick': 300, 'poll_interval_ticks': 5, 'stable_samples': 2}
         planned = self.client.tool('plan', session_id=sid, request=json.dumps(request))
         self.assertTrue(planned['ok'], planned)
+        self.assertIsNone(planned['observation']['workforce_choices'])
         original = planned['original_plan']
         self.assertEqual(len(original['steps']), 2)
         self.assertEqual(original['steps'][1]['depends_on'], [0])
@@ -386,6 +398,7 @@ class CombinedProduction(unittest.TestCase):
         self.assertTrue(offline['ok'], offline)
         self.assertTrue(offline['frontier']['all_applied'])
         self.assertFalse(offline['original_goal_proven'])
+        self.assertIsNone(offline['observation']['workforce_choices'])
         self.assertEqual(calls, self.peer.calls)
         self.assertEqual(before, custody_files(self.directory))
 
@@ -566,6 +579,56 @@ class CombinedProduction(unittest.TestCase):
         self.assertFalse(observed['ok'], observed)
         self.assertEqual(self.peer.calls, calls_after_open)
 
+    def test_observation_source_drift_withdraws_choices_without_setter(self):
+        opened = self.client.open(max_wall_millis=60000)
+        self.assertTrue(opened['ok'], opened)
+        sid = opened['agent_turn']['session_id']
+        observed = self.client.tool('observe', session_id=sid)
+        self.assertTrue(observed['ok'], observed)
+        self.assertTrue(observed['observation']['workforce_choices']['options'])
+        self.peer.workforce_generation += 1
+        rejected = self.client.tool('observe', session_id=sid)
+        self.assertFalse(rejected['ok'], rejected)
+        queried = self.client.tool('query', session_id=sid)
+        self.assertTrue(queried['ok'], queried)
+        self.assertIsNone(queried['observation'])
+        self.assertFalse(self.peer.workforce_applied)
+        self.assertFalse(self.peer.order_created)
+        self.assertNotIn(('dfmcp_workforce_v1_17', 'PrepareAssignment'), self.peer.calls)
+        self.assertNotIn(('dfmcp_workforce_v1_17', 'CommitAssignment'), self.peer.calls)
+        self.assertNotIn(('dfmcp_work_orders_v1_10', 'CommitOrder'), self.peer.calls)
+
+    def test_cross_source_tick_floor_survives_failed_observation(self):
+        opened = self.client.open(max_wall_millis=60000)
+        self.assertTrue(opened['ok'], opened)
+        sid = opened['agent_turn']['session_id']
+        observed = self.client.tool('observe', session_id=sid)
+        self.assertTrue(observed['ok'], observed)
+        self.assertTrue(observed['observation']['workforce_choices']['options'])
+        self.peer.workforce_tick = TICK + 1
+        mismatched = self.client.tool('observe', session_id=sid)
+        self.assertFalse(mismatched['ok'], mismatched)
+        self.assertEqual(mismatched['retained_reference']['observation_tick_floor'], TICK + 1)
+        queried = self.client.tool('query', session_id=sid)
+        self.assertTrue(queried['ok'], queried)
+        self.assertEqual(queried['observation_tick_floor'], TICK + 1)
+        self.assertIsNone(queried['observation'])
+        self.peer.workforce_tick = TICK
+        workforce_calls = [call for call in self.peer.calls if call[0] == 'dfmcp_workforce_v1_17']
+        rolled_back = self.client.tool('observe', session_id=sid)
+        self.assertFalse(rolled_back['ok'], rolled_back)
+        self.assertEqual(rolled_back['retained_reference']['observation_tick_floor'], TICK + 1)
+        self.assertEqual(workforce_calls, [call for call in self.peer.calls if call[0] == 'dfmcp_workforce_v1_17'])
+        queried = self.client.tool('query', session_id=sid)
+        self.assertTrue(queried['ok'], queried)
+        self.assertEqual(queried['observation_tick_floor'], TICK + 1)
+        self.assertIsNone(queried['observation'])
+        for method in ('PrepareAssignment', 'CommitAssignment'):
+            self.assertNotIn(('dfmcp_workforce_v1_17', method), self.peer.calls)
+        self.assertNotIn(('dfmcp_work_orders_v1_10', 'CommitOrder'), self.peer.calls)
+        self.assertFalse(self.peer.workforce_applied)
+        self.assertFalse(self.peer.order_created)
+
 
 def main():
     global LOGS
@@ -581,7 +644,7 @@ def main():
     print(json.dumps({'schema': 'dfmcp.combined-production-stdio/1', 'tests': result.testsRun,
         'failed': len(result.failures), 'errors': len(result.errors), 'skipped': len(result.skipped),
         'actual_modern_stdio': True, 'loopback_peers_are_doubles': True, 'live_game': False}))
-    raise SystemExit(0 if result.wasSuccessful() and result.testsRun == 9 and not result.skipped else 1)
+    raise SystemExit(0 if result.wasSuccessful() and result.testsRun == 11 and not result.skipped else 1)
 
 
 if __name__ == '__main__': main()

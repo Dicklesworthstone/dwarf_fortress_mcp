@@ -27,6 +27,13 @@ fn interval() -> u64 {
 fn samples() -> u32 {
     1
 }
+pub(crate) fn valid_labor_key(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 64
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_')
+}
 impl Request {
     pub fn parse(raw: &str) -> Result<Self> {
         if raw.len() > 4096 {
@@ -68,12 +75,7 @@ impl Request {
     pub fn validate(&self) -> Result<()> {
         self.observation()?;
         self.unit_ids()?;
-        if self.labor.is_empty()
-            || self.labor.len() > 64
-            || !self
-                .labor
-                .bytes()
-                .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_')
+        if !valid_labor_key(&self.labor)
             || self.poll_interval_ticks == 0
             || self.poll_interval_ticks > MAX_DEFAULT_OBLIGATION_TICKS
             || !(1..=64).contains(&self.stable_samples)

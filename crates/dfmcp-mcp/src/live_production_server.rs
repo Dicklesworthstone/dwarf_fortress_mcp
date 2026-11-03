@@ -47,6 +47,10 @@ fn merge_recovery(old: &mut Option<Value>, latest: &Value) {
     if !latest["recovery"].is_null() {
         retained["recovery"] = latest["recovery"].clone();
     }
+    if let Some(floor) = latest["observation_tick_floor"].as_u64() {
+        retained["observation_tick_floor"] =
+            json!(floor.max(retained["observation_tick_floor"].as_u64().unwrap_or(0)));
+    }
     retained["review"] = Value::Null;
     if retained["frontier"].is_object() {
         retained["frontier"]["review"] = Value::Null;
@@ -482,7 +486,7 @@ pub fn fortress_open_session(
     })();
     result.unwrap_or_else(|cause| unbound("fortress.open_session", &cause))
 }
-#[tool(description = "Observe the exact paused canonical citizen source; no clock advance.")]
+#[tool(description = "Observe paused canonical citizens and source-pinned advisory labor choices; no clock advance.")]
 pub fn fortress_observe(session_id: String) -> String {
     with_session(session_id, "fortress.observe", None, || Ok(Action::Observe))
 }
@@ -621,14 +625,18 @@ mod tests {
 
     #[test]
     fn failed_publication_keeps_latest_floor_and_withdraws_old_review() {
-        let mut retained = Some(json!({"recovery":{"frontier":{"authority_tick_floor":3}},
+        let mut retained = Some(
+            json!({"observation_tick_floor":3,"recovery":{"frontier":{"authority_tick_floor":3}},
             "frontier":{"entries":[{"phase":"dispatch_started"}],"review":{"paired_seal":"old"}},
-            "review":{"paired_seal":"old"}}));
+            "review":{"paired_seal":"old"}}),
+        );
         merge_recovery(
             &mut retained,
-            &json!({"recovery":{"frontier":{"authority_tick_floor":8}}}),
+            &json!({"observation_tick_floor":8,"recovery":{"frontier":{"authority_tick_floor":8}}}),
         );
+        merge_recovery(&mut retained, &json!({"observation_tick_floor":7}));
         let value = retained.expect("retained test value");
+        assert_eq!(value["observation_tick_floor"], 8);
         assert_eq!(value["recovery"]["frontier"]["authority_tick_floor"], 8);
         assert_eq!(value["frontier"]["entries"][0]["phase"], "dispatch_started");
         assert!(value["frontier"]["review"].is_null());

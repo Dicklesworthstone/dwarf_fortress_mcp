@@ -63,6 +63,7 @@ retain the frozen eleven-tool waist; this profile's wire names are underscores.
 1. Open `mode="control"`. Offline and Reconcile modes do not gain write authority.
 2. Observe the paused canonical citizen roster. Retain its `observation.seal`
    and canonical citizen `entity_id` values; native unit IDs are not substitutes.
+   Current source also returns `observation.workforce_choices`, described below.
 3. Plan a closed JSON request containing `expected_observation`, `units`,
    `labor`, `enabled`, `recipe`, `amount` and `deadline_tick`. Optional
    `poll_interval_ticks` and `stable_samples` default to 10 and 1. Select
@@ -87,10 +88,44 @@ a proven preparation; it does not undo an Applied effect. `scope="session"`
 releases local ownership while preserving custody and makes no native
 cancellation claim. Checkpoint and Restore return explicit capability refusals.
 
-The current observation does not expose native work-detail and labor options
-before planning. Selecting a valid labor therefore still requires separate
-operator knowledge; bead `.4.2` tracks this missing agent-facing observation.
-Do not count a read-only operator scout as the agent discovering a valid intent.
+The newer `.4.2` source exposes pre-plan advisory workforce choices; its current
+test and live evidence remains explicit in `IMPLEMENTATION_STATUS.md`. BB's
+earlier real-game trial used a separate operator scout. That scout does not
+count as the MCP agent discovering a valid intent.
+
+Before an original plan exists, Observe reads workforce/1.17 for the first
+32 canonical citizens in numeric order. This additionally needs the operator's
+workforce read credential. It checks the same paused tick, world, site, source
+generation and exact selected native identities against the canonical capsule.
+`workforce_choices` carries its canonical anchor/seal, native capture witness,
+source version/generation/sequence, automatic-professions state, labor schema,
+selected citizen identity/eligibility and bounded `options`.
+
+Each option identifies a labor and observed single-labor selected-only detail,
+current `member_ids` and `labor_enabled_ids`, and advisory `enable_candidates`
+and `disable_candidates`. Copy a canonical ID from the desired candidate list
+to the original request's `units`, and the option's `labor` to its `labor` field.
+Only eligible citizens needing the corresponding membership/labor change are
+suggested. Ambiguous and multi-labor details are omitted; disabling is omitted
+when another detail can keep granting that labor. Automatic professions must be
+enabled. At most eight options appear, ordered by labor key. Coverage distinguishes
+the complete native capture from its partial public projection and states
+unrepresented details and omitted citizens/options. Empty results never establish absence outside the
+covered selection. With no citizens, no native request occurs and the native
+work-detail domain remains unknown.
+
+These are observed attachments and derived candidates, not canonical mutation
+preconditions or authority. Other recomputed labor effects remain unknown.
+The original compiler still binds canonical identity, and existing native
+preparation and commit independently re-observe and validate their full witness.
+The citizen observation seal remains a citizen identity seal; the additional
+choice witness separately binds that seal and native capture. Choices are
+process-local, disappear after original planning, and are not restored from
+historical custody. Query inspects them without acquiring another native read.
+Any failed call bound to this session withdraws choices; another Observe is
+needed to obtain them.
+Within the session, consumed authorized observation ticks remain an explicit monotonic floor even
+when the combined read fails, so retry cannot publish an older canonical tick.
 
 The returned `frontier.all_applied` means both historical native effects were
 proved at their respective boundaries. It does not mean current labor, produced

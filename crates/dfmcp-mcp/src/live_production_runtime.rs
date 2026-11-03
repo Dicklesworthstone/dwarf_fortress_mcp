@@ -10,6 +10,7 @@ use dfmcp_adapter::plan_archive::{create_private_plan_archive, open_private_plan
 use dfmcp_adapter::semantic_work_orders::SemanticWorkOrderSession;
 use dfmcp_adapter::semantic_workforce::SemanticWorkforceSession;
 use dfmcp_adapter::workforce_control::journal::WorkforceBinding;
+use dfmcp_adapter::workforce_control::rpc::WorkforceSource;
 use dfmcp_core::{
     Capability, CapabilityGrant, CapabilityScope, Digest32, GameTick, ObservationCursor,
     OperationContext, RequestId, Result, RiskTier, SessionId, StateAnchor, WorkBudget,
@@ -20,6 +21,7 @@ use dfmcp_world::PredicateEvidence;
 use serde_json::{Value, json};
 use std::time::{Duration, Instant};
 
+mod choices;
 mod config;
 mod custody;
 mod request;
@@ -110,6 +112,7 @@ struct Basis {
     capsule: LiveObservationCapsule,
     projection: LiveWorldProjection,
     seal: Digest32,
+    choices: Option<Value>,
 }
 
 pub(crate) struct Runtime {
@@ -119,6 +122,7 @@ pub(crate) struct Runtime {
     request: u128,
     budget: WorkBudget,
     anchor: StateAnchor,
+    observation_tick_floor: GameTick,
     opening_labor: bool,
     opening_orders: bool,
     parts: Option<(Labor, Order)>,
@@ -251,6 +255,9 @@ impl Runtime {
             tick: GameTick(0),
             state_hash: Digest32::ZERO,
         });
+        let observation_tick_floor = GameTick(config.recovery.map_or(anchor.tick.get(), |r| {
+            anchor.tick.get().max(r.frontier.authority_tick_floor)
+        }));
         let mut out = Self {
             config,
             mode,
@@ -258,6 +265,7 @@ impl Runtime {
             request: 1,
             budget,
             anchor,
+            observation_tick_floor,
             opening_labor,
             opening_orders,
             parts: None,
@@ -322,6 +330,7 @@ impl Runtime {
                 seal: observation_seal(&capsule, &projection),
                 capsule,
                 projection,
+                choices: None,
             });
             out.seal = Some(recovery.seal);
             out.identity_digest = Some(recovery.identity_digest);
@@ -530,6 +539,9 @@ impl Runtime {
         Ok(())
     }
     pub(crate) fn abandon_preparation(&mut self) {
+        if let Some(basis) = &mut self.basis {
+            basis.choices = None;
+        }
         if let Some(execution) = &mut self.execution {
             execution.abandon_preparation();
         }
@@ -560,6 +572,7 @@ impl Runtime {
     }
     pub(crate) fn opening_recovery_reference(&self) -> Value {
         json!({"mode":self.mode.as_str(),"anchor":anchor_json(self.anchor),"recovery":self.recovery_json(),
+            "observation_tick_floor":self.observation_tick_floor.get(),
             "original_plan":self.original.as_ref().map(plan_json),"runtime_admitted":false,
             "current_state_proven":false,"original_goal_proven":false,"automatic_redispatch":false})
     }
@@ -622,9 +635,11 @@ impl Runtime {
         };
         let frontier = frontier.as_ref().map(frontier_json);
         let observation=self.basis.as_ref().map(|b|json!({"seal":b.seal.to_hex(),"source_digest":b.capsule.content_digest.to_hex(),
-            "paused":true,"citizens":b.projection.snapshot.graph.entities.iter().filter(|(_,r)|r.kind==dfmcp_world::EntityKind::Unit).map(|(id,_)|json!({"entity_id":id.get().to_string()})).collect::<Vec<_>>() }));
+            "paused":true,"citizens":b.projection.snapshot.graph.entities.iter().filter(|(_,r)|r.kind==dfmcp_world::EntityKind::Unit).map(|(id,_)|json!({"entity_id":id.get().to_string()})).collect::<Vec<_>>(),
+            "workforce_choices":if self.original.is_none(){b.choices.as_ref()}else{None} }));
         let value = json!({"ok":true,"mode":self.mode.as_str(),"anchor":anchor_json(self.anchor),
             "runtime_admitted":false,"observation":observation,"original_plan":self.original.as_ref().map(plan_json),
+            "observation_tick_floor":self.observation_tick_floor.get(),
             "frontier":frontier,"review":review,
             "recovery":self.recovery_json(),"labor_control_enabled":self.labor_enabled(),"production_control_enabled":self.orders_enabled(),
             "native_custody":{"workforce_journal_id":self.workforce_journal.to_hex(),"order_journal_id":self.order_journal.to_hex()},
@@ -668,7 +683,7 @@ impl Runtime {
                 .ok_or_else(|| exhausted("combined observation cursor exhausted"))?,
         };
         let projection = project_live_capsule(&capsule, self.anchor.fortress_id, cursor)?;
-        if projection.snapshot.tick < self.anchor.tick {
+        if projection.snapshot.tick < self.anchor.tick.max(self.observation_tick_floor) {
             return Err(denied("combined observation regressed"));
         }
         work.context.anchor = projection.snapshot.anchor();
@@ -680,11 +695,53 @@ impl Runtime {
             .orders
             .acceptance()
             .citizens(&capsule, &projection, &work.take(MIB)?)?;
+        // Consumed, authorized clocks remain a floor even if the optional native
+        // attachment cannot be published. Failed observations cannot roll back.
+        self.observation_tick_floor = projection.snapshot.tick;
+        let (selection, _) = choices::select(
+            &capsule,
+            &projection,
+            self.config.workforce.acceptance(),
+            &work.take(2 * MIB)?,
+        )?;
+        let seal = observation_seal(&capsule, &projection);
+        let choices = if selection.is_empty() {
+            choices::empty(projection.snapshot.anchor(), seal)
+        } else {
+            let binding = self
+                .parts
+                .as_mut()
+                .ok_or_else(|| invalid("original native owners unavailable"))?
+                .0
+                .inventory(&work.take(144 * MIB)?)?
+                .binding;
+            let mut native = self
+                .config
+                .workforce
+                .native(&binding, &work.take(32 * MIB)?)?;
+            let ids = selection
+                .iter()
+                .map(|unit| unit.native_id)
+                .collect::<Vec<_>>();
+            let capture = native.observe(&ids, &work.take(32 * MIB)?)?;
+            let scope = self.config.workforce.acceptance();
+            if capture.generation() == scope.workforce_generation
+                && capture.folder() == scope.world_folder
+                && capture.site() == scope.site_id
+            {
+                self.observation_tick_floor =
+                    self.observation_tick_floor.max(GameTick(capture.tick()));
+            }
+            choices::project(&capsule, &projection, scope, &capture, &work.take(4 * MIB)?)?
+        };
+        self.config.current()?;
+        work.current()?;
         self.anchor = projection.snapshot.anchor();
         self.basis = Some(Basis {
-            seal: observation_seal(&capsule, &projection),
+            seal,
             capsule,
             projection,
+            choices: Some(choices),
         });
         self.view(&mut work)
     }

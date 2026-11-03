@@ -22,7 +22,8 @@ pub(super) fn compact(view: &Value) -> Value {
         })
         .collect();
     let r = &view["recovery"];
-    json!({"recovery":{"plan_digest":bounded(&r["plan_digest"],64),
+    json!({"observation_tick_floor":view["observation_tick_floor"].as_u64(),
+        "recovery":{"plan_digest":bounded(&r["plan_digest"],64),
         "object_digest":bounded(&r["object_digest"],64), "identity_digest":bounded(&r["identity_digest"],64),
         "anchor":compact_anchor(&r["anchor"]),
         "frontier":{"journal_id":bounded(&r["frontier"]["journal_id"],64),
@@ -112,14 +113,23 @@ fn encode(
             false,
             json!({"request":json!({"kind":"step", "original_plan_digest":view["original_plan"]["plan_digest"]}).to_string()}),
         ))
-    } else if view["original_plan"].is_null() && view["observation"].is_null() {
+    } else if view["original_plan"].is_null()
+        && (view["observation"].is_null() || view["observation"]["workforce_choices"].is_null())
+    {
         Some((
             "fortress_observe",
-            "Acquire the paused canonical observation before planning.",
+            "Acquire the paused canonical roster and advisory workforce choices before planning.",
             false,
             json!({}),
         ))
-    } else if view["original_plan"].is_null() {
+    } else if view["original_plan"].is_null()
+        && mode == Some("control")
+        && view["labor_control_enabled"] == true
+        && view["production_control_enabled"] == true
+        && view["observation"]["workforce_choices"]["options"]
+            .as_array()
+            .is_some_and(|v| !v.is_empty())
+    {
         Some((
             "fortress_plan",
             "Compile one original labor and finite-order plan against this observation.",
@@ -232,13 +242,14 @@ mod tests {
     fn recommendations_follow_observation_and_numeric_next_step_without_claiming_goal() {
         let original = "a".repeat(64);
         let session = SessionId::new((1u128 << 127) | (24u128 << 57) | 1);
-        let mut view = json!({"observation":null,"original_plan":null,"frontier":null});
+        let mut view = json!({"observation":null,"original_plan":null,"frontier":null,
+            "labor_control_enabled":true,"production_control_enabled":true});
         let call = |view: &Value, verified| {
             let (raw, overflow) = packet(
                 "fortress.query",
                 Some(session),
                 None,
-                None,
+                Some("control"),
                 None,
                 None,
                 json!({"ok":true}),
@@ -253,11 +264,18 @@ mod tests {
             call(&view, true)["agent_turn"]["recommendations"][0]["tool"],
             "fortress_observe"
         );
-        view["observation"] = json!({"seal":"b".repeat(64)});
+        view["observation"] = json!({"seal":"b".repeat(64),
+            "workforce_choices":{"options":[{"labor":"MINE","enable_candidates":["43"]}]}});
         assert_eq!(
             call(&view, true)["agent_turn"]["recommendations"][0]["tool"],
             "fortress_plan"
         );
+        view["labor_control_enabled"] = json!(false);
+        assert_eq!(
+            call(&view, true)["agent_turn"]["recommendations"],
+            json!([])
+        );
+        view["labor_control_enabled"] = json!(true);
         view["original_plan"] = json!({"plan_digest":original});
         view["frontier"] = json!({"next_ready":0,"review":null,"entries":[]});
         let response = call(&view, true);

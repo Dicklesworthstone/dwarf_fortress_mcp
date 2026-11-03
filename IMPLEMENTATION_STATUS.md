@@ -1,6 +1,67 @@
 # Implementation Status
 
-## Combined labor/order host under development
+## Combined real-game development experiment and remaining qualification
+
+Actual GPT-6.1 Terra medium under NTM exercised the public combined eleven-tool
+host on real DF v0.53.16 Linux64 ITCH / DFHack 53.16-r3. The exact development
+code was `bb3393a7bf3ef45ff6660c41478a628e1c524647`, debug executable SHA-256
+`2a7338dbcea129eb7258d51013da147938f06dce5590408549aa266122563c5e`.
+One original plan changed citizen 252's MINE assignment, then inserted its
+dependent finite wooden-bed order. Both returned Applied. Review-to-Commit
+intervals were 2.649079067 and 2.544319017 seconds, within the unchanged native
+lifetime. A closed-request negative refused before an original plan existed.
+
+Root separately replayed all 16 modern MCP exchanges, the four workforce and
+three creation-journal frames and their native checksums. Independent complete
+captures of seven citizens, eleven details and 94 labor columns show exactly
+one MINE bit and the intended membership change for native citizen 251; every
+other captured field is identical apart from the mutation sequence. The order
+queue changed from zero to one: order 0, ConstructBed, total/remaining 1/1,
+status 0. Other captured Lua rows remained identical at paused tick 12112800.
+No game-tick advancement was observed; bed production was not proved and
+original-goal/current-state proof remained false. The NTM nonauthoring verifier independently reached the same
+bounded result.
+
+Offline reopening retained both original keys/receipts and preserved all seven
+custody files byte-for-byte, with exact 0600 modes. Root verified all 234 export
+members against manifest SHA-256
+`994bd0a2d1ea063e354b8094364b33e8ec6f8ad725c86c936798ced88275298f`,
+and separately scanned the export against all three actual private values:
+zero matches. Fresh host checks confirmed the listener and owned game/MCP/model
+processes drained, three plugins restored, and both 30-file save sets unchanged.
+
+This is **dirty development execution**, not clean qualification or admission.
+Root's diagnostic Python import created three bytecode files during the build;
+the clean-source guard correctly failed. Tracked source bytes remained exact,
+and the failed guard and caches are preserved. The operator also displayed a
+numeric derived comparison and a cleanup receipt before their prescribed exact
+scan; retrospective scanning found no private value, without undoing either
+ordering deviation. Three incomplete loading captures, a corrected discovery
+instruction, an offline helper input-shape failure and a refused restoration
+while offline MCP was active remain in the evidence. Operator read-only labor
+scouting informed this trial and is not MCP agent competence.
+
+Later clean `49ece9c0800673a7731697f417e78053980b61e9` passes 17 focused Rust
+cases and the actual nine-case modern stdio suite. Its additive pre-plan error
+case fails on the preceding binary (eight pass, one fails), then passes on its
+new debug executable `9ce407aee0ade14ae736f2952f71daa143e0bbe04df478fcc19ba7d410786394`.
+The BB game result does not transfer to this new image. Full qualification is
+still pending: preceding `043a066` completed verify, but qualify failed with
+1,337 passing and 21 failing adapter tests, including budget/connection paths.
+No latest-source full passed receipt or Bead closure is claimed.
+
+Bead `.4.2` now has newer source for bounded advisory labor choices in Observe,
+using the existing source-pinned workforce reader, canonical identities and
+current Query/Observe authority. It exposes deterministic candidate lists,
+membership/eligibility, native witness and coverage omissions; it grants no
+mutation authority or precondition evidence. Errors withdraw choices while
+retaining consumed observation tick floors. Five new component cases ran within
+21 passing Mac tests at an earlier dirty cut; later edits and the eleven-case
+public suite remain unexecuted. No-scout real-game execution and exact final
+qualification are required before this read slice is complete. Registry and
+production runner admission remain unchanged.
+
+## Earlier combined development checks
 
 Bead `df-dfhack-bridge-plane-c-pic.4.1` now has source for a public combined
 MCP host and standard `serve-gameplay-dev labor-order` startup route. The real

@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-11-03 — Observed workforce choices and real combined control
+
+- Replay a real Terra/NTM combined development run: one MINE membership/labor
+  change, then one dependent finite bed-order insertion, two Applied keys and
+  zero ticks. Verify complete native captures, all 16 modern MCP exchanges,
+  seven unchanged offline custody files and fresh cleanup. Preserve the dirty
+  build guard failure, setup failures and scan-order deviations; no goods,
+  original-goal, qualification or admission claim.
+- Add bounded pre-plan workforce choices through Observe using the existing
+  native reader and canonical identity resolver. Publish source witnesses,
+  selected eligibility/membership and deterministic enable/disable candidates
+  with omissions. Revalidate through existing preparation/commit owners;
+  choices supply neither authority nor mutation preconditions.
+- Retain consumed observation tick floors after failed combined reads, withdraw
+  stale choices, and keep them absent after original planning and recovery.
+  Extend component and public tests without removing prior cases. Final tests,
+  no-scout game execution and full exact-source qualification are pending.
+- Retain the earlier full qualifier's 21 adapter failures. Clean 49's scoped
+  17 Rust and nine stdio cases pass; that is not full qualification.
+
 ## 2026-11-03 — Combined labor/order development MCP host
 
 - Connect the real production executor and durable dispatcher to the eleven
