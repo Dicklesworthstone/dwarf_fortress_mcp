@@ -277,6 +277,34 @@ class CombinedProduction(unittest.TestCase):
         try: self.client.close()
         finally: self.peer.close()
 
+    def test_preplan_lifecycle_refusals_do_not_invent_an_uncertain_effect(self):
+        opened = self.client.open(max_wall_millis=60000)
+        self.assertTrue(opened['ok'], opened)
+        sid = opened['agent_turn']['session_id']
+        calls = list(self.peer.calls)
+        before = custody_files(self.directory)
+        for name, args in (
+            ('commit', {'paired_seal': 'a' * 64, 'confirmed': True}),
+            ('plan', {'request': json.dumps({'kind': 'step', 'original_plan_digest': 'a' * 64})}),
+            ('cancel', {'scope': 'step'}),
+            ('wait', {}),
+        ):
+            failed = self.client.tool(name, session_id=sid, **args)
+            self.assertFalse(failed['ok'], failed)
+            self.assertIs(failed['game_mutation_dispatched'], False)
+            self.assertEqual(failed['agent_turn']['active_work']['indeterminate_effects'], [])
+            self.assertNotIn('fortress_wait', [r['tool'] for r in failed['agent_turn']['recommendations']])
+            self.assertEqual(self.peer.calls, calls)
+            self.assertEqual(custody_files(self.directory), before)
+        queried = self.client.tool('query', session_id=sid)
+        self.assertTrue(queried['ok'], queried)
+        observed = self.client.execute_next(queried)
+        self.assertTrue(observed['ok'], observed)
+        self.assertTrue(observed['observation']['seal'])
+        self.assertFalse(self.peer.workforce_applied)
+        self.assertFalse(self.peer.order_created)
+        self.assertFalse(any(op.startswith(('Prepare', 'Commit')) for _, op in self.peer.calls))
+
     def test_public_labor_then_finite_order_with_confirmation(self):
         opened = self.client.open(max_wall_millis=60000)
         self.assertTrue(opened['ok'], opened)
@@ -553,7 +581,7 @@ def main():
     print(json.dumps({'schema': 'dfmcp.combined-production-stdio/1', 'tests': result.testsRun,
         'failed': len(result.failures), 'errors': len(result.errors), 'skipped': len(result.skipped),
         'actual_modern_stdio': True, 'loopback_peers_are_doubles': True, 'live_game': False}))
-    raise SystemExit(0 if result.wasSuccessful() and result.testsRun == 8 and not result.skipped else 1)
+    raise SystemExit(0 if result.wasSuccessful() and result.testsRun == 9 and not result.skipped else 1)
 
 
 if __name__ == '__main__': main()

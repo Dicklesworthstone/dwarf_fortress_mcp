@@ -343,8 +343,9 @@ fn with_session(
                 .budget
                 .max_wall_millis
                 .min(remaining(started, total)?);
-            dispatched = action.may_dispatch();
-            may_need_reconciliation = action.may_need_reconciliation();
+            let native_execution = state.runtime.has_native_execution();
+            dispatched = action.may_dispatch() && native_execution;
+            may_need_reconciliation = action.may_need_reconciliation() && native_execution;
             let view = action.perform(&mut state.runtime, &context)?;
             state.retained = Some(view.to_json());
             runtime_io()?;

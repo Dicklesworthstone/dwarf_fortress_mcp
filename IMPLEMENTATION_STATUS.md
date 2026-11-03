@@ -54,6 +54,24 @@ withdraws the local review on failure, and recommends closing an offline session
 with retained recovery before reopening in Reconcile mode. Those fixes and the
 extended positive recovery path still require compilation and execution.
 
+The corrected `bb3393a` tracked source subsequently passed all 16 applicable
+combined-host tests on macOS aarch64, including both new regressions, using
+installed dated nightly `3e92e1a2d` (2,767 filtered; zero failed or ignored).
+The Linux-only private-custody case is excluded by its existing platform cfg.
+Ten existing Mac warnings remain visible; this is neither latest-nightly nor
+warning-denied/full-source qualification. Its separate Linux component build
+and eight-case execution remain pending.
+
+A further actual stdio reproduction found that lifecycle calls before any
+original executor exists falsely mark mutation uncertainty and recommend a
+nonprogressing Wait. Commit followed by that Wait both refuse with
+`no original combined execution`, with zero additional native calls. New source
+limits possible-dispatch/reconciliation classification to an existing original
+executor and frontier. A ninth public case requires four pre-plan lifecycle
+refusals to preserve custody and report no uncertain effect, then successfully
+resumes canonical observation. Its execution remains pending. The original
+eight positive/adverse scenarios and their strict assertions are retained.
+
 The agent also cannot discover eligible native single-labor detail choices
 before compiling the original plan. Bead `.4.2` owns this information gap.
 An operator read-only workforce scout can stage the bounded trial but is not

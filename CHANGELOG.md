@@ -21,6 +21,12 @@
   eight-case suite reproduces the latter on the prior binary (seven pass, one
   intended failure). Corrected-source execution is pending. Track missing
   pre-plan workforce choices in `.4.2`; operator scouting is not agent competence.
+- Execute both response regressions within 16 passing Mac component cases, with
+  the older dated toolchain and platform warnings disclosed. Reproduce another
+  pre-plan Commit/Wait guidance loop through actual stdio and fix its source
+  classification: no original executor means no possible native dispatch.
+  Add a ninth public case without weakening the existing eight; new execution
+  and final clean-source qualification remain pending.
 
 ## 2026-11-03 — Independently replayed current-source job-control pair
 

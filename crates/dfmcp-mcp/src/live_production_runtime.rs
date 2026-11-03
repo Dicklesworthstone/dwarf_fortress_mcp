@@ -365,6 +365,11 @@ impl Runtime {
     pub(crate) fn anchor(&self) -> StateAnchor {
         self.anchor
     }
+    /// Native effects are unreachable until both original execution owners exist.
+    /// This says nothing about whether an effect has actually been dispatched.
+    pub(crate) fn has_native_execution(&self) -> bool {
+        self.execution.is_some() && self.frontier.is_some()
+    }
     fn labor_enabled(&self) -> bool {
         self.opening_labor && self.config.workforce.labor_enabled()
     }

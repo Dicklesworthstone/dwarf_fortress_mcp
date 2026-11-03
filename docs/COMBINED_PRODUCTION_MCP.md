@@ -143,6 +143,10 @@ Successful responses receive a final owned cancellation and wall-deadline check
 after rendering. A failed final check discards that success, withdraws the
 review and returns a failure with retained recovery; it does not undo a possible
 native effect.
+Before the original executor and frontier exist, lifecycle refusals cannot
+dispatch a native effect. They report no dispatch and do not create a fictional
+uncertain key requiring reconciliation. The caller can inspect and acquire its
+canonical observation before compiling the original plan.
 Query verifies the parent archive/identity and durable frontier. Native family
 custody and effects are rechecked through their owners at preparation, commit
 and reconciliation boundaries; Query is not a new native effect observation.
