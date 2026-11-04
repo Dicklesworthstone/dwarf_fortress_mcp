@@ -1,5 +1,218 @@
 # Implementation Status
 
+## Latest combined development trial: public choices and two real effects
+
+Exact source `a515efb44ed64097a4fc080100aa471e12698549`, debug executable
+SHA-256 `0e514de89a82bf18c07d561836e94d9725df6ec85001fb43ba814d0a55e3560a`,
+was exercised by a fresh GPT-6.1 Terra medium session under NTM on real DF
+v0.53.16 Linux64 ITCH / DFHack 53.16-r3. The operator's independent before
+measurements were withheld from the player. Terra selected MINE and canonical
+citizen 252 from `observation.workforce_choices`, then confirmed the two steps
+of one original labor-and-finite-bed-order plan. Both returned Applied.
+
+Root separately replayed all 15 modern MCP exchanges (12 online, three offline),
+recomputed the complete public option projection and its witness from the
+independent seven-citizen, 94-labor-column, eleven-detail capture, and verified
+both native journals and original keys. Exactly one MINE bit and its intended
+membership changed; other captured native fields were identical apart from the
+mutation sequence. The queue gained order 0, ConstructBed, total/remaining 1/1,
+status 0. Review-to-Commit intervals were 2.194651036 and 4.306740033 seconds.
+The planted corrupted native receipt was rejected by the separate replay.
+
+Offline reopening retained both Applied receipts, disabled effect controls and
+preserved all seven custody files, including exact 0600 modes. Root verified
+all 207 export members (208 physical files, 16,550,424 member bytes) against
+manifest SHA-256
+`573b065922fc275c4e049973d710f60f917c614913f1cf38de5c2008ebc9da44`,
+and independently scanned all three actual private values before copying: zero
+matches. Fresh host checks confirmed the game, player and both MCP processes
+and owned groups absent, port 5000 closed, three plugins restored to their
+original absence, and both 30-file save sets matching the immutable baseline.
+The game was stopped before offline reopening; its bounded drain included
+SIGTERM/SIGKILL. Both MCP children reaped with status 0 and no escalation.
+
+This remains **unadmitted development execution**. No game ticks advanced and no
+produced bed or original-goal/current-state proof was established. Two player
+diagnostic renderings were printed before the newly formatted bytes were
+separately scanned. Later complete scanning found no private values; those
+ordering departures remain failures. One early roster attempt during loading
+was refused and retained. The malformed Plan omitted required fields, so it
+proves a generic request refusal, not isolated unknown-field rejection.
+A nonauthoring NTM Codex reviewer independently checked the raw manifest,
+exchanges, four offered choices, archive digest, both native journals, native
+diff, custody and cleanup, reaching the same bounded conclusion. Its initial
+archive-header assertion used a wrong layout assumption; it corrected that
+analysis against the actual digest suffix/object checksum. This agreement is
+not qualification. Full exact-source qualification remains pending.
+
+On the same frozen source, warning-denied scoped Linux Clippy and 23 focused
+Rust cases pass (zero failed/ignored, 2,867 filtered). Root's separate actual
+eleven-case public stdio run passes all eleven, with no failures/errors/skips.
+The subsequent Cargo CLI wrapper **failed**: its restart/reconcile-open case
+exceeded the 15-second public-client wait and the peer recorded a timeout.
+A successful open reply was retained during teardown. All 23 native requests
+have replies; the final native read was recorded about 17.496 seconds after
+the public request. A single unchanged restart rerun under syscall tracing
+passes in 5.128 seconds, without proving the original cause or replacing the
+failed wrapper. No timeout, assertion or native preparation lifetime was
+relaxed. The exact-source Mac diagnostic passes 22 portable cases with an
+older dated nightly and ten existing platform warnings; it is not full
+latest-nightly qualification. `.4.1`, `.4.2` and their broader parents remain
+open. Earlier qualification and live results below do not transfer to this
+source or executable, and this trial does not confer production admission.
+
+A separate disposable source variant makes a second pre-plan Observe return
+the cached view. It builds successfully and still passes the positive public
+labor/order case, but the unchanged source-drift and consumed-floor cases both
+fail at their expected refusal assertions (three cases, two failures, zero
+errors/skips). This checks the new tests' sensitivity to omitted fresh reads;
+the mutant executable is not a game or qualification artifact. Its earlier
+driver-path preflight failure and command-guard refusal are retained separately.
+
+## Combined real-game development experiment and remaining qualification
+
+Actual GPT-6.1 Terra medium under NTM exercised the public combined eleven-tool
+host on real DF v0.53.16 Linux64 ITCH / DFHack 53.16-r3. The exact development
+code was `bb3393a7bf3ef45ff6660c41478a628e1c524647`, debug executable SHA-256
+`2a7338dbcea129eb7258d51013da147938f06dce5590408549aa266122563c5e`.
+One original plan changed citizen 252's MINE assignment, then inserted its
+dependent finite wooden-bed order. Both returned Applied. Review-to-Commit
+intervals were 2.649079067 and 2.544319017 seconds, within the unchanged native
+lifetime. A closed-request negative refused before an original plan existed.
+
+Root separately replayed all 16 modern MCP exchanges, the four workforce and
+three creation-journal frames and their native checksums. Independent complete
+captures of seven citizens, eleven details and 94 labor columns show exactly
+one MINE bit and the intended membership change for native citizen 251; every
+other captured field is identical apart from the mutation sequence. The order
+queue changed from zero to one: order 0, ConstructBed, total/remaining 1/1,
+status 0. Other captured Lua rows remained identical at paused tick 12112800.
+No game-tick advancement was observed; bed production was not proved and
+original-goal/current-state proof remained false. The NTM nonauthoring verifier independently reached the same
+bounded result.
+
+Offline reopening retained both original keys/receipts and preserved all seven
+custody files byte-for-byte, with exact 0600 modes. Root verified all 234 export
+members against manifest SHA-256
+`994bd0a2d1ea063e354b8094364b33e8ec6f8ad725c86c936798ced88275298f`,
+and separately scanned the export against all three actual private values:
+zero matches. Fresh host checks confirmed the listener and owned game/MCP/model
+processes drained, three plugins restored, and both 30-file save sets unchanged.
+
+This is **dirty development execution**, not clean qualification or admission.
+Root's diagnostic Python import created three bytecode files during the build;
+the clean-source guard correctly failed. Tracked source bytes remained exact,
+and the failed guard and caches are preserved. The operator also displayed a
+numeric derived comparison and a cleanup receipt before their prescribed exact
+scan; retrospective scanning found no private value, without undoing either
+ordering deviation. Three incomplete loading captures, a corrected discovery
+instruction, an offline helper input-shape failure and a refused restoration
+while offline MCP was active remain in the evidence. Operator read-only labor
+scouting informed this trial and is not MCP agent competence.
+
+Later clean `49ece9c0800673a7731697f417e78053980b61e9` passes 17 focused Rust
+cases and the actual nine-case modern stdio suite. Its additive pre-plan error
+case fails on the preceding binary (eight pass, one fails), then passes on its
+new debug executable `9ce407aee0ade14ae736f2952f71daa143e0bbe04df478fcc19ba7d410786394`.
+The BB game result does not transfer to this new image. Full qualification is
+still pending: preceding `043a066` completed verify, but qualify failed with
+1,337 passing and 21 failing adapter tests, including budget/connection paths.
+No latest-source full passed receipt or Bead closure is claimed.
+
+Bead `.4.2` now has newer source for bounded advisory labor choices in Observe,
+using the existing source-pinned workforce reader, canonical identities and
+current Query/Observe authority. It exposes deterministic candidate lists,
+membership/eligibility, native witness and coverage omissions; it grants no
+mutation authority or precondition evidence. Errors withdraw choices while
+retaining consumed observation tick floors. Five new component cases ran within
+21 passing Mac tests at an earlier dirty cut; later edits and the eleven-case
+public suite remain unexecuted. No-scout real-game execution and exact final
+qualification are required before this read slice is complete. Registry and
+production runner admission remain unchanged.
+
+## Earlier combined development checks
+
+Bead `df-dfhack-bridge-plane-c-pic.4.1` now has source for a public combined
+MCP host and standard `serve-gameplay-dev labor-order` startup route. The real
+production executor and durable frontier own one complete labor-then-finite-order
+plan, native family sessions and original archive/citizen custody. Each step
+requires its current paired review and confirmation; only an exact verified
+historical labor receipt can release the order dependency. There is no clock,
+goal monitor or inference from queue insertion to produced goods.
+
+The initial diagnostic builds and real stdio runs exposed compiler integration,
+nested-budget, recommendation-name/session and initial evidence-priming defects.
+They are fixed without widening native limits or weakening custody checks.
+The resulting Linux CLI, SHA-256
+`4b105196d32b13119b3a3ae1e2e6a4928c11c2218ddaefaa124728e8d20210c7`,
+was built locked/offline with nightly rustc
+`1c3a6506966e21845b31de0b075d2527660db132` (commit date 2026-11-02).
+Its exact dirty source manifest is
+`789a6c7a7431209481397952fc44e87b2f4941da681c2c783b2f6e5a019ccf24`.
+Root verified all 2,725 snapshot entries against local bytes and modes at that
+cut; all Rust/scripts/tests matched, with only two later documentation/contract
+files differing. The subsequent response-path fixes below are newer source.
+
+The actual modern stdio component suite passes eight of eight cases, zero
+failures/errors/skips. Root separately reran all eight against the same sealed
+executable. It follows returned tool recommendations, confirms both exact native
+reviews, applies labor then the dependent finite order, preserves offline custody
+bytes/modes, reconciles a lost reply under its original key without redispatch,
+and checks missing custody, replaced generation, unknown environment, absent
+credential and unconfirmed/restarted seal refusals. The peers are joined TCP
+doubles, not Dwarf Fortress. Fifteen focused MCP Rust cases also pass, with
+2,867 other cases filtered; these are not a full workspace run.
+The scoped adapter refresh regression passes one case (1,357 filtered), and
+both existing native-shell filters pass 11 and five cases. The actual Rust CLI
+test wrapper also passes and requires all eight subprocess cases. Strict scoped
+Clippy found one collapsible conditional; its local syntax-only repair preserves
+the inventory read order and remains subject to the clean-source full gates.
+
+Clean revision `043a066a6179073e671980669f901496d4e0ffd1` passed the full debug
+workspace suite: 5,273 tests across 135 result blocks, zero failed, ignored,
+measured or filtered cases. Warning-denied workspace Clippy also passed.
+Its full verification and qualification remain in progress; these partial
+results are not a full-source receipt.
+
+Independent fresh-eyes source review found two further response defects:
+successful serialization lacked a final cancellation/deadline check, and an
+offline uncertain session recommended Wait although it cannot reconcile live.
+The latter is reproduced against the earlier executable by extending the
+eight-case suite: seven pass and one fails at the incorrect recommendation.
+New source checks cancellation and the original wall deadline after rendering,
+withdraws the local review on failure, and recommends closing an offline session
+with retained recovery before reopening in Reconcile mode. Those fixes and the
+extended positive recovery path still require compilation and execution.
+
+The corrected `bb3393a` tracked source subsequently passed all 16 applicable
+combined-host tests on macOS aarch64, including both new regressions, using
+installed dated nightly `3e92e1a2d` (2,767 filtered; zero failed or ignored).
+The Linux-only private-custody case is excluded by its existing platform cfg.
+Ten existing Mac warnings remain visible; this is neither latest-nightly nor
+warning-denied/full-source qualification. Its separate Linux component build
+and eight-case execution remain pending.
+
+A further actual stdio reproduction found that lifecycle calls before any
+original executor exists falsely mark mutation uncertainty and recommend a
+nonprogressing Wait. Commit followed by that Wait both refuse with
+`no original combined execution`, with zero additional native calls. New source
+limits possible-dispatch/reconciliation classification to an existing original
+executor and frontier. A ninth public case requires four pre-plan lifecycle
+refusals to preserve custody and report no uncertain effect, then successfully
+resumes canonical observation. Its execution remains pending. The original
+eight positive/adverse scenarios and their strict assertions are retained.
+
+The agent also cannot discover eligible native single-labor detail choices
+before compiling the original plan. Bead `.4.2` owns this information gap.
+An operator read-only workforce scout can stage the bounded trial but is not
+evidence that the MCP agent chose a valid intent unaided.
+
+Full clean-source qualification of the final source and a real-game trial of
+this new host remain pending. Earlier test-link storage-quota failures and diagnostic RED runs are
+retained. Existing qualified binaries and AG's single-job proof below do not
+transfer to it. The scoped bead and broad parent tasks remain open. The registry
+is empty and production admission is unchanged.
+
 ## Latest exact-source qualification
 
 Clean code revision `4ed1091f0718f1f331e1ab65528c802c107de64a` passed both
@@ -76,8 +289,8 @@ This closes `.8.1` for **one of eight policy classes**, using a disclosed
 operator-created normal-game fixture. The other seven classes remain live
 unproven. It does not prove workshop production through this job profile,
 original production-goal completion, broad fortress competence or admission.
-The CLI still selects separate gameplay runtimes; the combined production
-executor has no public MCP host, owned by `df-dfhack-bridge-plane-c-pic.4`.
+That proof used a separate gameplay runtime. The combined labor/order host is
+new development work described above; it has not inherited AG's live evidence.
 
 ### Earlier partial and failed trials
 

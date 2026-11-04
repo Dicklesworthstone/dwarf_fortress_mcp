@@ -267,6 +267,17 @@ with `serve-gameplay-dev manager-v1-23`, witnesses and updates that cache in the
 same transaction. Its host names, wire identity and custody are distinct.
 Neither historical appointment proof nor cache proof establishes bed production.
 
+The explicitly unadmitted [combined labor/order host](docs/COMBINED_PRODUCTION_MCP.md)
+is selected at startup with `serve-gameplay-dev labor-order`. It uses these
+eleven logical operations (underscore wire names) for one complete original
+two-step plan. Plan first compiles the closed labor/furniture request; Plan with
+`kind="step"` and `original_plan_digest` then prepares one dependency-satisfied
+original step. Commit requires its current `paired_seal` and confirmation. Wait
+reconciles one original key without dispatch or clock progress. Historical
+all-applied is distinct from current state or terminal-goal proof. Separate
+family source pins, write grants and custody remain mandatory. This host adds
+no native method, production runner or admission.
+
 ### `fortress.open_session`
 
 Negotiates fortress, versions, compatibility, requested capability scopes, observation profile,

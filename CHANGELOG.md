@@ -1,5 +1,72 @@
 # Changelog
 
+## 2026-11-03 — Real control chosen through public workforce observations
+
+- Exercise exact `a515efb` / executable `0e514de8…` with fresh Terra medium
+  under NTM: choose MINE/citizen 252 through MCP, apply the assignment and its
+  dependent finite bed-order insertion, and recover both receipts offline.
+  Root replays all 15 exchanges, recomputes all choices against complete native
+  before data, verifies both journals, unchanged seven-file recovery and fresh
+  process/plugin/save cleanup. No ticks, produced bed, goal proof or admission.
+- Retain two actor render-before-scan departures and the incomplete loading
+  capture. The malformed-request negative is generic, not field-specific.
+- Pass scoped warning-denied Clippy, 23 Linux cases and a separate eleven-case
+  public stdio run. Preserve the subsequent Cargo wrapper's restart timeout;
+  a passing traced diagnostic does not explain or erase it. Nonauthoring raw
+  review independently agrees with the bounded live result; full qualification
+  remains pending, with no task closure.
+- Plant a cached-observation implementation in a disposable build: the positive
+  control case still passes and both new stale-source/floor cases fail with
+  zero setup errors or skips. The candidate source is untouched.
+
+## 2026-11-03 — Observed workforce choices and real combined control
+
+- Replay a real Terra/NTM combined development run: one MINE membership/labor
+  change, then one dependent finite bed-order insertion, two Applied keys and
+  zero ticks. Verify complete native captures, all 16 modern MCP exchanges,
+  seven unchanged offline custody files and fresh cleanup. Preserve the dirty
+  build guard failure, setup failures and scan-order deviations; no goods,
+  original-goal, qualification or admission claim.
+- Add bounded pre-plan workforce choices through Observe using the existing
+  native reader and canonical identity resolver. Publish source witnesses,
+  selected eligibility/membership and deterministic enable/disable candidates
+  with omissions. Revalidate through existing preparation/commit owners;
+  choices supply neither authority nor mutation preconditions.
+- Retain consumed observation tick floors after failed combined reads, withdraw
+  stale choices, and keep them absent after original planning and recovery.
+  Extend component and public tests without removing prior cases. Final tests,
+  no-scout game execution and full exact-source qualification are pending.
+- Retain the earlier full qualifier's 21 adapter failures. Clean 49's scoped
+  17 Rust and nine stdio cases pass; that is not full qualification.
+
+## 2026-11-03 — Combined labor/order development MCP host
+
+- Connect the real production executor and durable dispatcher to the eleven
+  tools and standard `serve-gameplay-dev labor-order` profile. Retain one full
+  original labor-then-order plan, exact keys, family sessions and parent custody.
+- Seal all three operator configurations, keep independent family authority and
+  source pins, and verify original archive/identity at child evidence boundaries.
+  Lost replies retain original-key recovery; restart never restores a commit
+  permit. No clock, original-goal proof or production admission is added.
+- Fix compiler integration, nested budget, returned tool names/session IDs and
+  first-labor canonical-evidence priming found through actual compiled execution.
+  The Linux CLI passes eight public modern stdio component cases, separately
+  rerun by Root, and 15 focused Rust cases. Loopback peers remain doubles;
+  full clean qualification and new-host live execution are pending. Scoped
+  `.4.1` and broader parents stay open.
+- Fix two further fresh-eyes findings in source: check cancellation/deadline
+  after successful response rendering and withdraw the review on failure;
+  direct offline uncertainty to close-and-reopen reconciliation. The expanded
+  eight-case suite reproduces the latter on the prior binary (seven pass, one
+  intended failure). Corrected-source execution is pending. Track missing
+  pre-plan workforce choices in `.4.2`; operator scouting is not agent competence.
+- Execute both response regressions within 16 passing Mac component cases, with
+  the older dated toolchain and platform warnings disclosed. Reproduce another
+  pre-plan Commit/Wait guidance loop through actual stdio and fix its source
+  classification: no original executor means no possible native dispatch.
+  Add a ninth public case without weakening the existing eight; new execution
+  and final clean-source qualification remain pending.
+
 ## 2026-11-03 — Independently replayed current-source job-control pair
 
 - Prove real modern MCP suspend/resume by GPT-6.1 Terra medium under NTM on

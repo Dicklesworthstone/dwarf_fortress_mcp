@@ -103,8 +103,12 @@ it cannot allocate a replacement cursor or silently rebase the plan. Canonical
 citizen and native family generations remain separately bound. Their numeric
 generation counters need not match.
 
-This boundary adds no MCP tool or combined MCP server, bridge method, protocol
-generation, source issuer, capability grant, production runner or admitted live
-tuple. Concrete native clients remain unadmitted development implementations.
+The adapter boundary itself adds no MCP tool, bridge method, protocol generation,
+source issuer, capability grant, production runner or admitted live tuple.
+The separate [combined development MCP host](COMBINED_PRODUCTION_MCP.md) consumes
+this executor and durable coordinator through the existing eleven tools. It
+retains one original two-step labor/order plan with parent archive/identity
+custody and independently pinned real family shells. Concrete native clients
+remain unadmitted development implementations.
 Synthetic component execution is distinct from full workspace, ambient runtime,
 native DFHack and live-fortress qualification.
