@@ -56,10 +56,12 @@ which upstream regression forced it.
 | 2026-08-29 | `6481d49a6f9282f8161015323283fb7764dcf2f7` (main: fixes #59, #60) | v0.0.1 first integration | #59, #60 | modern-only profile compiles end to end (transport + facade + tasks); #61 (feature-less server build) open upstream, does not affect the admitted profile |
 | 2026-08-30 | `12d3469df8081ffdb663019ee4936324fedc98d5` (tags/v0.8.0) | v0.0.1 v0.8.0 preflight | v0.8.0 release | Restructured sse.rs (legacy SSE removed upstream), non-legacy warning fixes (3a82c30), modern-only profile verified |
 | 2026-09-12 | `180a7c88890705217bb8e202d19555adabf24187` (main) | v0.0.1 / `dfmcp-k2y` | Upstream range `12d3469..180a7c8`; Asupersync 0.5.0 migration | Keeps modern-only `tasks`; replaces the removed implicit stdio entry with explicit owned runtime/context calls. Current conformance execution is pending; historical failures below are retained. |
+| 2026-11-03 | `13461caf1f23bef675e0588b5e0c5ba8cf81b9f8` (reviewed branch, direct child of `180a7c8`) | `dfmcp-reality-wiring-proof-4bf.25` | [#100](https://github.com/Dicklesworthstone/fastmcp_rust/issues/100): cooperative cancellation readback race | Narrow `tasks.rs` repair and regressions only; deterministic RED/GREEN below. Exact Git-pin downstream Tasks 7/7 and full clean `4ed1091` qualification pass; 43 gates and 5255 tests in each profile. The later evidence-documentation head is not implicitly qualified. |
 
 ## Conformance status
 
-The current pin is `180a7c8`, using published Asupersync 0.5.0. The migration
+The current pin is `13461caf`, the reviewed narrow cancellation repair directly
+on `180a7c8`, using published Asupersync 0.5.0. The earlier migration
 retains the existing wire assertions and adds bounded response waits with owned
 reader cleanup. Neither the pin bump nor its compilation resolves the historical
 findings below without executing their corresponding real subprocess tests.
@@ -151,3 +153,63 @@ Against the real `dwarf-fortress-mcp serve` binary over stdio:
 
 `scripts/lab_stdio_walkthrough.py`, `scripts/lab_durable_restart.py` and
 `scripts/lab_replay_roundtrip.py` exercise the full modern lifecycle on this pin.
+
+## Cooperative cancellation readback race (2026-11-03)
+
+The full clean `e227a076` downstream verification at old pin `180a7c8`
+failed in release
+`cancellation_drains_original_plan_after_later_commit_without_dispatching_child`.
+The real MCP subprocess returned `-32603` for `tasks/cancel`:
+`Final task store returned cancellation data that is not durably retained`.
+Debug had 5237 passed; release had 5236 passed and one failed. The isolated
+release rerun passed. That rerun does not erase the original failure, and
+`qualify_local.sh` did not start. Source before/after matched.
+
+Upstream [#100](https://github.com/Dicklesworthstone/fastmcp_rust/issues/100)
+minimizes the race: the elected worker can consume cancellation intent and
+persist terminal cancellation before the request validates its returned active
+snapshot. The new pin accepts only a strictly newer, validated `Cancelled`
+successor preserving task identity, principal, creation and retention fields.
+Exact active readback still requires retained cancellation intent; substituted
+completed states, changed identity/principal/retention and generation rollback
+remain errors. The worker retains its terminal-notification responsibility.
+There is no downstream transport workaround.
+
+The exact pin is a one-file, direct-parent backport of the relevant production
+repair from `b89ff36e32b4884772aeb2d4cc6d47a50a2a7a09`; it does not take the
+unrelated 1715-commit/476-file range. Root independently reviewed production
+logic and tests. Four deterministic upstream regressions execute at the old
+pin with 1 passed/3 failed and at the repaired pin with 4 passed/0 failed,
+zero ignored in both runs. The tests include nine hostile successor controls
+and verify that acknowledgement/refusal leaves durable worker state unchanged.
+The first GREEN used pre-rustfmt test bytes (`fae818a9…`). Root checked the
+complete diff: six formatting-only hunks in the new test block, with production
+bytes identical. The published `13461` source was then executed separately:
+4 passed, 0 failed/ignored, 2105 filtered; source SHA-256
+`f372ec67d0c3cf34b07391de6c2a115db471cbe7e35e91f13174baa2aef14470`
+unchanged before/after and clean upstream Git. That exact rerun, rather than
+formatting equivalence, supplies the committed-source test result. Raw evidence
+is retained under `/tmp/dfmcp-fastmcp-cancel-evidence-exact13461-20261102`.
+
+Original RED/GREEN evidence is retained on TS1 under `/tmp/dfmcp-fastmcp-cancel-evidence-red3-20261102`
+and `/tmp/dfmcp-fastmcp-cancel-evidence-green-20261102`.
+
+A separate downstream release Tasks run uses an explicit local path override
+to the reviewed upstream bytes as a diagnostic. All seven release
+`modern_tasks_golden` cases passed, zero failed/ignored/filtered. Its source
+inventory changed only the private lockfile during override resolution, and
+all 356 upstream files stayed unchanged. Root independently parsed the raw
+4-test RED/GREEN and seven-test subprocess logs. This diagnostic does not
+qualify the checked-in exact Git pin. The checked-in dependency graph retains
+modern-only MCP 2026-07-28 and Tasks, without legacy features.
+
+Exact clean `4ed1091f0718f1f331e1ab65528c802c107de64a` subsequently passed
+the actual Git-pin Tasks suite (7/7), modern handshake suite (5/5), both
+mandatory scripts, all 43 gates, and 5255 debug plus 5255 release tests across
+134 result blocks each, with zero failures or ignored cases. Root independently
+checked all 2695 source files, the eight Git dependency sources, raw profile
+counts and qualification receipt SHA-256
+`6e2da780f6e02faa460888324f0e24b01820305f894b58f5ad36ae3bf3898e0d`.
+This exact-source result closes the scoped cancellation defect. It does not
+qualify the entire upstream project, later documentation commits, a native
+plugin, a live game tuple or production admission.

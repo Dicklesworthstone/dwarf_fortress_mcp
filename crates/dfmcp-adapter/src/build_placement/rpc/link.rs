@@ -44,6 +44,30 @@ const ALLOCATION: Limits = Limits {
     notification_bytes: 2 * 1024 * 1024,
 };
 
+// Separate workshop/1.20 generation: the same framing with its own fixed,
+// source-defined allowance. Every workshop reply fits the closed 8 KiB codec.
+const WORKSHOP: Limits = Limits {
+    bytes: 1024 * 1024,
+    calls: 32,
+    reply_bytes: codec::MAX_REPLY,
+    notification_bytes: MAX_BYTES,
+};
+
+// Closed tree/1.21 factory; existing furniture/workshop limits are unchanged.
+const TREE_HARVEST: Limits = Limits {
+    bytes: 8 * 1024 * 1024,
+    calls: 32,
+    reply_bytes: 512 * 1024,
+    notification_bytes: MAX_BYTES,
+};
+
+const MANAGER: Limits = Limits {
+    bytes: 8 * 1024 * 1024,
+    calls: 32,
+    reply_bytes: 256 * 1024,
+    notification_bytes: MAX_BYTES,
+};
+
 pub(crate) struct Link {
     socket: TcpStream,
     deadline: Instant,
@@ -103,6 +127,35 @@ impl Link {
     ) -> Result<Self> {
         Self::connect_profile(address, timeout, bytes, cancellation, check, ALLOCATION)
     }
+    /// One workshop/1.20 foreground connection. Callers cannot select a wider
+    /// profile; method binding and every frame still share one deadline.
+    pub(crate) fn connect_workshop(
+        address: SocketAddr,
+        timeout: Duration,
+        bytes: u64,
+        cancellation: BuildCancellation,
+        check: &dyn Fn() -> Result<()>,
+    ) -> Result<Self> {
+        Self::connect_profile(address, timeout, bytes, cancellation, check, WORKSHOP)
+    }
+    pub(crate) fn connect_tree_harvest(
+        address: SocketAddr,
+        timeout: Duration,
+        bytes: u64,
+        cancellation: BuildCancellation,
+        check: &dyn Fn() -> Result<()>,
+    ) -> Result<Self> {
+        Self::connect_profile(address, timeout, bytes, cancellation, check, TREE_HARVEST)
+    }
+    pub(crate) fn connect_manager(
+        address: SocketAddr,
+        timeout: Duration,
+        bytes: u64,
+        cancellation: BuildCancellation,
+        check: &dyn Fn() -> Result<()>,
+    ) -> Result<Self> {
+        Self::connect_profile(address, timeout, bytes, cancellation, check, MANAGER)
+    }
     fn connect_profile(
         address: SocketAddr,
         timeout: Duration,
@@ -130,7 +183,7 @@ impl Link {
         out.check(check)?;
         Ok(out)
     }
-    pub(super) fn narrow(&mut self, timeout: Duration, bytes: u64) -> Result<()> {
+    pub(crate) fn narrow(&mut self, timeout: Duration, bytes: u64) -> Result<()> {
         let proposed = Instant::now()
             .checked_add(timeout)
             .ok_or_else(budget_error)?;
@@ -273,7 +326,7 @@ impl Link {
             }
         }
     }
-    pub(super) fn fence(&mut self) {
+    pub(crate) fn fence(&mut self) {
         let _ = self.socket.shutdown(Shutdown::Both);
     }
 }

@@ -252,6 +252,21 @@ remain in each handoff. Operator-selected `completion-recover` and
 original-file loss while withholding verified construction claims. These are
 unadmitted development modes, separate from production protocol negotiation.
 
+The isolated [Manager/1.22 development profile](docs/MANAGER_APPOINTMENT_MCP.md)
+uses these same eleven names. `serve-gameplay-dev manager` observes one
+host-offered eligible current Expedition Leader for vacant MANAGER, prepares
+an exact assignment/HF/history witness, reviews and confirms once, and proves
+the complete unchanged-tick transaction through both native noble getters.
+Original-key lookup, independent journal/ACK custody and errors preserve
+uncertainty without redispatch. Role/candidate/path/method selection is not an
+MCP argument. Full fortress authority is required; production admission and
+canonical world continuity remain unestablished. This legacy generation does
+not prove the game's production-responsibility cache. The separate
+[Manager/1.23 profile](docs/MANAGER_APPOINTMENT_V1_23.md), selected at host startup
+with `serve-gameplay-dev manager-v1-23`, witnesses and updates that cache in the
+same transaction. Its host names, wire identity and custody are distinct.
+Neither historical appointment proof nor cache proof establishes bed production.
+
 ### `fortress.open_session`
 
 Negotiates fortress, versions, compatibility, requested capability scopes, observation profile,
@@ -586,13 +601,25 @@ Only `verified`, `compensated`, `cancelled`, and `failed` are ordinary terminal 
 
 ## Resources
 
+This inventory includes both implemented consumers and target families. The
+laboratory registers session and doctor templates; the exact implemented views,
+authority rules, returned schemas, retention behavior and deferred families are
+documented in [`docs/RESOURCE_URIS.md`](docs/RESOURCE_URIS.md). Fortress-scoped,
+knowledge and memory URI families below are not yet registered consumers.
+
 ```text
 df://session/{id}/summary
 df://session/{id}/capabilities
 df://session/{id}/handoff
+df://session/{id}/replay
+df://session/{id}/anchor
 df://session/{id}/tasks
 df://session/{id}/task-{task_id}
 df://session/{id}/entity-{entity_id}~{generation}~{anchor_digest}
+
+df://session/{id}/state
+df://session/{id}/state-{state_hash}
+df://session/{id}/state-{state_hash}~{section}~{offset}
 df://fortress/{id}/anchor
 df://fortress/{id}/entity/{entity}
 df://fortress/{id}/map/chunk/{x}/{y}/{z}

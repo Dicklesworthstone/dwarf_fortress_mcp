@@ -42,9 +42,18 @@ enum Field<'a> {
 pub(crate) struct Message<'a>(BTreeMap<u32, Field<'a>>);
 impl<'a> Message<'a> {
     pub(crate) fn parse(data: &'a [u8], maximum: u32) -> Result<Self> {
+        Self::parse_bounded(data, maximum, MAX_REPLY)
+    }
+    pub(crate) fn parse_tree_harvest(data: &'a [u8], maximum: u32) -> Result<Self> {
+        Self::parse_bounded(data, maximum, 512 * 1024)
+    }
+    pub(crate) fn parse_manager(data: &'a [u8], maximum: u32) -> Result<Self> {
+        Self::parse_bounded(data, maximum, 256 * 1024)
+    }
+    fn parse_bounded(data: &'a [u8], maximum: u32, bound: usize) -> Result<Self> {
         require(
-            data.len() <= MAX_REPLY && maximum <= 13,
-            "oversized furniture envelope",
+            data.len() <= bound && maximum <= 13,
+            "oversized fixed-profile envelope",
         )?;
         let mut r = Reader(data);
         let mut fields = BTreeMap::new();

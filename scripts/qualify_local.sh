@@ -107,7 +107,7 @@ run_gate repository-integrity python3 scripts/check_repository_integrity.py
 run_gate local-qualification-receipt python3 scripts/check_local_qualification_receipt.py
 run_gate implementation-status python3 scripts/check_implementation_status.py
 run_gate static-contracts bash -c \
-  'python3 scripts/validate_repo.py && python3 scripts/check_source_bundle.py && python3 scripts/check_live_announcements.py'
+  'python3 scripts/validate_repo.py && python3 scripts/check_source_bundle.py && python3 scripts/check_live_announcements.py && python3 scripts/check_workshop_construction.py && python3 scripts/check_tree_harvest.py && python3 scripts/check_manager_appointment.py && python3 scripts/check_manager_v1_23.py'
 run_gate agent-contract python3 scripts/check_agent_contract.py
 run_gate dfhack-read-bridge-contract python3 scripts/check_dfhack_bridge.py
 run_gate bridge-auth-order python3 scripts/check_bridge_auth_order.py
@@ -123,7 +123,11 @@ run_gate live-server-artifact-admission bash -c \
   'python3 scripts/check_live_server_artifact.py && python3 scripts/check_release_source_custody.py'
 run_gate dependency-policy python3 scripts/check_dependency_policy.py
 run_gate repository-integrity-tests bash -c \
-  'python3 scripts/test_repository_integrity.py && python3 scripts/test_read_stable_repository_file.py && python3 scripts/test_source_bundle.py && python3 scripts/test_source_bundle_output_location.py && python3 scripts/test_validate_repo_rust.py && python3 scripts/test_dfhack_bridge_contract.py && python3 scripts/test_live_mcp.py && python3 scripts/test_read_stable_repository_file_loader.py'
+  'python3 scripts/test_repository_integrity.py && python3 scripts/test_read_stable_repository_file.py && python3 scripts/test_source_bundle.py && python3 scripts/test_source_bundle_output_location.py && python3 scripts/test_validate_repo_rust.py && python3 scripts/test_dfhack_bridge_contract.py && python3 scripts/test_live_mcp.py && python3 scripts/test_read_stable_repository_file_loader.py && python3 scripts/test_workshop_source_inventory.py && python3 scripts/test_workshop_native.py --mutations && python3 scripts/test_tree_harvest_source_inventory.py && python3 scripts/test_tree_harvest_native.py --mutations && python3 scripts/test_manager_source_inventory.py && python3 scripts/test_manager_native.py --mutations && python3 scripts/test_manager_v1_23_source_inventory.py && python3 scripts/test_manager_v1_23_native.py --mutations &&
+    python3 scripts/test_job_suspension_native.py --ubsan &&
+    for job_mutant in witness idempotency eligibility job-list job-policy; do
+      python3 scripts/test_job_suspension_native.py --ubsan --mutant "$job_mutant" || exit
+    done && python3 scripts/test_job_control_sdk_guard.py'
 run_gate local-qualification-receipt-tests python3 scripts/test_local_qualification_receipt.py
 run_gate implementation-status-tests python3 scripts/test_implementation_status.py
 run_gate live-acceptance-tests bash -c \
@@ -142,6 +146,23 @@ run_gate live-server-binary-receipt-tests python3 scripts/test_live_server_binar
 run_gate admitted-live-launcher-tests bash -c \
   'python3 scripts/test_admitted_live_launcher.py && python3 scripts/test_live_admission_ticket.py'
 run_gate python-syntax python3 -m py_compile \
+  scripts/test_job_suspension_native.py \
+  scripts/test_job_control_sdk_guard.py \
+  scripts/check_manager_appointment.py \
+  scripts/test_manager_source_inventory.py \
+  scripts/test_manager_native.py \
+  scripts/check_manager_v1_23.py \
+  scripts/test_manager_v1_23_source_inventory.py \
+  scripts/test_manager_v1_23_native.py \
+  tests/stdio/manager_appointment.py \
+  scripts/check_tree_harvest.py \
+  scripts/test_tree_harvest_source_inventory.py \
+  scripts/test_tree_harvest_native.py \
+  tests/stdio/tree_harvest.py \
+  scripts/check_workshop_construction.py \
+  scripts/test_workshop_source_inventory.py \
+  scripts/test_workshop_native.py \
+  tests/stdio/workshop.py \
   scripts/announcement_source_custody.py \
   scripts/test_announcement_source_custody.py \
   scripts/validate_repo.py \

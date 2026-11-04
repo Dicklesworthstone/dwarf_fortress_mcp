@@ -25,7 +25,7 @@ external_runtime_dependencies = []
 # bump ships with a conformance note in docs/DOGFOODING_FASTMCP.md.
 crate = "fastmcp-rust"
 repository = "https://github.com/Dicklesworthstone/fastmcp_rust"
-pin = "180a7c88890705217bb8e202d19555adabf24187"
+pin = "13461caf1f23bef675e0588b5e0c5ba8cf81b9f8"
 profile = "modern-only-mcp-2026-07-28"
 required_features = ["tasks"]
 forbidden_features = [

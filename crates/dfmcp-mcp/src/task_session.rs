@@ -24,15 +24,20 @@ fn with_task_session<T>(
     with_session(&session, || Err(session_error()), body)
 }
 
+fn with_task_read<T>(session_id: &str, body: impl FnOnce(&LabSession) -> Result<T>) -> Result<T> {
+    let session = resolve_session(Some(session_id.to_owned()))?;
+    with_session_read(&session, Err, body)
+}
+
 pub(crate) fn read_authority(session_id: &str) -> Result<()> {
-    with_task_session(session_id, |session| {
+    with_task_read(session_id, |session| {
         let ctx = context_for(session, session.next_request_id);
         authorize_entry(&ctx, Capability::Observe, RiskTier::ReadOnly)
     })
 }
 
 pub(crate) fn read_budget(session_id: &str) -> Result<WorkBudget> {
-    with_task_session(session_id, |session| {
+    with_task_read(session_id, |session| {
         let ctx = context_for(session, session.next_request_id);
         authorize_entry(&ctx, Capability::Observe, RiskTier::ReadOnly)?;
         Ok(session.budget)
@@ -40,7 +45,7 @@ pub(crate) fn read_budget(session_id: &str) -> Result<WorkBudget> {
 }
 
 pub(crate) fn has_original_receipt(session_id: &str, digest: &str) -> Result<bool> {
-    with_task_session(session_id, |session| {
+    with_task_read(session_id, |session| {
         let ctx = context_for(session, session.next_request_id);
         authorize_entry(&ctx, Capability::Observe, RiskTier::ReadOnly)?;
         Ok(session.commit_receipts.contains_key(digest))
@@ -414,7 +419,7 @@ fn view_locked(session: &LabSession, digest: &str) -> Result<PlanTaskView> {
 }
 
 pub(crate) fn view(session_id: &str, digest: &str) -> Result<PlanTaskView> {
-    with_task_session(session_id, |session| {
+    with_task_read(session_id, |session| {
         let ctx = context_for(session, session.next_request_id);
         authorize_entry(&ctx, Capability::Observe, RiskTier::ReadOnly)?;
         view_locked(session, digest)

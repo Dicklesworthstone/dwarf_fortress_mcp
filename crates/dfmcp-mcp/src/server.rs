@@ -238,6 +238,27 @@ fn not_retained_reason(session: &LabSession, hex: &str) -> String {
     }
 }
 
+/// Resolve an exact immutable version for an already-authorized resource
+/// read while `with_session` owns the current fortress. Addresses never fall
+/// back to a newer version or another session's history.
+pub(crate) fn retained_resource_snapshot<'a>(
+    session: &'a LabSession,
+    hash: Option<&str>,
+) -> Result<&'a WorldSnapshot> {
+    let current = session.adapter.snapshot();
+    match hash {
+        None => Ok(current),
+        Some(hash) if current.state_hash.to_hex() == hash => Ok(current),
+        Some(hash) => session
+            .history
+            .find_hex(hash)
+            .and_then(|digest| session.history.get(&digest))
+            .ok_or_else(|| {
+                DfmcpError::new(ErrorCode::StaleAnchor, not_retained_reason(session, hash))
+            }),
+    }
+}
+
 /// Observed world changes from the version with `from_state_hash` to the
 /// newest version this session saw. `None` when the session is unknown;
 /// a single `history_not_retained` item when the base aged out.
@@ -2072,12 +2093,19 @@ pub(crate) fn lookup_session_str(session_id: &str) -> Result<Arc<Mutex<LabSessio
 }
 
 /// The replay bundle of a session's recorded calls.
+#[cfg(test)]
 pub(crate) fn replay_bundle_for(session_id: &str) -> Result<serde_json::Value> {
     let session = lookup_session_str(session_id)?;
     let guard = session
         .lock()
         .map_err(|_| DfmcpError::new(ErrorCode::InternalInvariantViolation, "session poisoned"))?;
     Ok(crate::replay::bundle_json(&guard.replay))
+}
+
+/// Resource callers already hold the current, owner-fenced read view. Keep
+/// authorization and replay inspection within that single admission boundary.
+pub(crate) fn resource_replay_bundle(session: &LabSession) -> serde_json::Value {
+    crate::replay::bundle_json(&session.replay)
 }
 
 pub(crate) fn resolve_session(session_id: Option<String>) -> Result<Arc<Mutex<LabSession>>> {

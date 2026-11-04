@@ -47,6 +47,8 @@ pub mod live_spatial_server;
 pub mod live_work_order_progress_server;
 pub mod live_work_orders_server;
 pub mod live_workforce_server;
+pub mod manager_appointment_server;
+pub mod manager_appointment_v1_23_server;
 mod observation_projection;
 mod output_budget;
 pub mod replay;
@@ -59,7 +61,9 @@ pub mod server;
 mod task_service;
 mod task_store;
 pub mod tasks;
+pub mod tree_harvest_server;
 mod witness;
+pub mod workshop_construction_server;
 mod world_changes;
 
 pub use admission::{AdmissionProvenance, current_admission_provenance, run_live_stdio};

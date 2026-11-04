@@ -1,5 +1,296 @@
 # Implementation Status
 
+## Latest exact-source qualification
+
+Clean code revision `4ed1091f0718f1f331e1ab65528c802c107de64a` passed both
+`./scripts/verify.sh` and `./scripts/qualify_local.sh` on Linux x86_64 with
+nightly rustc `3e92e1a2d20b991ef23a6c6064c34d57ee8c98d3`
+(commit date 2026-11-01).
+All 43 qualification gates passed. Each script's debug and release suites
+separately passed 5255 tests across 134 result blocks, with zero failed,
+ignored, measured or filtered cases. Root independently validated the receipt,
+all 2695 Git file bytes and executable semantics, source stability, source
+snapshot, exact FastMCP Git dependencies and raw test counts.
+
+Qualification receipt SHA-256:
+`6e2da780f6e02faa460888324f0e24b01820305f894b58f5ad36ae3bf3898e0d`.
+Source snapshot digest:
+`1dc7ebf128f6f23b8d1607b52ce05e23360708e5f4b71a9a75b1aae96dfec666`.
+This qualifies that exact revision. Later unqualified source changes, including
+this evidence-documentation update, do not inherit the receipt.
+
+The narrow FastMCP cancellation repair at `13461caf` passed four deterministic
+upstream tests and seven actual downstream release Tasks cases. Bead `.25`
+is closed for that proven bug. Resource authority and read-side-effect fixes
+also executed: 26 resource tests and 11 objective-lifecycle tests passed,
+including the 30-case process/durable read regression. Broader `.11` remains
+open for resource families still unavailable.
+
+A separate fresh release build produced the source-bound **development-only**
+job-control executable SHA-256
+`df7617d4379fb1e390984d8e0f049438b37c03d5abd7f499d0875610f803c9cb`,
+10,749,152 bytes. Its actual non-test compiler artifact reported `fresh=false`,
+meaning it was compiled rather than reused; all source bytes remained exact.
+This is not a production server receipt or admission. The current composed
+job policy's one-class real-game proof is recorded under `.8.1` below;
+historical live10 evidence does not qualify its posting and claim restrictions.
+
+The compatibility registry remains empty, the production runner map remains
+protocol 1.0 only, and no live tuple or game mutation is production-admitted.
+The bounded W wooden-bed experiment below remains exact to `e899a442` and its
+named artifacts; neither source qualification nor that experiment proves broad
+fortress autonomy or the retired original order's completion.
+
+## Current job-control development evidence
+
+AG completed the current-source suspend/resume pair on real DF v0.53.16
+Linux64 ITCH with DFHack 53.16-r3. Actual GPT-6.1 Terra medium under NTM used
+the exact development executable above and native job plugin
+`e7a3f93449dd79d0e1adb6948510834ceba0436e635f188482e194536da282e1`.
+Root independently replayed all 18 modern MCP exchanges, six canonical journal
+frames, both native receipts and three nonce-bound native captures. Real
+`ConstructBed` job 5 changed flags `0 → 2 → 0` at tick 12114576; posting index
+remained -1 and all other captured fields were identical. No game tick advanced
+during those effects.
+
+Suspend receipt: `6182a9380dcffdba49315e9e7df8f7045fd1ce44653fd69dcc473a9567d1ac1b`.
+Resume receipt: `48bbe7ee301ec07f2af9e540da3eb5a3b8dcb5fc310ce7d7f4ad91f7b82f02ba`.
+Plan-response-to-Commit-dispatch intervals were 18.182097514 and 11.299098499
+seconds after removing the redundant pre-commit Explain step. Native lifetime
+and revalidation remained unchanged.
+
+Offline discovery returned both Applied records and preserved the original
+2894-byte, mode-0600 journal with SHA-256
+`44ff5305e1b5c09bdb3441e17833a8af07a482d37a01dee84b48c35bdb0636a1`.
+Root checked every member of the 324-file primary export and 23-file supplement;
+their manifests are `f0a0362b9c47c8c313dd98be09c0f33cb1453cf85e4cf54e17c5d8672ed821d2`
+and `6761b3e426f25fcd470a17aad41671003754e7fd4a4ab5f8764f093a6be70e4c`.
+Both passed the 126-value private scan. One optional workshop screenshot was
+not captured. Opened game/plugin/library bytes, the server image, all five
+native source inputs, final pause/log/map identity and cleanup were verified.
+A fresh read-only host check additionally confirmed both 30-file save sets,
+the original plugin bytes/mode, empty owned game groups, both MCP server
+identities drained and port 5000 closed.
+
+This closes `.8.1` for **one of eight policy classes**, using a disclosed
+operator-created normal-game fixture. The other seven classes remain live
+unproven. It does not prove workshop production through this job profile,
+original production-goal completion, broad fortress competence or admission.
+The CLI still selects separate gameplay runtimes; the combined production
+executor has no public MCP host, owned by `df-dfhack-bridge-plane-c-pic.4`.
+
+### Earlier partial and failed trials
+
+AD used that exact development executable and the source-matched native job
+plugin `e7a3f93449dd79d0e1adb6948510834ceba0436e635f188482e194536da282e1`.
+Actual GPT-6.1 Terra under NTM observed and suspended real `ConstructBed` job 5
+through modern MCP. Root independently verified the canonical Applied receipt
+`66d206f5ed467667f5a97e4286d9dd2ef5760edeb7e5dbea45668acedeec22ed`,
+MCP process-image identity, and native captures with flags `0 → 2` at unchanged
+tick 12114541. Posting index remained -1; holder, queue, filters, worker and
+all other captured fields were unchanged.
+
+This is a **partial** trial. Its second key, `ad-job5-resume`, remains
+historically Prepared, with no resume commit. The four-frame journal contains
+one Applied suspension and that preparation. Offline discovery truthfully
+returned both, and the before/after journal identity was unchanged. The
+game was paused and drained and the plugin and both saves restored. The
+278-file export and 19-file supplement matched their manifests; process
+metadata displayed before its dedicated scan remains a disclosed ordering
+violation. AD did not prove the complete pair; its Prepared resume remains
+historical evidence and was not combined with AG to claim success.
+
+AE separately prepared the same kind of job but spent at least 80.129179611
+seconds between the complete Plan response and Commit dispatch. Plan performs
+native preparation before replying; the native lifetime is 60 seconds. Its
+canonical three-frame journal ends Refused, and independent raw captures show
+the job unchanged at tick 12114542. The capture filename `resumed` labels only
+that post-refusal read; no resume happened. Root verified all 307 export and
+19 supplement members, the refusal receipt, request-payload-bound timing,
+read-only offline discovery, unchanged 1490-byte journal identity, final pause
+and cleanup evidence. This is negative evidence, not gameplay success.
+
+The client workflow now calls for reviewing the complete effect in Plan and
+committing immediately, with Explain afterward. Plan and Explain returned
+identical 15-field effects in AE; an extra reasoning turn exhausted the native
+window without adding evidence. Native expiry, revalidation and authority are
+unchanged. A prepared pipe-only relay is not integrated or live-qualified.
+
+AF ended during operator setup with no MCP requests. Root misidentified the
+workshop header X as a panel-close control; its normal UI handler instead
+removed the bed task and queued demolition. The game stayed paused, and cleanup
+had begun before a repair instruction arrived. The 325-file export and 40-file
+supplement preserve this incident and match their manifests. The supported GUI
+input route had successfully removed an earlier incorrect task and created
+the intended bed; future setup leaves the panel open and verifies tooltips.
+No job-control or production-success credit is assigned to AF.
+
+The live investigation also fixed an operator-harness defect: Lua `print`
+wrote evidence to the RPC reply while supervisors read the game log. Bounded,
+checked `io.write`/flush producers now match those consumers, including the
+independent selected-job capture. A real read-only DFHack nonce probe verified
+the two output channels. Fixture preparation, UI dismissal and these probes
+are operator work; they are not MCP production competence or admission.
+
+## Historical intermediate findings
+
+The following notes preserve earlier cuts and failed or pending attempts.
+Their pending statements are superseded only by the exact evidence above;
+no failed receipt is erased.
+
+Clean `7a1abc12` exact-pin metadata passed, then the first focused Rust build
+refused a mutex-guard coercion in a new objective regression (E0308). Zero
+tests executed; handshake, Tasks, Manager and both mandatory scripts were
+unrun. The regression now binds the guard explicitly; assertions are unchanged.
+The published FastMCP source separately passes all four deterministic tests
+with exact file SHA `f372ec67…` stable before and after.
+
+A second review closes the task-resource precheck/fetch race. Task discovery,
+detail and evidence fetch candidates outside world/session locks, then
+reauthorize and render under the current owner-fenced view. Candidate errors
+also wait for that final authority check. New deterministic component cases
+cover shared-clock expiry and durable-owner replacement on all three routes;
+detail/evidence use explicit synthetic task fixtures. No task-store lock is
+acquired under the world/session lock. These new tests are not yet executed.
+The now-test-only diagnostic replay helper is excluded from production builds,
+addressing the warning observed in the intermediate e347 build.
+
+Fresh review repairs laboratory resource reads that could publish objective
+history or durable custody as a side effect. State, task, summary, handoff,
+anchor, replay, capabilities and doctor reads now share the owner-fenced
+immutable session view; summary observation also preserves the adapter
+transcript. Replay authorizes against the current shared-world clock. State
+projection and escaped-response publication share one wall deadline. New
+regressions cover 30 process/durable allowed/denied cases, replaced ownership,
+shared-clock expiry, and three deadline checkpoints. These source changes have
+not yet executed as Rust tests.
+
+The complete clean `e227a076` verification failed in release Tasks cancellation:
+5237 debug tests passed, while release had 5236 passed and one failed. No full
+qualification receipt was generated. An isolated rerun passed; subsequent
+deterministic upstream tests reproduce the cancellation-intent/readback race.
+The narrow FastMCP repair is tracked at upstream issue #100 and consumed at
+exact Git pin `13461caf1f23bef675e0588b5e0c5ba8cf81b9f8`, a direct child of
+old `180a7c8` changing only upstream `tasks.rs`. Deterministic upstream tests
+are RED 1 passed/3 failed and GREEN 4 passed/0 failed, including nine hostile
+successors. Exact-pin subprocess conformance and new full qualification remain
+pending. The failed run is retained.
+
+This integration candidate combines the Manager 1.23 successor with public main
+`bad8eea`, preserving the current entity-resource consumer, immutable state pages,
+and both job-control repairs. The job policy now combines eight explicit native
+type/holder pairs with exact holder references, hidden-worker refusal, unposted
+and unclaimed restrictions, and complete list/back-reference/horizon validation.
+Its SDK-double suite passes 863 assertions in 13 groups, all five compiled
+mutants, and a separate 287-check guard. Prior live10 evidence does not qualify
+this changed policy; the old capture did not record posting index. Those job
+checks are now required by both standard scripts. Merged-source Rust execution
+and full qualification remain pending.
+
+Real W on clean `e899a442` and native Manager ELF `74d011e0…` reached a completed
+original Carpenter workshop and a newly observed PECAN-wood BED 561 through the
+actual modern MCP loop. Root independently verified all 343 export members,
+the Manager 1.23 canonical transaction and journal/ACK chain, and the public
+inventory against independent paused native readback. Four reviewed clock runs
+advanced 94/1200/1200/1200 ticks (3694 total), with zero overshoot; the bed interval
+used 1200 ticks. Fresh Root-authored host checks verified both 30-file saves,
+eight restored plugin states, drained owned game identities and a closed port.
+The original finite order disappeared: its semantic goal remains Unknown and
+causal production attribution remains unknown. Separate pre/post offline file
+hashes were not captured. These limits and retirement work remain tracked in
+`.14.5`; parent `.14`, `.14.2` and `.14.4` remain open under their written criteria.
+
+The append-bound Manager native source separately builds against the matching
+SDK as ELF SHA-256
+`8fe393edd76a0c84520d16627f313852a892f3e29db82f6eaa8f8ffd12899e6f`.
+Root checked all 31 native inputs against this integration source. That build
+is not the W executable and has no inherited live qualification. Resource
+output accounting also now shares one complete 4096-byte numeric-request-ID
+reserve across entity, task and state views; the new boundary regression has
+not yet executed on this merged source.
+
+Independent clean-source follow-up: `82f9a6cde52a58d65475c19ba4686c09397cd6cc`
+completed both mandatory scripts, all 43 qualification gates, and 5227 tests in
+each Rust profile across 131 targets, with zero failed/ignored/measured/filtered.
+Receipt SHA-256: `df33f61d5d67188caecc02e57d590ccafadaea758f2d1473d165ff68e5e14368`.
+Root compared all 2676 source files and parsed both raw test gates independently.
+This qualifies the preceding response/deadline changes, not this newer 1.23 source.
+
+Manager 1.23 cache-bearing development source is being integrated. U proved the
+1.22 base assignment/HF/history transaction; V independently observed the game
+production-responsibility cache still empty. The normal UI reappointment probe
+did not complete, so its causal repair is not claimed. This successor witnesses
+and updates the cache with distinct wire/custody identity, leaving 1.22 intact.
+The preceding native component reported 13 scenarios/308 assertions and four
+killed mutants, with unchanged 1.22 vectors; a target-library-matched SDK build
+exists. Clean `e899a442` passed 23 adapter cases and actual modern MCP suites of
+8 dedicated 1.23, 8 CLI 1.23 and 7 legacy cases, using native doubles. Strict
+Clippy found stale test-family references and a hex-parser lint; both are fixed
+forward. Fresh review also found terminal HF-link/history off-by-one limits and
+missing cache append capacity. The newer source reserves append room before
+preparation and observes the complete terminal limits, with focused regressions
+and compiled mutants. Full qualification of this successor and live 1.23
+production remain pending; neither earlier component result transfers silently.
+The corrected native SDK-double run passed 15 scenarios/343 assertions and all
+eight compiled mutants; legacy 1.22 passed 12/270 and its three mutants with
+unchanged vectors. These are component checks, not a new SDK build or game run.
+The development source grants no compatibility or production admission.
+
+Full verification at `57410a1` exposed a missed nested CLI test denominator:
+the Tree and workshop subprocess suites each passed seven, while their standard
+CLI caller still expected five. The caller now requires seven and retains all
+zero-failure/error/skip assertions. That full verification failed and qualification
+did not start at 574; 82 subsequently passed both commands as recorded above.
+Both required commands remain pending for the newer Manager 1.23 source.
+
+Prepared Tree, workshop and Manager profiles now default to the existing
+60000ms ceiling. Tree/Manager preflight held connections before dispatch custody;
+workshop preserves the typed cause of failed pre-dispatch revalidation. This
+repairs the real S trial's expired five-second review budget without renewing
+original connection/native deadlines or one-use authority. Delayed-review and
+expired-no-dispatch subprocess regressions are added; execution on this source
+is pending. The real S uncertainty and failed T startup remain negative evidence.
+
+
+The Manager native component runner is now connected to both mandatory scripts.
+Its 12-scenario/270-assertion and three compiled-mutation checks remain pending
+at this source; SDK doubles do not establish ABI, live or admission evidence.
+
+Tree envelope accounting now reserves 4096 bytes for admitted numeric request IDs.
+The source, contract, mutation check and boundary regression are updated; Rust
+execution remains pending. This repairs project-budget accounting and does not
+claim a reproduced native 1MiB transport failure.
+
+Session and doctor resource handlers now explicitly request private zero-TTL
+responses. Source and regression tests are present; execution and independent
+qualification are pending. This change does not establish native or runtime
+admission.
+
+Exact execution follow-up (2026-11-02): clean `924037df` completed both required
+scripts, with all 43 qualification gates passed and 5198 debug plus 5198 release
+cases across 128 targets per profile (zero failed, ignored or filtered). Receipt
+SHA-256: `af4da048c5881c0dbb1b6dae68c3030550b1820e42976847a40356482c399bbd`.
+The later response-only `cd3ef967` passed 11 resource cases (2831 filtered),
+5 Tree packet cases (2837 filtered), and all 4 modern handshake/resource subprocess
+cases. The maximum numeric-ID envelope regression is included. All had zero
+failures or ignored cases; these are focused checks, not a new full qualification.
+
+Clean Manager source `63548fa7` now also built its dedicated and standard CLI
+executables; each passed the actual five-case modern MCP subprocess suite.
+Those native peers are explicit doubles. The separate native-only real-game R
+transaction remains the game evidence described below. The original MCP-only
+bed trial is still pending; this integrated successor has no inherited full
+qualification or production admission.
+
+Clean `f922921f` passed all three actual modern subprocess suites (7/7 each),
+plus 14 Tree, 23 workshop and 18 Manager adapter cases. Root independently
+compared every source input and consumed their raw terminal output; the peers
+remain protocol doubles. The same new Tree suite against the sealed old 64fd
+binary passed five cases and failed exactly the two deadline regressions.
+Strict latest-nightly Clippy then stopped before both full scripts on the
+numeric-ID test's `int_plus_one` lint. The equivalent strict inequality now
+retains the identical newline-inclusive bound; successor qualification is pending.
+
 This file is the authoritative antidote to accidental overclaiming. Prospective architecture prose
 describes the target system; this file describes what the checked-in source and exact evidence
 actually establish.
@@ -7,8 +298,8 @@ actually establish.
 ## Current phase
 
 **Phase 0D-R0 with implemented but unadmitted read profiles through citizen-inclusive spatial/1.8,
-optional archive-bound durable foreground watches, and an explicitly unadmitted pause-control/1.7
-development slice. No live tuple is currently admitted.**
+optional archive-bound durable foreground watches, and explicitly unadmitted pause-control/1.7
+and original Carpenter workshop/1.20 and visible-tree supply/1.21 development slices. No live tuple is currently admitted.**
 
 The repository contains:
 
@@ -23,12 +314,364 @@ The repository contains:
 - a private hash-chained pause-effect coordinator journal whose source records `CommitStarted` before dispatch and terminal evidence before acknowledgement;
 - offline read-only pause-effect discovery without a bridge connection or mutation authority;
 - an explicitly unadmitted furniture/1.19 native, Rust and eleven-tool MCP development path for exact-item bed/chair/table placement, durable single-attempt coordination and original-key recovery;
+- an explicitly unadmitted workshop/1.20 native, safe-Rust and registered eleven-tool MCP development path for one original 3x3 Carpenter workshop using one exact eligible WOOD log;
 - a protocol-bound V2 production ticket and runtime dispatcher whose map still contains only protocol 1.0.
 
 The checked-in compatibility registry remains empty. Source presence does not imply qualification,
 admission, or support. No protocol beyond 1.0 appears in the production runner map.
 
+## Manager appointment 1.22 source (2026-11-02; .14.2)
+
+The isolated Manager generation adds eight adapter modules for exact capture,
+codec, one-attempt RPC/custody and focused tests, plus an eleven-tool MCP
+consumer reachable with `serve-gameplay-dev manager`. It offers only the exact
+host-pinned eligible current Expedition Leader for an existing vacant MANAGER.
+Full-fortress authority, one review/confirmation, original-key journal and
+independent ACK precede the native assignment/HF/history transaction. Success
+requires the full projected poststate and fresh dual-getter proof without ticks.
+
+Native attempt 4 compiled against the real 53.16 SDK; its 206032-byte plugin
+SHA-256 is `4c6e64a08abf708ac16b186926c694f7f26d3f4caad07e0bb1be96567af17d1d`.
+A separate native-only R trial on the original disposable save appointed the
+Manager, retained byte-identical duplicate-commit/query receipts, and added
+exactly one history event without advancing the paused tick. Root independently
+decoded the full canonical transaction and commitments and checked both external
+role getters, the declared world/HF/history projection and cleanup record.
+The 162-file/479820-byte export manifest is
+`d76796712cf68b35efc05c4ca60da0de82ad3a2d01fb284f75401aa3cf1acc48`;
+76 private values were scanned with zero matches. Native evidence binds only
+the seven unchanged native inputs, not the Rust controller or production admission.
+Adapter cut 2 failed with E0603/zero tests; cut 3 passed 15 scoped tests with
+1331 filtered. Cut 4, MCP/CLI execution, full exact-source qualification and the
+original MCP-only bed chain remain pending. Original `.14` and `.14.2` stay open. See
+`docs/MANAGER_APPOINTMENT_MCP.md` and `architecture/manager_appointment_v1_22.json`.
+Independent Terra source review found two public-adapter stale-tick authority
+issues, without showing an unauthorized actual MCP effect. Cut 4 reauthorizes
+every plan edge at the maximum caller/plan/observed tick and passes the retained
+journal frontier through both injected guards and the writer. Paired TCP/lease
+regressions are source-present, with execution pending Root's direct build.
+The production map and empty registry are unchanged.
+
 ## Evidence hierarchy
+
+### Direct execution and original-save K experiment (2026-11-02)
+
+Exact `64fd25f7f77a12baa57e9c055b764957b2477e77`, compiled directly on Linux
+with latest nightly `3e92e1a2d20b991ef23a6c6064c34d57ee8c98d3`, passes 2,840
+MCP library cases, two Rust stdio wrappers and 1,330 adapter cases, with zero
+failed, ignored or filtered. Five Tree and five workshop subprocess scenarios
+pass, including large and maximum-2,048-cell evidence. Exact real J replay
+returns a usable session and external ACK: content 0 is the packet and two raw
+blocks reconstruct all 30,489 native bytes. Credential-free offline reopening
+preserves custody without native I/O. This is not full workspace qualification.
+
+Separate live K uses sealed 64fd development executables with Classic 53.16 /
+DFHack 53.16-r3 on Linux x86_64. A reviewed Tree designation is followed by
+observed root-predicate absence and ten new eligible ground WOOD items; causal
+item attribution remains unknown. A reviewed construction using ground log 549
+is followed by fresh original Carpenter building 1 completion, independently
+observed at stage 3/3. One reviewed finite wooden-bed order 0 is inserted, but
+remains unvalidated/inactive with one item outstanding and zero BED after four
+1,200-tick bed intervals. No manager was observed among seven citizens. No
+manager, labor, item or order flags were forced. The manager cause is unproved.
+
+Root independently verifies 306 export members / 2,280,694 bytes against
+manifest `0ae0882bf9e244f25e54a11cab40d0bca4af0edcd7ac1605467998d0e81dcf5a`,
+all modern exchange identities and chunk hashes, six bounded intervals totaling
+7,200 requested and observed ticks with zero overshoot, and nine unchanged
+custody files after credential-free offline reopening of all four profiles.
+The export reports 75 exact private values scanned with zero matches. Fresh
+host checks verify seven original plugin states, both exact 30-file saves,
+absent original process births and a closed port; the terminal capture proves
+raw pause and an inactive clock before drain. Raw exports and independent replay
+remain under `target/fresh-eyes-20261101/workshop-k-*`.
+
+Actual standard CLI integration passes on exact
+`34c8c53488078db89df0cd39b21bb336a960fb10`: one Rust case drives three
+subprocess scenarios and the original five Tree/five workshop cases. Its direct
+warning-denied Clippy attempt rejects three existing Tree custody APIs for
+argument count. This successor locally annotates only those style findings with
+reasons, keeping explicit frame, authority, pin and ACK arguments unchanged.
+A named test-fixture tuple resolves the separate type-complexity finding.
+All-target compilation also exposes an unresolved private TestClock import in
+the shared public-API integration file. The successor keeps interrupted-read
+assertions shared, and includes deterministic delayed/pre-I/O/unwind clock
+cases only in the unit module. Its test read hook defaults to absent and runs
+after releasing the fixture borrow. Production code and clock are unchanged.
+Both compilation contexts require new execution; no test is ignored or dropped.
+Both required full commands still need terminal successor evidence. K is a
+bounded partial gameplay experiment, not full campaign qualification, competent
+autonomous production, compatibility or admission. Original `.14` and the MCP
+bug's final qualification remain open.
+
+
+### Standard gameplay development startup (2026-11-02; source only)
+
+The standard executable now accepts the closed operator startup command
+`serve-gameplay-dev <tree|workshop|bounded-clock|finite-bed>`. It calls the
+existing Tree/1.21, workshop/1.20, standalone run/1.13 or semantic finite-order
+stdio server directly in the same process. Profile selection creates no grant,
+changes no environment, spawns no process and adds no bridge method. Each
+selected runtime retains its existing opt-in, closed configuration, source pins,
+eleven modern tools, typed preparation/confirmation, original keys and recovery.
+The finite-order entry now invokes its existing environment guard before stdio
+startup too. Unknown/missing profiles and extra arguments refuse; production
+launch state remains refused. The production runner/registry and frozen 1.0/1.1
+wire semantics remain unchanged.
+
+This makes existing mutation-capable backends reachable from the standard CLI.
+It is one profile per process, without a shared cross-profile session, automatic
+Tree-to-workshop-to-bed controller or claim that those original gameplay goals
+have succeeded. The `finite-bed` alias retains the existing finite furniture
+recipes and amount bounds; the original task uses `wooden_bed`, amount 1.
+
+One new Rust integration case drives three CLI subprocess scenarios: closed
+argument rejection, exact modern discovery/authority refusal on all four
+profiles, and the original five Tree plus five workshop component scenarios
+through standard CLI startup. Existing cases and assertions remain intact.
+Only scoped static/syntax/UBS checks are run by the source author; actual Rust,
+CLI subprocess execution, final qualification and gameplay are pending Root's
+execution on this exact successor. Earlier candidate evidence is retained with
+its own source identity. Original .14 remains open.
+
+
+### Tree result-size repair (2026-11-02; source and replay evidence only)
+
+Live I's exact cfcc Tree executable rejected a correctly formed modern open with
+`-32603 invalid tools/call result for Modern2026` after initial journal/ACK
+creation. No external session/ACK, plan, designation or clock was sent. Original
+I custody remains untouched. Root independently verified the scanned I export
+(manifest `7e35ec7ab4c8575191898d595f4d2e686d9aba4d6e72f8f039269764bd68d371`).
+Fresh J performed native Handshake+Read only and preserved pause, plugins and
+saves. Its distinct canonical capture is 30489 bytes, SHA256
+`8c8b6ec8e3b8e19e1ab8e30a152580a4fb38455677bd4dfdfaee90df1fcc5472`.
+Its hex alone is 60978 characters and fits the pinned single-string limit.
+Root's unchanged-J replay against old cfcc reproduces the rejected complete
+result with header-only custody/zero ACK frames and no native mutation call.
+This is component replay, not recovered I bytes or another live MCP execution.
+
+A separate actual-stdio protocol-double reproduction uses the same sealed cfcc
+binary (`608c8e914743fe48d0705c733ec5b9151f9792a8c45e4caba6c53029afa69a5f`).
+The 1090-byte native-vector control returns a session and independent ACK; the
+valid 67676-byte fixture returns the expected `-32603`. Both call only Handshake
+and ReadTreeHarvest and retain header-only journal plus 140-byte ACK. The first
+attempt stopped on a faulty fixed header-length assertion before the large
+case; preserve it separately from the corrected driver exit 0, which proves
+reproduction of a defect, not a product pass. Raw records are retained under
+`target/large-result-repair-20261102a/old-cfcc-reproduction[-b]`.
+
+The private repair branch adopts only owned bug `.14.1`; the frozen cfcc checkout
+and its 161 Bead rows stay unchanged. It uses the pinned macro's explicit typed
+modern result API. content[0] keeps the full Agent Turn and custody/ACK, with
+recursive raw-capsule descriptors bound to field paths, ordered separate content
+blocks, byte lengths and complete/per-block SHA256. Complete serialization with
+empty ordinary-tool metadata and worst-case admitted JSON-RPC ID/framing is
+bounded by 512KiB; each text remains within the unchanged 65536-byte codec guard.
+The existing bounded fallback preserves original custody and uncertainty.
+The first executed repair candidate `527587a` failed compilation before tests:
+`CompleteResult<FinalCallToolResult>` deliberately does not implement Serde
+serialization. The correction measures the actual guarded
+`CoreResult::Final(FinalCoreResult::ToolsCall { .. }).encode()` wire, and the
+packet regression exercises that same public codec. Ordinary tools/call uses
+empty metadata: the pinned codec rejects discovery-only server identity there.
+The correction also removes an unused import and checks Query authority plus
+the 32-byte budget before reading Tree entropy, matching the workshop boundary.
+At that checkpoint, fresh corrected-source compilation and execution were required.
+Direct `8eb7754` execution compiled the production library but stopped before
+tests on an ambiguous integer type in the chunk-boundary test. The test sizes
+now explicitly use `usize`; the newline-inclusive bound is equivalently written
+as a strict comparison. This preserves every byte size, assertion and case.
+The first corrected-executable J replay then exposed a scope mismatch in the
+new entropy authorization: Tree's Query grant is map-scoped, so requesting
+`None` correctly fails. Both entropy callers now pass their configured map
+area explicitly. The grant remains unchanged, and the source mutation checks
+cover both scoped call sites. That correction required another actual-capture replay.
+Native Tree/workshop code, protocols, vectors and ground-material policy remain
+byte-identical to cfcc. No production registry/runner/floor is widened.
+
+Prior exact cfcc component execution is now independently consumed by Root:
+RCH job 30090363205058940 passes all 1330 adapter cases, and job
+30090363205058942 passes 2838 MCP library cases plus two Rust wrappers driving
+five Tree and five workshop subprocess scenarios, with zero failures/ignored/
+filtered/skipped. Source receipts and sealed development ELFs apply only to cfcc.
+They do not qualify this repair. Root subsequently reports direct Linux
+execution on exact `64fd25f7f77a12baa57e9c055b764957b2477e77`: 2840 MCP library
+cases plus two Rust stdio wrappers and all 1330 adapter cases passed, with zero
+failed/ignored/filtered cases. The nested five Tree and five workshop scenarios
+also passed, including large and maximum-2048-cell evidence. Root's replay of
+unchanged J bytes against its sealed 64fd executable returned a session and ACK;
+two raw chunks reconstructed the exact `8c8b6ec8...1fcc5472` capture. Offline
+reopening used that returned ACK without a new native connection or token and
+preserved the custody bytes. Only Handshake and ReadTreeHarvest were called.
+These are exact-64fd component/replay results, not execution of the merged CLI
+successor or a second live native capture. Root retains a 64fd full-verify
+attempt that failed four packaging fixtures under an explicit build-target
+environment override; no gate or product assertion changes follow from it.
+Both final full commands, real felling, WOOD, original workshop, finite bed,
+native R1 and admission remain pending. Root owns the separately sealed 64fd K
+experiment and its outcome; the CLI integration does not transfer that proof.
+The frozen 08 qualification exit 101 and all prior RED/compiler receipts remain
+preserved. Neither original .14 acceptance criterion is closed.
+
+The repair preflight also retains a broad-validator exit 1: the existing cfcc
+clock fixture uses two forbidden `expect` calls outside a test module. The
+private candidate replaces them with equivalent installed-clock assertions and
+conditional updates. Production clocks, the 10ms request, test cases and source
+validator are unchanged. The fixture is included in Root's exact-64fd adapter
+pass; the merged CLI source still requires its own execution and qualification.
+
+
+### Visible-tree supply (2026-11-01; new source, execution pending)
+
+The isolated tree-harvest/1.21 native generation, safe-Rust adapter and registered
+`dfmcp-tree-harvest-v1-21-dev-server` implement one host-pinned visible mature
+root-coordinate/species intent through supported `Designations::markPlant`.
+The SDK computes the exact southeast designation coordinate after bounded body
+and visibility validation. Worker/tool approach witnesses use that coordinate;
+CUTWOOD eligibility and reciprocal TEMP axe offers do not prove equipment,
+assignment or scheduling. No stable plant ID is invented. PERM Wagon logs remain
+ineligible, and workshop/1.20 ground material semantics and vectors stay unchanged.
+
+The coordinator uses separate 1.21 protocol/hash/custody domains, an independent
+pre-dispatch acknowledgement, original one-use permission and full-history
+frontiers. A fixed maximum 12000-tick monitoring horizon grants no clock runs;
+the existing separately reviewed run/1.13 path retains its per-run limits. A
+historical designation ACK is distinct from a fresh root-predicate absence and
+new eligible ground WOOD observation. Causal log provenance remains unknown.
+Global registry reads require explicit loaded-map read scope; direct designation
+authority/lease cover the tree/halo and touched scheduling block. Canonical world
+anchor remains null and continuity unestablished. See [the development
+workflow](docs/TREE_HARVEST_MCP.md).
+
+The new source registers 14 adapter cases, two MCP packet cases and one Rust
+integration driving five actual-stdio scenarios; **Tree Rust tests and stdio execution
+remain pending**. Three new Tree and seven existing workshop source-inventory
+regressions actually pass. An earlier stable Tree native SDK-double cut passes
+eight scenarios / 275 assertions, ten original vectors and seven individually
+compiled/killed mutants; its changed contract/source inventory does not qualify
+this later source. The extracted shared native engine previously preserved all
+12 workshop vectors and passed its 13-scenario component harness. All earlier
+failed attempts and raw evidence are retained. These are component evidence,
+not final exact-source SDK, native R1, real felling or admission proof.
+
+The first admitted ts1 all-adapter compile on exact `45b2a4e` exits 101 with
+two compiler errors and **zero tests run**: an unconstrained dispatch-closure
+error type and a TCP-test peer factory shadowed by its local handle. The RCH
+worker verifies the source-content receipt, and the clean 2644-file source
+snapshots match before/after. Raw output remains under
+`target/root-ts1-45b-adapter-b/`. The private successor gives the closure its
+existing `Result<Record>` type and renames the factory and all five callers;
+guards, indeterminate classification, joins, assertions and case counts stay
+unchanged. Corrected-source Rust execution remains pending.
+
+Frozen `08fca4c` finishes `verify.sh` with exit 0: 125 targets / 5176 passing
+cases in each debug and release profile, zero failed, ignored or filtered. Its
+separate `qualify_local.sh` exits 101 at release-tests after all 5176 debug cases
+pass. The first release target reports 1314 passes and one failure in
+`interrupted_or_over_deadline_reads_close_without_retries_or_old_scope`:
+its expected one read can be precluded by legitimate expiry of the unchanged
+10ms budget before I/O. The raw failure does not identify the loop iteration.
+The failed official receipt records 37 passed gates, one failed and five
+unreached of 43, with exact clean source and matching before/after snapshots:
+`target/qualification/2026-11-02T03-02-46Z-08fca4c3076e/qualification-receipt.json`,
+SHA-256 `fd65be96fad92a8bbe0d6c765f3b679d2ca84fe8a80fcfd5d5faed74d3b3eb11`.
+Raw streams and terminal summary remain in `target/full-08fca4c-20261101a/`.
+This is failed qualification, not a full-source pass.
+
+The private successor adds a test-only per-thread fixture clock with unwind
+restoration; production retains actual monotonic `Instant`. The existing
+in-flight expiry case keeps its 10ms request and exact one-read/no-retry oracle,
+advancing the clock only after read entry and checking no authorization or
+publication. One additional registered case,
+`pre_io_deadline_refusal_withdraws_without_reads_and_clock_restores_on_unwind`,
+requires zero opens/reads/authorizations, released sources and withdrawn prior
+scope, and verifies nested clock restoration on panic. **Execution of this
+repair remains pending**; the frozen 08 failure is retained unchanged.
+
+The 834 startup-status/log correction has independent manual-relink five-case
+stdio evidence, not Cargo/full-source qualification. This new combined source
+inherits neither result. Both final full commands, final matching-SDK builds of
+Tree and workshop, exact artifacts, untouched-game workshop and finite-bed
+acceptance remain pending under original `.14`. No registry, production runner,
+floor, manager state or game is changed by this source work.
+
+
+### Original Carpenter workshop (2026-11-01; unqualified source changes)
+
+The distinct workshop/1.20 native generation implements the closed
+Workshop/Carpenters path through supported DFHack allocation, sizing and
+`constructWithItems` APIs. Its safe-Rust adapter and registered
+`dfmcp-workshop-v1-20-dev-server` connect bounded observation, original planning,
+complete review, one confirmed construction attempt, original-key reconciliation
+and fresh original-building completion evidence through the existing eleven
+modern MCP tools. The one-log policy independently checks exact material,
+outside-footprint origin, all nine floors and observed worker eligibility;
+eligibility does not promise assignment or scheduling.
+
+The coordinator synchronizes DispatchStarted and an independently retained
+acknowledgement before the native writer. Recovery rejects valid-prefix rollback
+and restores no dispatch permission. Full-history generation/clock floors,
+sticky original-continuity loss, same-connection preparation and failure
+withdrawal prevent old seals or replacement identities from reviving authority.
+Agent Turns preserve a null canonical world anchor and explicit unestablished
+world continuity; native source references and verified local custody remain
+separate. Recommendations carry callable Observe/Plan/Commit/Wait arguments and
+terminal reasons. See [the development workflow](docs/WORKSHOP_CONSTRUCTION_MCP.md).
+
+Actual final focused execution on TRJ with `nightly-2026-11-01` passes 23 adapter
+cases, seven MCP unit cases and one Rust integration case running five actual
+modern stdio scenarios against explicit joined native TCP doubles and real
+private custody files. Rust cases have zero failures or ignored tests; the five
+Python scenarios have zero failures, errors or skips. Seven source-inventory
+regressions pass. Warning-denied Clippy across all adapter/MCP targets and
+features, formatting, syntax and diff checks pass. The native component harness
+passes 13 scenarios / 27,596 assertions, verifies 12 byte vectors and rejects all
+12 individually compiled mutants under strict GCC/UBSan. That harness uses
+SDK/protobuf doubles, not a live game or real SDK runtime. The final 35-file
+workshop source map is unchanged across the final Rust execution.
+
+Terra separately configures, generates protobuf and builds/links the actual
+DFHack SDK diagnostic probe with GCC 15.2, `-Wall -Werror`, all three exits zero
+and empty stderr, under `target/workshop-sdk-probe-20261101/`. Its unchanged
+native input SHA-256 values are:
+
+- plugin C++: `af86aa1f6b41816ca0f5f681094b2c27ec733fb63497710dd27b4044398ff883`;
+- workshop header: `b3279b53443a1d2f2c1db98603f1b6cf085791c5bde094a442d00511d87fe525`;
+- protobuf source: `06b6787a4e52800e9759d05a31682cd419bf3a16895681c984d41ed7ad887085`.
+
+The diagnostic ELF is 189,336 bytes, SHA-256
+`583b17aadc48b3ed74dfce5c810b95b39bb66fd53d7a42aacc98dc8a3aa6bc5c`;
+its staged RUNPATH and build output are diagnostic evidence, not an accepted
+native R1 or installed artifact. Raw focused stdout/stderr/exits, source maps
+and earlier failed attempts remain under `target/codex-continuation-20261101a/`;
+final adapter/MCP runs are `20-adapter-final` and `21-mcp-final`. Final stdio
+transcripts and actual crash/prefix custody remain in the owned TRJ directory
+`/scratch/tmp/dfmcp-workshop-stdio-1444705/`. The failed run-16 `chunks_exact`
+Clippy diagnostic remains failed; the equivalent `as_chunks` repair passes
+run 17 and the final focused reruns.
+
+Fresh parent execution strengthens the existing production-environment case
+to require a nonzero process exit and finds a launcher defect at `08fca4c`:
+startup is refused before serving or native calls, but the executable exits
+zero. The five real stdio scenarios then report four passes and one failure,
+zero errors or skips. Raw output remains under
+`target/root-recorder-proof-20261101/`; this failure is not an unauthorized
+startup or writer. The corrected launcher returns failure when startup
+validation returns. The same test driver also preserves distinct stdout,
+stderr and exit files for empty, `1.0` and `1.20` production markers instead
+of replacing their dotted suffixes. Execution of the corrected launcher and
+full qualification of this later source are still pending. The frozen
+`08fca4c` full run remains separate and cannot qualify these changes.
+
+Full clean final-source Rust qualification through both mandatory commands,
+accepted native R1/artifact evidence, untouched-game original-workshop proof
+and live acceptance remain pending. Earlier R28/R29 qualification does not
+transfer. Original `.14` stays open: finite-bed output and its real
+manager/activation prerequisites remain unproved, and operator UI setup earns
+no MCP capability credit. The existing separate bounded run/1.13 development
+profile may supply independently reviewed game intervals; it proves neither
+cross-plugin atomicity nor workshop causality. No registry, production runner,
+deployment floor or runtime admission is widened.
 
 ### Session entity resource consumer (exact R29 full Rust qualification)
 
@@ -502,6 +1145,69 @@ failed; passing identical tests on another worker does not reclassify them or
 establish their sole cause. The scoped job-control defect is complete; later
 report/Bead edits inherit no qualification. No R1, broad fortress competence,
 productive output, production server-artifact or runtime admission follows.
+
+### Read immutable world records through authorized MCP resources (2026-10-30)
+
+The laboratory session resource template now exposes `state`, exact retained
+`state-{hash}` manifests, and paginated entities, relations, map chunks and
+events. Every page uses the existing presence-aware `research-full` canonical
+projection and carries the original source hash and complete version identity.
+Continuations stay on that version while the current world changes; collected
+or unknown versions return `stale_anchor` without substituting newer records.
+
+Each read resolves the session's durable-owner fence and checks current Observe
+authority under the shared-world lock, including current-tick expiry for old
+versions. Narrow grants cannot acquire whole-world coverage. Source work and
+escaped transport output are budgeted, rows remain indivisible, and clipped
+pages retract full-domain and absence claims. Session resources explicitly
+return private zero-lifetime cache hints so grants and current continuity are
+rechecked. The frozen eleven tools and production admission remain unchanged.
+
+Ten focused resource unit tests and one real modern-stdio integration test are
+present, covering immutable traversal through an intervening plan/commit,
+canonical records, retention, authority, coverage and response bounds. They
+have not executed in this session: the actual pinned runtime dependency build
+was killed by the shared host's memory limit before project diagnostics. Static
+review and formatting do not establish Rust execution or live qualification.
+Both required repository commands were attempted: `verify.sh` and a documented
+development-dirty `qualify_local.sh` run pass repository/source/Agent Turn checks
+before stopping at the same nine existing DFHack bridge-contract findings.
+The three reported paths are unchanged by these feature commits; no gate was
+weakened to turn those failures into qualification.
+The complete URI inventory and deferred fortress/knowledge/memory consumers
+are recorded in [`RESOURCE_URIS.md`](docs/RESOURCE_URIS.md). Bead
+`dfmcp-reality-wiring-proof-4bf.11` remains open for the broader surface and its
+executed acceptance evidence.
+
+### Restore positive job suspension with actual SDK fields (2026-10-30)
+
+The existing job-control/1.9 handler now implements an explicit eight-type
+eligibility policy instead of refusing every job after the removal of fictional
+DFHack APIs. The allowed workshop and furnace jobs must be idle, unposted,
+unclaimed, in a completed holder, and free of active item handling or special
+references. The complete bounded world job list and holder queue must agree on
+the exact selected job. Preparation and the sole suspension setter both retain
+the existing witness, authority, idempotency and immediate-readback boundaries.
+
+The actual handler and engine pass 863 assertions in 13 groups with nonrecovering
+UBSan and warnings denied against explicit SDK-shaped doubles. All five mutations
+removing witness, replay, eligibility, complete-list or closed-policy checks are
+rejected. The independent SDK guard passes 26 assertions. The regenerated wire
+fixtures use actual `ConstructBed=69` and `Workshop=13` enum values; the earlier
+synthetic `BrewDrink` fixture and its fictional helper methods do not establish
+SDK compatibility. Python independently verifies the new witness/plan/token/
+receipt chain and rejects altered or incomplete journal histories.
+
+These are source and executed boundary-double results, not a matching-SDK build
+or live-fortress trial. An attempted full adapter Rust unit-test build was killed
+before tests ran on the original resource-exhausted host. A subsequent actual
+`cargo check --locked --offline -p dfmcp-adapter --lib` passes on latest nightly
+with the complete original core/world/intent/adapter production composition.
+This is type-checking evidence, not Rust test execution. Full workspace, native
+and live qualification remain separate. Bead `dfmcp-reality-wiring-proof-4bf.8`
+remains open for its real-SDK and real-MCP acceptance requirements. The existing
+wire generation, five methods, production runner map and empty compatibility
+registry are unchanged. See [`JOB_SUSPENSION_CONTROL.md`](docs/JOB_SUSPENSION_CONTROL.md).
 
 ### Execute original labor and work-order plans through the native owners (2026-10-30)
 

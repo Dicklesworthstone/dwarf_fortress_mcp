@@ -829,16 +829,9 @@ impl MemoryAdapter {
     }
 }
 
-impl GameAdapter for MemoryAdapter {
-    fn identity(&self) -> AdapterIdentity {
-        self.identity.clone()
-    }
-
-    fn current_anchor(&self) -> Option<StateAnchor> {
-        Some(self.snapshot.anchor())
-    }
-
-    fn health(&mut self, context: &OperationContext) -> Result<AdapterHealth> {
+impl MemoryAdapter {
+    /// Inspect health without changing transcript, work or world state.
+    pub fn health_readonly(&self, context: &OperationContext) -> Result<AdapterHealth> {
         context.authorize(Capability::Doctor, RiskTier::ReadOnly, &[], None)?;
         self.check_anchor(context.anchor)?;
         Ok(AdapterHealth {
@@ -851,8 +844,10 @@ impl GameAdapter for MemoryAdapter {
         })
     }
 
-    fn observe(
-        &mut self,
+    /// Observe without recording a semantic adapter event; resource inspection
+    /// shares the normal observation policy but cannot mutate session history.
+    pub fn observe_readonly(
+        &self,
         request: &ObservationRequest,
         context: &OperationContext,
     ) -> Result<ObservationFrame> {
@@ -915,7 +910,6 @@ impl GameAdapter for MemoryAdapter {
                 .retryable(true));
             }
         };
-        self.record_event(LabEvent::Observed(self.snapshot.anchor()));
         Ok(ObservationFrame {
             payload,
             evidence: vec![evidence(
@@ -927,6 +921,30 @@ impl GameAdapter for MemoryAdapter {
             truncated: false,
             continuation: None,
         })
+    }
+}
+
+impl GameAdapter for MemoryAdapter {
+    fn identity(&self) -> AdapterIdentity {
+        self.identity.clone()
+    }
+
+    fn current_anchor(&self) -> Option<StateAnchor> {
+        Some(self.snapshot.anchor())
+    }
+
+    fn health(&mut self, context: &OperationContext) -> Result<AdapterHealth> {
+        self.health_readonly(context)
+    }
+
+    fn observe(
+        &mut self,
+        request: &ObservationRequest,
+        context: &OperationContext,
+    ) -> Result<ObservationFrame> {
+        let frame = self.observe_readonly(request, context)?;
+        self.record_event(LabEvent::Observed(self.snapshot.anchor()));
+        Ok(frame)
     }
 
     fn query(

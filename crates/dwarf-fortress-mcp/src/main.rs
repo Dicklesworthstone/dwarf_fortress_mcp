@@ -43,6 +43,7 @@ fn run() -> Result<(), Box<dyn Error>> {
         "bridge" => bridge(env::args().nth(2))?,
         "serve" => dfmcp_mcp::run_stdio(),
         "serve-live" => dfmcp_mcp::run_live_stdio(),
+        "serve-gameplay-dev" => return serve_gameplay_dev(env::args().skip(2)),
         "replay" => return replay(env::args().nth(2)),
         "evaluate" => return evaluate(env::args().skip(2).collect()),
         "bench" => return bench(env::args().nth(2)),
@@ -51,6 +52,27 @@ fn run() -> Result<(), Box<dyn Error>> {
         }
     }
     Ok(())
+}
+
+/// An operator chooses one existing guarded runtime before stdio starts.
+/// This does not combine sessions, change environment or grant authority.
+fn serve_gameplay_dev(mut args: impl Iterator<Item = String>) -> Result<(), Box<dyn Error>> {
+    const USAGE: &str = "usage: dwarf-fortress-mcp serve-gameplay-dev <tree|workshop|manager|manager-v1-23|bounded-clock|finite-bed>";
+    let profile = args.next().ok_or(USAGE)?;
+    if args.next().is_some() {
+        return Err(USAGE.into());
+    }
+    match profile.as_str() {
+        "tree" => dfmcp_mcp::tree_harvest_server::run_stdio(),
+        "workshop" => dfmcp_mcp::workshop_construction_server::run_stdio(),
+        "manager" => dfmcp_mcp::manager_appointment_server::run_stdio(),
+        "manager-v1-23" => dfmcp_mcp::manager_appointment_v1_23_server::run_stdio(),
+        "bounded-clock" => dfmcp_mcp::live_run_server::run_stdio(),
+        "finite-bed" => dfmcp_mcp::live_semantic_work_orders_server::run_stdio(),
+        _ => return Err(USAGE.into()),
+    }
+    // Serving owns the process until exit. A returning entry refused startup.
+    Err("selected unadmitted gameplay runtime refused startup".into())
 }
 
 /// Re-execute a `dfmcp.replay.bundle/1` in a fresh laboratory session and
@@ -130,6 +152,8 @@ COMMANDS:
     bridge      Authenticate to dfmcp_bridge and publish one canonical live read
     serve       Run the deterministic laboratory MCP server
     serve-live  Run the authenticated read-only live MCP server
+    serve-gameplay-dev <tree|workshop|manager|manager-v1-23|bounded-clock|finite-bed>
+                Run one existing guarded, unadmitted gameplay development profile
     replay      Re-execute a laboratory replay bundle and report the first divergence
     evaluate    Score a policy on a laboratory scenario: evaluate <scenario> <policy> <ticks>
     bench       Laboratory SLO-001..015 scorecard: bench [iterations]
@@ -155,6 +179,10 @@ STATUS:
     authenticated read-only server over bridge protocol V1. Both preserve the
     exact same eleven-tool waist; live mutation-stage tools fail closed because
     the bridge registers no mutation methods.
+
+    `serve-gameplay-dev` selects one development runtime at operator startup.
+    Each keeps its own eleven tools, opt-in, source pins, authority and custody.
+    This is not a unified cross-profile session or production admission.
 ",
         version = env!("CARGO_PKG_VERSION")
     );
@@ -172,6 +200,7 @@ transport: mcp/2026-07-28 (modern-only) over stdio via the owned fastmcp_rust si
 server_modes:
   laboratory: serve
   authenticated_live_read_only: serve-live
+  unadmitted_gameplay_development: serve-gameplay-dev <tree|workshop|manager|manager-v1-23|bounded-clock|finite-bed>
 bridge_read_protocol: dfmcp.bridge.v1 over DFHack native protobuf RPC
 bridge_read_methods:
   - Handshake

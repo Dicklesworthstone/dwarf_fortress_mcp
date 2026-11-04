@@ -60,25 +60,26 @@ void authorize(const wire::Request *in, wire::Reply *out) {
 // flags=0 registration gives DFHack-owned CoreSuspender serialization. There is
 // no onUpdate work, detached task or pointer retained outside that suspension.
 df::job *find_job(std::uint32_t id) {
-    js::require(df::global::world && id <= INT32_MAX, 5);
+    js::require(df::global::world && df::global::job_next_id
+        && *df::global::job_next_id >= 0 && id <= INT32_MAX, 5);
     std::set<std::int32_t> seen;
     df::job *selected = nullptr;
-    for (auto *link = df::global::world->jobs.list.next; link; link = link->next) {
-        js::require(seen.size() < 65536 && link->item && link->item->id >= 0, 5);
+    auto *previous = &df::global::world->jobs.list;
+    for (auto *link = previous->next; link; previous = link, link = link->next) {
+        js::require(seen.size() < 65536 && link->prev == previous && link->item
+            && link->item->id >= 0 && link->item->id < *df::global::job_next_id, 5);
         auto *job = link->item;
-        js::require(seen.insert(job->id).second, 5);
+        js::require(job->list_link == link && seen.insert(job->id).second, 5);
         if (static_cast<std::uint32_t>(job->id) == id) selected = job;
     }
     return selected;
 }
 
-// Closed development policy, using actual 53.16 SDK fields rather than a
-// nonexistent DFHack supported-job API. These four ordinary furniture jobs
-// may be toggled only while idle at their exact owning workshop. Custom
-// reactions, special/active jobs and malformed holder queues remain read-only.
+// Closed development policy using actual 53.16 SDK fields and types.
+// Only unposted, unclaimed idle production jobs at their exact holder qualify.
 bool supported_job(const df::job &job, df::building *holder) {
-    if (!holder || holder->getType() != df::building_type::Workshop
-        || !job.reaction_name.empty() || !job.specific_refs.empty()
+    if (!holder || !job.reaction_name.empty() || !job.specific_refs.empty()
+        || !job.items.empty() || job.job_items.elements.empty() || job.posting_index != -1
         || job.flags.bits.working || job.flags.bits.fetching || job.flags.bits.special
         || job.flags.bits.bringing || job.flags.bits.item_lost) return false;
     // DFHack's getWorker/getHolder return only the first matching reference.
@@ -92,16 +93,25 @@ bool supported_job(const df::job &job, df::building *holder) {
     case df::job_type::ConstructBed:
     case df::job_type::ConstructDoor:
     case df::job_type::ConstructThrone:
-    case df::job_type::ConstructTable: break;
+    case df::job_type::ConstructTable:
+    case df::job_type::PrepareMeal:
+        if (holder->getType() != df::building_type::Workshop) return false;
+        break;
+    case df::job_type::SmeltOre:
+    case df::job_type::MeltMetalObject:
+    case df::job_type::MakeCharcoal:
+        if (holder->getType() != df::building_type::Furnace) return false;
+        break;
     default: return false;
     }
     // Job::assignToWorkshop documents at most ten jobs. Validate the complete
     // bounded queue: an early match cannot hide nulls or duplicate identities.
-    if (holder->jobs.empty() || holder->jobs.size() > 10) return false;
+    js::require(holder->jobs.size() <= 10, 5);
+    if (holder->jobs.empty()) return false;
     bool present = false;
     std::set<std::int32_t> ids;
     for (const auto *candidate : holder->jobs) {
-        if (!candidate || candidate->id < 0 || !ids.insert(candidate->id).second) return false;
+        js::require(candidate && candidate->id >= 0 && ids.insert(candidate->id).second, 5);
         if (candidate == &job) present = true;
     }
     return present;
@@ -115,8 +125,13 @@ js::Observation read_job(std::uint32_t id) {
     js::require(df::global::job_next_id && *df::global::job_next_id >= 0 && id <= INT32_MAX, 5);
     auto *job = find_job(id); js::require(job != nullptr, 4);
     js::require(job->id >= 0 && static_cast<std::uint32_t>(job->id) == id
-        && job->general_refs.size() <= 4096 && job->items.size() <= 65536 && job->job_items.elements.size() <= 4096, 5);
+        && job->general_refs.size() <= 4096 && job->specific_refs.size() <= 4096
+        && job->items.size() <= 65536 && job->job_items.elements.size() <= 4096
+        && job->posting_index >= -1, 5);
     for (const auto *ref : job->general_refs) js::require(ref != nullptr, 5);
+    for (const auto *ref : job->specific_refs) js::require(ref != nullptr, 5);
+    for (const auto *item : job->items) js::require(item != nullptr, 5);
+    for (const auto *filter : job->job_items.elements) js::require(filter != nullptr, 5);
     auto *worker = Job::getWorker(job); auto *holder = Job::getHolder(job);
     js::require((!worker || worker->id >= 0) && (!holder || holder->id >= 0), 5);
     js::Observation out; out.job = id; out.next_job = *df::global::job_next_id; out.site = static_cast<std::uint32_t>(site);

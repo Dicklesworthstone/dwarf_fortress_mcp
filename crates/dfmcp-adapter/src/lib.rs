@@ -63,6 +63,7 @@ pub mod live_session;
 pub mod live_session_v1_1;
 pub mod live_spatial;
 pub mod live_version;
+pub mod manager_appointment;
 pub mod operations_analysis;
 pub mod operations_journal;
 pub mod order_progress;
@@ -80,12 +81,14 @@ pub mod semantic_workforce;
 pub mod shelter_analysis;
 pub mod spatial_inventory;
 pub mod transceiver;
+pub mod tree_harvest;
 pub mod work_order_control;
 pub mod work_order_progress;
 pub mod work_orders;
 pub mod workforce_analysis;
 pub mod workforce_control;
 pub mod workforce_session;
+pub mod workshop_construction;
 
 pub use announcement_wire::{
     ANNOUNCEMENT_AFTER_ID_FIELD, ANNOUNCEMENT_COMPLETE_THROUGH_LATEST_FIELD,

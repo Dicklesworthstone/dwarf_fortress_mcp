@@ -28,26 +28,70 @@ those exact bytes. No count of requirements proves their content or feasibility.
 Prepare requires an exact witness and the deterministic plan digest for the
 selected job and desired Boolean. It refuses unless the game is paused, there
 is no assigned worker, the completion timer is -1, the closed policy below
-accepts the job, and its holder is a completed workshop. Every prerequisite is
+accepts the job, and its holder is a completed workshop or furnace. Every prerequisite is
 rechecked at commit by reproducing the exact witness. The caller must inspect
 again after a changed field, tick, job-ID horizon or local sequence.
 
-DFHack 53.16 has no `Job::isSupportedJob` or `Job::getJob` API. The actual adapter
-therefore scans the complete bounded world job list, rejecting nulls, duplicate
-IDs, cycles and more than 65,536 entries. Its positive policy admits only
-`ConstructBed`, `ConstructDoor`, `ConstructThrone` and `ConstructTable`, with no
-custom reaction or specific references and none of the working, fetching,
-special, bringing or item-lost flags. The exact selected pointer must occur in
-its workshop's complete queue of at most ten jobs, with no nulls or duplicate
-IDs. Its complete general-reference vector must contain exactly one resolvable
-`BUILDING_HOLDER` with matching native ID and pointer. Any worker reference,
-including dangling/duplicate references hidden by DFHack's first-match helpers,
-and any extra or conflicting reference refuse. Furnace and all other job classes remain unsupported in this first closed
-policy. This does not claim eligibility for every ordinary DFHack job.
+### Closed eligibility for the 53.16 SDK
 
-The setter repeats full selected-job eligibility before assigning only the
-suspension bit. Commit still requires the unchanged original witness, current
-native preparation and authenticated authority; eligibility alone grants none.
+DFHack 53.16 provides `Job::getHolder` and `Job::getWorker`, but no public
+`Job::getJob` or `Job::isSupportedJob`. The plugin resolves the selected job by
+walking the real `world->jobs.list` completely. The scan is bounded to 65,536
+jobs and rejects null entries, duplicate IDs, cycles, broken previous links,
+mismatched `job.list_link` back-references, and IDs outside the current
+`job_next_id` horizon. Finding the selected ID does not end validation early.
+
+The existing observation's `supported` bit now represents this explicit closed
+type/holder policy:
+
+| Native job type | Required holder type |
+| --- | --- |
+| `ConstructBed`, `ConstructDoor`, `ConstructThrone`, `ConstructTable` | `Workshop` |
+| `PrepareMeal` | `Workshop` |
+| `SmeltOre`, `MeltMetalObject`, `MakeCharcoal` | `Furnace` |
+
+An eligible job must also have an empty reaction name, no specific references,
+no attached items, and a nonempty bounded collection of non-null requirement
+filters. The `item_lost` flag must also be false. The complete general-reference
+vector must contain exactly one resolvable `BUILDING_HOLDER` with the exact
+selected holder ID and pointer; dangling, duplicate, worker and extra references
+refuse, including those hidden by first-match helper behavior. Its `working`, `fetching`, `bringing` and `special` flags must be false,
+and `posting_index` must be exactly -1. The holder's queue must contain the exact
+selected job pointer once, contain no null or duplicate-ID entries, and fit the
+ten-job native queue bound. All collection bounds and pointers used in the
+selected observation are checked before publication.
+
+This supports only idle **unposted, unclaimed** jobs. A queued job with a live
+posting, reserved ingredients, an active worker, a custom reaction or an
+unlisted type remains inspectable but cannot be prepared. No brewing claim is
+made: `BrewDrink` is not a job enum member in this SDK. The policy does not infer
+recipe feasibility, material availability or workshop subtype compatibility.
+It accepts only an already existing exact job and controls its suspension bit.
+
+The setter repeats a complete validated observation and eligibility check under
+the RPC's existing game suspension, then resolves the exact global-list member
+again before writing only `job->flags.bits.suspend`. It does not call
+`removeWorker`, `removePostings`, enqueue work, change any other flag, or advance
+time. The unposted/unclaimed restriction deliberately avoids needing those
+additional effects. It cannot establish that a resumed job will execute or
+finish. These checks consume the existing `supported` field; method names,
+wire encodings and digest domains do not change.
+
+The inspected upstream source is DFHack `53.16-r1`, commit
+`c80747da32aad3bdd5915c60105136d6558aca39`, whose `library/xml` submodule pins
+df-structures `1dd01aad64219afa0578f1328cf15bd0c6006d5a`:
+
+- [Public Job API](https://github.com/DFHack/dfhack/blob/c80747da32aad3bdd5915c60105136d6558aca39/library/include/modules/Job.h).
+- [Holder/worker resolution, world-list linkage and workshop assignment](https://github.com/DFHack/dfhack/blob/c80747da32aad3bdd5915c60105136d6558aca39/library/modules/Job.cpp).
+- [Upstream workflow's private support predicate and posting-aware suspension](https://github.com/DFHack/dfhack/blob/c80747da32aad3bdd5915c60105136d6558aca39/plugins/workflow.cpp).
+- [Upstream suspendmanager's flag and worker behavior](https://github.com/DFHack/dfhack/blob/c80747da32aad3bdd5915c60105136d6558aca39/plugins/suspendmanager.cpp).
+- [Exact job enum, flags, posting index and reference fields](https://github.com/DFHack/df-structures/blob/1dd01aad64219afa0578f1328cf15bd0c6006d5a/df.job.xml).
+- [Exact building types](https://github.com/DFHack/df-structures/blob/1dd01aad64219afa0578f1328cf15bd0c6006d5a/df.d_basics.xml)
+  and [building job queue](https://github.com/DFHack/df-structures/blob/1dd01aad64219afa0578f1328cf15bd0c6006d5a/df.building.xml).
+
+Reviewing these sources establishes the intended API/field contract. Actual
+matching SDK compilation and a disposable-fortress effect trial remain separate
+evidence requirements under `dfmcp-reality-wiring-proof-4bf.8`.
 
 A stable ASCII idempotency key is 1..128 bytes. Prepare is nonmutating and retains
 its original token when replayed. It does not refresh its 60-second monotonic
@@ -101,9 +145,9 @@ DFHack/protobuf doubles, not a captured live fortress.
 
 ## Executed evidence
 
-The 2026-10-31 repair replaces the original SDK-fiction doubles with a linked
-world list and actual enum/field-shaped doubles. The complete handler suite
-passes 397 assertions in nine groups under nonrecovering UBSan, and the separate
+The 2026-10-31 historical repair replaced the original SDK-fiction doubles with a linked
+world list and actual enum/field-shaped doubles. That exact historical handler suite
+passed 397 assertions in nine groups under nonrecovering UBSan, and the separate
 SDK-policy suite exercises four positive job classes, 28 rejection policies,
 post-prepare invalidation, revoked credentials and malformed lists. All three
 existing engine mutations remain rejected. The throwing-setter case now checks
@@ -131,6 +175,13 @@ construction, produced-item or fortress-competence credit. Artifacts are under
 `target/reality-check-20261030/terra-live10-export`; independent replay is
 `target/bang-for-buck-20261031/live10-parent-review.json`. Development evidence
 does not grant compatibility or runtime admission.
+
+The integration candidate combines both policies and is not the binary named
+above. It admits the eight listed classes only under the stricter unposted,
+unclaimed and exact-reference guards. Its current component doubles exercise
+863 assertions across 13 groups and reject all five compiled mutations, including early list exit and policy bypass. This
+is a new source policy requiring separate real-SDK and live qualification;
+live10 did not record posting index and cannot prove the new guard eligible.
 
 The earlier implementation record below describes its original synthetic run;
 it does not retroactively establish valid real-SDK acquisition.

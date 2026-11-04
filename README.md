@@ -170,6 +170,44 @@ After admitted startup, Agent Turns also expose the exact bridge protocol, ticke
 entry, registry, decision, monotonic floor, server receipt, launch, and executable identities. Those
 fields explain authority; they do not create more authority.
 
+### Gameplay development startup
+
+For an operator-configured gameplay development process, the standard executable
+also accepts one closed startup profile:
+
+```text
+dwarf-fortress-mcp serve-gameplay-dev tree
+dwarf-fortress-mcp serve-gameplay-dev workshop
+dwarf-fortress-mcp serve-gameplay-dev manager-v1-23
+dwarf-fortress-mcp serve-gameplay-dev bounded-clock
+dwarf-fortress-mcp serve-gameplay-dev finite-bed
+```
+
+These select the existing [Tree 1.21](docs/TREE_HARVEST_MCP.md),
+[workshop 1.20](docs/WORKSHOP_CONSTRUCTION_MCP.md),
+[cache-bearing Manager 1.23](docs/MANAGER_APPOINTMENT_V1_23.md),
+[standalone clock 1.13](docs/BOUNDED_SIMULATION_MCP.md), or
+[finite furniture-order](docs/SEMANTIC_WORK_ORDER_MCP.md) server in the same
+process. Configure the selected profile's existing opt-in, source pins,
+credentials, write authority and private recovery custody before startup.
+Selection grants no authority. Unknown/missing profiles and extra arguments
+refuse; production launch state remains refused. Each runtime preserves its
+own eleven modern tools and typed plan/review/confirmation/recovery contract.
+`finite-bed` retains the finite-order runtime's existing bounded furniture
+recipes; request `wooden_bed` and amount 1 for the original bed objective.
+
+The legacy `manager` startup still selects [Manager 1.22](docs/MANAGER_APPOINTMENT_MCP.md).
+That generation proves its assignment/HF/history projection but omits the
+production-responsibility cache; a completed appointment can therefore leave
+work orders asking for a Manager. Use `manager-v1-23` with its distinct host
+configuration, credentials and custody when testing production control.
+
+This is one selected runtime per process, not a shared cross-profile session or
+an automatic Tree-to-workshop-to-bed controller. Changing profile requires a
+separate configured process and preserves the previous original custody.
+Actual gameplay acceptance, full qualification and admission remain separate;
+original `.14` stays open. `serve` and `serve-live` keep their existing meanings.
+
 ### Deterministic laboratory
 
 `dwarf-fortress-mcp serve` runs the same eleven tools against a deterministic laboratory
@@ -194,6 +232,16 @@ outputs together, includes food/drink consumption during the work, and can add
 explicitly authorized labor and workshop setup. See the
 [furniture production walkthrough](docs/CARPENTRY_PRODUCTION.md) and
 [production reserve planning](docs/PRODUCTION_RESERVE_PLANNING.md).
+
+The [original Carpenter workshop workflow](docs/WORKSHOP_CONSTRUCTION_MCP.md)
+documents the separate unadmitted workshop/1.20 native, safe-Rust and registered
+eleven-tool development consumer. Focused execution and an actual-SDK diagnostic
+build do not establish full final-source qualification, native R1, untouched-game
+workshop construction or production admission.
+
+The [one visible-tree supply workflow](docs/TREE_HARVEST_MCP.md) documents the
+separate unadmitted 1.21 source path for normal chopping designations and fresh
+ground-WOOD observations. Designation is not wood, and live proof remains pending.
 
 ### Original mining goals
 

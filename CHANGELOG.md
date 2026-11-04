@@ -1,5 +1,374 @@
 # Changelog
 
+## 2026-11-03 — Independently replayed current-source job-control pair
+
+- Prove real modern MCP suspend/resume by GPT-6.1 Terra medium under NTM on
+  exact `4ed1091`, server `df7617d4…` and native plugin `e7a3f934…`. Root's
+  unchanged strict auditors pass all 18 exchanges, six journal frames and
+  both Applied receipts. Independent native captures show job 5 flags
+  `0 → 2 → 0`, posting -1, all other captured fields unchanged and zero ticks.
+- Verify exact offline preservation of the original 2894-byte journal, all
+  347 export/supplement members, native/server/source identities, final pause
+  and fresh host restoration/drain. Disclose the optional missing screenshot.
+- Close `.8.1` for one live job class; seven other classes, unified MCP host,
+  broader fortress competence and production admission remain unproved.
+- Retain AD's incomplete pair, AE's expiry refusal and AF's operator error
+  separately. No later documentation head inherits `4ed1091` qualification.
+
+## 2026-11-03 — Preparation expiry and client workflow
+
+- Independently replay AE's terminal refusal and unchanged real job: at least
+  80.129179611 seconds elapsed after Plan returned, beyond native preparation's
+  60-second lifetime. Preserve its negative result; AE did not close `.8.1`.
+- Document reviewing Plan's complete effect and immediate Commit, followed by
+  Explain. Their effect objects are identical; no native expiry or authority
+  check is relaxed. A pipe-only relay is still unintegrated development work.
+- Verify the complete 326-member export/supplement, canonical refusal receipt,
+  exact offline journal preservation and paused owned cleanup. These later
+  documentation changes do not inherit `4ed1091` qualification.
+- Preserve AF's failed operator setup, including Root's incorrect header-X
+  identification and the resulting queued demolition. Verify all 365 export
+  members and cleanup; no MCP request occurred. Use the verified supported UI
+  input route and leave the workshop panel open in the next trial.
+
+## 2026-11-03 — Current-source live job suspension and harness repairs
+
+- Prove one real MCP suspension on qualified `4ed1091`, source-matched native
+  plugin `e7a3f934…` and development server `df7617d4…`: independent captures
+  show job 5 flags `0 → 2` at the same paused tick with other captured fields
+  unchanged. Preserve the uncommitted Prepared resume and keep `.8.1` open.
+- Verify original-journal offline discovery and unchanged before/after bytes;
+  retain cleanup evidence and the disclosed metadata scan-order violation.
+- Repair the operator Lua evidence channel and independently verify it in
+  actual DFHack. Keep failed startup, UI-pause and deadline attempts distinct
+  from gameplay success, and preserve the production admission boundary.
+
+## 2026-11-03 — Qualified cancellation and resource repairs
+
+- Qualify clean `4ed1091`: both mandatory scripts pass, all 43 gates, and
+  5255 tests per debug/release profile across 134 result blocks. Independent
+  receipt, source and raw-log replay pass; receipt SHA-256 `6e2da780…`.
+- Close the scoped cancellation bug `.25` after exact upstream and downstream
+  conformance. Keep the broader resource and gameplay proof tasks open.
+- Build a fresh non-test development job server, SHA-256 `df7617d4…`, bound
+  to all 2695 exact source files. Track the composed policy live trial as `.8.1`;
+  do not inherit the older live10 receipt or imply production admission.
+- Correct the integration guide's tool-name scope: laboratory underscore names
+  and explicit live-profile dotted names must be discovered and sent unchanged.
+  Update the quickstart pin and describe local/self-hosted conformance authority.
+- This later documentation and tracker update has no new full-source receipt;
+  the qualification remains exact to `4ed1091`.
+
+## 2026-11-03 — Resource inspection and cancellation review
+
+- Reauthorize task candidates at owner-fenced publication after fetching them
+  outside world/session locks. Add deterministic expiry/replacement component
+  regressions for discovery, detail and evidence; execution is pending.
+- Keep the replay test export test-only after resources adopt the fenced helper.
+- Correct the mutex-guard binding in the new objective regression after a clean
+  build refused it before running tests; retain that failed attempt.
+- Keep resource reads from certifying objectives, recording observation events,
+  consuming request IDs or publishing custody. Apply current shared-world
+  authority and durable-owner fences to replay and capabilities inspection.
+- Use one state-resource wall deadline through projection and escaped output
+  accounting. Add allowed/denied process/durable, owner replacement, shared-clock
+  expiry and deterministic deadline regressions; Rust execution is pending.
+- Retain the clean e227 full release failure in Tasks cancellation. Track the
+  minimized upstream race as fastmcp_rust#100 and take its reviewed narrow exact
+  Git pin `13461caf` in all three dependencies, the lockfile and allowlist.
+  Deterministic upstream regressions pass 4/4; downstream conformance and full
+  qualification are pending. No new qualification is claimed.
+
+## 2026-11-03 — Real wooden bed and main integration
+
+- Record independently replayed W: real MCP Tree supply, completed original
+  Carpenter, Manager 1.23 cache appointment, one finite order and newly observed
+  PECAN-wood BED561 after 1200 bed ticks. Keep the disappeared original order's
+  goal Unknown; do not infer causal linkage. Fresh host cleanup checks pass.
+- Reconcile public main's immutable resource and job-control work with the
+  gameplay branch, preserving entity references and the stronger guards from
+  both job policies. Native job doubles pass 863/13 plus the 287-check guard and
+  all five compiled mutants; require these checks in both standard scripts.
+- Reserve the largest numeric wire ID for entity/task/state resource budgets
+  once, and add a real entity-resource budget refusal/positive regression.
+- Direct gameplay documentation to `manager-v1-23`; retain the legacy Manager
+  route with its missing-cache limitation. Merged-source Rust checks are pending.
+
+## 2026-11-03 — Manager append capacity and actual MCP follow-up
+
+- Reserve HF-link/cache capacity before Manager 1.23 preparation and accept the
+  last valid HF-link/history append during native terminal observation. Preserve
+  legacy 1.22 native behavior; add boundary regressions and compiled mutants.
+- Native SDK doubles pass 15 scenarios/343 assertions and eight compiled mutants;
+  legacy passes 12/270 and three mutants with unchanged vectors.
+- Record clean e899 focused execution: 23 adapter cases and actual dedicated/CLI
+  1.23 suites of eight each plus seven legacy cases, using native doubles.
+- Fix the test-only undeclared JSON import, stale session-family test constant
+  and strict-Clippy hex parser diagnostic. Full current-source checks and real
+  1.23 bed production remain pending.
+
+## 2026-11-02 — Full qualification of the preceding repairs
+
+- Clean `82f9a6c` passes both required scripts, all 43 gates and 5227 tests
+  per Rust profile across 131 targets, zero failures or ignored cases.
+- Record exact source/receipt scope; this evidence does not transfer to 1.23.
+- Connect the new 1.23 source, native mutation gate and both eight-case actual
+  MCP subprocess wrappers to the existing qualification path. Execution pending.
+
+## 2026-11-02 — Manager 1.23 cache integration (early development cut)
+
+- Witness group/civ responsibility caches and include the selected Manager
+  assignment in MANAGE_PRODUCTION during the same native transaction.
+- Preserve legacy 1.22 wire/vectors; add distinct 1.23 startup, package, native
+  identity, codecs, custody and scoped public cache-proof field.
+- Add native component/mutation and Rust cache/custody regression sources.
+  Rust execution and live 1.23 production remain pending.
+
+## 2026-11-02 — Keep standard CLI suite counts exact
+
+- Correct the nested Tree/workshop standard CLI caller to require seven tests
+  after adding both deadline regressions. Preserve every zero-failure/error/skip
+  assertion; retain the failed574 verification as evidence of the missed caller.
+
+## 2026-11-02 — Deadline regression execution and strict Clippy repair
+
+- Record exact f922 focused GREEN: seven actual MCP cases per prepared profile,
+  and 14/23/18 Tree/workshop/Manager adapter cases. Old sealed Tree reproduces
+  exactly both new failures (five passed, two failed).
+- Preserve latest-nightly Clippy failure and use an equivalent strict inequality
+  for the newline-inclusive numeric-ID test bound. Full successor checks pending.
+
+## 2026-11-02 — Prepared control review deadlines (.14.3)
+
+- Use the existing 60-second ceiling by default for Tree, workshop and Manager
+  review; preserve shrinking original deadlines and the native prepare expiry.
+- Reject already expired Tree/Manager connections before recording dispatch;
+  preserve typed workshop pre-dispatch read failures and original custody.
+- Add actual MCP delayed-review/default and expired/no-dispatch regressions,
+  including consumed permission on a later call. Execution remains pending.
+
+## 2026-11-02 — Exact-source verification follow-up
+
+- Record all 43 qualification gates and 5198 tests in each Rust profile on clean
+  `924037df`; this qualification does not transfer to later source.
+- Response-safety `cd3ef967` passes 11 resource, 5 Tree packet and 4 modern
+  subprocess cases, including numeric-ID budget and zero-TTL behavior.
+- Manager `63548fa7` dedicated and standard CLI executables each pass five
+  actual modern subprocess scenarios with explicit native doubles. Real-game
+  MCP bed acceptance and full integrated-head qualification remain pending.
+
+## 2026-11-02 — Run Manager native regressions in standard checks
+
+- Record independently replayed native-only R evidence: one Manager appointment,
+  one history event, zero ticks, original-key duplicate/query stability and cleanup.
+  MCP-only bed acceptance and production admission remain unproved.
+- Wire the existing Manager native transaction tests into both mandatory scripts.
+  Preserve exact vectors, independent commitments and three compiled mutation
+  controls; source is present and execution remains pending.
+
+## 2026-11-02 — Vacant Manager 1.22 development source (.14.2)
+
+- Add the fixed six-method native generation and lossless bounded Rust
+  capture/plan/receipt codec for one vacant MANAGER appointment, preserving raw
+  assignment flags and the generated event constructor's one-zero-byte flags.
+- Reuse one-attempt journal/independent ACK custody and same-connection permission.
+  Revalidation, the complete assignment/HF/history transaction and dual-getter
+  proof are required; uncertain effects retain the original key without retry.
+- Wire the existing eleven tools and `serve-gameplay-dev manager`, with full
+  fortress authority, one explicit review/confirmation and zero game ticks.
+  Add native-vector, custody, TCP, MCP presentation and actual subprocess test
+  sources; these are not live-game evidence.
+- Correct public-adapter stale-tick authority after independent source review:
+  retain the connection's observed tick floor, reauthorize all native plan
+  edges at max caller/plan/observed time, and give both dispatch guards and the
+  writer the journal's retained tick. Add paired TCP/real-lease regressions;
+  keep one shrinking budget and post-dispatch uncertainty unchanged.
+- Root reports native SDK attempt 4 build success. Retain actual Rust cut 2
+  E0603/zero-test evidence; cut 3 corrects test visibility and scope policy.
+  Final Rust/MCP execution, live Manager/bed acceptance and qualification remain
+  pending. No registry, production runner, admission or item closure changes.
+
+## 2026-11-02 — Account for maximum numeric MCP request IDs
+
+- Tree result sizing now reserves the pinned codec's 4096-byte numeric ID bound,
+  alongside framing and newline. A new full-envelope/chunk-preservation regression
+  targets the actual 512KiB boundary; Rust execution is pending.
+
+## 2026-11-02 — Revalidate session resources on every read
+
+- Session and doctor resource responses now specify a private zero TTL, so
+  clients are not invited to reuse state or authority after it changes. Modern
+  stdio and grant-revocation regressions are added; execution remains pending.
+
+## 2026-11-02 — Direct compilation and bounded live gameplay evidence
+
+- Direct Linux execution on exact `64fd25f` passes 2,842 MCP/wrapper and 1,330
+  adapter cases. Real J replay returns a usable session and ACK; two raw content
+  blocks reconstruct all 30,489 native bytes.
+- Live K semantic MCP effects designate the observed tree and complete original
+  Carpenter workshop 1. The finite bed order remains inactive/unvalidated, with
+  zero beds after four bounded production intervals. No manager was observed;
+  that is a blocker hypothesis, not a proved sole cause. No flags were forced.
+- Independently replay all 306 exports, six exact 1,200-tick intervals without
+  overshoot and nine unchanged offline custody files. Fresh host checks confirm
+  cleanup, seven original plugin states, both 30-file saves and port closure.
+- Actual standard CLI integration passes on exact `34c8c53`. Its warning-denied
+  Clippy run finds three existing Tree custody APIs over the argument-count
+  style limit. Add three local, reasoned lint annotations, retaining explicit
+  authority/frame/ACK parameters and behavior, and name the test fixture tuple
+  type to resolve the separate type-complexity finding. Final successor qualification
+  and original bed acceptance remain pending; no broad lint/test gate changes.
+- Fix the all-target integration build: shared workforce tests had imported a
+  private unit-test clock from the ordinary production library. Preserve the
+  interrupted-read assertions in the public-API suite and retain deterministic
+  delayed/pre-I/O/unwind assertions in a unit-only include. The test read hook
+  defaults to absent; production clock and code remain unchanged.
+
+
+## 2026-11-02 — Connect standard CLI to existing gameplay development runtimes
+
+- Add `serve-gameplay-dev <tree|workshop|bounded-clock|finite-bed>` as a closed
+  operator startup choice. Invoke the existing guarded runtime in-process;
+  preserve its eleven modern tools, plans, confirmation, custody and authority.
+  Unknown/missing profiles and extra arguments refuse before startup.
+- Apply the finite-order runtime's existing environment guard before stdio
+  startup as well as on requests. Production state remains refused; no native
+  generation, production registry or protocol-1.0/1.1 mutation route changes.
+- Add one Rust integration target driving three actual CLI scenarios. Reuse the
+  existing five Tree and five workshop subprocess cases via optional test-only
+  server arguments; retain their assertions and counts. Execution is pending
+  Root's direct build. This selects one runtime per process; shared cross-profile
+  sessions, original .14 gameplay acceptance and final qualification remain open.
+
+
+## 2026-11-02 — Correct Tree result encoding and entropy authorization
+
+- Preserve candidate `527587a` compiler exit 101 and zero executed tests.
+  Measure complete results through the pinned public modern tools/call codec;
+  use it in the packet regression as well. Keep empty ordinary metadata and
+  all existing response, string, evidence and custody limits.
+- Check Query authority and the 32-byte budget before Tree entropy I/O, and
+  remove the unused Record import. Extend source-boundary mutation checks.
+  Corrected-source execution and live gameplay proof remain pending.
+- Preserve direct `8eb7754` test-compilation exit 101 and zero executed cases.
+  Annotate chunk-test sizes as `usize` and write the identical newline-inclusive
+  bound as a strict comparison. Production encoding already compiled; complete
+  corrected-source execution remains pending.
+- Retain J replay's capability-denied result: the new Tree entropy check
+  requested an unscoped Query against a map-scoped grant. Pass the configured
+  area from both callers and enforce those call sites in mutation checks.
+- Integrate both corrections into the private CLI branch. Root reports exact
+  `64fd25f` direct Linux passes: 2842 MCP/wrapper cases, 1330 adapter cases and
+  five Tree plus five workshop subprocess scenarios, all without failures or
+  ignored/filtered cases. Its sealed-executable J replay returns a usable ACK
+  and losslessly reconstructs all 30489 bytes; offline reopening preserves
+  custody without native calls. These results belong to 64fd. The merged CLI
+  candidate, both final full commands and gameplay acceptance remain unproved.
+
+## 2026-11-02 — Package complete Tree evidence within modern MCP bounds
+
+- Preserve Live I's rejected open and original custody, and independent old-cfcc
+  replay RED of J's unchanged 30489-byte canonical capture. Its 60978 hex
+  characters fit individually; complete Agent Turn wrapping crosses the pinned
+  result-string bound. A separate valid 67676-byte protocol-double capture also
+  reproduces the old failure with header-only custody and zero writers.
+- Return typed modern complete results with the full Agent Turn, independent ACK
+  and original uncertainty in content[0]. Recursively replace raw capsules with
+  explicit ordered block/path/length/SHA256 descriptors and preserve every byte
+  in separate bounded hex content blocks. Keep dependency, native bytes, eleven
+  tools, custody, authority and transport guards unchanged.
+- Check complete typed serialization with empty ordinary-tool metadata and
+  worst-case admitted JSON-RPC framing against the existing 512KiB product
+  ceiling. Preserve the
+  bounded custody/uncertainty fallback. Extend the same five stdio scenarios with
+  large/max-cell positives, actual longest-ID envelope and corrupt-block refusal;
+  add two registered Rust packet regressions. Repaired-source Rust, new J replay
+  and full qualification are pending. Original .14 and owned bug .14.1 stay open.
+- Preserve the broad validator RED for two forbidden `expect` calls in the
+  existing test-only citizen clock seam. Use an equivalent installed-clock
+  assertion and conditional update; production time, deadlines and cases stay
+  unchanged. Keep the validator and its forbidden-call rule intact.
+
+
+## 2026-11-02 — Fix the first executed Tree adapter compiler errors
+
+- Preserve exact `45b2a4e`'s admitted ts1 compiler exit 101, worker-verified
+  source-content receipt and matching clean before/after source snapshots.
+  Zero tests ran. Keep this RED separate from transport/admission refusals.
+- Annotate the post-ack dispatch closure as `Result<Record>` and rename the
+  TCP peer factory and all callers to avoid handle shadowing. Preserve guards,
+  indeterminate key/cause mapping, peer joins, assertions and all test counts.
+  Corrected-source execution and final full qualification remain pending.
+
+## 2026-11-01 — Make citizen deadline regressions deterministic
+
+- Retain frozen `08fca4c` verifier exit 0 and qualification exit 101. Debug and
+  verifier release profiles each pass 5176 cases across 125 targets; qualification
+  release stops at 1314 passes / one failed citizen deadline case. Preserve the
+  failed official receipt, all raw output and exact-source snapshots.
+- Add a test-only per-thread monotonic clock with RAII unwind restoration.
+  Keep the existing 10ms request and exact one-read/no-retry assertion; expire
+  the fake source only after recording read entry. Require released resources,
+  withdrawn old scope and no final authorization/publication. Add one registered
+  pre-I/O expiry/unwind case requiring zero I/O. Production time and budgets are
+  unchanged. Focused execution and both final full commands remain pending.
+
+## 2026-11-01 — Add supported one-tree supply development generation
+
+- Add isolated unadmitted tree-harvest/1.21 native, safe-Rust and eleven-tool
+  modern MCP source using SDK `markPlant` at its computed southeast trunk tile.
+  Preserve unknown stable plant identity, complete visible body witnesses,
+  observed CUTWOOD/axe offers and separate designation/supply proof.
+- Share the pure native one-attempt engine while preserving workshop/1.20 wire
+  vectors and ground-only policy. Reject PERM borrowing and forced item/job state.
+- Synchronize independent acknowledgement before one dispatch; withdraw failed
+  preparation, enforce scoped grants and one shrinking budget, preserve consumed
+  source frontiers and refuse rollback or uncertainty-clearing negative history.
+- Register 14 adapter, two MCP packet and one five-scenario actual-stdio Rust
+  integration cases. Execution remains pending. Three Tree and seven workshop
+  inventory regressions pass; earlier native-double cuts retain their exact
+  component scope and failed attempts. Keep both final full commands, exact SDK
+  artifacts, game proof and original `.14` acceptance open. Preserve all 43 gate
+  IDs and production admission boundaries.
+
+## 2026-11-01 — Preserve workshop startup failure status and distinct test logs
+
+- Return process failure when workshop startup validation refuses the closed
+  environment. The strengthened existing real stdio case detects exit zero on
+  `08fca4c`; retain its four-pass/one-failure result. Corrected-source execution
+  and full qualification remain pending.
+- Append log-file extensions to production markers so `1.0` and `1.20` retain
+  separate stdout, stderr and exit receipts. Keep all five stdio scenarios and
+  their original positive, recovery and refusal assertions.
+
+## 2026-11-01 — Connect original Carpenter workshop construction through MCP
+
+- Implement the distinct unadmitted workshop/1.20 native generation, safe-Rust
+  adapter and registered eleven-tool modern MCP consumer for one exact eligible
+  WOOD log and one original 3x3 Carpenter workshop. Preserve complete review,
+  scoped authority/leases, fresh revalidation and one native construction attempt.
+- Synchronize journal dispatch and independent acknowledgement before the writer;
+  reject prefix rollback, source/clock regression and stale or foreign prepared
+  connections. Withdraw old knowledge and preparation after failed calls.
+  Preserve original identity through recovery without redispatch or new keys.
+- Connect callable Observe/Plan/Commit/Wait recommendations and terminal reasons;
+  preserve the full Agent Turn spine, null canonical anchor and explicit unknown
+  world continuity, including errors and bounded overflow.
+- Pass final focused 23 adapter cases, seven MCP unit cases, one integration
+  case running five actual stdio scenarios, and seven source-inventory cases,
+  with zero failures, ignored cases or skips. Strict native component execution
+  passes 13 scenarios / 27,596 assertions, 12 vectors and 12 individual compiled
+  mutation checks using SDK/protobuf doubles. Clippy and formatting pass; retain
+  earlier failed attempts and their raw output.
+- Record Terra's separate actual-SDK configure/protobuf/build-link diagnostic,
+  with exact unchanged C++/header/proto hashes and probe location in
+  `IMPLEMENTATION_STATUS.md`. This is not accepted native R1, game execution,
+  full final-source Rust qualification, artifact or runtime admission.
+- Keep both mandatory full qualification commands and live acceptance pending.
+  Original `.14` and finite-bed manager/activation prerequisites remain open;
+  preserve the production registry, runner and floor. Document the isolated
+  profile in `docs/WORKSHOP_CONSTRUCTION_MCP.md`.
+
 ## 2026-11-01 — Withdraw failed-call item views and bound test setup
 
 - Exact private R29 `b6d0e626` passes both required commands on the November 1
@@ -166,6 +535,39 @@
   old unreconciled Prepared record. Source/artifact qualification grants no
   native campaign, registry, production-runner or runtime admission, and does
   not transfer to the later shared checkout or report updates.
+
+## 2026-10-30 — Add immutable world resource consumers
+
+- Expose current and exact retained world manifests plus bounded entity,
+  relation, map-chunk and event pages through the existing session resource
+  template, reusing canonical presence-aware observation rendering.
+- Keep continuations on their original source hash, distinguish current from
+  historical anchors, and explicitly refuse unknown or collected versions.
+- Recheck current session authority and expiry on every historical read;
+  enforce source/output budgets and truthful partial/absence coverage.
+- Override the transport's default resource cache lifetime with private
+  zero-lifetime hints so changing grants and continuity are checked afresh.
+- Add ten focused unit cases, a real modern-stdio traversal/authority/budget
+  regression, and an exact implemented/deferred URI inventory. Rust execution
+  remains blocked by host memory exhaustion during the actual dependency build;
+  no live qualification or production admission is claimed.
+- Pass the complete production adapter Rust check on latest nightly. Attempt
+  both required repository commands; each stops at nine existing bridge-contract
+  findings in unchanged paths, without weakening those gates.
+
+## 2026-10-30 — Restore guarded workshop and furnace job control
+
+- Replace refusal-only native job suspension with a closed eight-type policy
+  using actual DFHack job, holder, posting and activity fields. Restrict writes
+  to idle, unposted, unclaimed jobs in completed matching production buildings.
+- Validate the complete bounded job list and exact holder queue membership before
+  the sole suspension-bit setter; retain stale-plan refusal, original-key replay
+  and immediate exact readback without retrying uncertain effects.
+- Replace fictional SDK test helpers and `BrewDrink` enum assumptions with
+  SDK-shaped lists and real enum values. Pass 863 handler/engine assertions under
+  UBSan, 26 independent SDK-guard assertions, and reject five safety mutations.
+- Retain explicit source/test scope: matching-SDK build, live MCP execution and
+  full Rust qualification remain open. No bridge method or admission is added.
 
 ## 2026-10-30 — Repair executable wiring and prove a bounded live run
 

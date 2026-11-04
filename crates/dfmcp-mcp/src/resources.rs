@@ -1,13 +1,15 @@
 //! Read-only `df://` resource families (MCP_SURFACE.md §Resources),
 //! laboratory slice.
 //!
-//! Session-scoped URIs carry their own authority: the `{session_id}` slot
+//! Session-scoped URIs identify an authority lookup: the `{session_id}` slot
 //! names the session whose negotiated grants gate the read. Fortress-scoped
 //! families (`df://fortress/{id}/anchor`, map chunks, events, …) stay
-//! unimplemented on purpose until `resources/read` gains a session-binding
+//! unregistered until `resources/read` gains a transport session-binding
 //! design: a fortress URI without a session slot could only be authorized
 //! from the transport context, and transport identity grants nothing
 //! (CAPABILITIES.md: no ambient authority).
+//! Session-bound immutable state pages already expose retained entities,
+//! relations, map chunks, and event records without ambient authority.
 //!
 //! Facade note: the pinned `fastmcp_rust` facade does not re-export
 //! `UriParams`, so template handlers spell the parameter type as the
@@ -17,18 +19,22 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use dfmcp_adapter::GameAdapter;
-use fastmcp_rust::ResourceTemplate;
 use fastmcp_rust::prelude::{
     McpContext, McpError, McpResult, Resource, ResourceContent, ResourceHandler,
+};
+use fastmcp_rust::{
+    CacheTtl, CompleteResult, FinalReadResourceResult, FinalResourceReadCacheHintProvenance,
+    ResourceTemplate,
 };
 use serde_json::{Value, json};
 
 use crate::server::{
-    active_session_count, anchor_json, authorize_entry, lookup_session, next_context,
-    parse_session_id_arg, snapshot_json,
+    active_session_count, anchor_json, authorize_entry, lookup_session, parse_session_id_arg,
+    read_context, snapshot_json,
 };
 use dfmcp_core::{Capability, Digest32, EntityId, RiskTier, SessionId, StateAnchor};
+
+pub(crate) mod state;
 
 /// One template serves every session view. The pinned fastmcp router admits
 /// at most one template per compatible leading literal (`df://session/`), so
@@ -36,13 +42,14 @@ use dfmcp_core::{Capability, Digest32, EntityId, RiskTier, SessionId, StateAncho
 /// `view` capture keeps the documented URIs exactly.
 const SESSION_VIEW_TEMPLATE: &str = "df://session/{session_id}/{view}";
 /// Views served under `df://session/{session_id}/{view}`.
-pub const SESSION_VIEWS: [&str; 6] = [
+pub const SESSION_VIEWS: [&str; 7] = [
     "summary",
     "capabilities",
     "handoff",
     "replay",
     "anchor",
     "tasks",
+    "state",
 ];
 const DOCTOR_BUNDLE_TEMPLATE: &str = "df://doctor/{session_id}";
 
@@ -97,10 +104,13 @@ fn denial(operation: &str, error: dfmcp_core::DfmcpError) -> McpError {
     ))
 }
 
-fn poisoned(operation: &str) -> McpError {
-    McpError::internal_error(format!(
-        "internal_invariant_violation: {operation} session mutex poisoned"
-    ))
+fn inspect_session<T>(
+    raw: &str,
+    operation: &str,
+    body: impl FnOnce(&crate::server::LabSession) -> McpResult<T>,
+) -> McpResult<T> {
+    let session = lookup(raw, operation)?;
+    crate::server::with_session_read(&session, |error| Err(denial(operation, error)), body)
 }
 
 fn text_content(uri: &str, payload: String) -> Vec<ResourceContent> {
@@ -117,6 +127,16 @@ fn template_read_refusal() -> McpError {
         "capability_denied: df:// resources require a concrete session-scoped URI; \
          template URIs carry no authority",
     )
+}
+
+// Session resources reflect current authority and state, even when their URI
+// names an immutable anchor. A client must ask the server again on every read.
+fn uncached_resource_contents(
+    contents: Vec<ResourceContent>,
+) -> McpResult<CompleteResult<FinalReadResourceResult>> {
+    let mut result = fastmcp_server::promote_legacy_resource_contents(contents)?;
+    result.payload.ttl_ms = CacheTtl::milliseconds(0);
+    Ok(result)
 }
 
 fn entity_anchor_digest(anchor: StateAnchor) -> dfmcp_core::Result<Digest32> {
@@ -256,41 +276,36 @@ pub(crate) fn session_entity(
 /// Requires the session's negotiated `observe` capability.
 pub(crate) fn session_summary(session_id_hex: &str, uri: &str) -> McpResult<Vec<ResourceContent>> {
     let operation = "df://session/summary";
-    let session = lookup(session_id_hex, operation)?;
-    crate::server::with_session(
-        &session,
-        || Err(poisoned(operation)),
-        |guard| {
-            let (_, ctx) = next_context(guard).map_err(|error| denial(operation, error))?;
-            if let Err(error) = authorize_entry(&ctx, Capability::Observe, RiskTier::ReadOnly) {
-                return Err(denial(operation, error));
-            }
-            let request = dfmcp_adapter::ObservationRequest {
-                since: None,
-                projection: dfmcp_adapter::Projection::Summary,
-                interest: dfmcp_adapter::InterestSet::default(),
-                max_entities: guard.budget.max_entities,
-                max_bytes: guard.budget.max_bytes,
-                max_output_tokens: guard.budget.max_output_tokens,
-                continuation: None,
-            };
-            match guard.adapter.observe(&request, &ctx) {
-                Ok(frame) => match frame.payload {
-                    dfmcp_adapter::ObservationPayload::Snapshot(snapshot) => {
-                        let mut payload = snapshot_json(&snapshot);
-                        payload["projection"] = json!("summary");
-                        payload["session_id"] = json!(format!("{}", guard.session_id));
-                        payload["resource"] = json!(uri);
-                        Ok(text_content(uri, payload.to_string()))
-                    }
-                    _ => Err(McpError::internal_error(
-                        "internal_invariant_violation: summary observation returned a non-snapshot payload",
-                    )),
-                },
-                Err(error) => Err(denial(operation, error)),
-            }
-        },
-    )
+    inspect_session(session_id_hex, operation, |guard| {
+        let ctx = read_context(guard);
+        if let Err(error) = authorize_entry(&ctx, Capability::Observe, RiskTier::ReadOnly) {
+            return Err(denial(operation, error));
+        }
+        let request = dfmcp_adapter::ObservationRequest {
+            since: None,
+            projection: dfmcp_adapter::Projection::Summary,
+            interest: dfmcp_adapter::InterestSet::default(),
+            max_entities: guard.budget.max_entities,
+            max_bytes: guard.budget.max_bytes,
+            max_output_tokens: guard.budget.max_output_tokens,
+            continuation: None,
+        };
+        match guard.adapter.observe_readonly(&request, &ctx) {
+            Ok(frame) => match frame.payload {
+                dfmcp_adapter::ObservationPayload::Snapshot(snapshot) => {
+                    let mut payload = snapshot_json(&snapshot);
+                    payload["projection"] = json!("summary");
+                    payload["session_id"] = json!(format!("{}", guard.session_id));
+                    payload["resource"] = json!(uri);
+                    Ok(text_content(uri, payload.to_string()))
+                }
+                _ => Err(McpError::internal_error(
+                    "internal_invariant_violation: summary observation returned a non-snapshot payload",
+                )),
+            },
+            Err(error) => Err(denial(operation, error)),
+        }
+    })
 }
 
 /// `df://session/{session_id}/capabilities` — the session's own negotiation
@@ -301,85 +316,80 @@ pub(crate) fn session_capabilities(
     uri: &str,
 ) -> McpResult<Vec<ResourceContent>> {
     let operation = "df://session/capabilities";
-    let session = lookup(session_id_hex, operation)?;
-    let guard = session.lock().map_err(|_| poisoned(operation))?;
-    let payload = json!({
-        "ok": true,
-        "session_id": format!("{}", guard.session_id),
-        "fortress_id": format!("{}", guard.fortress_id),
-        "granted_capabilities": guard
-            .grants
-            .iter()
-            .map(|grant| json!({
-                "capability": grant.capability.as_str(),
-                "max_risk": grant.max_risk.as_str(),
-            }))
-            .collect::<Vec<_>>(),
-        "budget": {
-            "max_wall_millis": guard.budget.max_wall_millis,
-            "max_game_ticks": guard.budget.max_game_ticks,
-            "max_entities": guard.budget.max_entities,
-            "max_bytes": guard.budget.max_bytes,
-            "max_output_tokens": guard.budget.max_output_tokens,
-            "max_actions": guard.budget.max_actions,
-        },
-        "negotiation": guard.negotiation.to_json(),
-        "note": "self-description of the session's own authority; confers nothing",
-        "resource": uri,
-    });
-    Ok(text_content(uri, payload.to_string()))
+    inspect_session(session_id_hex, operation, |guard| {
+        let payload = json!({
+            "ok": true,
+            "session_id": format!("{}", guard.session_id),
+            "fortress_id": format!("{}", guard.fortress_id),
+            "granted_capabilities": guard
+                .grants
+                .iter()
+                .map(|grant| json!({
+                    "capability": grant.capability.as_str(),
+                    "max_risk": grant.max_risk.as_str(),
+                }))
+                .collect::<Vec<_>>(),
+            "budget": {
+                "max_wall_millis": guard.budget.max_wall_millis,
+                "max_game_ticks": guard.budget.max_game_ticks,
+                "max_entities": guard.budget.max_entities,
+                "max_bytes": guard.budget.max_bytes,
+                "max_output_tokens": guard.budget.max_output_tokens,
+                "max_actions": guard.budget.max_actions,
+            },
+            "negotiation": guard.negotiation.to_json(),
+            "note": "self-description of the session's own authority; confers nothing",
+            "resource": uri,
+        });
+        Ok(text_content(uri, payload.to_string()))
+    })
 }
 
 /// `df://doctor/{session_id}` — doctor report bundle for the session.
 /// Requires the session's negotiated `doctor` capability.
 pub(crate) fn doctor_bundle(session_id_hex: &str, uri: &str) -> McpResult<Vec<ResourceContent>> {
     let operation = "df://doctor";
-    let session = lookup(session_id_hex, operation)?;
-    crate::server::with_session(
-        &session,
-        || Err(poisoned(operation)),
-        |guard| {
-            let (_, ctx) = next_context(guard).map_err(|error| denial(operation, error))?;
-            if let Err(error) = authorize_entry(&ctx, Capability::Doctor, RiskTier::ReadOnly) {
-                return Err(denial(operation, error));
-            }
-            let health_res = guard.adapter.health(&ctx);
-            let health_opt = health_res.as_ref().ok();
-            let report = crate::doctor::DoctorInspector.generate_report(
-                active_session_count(),
-                health_opt,
-                None,
-                0,
-                0,
-            );
-            let payload = match health_res {
-                Ok(health) => json!({
-                    "ok": true,
-                    "session_id": format!("{}", guard.session_id),
-                    "status": if report.is_healthy { "healthy" } else { "degraded" },
-                    "active_sessions_count": report.active_sessions_count,
-                    "adapter": health.identity.name,
-                    "compatibility": format!("{:?}", health.identity.compatibility),
-                    "fortress_loaded": health.fortress_loaded,
-                    "findings": report.findings,
-                    "warnings": health.warnings,
-                    "current_anchor": health.current_anchor.as_ref().map(anchor_json),
-                    "resource": uri,
-                }),
-                Err(error) => json!({
-                    "ok": false,
-                    "error": {
-                        "operation": operation,
-                        "code": error.code.as_str(),
-                        "message": error.message,
-                        "retryable": error.retryable,
-                    },
-                    "resource": uri,
-                }),
-            };
-            Ok(text_content(uri, payload.to_string()))
-        },
-    )
+    inspect_session(session_id_hex, operation, |guard| {
+        let ctx = read_context(guard);
+        if let Err(error) = authorize_entry(&ctx, Capability::Doctor, RiskTier::ReadOnly) {
+            return Err(denial(operation, error));
+        }
+        let health_res = guard.adapter.health_readonly(&ctx);
+        let health_opt = health_res.as_ref().ok();
+        let report = crate::doctor::DoctorInspector.generate_report(
+            active_session_count(),
+            health_opt,
+            None,
+            0,
+            0,
+        );
+        let payload = match health_res {
+            Ok(health) => json!({
+                "ok": true,
+                "session_id": format!("{}", guard.session_id),
+                "status": if report.is_healthy { "healthy" } else { "degraded" },
+                "active_sessions_count": report.active_sessions_count,
+                "adapter": health.identity.name,
+                "compatibility": format!("{:?}", health.identity.compatibility),
+                "fortress_loaded": health.fortress_loaded,
+                "findings": report.findings,
+                "warnings": health.warnings,
+                "current_anchor": health.current_anchor.as_ref().map(anchor_json),
+                "resource": uri,
+            }),
+            Err(error) => json!({
+                "ok": false,
+                "error": {
+                    "operation": operation,
+                    "code": error.code.as_str(),
+                    "message": error.message,
+                    "retryable": error.retryable,
+                },
+                "resource": uri,
+            }),
+        };
+        Ok(text_content(uri, payload.to_string()))
+    })
 }
 
 /// `df://session/{session_id}/handoff` — resumable handoff packet: anchor,
@@ -388,20 +398,15 @@ pub(crate) fn doctor_bundle(session_id_hex: &str, uri: &str) -> McpResult<Vec<Re
 /// it never polls, dispatches, or changes state.
 pub(crate) fn session_handoff(session_id_hex: &str, uri: &str) -> McpResult<Vec<ResourceContent>> {
     let operation = "df://session/handoff";
-    let session = lookup(session_id_hex, operation)?;
-    crate::server::with_session(
-        &session,
-        || Err(poisoned(operation)),
-        |guard| {
-            let (_, ctx) = next_context(guard).map_err(|error| denial(operation, error))?;
-            if let Err(error) = authorize_entry(&ctx, Capability::Observe, RiskTier::ReadOnly) {
-                return Err(denial(operation, error));
-            }
-            let mut payload = crate::server::handoff_json(guard);
-            payload["resource"] = json!(uri);
-            Ok(text_content(uri, payload.to_string()))
-        },
-    )
+    inspect_session(session_id_hex, operation, |guard| {
+        let ctx = read_context(guard);
+        if let Err(error) = authorize_entry(&ctx, Capability::Observe, RiskTier::ReadOnly) {
+            return Err(denial(operation, error));
+        }
+        let mut payload = crate::server::handoff_json(guard);
+        payload["resource"] = json!(uri);
+        Ok(text_content(uri, payload.to_string()))
+    })
 }
 
 /// `df://session/{session_id}/anchor` — the session fortress's current
@@ -410,125 +415,156 @@ pub(crate) fn session_handoff(session_id_hex: &str, uri: &str) -> McpResult<Vec<
 /// Requires `observe`; never changes state.
 pub(crate) fn session_anchor(session_id_hex: &str, uri: &str) -> McpResult<Vec<ResourceContent>> {
     let operation = "df://session/anchor";
-    let session = lookup(session_id_hex, operation)?;
-    crate::server::with_session(
-        &session,
-        || Err(poisoned(operation)),
-        |guard| {
-            let (_, ctx) = next_context(guard).map_err(|error| denial(operation, error))?;
-            if let Err(error) = authorize_entry(&ctx, Capability::Observe, RiskTier::ReadOnly) {
-                return Err(denial(operation, error));
-            }
-            let snapshot = guard.adapter.snapshot();
-            let v2 = dfmcp_core::StateAnchorV2::from_v1(
-                snapshot.anchor(),
-                dfmcp_core::AnchorEpochs::laboratory(snapshot.fortress_id),
-            )
-            .map_err(|error| denial(operation, error))?;
-            let payload = json!({
-                "ok": true,
-                "resource": uri,
-                "fortress_id": snapshot.fortress_id.get().to_string(),
-                "anchor": anchor_json(&snapshot.anchor()),
-                "anchor_v2": {
-                    "fortress_lineage": v2.fortress_lineage.to_hex(),
-                    "observation_epoch": v2.observation_epoch,
-                    "snapshot_sequence": v2.snapshot_sequence,
-                    "game_tick": v2.game_tick.map(|tick| tick.0),
-                    "bridge_generation": v2.bridge_generation,
-                    "bridge_protocol": v2.bridge_protocol,
-                    "adapter_epoch": v2.adapter_epoch,
-                    "schema_epoch": v2.schema_epoch,
-                    "policy_epoch": v2.policy_epoch,
-                    "semantic_world_root": v2.semantic_world_root.to_hex(),
-                    "digest": v2.digest().to_hex(),
-                    "note": "complete version tuple; a changed observation_epoch invalidates every older handle",
-                },
-                "paused": snapshot.paused,
-            });
-            Ok(text_content(uri, payload.to_string()))
-        },
-    )
+    inspect_session(session_id_hex, operation, |guard| {
+        let ctx = read_context(guard);
+        if let Err(error) = authorize_entry(&ctx, Capability::Observe, RiskTier::ReadOnly) {
+            return Err(denial(operation, error));
+        }
+        let snapshot = guard.adapter.snapshot();
+        let v2 = dfmcp_core::StateAnchorV2::from_v1(
+            snapshot.anchor(),
+            dfmcp_core::AnchorEpochs::laboratory(snapshot.fortress_id),
+        )
+        .map_err(|error| denial(operation, error))?;
+        let payload = json!({
+            "ok": true,
+            "resource": uri,
+            "fortress_id": snapshot.fortress_id.get().to_string(),
+            "anchor": anchor_json(&snapshot.anchor()),
+            "anchor_v2": {
+                "fortress_lineage": v2.fortress_lineage.to_hex(),
+                "observation_epoch": v2.observation_epoch,
+                "snapshot_sequence": v2.snapshot_sequence,
+                "game_tick": v2.game_tick.map(|tick| tick.0),
+                "bridge_generation": v2.bridge_generation,
+                "bridge_protocol": v2.bridge_protocol,
+                "adapter_epoch": v2.adapter_epoch,
+                "schema_epoch": v2.schema_epoch,
+                "policy_epoch": v2.policy_epoch,
+                "semantic_world_root": v2.semantic_world_root.to_hex(),
+                "digest": v2.digest().to_hex(),
+                "note": "complete version tuple; a changed observation_epoch invalidates every older handle",
+            },
+            "paused": snapshot.paused,
+        });
+        Ok(text_content(uri, payload.to_string()))
+    })
 }
 
 /// `df://session/{session_id}/replay` — the session's deterministic replay
 /// bundle. Requires the negotiated `observe` capability; never changes state.
 pub(crate) fn session_replay(session_id_hex: &str, uri: &str) -> McpResult<Vec<ResourceContent>> {
     let operation = "df://session/replay";
-    let session = lookup(session_id_hex, operation)?;
-    let (_, ctx) = {
-        let mut guard = session.lock().map_err(|_| poisoned(operation))?;
-        next_context(&mut guard).map_err(|error| denial(operation, error))?
-    };
-    if let Err(error) = authorize_entry(&ctx, Capability::Observe, RiskTier::ReadOnly) {
-        return Err(denial(operation, error));
-    }
-    let mut payload = crate::server::replay_bundle_for(session_id_hex)
-        .map_err(|error| denial(operation, error))?;
-    payload["resource"] = json!(uri);
-    Ok(text_content(uri, payload.to_string()))
+    inspect_session(session_id_hex, operation, |guard| {
+        let ctx = read_context(guard);
+        authorize_entry(&ctx, Capability::Observe, RiskTier::ReadOnly)
+            .map_err(|error| denial(operation, error))?;
+        let mut payload = crate::server::resource_replay_bundle(guard);
+        payload["resource"] = json!(uri);
+        Ok(text_content(uri, payload.to_string()))
+    })
 }
 
 /// Modern Tasks have no tasks/list method. Discovery stays in the existing
 /// capability-checked session resource waist.
 fn task_resource_bytes(uri: &str, serialized: &str) -> usize {
     // Resource text is JSON inside a JSON-RPC result. Count its escaping and
-    // the resource wrapper, with room for the bounded outer request envelope.
+    // the resource wrapper. The pinned protocol preserves numeric request IDs
+    // of up to 4096 bytes; the handler sees no original ID, so reserve that
+    // maximum as well as the fixed result/cache/envelope metadata.
     json!({"contents": [{"uri": uri, "mimeType": "application/json", "text": serialized}]})
         .to_string()
         .len()
-        .saturating_add(128)
+        .saturating_add(128 + 4096)
 }
 
-fn session_tasks(
+// Fetch the immutable candidate without world/session locks. Reauthorize and
+// render under one owner-fenced view so publication cannot outlive authority.
+fn task_candidate<T>(
+    session_id: &str,
+    operation: &str,
+    after_precheck: impl FnOnce(),
+    fetch: impl FnOnce() -> McpResult<T>,
+    render: impl FnOnce(T, dfmcp_core::WorkBudget) -> McpResult<Vec<ResourceContent>>,
+) -> McpResult<Vec<ResourceContent>> {
+    crate::server::task_session::read_budget(session_id)
+        .map_err(|error| denial(operation, error))?;
+    after_precheck();
+    let candidate = fetch();
+    inspect_session(session_id, operation, |guard| {
+        let ctx = read_context(guard);
+        authorize_entry(&ctx, Capability::Observe, RiskTier::ReadOnly)
+            .map_err(|error| denial(operation, error))?;
+        render(candidate?, guard.budget)
+    })
+}
+
+pub(crate) fn session_tasks(
     session_id_hex: &str,
     uri: &str,
     offset: usize,
 ) -> McpResult<Vec<ResourceContent>> {
-    let operation = "df://session/tasks";
-    // This enters with_session so a shared world's current clock and grants
-    // govern the read. Reading a task must not consume a semantic request ID.
-    let budget = crate::server::task_session::read_budget(session_id_hex)
-        .map_err(|error| denial(operation, error))?;
-    let mut payload = crate::task_service::session_tasks(session_id_hex, offset);
-    payload["ok"] = json!(payload.get("unavailable").is_none());
-    payload["schema"] = json!("dfmcp.lab-tasks/1");
-    payload["session_id"] = json!(session_id_hex);
-    payload["resource"] = json!(uri);
-    payload["max_active"] = json!(1);
-    payload["max_retained"] = json!(crate::task_store::MAX_RETAINED_TASKS);
-    payload["retention"] = json!("process_lifetime");
-    payload["scope"] = json!("laboratory_process_only");
-    let max_bytes = budget.max_bytes.min(
-        u64::from(budget.max_output_tokens)
-            .saturating_mul(crate::output_budget::BYTES_PER_TOKEN as u64),
-    );
-    loop {
-        let serialized = payload.to_string();
-        if task_resource_bytes(uri, &serialized) as u64 <= max_bytes {
-            return Ok(text_content(uri, serialized));
-        }
-        let Some(tasks) = payload.get_mut("tasks").and_then(Value::as_array_mut) else {
-            return Err(McpError::invalid_params(
-                "task diagnostics exceed the negotiated output budget",
-            ));
-        };
-        if tasks.len() <= 1 {
-            return Err(McpError::invalid_params(format!(
-                "task discovery requires {} bytes, exceeding the negotiated {max_bytes}-byte output bound; no active handle or drain evidence was silently omitted",
-                task_resource_bytes(uri, &serialized)
-            )));
-        }
-        // Active work sorts first. Trimming only the last history handle
-        // preserves the sole active monitor, with an explicit continuation.
-        tasks.pop();
-        let end = offset + tasks.len();
-        payload["complete"] = json!(false);
-        payload["next"] = json!(format!("df://session/{session_id_hex}/tasks-{end}"));
-        payload["output_budget"] = json!({"max_bytes": max_bytes,
+    session_tasks_with(
+        session_id_hex,
+        uri,
+        offset,
+        || {},
+        || Ok(crate::task_service::session_tasks(session_id_hex, offset)),
+    )
+}
+fn session_tasks_with(
+    session_id_hex: &str,
+    uri: &str,
+    offset: usize,
+    after_precheck: impl FnOnce(),
+    fetch: impl FnOnce() -> McpResult<Value>,
+) -> McpResult<Vec<ResourceContent>> {
+    task_candidate(
+        session_id_hex,
+        "df://session/tasks",
+        after_precheck,
+        fetch,
+        |mut payload, budget| {
+            payload["ok"] = json!(payload.get("unavailable").is_none());
+            payload["schema"] = json!("dfmcp.lab-tasks/1");
+            payload["session_id"] = json!(session_id_hex);
+            payload["resource"] = json!(uri);
+            payload["max_active"] = json!(1);
+            payload["max_retained"] = json!(crate::task_store::MAX_RETAINED_TASKS);
+            payload["retention"] = json!("process_lifetime");
+            payload["scope"] = json!("laboratory_process_only");
+            let max_bytes = budget.max_bytes.min(
+                u64::from(budget.max_output_tokens)
+                    .saturating_mul(crate::output_budget::BYTES_PER_TOKEN as u64),
+            );
+            loop {
+                let serialized = payload.to_string();
+                if task_resource_bytes(uri, &serialized) as u64 <= max_bytes {
+                    return Ok(text_content(uri, serialized));
+                }
+                let Some(tasks) = payload.get_mut("tasks").and_then(Value::as_array_mut) else {
+                    return Err(McpError::invalid_params(
+                        "task diagnostics exceed the negotiated output budget",
+                    ));
+                };
+                if tasks.len() <= 1 {
+                    return Err(McpError::invalid_params(format!(
+                        "task discovery requires {} bytes, exceeding the negotiated {max_bytes}-byte output bound; no active handle or drain evidence was silently omitted",
+                        task_resource_bytes(uri, &serialized)
+                    )));
+                }
+                // Active work sorts first. Trimming only the last history handle
+                // preserves the sole active monitor, with an explicit continuation.
+                tasks.pop();
+                let end = offset + tasks.len();
+                payload["complete"] = json!(false);
+                payload["next"] = json!(format!("df://session/{session_id_hex}/tasks-{end}"));
+                payload["output_budget"] = json!({"max_bytes": max_bytes,
             "max_output_tokens": budget.max_output_tokens, "clipped": true,
             "reason": "terminal history continues in the next resource page"});
-    }
+            }
+        },
+    )
 }
 
 fn session_task_detail(
@@ -536,23 +572,40 @@ fn session_task_detail(
     uri: &str,
     task_id: &str,
 ) -> McpResult<Vec<ResourceContent>> {
-    let operation = "df://session/task-detail";
-    let budget = crate::server::task_session::read_budget(session_id_hex)
-        .map_err(|error| denial(operation, error))?;
-    let mut payload = crate::task_service::task_detail(session_id_hex, task_id)?;
-    payload["ok"] = json!(true);
-    payload["schema"] = json!("dfmcp.lab-task-detail/1");
-    payload["session_id"] = json!(session_id_hex);
-    payload["resource"] = json!(uri);
-    let mut serialized = payload.to_string();
-    let max_bytes = budget.max_bytes.min(
-        u64::from(budget.max_output_tokens)
-            .saturating_mul(crate::output_budget::BYTES_PER_TOKEN as u64),
-    );
-    if task_resource_bytes(uri, &serialized) as u64 > max_bytes {
-        let (source, evidence) = task_evidence_document(&payload);
-        let progress = &payload["progress"];
-        payload = json!({"ok": true, "schema": "dfmcp.lab-task-detail/1",
+    session_task_detail_with(
+        session_id_hex,
+        uri,
+        task_id,
+        || {},
+        || crate::task_service::task_detail(session_id_hex, task_id),
+    )
+}
+fn session_task_detail_with(
+    session_id_hex: &str,
+    uri: &str,
+    task_id: &str,
+    after_precheck: impl FnOnce(),
+    fetch: impl FnOnce() -> McpResult<Value>,
+) -> McpResult<Vec<ResourceContent>> {
+    task_candidate(
+        session_id_hex,
+        "df://session/task-detail",
+        after_precheck,
+        fetch,
+        |mut payload, budget| {
+            payload["ok"] = json!(true);
+            payload["schema"] = json!("dfmcp.lab-task-detail/1");
+            payload["session_id"] = json!(session_id_hex);
+            payload["resource"] = json!(uri);
+            let mut serialized = payload.to_string();
+            let max_bytes = budget.max_bytes.min(
+                u64::from(budget.max_output_tokens)
+                    .saturating_mul(crate::output_budget::BYTES_PER_TOKEN as u64),
+            );
+            if task_resource_bytes(uri, &serialized) as u64 > max_bytes {
+                let (source, evidence) = task_evidence_document(&payload);
+                let progress = &payload["progress"];
+                payload = json!({"ok": true, "schema": "dfmcp.lab-task-detail/1",
             "session_id": session_id_hex, "resource": uri, "task_id": task_id,
             "plan_digest": payload["plan_digest"], "scope": "laboratory_process_only",
             "task": {"taskId": task_id, "status": payload["task"]["status"]},
@@ -566,14 +619,16 @@ fn session_task_detail(
                 "next": format!("df://session/{session_id_hex}/task-{task_id}~evidence-0")},
             "output_budget": {"max_bytes": max_bytes, "max_output_tokens": budget.max_output_tokens,
                 "clipped": true, "omitted": "full proof continues in digest-checked evidence pages"}});
-        serialized = payload.to_string();
-        if task_resource_bytes(uri, &serialized) as u64 > max_bytes {
-            return Err(McpError::invalid_params(
-                "task detail summary exceeds the negotiated output budget; no proof was silently omitted",
-            ));
-        }
-    }
-    Ok(text_content(uri, serialized))
+                serialized = payload.to_string();
+                if task_resource_bytes(uri, &serialized) as u64 > max_bytes {
+                    return Err(McpError::invalid_params(
+                        "task detail summary exceeds the negotiated output budget; no proof was silently omitted",
+                    ));
+                }
+            }
+            Ok(text_content(uri, serialized))
+        },
+    )
 }
 
 fn task_evidence_document(detail: &Value) -> (&'static str, String) {
@@ -590,43 +645,65 @@ fn session_task_evidence(
     task_id: &str,
     offset: usize,
 ) -> McpResult<Vec<ResourceContent>> {
-    let budget = crate::server::task_session::read_budget(session_id_hex)
-        .map_err(|error| denial("df://session/task-evidence", error))?;
-    let detail = crate::task_service::task_detail(session_id_hex, task_id)?;
-    let (source, evidence) = task_evidence_document(&detail);
-    if offset > evidence.len() || !evidence.is_char_boundary(offset) {
-        return Err(McpError::invalid_params(
-            "task evidence offset must be a valid UTF-8 boundary inside the retained document",
-        ));
-    }
-    let digest = dfmcp_core::Digest32::of_bytes(evidence.as_bytes()).to_hex();
-    let max_bytes = budget.max_bytes.min(
-        u64::from(budget.max_output_tokens)
-            .saturating_mul(crate::output_budget::BYTES_PER_TOKEN as u64),
-    );
-    let mut end = offset.saturating_add(16 * 1024).min(evidence.len());
-    loop {
-        while !evidence.is_char_boundary(end) {
-            end -= 1;
-        }
-        let payload = json!({"ok": true, "schema": "dfmcp.lab-task-evidence-page/1",
+    session_task_evidence_with(
+        session_id_hex,
+        uri,
+        task_id,
+        offset,
+        || {},
+        || crate::task_service::task_detail(session_id_hex, task_id),
+    )
+}
+fn session_task_evidence_with(
+    session_id_hex: &str,
+    uri: &str,
+    task_id: &str,
+    offset: usize,
+    after_precheck: impl FnOnce(),
+    fetch: impl FnOnce() -> McpResult<Value>,
+) -> McpResult<Vec<ResourceContent>> {
+    task_candidate(
+        session_id_hex,
+        "df://session/task-evidence",
+        after_precheck,
+        fetch,
+        |detail, budget| {
+            let (source, evidence) = task_evidence_document(&detail);
+            if offset > evidence.len() || !evidence.is_char_boundary(offset) {
+                return Err(McpError::invalid_params(
+                    "task evidence offset must be a valid UTF-8 boundary inside the retained document",
+                ));
+            }
+            let digest = dfmcp_core::Digest32::of_bytes(evidence.as_bytes()).to_hex();
+            let max_bytes = budget.max_bytes.min(
+                u64::from(budget.max_output_tokens)
+                    .saturating_mul(crate::output_budget::BYTES_PER_TOKEN as u64),
+            );
+            let mut end = offset.saturating_add(16 * 1024).min(evidence.len());
+            loop {
+                while !evidence.is_char_boundary(end) {
+                    end -= 1;
+                }
+                let payload = json!({"ok": true, "schema": "dfmcp.lab-task-evidence-page/1",
             "session_id": session_id_hex, "resource": uri, "task_id": task_id, "source": source,
             "encoding": "json_utf8", "digest": digest, "total_bytes": evidence.len(), "offset": offset,
             "part": &evidence[offset..end], "complete": end == evidence.len(),
             "next": (end < evidence.len()).then(|| format!("df://session/{session_id_hex}/task-{task_id}~evidence-{end}")),
             "reassembly": "concatenate part strings in offset order, require one unchanged digest, then parse the complete JSON document",
             "scope": "laboratory_process_only"});
-        let serialized = payload.to_string();
-        if task_resource_bytes(uri, &serialized) as u64 <= max_bytes {
-            return Ok(text_content(uri, serialized));
-        }
-        if end <= offset + 4 {
-            return Err(McpError::invalid_params(
-                "task evidence page metadata exceeds the negotiated output budget",
-            ));
-        }
-        end = offset + (end - offset) / 2;
-    }
+                let serialized = payload.to_string();
+                if task_resource_bytes(uri, &serialized) as u64 <= max_bytes {
+                    return Ok(text_content(uri, serialized));
+                }
+                if end <= offset + 4 {
+                    return Err(McpError::invalid_params(
+                        "task evidence page metadata exceeds the negotiated output budget",
+                    ));
+                }
+                end = offset + (end - offset) / 2;
+            }
+        },
+    )
 }
 
 fn read_param_or_refuse(
@@ -668,6 +745,19 @@ impl ResourceHandler for DoctorBundleResource {
         Err(template_read_refusal())
     }
 
+    fn final_resource_read_cache_hint_provenance(&self) -> FinalResourceReadCacheHintProvenance {
+        FinalResourceReadCacheHintProvenance::Explicit
+    }
+
+    fn read_final_with_uri(
+        &self,
+        ctx: &McpContext,
+        uri: &str,
+        params: &HashMap<String, String>,
+    ) -> McpResult<CompleteResult<FinalReadResourceResult>> {
+        uncached_resource_contents(self.read_with_uri(ctx, uri, params)?)
+    }
+
     fn read_with_uri(
         &self,
         _ctx: &McpContext,
@@ -690,7 +780,9 @@ const SESSION_VIEW_DESCRIPTION: &str = "Session views: summary (bounded snapshot
      (the session fortress's current canonical anchor), tasks and tasks-{offset} (bounded modern \
      MCP task handles, active first), task-{taskId} (original plan progress, cancellation drains \
      and final evidence; laboratory process only), entity-{id}~{generation}~{anchor_digest} \
-     (one Query-authorized entity at the exact current complete anchor, discovered in entity query rows)";
+     (one Query-authorized entity at the exact current complete anchor, discovered in entity query rows), state (current world manifest), \
+     state-{state_hash} (exact retained manifest), state-{state_hash}~{section}~{offset} \
+     (immutable bounded entities, relations, chunks, or events page; requires observe)";
 
 impl ResourceHandler for SessionViewResource {
     fn definition(&self) -> Resource {
@@ -713,6 +805,19 @@ impl ResourceHandler for SessionViewResource {
         Err(template_read_refusal())
     }
 
+    fn final_resource_read_cache_hint_provenance(&self) -> FinalResourceReadCacheHintProvenance {
+        FinalResourceReadCacheHintProvenance::Explicit
+    }
+
+    fn read_final_with_uri(
+        &self,
+        ctx: &McpContext,
+        uri: &str,
+        params: &HashMap<String, String>,
+    ) -> McpResult<CompleteResult<FinalReadResourceResult>> {
+        uncached_resource_contents(self.read_with_uri(ctx, uri, params)?)
+    }
+
     fn read_with_uri(
         &self,
         _ctx: &McpContext,
@@ -728,6 +833,8 @@ impl ResourceHandler for SessionViewResource {
             "anchor" => session_anchor(raw, uri),
             entity if entity.starts_with("entity-") => session_entity(raw, uri, entity),
             "tasks" => session_tasks(raw, uri, 0),
+            "state" => state::read(raw, uri, view),
+            page if page.starts_with("state-") => state::read(raw, uri, page),
             page if page.starts_with("tasks-") => {
                 let offset = page[6..].parse::<usize>().map_err(|_| {
                     McpError::invalid_params("task page offset must be a nonnegative integer")
@@ -766,6 +873,7 @@ pub fn register_all(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::server::next_context;
     use crate::server::{
         fortress_cancel, fortress_checkpoint, fortress_commit, fortress_doctor, fortress_explain,
         fortress_observe, fortress_open_session, fortress_plan, fortress_query, fortress_restore,
@@ -1025,6 +1133,32 @@ mod tests {
     }
 
     #[test]
+    fn session_and_doctor_resources_recheck_revoked_grants() {
+        let id = session_id_of(&open_with_caps(&[
+            ("observe", "read_only"),
+            ("doctor", "read_only"),
+        ]));
+        let summary_uri = format!("df://session/{id}/summary");
+        let doctor_uri = format!("df://doctor/{id}");
+        assert!(session_summary(&id, &summary_uri).is_ok());
+        assert!(doctor_bundle(&id, &doctor_uri).is_ok());
+        let session = lookup(&id, "test").expect("session");
+        session.lock().expect("lock").grants.clear();
+        assert!(
+            session_summary(&id, &summary_uri)
+                .expect_err("revoked observe grant")
+                .to_string()
+                .contains("capability_denied")
+        );
+        assert!(
+            doctor_bundle(&id, &doctor_uri)
+                .expect_err("revoked doctor grant")
+                .to_string()
+                .contains("capability_denied")
+        );
+    }
+
+    #[test]
     fn resource_templates_advertise_session_scoped_families() {
         let views = SessionViewResource
             .template()
@@ -1038,11 +1172,73 @@ mod tests {
                 "handoff",
                 "replay",
                 "anchor",
-                "tasks"
+                "tasks",
+                "state"
             ]
         );
         let doctor = DoctorBundleResource.template().expect("doctor template");
         assert_eq!(doctor.uri_template, "df://doctor/{session_id}");
+    }
+
+    #[test]
+    fn replay_resource_checks_expiry_against_the_shared_world_tick() {
+        fn open_shared() -> String {
+            let raw = crate::server::open_session_in_scenario(
+                Some(true),
+                Some("390021".to_owned()),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                Some("empty".to_owned()),
+                Some(true),
+                Some(false),
+            );
+            let value: Value = serde_json::from_str(&raw).expect("shared session");
+            assert_eq!(value["ok"], true, "{value}");
+            session_id_of(&value)
+        }
+        let reader_id = open_shared();
+        let controller_id = open_shared();
+        let reader = lookup(&reader_id, "test").expect("reader");
+        {
+            let mut guard = reader.lock().expect("reader lock");
+            for grant in &mut guard.grants {
+                if grant.capability == Capability::Observe {
+                    grant.expires_at_tick = Some(dfmcp_core::GameTick(2));
+                }
+            }
+        }
+        let uri = format!("df://session/{reader_id}/replay");
+        assert!(session_replay(&reader_id, &uri).is_ok());
+        let controller = lookup(&controller_id, "test").expect("controller");
+        crate::server::with_session(
+            &controller,
+            || panic!("controller unavailable"),
+            |guard| {
+                guard
+                    .adapter
+                    .advance_ticks(10)
+                    .expect("advance shared world")
+            },
+        );
+        assert_eq!(
+            reader
+                .lock()
+                .expect("reader lock")
+                .adapter
+                .snapshot()
+                .tick
+                .0,
+            1,
+            "the reader cache must actually lag the shared world"
+        );
+        let denied = session_replay(&reader_id, &uri).expect_err("expired observe grant");
+        assert!(denied.to_string().contains("capability_denied"), "{denied}");
+        crate::server::release_shared_world(dfmcp_core::FortressId::new(390021));
     }
 
     fn entity_session() -> (String, Value) {
@@ -1179,6 +1375,31 @@ mod tests {
     }
 
     #[test]
+    fn entity_resource_budget_includes_the_largest_numeric_wire_id() {
+        let (session_id, page) = entity_session();
+        let uri = page["rows"][0]["resource_uri"].as_str().expect("resource");
+        let contents = entity_read(&session_id, uri).expect("initial entity");
+        let text = contents[0].text.as_deref().expect("resource text");
+        let id: Value = serde_json::from_str(&"9".repeat(4096)).expect("exact protocol ID");
+        let wire = json!({"jsonrpc":"2.0", "id":id, "result":{
+            "contents":[{"uri":uri,"mimeType":"application/json","text":text}],
+            "ttlMs":0,"cacheScope":"private"}})
+        .to_string();
+        let reserved = task_resource_bytes(uri, text);
+        assert!(reserved >= wire.len());
+        let session = lookup(&session_id, "test").expect("session");
+        session.lock().expect("lock").budget.max_bytes = (wire.len() - 1) as u64;
+        assert!(
+            entity_read(&session_id, uri)
+                .expect_err("wire budget refused")
+                .to_string()
+                .contains("budget_exceeded")
+        );
+        session.lock().expect("lock").budget.max_bytes = reserved as u64;
+        assert!(entity_read(&session_id, uri).is_ok());
+    }
+
+    #[test]
     fn entity_resource_refuses_wrong_generation_fortress_epoch_and_malformed_handles() {
         let (session_id, page) = entity_session();
         let uri = page["rows"][0]["resource_uri"].as_str().expect("resource");
@@ -1252,5 +1473,151 @@ mod tests {
             )
             .is_ok()
         );
+    }
+
+    // Synthetic task payloads exercise the same final authorization and render
+    // boundary as the store-backed routes; they are not live-game evidence.
+    fn task_fixture_read(
+        kind: &str,
+        session: &str,
+        after_precheck: impl FnOnce(),
+        fetched: &std::cell::Cell<bool>,
+    ) -> McpResult<Vec<ResourceContent>> {
+        let uri = format!("df://session/{session}/{kind}");
+        let fetch = || {
+            fetched.set(true);
+            if kind == "tasks" {
+                Ok(crate::task_service::session_tasks(session, 0))
+            } else {
+                Ok(
+                    json!({"task": {"status": "working"}, "plan_digest": "fixture",
+                    "progress": {"stage": "working"}, "final_evidence": null}),
+                )
+            }
+        };
+        match kind {
+            "tasks" => session_tasks_with(session, &uri, 0, after_precheck, fetch),
+            "detail" => session_task_detail_with(session, &uri, "fixture", after_precheck, fetch),
+            "evidence" => {
+                session_task_evidence_with(session, &uri, "fixture", 0, after_precheck, fetch)
+            }
+            _ => Err(McpError::invalid_params("invalid test route")),
+        }
+    }
+
+    fn task_test_open(selector: &str, shared: bool, durable: bool) -> String {
+        let raw = crate::server::open_session_in_scenario(
+            Some(true),
+            Some(selector.to_owned()),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some("empty".to_owned()),
+            Some(shared),
+            Some(durable),
+        );
+        let value: Value = serde_json::from_str(&raw).expect("session JSON");
+        assert_eq!(value["ok"], true, "{value}");
+        session_id_of(&value)
+    }
+
+    #[test]
+    fn task_resource_candidates_reauthorize_after_shared_tick_advance() {
+        for (index, kind) in ["tasks", "detail", "evidence"].into_iter().enumerate() {
+            let selector = (390100 + index).to_string();
+            let reader_id = task_test_open(&selector, true, false);
+            let controller_id = task_test_open(&selector, true, false);
+            let reader = lookup(&reader_id, "test").expect("reader");
+            {
+                let mut guard = reader.lock().expect("reader lock");
+                for grant in &mut guard.grants {
+                    if grant.capability == Capability::Observe {
+                        grant.expires_at_tick = Some(dfmcp_core::GameTick(2));
+                    }
+                }
+            }
+            let fetched = std::cell::Cell::new(false);
+            assert!(
+                task_fixture_read(kind, &reader_id, || {}, &fetched).is_ok(),
+                "{kind}"
+            );
+            assert!(fetched.replace(false));
+            let controller = lookup(&controller_id, "test").expect("controller");
+            let denied = task_fixture_read(
+                kind,
+                &reader_id,
+                || {
+                    crate::server::with_session(
+                        &controller,
+                        || panic!("controller unavailable"),
+                        |guard| {
+                            guard
+                                .adapter
+                                .advance_ticks(10)
+                                .expect("advance shared world")
+                        },
+                    );
+                },
+                &fetched,
+            )
+            .expect_err("expired authority must not publish candidate");
+            assert!(
+                fetched.get(),
+                "candidate must actually be fetched for {kind}"
+            );
+            assert!(denied.to_string().contains("capability_denied"), "{denied}");
+            crate::server::release_shared_world(dfmcp_core::FortressId::new(390100 + index as u64));
+        }
+    }
+
+    #[test]
+    fn task_resource_candidates_reauthorize_after_durable_owner_replacement() {
+        struct DurableDir(std::path::PathBuf);
+        impl Drop for DurableDir {
+            fn drop(&mut self) {
+                crate::server::simulate_durable_restart(None);
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        let _serial = crate::server::serialized_durable_tests();
+        for (index, kind) in ["tasks", "detail", "evidence"].into_iter().enumerate() {
+            let path = std::env::temp_dir().join(format!(
+                "dfmcp-task-candidate-{}-{index}",
+                std::process::id()
+            ));
+            let _ = std::fs::remove_dir_all(&path);
+            crate::server::simulate_durable_restart(Some(path.clone()));
+            let _directory = DurableDir(path);
+            let selector = (390110 + index).to_string();
+            let old = task_test_open(&selector, false, true);
+            let fetched = std::cell::Cell::new(false);
+            assert!(
+                task_fixture_read(kind, &old, || {}, &fetched).is_ok(),
+                "{kind}"
+            );
+            assert!(fetched.replace(false));
+            let new_owner = std::cell::RefCell::new(None);
+            let denied = task_fixture_read(
+                kind,
+                &old,
+                || {
+                    *new_owner.borrow_mut() = Some(task_test_open(&selector, false, true));
+                },
+                &fetched,
+            )
+            .expect_err("superseded owner must not publish candidate");
+            assert!(
+                fetched.get(),
+                "candidate must actually be fetched for {kind}"
+            );
+            assert!(denied.to_string().contains("conflict"), "{denied}");
+            let current = new_owner.into_inner().expect("replacement owner");
+            assert_ne!(old, current);
+            assert!(task_fixture_read(kind, &current, || {}, &std::cell::Cell::new(false)).is_ok());
+        }
     }
 }

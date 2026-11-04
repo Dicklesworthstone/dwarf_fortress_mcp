@@ -706,6 +706,10 @@ pub fn fortress_restore(session_id: String) -> String {
 }
 
 pub fn run_stdio() {
+    if let Err(cause) = validate_environment() {
+        eprintln!("{cause}");
+        std::process::exit(1);
+    }
     let server = ServerBuilder::new("dfmcp-live-semantic-work-orders-dev", env!("CARGO_PKG_VERSION"))
         .tool(FortressOpenSession).tool(FortressObserve).tool(FortressQuery)
         .tool(FortressPlan).tool(FortressCommit).tool(FortressWait)
