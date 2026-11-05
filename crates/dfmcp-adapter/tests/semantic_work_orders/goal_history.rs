@@ -114,6 +114,325 @@ where
 }
 
 #[test]
+fn pure_invalidation_withholds_current_proof_and_the_next_durable_sample_retains_the_gap()
+-> Result<()> {
+    let (mut fixture, mut session, review, storage) = history_fixture()?;
+    let mut monitor = begin(&fixture, &mut session, &review, &storage, true)?;
+    let first = durable_poll(
+        &fixture,
+        &mut session,
+        &mut monitor,
+        1,
+        10,
+        0,
+        true,
+        false,
+        |p| Ok(grant(p)),
+    )?;
+    assert_eq!(first.progress().current_goal, PredicateTruth::True);
+    assert!(!first.original_goal_proven());
+    let grants = fixture.context.grants.clone();
+    fixture.context.grants.clear();
+    let bytes = storage.stored_bytes();
+    let trace = fixture.trace.borrow().clone();
+    let cursor = monitor.high_cursor();
+    monitor.invalidate_current_sample()?;
+    assert!(monitor.latest().is_none());
+    assert!(monitor.first_satisfied_anchor().is_none());
+    assert_eq!(monitor.high_cursor(), cursor);
+    assert_eq!(storage.stored_bytes(), bytes);
+    assert_eq!(
+        *fixture.trace.borrow(),
+        trace,
+        "invalidation performs no I/O"
+    );
+    fixture.context.grants = grants;
+
+    let after_gap = durable_poll(
+        &fixture,
+        &mut session,
+        &mut monitor,
+        2,
+        20,
+        0,
+        true,
+        false,
+        |p| Ok(grant(p)),
+    )?;
+    assert!(!after_gap.progress().continuous);
+    assert!(!after_gap.original_goal_proven());
+    drop(monitor);
+    drop(session);
+
+    let mut recovered = fixture.session(false, JournalMode::Reconcile, true)?;
+    let review = recovered.reattach(fixture.original.clone(), &fixture.context)?;
+    let mut monitor = begin(&fixture, &mut recovered, &review, &storage, false)?;
+    assert!(monitor.latest().is_none());
+    assert!(
+        monitor.first_satisfied_anchor().is_none(),
+        "replay must retain the gap between the two historical True samples"
+    );
+    assert!(!matches!(
+        monitor.historical_obligation_status(),
+        Some(ObligationStatus::Fulfilled { .. })
+    ));
+    let pending = durable_poll(
+        &fixture,
+        &mut recovered,
+        &mut monitor,
+        3,
+        30,
+        0,
+        true,
+        false,
+        |p| Ok(grant(p)),
+    )?;
+    assert!(!pending.original_goal_proven());
+    let fulfilled = durable_poll(
+        &fixture,
+        &mut recovered,
+        &mut monitor,
+        4,
+        40,
+        0,
+        true,
+        false,
+        |p| Ok(grant(p)),
+    )?;
+    assert!(fulfilled.original_goal_proven());
+    let proof = fulfilled.progress().anchor;
+    let bytes = storage.stored_bytes();
+    let trace = fixture.trace.borrow().clone();
+    fixture.context.grants.clear();
+    monitor.invalidate_current_sample()?;
+    assert!(monitor.latest().is_none());
+    assert_eq!(monitor.first_satisfied_anchor(), Some(proof));
+    assert!(matches!(
+        monitor.historical_obligation_status(),
+        Some(ObligationStatus::Fulfilled { .. })
+    ));
+    assert_eq!(storage.stored_bytes(), bytes);
+    assert_eq!(*fixture.trace.borrow(), trace);
+    Ok(())
+}
+
+#[test]
+fn retired_order_inventory_achievement_replays_exactly_without_current_truth_or_causation()
+-> Result<()> {
+    let (mut fixture, mut session, review) = inventory_fixture(1)?;
+    fixture.context.budget.max_bytes = 1024 * 1024 * 1024;
+    let storage = Memory::new("inventory-goal-history", Rc::clone(&fixture.trace));
+    let mut monitor = session.begin_durable_goal_monitor(
+        open_history(&fixture, &review, &storage, true, false)?,
+        review.seal(),
+        &fixture.context,
+        |p, _| Ok(inventory_grant(p)),
+    )?;
+    let pending = durable_poll(
+        &fixture,
+        &mut session,
+        &mut monitor,
+        1,
+        10,
+        2,
+        true,
+        true,
+        |p| Ok(inventory_grant(p)),
+    )?;
+    assert!(!pending.original_goal_proven());
+    retire_original_order(&fixture)?;
+    let retired = durable_poll(
+        &fixture,
+        &mut session,
+        &mut monitor,
+        2,
+        20,
+        0,
+        true,
+        false,
+        |p| Ok(inventory_grant(p)),
+    )?;
+    assert!(retired.original_goal_proven());
+    assert!(!retired.progress().receipt_linked);
+    assert!(matches!(
+        retired.progress().physical_work,
+        WorkOrderPhysicalState::Unknown { .. }
+    ));
+    assert!(!retired.semantic_completion_proven());
+    let proof = retired.progress().anchor;
+    let bytes = storage.stored_bytes();
+    drop(monitor);
+    drop(session);
+
+    fixture
+        .context
+        .grants
+        .retain(|grant| matches!(grant.capability, Capability::Query | Capability::Observe));
+    let mut recovered = fixture.session(false, JournalMode::Reconcile, true)?;
+    let review = recovered.reattach(fixture.original.clone(), &fixture.context)?;
+    let reads = fixture.native.borrow().reads;
+    let checks = Cell::new(0);
+    let mut monitor = recovered.begin_durable_goal_monitor(
+        open_history(&fixture, &review, &storage, false, false)?,
+        review.seal(),
+        &fixture.context,
+        |p, context| {
+            checks.set(checks.get() + 1);
+            assert!(context.anchor.tick >= proof.tick);
+            Ok(inventory_grant(p))
+        },
+    )?;
+    assert_eq!(
+        checks.get(),
+        4,
+        "each stored sample requires two independent policy checks"
+    );
+    assert_eq!(fixture.native.borrow().reads, reads);
+    assert_eq!(
+        storage.stored_bytes(),
+        bytes,
+        "replay cannot rewrite history"
+    );
+    assert!(monitor.latest().is_none());
+    assert_eq!(monitor.first_satisfied_anchor(), Some(proof));
+    assert_eq!(monitor.last_observation_anchor(), Some(proof));
+    assert_eq!(monitor.original_plan(), &fixture.original);
+    assert_eq!(
+        ObservedInventoryObjective::from_plan(monitor.original_plan()),
+        Some(ObservedInventoryObjective {
+            item_type: "BED".into(),
+            min_stack_units: 1
+        })
+    );
+    assert!(matches!(
+        monitor.historical_obligation_status(),
+        Some(ObligationStatus::Fulfilled { .. })
+    ));
+
+    let lost = durable_poll(
+        &fixture,
+        &mut recovered,
+        &mut monitor,
+        3,
+        30,
+        0,
+        false,
+        false,
+        |p| Ok(inventory_grant(p)),
+    )?;
+    assert_eq!(lost.progress().current_goal, PredicateTruth::False);
+    assert!(!lost.original_goal_proven());
+    assert!(!lost.semantic_completion_proven());
+    assert_eq!(lost.progress().first_satisfied_anchor, Some(proof));
+    let last = lost.progress().anchor;
+    drop(monitor);
+    drop(recovered);
+
+    let mut recovered = fixture.session(false, JournalMode::Reconcile, true)?;
+    let review = recovered.reattach(fixture.original.clone(), &fixture.context)?;
+    let bytes = storage.stored_bytes();
+    let monitor = recovered.begin_durable_goal_monitor(
+        open_history(&fixture, &review, &storage, false, true)?,
+        review.seal(),
+        &fixture.context,
+        |p, _| Ok(inventory_grant(p)),
+    )?;
+    assert!(monitor.latest().is_none());
+    assert_eq!(monitor.first_satisfied_anchor(), Some(proof));
+    assert_eq!(monitor.last_observation_anchor(), Some(last));
+    assert_eq!(storage.stored_bytes(), bytes);
+    assert_eq!(fixture.native.borrow().prepares, 1);
+    assert_eq!(fixture.native.borrow().commits, 1);
+    assert_eq!(fixture.native.borrow().queries, 0);
+    Ok(())
+}
+
+#[test]
+fn inventory_history_requires_its_exact_original_policy_and_cannot_upgrade_unknown_samples()
+-> Result<()> {
+    let policy_for = |p: &WorkOrderGoalProjection, allow_items: bool| {
+        let mut policy = inventory_grant(p);
+        if !allow_items {
+            policy.entity_kinds.remove(&EntityKind::Item);
+            policy.sources.retain(|source| {
+                !matches!(source,
+                EvidenceSource::Observed { field, .. } if field.starts_with("operations/1.3.item."))
+            });
+        }
+        policy
+    };
+    for originally_allowed in [false, true] {
+        let (mut fixture, mut session, review) = inventory_fixture(1)?;
+        fixture.context.budget.max_bytes = 1024 * 1024 * 1024;
+        let storage = Memory::new("inventory-policy-history", Rc::clone(&fixture.trace));
+        let mut monitor = session.begin_durable_goal_monitor(
+            open_history(&fixture, &review, &storage, true, false)?,
+            review.seal(),
+            &fixture.context,
+            |p, _| Ok(policy_for(p, originally_allowed)),
+        )?;
+        for n in 1..=2 {
+            let result = durable_poll(
+                &fixture,
+                &mut session,
+                &mut monitor,
+                n,
+                10 * n,
+                0,
+                true,
+                false,
+                |p| Ok(policy_for(p, originally_allowed)),
+            )?;
+            assert_eq!(
+                result.progress().current_goal,
+                if originally_allowed {
+                    PredicateTruth::True
+                } else {
+                    PredicateTruth::Unknown
+                }
+            );
+            assert_eq!(result.original_goal_proven(), originally_allowed && n == 2);
+        }
+        let proof = monitor.first_satisfied_anchor();
+        drop(monitor);
+        drop(session);
+        let mut recovered = fixture.session(false, JournalMode::Reconcile, true)?;
+        let review = recovered.reattach(fixture.original.clone(), &fixture.context)?;
+        let bytes = storage.stored_bytes();
+        let reads = fixture.native.borrow().reads;
+        let changed = recovered.begin_durable_goal_monitor(
+            open_history(&fixture, &review, &storage, false, true)?,
+            review.seal(),
+            &fixture.context,
+            |p, _| Ok(policy_for(p, !originally_allowed)),
+        );
+        assert_eq!(
+            changed.err().ok_or_else(rejected)?.code,
+            ErrorCode::CapabilityDenied
+        );
+        assert_eq!(fixture.native.borrow().reads, reads);
+        assert_eq!(storage.stored_bytes(), bytes);
+        let exact = recovered.begin_durable_goal_monitor(
+            open_history(&fixture, &review, &storage, false, true)?,
+            review.seal(),
+            &fixture.context,
+            |p, _| Ok(policy_for(p, originally_allowed)),
+        )?;
+        assert!(exact.latest().is_none());
+        assert_eq!(exact.first_satisfied_anchor(), proof);
+        assert_eq!(
+            matches!(
+                exact.historical_obligation_status(),
+                Some(ObligationStatus::Fulfilled { .. })
+            ),
+            originally_allowed
+        );
+        assert_eq!(storage.stored_bytes(), bytes);
+    }
+    Ok(())
+}
+
+#[test]
 fn original_achievement_survives_two_reopens_while_current_false_and_unknown_remain_visible()
 -> Result<()> {
     let (fixture, mut session, review, storage) = history_fixture()?;

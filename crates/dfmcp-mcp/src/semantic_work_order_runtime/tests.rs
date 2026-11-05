@@ -2,6 +2,8 @@
 //! acquisition, real semantic/native journals, exact archives and goal history.
 #[path = "clock_runtime_tests.rs"]
 mod clock_runtime_tests;
+#[path = "inventory_tests.rs"]
+mod inventory_tests;
 use super::*;
 use dfmcp_adapter::live_jobs::{LiveJob, LiveJobObservation};
 use dfmcp_adapter::live_operations::{LiveItem, LiveOperationsObservation};
@@ -577,6 +579,7 @@ struct Resources {
     remaining: Rc<Cell<i32>>,
     jobs: Rc<Cell<bool>>,
     item_count: Rc<Cell<usize>>,
+    items_override: Rc<RefCell<Option<Vec<LiveItem>>>>,
     item_denied: Rc<Cell<bool>>,
     item_authorizations: Rc<Cell<usize>>,
     item_grant_limit: Rc<Cell<usize>>,
@@ -624,6 +627,7 @@ impl Resources {
             remaining: Rc::new(Cell::new(5)),
             jobs: Rc::new(Cell::new(false)),
             item_count: Rc::new(Cell::new(0)),
+            items_override: Rc::new(RefCell::new(None)),
             item_denied: Rc::new(Cell::new(false)),
             item_authorizations: Rc::new(Cell::new(0)),
             item_grant_limit: Rc::new(Cell::new(usize::MAX)),
@@ -828,6 +832,9 @@ impl Shell for Resources {
                 item.native_id = 2 + n as u32;
                 raw.items.push(item);
             }
+        }
+        if let Some(items) = self.items_override.borrow().as_ref() {
+            raw.items = items.clone();
         }
         Ok(OperationsFixture {
             raw,

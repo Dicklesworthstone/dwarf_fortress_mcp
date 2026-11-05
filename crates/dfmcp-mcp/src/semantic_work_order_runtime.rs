@@ -7,8 +7,8 @@ use dfmcp_adapter::live_projection::{LiveWorldProjection, project_live_capsule};
 use dfmcp_adapter::plan_archive::PlanArchiveStore;
 use dfmcp_adapter::semantic_work_orders::{
     AssociationStore, DurableWorkOrderGoalMonitor, GoalHistoryStore, NativeOrderCreation,
-    OperationsGoalSource, SemanticWorkOrderReview, SemanticWorkOrderSession,
-    WorkOrderEvidenceOwner, WorkOrderGoalProgress,
+    ObservedInventoryObjective, OperationsGoalSource, SemanticWorkOrderReview,
+    SemanticWorkOrderSession, WorkOrderEvidenceOwner, WorkOrderGoalProgress,
 };
 use dfmcp_adapter::work_order_control::session::WorkOrderSession;
 use dfmcp_adapter::work_order_control::{
@@ -249,6 +249,17 @@ fn truth(t: PredicateTruth) -> &'static str {
 }
 impl View {
     pub fn to_json(&self) -> Value {
+        let inventory = self
+            .original
+            .as_ref()
+            .and_then(ObservedInventoryObjective::from_plan);
+        let objective = inventory.as_ref().map_or_else(
+            || json!({"kind":"original_order_completion"}),
+            |objective| {
+                json!({"kind":"observed_inventory_minimum", "item_type":objective.item_type,
+                "minimum_stack_units":objective.min_stack_units})
+            },
+        );
         let insertion = self.creation.as_ref().map(|creation| match creation {
             NativeOrderCreation::Unverified => json!({"verified":false,"native_order_id":null,"receipt":null}),
             NativeOrderCreation::Inserted { native_order_id, receipt } =>
@@ -257,6 +268,7 @@ impl View {
         let original = self.original.as_ref().map(|plan| json!({
             "plan_digest":plan.digest.to_hex(),"intent_id":plan.intent_id.to_string(),
             "anchor":anchor_json(plan.anchor),"summary":plan.summary,"expires_at_tick":plan.expires_at_tick.get(),
+            "objective":objective,
             "terminal":format!("{:?}",plan.terminal_condition),
             "steps":plan.steps.iter().map(|s|json!({"key":s.idempotency_key,"action":format!("{:?}",s.action),
                 "postconditions":s.postconditions.iter().map(|p|format!("{p:?}")).collect::<Vec<_>>(),
@@ -264,6 +276,7 @@ impl View {
                     "poll_interval_ticks":o.poll_interval_ticks,"stable_samples":o.stable_for_observations}))})).collect::<Vec<_>>()
         }));
         let goal = self.goal.as_ref().map(|p| json!({"anchor":anchor_json(p.anchor),
+            "objective_kind":objective["kind"],
             "source_digest":p.source_digest.to_hex(),"current_truth":truth(p.current_goal),
             "postconditions":truth(p.postconditions),"plan_terminal":truth(p.plan_terminal),
             "obligation_terminal":p.obligation_terminal.map(truth),"failure_predicate":p.failure_predicate.map(truth),
@@ -272,6 +285,17 @@ impl View {
             "physical_quiescence_proven":p.physical_work.is_quiescent(),"receipt_linked":p.receipt_linked,
             "continuous":p.continuous,
             "semantic_completion_proven":p.current_goal_proven() && p.receipt_linked && p.physical_work.is_quiescent()
+        }));
+        let inventory_goal = inventory.as_ref().map(|inventory| json!({
+            "kind":"observed_inventory_minimum", "item_type":inventory.item_type,
+            "minimum_stack_units":inventory.min_stack_units,
+            "quantity_semantics":"sum_of_observed_stack_size",
+            "current_truth":self.goal.as_ref().map(|p| truth(p.current_goal)),
+            "proven_at_anchor":self.goal.as_ref().is_some_and(WorkOrderGoalProgress::current_goal_proven),
+            "anchor":self.goal.as_ref().map(|p| anchor_json(p.anchor)),
+            "first_satisfied_anchor":self.first_satisfied_anchor.map(anchor_json),
+            "preexisting_items_included":true, "production_attribution":"unknown",
+            "material_classification":"unknown", "eligibility":"not_assessed"
         }));
         let recovery = self.archive.zip(self.original.as_ref()).map(|(seal, p)| {
             let mut value = json!({"plan_digest":seal.plan_digest.to_hex(),
@@ -296,12 +320,13 @@ impl View {
             "recovery":recovery,
             "native_state":self.native.as_ref().map(|n|n.state().as_str()),"insertion":insertion,
             "current_goal":goal,"current_goal_available":self.goal.is_some(),
+            "inventory_objective":inventory_goal,
             "item_observations":self.item_observations.clone().unwrap_or_else(unavailable_item_observations),
             "first_satisfied_anchor":self.first_satisfied_anchor.map(anchor_json),
             "historical_obligation":self.historical_obligation.as_ref().map(|s|format!("{s:?}")),
             "history":{"events":self.history_events,"bytes":self.history_bytes,"fenced":self.history_fenced},
             "one_goal_limit":1,"automatic_redispatch":false,
-            "coverage_omissions":["item output quantities","material and workshop feasibility","automatic chaining of clock runs","continuous goal truth"]})
+            "coverage_omissions":["order-attributed output quantities","material and workshop feasibility","automatic chaining of clock runs","continuous goal truth"]})
     }
 }
 
@@ -645,7 +670,7 @@ impl<S: Shell> Runtime<S> {
             &work.rest()?,
             |p, c| {
                 shell.check_environment()?;
-                acceptance.goal(p, c)
+                acceptance.goal_for(review.original_plan(), p, c)
             },
         )?;
         self.monitor = Some(monitor);
@@ -971,6 +996,19 @@ impl<S: Shell> Runtime<S> {
     pub fn wait(&mut self, c: &OperationContext) -> Result<View> {
         // Never carry an earlier item sample through a failed or incomplete read.
         self.item_observations = None;
+        let result = self.wait_inner(c);
+        if result.is_err()
+            && let Some(monitor) = &mut self.monitor
+        {
+            // Authority, budget or reconciliation can fail before the adapter's
+            // sampling boundary. Withdraw the sample and unfinished streak
+            // without spending I/O or authority the caller no longer has. The
+            // next admitted poll records this interruption in its Started event.
+            monitor.invalidate_current_sample()?;
+        }
+        result
+    }
+    fn wait_inner(&mut self, c: &OperationContext) -> Result<View> {
         self.check(c, false)?;
         let review = self
             .review
@@ -1047,7 +1085,7 @@ impl<S: Shell> Runtime<S> {
             |c| shell.operations(c),
             |p, c| {
                 shell.check_environment()?;
-                let goal_policy = acceptance.goal(p, c)?;
+                let goal_policy = acceptance.goal_for(review.original_plan(), p, c)?;
                 // A missing or changed presentation grant withholds the item
                 // view; it must not change the original goal's proof policy.
                 let items = shell
@@ -1140,9 +1178,15 @@ impl<S: Shell> Runtime<S> {
             .ok_or_else(|| {
                 denied("clock control requires a fresh receipt-linked original-goal sample")
             })?;
-        if goal.current_goal_proven() && goal.physical_work.is_quiescent() {
+        let inventory_goal = sample
+            .original
+            .as_ref()
+            .and_then(ObservedInventoryObjective::from_plan);
+        if goal.current_goal_proven()
+            && (inventory_goal.is_some() || goal.physical_work.is_quiescent())
+        {
             return Err(denied(
-                "the original goal is already proved and physically quiet",
+                "the original objective is already proved; no further clock run is required for it",
             ));
         }
         self.clock_target(sample.creation.as_ref())?

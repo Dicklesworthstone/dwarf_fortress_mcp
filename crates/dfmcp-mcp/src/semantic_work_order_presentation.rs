@@ -67,6 +67,24 @@ fn obligation(view: &Value) -> Option<Value> {
         "poll_interval_ticks":o["poll_interval_ticks"].as_u64()?,
         "stable_samples":o["stable_samples"].as_u64()?}))
 }
+fn inventory_objective(view: &Value) -> Option<Value> {
+    let objective = &view["original_plan"]["objective"];
+    if objective["kind"] != "observed_inventory_minimum" {
+        return None;
+    }
+    let item_type = objective["item_type"]
+        .as_str()
+        .filter(|kind| matches!(*kind, "BED" | "DOOR" | "TABLE" | "CHAIR"))?;
+    let minimum = objective["minimum_stack_units"]
+        .as_u64()
+        .filter(|n| (1..=1_000_000).contains(n))?;
+    Some(
+        json!({"kind":"observed_inventory_minimum", "item_type":item_type,
+        "minimum_stack_units":minimum, "preexisting_items_included":true,
+        "production_attribution":"unknown", "material_classification":"unknown",
+        "eligibility":"not_assessed"}),
+    )
+}
 fn run_state(value: &Value) -> Option<&str> {
     value.as_str().filter(|s| {
         matches!(
@@ -127,6 +145,7 @@ fn compact(view: &Value) -> Value {
         "native_state":native_state(view),"anchor":anchor(&view["anchor"]),
         "original_plan":{"plan_digest":digest(&view["original_plan"]["plan_digest"]),
             "anchor":anchor(&view["original_plan"]["anchor"]),
+            "objective":inventory_objective(view),
             "steps":[{"obligation":obligation(view)}]},
         "insertion":{"verified":view["insertion"]["verified"].as_bool(),
             "native_order_id":view["insertion"]["native_order_id"].as_u64(),
@@ -246,6 +265,13 @@ fn render(
             && g["receipt_linked"] == true
             && g["physical_quiescence_proven"] == true
     });
+    let inventory = inventory_objective(view);
+    let inventory_proven = inventory.as_ref().and(goal).map(|g| {
+        g["objective_kind"] == "observed_inventory_minimum"
+            && g["original_goal_proven"] == true
+            && g["current_truth"] == "true"
+    });
+    let objective_proven = completion == Some(true) || inventory_proven == Some(true);
     let clock_authority = verified
         && c.mode == Some("control")
         && result["development_clock_enabled"] == true
@@ -286,7 +312,7 @@ fn render(
     let clock_commit = clock_authority
         && clock_linked
         && !uncertain
-        && completion != Some(true)
+        && !objective_proven
         && state == Some("created")
         && view["insertion"]["verified"] == true
         && clock_active.is_some_and(|r| {
@@ -307,7 +333,7 @@ fn render(
     let run_proposal = clock_authority
         && clock_linked
         && !uncertain
-        && completion != Some(true)
+        && !objective_proven
         && proposed_ticks.is_some()
         && state == Some("created")
         && view["insertion"]["verified"] == true
@@ -361,6 +387,7 @@ fn render(
     }
     if let Some(o) = obligation(view) {
         work["obligations"] = json!([{"original":o,"currently_verified":verified,
+            "inventory_objective":inventory,
             "goal_as_of_anchor":goal,"first_satisfied_anchor":anchor(&view["first_satisfied_anchor"]),
             "historical_achievement_is_current_truth":false}]);
     }
@@ -395,8 +422,7 @@ fn render(
                 "game_ticks":proposed_ticks,"wall_millis":c.budget.map(|b|b.max_wall_millis.min(5000)).unwrap_or(0)});
             recommendations.push(next_clock("fortress.plan","prepare a finite clock slice for the retained goal, then review its separate seal before unpausing",
                 json!({"session_id":session.to_string(),"request":request.to_string()}),false));
-        } else if state == Some("created") && completion != Some(true) && c.mode != Some("offline")
-        {
+        } else if state == Some("created") && !objective_proven && c.mode != Some("offline") {
             recommendations.push(next("fortress.wait","reconcile retained effects and obtain one fresh original-goal sample; wait does not start or extend a clock run",args,false));
         } else if c.mode != Some("offline")
             && !observed
@@ -414,6 +440,9 @@ fn render(
         json!({"action":"fortress.plan","enabled":production && observed && state.is_none() && !uncertain,
             "purpose":if original {"resume_only_the_unchanged_original_request"} else {"prepare_one_original_goal"},
             "recipes":["wooden_bed","wooden_door","wooden_table","wooden_chair"],"amount_min":1,"amount_max":100,
+            "optional_objective":{"kind":"observed_inventory_minimum", "item_type":"exact recipe output type",
+                "minimum_stack_units_min":1, "minimum_stack_units_max":1000000,
+                "preexisting_items_included":true, "production_attribution":"unknown"},
             "requires":["operator production authority","exact observation seal","unchanged original request and deadline when recovering"],"grants_authority":false}),
         json!({"action":"fortress.commit","enabled":commit,"requires_confirmation":true,
             "requires":["exact paired seal","current authority and evidence revalidation"],"grants_authority":false}),
@@ -455,6 +484,8 @@ fn render(
             "original_goal_proven_at_anchor":goal.and_then(|g|g["original_goal_proven"].as_bool()),
             "physical_quiescence_proven_at_anchor":goal.and_then(|g|g["physical_quiescence_proven"].as_bool()),
             "semantic_completion_proven_at_anchor":completion,
+            "inventory_objective":inventory,
+            "inventory_objective_proven_at_anchor":inventory_proven,
             "historical_first_satisfied_anchor":anchor(&view["first_satisfied_anchor"]),
             "clock_advanced":if clock.as_ref().is_some_and(|v|v["run_count"].as_u64().is_some_and(|n|n>0)) || clock_uncertain {Value::Null} else {json!(false)},
             "clock_may_be_running":clock_uncertain,"clock_receipt_is_goal_proof":false,"current_pause_proven":false,
@@ -474,11 +505,13 @@ fn render(
             json!({"uncertainty_id":"retained_custody","epistemic_state":if verified {"observed"} else {"unknown"},
                 "statement":"Unavailable retained state does not prove absence of work. Never retry insertion or unpause from an uncertain result."}),
             json!({"uncertainty_id":"native_clock_receipts","epistemic_state":"unknown",
-                "statement":"Native clock stop limits are callback triggers. Historical pause and sampled stop predicates prove neither current pause nor the original goal."})])
+                "statement":"Native clock stop limits are callback triggers. Historical pause and sampled stop predicates prove neither current pause nor the original goal."}),
+            json!({"uncertainty_id":"inventory_attribution","epistemic_state":"unknown",
+                "statement":"An explicitly requested inventory minimum includes preexisting items and does not prove order completion, production attribution, material or usable supply."})])
         .coverage(json!({"status":if verified {"partial"} else {"unavailable"},
             "complete_domains":if verified {vec!["this_runtime_retained_original_goal"]} else {vec![]},
             "partial_domains":["canonical_citizens","receipt_linked_native_order_progress","global_job_quiescence"],
-            "omitted_domains":["item output quantities","material and workshop feasibility","automatic chaining of clock runs","other controllers","continuous goal truth"],
+            "omitted_domains":["order-attributed output quantities","material and workshop feasibility","automatic chaining of clock runs","other controllers","continuous goal truth"],
             "continuation":null}))
         .references(vec![json!({"kind":"original_goal_custody","review":review(view),"recovery":recovery(view),
             "clock":clock,"currently_verified":verified})]);

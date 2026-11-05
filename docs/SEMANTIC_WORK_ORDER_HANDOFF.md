@@ -153,6 +153,17 @@ job roster cannot prove quiescence. A current stock goal can be True while this
 completion evidence remains Unknown. An Unknown creation receipt is never
 resolved by independent goal truth.
 
+`ObservedInventoryObjective::from_plan` recognizes the bounded inventory mode
+from the validated original plan: one supported furniture recipe, exact Item
+type selection, summed `stack_size >= minimum`, and the identical predicate on
+the plan terminal, step postconditions and obligation terminal. The minimum is
+1–1,000,000 stack units and the obligation has no failure predicate. Broader or
+legacy goals return no inventory objective. Recognition grants no authority;
+the embedding source issuer must separately qualify complete Item coverage and
+the observed type/stack fields. The dedicated MCP runtime makes this explicit
+before preparation through the optional objective described in
+`SEMANTIC_WORK_ORDER_MCP.md`. No observed inventory is attributed to the order.
+
 The monitor uses the unchanged original deadline, cadence, failure predicate
 and stability requirement. Distinct canonical observations and eligible game
 ticks are required for stability; a gap or failed acquisition/policy check
@@ -241,6 +252,15 @@ Corrupt or torn frames are refused unchanged rather than partially repaired.
 make those distinctions explicit. `observation_interrupted(context)` persists
 a known gap without native contact. Recovery restores no mutation grant,
 preparation lifetime, independent source policy or evidence of current absence.
+
+`invalidate_current_sample()` withdraws current proof and unfinished stability
+without I/O or grants. A caller can use it when a foreground poll fails during
+preflight or under revoked authority, before it reaches native sampling. It
+preserves historical first achievement and source floors. The next authorized
+poll records the interruption in its existing Started event; reopening before
+that poll already clears unfinished stability. The explicit
+`observation_interrupted(context)` operation remains the authorized durable gap
+write. Neither operation changes the history format or original deadline.
 
 ## Restart and uncertain effects
 

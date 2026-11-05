@@ -531,6 +531,43 @@ fn original_runtime_runs_to_completion_then_advances_original_sampled_stability(
 }
 
 #[test]
+fn satisfied_inventory_objective_refuses_an_unnecessary_native_clock_run() -> Result<()> {
+    let resources = ClockResources::new()?;
+    let mut runtime = start_clock(&resources, Mode::Control, 241)?;
+    let c = runtime.context(false)?;
+    let observed = runtime.observe(&c)?;
+    let request = Request::parse(&json!({
+        "expected_observation":observed.observation.expect("observation").0.to_hex(),
+        "recipe":"wooden_bed", "amount":5, "deadline_tick":runtime.anchor().tick.get()+100,
+        "poll_interval_ticks":10, "stable_samples":1,
+        "objective":{"kind":"observed_inventory_minimum","item_type":"BED","minimum_stack_units":1}
+    }).to_string())?;
+    let c = runtime.context(false)?;
+    let prepared = runtime.plan(request, &c)?;
+    let c = runtime.context(false)?;
+    runtime.commit(prepared.review.as_ref().expect("review").seal(), true, &c)?;
+    resources.base.item_count.set(1);
+    resources.base.advance(10, 5)?;
+    let c = runtime.context(false)?;
+    let satisfied = runtime.wait(&c)?;
+    assert!(satisfied.goal.as_ref().expect("goal").current_goal_proven());
+    assert!(
+        !satisfied
+            .goal
+            .as_ref()
+            .expect("goal")
+            .physical_work
+            .is_quiescent()
+    );
+    let c = runtime.context(false)?;
+    assert!(runtime.plan_run(run_request(&satisfied, 10), &c).is_err());
+    assert_eq!(resources.state.borrow().prepares, 0);
+    assert_eq!(resources.state.borrow().commits, 0);
+    assert_eq!(resources.base.native.borrow().commits, 1);
+    Ok(())
+}
+
+#[test]
 fn lost_clock_reply_and_offline_recovery_never_repeat_the_unpause() -> Result<()> {
     let resources = ClockResources::new()?;
     let mut runtime = start_clock(&resources, Mode::Control, 202)?;

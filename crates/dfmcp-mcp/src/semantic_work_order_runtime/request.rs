@@ -7,8 +7,19 @@ use dfmcp_intent::{
     Action, Constraint, Intent, ObligationSpec, PreparedPlan, RequestedAction, StaticPlanner,
     derive_step_idempotency_key,
 };
-use dfmcp_world::{CompareOp, Predicate, PredicateEvidence, Value};
+use dfmcp_world::{CompareOp, EntityKind, Predicate, PredicateEvidence, Value};
 use serde::Deserialize;
+
+/// A separately requested observation goal. It never asserts which order
+/// produced an item, its material, or whether it is available for use.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum Objective {
+    ObservedInventoryMinimum {
+        item_type: String,
+        minimum_stack_units: u64,
+    },
+}
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -21,6 +32,8 @@ pub struct Request {
     pub poll_interval_ticks: u64,
     #[serde(default = "samples")]
     pub stable_samples: u32,
+    #[serde(default)]
+    pub objective: Option<Objective>,
 }
 fn interval() -> u64 {
     10
@@ -43,7 +56,7 @@ impl Request {
     }
     pub fn validate(&self) -> Result<()> {
         self.observation()?;
-        recipe(&self.recipe)?;
+        let (native, _) = recipe(&self.recipe)?;
         if !(1..=100).contains(&self.amount)
             || self.poll_interval_ticks == 0
             || self.poll_interval_ticks > MAX_DEFAULT_OBLIGATION_TICKS
@@ -51,6 +64,16 @@ impl Request {
         {
             return Err(invalid(
                 "finite order requires amount 1..100 and bounded nonzero cadence/stability",
+            ));
+        }
+        if let Some(Objective::ObservedInventoryMinimum {
+            item_type,
+            minimum_stack_units,
+        }) = &self.objective
+            && (item_type != output_type(native) || !(1..=1_000_000).contains(minimum_stack_units))
+        {
+            return Err(invalid(
+                "inventory objective requires the recipe's exact item type and 1..1000000 stack units",
             ));
         }
         Ok(())
@@ -85,13 +108,28 @@ impl Request {
             amount: self.amount,
             conditions: Vec::new(),
         };
-        let mut identity = b"dfmcp-native-semantic-production-request/1\0".to_vec();
+        // Default requests retain their exact identity, original plan bytes and
+        // history policy. The optional objective is a distinct sealed intent.
+        let mut identity = if self.objective.is_some() {
+            b"dfmcp-native-semantic-production-request/2\0".to_vec()
+        } else {
+            b"dfmcp-native-semantic-production-request/1\0".to_vec()
+        };
         identity.extend_from_slice(self.observation()?.as_bytes());
         identity.extend_from_slice(&(native as u32).to_be_bytes());
         identity.extend_from_slice(&self.amount.to_be_bytes());
         identity.extend_from_slice(&self.deadline_tick.to_be_bytes());
         identity.extend_from_slice(&self.poll_interval_ticks.to_be_bytes());
         identity.extend_from_slice(&self.stable_samples.to_be_bytes());
+        if let Some(Objective::ObservedInventoryMinimum {
+            item_type,
+            minimum_stack_units,
+        }) = &self.objective
+        {
+            identity.extend_from_slice(&(item_type.len() as u64).to_be_bytes());
+            identity.extend_from_slice(item_type.as_bytes());
+            identity.extend_from_slice(&minimum_stack_units.to_be_bytes());
+        }
         let hash = Digest32::of_bytes(&identity);
         let id = IntentId::new(u128::from_be_bytes(
             hash.as_bytes()[..16]
@@ -109,20 +147,44 @@ impl Request {
             op: CompareOp::Eq,
             value,
         };
-        let terminal = Predicate::All(vec![
+        let order_terminal = Predicate::All(vec![
             equal("amount_total", Value::U64(u64::from(self.amount))),
             equal("amount_remaining", Value::U64(0)),
             equal("validated", Value::Bool(true)),
             equal("active", Value::Bool(false)),
         ]);
+        let (terminal, summary) = match &self.objective {
+            Some(Objective::ObservedInventoryMinimum {
+                item_type,
+                minimum_stack_units,
+            }) => (
+                Predicate::EntityQuantity {
+                    kind: EntityKind::Item,
+                    filter_field: "type_key".into(),
+                    filter_value: Value::Text(item_type.clone()),
+                    quantity_field: Some("stack_size".into()),
+                    op: CompareOp::Ge,
+                    value: *minimum_stack_units,
+                },
+                format!(
+                    "Observe at least {minimum_stack_units} {item_type} stack units after inserting {} finite {} order units; production attribution unknown",
+                    self.amount,
+                    native.as_str()
+                ),
+            ),
+            None => (
+                order_terminal,
+                format!(
+                    "Complete {} finite {} order units",
+                    self.amount,
+                    native.as_str()
+                ),
+            ),
+        };
         let intent = Intent {
             id,
             anchor: context.anchor,
-            summary: format!(
-                "Complete {} finite {} order units",
-                self.amount,
-                native.as_str()
-            ),
+            summary,
             terminal_condition: terminal.clone(),
             constraints: vec![Constraint::MaxRisk(RiskTier::Guarded)],
             requested_actions: vec![RequestedAction {
@@ -143,6 +205,14 @@ impl Request {
             }],
         };
         StaticPlanner::default().prepare_with_evidence(evidence, &intent, context)
+    }
+}
+fn output_type(recipe: WorkOrderRecipe) -> &'static str {
+    match recipe {
+        WorkOrderRecipe::WoodenBed => "BED",
+        WorkOrderRecipe::WoodenDoor => "DOOR",
+        WorkOrderRecipe::WoodenTable => "TABLE",
+        WorkOrderRecipe::WoodenChair => "CHAIR",
     }
 }
 fn recipe(raw: &str) -> Result<(WorkOrderRecipe, &'static str)> {

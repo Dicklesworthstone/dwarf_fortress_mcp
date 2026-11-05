@@ -81,10 +81,20 @@ impl<H: EffectJournalStorage> DurableWorkOrderGoalMonitor<H> {
             .and_then(|runtime| runtime.get_status(self.monitor.action_id))
     }
 
+    /// Withdraw current proof and interrupt unfinished stability without I/O or
+    /// authority. An observing facade can call this when a read fails before it
+    /// reaches the durable poll, including after Query or Observe is revoked.
+    /// Historical first achievement and source floors remain intact. The next
+    /// poll records the interruption in its Started event; reopening before that
+    /// event also clears unfinished stability and never restores current truth.
+    pub fn invalidate_current_sample(&mut self) -> Result<()> {
+        self.monitor.observation_interrupted()
+    }
+
     /// Persist a known observation gap without reading or changing native work.
     /// An ambiguous write fences this owner until its history is reopened.
     pub fn observation_interrupted(&mut self, context: &OperationContext) -> Result<()> {
-        self.monitor.observation_interrupted()?;
+        self.invalidate_current_sample()?;
         let mut current = context.clone();
         current.anchor.tick = current.anchor.tick.max(self.high_tick());
         self.monitor.high_tick = current.anchor.tick;

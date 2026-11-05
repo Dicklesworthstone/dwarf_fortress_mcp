@@ -704,6 +704,54 @@ fn original_completion_and_deadline_prevent_unnecessary_clock_proposals() {
 }
 
 #[test]
+fn explicit_inventory_success_is_terminal_guidance_without_order_completion() {
+    let mut view = clock_retained(false);
+    view["original_plan"]["objective"] = json!({"kind":"observed_inventory_minimum",
+        "item_type":"BED", "minimum_stack_units":1});
+    view["current_goal"] = json!({"objective_kind":"observed_inventory_minimum",
+        "current_truth":"true", "original_goal_proven":true,
+        "receipt_linked":false, "physical_quiescence_proven":false,
+        "semantic_completion_proven":false});
+    let packet = clock_output("control", clock_success(), view.clone(), 10, false);
+    assert_eq!(
+        packet["agent_turn"]["briefing"]["inventory_objective_proven_at_anchor"],
+        true
+    );
+    assert_eq!(
+        packet["agent_turn"]["briefing"]["semantic_completion_proven_at_anchor"],
+        false
+    );
+    assert!(
+        packet["agent_turn"]["recommendations"]
+            .as_array()
+            .expect("recommendations")
+            .is_empty()
+    );
+    assert!(!clock_enabled(&packet, "fortress.plan"));
+    let failed = clock_output("control", json!({"ok":false}), view, 10, false);
+    assert!(failed["agent_turn"]["briefing"]["inventory_objective_proven_at_anchor"].is_null());
+    assert_eq!(failed["retained_state_currently_verified"], false);
+}
+
+#[test]
+fn inventory_claim_without_the_explicit_original_objective_cannot_end_guidance() {
+    let mut view = clock_retained(false);
+    view["current_goal"] = json!({"objective_kind":"observed_inventory_minimum",
+        "current_truth":"true", "original_goal_proven":true,
+        "receipt_linked":false, "physical_quiescence_proven":false,
+        "semantic_completion_proven":false});
+    view["inventory_objective"] = json!({"proven_at_anchor":true});
+    let packet = clock_output("control", clock_success(), view, 10, false);
+    assert!(packet["agent_turn"]["briefing"]["inventory_objective_proven_at_anchor"].is_null());
+    assert!(
+        !packet["agent_turn"]["recommendations"]
+            .as_array()
+            .expect("recommendations")
+            .is_empty()
+    );
+}
+
+#[test]
 fn clock_overflow_preserves_exact_journal_and_active_review_without_false_proof() {
     let mut view = clock_retained(true);
     view["clock"]["unexpected_private_configuration"] = json!("must-not-survive-clock-fallback");

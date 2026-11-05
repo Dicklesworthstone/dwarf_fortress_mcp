@@ -598,7 +598,7 @@ fn cancel_action(scope: Option<&str>) -> Result<Action> {
 }
 
 #[tool(
-    description = "Compile and durably prepare one finite original furniture-order goal. Request is closed JSON: expected_observation, recipe (wooden_bed, wooden_door, wooden_table or wooden_chair), amount 1..100, absolute deadline_tick, optional poll_interval_ticks and stable_samples. Returns the paired review seal; does not insert. Repeating the same request cannot renew its deadline or replace the goal. After insertion, kind=run with original_paired_seal, game_ticks and wall_millis separately prepares a finite receipt-linked clock run within that deadline; this never unpauses."
+    description = "Compile and durably prepare one finite original furniture-order goal. Request is closed JSON: expected_observation, recipe (wooden_bed, wooden_door, wooden_table or wooden_chair), amount 1..100, absolute deadline_tick, optional poll_interval_ticks and stable_samples. Optional objective={kind:observed_inventory_minimum,item_type:BED|DOOR|TABLE|CHAIR,minimum_stack_units:1..1000000} must match the recipe and proves observed stock including preexisting items, not order completion or output attribution. Returns the paired review seal; does not insert. Repeating the same request cannot renew its deadline or replace the goal. After insertion, kind=run with original_paired_seal, game_ticks and wall_millis separately prepares a finite receipt-linked clock run within that deadline; this never unpauses."
 )]
 pub fn fortress_plan(session_id: String, request: String) -> String {
     with_session(session_id, "fortress.plan", None, || plan_action(&request))

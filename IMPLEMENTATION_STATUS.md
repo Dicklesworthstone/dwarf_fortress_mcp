@@ -1,5 +1,53 @@
 # Implementation Status
 
+## 2026-11-05 — Explicit inventory goals survive finite-order retirement
+
+The standalone semantic work-order development host now accepts an explicit
+`observed_inventory_minimum` objective in the original closed request. A recipe-
+matched BED/DOOR/TABLE/CHAIR type and 1–1,000,000 stack-unit minimum are sealed
+with the original deadline, cadence and stability under a distinct request
+identity. Omitted objectives preserve the existing request identity, order
+predicates, projection bytes and history policy fingerprints.
+
+The full operations item roster supplies qualified type/stack evidence only for
+that recognized retained objective. The sixteen-row item presentation remains
+separate. Native order disappearance can therefore leave order linkage and
+physical work Unknown while the expressly requested inventory minimum is proved.
+Existing or unrelated matching items count; material, usability, new production
+and order attribution remain unproved. Inventory truth does not reconcile an
+uncertain insertion or permit redispatch.
+
+Durable replay reissues the same objective-specific policy, retains first
+achievement and the exact original plan, and clears current proof on reopen.
+Later inventory loss withdraws current success. Agent Turns expose the chosen
+objective and stop requesting unnecessary polling/clock progress after its
+qualified success. Further stability samples after order retirement still need
+separately managed game-time progress because native clock control remains tied
+to the original receipt-linked order.
+
+A reviewed early-Wait failure gap was also fixed: denied authority, insufficient
+budget or reconciliation failure now clears the current sample and unfinished
+streak without extra I/O. The next admitted poll persists the interruption in
+the existing Started event; first achievement and source floors are retained.
+
+Final focused execution on nightly 2026-11-05 passes 88 actual-source MCP
+component cases and 65 adapter work-order cases, including seven new inventory
+runtime cases, seven adapter cases, two presentation cases and one clock case.
+Together with the prior core targets this is 352 passing focused cases, zero
+failures/ignored in the successful final runs. Production-library and component
+Clippy pass with warnings denied; the component harness permits dead_code for
+omitted outside callers. All fourteen feature source/test files were unchanged
+across the final component test/Clippy window (inventory SHA-256
+363682649b170ea400dcba5dedd3e5ee490d8b3983049d85c3b83b18b52a97dc).
+A prior private-file test failed on the full shared filesystem; it and the whole
+suite passed using isolated temporary storage, without changing assertions.
+
+The actual-source harness leaves repository dependency pins intact and excludes
+FastMCP transport macros and the Asupersync-facing facade. No complete workspace,
+stdio, native DFHack, live campaign or compatibility/admission qualification is
+claimed. Bead `dfmcp-reality-wiring-proof-4bf.14.5` remains in progress pending
+its real modern MCP/game acceptance.
+
 ## 2026-11-05 — Source-qualified entity counts and stack quantities
 
 The core predicate language now supports bounded exact counts and unsigned sums

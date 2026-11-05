@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-11-05 — Original observed-inventory objectives through production MCP
+
+- Add a closed, recipe-matched observed inventory minimum to the original finite
+  work-order request, with a distinct identity and unchanged legacy goals.
+- Prove stack quantities from the complete qualified operations roster; retain
+  unknown order completion and attribution when the order has retired.
+- Reissue conditional inventory policy during durable replay, retain first
+  achievement, and withdraw current success after consumption or reopening.
+- Expose separate inventory success and useful terminal guidance; preserve
+  uncertain insertion custody and refuse unnecessary native clock runs.
+- Clear current proof and unfinished stability after early Wait failures without
+  unauthorized I/O, using the existing durable interruption representation.
+- Pass 88 MCP component and 65 adapter cases plus scoped warning-denied Clippy
+  on the November 5 nightly. Full transport/game qualification remains pending.
+
 ## 2026-11-05 — Exact entity quantities in goals and archived predicates
 
 - Add bounded entity counts and unsigned quantity sums with complete-domain,

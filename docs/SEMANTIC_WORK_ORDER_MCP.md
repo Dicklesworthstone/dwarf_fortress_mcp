@@ -28,6 +28,20 @@ unproved even when the selected order's predicate is true.
 If the game removes the order before a qualified completion sample, disappearance
 remains unknown; it cannot substitute for the required counter and status proof.
 
+An optional, explicitly selected `observed_inventory_minimum` objective instead
+asks whether the complete operations item roster contains a minimum number of
+stack units of the recipe's item type. Its entire original terminal,
+postconditions and temporal obligation use that inventory predicate. It has a
+distinct sealed request identity; an existing order-completion goal cannot be
+converted after the order disappears. Omitting the objective preserves the old
+request identity, original predicates and durable history policy exactly.
+
+Inventory proof can remain available after normal order retirement. It includes
+preexisting and unrelated matching items, and items of any material or usability.
+It proves neither new production nor which order caused an item. A missing
+original order still has unknown physical work, `receipt_linked: false` and
+`semantic_completion_proven: false`, even when the inventory objective is true.
+
 The response separates these questions:
 
 | Response field | Meaning |
@@ -39,12 +53,16 @@ The response separates these questions:
 | `current_goal.physical_quiescence_proven` | The qualified complete global job domain is quiet. |
 | `current_goal.semantic_completion_proven` | Original goal proof, receipt linkage and physical quiescence hold together. |
 | `current_goal_available` | A current-process goal sample exists; exact restart does not fabricate one. |
+| `original_plan.objective` | The immutable selected objective: original order completion or observed inventory minimum. |
+| `inventory_objective.proven_at_anchor` | The explicitly selected inventory minimum satisfies its original temporal requirement at the named sample. |
+| `inventory_objective.first_satisfied_anchor` | First qualified inventory achievement, preserved independently of later consumption or restart. |
 | `clock.active_run` | The separate reviewed native run, if one remains unsettled. |
 | `clock.may_be_running` | Retained clock uncertainty still prevents a fresh paused original-goal sample. |
 | `clock.runs[].native.historical_pause_verified` | That native receipt verified a pause at its recorded tick; it does not establish the game's current pause state. |
 
-This is a finite native order goal. It does not prove an inventory quota,
-produced-item quantities, material availability or workshop feasibility. Brewing,
+The default goal proves finite native order completion. The optional inventory
+goal proves only the declared observed stack minimum; neither mode proves
+order-attributed output quantities, material availability or workshop feasibility. Brewing,
 cooking, order conditions, multiple goals and automatic chaining of runs are
 outside this runtime. Clock receipts retain their own source anchors and never
 become original-goal proof or replace its canonical sample anchor.
@@ -284,6 +302,63 @@ under current clock authority. It retains the original goal and manager order.
 `fortress.checkpoint` and `fortress.restore` are explicitly unavailable; their names remain present to
 preserve the eleven-tool interface.
 
+### Select an observed inventory minimum before preparation
+
+To request useful stock guidance after a finite order may retire, include this
+optional objective in the original `fortress.plan` request string:
+
+```json
+{
+  "expected_observation": "<64-character observation seal>",
+  "recipe": "wooden_bed",
+  "amount": 1,
+  "deadline_tick": 12000,
+  "poll_interval_ticks": 10,
+  "stable_samples": 1,
+  "objective": {
+    "kind": "observed_inventory_minimum",
+    "item_type": "BED",
+    "minimum_stack_units": 1
+  }
+}
+```
+
+The recipe and item type must match exactly: wooden bed → `BED`, wooden door →
+`DOOR`, wooden table → `TABLE`, wooden chair → `CHAIR`. The minimum is an integer
+from 1 through 1,000,000 and is independent of the explicitly requested order
+amount. Unknown objective fields, other kinds, lowercase aliases and mismatched
+item types are refused before preparation. Changing the minimum, type, cadence
+or deadline cannot replace a retained original plan.
+
+Proof sums `stack_size` over every matching `type_key` in the complete qualified
+operations roster. It never counts only the sixteen presentation examples.
+The source policy adds complete Item coverage and exactly the type/stack source
+fields only for this recognized original objective. Incomplete coverage or
+unqualified data remains Unknown, even if a partial subtotal is large enough.
+The same conditional policy is reissued during exact durable replay; legacy
+order-completion policy fingerprints remain unchanged.
+
+The original deadline, cadence and stable-sample count still apply. Repeated
+reads at the same game tick do not advance stability. A failed Wait withdraws
+the current sample and unfinished streak even when failure occurs before native
+sampling; that withdrawal performs no extra I/O under revoked authority. The
+next authorized poll persists the gap. First achievement remains historical
+evidence if later stock falls below the minimum, a later call fails or the
+process reopens. Offline recovery exposes no current inventory proof.
+
+After inventory proof succeeds, Agent Turn marks the selected objective as
+satisfied and stops proposing additional clock runs or required polling for
+that objective. Original insertion uncertainty still requires reconciliation;
+inventory truth cannot resolve it or authorize another insertion. The original
+order and any other game work may still be active.
+
+Clock control remains tied to the exact receipt-linked order. If that order has
+already disappeared and more stable samples are needed, game time must progress
+through a separately managed control path before another coherent paused sample.
+The one-sample default can finish at the first qualified post-retirement sample.
+This mode makes no delta-inventory, newly-produced, wood-classification,
+available-for-use or causal-output claim.
+
 ### Advance the retained goal with a reviewed bounded run
 
 After verified insertion, call `fortress.plan` with the same `session_id` and a
@@ -344,8 +419,10 @@ still requires two qualifying original samples at least ten ticks apart;
 neither an immediate repeated read nor a clock receipt supplies the second
 sample. For a currently true goal still awaiting temporal proof, run
 recommendations use the original polling cadence to leave room for the further
-samples required by `stable_samples` greater than two. Once original completion
-and physical quiescence are both proved, further runs for this goal are refused.
+samples required by `stable_samples` greater than two. Once original order
+completion and physical quiescence are both proved, further runs for that goal
+are refused. A selected inventory objective also refuses further runs once its
+original temporal proof is satisfied, independently of remaining order work.
 
 ## Lost replies and restart
 
@@ -427,9 +504,11 @@ inspection. The output allowance is 32768 four-byte proxy units. Smaller output
 allowances refuse before I/O; JSON is never truncated. An oversized response
 falls back to bounded recovery identifiers and explicit uncertainty.
 
-Source policy is fixed in code: initial canonical pause/citizen identity,
+Default source policy is fixed in code: initial canonical pause/citizen identity,
 receipt-linked selected-order counters/status and complete global job count
-needed for physical quiescence. A separate read-only presentation policy accepts
+needed for physical quiescence. Only the explicit sealed inventory objective
+adds complete Item coverage and the observed type/stack fields to its proof
+policy. A separate read-only presentation policy accepts
 the existing operations/1.3 item identity, type, subtype, numeric material and
 stack fields. It does not change the original goal policy or its durable history
 fingerprint. Operator JSON cannot add evidence fields or capabilities. All native
@@ -448,12 +527,13 @@ unknown. Empty results prove no matching candidates only when coverage is
 complete for that recorded anchor.
 
 The item view may remain useful when the original order disappears and its
-goal becomes Unknown. It never promotes original completion or mutation
+order-completion goal becomes Unknown. It never promotes original completion or mutation
 preconditions. Failed/incomplete sampling, attempted unpause, changed source,
 presentation-authorization loss and recovery withhold the previous rows;
 unavailable coverage is explicitly unknown. Inspecting a retained sample does
 not prove current game freshness. These are additional observations under the
-same eleven tools, with no new bridge fields or output-oriented goal mode.
+same eleven tools and existing bridge fields. The separately selected inventory
+objective uses its own original predicate and qualified full-roster proof.
 
 A denied Query or failed canonical Observe also retires the optional cached
 rows. Regranting authority or issuing another Query cannot revive them; a new

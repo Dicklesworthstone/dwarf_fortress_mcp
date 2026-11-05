@@ -26,6 +26,7 @@ use crate::work_orders::{WorkOrderObservation, WorkOrderPlan, WorkOrderState};
 pub mod goal_history;
 pub mod goal_monitor;
 pub mod goal_projection;
+mod inventory_objective;
 pub mod store;
 pub use goal_history::{
     DurableWorkOrderGoalMonitor, GoalHistoryStore, PrivateGoalHistoryStore,
@@ -35,6 +36,7 @@ pub use goal_monitor::{
     OperationsGoalSource, WorkOrderGoalMonitor, WorkOrderGoalProgress, WorkOrderGoalResult,
 };
 pub use goal_projection::{WorkOrderGoalProjection, WorkOrderPhysicalState};
+pub use inventory_objective::ObservedInventoryObjective;
 use store::{Association, MAX_ASSOCIATIONS, MAX_STORE_BYTES};
 pub use store::{AssociationStore, PrivateAssociationStore, open_private_association_store};
 

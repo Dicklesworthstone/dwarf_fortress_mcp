@@ -7,8 +7,8 @@ use dfmcp_adapter::live_jobs::{LiveJob, LiveJobObservation};
 use dfmcp_adapter::live_jobs_rpc::operations::{OperationsLimits, OperationsRpcClient};
 use dfmcp_adapter::live_operations::{LiveItem, LiveOperationsObservation};
 use dfmcp_adapter::semantic_work_orders::{
-    OperationsGoalSource, WorkOrderGoalMonitor, WorkOrderGoalProjection, WorkOrderGoalResult,
-    WorkOrderPhysicalState,
+    ObservedInventoryObjective, OperationsGoalSource, WorkOrderGoalMonitor,
+    WorkOrderGoalProjection, WorkOrderGoalResult, WorkOrderPhysicalState,
 };
 use dfmcp_adapter::work_order_progress::rpc::{ProgressRpcClient, ProgressStream};
 use dfmcp_adapter::work_order_progress::{ProgressManifest, ProgressObservation, ProgressSource};
@@ -24,6 +24,149 @@ fn observed_goal() -> Predicate {
         value: Value::U64(1),
     }
 }
+fn inventory_goal(item_type: &str, minimum: u64) -> Predicate {
+    Predicate::EntityQuantity {
+        kind: EntityKind::Item,
+        filter_field: "type_key".into(),
+        filter_value: Value::Text(item_type.into()),
+        quantity_field: Some("stack_size".into()),
+        op: CompareOp::Ge,
+        value: minimum,
+    }
+}
+fn set_inventory_goal(plan: &mut PreparedPlan, item_type: &str, minimum: u64) {
+    let goal = inventory_goal(item_type, minimum);
+    plan.terminal_condition = goal.clone();
+    plan.steps[0].postconditions = vec![goal.clone()];
+    if let Some(spec) = &mut plan.steps[0].obligation {
+        spec.terminal = goal;
+    }
+}
+fn inventory_fixture(
+    minimum: u64,
+) -> Result<(
+    Fixture,
+    Session,
+    dfmcp_adapter::semantic_work_orders::SemanticWorkOrderReview,
+)> {
+    goal_fixture_with_config(WorkOrderState::Created, |p| {
+        set_inventory_goal(p, "BED", minimum);
+    })
+}
+
+#[test]
+fn observed_inventory_objective_recognizes_only_the_closed_original_sealed_goal() -> Result<()> {
+    let fixture = Fixture::new()?;
+    assert!(ObservedInventoryObjective::from_plan(&fixture.original).is_none());
+    for (job, item_type) in [
+        ("CONSTRUCT_BED", "BED"),
+        ("wooden_bed", "BED"),
+        ("CONSTRUCT_DOOR", "DOOR"),
+        ("wooden_door", "DOOR"),
+        ("CONSTRUCT_TABLE", "TABLE"),
+        ("wooden_table", "TABLE"),
+        ("CONSTRUCT_CHAIR", "CHAIR"),
+        ("CONSTRUCT_THRONE", "CHAIR"),
+        ("wooden_chair", "CHAIR"),
+    ] {
+        for minimum in [1, ObservedInventoryObjective::MAX_STACK_UNITS] {
+            let mut original = plan(&fixture.observer.projection.snapshot, job, 1);
+            set_inventory_goal(&mut original, item_type, minimum);
+            let original = reseal(original);
+            original.validate_structure()?;
+            assert_eq!(
+                ObservedInventoryObjective::from_plan(&original),
+                Some(ObservedInventoryObjective {
+                    item_type: item_type.into(),
+                    min_stack_units: minimum,
+                }),
+                "{job} at {minimum}"
+            );
+        }
+    }
+
+    for change in 0..17 {
+        let mut original = fixture.original.clone();
+        set_inventory_goal(&mut original, "BED", 3);
+        match change {
+            0 => set_inventory_goal(&mut original, "DOOR", 3),
+            1 => set_inventory_goal(&mut original, "BED", 0),
+            2 => set_inventory_goal(
+                &mut original,
+                "BED",
+                ObservedInventoryObjective::MAX_STACK_UNITS + 1,
+            ),
+            3..=8 => {
+                let mut goal = inventory_goal("BED", 3);
+                if let Predicate::EntityQuantity {
+                    kind,
+                    filter_field,
+                    filter_value,
+                    quantity_field,
+                    op,
+                    ..
+                } = &mut goal
+                {
+                    match change {
+                        3 => *kind = EntityKind::Building,
+                        4 => *filter_field = "label".into(),
+                        5 => *filter_value = Value::U64(5),
+                        6 => *quantity_field = None,
+                        7 => *quantity_field = Some("item_type".into()),
+                        _ => *op = CompareOp::Eq,
+                    }
+                }
+                original.terminal_condition = goal.clone();
+                original.steps[0].postconditions = vec![goal.clone()];
+                original.steps[0]
+                    .obligation
+                    .as_mut()
+                    .ok_or_else(rejected)?
+                    .terminal = goal;
+            }
+            9 => original.steps[0].postconditions = vec![observed_goal()],
+            10 => {
+                original.steps[0]
+                    .obligation
+                    .as_mut()
+                    .ok_or_else(rejected)?
+                    .terminal = observed_goal();
+            }
+            11 => original.steps[0].obligation = None,
+            12 => {
+                original.steps[0]
+                    .obligation
+                    .as_mut()
+                    .ok_or_else(rejected)?
+                    .failure = Some(observed_goal());
+            }
+            13 => {
+                let goal =
+                    Predicate::All(vec![inventory_goal("BED", 3), observed_goal()]).normalized();
+                original.terminal_condition = goal.clone();
+                original.steps[0].postconditions = vec![goal.clone()];
+                original.steps[0]
+                    .obligation
+                    .as_mut()
+                    .ok_or_else(rejected)?
+                    .terminal = goal;
+            }
+            14 => original.requires_checkpoint = true,
+            15 => original.steps[0].compensation = Some(Action::Pause { paused: true }),
+            _ => {}
+        }
+        let mut original = reseal(original);
+        if change == 16 {
+            original.digest = Digest32::ZERO;
+        }
+        assert!(
+            ObservedInventoryObjective::from_plan(&original).is_none(),
+            "broader or invalid objective {change} must not select Item authority"
+        );
+    }
+    Ok(())
+}
+
 fn goal_fixture() -> Result<(
     Fixture,
     Session,
@@ -249,6 +392,30 @@ fn grant(projection: &WorkOrderGoalProjection) -> EvidencePolicy {
         .insert(EntityKind::WorkOrder, EvidenceCoverage::Observed);
     policy
 }
+fn inventory_grant(projection: &WorkOrderGoalProjection) -> EvidencePolicy {
+    let mut policy = EvidencePolicy::at(projection.anchor());
+    policy.paused = true;
+    policy.entity_kinds = BTreeMap::from([
+        (EntityKind::Fortress, EvidenceCoverage::Observed),
+        (EntityKind::Job, EvidenceCoverage::Complete),
+        (EntityKind::WorkOrder, EvidenceCoverage::Observed),
+        (EntityKind::Item, EvidenceCoverage::Complete),
+    ]);
+    policy.sources = projection
+        .observed_sources()
+        .into_iter()
+        .filter(|source| {
+            matches!(source, EvidenceSource::Observed { field, .. }
+            if matches!(field.as_str(),
+                "operations/1.3.job_count"
+                    | "operations/1.3.item.type_key"
+                    | "operations/1.3.item.getStackSize"
+                    | "work-order-progress/1.12.manager_order.counters"
+                    | "work-order-progress/1.12.manager_order.status"))
+        })
+        .collect();
+    policy
+}
 struct ProgressFixture {
     manifest: ProgressManifest,
     captures: Vec<ProgressObservation>,
@@ -316,6 +483,17 @@ fn advance(f: &Fixture, relative_tick: u64) -> Result<WorkOrderObservation> {
     f.native.borrow_mut().queue = queue.clone();
     Ok(queue)
 }
+fn retire_original_order(fixture: &Fixture) -> Result<()> {
+    let old = fixture.native.borrow().queue.clone();
+    let expected = queue()?.next_order_id();
+    assert_eq!(old.order_ids().last(), Some(&expected));
+    let mut bytes = old.canonical_bytes().to_vec();
+    let count = 43 + old.world_folder().len();
+    bytes[count..count + 4].copy_from_slice(&((old.order_ids().len() - 1) as u32).to_be_bytes());
+    bytes.truncate(bytes.len() - 4);
+    fixture.native.borrow_mut().queue = WorkOrderObservation::decode(&bytes)?;
+    Ok(())
+}
 #[allow(clippy::too_many_arguments)]
 fn poll<A>(
     f: &Fixture,
@@ -326,10 +504,36 @@ fn poll<A>(
     remaining: i32,
     has_items: bool,
     has_jobs: bool,
+    policy: A,
+) -> Result<WorkOrderGoalResult>
+where
+    A: FnMut(&WorkOrderGoalProjection) -> Result<EvidencePolicy>,
+{
+    poll_with_operations(
+        f,
+        session,
+        monitor,
+        n,
+        tick,
+        remaining,
+        |queue| operations(queue, has_items, has_jobs),
+        policy,
+    )
+}
+#[allow(clippy::too_many_arguments)]
+fn poll_with_operations<A, O>(
+    f: &Fixture,
+    session: &mut Session,
+    monitor: &mut WorkOrderGoalMonitor,
+    n: u64,
+    tick: u64,
+    remaining: i32,
+    capture: O,
     mut policy: A,
 ) -> Result<WorkOrderGoalResult>
 where
     A: FnMut(&WorkOrderGoalProjection) -> Result<EvidencePolicy>,
+    O: FnOnce(&WorkOrderObservation) -> LiveOperationsObservation,
 {
     let queue = advance(f, tick)?;
     // The fixture always creates the original next-ID exactly once.
@@ -355,7 +559,7 @@ where
     let closed = Rc::new(Cell::new(0));
     let progress_source = native_progress(captures, Rc::clone(&closed));
     let operations_source = OperationsFixture {
-        raw: operations(&queue, has_items, has_jobs),
+        raw: capture(&queue),
         closed: Rc::clone(&closed),
     };
     session.poll_original_goal(
@@ -377,6 +581,176 @@ where
             policy(projection)
         },
     )
+}
+
+#[test]
+fn inventory_goal_sums_only_matching_stack_units_from_the_complete_operations_roster() -> Result<()>
+{
+    let (f, mut session, review) = inventory_fixture(4)?;
+    let mut monitor = session.begin_goal_monitor(review.seal(), &f.context)?;
+    for n in 1..=3 {
+        let result = poll_with_operations(
+            &f,
+            &mut session,
+            &mut monitor,
+            n,
+            10 * n,
+            0,
+            |queue| {
+                let mut raw = operations(queue, true, false);
+                raw.items[0].stack_size = if n == 1 { 2 } else { 3 };
+                let mut second_bed = raw.items[0].clone();
+                second_bed.native_id = 3;
+                second_bed.stack_size = 1;
+                let mut door = second_bed.clone();
+                door.native_id = 4;
+                door.type_key = "DOOR".into();
+                door.stack_size = 100;
+                let mut table = door.clone();
+                table.native_id = 5;
+                table.type_key = "TABLE".into();
+                raw.items.extend([second_bed, door, table]);
+                raw
+            },
+            |p| Ok(inventory_grant(p)),
+        )?;
+        assert_eq!(
+            result.progress().current_goal,
+            if n == 1 {
+                PredicateTruth::False
+            } else {
+                PredicateTruth::True
+            },
+            "four item records and unrelated stacks must not satisfy four BED units"
+        );
+        assert_eq!(result.original_goal_proven(), n == 3);
+        assert_eq!(result.semantic_completion_proven(), n == 3);
+    }
+    assert_eq!(monitor.original_plan(), &f.original);
+    assert_eq!(f.native.borrow().commits, 1);
+    Ok(())
+}
+
+#[test]
+fn inventory_goal_can_be_proven_after_order_retirement_and_later_loss_withdraws_current_proof()
+-> Result<()> {
+    let (f, mut session, review) = inventory_fixture(1)?;
+    let mut monitor = session.begin_goal_monitor(review.seal(), &f.context)?;
+    let first = poll(&f, &mut session, &mut monitor, 1, 10, 2, true, true, |p| {
+        Ok(inventory_grant(p))
+    })?;
+    assert_eq!(first.progress().current_goal, PredicateTruth::True);
+    assert!(!first.original_goal_proven());
+    assert!(matches!(
+        first.progress().physical_work,
+        WorkOrderPhysicalState::Outstanding { remaining: 2, .. }
+    ));
+    retire_original_order(&f)?;
+    let retired = poll(&f, &mut session, &mut monitor, 2, 20, 0, true, false, |p| {
+        Ok(inventory_grant(p))
+    })?;
+    assert!(retired.original_goal_proven());
+    assert_eq!(retired.progress().plan_terminal, PredicateTruth::True);
+    assert_eq!(retired.progress().postconditions, PredicateTruth::True);
+    assert_eq!(
+        retired.progress().obligation_terminal,
+        Some(PredicateTruth::True)
+    );
+    assert!(matches!(
+        retired.creation_result(),
+        NativeOrderCreation::Inserted { .. }
+    ));
+    assert!(!retired.progress().receipt_linked);
+    assert!(matches!(
+        retired.progress().physical_work,
+        WorkOrderPhysicalState::Unknown { .. }
+    ));
+    assert!(!retired.semantic_completion_proven());
+    let proof = retired.progress().anchor;
+
+    let lost = poll(
+        &f,
+        &mut session,
+        &mut monitor,
+        3,
+        30,
+        0,
+        false,
+        false,
+        |p| {
+            let policy = inventory_grant(p);
+            assert!(!policy.sources.iter().any(|source| matches!(source,
+            EvidenceSource::Observed { field, .. } if field.starts_with("operations/1.3.item."))));
+            Ok(policy)
+        },
+    )?;
+    assert_eq!(lost.progress().current_goal, PredicateTruth::False);
+    assert!(!lost.original_goal_proven());
+    assert!(!lost.semantic_completion_proven());
+    assert_eq!(lost.progress().first_satisfied_anchor, Some(proof));
+    assert!(matches!(
+        lost.progress().obligation,
+        Some(ObligationStatus::Fulfilled { .. })
+    ));
+    assert_eq!(f.native.borrow().prepares, 1);
+    assert_eq!(f.native.borrow().commits, 1);
+    assert_eq!(f.native.borrow().queries, 0);
+    Ok(())
+}
+
+#[test]
+fn inventory_goal_requires_complete_item_coverage_and_both_exact_field_sources() -> Result<()> {
+    for denial in 0..4 {
+        let (f, mut session, review) = inventory_fixture(1)?;
+        let mut monitor = session.begin_goal_monitor(review.seal(), &f.context)?;
+        poll(&f, &mut session, &mut monitor, 1, 10, 0, true, false, |p| {
+            Ok(inventory_grant(p))
+        })?;
+        let unknown = poll(&f, &mut session, &mut monitor, 2, 20, 0, true, false, |p| {
+            let mut policy = inventory_grant(p);
+            match denial {
+                0 => {
+                    policy
+                        .entity_kinds
+                        .insert(EntityKind::Item, EvidenceCoverage::Observed);
+                }
+                1 => {
+                    policy.entity_kinds.remove(&EntityKind::Item);
+                }
+                _ => {
+                    let denied = if denial == 2 {
+                        "operations/1.3.item.type_key"
+                    } else {
+                        "operations/1.3.item.getStackSize"
+                    };
+                    policy.sources.retain(|source| {
+                        !matches!(source,
+                        EvidenceSource::Observed { field, .. } if field == denied)
+                    });
+                }
+            }
+            Ok(policy)
+        })?;
+        assert_eq!(
+            unknown.progress().current_goal,
+            PredicateTruth::Unknown,
+            "denial {denial}"
+        );
+        assert!(!unknown.original_goal_proven());
+        assert!(monitor.first_satisfied_anchor().is_none());
+        let restart = poll(&f, &mut session, &mut monitor, 3, 30, 0, true, false, |p| {
+            Ok(inventory_grant(p))
+        })?;
+        assert!(
+            !restart.original_goal_proven(),
+            "unknown evidence must interrupt stability"
+        );
+        let proven = poll(&f, &mut session, &mut monitor, 4, 40, 0, true, false, |p| {
+            Ok(inventory_grant(p))
+        })?;
+        assert!(proven.original_goal_proven());
+    }
+    Ok(())
 }
 
 #[test]

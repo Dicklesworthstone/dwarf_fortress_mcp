@@ -2,13 +2,14 @@
 //! This is not compatibility-registry admission and cannot be configured by MCP.
 use super::{denied, invalid};
 use dfmcp_adapter::live_projection::LiveWorldProjection;
-use dfmcp_adapter::semantic_work_orders::WorkOrderGoalProjection;
 use dfmcp_adapter::semantic_work_orders::goal_projection::{
     ORDER_COUNTER_SOURCE, ORDER_STATUS_SOURCE,
 };
+use dfmcp_adapter::semantic_work_orders::{ObservedInventoryObjective, WorkOrderGoalProjection};
 use dfmcp_adapter::work_orders::rpc::WorkOrderManifest;
 use dfmcp_adapter::{BridgeManifest, LiveObservationCapsule};
 use dfmcp_core::{Capability, FortressId, OperationContext, Result, RiskTier};
+use dfmcp_intent::PreparedPlan;
 use dfmcp_world::{EntityKind, EvidenceCoverage, EvidencePolicy, EvidenceSource};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -262,6 +263,43 @@ impl SourceAcceptance {
             }
         }
         projection.evidence(policy.clone())?;
+        Ok(policy)
+    }
+
+    /// Select additional proof authority only from the retained original
+    /// objective. Legacy order goals preserve their exact policy fingerprint.
+    /// Live polling and durable replay must call this same selector.
+    pub fn goal_for(
+        &self,
+        original: &PreparedPlan,
+        projection: &WorkOrderGoalProjection,
+        context: &OperationContext,
+    ) -> Result<EvidencePolicy> {
+        let mut policy = self.goal(projection, context)?;
+        if ObservedInventoryObjective::from_plan(original).is_some() {
+            let operations = projection.operations();
+            let digest = operations.source_digest()?;
+            let available = projection.observed_sources();
+            policy
+                .entity_kinds
+                .insert(EntityKind::Item, EvidenceCoverage::Complete);
+            for field in [
+                "operations/1.3.item.type_key",
+                "operations/1.3.item.getStackSize",
+            ] {
+                let source = EvidenceSource::Observed {
+                    field: field.into(),
+                    source_digest: digest,
+                };
+                if !operations.items.is_empty() && !available.contains(&source) {
+                    return Err(denied("inventory objective source field is unavailable"));
+                }
+                if available.contains(&source) {
+                    policy.sources.insert(source);
+                }
+            }
+            projection.evidence(policy.clone())?;
+        }
         Ok(policy)
     }
 }
