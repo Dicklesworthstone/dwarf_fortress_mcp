@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 //! Unadmitted combined labor and finite-order MCP host.
-use crate::live_production_runtime::{Config, Mode, Request, Runtime, View};
+use crate::live_production_runtime::{Config, Mode, ObserveRequest, Request, Runtime, View};
 use crate::semantic_workforce_runtime::digest;
 use dfmcp_core::{
     DfmcpError, Digest32, ErrorCode, OperationContext, RequestId, Result, SessionId, WorkBudget,
@@ -57,7 +57,7 @@ fn merge_recovery(old: &mut Option<Value>, latest: &Value) {
     }
 }
 enum Action {
-    Observe,
+    Observe(ObserveRequest),
     Inspect,
     Plan(Request),
     Prepare(Digest32),
@@ -78,7 +78,7 @@ impl Action {
     }
     fn perform(self, runtime: &mut Runtime, c: &OperationContext) -> Result<View> {
         match self {
-            Self::Observe => runtime.observe(c),
+            Self::Observe(request) => runtime.observe(request, c),
             Self::Inspect => runtime.inspect(c),
             Self::Plan(request) => runtime.plan(request, c),
             Self::Prepare(id) => runtime.prepare_next(id, c),
@@ -486,9 +486,17 @@ pub fn fortress_open_session(
     })();
     result.unwrap_or_else(|cause| unbound("fortress.open_session", &cause))
 }
-#[tool(description = "Observe paused canonical citizens and source-pinned advisory labor choices; no clock advance.")]
-pub fn fortress_observe(session_id: String) -> String {
-    with_session(session_id, "fortress.observe", None, || Ok(Action::Observe))
+#[tool(
+    description = "Observe paused canonical citizens and advisory labor choices. Optional closed JSON request selects 1-32 canonical units and an option_offset; every page is a fresh observation. No clock advance."
+)]
+pub fn fortress_observe(session_id: String, request: Option<String>) -> String {
+    with_session(session_id, "fortress.observe", None, || {
+        let request = match request {
+            Some(raw) => ObserveRequest::parse(&raw)?,
+            None => ObserveRequest::default(),
+        };
+        Ok(Action::Observe(request))
+    })
 }
 #[tool(description = "Inspect retained original plan, frontier, review and recovery custody.")]
 pub fn fortress_query(session_id: String) -> String {
@@ -721,7 +729,7 @@ mod tests {
         assert!(Action::Commit(id, true).may_dispatch());
         assert!(Action::Wait.may_need_reconciliation());
         assert!(Action::Cancel.may_need_reconciliation());
-        assert!(!Action::Observe.may_need_reconciliation());
+        assert!(!Action::Observe(ObserveRequest::default()).may_need_reconciliation());
         assert!(!Action::Inspect.may_need_reconciliation());
         assert!(!Action::Unavailable.may_need_reconciliation());
     }

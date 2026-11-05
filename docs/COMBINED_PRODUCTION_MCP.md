@@ -93,10 +93,18 @@ test and live evidence remains explicit in `IMPLEMENTATION_STATUS.md`. BB's
 earlier real-game trial used a separate operator scout. That scout does not
 count as the MCP agent discovering a valid intent.
 
-Before an original plan exists, Observe reads workforce/1.17 for the first
-32 canonical citizens in numeric order. This additionally needs the operator's
-workforce read credential. It checks the same paused tick, world, site, source
-generation and exact selected native identities against the canonical capsule.
+Before an original plan exists, Observe reads workforce/1.17 for at most
+32 canonical citizens. Its default remains the first 32 in numeric order.
+The optional `request` argument is a closed JSON string containing `units`,
+`option_offset`, or both. `units` selects 1–32 distinct canonical citizen IDs
+from `observation.citizens`, encoded as nonzero decimal strings. IDs are
+normalized numerically; duplicates, noncanonical spellings, unknown fields
+and absent citizens are refused. Explicit selection makes citizens beyond the
+default first 32 accessible without widening the native selection limit.
+
+This additionally needs the operator's workforce read credential. It checks
+the same paused tick, world, site, source generation and exact selected native
+identities against the fresh complete canonical capsule.
 `workforce_choices` carries its canonical anchor/seal, native capture witness,
 source version/generation/sequence, automatic-professions state, labor schema,
 selected citizen identity/eligibility and bounded `options`.
@@ -108,11 +116,42 @@ to the original request's `units`, and the option's `labor` to its `labor` field
 Only eligible citizens needing the corresponding membership/labor change are
 suggested. Ambiguous and multi-labor details are omitted; disabling is omitted
 when another detail can keep granting that labor. Automatic professions must be
-enabled. At most eight options appear, ordered by labor key. Coverage distinguishes
-the complete native capture from its partial public projection and states
-unrepresented details and omitted citizens/options. Empty results never establish absence outside the
-covered selection. With no citizens, no native request occurs and the native
-work-detail domain remains unknown.
+enabled. At most eight options appear, ordered by labor key. `option_offset`
+defaults to zero and selects a window after all candidate checks and sorting.
+It is bounded at 128 and must not exceed the current eligible option count.
+An offset equal to that count returns an explicitly empty final page; a larger
+offset is an error. Coverage states the available, returned and omitted option
+counts, including omissions before and after the requested window.
+
+For example, using canonical citizen IDs obtained from an earlier observation,
+the existing Observe tool accepts:
+
+```json
+{
+  "session_id": "<the current combined session ID>",
+  "request": "{\"units\":[\"43\",\"252\"],\"option_offset\":8}"
+}
+```
+
+The response records the normalized `selection_request`. When another window
+exists, `next_observation_request` contains its offset and the exact resolved
+canonical citizens. The Agent Turn also exposes that read as a structured
+`fortress_observe` recommendation. Keeping those explicit identities prevents
+a changed roster from silently replacing citizens with a new default first 32.
+
+Every window acquires a new full canonical observation and native capture.
+These are independent fresh observations: their pages cannot be combined into
+one canonical snapshot. Use the latest successful response's observation seal
+when planning. The default attachment retains its original version-one witness;
+explicit selections or nonzero offsets use a version-two witness that also
+binds normalized selectors and offset. `witness_version` makes that distinction
+explicit. Neither witness grants mutation authority.
+
+Coverage distinguishes the complete native capture from its partial public
+projection and states unrepresented details and omitted citizens/options.
+Empty results never establish absence outside the covered selection. With no
+citizens, no native request occurs, the native work-detail domain and available
+option count remain unknown, and no later-page request is offered.
 
 These are observed attachments and derived candidates, not canonical mutation
 preconditions or authority. Other recomputed labor effects remain unknown.
@@ -131,8 +170,10 @@ The returned `frontier.all_applied` means both historical native effects were
 proved at their respective boundaries. It does not mean current labor, produced
 goods, workshop/material feasibility or the original terminal predicate is true.
 This host always leaves `current_state_proven` and `original_goal_proven` false.
-After an original exists, Observe reports retained original custody rather than
-pretending to acquire a new canonical world or rebase its original anchor.
+After an original exists, default Observe reports retained original custody.
+A nondefault selection or page request is refused before native contact; the
+host cannot acquire a replacement canonical world or rebase the original
+anchor through these selectors.
 
 ## Recovery and failure
 
@@ -205,3 +246,19 @@ they run the actual executable and real private stores. A source-bound actual
 DFHack/game trial, clean full-source qualification and production admission
 are separate evidence requirements. The registry and production runner map
 remain unchanged.
+
+### Selected workforce discovery increment (2026-11-05)
+
+Source now includes canonical citizen selection, option paging, versioned
+projection witnesses and fresh-read recommendations. The choices module has
+13 component regressions; the actual CLI/stdio suite contains 14 scenarios,
+including a two-citizen assignment using the 33rd roster citizen and a labor
+option beyond the first eight, followed by its original dependent order.
+Malformed selectors, unavailable identities, later-page range checks and
+post-plan selection refusal retain the existing no-redispatch behavior.
+
+These new cases and their integration were independently reviewed in source.
+They were not executed: this editing session had no usable execution environment.
+Compilation, rustfmt, focused and full tests, verification and qualification
+remain pending for these bytes. Existing recorded game trials do not qualify
+this increment, and bead `df-dfhack-bridge-plane-c-pic.4.2` remains in progress.

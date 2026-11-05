@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-11-05 — Select any covered citizen and page workforce choices
+
+- Add a closed optional Observe request for 1–32 canonical citizen IDs and a
+  bounded option offset, exposing choices beyond the first 32 citizens/eight
+  options without changing native selection or response limits.
+- Bind selected/page request semantics in a distinct derived witness; retain
+  default witness bytes, explicit omission counts and independently fresh
+  observation anchors. Suggested next reads pin the exact selected citizens.
+- Wire fresh-read suggestions through Agent Turns and reject malformed,
+  unavailable or post-plan selectors without creating a mutation permit.
+- Add seven choices regressions, one presentation regression and three public
+  CLI/stdio scenarios; expand the latter to 14 and correct its peer for repeated
+  selectors and complete multi-citizen receipts.
+- Independently review source and check JSON/contracts/counters. Runtime tests,
+  formatting and qualification remain unexecuted because this session has no
+  usable execution environment; no new live or admission claim.
+
 ## 2026-11-05 — Presence-aware lexical search and kind discovery
 
 - Exclude unavailable or contradictory fact compatibility values and their

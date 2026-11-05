@@ -36,12 +36,53 @@ def text(value):
     return len(value).to_bytes(2, 'big') + value
 
 
-def workforce_capture():
+def workforce_capture(ids=(42,), option_count=0):
+    keys = [f'LABOR_{i}' for i in range(option_count)] if option_count else ['MINE', 'CARPENTRY']
+    details = [{'name': f'Only {key}', 'flags': 0, 'selected_only': True,
+                'labors': [int(i == column) for i in range(len(keys))], 'members': []}
+               for column, key in enumerate(keys)] if option_count else [
+                   {'name': 'Mining only', 'flags': 0, 'selected_only': True,
+                    'labors': [1, 0], 'members': []}]
     return wf.encode_capture({'generation': WGEN, 'sequence': 3, 'tick': TICK, 'site': SITE,
-        'folder': 'region1', 'paused': True, 'automatic': True, 'labor_keys': ['MINE', 'CARPENTRY'],
-        'details': [{'name': 'Mining only', 'flags': 0, 'selected_only': True,
-                     'labors': [1, 0], 'members': []}],
-        'units': [{'id': 42, 'historical_id': 42, 'eligible': True, 'labors': [0, 0]}]})
+        'folder': 'region1', 'paused': True, 'automatic': True, 'labor_keys': keys,
+        'details': details,
+        'units': [{'id': ident, 'historical_id': ident, 'eligible': True,
+                   'labors': [0] * len(keys)} for ident in ids]})
+
+
+def workforce_fields(raw):
+    """Decode only the documented unpacked repeated unit selector specially."""
+    at = 0
+    out = {}
+    def take():
+        nonlocal at
+        value = shift = 0
+        while True:
+            byte = raw[at]
+            at += 1
+            value |= (byte & 127) << shift
+            if byte < 128:
+                return value
+            shift += 7
+            assert shift < 70
+    while at < len(raw):
+        key = take()
+        tag, kind = key >> 3, key & 7
+        if kind == 0:
+            value = take()
+        else:
+            assert kind == 2
+            size = take()
+            value = raw[at:at + size]
+            assert len(value) == size
+            at += size
+        if tag == 11:
+            assert kind == 0
+            out.setdefault(tag, []).append(value)
+        else:
+            assert tag not in out
+            out[tag] = value
+    return out
 
 
 def workforce_effect(plan, applied):
@@ -51,10 +92,14 @@ def workforce_effect(plan, applied):
     raw += struct.pack('>QQQ', before['generation'], before['sequence'], before['tick'])
     if applied:
         after, changed = wf.expected(before, plan['detail_index'], plan['assigned'])
-        assert changed == [42]
-        after['units'][0]['labors'] = [1, 0]
+        assert changed == [unit['id'] for unit in before['units']]
+        for unit in after['units']:
+            for column, enabled in enumerate(before['details'][plan['detail_index']]['labors']):
+                if enabled:
+                    unit['labors'][column] = int(plan['assigned'])
         raw += b'\x02' + hashlib.sha256(wf.encode_capture(after)).digest()
-        raw += struct.pack('>HH', len(before['labor_keys']), 1) + wf.encode_unit(after['units'][0])
+        raw += struct.pack('>HH', len(before['labor_keys']), len(after['units']))
+        raw += b''.join(wf.encode_unit(unit) for unit in after['units'])
     else:
         raw += b'\x00' + bytes(32) + struct.pack('>HH', len(before['labor_keys']), 0)
     return raw + wf.hashed(b'dfmcp-workforce-receipt/1', raw)
@@ -83,20 +128,25 @@ def order_effect(plan, created):
     return raw + proof + text(key)
 
 
-def citizen_reply(op, req):
+def citizen_reply(op, req, citizen_ids=(42,)):
     if op == 'Handshake':
         assert req[6] == TOKEN
         return (number(1, 1) + blob(2, b'') + blob(3, b'') + number(4, 1) + number(5, 0)
                 + blob(6, b'0.1.0') + blob(7, DFH) + blob(8, DF) + number(9, 1) + number(10, 1)
                 + blob(11, req[5]) + number(12, GEN) + blob(13, b'Handshake') + blob(13, b'ReadObservation'))
-    assert req[4] == TOKEN and req[5] == 0 and req[6] >= 1
-    citizen = number(1, 84) + blob(2, b'Urist 42' if req[7] else b'') + blob(3, b'dwarf')
-    citizen += number(4, 8) + number(5, 20) + number(6, 22) + number(7, 4)
-    citizen += b''.join(number(n, int(n not in (13, 14, 15))) for n in range(8, 17))
+    assert req[4] == TOKEN and 0 <= req[5] <= len(citizen_ids) and req[6] >= 1
+    page = citizen_ids[req[5]:req[5] + req[6]]
+    citizens = b''
+    for ident in page:
+        citizen = number(1, ident * 2) + blob(2, f'Urist {ident}'.encode() if req[7] else b'') + blob(3, b'dwarf')
+        citizen += number(4, 8) + number(5, 20) + number(6, 22) + number(7, 4)
+        citizen += b''.join(number(n, int(n not in (13, 14, 15))) for n in range(8, 17))
+        citizens += blob(19, citizen)
     return (number(1, 1) + blob(2, b'') + blob(3, b'') + number(4, 1) + number(5, 0)
             + blob(6, req[3]) + number(7, GEN) + number(8, 1) + number(9, 1) + number(10, 1)
             + number(11, 0) + number(12, TICK) + blob(13, b'Routing fixture') + blob(14, b'region1')
-            + number(15, SITE * 2) + number(16, 1) + number(17, 0) + number(18, 1) + blob(19, citizen))
+            + number(15, SITE * 2) + number(16, len(citizen_ids)) + number(17, req[5])
+            + number(18, int(req[5] + len(page) == len(citizen_ids))) + citizens)
 
 
 class Peer:
@@ -112,6 +162,9 @@ class Peer:
         self.threads = []
         self.errors = []
         self.calls = []
+        self.citizen_ids = [42]
+        self.option_count = 0
+        self.workforce_selections = []
         self.workforce_plan = None
         self.order_plan = None
         self.workforce_applied = False
@@ -144,7 +197,9 @@ class Peer:
                     except EOFError: break
                     assert pad == 0 and 0 <= size <= 131072
                     wire_request = receive(stream, size)
-                    req = fields(wire_request)
+                    req = (workforce_fields(wire_request)
+                           if method and bound[method][0] == 'dfmcp_workforce_v1_17'
+                           else fields(wire_request))
                     if method == 0:
                         op, plugin = req[1].decode(), req[4].decode()
                         ident = len(bound) + 2
@@ -165,20 +220,25 @@ class Peer:
             self.errors.append(repr(error))
 
     def reply(self, plugin, op, req):
-        if plugin == 'dfmcp_bridge': return citizen_reply(op, req)
+        if plugin == 'dfmcp_bridge': return citizen_reply(op, req, self.citizen_ids)
         assert req[1] == TOKEN
         if plugin == 'dfmcp_workforce_v1_17':
             response = (number(1, 1) + number(2, 0) + blob(3, req[2]) + number(4, 1) + number(5, 17)
                         + number(6, self.workforce_generation) + blob(7, DF) + blob(8, DFH))
             if op == 'ObserveWorkforce':
-                capture = bytearray(workforce_capture())
+                ids = req[11]
+                assert ids == sorted(set(ids)) and 1 <= len(ids) <= 32
+                assert all(ident in self.citizen_ids for ident in ids)
+                self.workforce_selections.append(ids)
+                capture = bytearray(workforce_capture(ids, self.option_count))
                 capture[8:16] = self.workforce_generation.to_bytes(8, 'big')
                 capture[24:32] = self.workforce_tick.to_bytes(8, 'big')
                 response += blob(9, bytes(capture))
             if op == 'PrepareAssignment':
-                self.workforce_plan = wf.make_plan(req[5].decode(), req[6], bool(req[7]), workforce_capture())
+                capture = workforce_capture(req[11], self.option_count)
+                self.workforce_plan = wf.make_plan(req[5].decode(), req[6], bool(req[7]), capture)
                 assert bytes.fromhex(self.workforce_plan['plan_digest']) == req[9]
-                assert hashlib.sha256(workforce_capture()).digest() == req[8]
+                assert hashlib.sha256(capture).digest() == req[8]
                 response += blob(10, workforce_effect(self.workforce_plan, False))
             if op == 'CommitAssignment':
                 assert self.workforce_plan and req[5].decode() == self.workforce_plan['key']
@@ -630,6 +690,145 @@ class CombinedProduction(unittest.TestCase):
         self.assertFalse(self.peer.order_created)
 
 
+    def test_selected_citizen_and_later_option_execute_original_plan(self):
+        self.peer.citizen_ids = list(range(10, 43))
+        self.peer.option_count = 10
+        opened = self.client.open(max_wall_millis=60000)
+        self.assertTrue(opened['ok'], opened)
+        sid = opened['agent_turn']['session_id']
+        first = self.client.execute_next(opened)
+        self.assertTrue(first['ok'], first)
+        choices = first['observation']['workforce_choices']
+        self.assertEqual(choices['coverage']['canonical_citizens'], 33)
+        self.assertEqual(choices['coverage']['selected_citizens'], 32)
+        self.assertEqual(choices['coverage']['omitted_citizens'], 1)
+        self.assertNotIn('43', [unit['entity_id'] for unit in choices['selected_citizens']])
+        self.assertIn('43', [unit['entity_id'] for unit in first['observation']['citizens']])
+        self.assertEqual(self.peer.workforce_selections[-1], list(range(10, 42)))
+
+        selected = self.client.tool('observe', session_id=sid, request=json.dumps(
+            {'units': ['43', '42'], 'option_offset': 8}))
+        self.assertTrue(selected['ok'], selected)
+        choices = selected['observation']['workforce_choices']
+        self.assertEqual(self.peer.workforce_selections[-1], [41, 42])
+        self.assertEqual([unit['entity_id'] for unit in choices['selected_citizens']], ['42', '43'])
+        self.assertEqual([option['labor'] for option in choices['options']], ['LABOR_8', 'LABOR_9'])
+        self.assertEqual(choices['coverage']['available_options'], 10)
+        self.assertEqual(choices['coverage']['option_offset'], 8)
+        self.assertEqual(choices['coverage']['omitted_options'], 8)
+        self.assertIsNone(choices['coverage']['next_option_offset'])
+        self.assertNotEqual(choices['witness'], first['observation']['workforce_choices']['witness'])
+        self.assertEqual(choices['canonical_observation_seal'], selected['observation']['seal'])
+        self.assertFalse(choices['mutation_authority'])
+        self.assertFalse(choices['mutation_precondition_evidence'])
+        self.assertTrue(choices['revalidation_required'])
+
+        option = choices['options'][0]
+        request = {'expected_observation': selected['observation']['seal'],
+                   'units': option['enable_candidates'], 'labor': option['labor'],
+                   'enabled': True, 'recipe': 'wooden_bed', 'amount': 1,
+                   'deadline_tick': 300, 'poll_interval_ticks': 5, 'stable_samples': 2}
+        planned = self.client.tool('plan', session_id=sid, request=json.dumps(request))
+        self.assertTrue(planned['ok'], planned)
+        original = planned['original_plan']
+        self.assertEqual(original['steps'][0]['action']['units'], ['42', '43'])
+        self.assertEqual(original['steps'][0]['action']['labor'], 'LABOR_8')
+        calls = list(self.peer.calls)
+        denied = self.client.tool('observe', session_id=sid, request=json.dumps({'units': ['43']}))
+        self.assertFalse(denied['ok'], denied)
+        self.assertEqual(self.peer.calls, calls)
+        current = self.client.tool('observe', session_id=sid)
+        self.assertTrue(current['ok'], current)
+        self.assertEqual(current['original_plan'], original)
+        for index in (0, 1):
+            prepared = self.client.execute_next(current)
+            self.assertTrue(prepared['ok'], prepared)
+            self.assertEqual(prepared['review']['step_id'], index)
+            self.assertEqual(prepared['review']['idempotency_key'], original['steps'][index]['key'])
+            current = self.client.execute_next(prepared)
+            self.assertTrue(current['ok'], current)
+        self.assertTrue(current['frontier']['all_applied'])
+        self.assertFalse(current['original_goal_proven'])
+        self.assertFalse(current['current_state_proven'])
+        self.assertEqual(sum(op == 'CommitAssignment' for _, op in self.peer.calls), 1)
+        self.assertEqual(sum(op == 'CommitOrder' for _, op in self.peer.calls), 1)
+
+    def test_closed_observation_selectors_withdraw_choices_without_native_writes(self):
+        opened = self.client.open(max_wall_millis=60000)
+        self.assertTrue(opened['ok'], opened)
+        sid = opened['agent_turn']['session_id']
+        observed = self.client.execute_next(opened)
+        self.assertTrue(observed['ok'], observed)
+        calls = list(self.peer.calls)
+        invalid = [
+            '{"units":[]}', '{"units":["43","43"]}', '{"units":["043"]}',
+            '{"units":["0"]}', '{"units":[43]}', '{"units":["+43"]}',
+            '{"units":["43"],"native_id":42}', '{"option_offset":-1}',
+            '{"option_offset":129}', '{"option_offset":0,"option_offset":0}',
+            json.dumps({'units': [str(n) for n in range(1, 34)]}), ' ' * 4097,
+        ]
+        for raw in invalid:
+            rejected = self.client.tool('observe', session_id=sid, request=raw)
+            self.assertFalse(rejected['ok'], rejected)
+            self.assertIs(rejected['game_mutation_dispatched'], False)
+            self.assertEqual(self.peer.calls, calls)
+            self.assertEqual(rejected['agent_turn']['active_work']['indeterminate_effects'], [])
+        queried = self.client.tool('query', session_id=sid)
+        self.assertTrue(queried['ok'], queried)
+        self.assertIsNone(queried['observation']['workforce_choices'])
+        workforce_calls = [call for call in self.peer.calls if call[0] == 'dfmcp_workforce_v1_17']
+        unknown = self.client.tool('observe', session_id=sid, request='{"units":["999"]}')
+        self.assertFalse(unknown['ok'], unknown)
+        self.assertEqual(workforce_calls, [call for call in self.peer.calls if call[0] == 'dfmcp_workforce_v1_17'])
+        queried = self.client.tool('query', session_id=sid)
+        self.assertTrue(queried['ok'], queried)
+        self.assertIsNone(queried['observation'])
+        self.assertFalse(any(op.startswith(('Prepare', 'Commit')) for _, op in self.peer.calls))
+        self.assertFalse(self.peer.workforce_applied)
+        self.assertFalse(self.peer.order_created)
+
+    def test_option_pages_offer_fresh_reads_and_reject_out_of_range(self):
+        self.peer.option_count = 10
+        opened = self.client.open(max_wall_millis=60000)
+        self.assertTrue(opened['ok'], opened)
+        sid = opened['agent_turn']['session_id']
+        first = self.client.execute_next(opened)
+        self.assertTrue(first['ok'], first)
+        choices = first['observation']['workforce_choices']
+        self.assertEqual([option['labor'] for option in choices['options']],
+                         [f'LABOR_{i}' for i in range(8)])
+        self.assertEqual(choices['next_observation_request'], {'units': ['43'], 'option_offset': 8})
+        recommendations = [r for r in first['agent_turn']['recommendations'] if r['tool'] == 'fortress_observe']
+        self.assertEqual(len(recommendations), 1)
+        self.assertEqual(json.loads(recommendations[0]['arguments']['request']),
+                         choices['next_observation_request'])
+        second = self.client.tool('observe', **recommendations[0]['arguments'])
+        self.assertTrue(second['ok'], second)
+        self.assertEqual([option['labor'] for option in second['observation']['workforce_choices']['options']],
+                         ['LABOR_8', 'LABOR_9'])
+        self.assertNotEqual(second['observation']['seal'], first['observation']['seal'])
+        self.assertIsNone(second['observation']['workforce_choices']['next_observation_request'])
+        queried = self.client.tool('query', session_id=sid)
+        self.assertTrue(queried['ok'], queried)
+        self.assertEqual(queried['observation']['workforce_choices'], second['observation']['workforce_choices'])
+        exhausted = self.client.tool('observe', session_id=sid,
+                                     request='{"units":["43"],"option_offset":10}')
+        self.assertTrue(exhausted['ok'], exhausted)
+        choices = exhausted['observation']['workforce_choices']
+        self.assertEqual(choices['options'], [])
+        self.assertEqual(choices['coverage']['available_options'], 10)
+        self.assertEqual(choices['coverage']['omitted_options'], 10)
+        self.assertIsNone(choices['next_observation_request'])
+        rejected = self.client.tool('observe', session_id=sid,
+                                    request='{"units":["43"],"option_offset":11}')
+        self.assertFalse(rejected['ok'], rejected)
+        queried = self.client.tool('query', session_id=sid)
+        self.assertTrue(queried['ok'], queried)
+        self.assertIsNone(queried['observation'])
+        self.assertFalse(any(op.startswith(('Prepare', 'Commit')) for _, op in self.peer.calls))
+        self.assertFalse(self.peer.workforce_applied)
+        self.assertFalse(self.peer.order_created)
+
 def main():
     global LOGS
     parser = argparse.ArgumentParser(description=__doc__)
@@ -644,7 +843,7 @@ def main():
     print(json.dumps({'schema': 'dfmcp.combined-production-stdio/1', 'tests': result.testsRun,
         'failed': len(result.failures), 'errors': len(result.errors), 'skipped': len(result.skipped),
         'actual_modern_stdio': True, 'loopback_peers_are_doubles': True, 'live_game': False}))
-    raise SystemExit(0 if result.wasSuccessful() and result.testsRun == 11 and not result.skipped else 1)
+    raise SystemExit(0 if result.wasSuccessful() and result.testsRun == 14 and not result.skipped else 1)
 
 
 if __name__ == '__main__': main()

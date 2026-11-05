@@ -2,7 +2,101 @@
 use super::*;
 use dfmcp_adapter::live_routing::{LiveRoutingEvidence, NativeUnitIdentity};
 use dfmcp_adapter::workforce_control::{MAX_UNITS, WorkforceCapture};
+use dfmcp_core::EntityId;
 use dfmcp_world::EntityKind;
+use serde::Deserialize;
+
+/// Observe selectors change only the bounded advisory projection. They never
+/// become native IDs, work-detail selectors or mutation authority.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct ObserveRequest {
+    units: Option<Vec<EntityId>>,
+    option_offset: usize,
+}
+
+// workforce/1.17 admits at most 128 labor columns. No request can ask for an
+// unbounded offset, even before the complete native capture is available.
+const MAX_OPTION_OFFSET: usize = 128;
+
+impl ObserveRequest {
+    pub(crate) fn parse(raw: &str) -> Result<Self> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Input {
+            units: Option<Vec<String>>,
+            #[serde(default)]
+            option_offset: usize,
+        }
+        if raw.len() > 4096 {
+            return Err(exhausted("combined observe request exceeds 4096 bytes"));
+        }
+        let input: Input = serde_json::from_str(raw)
+            .map_err(|_| invalid("invalid closed combined observe request"))?;
+        if input.option_offset > MAX_OPTION_OFFSET {
+            return Err(invalid(
+                "workforce option offset exceeds the native labor bound",
+            ));
+        }
+        let units = input
+            .units
+            .map(|raw_units| -> Result<Vec<EntityId>> {
+                if raw_units.is_empty() || raw_units.len() > MAX_UNITS {
+                    return Err(invalid("select between one and 32 canonical citizens"));
+                }
+                let mut units = raw_units
+                    .iter()
+                    .map(|raw| {
+                        let value = raw
+                            .parse::<u64>()
+                            .map_err(|_| invalid("unit identity must be canonical decimal"))?;
+                        if value == 0 || raw != &value.to_string() {
+                            return Err(invalid(
+                                "unit identity must be nonzero canonical decimal",
+                            ));
+                        }
+                        Ok(EntityId::new(value))
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                units.sort();
+                if units.windows(2).any(|pair| pair[0] == pair[1]) {
+                    return Err(invalid(
+                        "duplicate canonical citizen identities are refused",
+                    ));
+                }
+                Ok(units)
+            })
+            .transpose()?;
+        Ok(Self {
+            units,
+            option_offset: input.option_offset,
+        })
+    }
+
+    pub(crate) fn is_default(&self) -> bool {
+        self.units.is_none() && self.option_offset == 0
+    }
+
+    fn selection(&self) -> &'static str {
+        if self.units.is_some() {
+            "canonical_id_ascending_explicit"
+        } else {
+            "canonical_id_ascending_first_32"
+        }
+    }
+
+    pub(crate) fn selection_json(&self) -> Value {
+        let mut value = json!({"option_offset":self.option_offset});
+        if let Some(units) = &self.units {
+            value["units"] = json!(
+                units
+                    .iter()
+                    .map(|id| id.get().to_string())
+                    .collect::<Vec<_>>()
+            );
+        }
+        value
+    }
+}
 
 pub(super) const MAX_CHOICES: usize = 8;
 
@@ -10,6 +104,7 @@ pub(super) fn select(
     capsule: &LiveObservationCapsule,
     projection: &LiveWorldProjection,
     scope: &workforce::policy::SourceAcceptance,
+    request: &ObserveRequest,
     c: &OperationContext,
 ) -> Result<(Vec<NativeUnitIdentity>, usize)> {
     let policy = scope.citizens(capsule, projection, c)?;
@@ -23,22 +118,43 @@ pub(super) fn select(
         .filter(|(_, entity)| entity.kind == EntityKind::Unit)
         .map(|(id, _)| *id)
         .collect::<Vec<_>>();
-    if ids.is_empty() {
-        return Ok((Vec::new(), 0));
+    let selected = if let Some(units) = &request.units {
+        if units.iter().any(|id| ids.binary_search(id).is_err()) {
+            return Err(invalid(
+                "selected citizen is absent from the exact canonical roster",
+            ));
+        }
+        units.as_slice()
+    } else {
+        &ids[..ids.len().min(MAX_UNITS)]
+    };
+    if selected.is_empty() {
+        return Ok((Vec::new(), ids.len()));
     }
-    Ok((
-        routing.resolve_units(&ids[..ids.len().min(MAX_UNITS)])?,
-        ids.len(),
-    ))
+    Ok((routing.resolve_units(selected)?, ids.len()))
 }
 
-pub(super) fn empty(anchor: StateAnchor, seal: Digest32) -> Value {
-    json!({"schema":"dfmcp.combined-workforce-choices/1","canonical_anchor":anchor_json(anchor),
+pub(super) fn empty(
+    anchor: StateAnchor,
+    seal: Digest32,
+    request: &ObserveRequest,
+) -> Result<Value> {
+    if !request.is_default() {
+        return Err(invalid(
+            "empty canonical roster has no selected citizens or later option page",
+        ));
+    }
+    Ok(json!({"schema":"dfmcp.combined-workforce-choices/1","canonical_anchor":anchor_json(anchor),
         "canonical_observation_seal":seal.to_hex(),"epistemic_state":"observed",
+        "selection_request":request.selection_json(),"witness_version":null,
+        "next_observation_request":null,"fresh_observation_required":true,
         "selected_citizens":[],"options":[],"native_observed":false,
         "coverage":{"canonical_citizens":0,"selected_citizens":0,"omitted_citizens":0,
-            "work_detail_domain":"unknown","omitted_options":0},
-        "revalidation_required":true,"mutation_authority":false,"mutation_precondition_evidence":false})
+            "selection":request.selection(),"work_detail_domain":"unknown","omitted_options":0,
+            "paging":"independent_fresh_observations",
+            "available_options":null,"option_offset":0,"returned_options":0,
+            "omitted_options_before":0,"omitted_options_after":null,"next_option_offset":null},
+        "revalidation_required":true,"mutation_authority":false,"mutation_precondition_evidence":false}))
 }
 
 pub(super) fn project(
@@ -46,9 +162,10 @@ pub(super) fn project(
     projection: &LiveWorldProjection,
     scope: &workforce::policy::SourceAcceptance,
     capture: &WorkforceCapture,
+    request: &ObserveRequest,
     c: &OperationContext,
 ) -> Result<Value> {
-    let (units, total) = select(capsule, projection, scope, c)?;
+    let (units, total) = select(capsule, projection, scope, request, c)?;
     if capture.generation() != scope.workforce_generation
         || capture.folder() != scope.world_folder
         || capture.site() != scope.site_id
@@ -134,18 +251,58 @@ pub(super) fn project(
             "candidates_epistemic_state":"certified_derived","other_recomputed_labor_effects":"unknown"}));
     }
     options.sort_by(|left, right| left["labor"].as_str().cmp(&right["labor"].as_str()));
-    let omitted_options = options.len().saturating_sub(MAX_CHOICES);
-    options.truncate(MAX_CHOICES);
+    let available_options = options.len();
+    if request.option_offset > available_options {
+        return Err(invalid(
+            "workforce option offset exceeds the current available options",
+        ));
+    }
+    let page_end = request
+        .option_offset
+        .saturating_add(MAX_CHOICES)
+        .min(available_options);
+    let options = options
+        .into_iter()
+        .skip(request.option_offset)
+        .take(MAX_CHOICES)
+        .collect::<Vec<_>>();
+    let omitted_options = available_options.saturating_sub(options.len());
+    let next_option_offset = (page_end < available_options).then_some(page_end);
+    // Pin the resolved citizens even when this page used the default window.
+    // A later Observe must read again and must not silently substitute a new
+    // first-32 selection if the canonical roster has changed.
+    let next_observation_request = next_option_offset.map(|offset| {
+        json!({"units":units.iter().map(|unit|unit.canonical_id.get().to_string()).collect::<Vec<_>>(),
+            "option_offset":offset})
+    });
     let seal = observation_seal(capsule, projection);
-    let mut bytes = b"dfmcp-combined-workforce-choices/1\0".to_vec();
+    // Retain the original witness bytes for the default projection. A selected
+    // roster or later page binds its normalized selectors in a distinct domain.
+    let witness_version = if request.is_default() { 1 } else { 2 };
+    let mut bytes = if request.is_default() {
+        b"dfmcp-combined-workforce-choices/1\0".to_vec()
+    } else {
+        b"dfmcp-combined-workforce-choices/2\0".to_vec()
+    };
     bytes.extend_from_slice(&(MAX_UNITS as u32).to_be_bytes());
     bytes.extend_from_slice(&(MAX_CHOICES as u32).to_be_bytes());
     bytes.extend_from_slice(b"canonical_id_ascending\0labor_key_ascending\0");
     bytes.extend_from_slice(seal.as_bytes());
     bytes.extend_from_slice(capture.witness().as_bytes());
+    if !request.is_default() {
+        bytes.push(u8::from(request.units.is_some()));
+        let selected = request.units.as_deref().unwrap_or(&[]);
+        bytes.extend_from_slice(&(selected.len() as u32).to_be_bytes());
+        for id in selected {
+            bytes.extend_from_slice(&id.get().to_be_bytes());
+        }
+        bytes.extend_from_slice(&(request.option_offset as u32).to_be_bytes());
+    }
     Ok(json!({"schema":"dfmcp.combined-workforce-choices/1",
         "canonical_anchor":anchor_json(projection.snapshot.anchor()),
         "canonical_observation_seal":seal.to_hex(),"epistemic_state":"observed",
+        "selection_request":request.selection_json(),"witness_version":witness_version,
+        "next_observation_request":next_observation_request,"fresh_observation_required":true,
         "witness":Digest32::of_bytes(&bytes).to_hex(),"native_observed":true,
         "source":{"protocol":"workforce/1.17","generation":capture.generation(),
             "sequence":capture.sequence(),"capture_witness":capture.witness().to_hex(),
@@ -153,13 +310,18 @@ pub(super) fn project(
             "tick":capture.tick(),"paused":capture.paused(),"automatic":capture.automatic()},
         "labor_keys":capture.labor_keys(),"selected_citizens":selected,"options":options,
         "coverage":{"canonical_citizens":total,"selected_citizens":units.len(),
-            "omitted_citizens":total.saturating_sub(units.len()),"selection":"canonical_id_ascending_first_32",
+            "omitted_citizens":total.saturating_sub(units.len()),"selection":request.selection(),
             "work_detail_domain":"complete_capture_partial_projection",
             "native_work_details":capture.details().len(),"all_work_details_returned":false,
             "projection":"actionable_single_labor_options_for_selected_citizens",
             "unrepresented_work_details":capture.details().len().saturating_sub(options.len()),
             "option_limit":MAX_CHOICES,
-            "omitted_options":omitted_options,"option_order":"labor_key_ascending"},
+            "omitted_options":omitted_options,"option_order":"labor_key_ascending",
+            "paging":"independent_fresh_observations",
+            "available_options":available_options,"option_offset":request.option_offset,
+            "returned_options":options.len(),"omitted_options_before":request.option_offset,
+            "omitted_options_after":available_options.saturating_sub(page_end),
+            "next_option_offset":next_option_offset},
         "revalidation_required":true,"mutation_authority":false,"mutation_precondition_evidence":false,
         "current_state_proven":false,"productivity_proven":false}))
 }

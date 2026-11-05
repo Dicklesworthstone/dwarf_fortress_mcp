@@ -113,7 +113,57 @@
       "mutation_authority": false,
       "native_preparation_and_commit_revalidate": true,
       "retained_after_original_plan": false,
-      "restored_by_recovery": false
+      "restored_by_recovery": false,
+      "observe_request": {
+        "tool": "fortress.observe",
+        "argument": "request",
+        "encoding": "closed JSON string",
+        "maximum_bytes": 4096,
+        "optional_units": "one to 32 unique nonzero canonical decimal entity-ID strings, normalized numerically",
+        "optional_option_offset": "integer from zero through 128; default zero",
+        "unknown_fields": "rejected",
+        "unknown_selected_citizens": "rejected before native workforce contact",
+        "default_request": "first 32 canonical citizens and first eight eligible options",
+        "nondefault_request_after_original_plan": "rejected before native contact"
+      },
+      "explicit_selection": "canonical_id_ascending_explicit",
+      "option_paging": {
+        "offset_max": 128,
+        "offset_applied_after": "all candidate checks and labor_key_ascending sort",
+        "page_limit": 8,
+        "offset_greater_than_available": "rejected",
+        "offset_equal_to_available": "explicit empty terminal page",
+        "each_page": "independent_fresh_observations",
+        "canonical_pages_merged": false,
+        "next_request_pins": "exact resolved canonical units and next option offset",
+        "next_request_field": "next_observation_request",
+        "next_request_authorizes_mutation": false,
+        "planning_seal": "latest successful observation",
+        "coverage_fields": [
+          "available_options",
+          "option_offset",
+          "returned_options",
+          "omitted_options_before",
+          "omitted_options_after",
+          "omitted_options",
+          "next_option_offset"
+        ],
+        "empty_roster_available_options": "unknown"
+      },
+      "witness_versions": {
+        "default": 1,
+        "default_bytes_preserved": true,
+        "selected_or_paged": 2,
+        "selected_or_paged_domain": "dfmcp-combined-workforce-choices/2",
+        "selected_or_paged_binds": [
+          "selection_mode",
+          "normalized_requested_canonical_units",
+          "option_offset",
+          "fixed_limits_and_ordering",
+          "canonical_observation_seal",
+          "native_capture_witness"
+        ]
+      }
     },
     "finite_order_amount_max": 100,
     "wall_millis_max": 60000,

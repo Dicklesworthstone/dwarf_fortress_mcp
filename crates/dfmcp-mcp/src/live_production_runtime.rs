@@ -26,6 +26,7 @@ mod config;
 mod custody;
 mod request;
 mod review;
+pub(crate) use choices::ObserveRequest;
 pub(crate) use config::Config;
 use custody::{GuardedEvidence, SharedCustody};
 use orders::Shell as OrderShell;
@@ -659,7 +660,11 @@ impl Runtime {
         }
         result
     }
-    pub(crate) fn observe(&mut self, c: &OperationContext) -> Result<View> {
+    pub(crate) fn observe(
+        &mut self,
+        request: ObserveRequest,
+        c: &OperationContext,
+    ) -> Result<View> {
         self.check(c, false)?;
         if self.mode == Mode::Offline {
             return Err(denied(
@@ -667,6 +672,11 @@ impl Runtime {
             ));
         }
         if self.original.is_some() {
+            if request != ObserveRequest::default() {
+                return Err(invalid(
+                    "workforce selection and paging are available only before original planning",
+                ));
+            }
             return self.inspect(c);
         }
         self.basis = None;
@@ -702,11 +712,12 @@ impl Runtime {
             &capsule,
             &projection,
             self.config.workforce.acceptance(),
+            &request,
             &work.take(2 * MIB)?,
         )?;
         let seal = observation_seal(&capsule, &projection);
         let choices = if selection.is_empty() {
-            choices::empty(projection.snapshot.anchor(), seal)
+            choices::empty(projection.snapshot.anchor(), seal, &request)?
         } else {
             let binding = self
                 .parts
@@ -732,7 +743,14 @@ impl Runtime {
                 self.observation_tick_floor =
                     self.observation_tick_floor.max(GameTick(capture.tick()));
             }
-            choices::project(&capsule, &projection, scope, &capture, &work.take(4 * MIB)?)?
+            choices::project(
+                &capsule,
+                &projection,
+                scope,
+                &capture,
+                &request,
+                &work.take(4 * MIB)?,
+            )?
         };
         self.config.current()?;
         work.current()?;

@@ -1,5 +1,40 @@
 # Implementation Status
 
+## 2026-11-05 — Workforce choices beyond the default roster and option window
+
+The combined labor-order development host now accepts an optional closed Observe
+request selecting 1–32 canonical citizens and an option offset. Citizens beyond
+the default first 32 and eligible options beyond the first eight can be discovered
+through the same public tool. Default calls preserve their original selection and
+witness bytes. Selected/page witnesses bind normalized request semantics in a
+distinct version-two domain; coverage identifies both earlier and later omissions.
+
+Each call acquires and validates a fresh canonical capsule and exact selected
+workforce capture. The next read request pins the actual selected citizens and
+returns through Agent Turn recommendations. It cannot merge independently read
+pages or authorize mutation. Malformed requests withdraw prior choices; absent
+citizens fail before workforce contact; nondefault requests after original
+planning refuse rather than silently returning retained custody. Existing
+source/tick floors, native limits, original plan identity and confirmation remain.
+
+Seven new choices cases extend that module to 13 tests. One presentation
+regression checks fresh-read recommendations and error withdrawal. Three new
+public stdio scenarios extend the CLI suite to 14, including a two-citizen
+assignment containing the 33rd roster citizen and a labor option beyond the
+first eight, followed by its dependent finite order. The peer now decodes the
+existing repeated workforce unit selector and emits every selected post-state.
+
+Independent source review found and corrected the test peer's previous
+single-post-state assumption. JavaScript checks parsed the updated machine
+contract and documentation example and checked bounds, tool count, registrations
+and matching suite counters. No usable execution environment was available:
+Rust/Python execution, rustfmt, the regression suites, verify and full local
+qualification were not run. These bytes have no new native or real-game
+qualification and do not inherit prior live-trial evidence.
+
+Bead `df-dfhack-bridge-plane-c-pic.4.2` remains in progress. Native workforce/1.17,
+production admission, clock authority and original-goal proof are unchanged.
+
 ## 2026-11-05 — Lexical search respects fact availability
 
 The existing public laboratory search route now indexes entity fields only

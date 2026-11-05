@@ -139,7 +139,7 @@ fn encode(
     } else {
         None
     };
-    let recommendations = recommendation
+    let mut recommendations = recommendation
         .into_iter()
         .map(|(tool, reason, confirm, mut arguments)| {
             if let Some(id) = session {
@@ -147,7 +147,24 @@ fn encode(
             }
             recommendation_fn(tool, reason, confirm, arguments)
         })
-        .collect();
+        .collect::<Vec<_>>();
+    // This suggestion requests a new capture; it never joins pages into a
+    // canonical snapshot or carries mutation/preparation authority.
+    if verified
+        && !uncertain
+        && mode != Some("offline")
+        && view["original_plan"].is_null()
+        && let Some(id) = session
+        && view["observation"]["workforce_choices"]["next_observation_request"].is_object()
+    {
+        recommendations.push(recommendation_fn(
+            "fortress_observe",
+            "Inspect the next bounded labor choices for these same citizens with a fresh observation; use its new seal for planning.",
+            false,
+            json!({"session_id":id.to_string(),
+                "request":view["observation"]["workforce_choices"]["next_observation_request"].to_string()}),
+        ));
+    }
     let mut turn = AgentTurnBuilder::new(operation, phase)
         .continuity(if uncertain { ContinuityStatus::Indeterminate } else if verified { ContinuityStatus::Partial } else if retained.is_some() { ContinuityStatus::Stale } else { ContinuityStatus::Bootstrap }, None, None, None)
         .briefing(json!({"runtime":"unadmitted_combined_production_development", "runtime_admitted":false,"mode":mode,
@@ -238,6 +255,50 @@ pub(super) fn packet(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn later_choice_pages_are_explicit_fresh_reads_and_withdrawn_on_error() {
+        let session = SessionId::new((1u128 << 127) | (24u128 << 57) | 1);
+        let next = json!({"units":["43"],"option_offset":8});
+        let view = json!({"original_plan":null,"labor_control_enabled":true,
+            "production_control_enabled":true,"observation":{"seal":"a".repeat(64),
+                "workforce_choices":{"options":[{"labor":"MINE"}],
+                    "next_observation_request":next}}});
+        for (verified, uncertain, expected) in [(true, false, 1), (false, false, 0), (true, true, 0)] {
+            let (raw, overflow) = packet(
+                "fortress.query",
+                Some(session),
+                None,
+                Some("control"),
+                None,
+                None,
+                json!({"ok":verified}),
+                Some(&view),
+                verified,
+                uncertain,
+            );
+            assert!(!overflow);
+            let response: Value = serde_json::from_str(&raw).expect("packet JSON");
+            let suggestions = response["agent_turn"]["recommendations"]
+                .as_array()
+                .expect("recommendations");
+            let pages = suggestions
+                .iter()
+                .filter(|item| item["tool"] == "fortress_observe")
+                .collect::<Vec<_>>();
+            assert_eq!(pages.len(), expected);
+            if verified && !uncertain {
+                assert_eq!(suggestions[0]["tool"], "fortress_plan");
+                let arguments = &pages[0]["arguments"];
+                assert_eq!(arguments["session_id"], session.to_string());
+                let request: Value = serde_json::from_str(
+                    arguments["request"].as_str().expect("closed observation request"),
+                )
+                .expect("observation request JSON");
+                assert_eq!(request, next);
+            }
+        }
+    }
+
     #[test]
     fn recommendations_follow_observation_and_numeric_next_step_without_claiming_goal() {
         let original = "a".repeat(64);
