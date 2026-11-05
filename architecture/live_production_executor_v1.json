@@ -230,13 +230,21 @@
       "crates/dfmcp-adapter/src/live_production/tests.rs",
       "crates/dfmcp-mcp/src/lib.rs",
       "scripts/verify.sh",
-      "scripts/qualify_local.sh"
+      "scripts/qualify_local.sh",
+      "crates/dfmcp-mcp/src/semantic_citizens.rs",
+      "crates/dfmcp-mcp/src/semantic_citizens_tests.rs"
     ],
     "private_custody_platforms": [
       "linux-x86_64",
       "linux-aarch64"
     ],
     "labor_resolver_primed_by_fresh_authorized_original_citizen_read": true,
-    "nested_frontier_byte_work_max": 2147483648
+    "nested_frontier_byte_work_max": 2147483648,
+    "canonical_citizens": {
+      "page_max": 128,
+      "complete_roster_max": 200,
+      "evidence_refresh_budget_bytes": 16777216,
+      "capture_policy": "complete_coherent_or_refuse"
+    }
   }
 }

@@ -34,8 +34,11 @@ achievement survives recovery, while current goal truth requires another sample.
 Offline reopening performs no native contact. A Control opening made without labor
 authority cannot acquire it later merely because the environment changes.
 
-The concrete source bounds complete citizen acquisition to 128 citizens, foreground
-selection to 32, and citizen pages to 32 identities. Logical work defaults to 2 GiB per call; an explicit allowance up to 32 GiB
+The concrete source bounds complete citizen acquisition to 200 citizens using
+native transport pages of at most 128. It publishes only a complete coherent
+roster; oversized or inconsistent pages refuse the observation. Foreground
+selection remains 32 and public citizen pages remain 32 identities. Logical work
+defaults to 2 GiB per call; an explicit allowance up to 32 GiB
 supports longer history replay within the same 60-second wall ceiling and zero
 game-clock budget. Original custody and current
 authority are rechecked after DispatchStarted synchronization, immediately before
@@ -156,6 +159,8 @@ Conservative local byte-work is reserved for canonicalization, hashing and
 scope revalidation. Each successful refresh prepays two borrowed routing views;
 exhaustion requires another explicit bounded refresh. The semantic session's
 existing 16 MiB per-refresh reservation can refuse a large complete roster.
+The concrete semantic hosts therefore cap the complete roster at 200; its
+worst-case refresh reserves 16,138,240 bytes within that unchanged allowance.
 
 This component acquires identity evidence. The V1 citizen projection does not
 establish labor permissions, so it adds no original labor-goal proof. Independent

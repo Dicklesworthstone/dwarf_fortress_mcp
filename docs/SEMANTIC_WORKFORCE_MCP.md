@@ -169,8 +169,10 @@ possible after a verified assignment without enabling more labor mutations.
 Close and explicitly reopen if a different mode is needed.
 
 Call `fortress.observe(session_id=...)` to acquire a complete paused V1 citizen
-observation. The development runtime bounds the complete roster at 128 citizens;
-it does not silently truncate a larger fortress. Retain its observation seal.
+observation. The development runtime bounds the complete roster at 200 citizens;
+native transport pages contain at most 128 citizens. Every page must describe
+the same paused world, tick and complete domain before publication. An oversized
+or inconsistent observation refuses as a whole. Retain its observation seal.
 The response identifies canonical citizens; additional bounded citizen pages
 come from that exact retained observation:
 

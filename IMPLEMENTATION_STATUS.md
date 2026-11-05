@@ -1,5 +1,34 @@
 # Implementation Status
 
+## 2026-11-05 — Complete semantic control rosters through 200 citizens
+
+Both semantic native shells, including the workforce acquisition reused by the
+combined production host, now acquire complete rosters of up to 200 citizens.
+The shared reader retains 128-citizen native pages, original source pins,
+shrinking deadlines and per-page reservations. An oversized domain or any
+cross-page source, tick, world, count, identity or paused-state inconsistency
+refuses the entire observation. Canonical capsule identity is unchanged by
+pagination. Foreground workforce mutations remain limited to 32 citizens.
+
+Preparation and commit use the same 200-citizen ceiling through the real
+CitizenWorkforceEvidenceOwner. Its worst-case refresh reserves 16,138,240 bytes
+within the unchanged 16 MiB allowance. A failed refresh withdraws prior routing
+evidence; neither partial rosters nor a larger configured maximum can substitute
+for the exact original complete domain. No native protocol or admission changes.
+
+Latest-nightly execution passes 96 actual-source MCP component cases, including
+eight new acquisition/revalidation cases, with zero failures or ignored cases.
+Both actual native Rust shells and the shared helper pass warning-denied Clippy;
+the workforce production runtime is compiled separately because its unit-test
+tree requires unavailable FastMCP transport helpers. All six feature source and
+contract files were stable across this final window (aggregate SHA-256
+d9f71a01e0b782187868fe5d77c1eab618b9ac4c27ec73b59963f783181a0939).
+The session now has 360 passing focused cases: 199 core/world/intent, 65 adapter
+and 96 MCP/helper. Injected page sources exercise the actual complete reader and
+evidence owner; no TCP/native plugin, public stdio, actual larger fortress,
+complete-workspace or compatibility/admission qualification is claimed.
+Bead `df-dfhack-bridge-plane-c-pic.4.2` remains in progress for its full acceptance.
+
 ## 2026-11-05 — Explicit inventory goals survive finite-order retirement
 
 The standalone semantic work-order development host now accepts an explicit

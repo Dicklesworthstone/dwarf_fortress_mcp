@@ -3,11 +3,12 @@
 use super::identity::{CapsuleStore, create_private_capsule, open_private_capsule};
 use super::policy::SourceAcceptance;
 use super::*;
+use crate::semantic_citizens;
 use dfmcp_adapter::build_placement::journal::private_file::PrivateBuildFile;
 use dfmcp_adapter::live_connect::LiveConnectionConfig;
 use dfmcp_adapter::plan_archive::{create_private_plan_archive, open_private_plan_archive};
 use dfmcp_adapter::semantic_workforce::evidence_owner::{
-    CitizenEvidenceLimits, CitizenEvidenceSource, CitizenRpcSource, CitizenWorkforceEvidenceOwner,
+    CitizenEvidenceSource, CitizenRpcSource, CitizenWorkforceEvidenceOwner,
 };
 use dfmcp_adapter::semantic_workforce::{
     open_private_association_store, open_private_goal_history_store,
@@ -20,10 +21,7 @@ use dfmcp_adapter::workforce_control::rpc::{
     WorkforceManifest, WorkforceRpcClient, WorkforceSource, WorkforceTcpStream,
 };
 use dfmcp_adapter::workforce_control::{AssignmentEffect, AssignmentPlan, WorkforceCapture};
-use dfmcp_adapter::{
-    BridgeCredentials, BridgeManifest, LiveObservationSource, ObservationPage,
-    parse_loopback_endpoint, read_complete_observation_bounded,
-};
+use dfmcp_adapter::{BridgeCredentials, parse_loopback_endpoint};
 use dfmcp_world::EvidencePolicy;
 use serde::Deserialize;
 use std::net::{SocketAddr, TcpStream};
@@ -516,31 +514,6 @@ impl NativeRuntime {
     }
 }
 
-struct Pages<'a> {
-    source: &'a mut CitizenRpcSource<TcpStream>,
-    work: &'a mut Work,
-    manifest: BridgeManifest,
-}
-impl LiveObservationSource for Pages<'_> {
-    fn bridge_manifest(&self) -> BridgeManifest {
-        self.manifest.clone()
-    }
-    fn read_observation_page(
-        &mut self,
-        offset: u32,
-        maximum: u32,
-        names: bool,
-    ) -> Result<ObservationPage> {
-        let c = self.work.reserve(1024 * 1024)?;
-        let page = self.source.read_page(offset, maximum, names, &c)?;
-        if self.source.bridge_manifest() != self.manifest {
-            return Err(denied(
-                "citizen incarnation changed during complete acquisition",
-            ));
-        }
-        Ok(page)
-    }
-}
 impl Shell for NativeShell {
     type Journal = PrivateWorkforceFile;
     type Association = PrivateBuildFile;
@@ -653,13 +626,7 @@ impl Shell for NativeShell {
         self.config.current()?;
         let mut work = Work::new(c)?;
         let mut source = self.config.citizens(&work.reserve(2 * MIB)?)?;
-        let manifest = source.bridge_manifest();
-        let mut pages = Pages {
-            source: &mut source,
-            work: &mut work,
-            manifest,
-        };
-        let capsule = read_complete_observation_bounded(&mut pages, 128, false, 128)?;
+        let capsule = semantic_citizens::read_complete(&mut source, |bytes| work.reserve(bytes))?;
         drop(source);
         work.current()?;
         self.config.current()?;
@@ -687,10 +654,7 @@ impl Shell for NativeShell {
         });
         CitizenWorkforceEvidenceOwner::new::<CitizenRpcSource<TcpStream>>(
             capsule,
-            CitizenEvidenceLimits {
-                page_size: 128,
-                max_citizens: 128,
-            },
+            semantic_citizens::LIMITS,
             factory,
             authorizer,
             c,

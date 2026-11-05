@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-11-05 — Complete citizen rosters beyond a single native page
+
+- Support complete rosters through 200 citizens in both semantic native shells
+  and the combined host's reused workforce acquisition, with unchanged 128-row
+  transport pages and 32-citizen mutation selection.
+- Share the complete reader and evidence limits; refuse oversized or incoherent
+  pages without publishing partial state or retaining stale routing evidence.
+- Exercise the actual 200-citizen evidence refresh within its existing 16 MiB
+  reservation, without changing grants, protocols or canonical capsule bytes.
+- Pass all eight new roster cases and the existing 88 MCP component cases, plus
+  warning-denied Clippy for both actual native Rust shells. The focused session
+  total is 360; full transport, native/game and admission proof remain pending.
+
 ## 2026-11-05 — Original observed-inventory objectives through production MCP
 
 - Add a closed, recipe-matched observed inventory minimum to the original finite

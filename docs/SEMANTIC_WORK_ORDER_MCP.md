@@ -492,9 +492,11 @@ ticks and a separate 1–60000 millisecond stop bound. Those native limits are
 checked at callback opportunities, so actual progress can overshoot; the
 receipt reports observed tick overshoot. Other controllers can also affect the
 game clock and are not globally fenced by this runtime.
-Complete native acquisition is capped at 128 citizens, 1024 jobs, 1024
+Complete native acquisition is capped at 200 citizens, 1024 jobs, 1024
 buildings and 2046 items; an oversized observation refuses instead of silently
-truncating its domain.
+truncating its domain. Citizen acquisition uses native pages of at most 128 and
+publishes only a complete coherent paused roster. Original-roster revalidation
+retains its existing 16 MiB allowance.
 
 The maximum byte-work allowance is 2 GiB. This is a logical upper bound covering
 repeated complete custody verification and all potential history appends, not

@@ -64,6 +64,9 @@ retain the frozen eleven-tool waist; this profile's wire names are underscores.
 2. Observe the paused canonical citizen roster. Retain its `observation.seal`
    and canonical citizen `entity_id` values; native unit IDs are not substitutes.
    Current source also returns `observation.workforce_choices`, described below.
+   The complete roster is bounded at 200 citizens, acquired in native pages of
+   at most 128. Oversized or inconsistent captures refuse as a whole; the
+   selected workforce domain remains bounded at 32 citizens.
 3. Plan a closed JSON request containing `expected_observation`, `units`,
    `labor`, `enabled`, `recipe`, `amount` and `deadline_tick`. Optional
    `poll_interval_ticks` and `stable_samples` default to 10 and 1. Select

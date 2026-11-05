@@ -55,6 +55,7 @@ mod observation_projection;
 mod output_budget;
 pub mod replay;
 pub mod resources;
+mod semantic_citizens;
 pub mod semantic_dig_runtime;
 pub mod semantic_furniture_runtime;
 mod semantic_work_order_runtime;
