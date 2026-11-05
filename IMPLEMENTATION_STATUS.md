@@ -1,5 +1,34 @@
 # Implementation Status
 
+## 2026-11-05 — Source-qualified entity counts and stack quantities
+
+The core predicate language now supports bounded exact counts and unsigned sums
+across a selected canonical entity-kind domain. Independently complete coverage,
+qualified known selector facts for every member and qualified quantities for
+all matching members are required. Missing, contradictory, stale, future or
+ineligible facts and checked-sum overflow remain Unknown even when a partial
+subtotal exceeds the requested minimum. Counted records and stack units are
+explicitly different quantities.
+
+Append-only predicate tag 12 binds the selector, quantity, comparison and target
+into canonical predicates, query continuations and exact prepared-plan archives.
+Legacy tags and independent fixed archive vectors retain their original bytes.
+Cross-anchor MCP witnesses compare a bounded complete kind census, including
+phantoms, changed selectors and replaced contributors with an unchanged total.
+This supplies the core required by the separately requested inventory objective
+in bead `dfmcp-reality-wiring-proof-4bf.14.5`; public request wiring follows in a
+separate increment.
+
+Executed on nightly 2026-11-05 (rustc 2d20b42b8): 199 focused core/world/intent
+cases pass, including eleven quantity regressions, eighteen archive cases and
+all five lexical search cases. Three actual-source witness cases also pass in
+the isolated MCP component harness. The harness copies package manifests and
+uses the actual source/tests without changing repository dependency pins;
+unavailable FastMCP/Asupersync transport composition is excluded. Scoped rustfmt
+and diff checks pass. These are focused source execution results, not full
+workspace qualification, native/live proof or compatibility admission. The
+owning retirement-evidence bead remains in progress.
+
 ## 2026-11-05 — Workforce choices beyond the default roster and option window
 
 The combined labor-order development host now accepts an optional closed Observe

@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-11-05 — Exact entity quantities in goals and archived predicates
+
+- Add bounded entity counts and unsigned quantity sums with complete-domain,
+  independently qualified evidence and conservative Unknown semantics.
+- Bind the new predicate through canonical bytes, query continuation identity
+  and appended archive tag 12 while preserving legacy vectors.
+- Capture complete kind-domain reads for MCP revalidation, detecting inserted,
+  removed and replaced contributors and selector changes.
+- Pass 199 focused core/world/archive cases and three actual-source witness
+  cases on the November 5 nightly; preserve the full-runtime qualification gap.
+
 ## 2026-11-05 — Select any covered citizen and page workforce choices
 
 - Add a closed optional Observe request for 1–32 canonical citizen IDs and a

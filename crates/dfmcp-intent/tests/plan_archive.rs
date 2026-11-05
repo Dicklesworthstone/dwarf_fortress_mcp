@@ -334,6 +334,101 @@ fn laboratory_room_access_appends_a_lossless_predicate_tag() -> Result<()> {
 }
 
 #[test]
+fn inventory_quantity_roundtrips_exactly_with_original_obligation_and_tag_twelve() -> Result<()> {
+    for quantity_field in [None, Some("stack_size".to_owned())] {
+        for op in [
+            CompareOp::Eq,
+            CompareOp::Ne,
+            CompareOp::Lt,
+            CompareOp::Le,
+            CompareOp::Gt,
+            CompareOp::Ge,
+        ] {
+            let goal = Predicate::EntityQuantity {
+                kind: EntityKind::Item,
+                filter_field: "type_key".into(),
+                filter_value: Value::Text("BED".into()),
+                quantity_field: quantity_field.clone(),
+                op,
+                value: u64::MAX,
+            };
+            let mut plan = make(
+                vec![Action::CreateWorkOrder {
+                    name: "original inventory minimum".into(),
+                    job_token: "CONSTRUCT_BED".into(),
+                    amount: 3,
+                    conditions: Vec::new(),
+                }],
+                goal.clone(),
+                false,
+            );
+            if let Some(obligation) = &mut plan.steps[0].obligation {
+                obligation.terminal = goal;
+            }
+            plan.digest = plan.compute_digest();
+            plan.id = plan.expected_id();
+            let (bytes, _) = roundtrip(&plan)?;
+            let predicate = 12 + 16 + 16 + 64 + 4 + plan.summary.len();
+            assert_eq!(bytes[predicate], 12);
+            assert_eq!(
+                plan.steps[0].obligation.as_ref().map(|o| (
+                    o.deadline_tick,
+                    o.poll_interval_ticks,
+                    o.stable_for_observations
+                )),
+                Some((GameTick(180), 5, 2))
+            );
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn inventory_quantity_archive_preserves_kind_aliases_and_rejects_malformed_optional_fields()
+-> Result<()> {
+    let goal = Predicate::EntityQuantity {
+        kind: EntityKind::Item,
+        filter_field: "type_key".into(),
+        filter_value: Value::Text("BED".into()),
+        quantity_field: Some("stack_size".into()),
+        op: CompareOp::Ge,
+        value: 1,
+    };
+    let ordinary = make(vec![Action::Pause { paused: false }], goal.clone(), false);
+    let mut alias_goal = goal;
+    if let Predicate::EntityQuantity { kind, .. } = &mut alias_goal {
+        *kind = EntityKind::Other("item".into());
+    }
+    let alias = make(vec![Action::Pause { paused: false }], alias_goal, false);
+    let (bytes, seal) = roundtrip(&ordinary)?;
+    let (_, alias_seal) = roundtrip(&alias)?;
+    assert_eq!(ordinary.digest, alias.digest);
+    assert_ne!(seal.object_digest, alias_seal.object_digest);
+    let predicate = 12 + 16 + 16 + 64 + 4 + ordinary.summary.len();
+    // Tag, built-in kind, selector name, tagged text value, optional quantity.
+    let optional = predicate + 1 + 1 + 4 + 8 + 1 + 4 + 3;
+    assert_eq!(bytes[optional], 1);
+    for (offset, patch) in [
+        (optional, vec![2]),
+        (optional + 1, u32::MAX.to_be_bytes().to_vec()),
+        (optional + 1 + 4 + 10, vec![255]),
+    ] {
+        let mut changed = bytes.clone();
+        changed[offset..offset + patch.len()].copy_from_slice(&patch);
+        let (changed, expected) = resigned(&changed, seal.plan_digest);
+        assert!(archive::decode(&changed, expected, ArchiveLimits::default()).is_err());
+    }
+    let mut oversized = ordinary;
+    if let Predicate::EntityQuantity { quantity_field, .. } = &mut oversized.terminal_condition {
+        *quantity_field = Some("x".repeat(257));
+    }
+    assert!(
+        matches!(archive::encode(&oversized, ArchiveLimits::default()), Err(error) if error.code == ErrorCode::BudgetExceeded)
+    );
+    Ok(())
+}
+
+#[test]
 fn laboratory_room_access_archive_rejects_oversized_or_invalid_targets() -> Result<()> {
     let access = Predicate::LaboratoryRoomAccess {
         area: area(),

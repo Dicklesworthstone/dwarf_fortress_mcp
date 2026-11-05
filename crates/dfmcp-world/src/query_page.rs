@@ -41,7 +41,7 @@ pub fn execute_bounded_query(
         .max(1)
         .saturating_add(query.predicate.as_ref().map_or(1, Predicate::complexity));
     let access_work = query.predicate.as_ref().map_or(0, |predicate| {
-        predicate.laboratory_access_work(snapshot.graph.entities.len())
+        predicate.additional_scan_work(snapshot.graph.entities.len())
     });
     if (snapshot.graph.entities.len() as u64)
         .saturating_mul((per_entity as u64).saturating_add(access_work))
@@ -222,6 +222,35 @@ fn encode_predicate(bytes: &mut Vec<u8>, predicate: &Predicate) -> Result<()> {
                 bytes.extend_from_slice(&at.y.to_be_bytes());
                 bytes.extend_from_slice(&at.z.to_be_bytes());
             }
+        }
+        Predicate::EntityQuantity {
+            kind,
+            filter_field,
+            filter_value,
+            quantity_field,
+            op,
+            value,
+        } => {
+            bytes.push(12);
+            encode_entity_kind(bytes, kind)?;
+            put_str(bytes, filter_field);
+            filter_value.encode(bytes);
+            match quantity_field {
+                Some(field) => {
+                    bytes.push(1);
+                    put_str(bytes, field);
+                }
+                None => bytes.push(0),
+            }
+            bytes.push(match op {
+                crate::CompareOp::Eq => 0,
+                crate::CompareOp::Ne => 1,
+                crate::CompareOp::Lt => 2,
+                crate::CompareOp::Le => 3,
+                crate::CompareOp::Gt => 4,
+                crate::CompareOp::Ge => 5,
+            });
+            put_u64(bytes, *value);
         }
     }
     if bytes.len() > MAX_QUERY_IDENTITY_BYTES {

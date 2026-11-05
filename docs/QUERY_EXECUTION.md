@@ -64,6 +64,37 @@ source anchor in its normal Agent Turn. Search results are advisory retrieval
 over the supplied projection. Neither an empty result nor a known value alone
 proves complete-world absence, source authenticity or mutation eligibility.
 
+## Qualified entity quantities
+
+The typed `Predicate::EntityQuantity` counts matching entity records or sums a
+named unsigned quantity field across one canonical entity-kind domain. It uses
+one exact field-equality selector, a comparison operator and an unsigned target.
+For example, `Item` with `type_key == "BED"`, quantity field `stack_size`, and
+`Ge 1` asks whether the observed roster contains at least one BED stack unit.
+Omitting the quantity field counts records, which is a different quantity.
+
+Proof through `PredicateEvidence` requires independently granted **complete**
+coverage of that kind. Every member needs a qualified known selector; every
+matching member needs a qualified known `U64` quantity when summing. Unavailable,
+contradictory, future or ineligible source facts, invalid quantity types and
+checked-sum overflow yield `Unknown`. A qualifying subtotal never bypasses
+missing evidence elsewhere in the domain. An empty complete domain sums to zero;
+an empty incomplete projection does not establish zero.
+
+Canonical kind names determine membership, including reserved-name aliases.
+Combined aggregate work is bounded to 4,000,000 record/field visits before proof
+evaluation. Query execution additionally charges repeated whole-domain scans
+against its existing work limit. These are typed core predicates; a raw
+`WorldSnapshot` query remains advisory and does not itself issue coverage or
+source authority.
+
+Predicate canonicalization, query-bound continuation identity and prepared-plan
+archive encoding use appended tag 12. Existing tags and legacy archive bytes
+remain unchanged. Cross-anchor MCP revalidation records a complete kind-domain
+read: newly inserted entities, changed selectors, quantity changes and replaced
+contributors invalidate it even if the resulting sum is equal. Its bounded
+census refuses oversized worlds conservatively.
+
 ## Evidence
 
 `query_page_tests.rs` covers all four ordering modes, repeated pages, changes in

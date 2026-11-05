@@ -326,6 +326,7 @@ impl<'a> PredicateEvidence<'a> {
     /// Bounds are validated across the entire tree before any short circuit.
     pub fn evaluate(&self, predicate: &Predicate) -> Result<PredicateTruth> {
         predicate.validate_shape()?;
+        predicate.validate_quantity_work(self.snapshot.graph.entities.len())?;
         Ok(self.evaluate_validated(predicate))
     }
 
@@ -446,6 +447,14 @@ impl<'a> PredicateEvidence<'a> {
                     .and_then(|entity| entity.fields.get(field))
                     .and_then(|fact| self.fact_value(fact))
                     .map_or(Unknown, |known| crate::query::compare(known, *op, value))
+            }
+            Predicate::EntityQuantity { kind, .. } => {
+                if !self.entity_absence_complete(Some(kind)) {
+                    return Unknown;
+                }
+                crate::query::entity_quantity_truth(self.snapshot, predicate, |fact| {
+                    self.fact_value(fact)
+                })
             }
             Predicate::EdgeExists { edge_id, kind } => {
                 if *edge_id == EdgeId::NIL {

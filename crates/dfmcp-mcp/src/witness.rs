@@ -34,6 +34,9 @@ pub(crate) struct ReadWitness {
     pause: bool,
     /// Complete building-kind domain, including absence of future occupants.
     building_domain: bool,
+    /// Aggregate predicates read every entity in these canonical kind domains,
+    /// including future members and currently nonmatching selector values.
+    entity_domains: BTreeSet<String>,
     /// Set when some read cannot be bounded; the witness then proves nothing.
     unbounded: bool,
 }
@@ -76,6 +79,9 @@ impl ReadWitness {
             Predicate::LaboratoryRoomAccess { area, .. } => {
                 self.region(*area);
                 self.building_domain = true;
+            }
+            Predicate::EntityQuantity { kind, .. } => {
+                self.entity_domains.insert(kind.as_str().to_owned());
             }
             Predicate::All(children) | Predicate::Any(children) => {
                 for child in children {
@@ -147,6 +153,28 @@ impl ReadWitness {
         if self.pause && base.paused != now.paused {
             return Some(json!({"read": "pause"}));
         }
+        if !self.entity_domains.is_empty() {
+            if base.graph.entities.len() > 65_536 || now.graph.entities.len() > 65_536 {
+                return Some(
+                    json!({"read":"entity_domains", "note":"aggregate census exceeds its bound"}),
+                );
+            }
+            // A single bounded census covers every aggregate kind. Comparing
+            // only matching IDs would miss insertions and selector changes.
+            let before = base
+                .graph
+                .entities
+                .iter()
+                .filter(|(_, entity)| self.entity_domains.contains(entity.kind.as_str()));
+            let after = now
+                .graph
+                .entities
+                .iter()
+                .filter(|(_, entity)| self.entity_domains.contains(entity.kind.as_str()));
+            if before.ne(after) {
+                return Some(json!({"read":"entity_domains", "kinds":self.entity_domains}));
+            }
+        }
         for id in &self.entities {
             if base.graph.entities.get(id) != now.graph.entities.get(id) {
                 return Some(json!({"read": "entity", "entity_id": id.get().to_string()}));
@@ -179,6 +207,10 @@ impl ReadWitness {
         if self.building_domain {
             value["building_domain"] =
                 json!({"kind":"building", "coverage":"complete", "max_entities":65_536});
+        }
+        if !self.entity_domains.is_empty() {
+            value["entity_domains"] = json!({"kinds":self.entity_domains,
+                "coverage":"complete", "max_entities":65_536});
         }
         value
     }
@@ -281,6 +313,97 @@ mod tests {
             json!({
                 "entities":[], "edges":[], "regions":[], "pause":false,
             })
+        );
+    }
+
+    #[test]
+    fn quantity_witness_detects_phantoms_selectors_and_replaced_contributors() {
+        use dfmcp_world::{CompareOp, Fact, FactSource, Value as WorldValue};
+        let mut base = WorldSnapshot::new(
+            FortressId::new(1),
+            GameTick(0),
+            ObservationCursor::ORIGIN,
+            false,
+            WorldGraph::default(),
+        );
+        let item = |id, item_type: &str, kind| EntityRecord {
+            id: EntityId::new(id),
+            generation: 1,
+            revision: 1,
+            kind,
+            label: "item".into(),
+            fields: std::collections::BTreeMap::from([
+                (
+                    "type_key".into(),
+                    Fact::known(
+                        WorldValue::Text(item_type.into()),
+                        GameTick(0),
+                        FactSource::DfhackField("type".into()),
+                        Digest32::of_bytes(b"source"),
+                    ),
+                ),
+                (
+                    "stack_size".into(),
+                    Fact::known(
+                        WorldValue::U64(1),
+                        GameTick(0),
+                        FactSource::DfhackField("stack".into()),
+                        Digest32::of_bytes(b"source"),
+                    ),
+                ),
+            ]),
+        };
+        base.graph
+            .entities
+            .insert(EntityId::new(1), item(1, "BED", EntityKind::Item));
+        base.graph
+            .entities
+            .insert(EntityId::new(2), item(2, "DOOR", EntityKind::Item));
+        base.refresh_hash();
+        let mut witness = ReadWitness::default();
+        witness.predicate(&Predicate::EntityQuantity {
+            kind: EntityKind::Item,
+            filter_field: "type_key".into(),
+            filter_value: WorldValue::Text("BED".into()),
+            quantity_field: Some("stack_size".into()),
+            op: CompareOp::Ge,
+            value: 1,
+        });
+        assert!(witness.first_change(&base, &base).is_none());
+        for kind in [EntityKind::Item, EntityKind::Other("item".into())] {
+            let mut phantom = base.clone();
+            phantom
+                .graph
+                .entities
+                .insert(EntityId::new(3), item(3, "BED", kind));
+            phantom.refresh_hash();
+            assert!(witness.first_change(&base, &phantom).is_some());
+        }
+        let mut selector = base.clone();
+        selector
+            .graph
+            .entities
+            .insert(EntityId::new(2), item(2, "BED", EntityKind::Item));
+        selector.refresh_hash();
+        assert!(witness.first_change(&base, &selector).is_some());
+        let mut replacement = base.clone();
+        replacement.graph.entities.remove(&EntityId::new(1));
+        replacement
+            .graph
+            .entities
+            .insert(EntityId::new(3), item(3, "BED", EntityKind::Item));
+        replacement.refresh_hash();
+        assert!(witness.first_change(&base, &replacement).is_some());
+        let mut unrelated = base.clone();
+        unrelated
+            .graph
+            .entities
+            .insert(EntityId::new(3), item(3, "BED", EntityKind::Unit));
+        unrelated.refresh_hash();
+        assert!(witness.first_change(&base, &unrelated).is_none());
+        assert_eq!(
+            witness.to_json()["entity_domains"]["kinds"],
+            json!(["item"])
         );
     }
 }

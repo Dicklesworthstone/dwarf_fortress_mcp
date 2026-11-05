@@ -14,6 +14,7 @@ const MAX_QUERY_VALUE_NODES: usize = 4_096;
 const MAX_QUERY_VALUE_BYTES: usize = 64 * 1_024;
 const MAX_QUERY_SCAN_ENTITIES: usize = 1_000_000;
 const MAX_QUERY_ACCESS_SCAN_WORK: u64 = 4_000_000;
+const MAX_PREDICATE_QUANTITY_WORK: u64 = 4_000_000;
 /// Total terrain tiles all region predicates in one predicate tree may visit.
 pub const MAX_PREDICATE_REGION_TILES: u64 = 262_144;
 
@@ -63,6 +64,19 @@ pub enum Predicate {
         entry: MapCoord,
         targets: Vec<MapCoord>,
     },
+    /// Count entities of one canonical kind whose known selector field equals
+    /// `filter_value`, or sum their known U64 `quantity_field` values. Evidence
+    /// evaluation requires complete kind coverage and qualified inputs for the
+    /// entire selected domain. Missing inputs and arithmetic overflow are
+    /// unknown, even when the known subtotal already exceeds the threshold.
+    EntityQuantity {
+        kind: EntityKind,
+        filter_field: String,
+        filter_value: Value,
+        quantity_field: Option<String>,
+        op: CompareOp,
+        value: u64,
+    },
 }
 
 impl Predicate {
@@ -98,9 +112,9 @@ impl Predicate {
         }
     }
 
-    /// Additional bounded occupancy/terrain work beyond ordinary node visits.
+    /// Additional bounded aggregate/occupancy work beyond ordinary node visits.
     /// Callers validate the complete predicate shape before estimating work.
-    pub(crate) fn laboratory_access_work(&self, entities: usize) -> u64 {
+    pub(crate) fn additional_scan_work(&self, entities: usize) -> u64 {
         let mut pending = vec![self];
         let mut work = 0u64;
         while let Some(predicate) = pending.pop() {
@@ -114,10 +128,37 @@ impl Predicate {
                         entities,
                     ));
                 }
+                Self::EntityQuantity { .. } => {
+                    work = work.saturating_add((entities as u64).saturating_mul(3));
+                }
                 _ => {}
             }
         }
         work
+    }
+
+    /// Bound every aggregate before Boolean short circuits or native proof.
+    /// Each record can require kind, selector and quantity inspection.
+    pub(crate) fn validate_quantity_work(&self, entities: usize) -> Result<()> {
+        let mut pending = vec![self];
+        let mut work = 0u64;
+        while let Some(predicate) = pending.pop() {
+            match predicate {
+                Self::All(children) | Self::Any(children) => pending.extend(children),
+                Self::Not(child) => pending.push(child),
+                Self::EntityQuantity { .. } => {
+                    work = work.saturating_add((entities as u64).saturating_mul(3));
+                    if work > MAX_PREDICATE_QUANTITY_WORK {
+                        return Err(DfmcpError::new(
+                            ErrorCode::BudgetExceeded,
+                            "entity quantity predicates exceed their combined scan work bound",
+                        ));
+                    }
+                }
+                _ => {}
+            }
+        }
+        Ok(())
     }
 
     #[must_use]
@@ -248,6 +289,35 @@ impl Predicate {
                     put_i32(output, at.y);
                     put_i32(output, at.z);
                 }
+            }
+            Self::EntityQuantity {
+                kind,
+                filter_field,
+                filter_value,
+                quantity_field,
+                op,
+                value,
+            } => {
+                output.push(12);
+                kind.encode(output);
+                put_str(output, filter_field);
+                filter_value.encode(output);
+                match quantity_field {
+                    Some(field) => {
+                        output.push(1);
+                        put_str(output, field);
+                    }
+                    None => output.push(0),
+                }
+                output.push(match op {
+                    CompareOp::Eq => 0,
+                    CompareOp::Ne => 1,
+                    CompareOp::Lt => 2,
+                    CompareOp::Le => 3,
+                    CompareOp::Gt => 4,
+                    CompareOp::Ge => 5,
+                });
+                put_u64(output, *value);
             }
         }
     }
@@ -385,6 +455,9 @@ fn evaluate_truth(
             targets,
         } => crate::laboratory_room_access_truth(snapshot, *area, *entry, targets)
             .map_or(PredicateTruth::Unknown, |truth| truth),
+        Predicate::EntityQuantity { .. } => {
+            entity_quantity_truth(snapshot, predicate, Fact::known_value)
+        }
         Predicate::All(predicates) => {
             let mut result = PredicateTruth::True;
             for predicate in predicates {
@@ -413,7 +486,11 @@ fn evaluate_truth(
 
 #[must_use]
 pub fn evaluate(snapshot: &WorldSnapshot, predicate: &Predicate) -> bool {
-    predicate.validate_shape().is_ok() && evaluate_truth(snapshot, None, predicate).is_true()
+    predicate.validate_shape().is_ok()
+        && predicate
+            .validate_quantity_work(snapshot.graph.entities.len())
+            .is_ok()
+        && evaluate_truth(snapshot, None, predicate).is_true()
 }
 
 /// Evaluate `predicate` with `candidate` standing in for every unanchored
@@ -434,10 +511,64 @@ pub fn evaluate_truth_for(
     candidate: EntityId,
     predicate: &Predicate,
 ) -> PredicateTruth {
-    if predicate.validate_shape().is_err() {
+    if predicate.validate_shape().is_err()
+        || predicate
+            .validate_quantity_work(snapshot.graph.entities.len())
+            .is_err()
+    {
         return PredicateTruth::Unknown;
     }
     evaluate_truth(snapshot, Some(candidate), predicate)
+}
+
+/// Shared arithmetic, with fact eligibility supplied by the caller. A plain
+/// snapshot query is advisory; `PredicateEvidence` separately requires complete
+/// kind coverage and supplies its source-qualified fact accessor.
+pub(crate) fn entity_quantity_truth<'a>(
+    snapshot: &'a WorldSnapshot,
+    predicate: &Predicate,
+    mut fact_value: impl FnMut(&'a Fact) -> Option<&'a Value>,
+) -> PredicateTruth {
+    let Predicate::EntityQuantity {
+        kind,
+        filter_field,
+        filter_value,
+        quantity_field,
+        op,
+        value,
+    } = predicate
+    else {
+        return PredicateTruth::Unknown;
+    };
+    let mut total = 0u64;
+    for entity in snapshot.graph.entities.values() {
+        // Canonical snapshots encode kind names, including reserved-name
+        // aliases. Byte-identical worlds must produce identical aggregate truth.
+        if entity.kind.as_str() != kind.as_str() {
+            continue;
+        }
+        if entity.id == EntityId::NIL {
+            return PredicateTruth::Unknown;
+        }
+        let Some(selector) = entity.fields.get(filter_field).and_then(&mut fact_value) else {
+            return PredicateTruth::Unknown;
+        };
+        if selector != filter_value {
+            continue;
+        }
+        let quantity = match quantity_field {
+            None => 1,
+            Some(field) => match entity.fields.get(field).and_then(&mut fact_value) {
+                Some(Value::U64(quantity)) => *quantity,
+                _ => return PredicateTruth::Unknown,
+            },
+        };
+        let Some(next) = total.checked_add(quantity) else {
+            return PredicateTruth::Unknown;
+        };
+        total = next;
+    }
+    compare(&Value::U64(total), *op, &Value::U64(*value))
 }
 
 pub(crate) fn compare(left: &Value, op: CompareOp, right: &Value) -> PredicateTruth {
@@ -625,6 +756,39 @@ fn validate_predicate_shape(root: &Predicate) -> Result<()> {
                 ));
             }
             Predicate::FieldCompare { value, .. } => validate_query_value(value)?,
+            Predicate::EntityQuantity {
+                kind,
+                filter_field,
+                filter_value,
+                quantity_field,
+                ..
+            } => {
+                for (name, bound) in std::iter::once((kind.as_str(), MAX_QUERY_KIND_BYTES))
+                    .chain(std::iter::once((
+                        filter_field.as_str(),
+                        MAX_QUERY_FIELD_BYTES,
+                    )))
+                    .chain(
+                        quantity_field
+                            .as_deref()
+                            .map(|field| (field, MAX_QUERY_FIELD_BYTES)),
+                    )
+                {
+                    if name.len() > bound {
+                        return Err(DfmcpError::new(
+                            ErrorCode::BudgetExceeded,
+                            "entity quantity kind or field exceeds its explicit byte bound",
+                        ));
+                    }
+                    if name.is_empty() || name.chars().any(char::is_control) {
+                        return Err(DfmcpError::new(
+                            ErrorCode::InvalidRequest,
+                            "entity quantity kind and fields require nonempty non-control names",
+                        ));
+                    }
+                }
+                validate_query_value(filter_value)?;
+            }
             Predicate::RegionTerrain { area, .. } => {
                 let tiles = crate::terrain::validate_region(*area)?;
                 region_tiles = region_tiles.saturating_add(tiles);
@@ -763,11 +927,10 @@ pub fn execute_bounded_query(
             "query snapshot exceeds the implementation scan safety bound",
         ));
     }
-    // A global access predicate is reevaluated for each candidate. Its complete
-    // building census and terrain traversal must not hide behind a single
-    // ordinary predicate-node charge in this direct reference entry point.
+    // Global quantity/access predicates are reevaluated for each candidate.
+    // Their complete domain scans must not hide behind one ordinary node charge.
     if let Some(predicate) = &query.predicate {
-        let access_work = predicate.laboratory_access_work(snapshot.graph.entities.len());
+        let access_work = predicate.additional_scan_work(snapshot.graph.entities.len());
         let row_work = (query.kinds.len().max(1) as u64)
             .saturating_add(predicate.complexity() as u64)
             .saturating_add(access_work);
@@ -777,7 +940,7 @@ pub fn execute_bounded_query(
         {
             return Err(DfmcpError::new(
                 ErrorCode::BudgetExceeded,
-                "query laboratory access work exceeds the conservative operation budget",
+                "query aggregate/access work exceeds the conservative operation budget",
             ));
         }
     }

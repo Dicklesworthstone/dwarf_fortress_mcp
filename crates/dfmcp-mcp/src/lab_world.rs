@@ -896,6 +896,18 @@ pub(crate) fn predicate_json(predicate: &Predicate) -> Json {
             "op": op_name(*op),
             "value": value_json(value),
         }}),
+        Predicate::EntityQuantity {
+            kind,
+            filter_field,
+            filter_value,
+            quantity_field,
+            op,
+            value,
+        } => json!({"entity_quantity": {
+            "kind":kind.as_str(), "filter_field":filter_field,
+            "filter_value":value_json(filter_value), "quantity_field":quantity_field,
+            "op":op_name(*op), "value":value,
+        }}),
         Predicate::EdgeExists { edge_id, kind } => json!({"edge_exists": {
             "edge_id": edge_id.get().to_string(),
             "kind": kind.as_ref().map(|kind| format!("{kind:?}")),

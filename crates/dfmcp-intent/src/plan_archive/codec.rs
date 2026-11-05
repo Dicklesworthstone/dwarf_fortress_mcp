@@ -307,6 +307,25 @@ impl<F: FnMut() -> Result<()>> Writer<'_, F> {
                     self.coord(*target)?;
                 }
             }
+            Predicate::EntityQuantity {
+                kind,
+                filter_field,
+                filter_value,
+                quantity_field,
+                op,
+                value,
+            } => {
+                self.byte(12)?;
+                self.entity_kind(kind)?;
+                self.text(filter_field, 256)?;
+                self.value(filter_value, depth + 1)?;
+                self.boolean(quantity_field.is_some())?;
+                if let Some(field) = quantity_field {
+                    self.text(field, 256)?;
+                }
+                self.compare_op(*op)?;
+                self.u64(*value)?;
+            }
         }
         Ok(())
     }
@@ -626,6 +645,24 @@ impl<F: FnMut() -> Result<()>> Reader<'_, '_, F> {
                     area,
                     entry,
                     targets,
+                }
+            }
+            12 => {
+                let kind = self.entity_kind()?;
+                let filter_field = self.text(256)?;
+                let filter_value = self.value(depth + 1)?;
+                let quantity_field = if self.boolean()? {
+                    Some(self.text(256)?)
+                } else {
+                    None
+                };
+                Predicate::EntityQuantity {
+                    kind,
+                    filter_field,
+                    filter_value,
+                    quantity_field,
+                    op: self.compare_op()?,
+                    value: self.u64()?,
                 }
             }
             _ => return Err(invalid("unknown archived predicate")),
