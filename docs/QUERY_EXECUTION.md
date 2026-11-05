@@ -38,6 +38,32 @@ Predicate shape/value limits remain in force. Query identity encoding additional
 bounds aggregate bytes to 256 KiB and nested kind names to 128 bytes. No predicate
 is weakened, normalized to true, or partially evaluated to evade a budget refusal.
 
+## Laboratory lexical retrieval
+
+The laboratory's existing `fortress_query` mode
+`{"mode":"search","text":"building","limit":5}` uses the bounded in-memory
+`FrankenSearchEngine` lexical prototype. This is not an owned FrankenSearch
+integration; roadmap bead `dfmcp-reality-wiring-proof-4bf.9` remains open.
+
+Entity documents include their labels, canonical kind names, and only field
+values accepted by `Fact::known_value()`. Legacy known values and consistent
+explicit `Known` values remain searchable. Absent, unknown, unsupported, omitted,
+redacted, stale and contradictory known-value records contribute neither field
+names nor compatibility values to matches, relevance scores or snippets. A
+label or kind can still match an entity whose fields are unavailable. Retained
+event summaries and values keep their existing lexical representation.
+
+Each snapshot indexing operation builds a complete bounded replacement before
+publishing it. Reindexing after a fact becomes unavailable withdraws its old
+terms. Equal scores retain canonical snapshot record order: ascending entity
+identity, then ascending retained event identity. The scorer and existing count,
+byte, token, query and result limits are unchanged.
+
+The public laboratory route rechecks current Query authority and names the
+source anchor in its normal Agent Turn. Search results are advisory retrieval
+over the supplied projection. Neither an empty result nor a known value alone
+proves complete-world absence, source authenticity or mutation eligibility.
+
 ## Evidence
 
 `query_page_tests.rs` covers all four ordering modes, repeated pages, changes in
@@ -48,3 +74,11 @@ also resumes a returned bound cursor.
 
 These additions are source implementation and regression tests, not live-bridge
 admission, runtime qualification, or proof of a successful Rust test run.
+
+The lexical regression additions in `dfmcp-world/tests/search_tests.rs`
+exercise every unavailable/inconsistent presence, positive known values and
+events, kind discovery, deterministic ties and withdrawal on reindexing.
+`lexical_search_mcp_tests.rs` exercises the actual public laboratory
+`fortress_query` path with a canonical fixture, current grants, Agent Turn
+anchors and a later presence change. These are source regressions; Rust
+execution and exact-source qualification remain pending for this increment.

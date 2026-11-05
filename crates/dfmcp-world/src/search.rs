@@ -20,7 +20,7 @@ const MAX_SEARCH_TOKENS: usize = 4_000_000;
 const MAX_SEARCH_QUERY_BYTES: usize = 4_096;
 const MAX_SEARCH_RESULTS: usize = 1_024;
 
-/// A ranked search match from the FrankenSearch engine.
+/// A ranked match from the deterministic in-memory lexical index.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SearchHit {
     pub entity_id: Option<EntityId>,
@@ -164,12 +164,23 @@ impl FrankenSearchEngine {
         }
         let mut replacement = Self::new();
         for (id, entity) in &snapshot.graph.entities {
+            // Compatibility values may survive redaction, omission or expiry.
+            // Apply the same presence boundary as canonical query projections
+            // before these bytes can affect either ranking or snippets.
             let facts_text: Vec<String> = entity
                 .fields
                 .iter()
-                .map(|(name, fact)| format!("{}: {:?}", name, fact.value))
+                .filter_map(|(name, fact)| {
+                    fact.known_value()
+                        .map(|value| format!("{name}: {value:?}"))
+                })
                 .collect();
-            let body = format!("{} {}", entity.label, facts_text.join(" "));
+            let body = format!(
+                "{} {} {}",
+                entity.label,
+                entity.kind.as_str(),
+                facts_text.join(" ")
+            );
             replacement.index_document(Some(*id), None, format!("Entity {:?}", id), body)?;
         }
 

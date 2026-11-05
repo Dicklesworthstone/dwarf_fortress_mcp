@@ -149,6 +149,9 @@ pub(crate) fn test_serial() -> std::sync::MutexGuard<'static, ()> {
 }
 
 #[cfg(test)]
+mod lexical_search_mcp_tests;
+
+#[cfg(test)]
 mod runtime_entry_tests {
     use super::run_with_runtime_cx;
     use asupersync::{Cx, cx::cap, runtime::SpawnError};

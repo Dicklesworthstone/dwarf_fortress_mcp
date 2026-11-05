@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-11-05 — Presence-aware lexical search and kind discovery
+
+- Exclude unavailable or contradictory fact compatibility values and their
+  field names from lexical matches, snippets and relevance calculations.
+- Include canonical entity kinds in the existing bounded search document,
+  preserving known values, retained events and deterministic result ordering.
+- Add four world regressions and two public query-route regressions, including
+  current Query authority, exact anchors and later known-to-redacted withdrawal.
+- Record source review only: compilation, formatting, executable regressions
+  and full verification/qualification could not run without an execution
+  environment. The owning FrankenSearch integration bead remains open.
+
 ## 2026-11-03 — Real control chosen through public workforce observations
 
 - Exercise exact `a515efb` / executable `0e514de8…` with fresh Terra medium

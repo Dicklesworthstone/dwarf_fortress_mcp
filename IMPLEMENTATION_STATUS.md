@@ -1,5 +1,26 @@
 # Implementation Status
 
+## 2026-11-05 — Lexical search respects fact availability
+
+The existing public laboratory search route now indexes entity fields only
+through `Fact::known_value()`. Absent, unknown, unsupported, omitted, redacted,
+stale and contradictory Known records no longer contribute retained compatibility
+values or field names to matches, snippets or relevance scores. Entity kind names
+are now searchable as the existing public contract promises. Known values,
+retained events, deterministic ties and bounded atomic index replacement remain.
+
+Four world regressions and two public `agent_facade::fortress_query` regressions
+cover these exclusions, positive known values, kind retrieval, current anchors,
+Query-grant revocation and withdrawal after a later presence change. The changes
+were reviewed against the existing source types and call chain through GitHub.
+No usable execution environment was available: Rust compilation, rustfmt, the
+new tests, `scripts/verify.sh` and `scripts/qualify_local.sh` were not run.
+This is source implementation, not execution or qualification evidence.
+
+Owning bead `dfmcp-reality-wiring-proof-4bf.9` remains open. This repairs the
+existing lexical baseline; it does not integrate owned FrankenSearch, change
+native protocols or establish live compatibility/admission.
+
 ## Latest combined development trial: public choices and two real effects
 
 Exact source `a515efb44ed64097a4fc080100aa471e12698549`, debug executable
