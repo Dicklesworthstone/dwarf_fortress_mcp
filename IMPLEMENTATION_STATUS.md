@@ -1,5 +1,34 @@
 # Implementation Status
 
+## 2026-11-05 — Monitor a selected production goal without replacing its parent
+
+The concrete labor/order executor now owns a durable selected-work-order goal
+monitor. It retains the complete original parent, archive, actual StepId/key,
+paired native review, verified insertion and historical predecessor custody.
+Fresh qualified progress and operations captures evaluate the selected original
+postconditions/obligation while reporting the whole parent terminal separately.
+Inventory success after order retirement cannot prove current labor, physical
+completion or order attribution, and never resolves uncertain insertion.
+
+The selected wrapper reuses the existing bounded raw history and replay engine.
+Original timing and first achievement survive recovery; current proof and
+unfinished stability reset. Replay and live policy callbacks recheck predecessor
+custody, and failures withdraw current evidence without renewing deadlines.
+Existing public one-step history/open/poll paths remain strict, including refusal
+before I/O when passed a multi-step selection. Legacy bytes remain unchanged.
+
+Final focused nightly execution passes all 23 live-production tests, including
+eight new selected-goal regressions, and all 65 standalone work-order integration
+cases. The 634-file input inventory stayed unchanged through both runs
+(SHA-256 f4ebf80f6e8ae2688a9a4bc92dba3d028d3077febd510ec75ce3d7c46a8696a2).
+The focused adapter mirror preserves production code and selected test bodies,
+excluding 147 unrelated test-module gates in 134 files to fit the shared memory
+limit. An earlier all-unit-test compilation was killed by the environment after
+a test-only enum mismatch was reported and then corrected. No full workspace,
+FastMCP, native DFHack, live-fortress or admission qualification is claimed.
+Public combined-runtime wiring follows separately; bead
+`df-dfhack-bridge-plane-c-pic.4` remains in progress for broader acceptance.
+
 ## 2026-11-05 — Complete semantic control rosters through 200 citizens
 
 Both semantic native shells, including the workforce acquisition reused by the

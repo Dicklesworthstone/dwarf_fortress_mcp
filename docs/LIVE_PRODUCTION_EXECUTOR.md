@@ -89,6 +89,34 @@ produced items, physical quiescence or the complete original goal. The combined
 owner never reports original-goal completion from all native receipts being
 present.
 
+## Selected original production goals
+
+After the exact original work-order insertion is verified, the executor can
+open a separate `SelectedWorkOrderGoalMonitor` and poll it through
+`poll_selected_order_goal`. This exclusive wrapper keeps the complete original
+parent and archive seal, actual selected StepId, original key, native review,
+insertion receipt and historical labor dependencies together. The mutable family
+sessions and inner monitor remain private. Legacy public one-step monitor and
+history APIs still refuse a selected multi-step review before source contact.
+
+Each sample evaluates the selected step's original postconditions and temporal
+obligation together. The complete parent's terminal predicate is evaluated
+separately. A true inventory objective cannot substitute historical labor
+readback for current labor evidence or establish the whole parent's goal. An
+explicit recipe-matched `observed_inventory_minimum` can remain true after the
+finite native order retires; existing and unrelated matching items count. This
+proves neither material, eligibility nor causal production by that order.
+
+The existing bounded durable history stores raw source captures and publication
+boundaries under the exact selected identity. Replay reissues independently
+accepted source policy, preserves first achievement and terminal history, and
+withdraws current proof and unfinished stability. Original deadlines, cadence
+and stability are never renewed. Failed outer publication can invalidate the
+current sample without additional I/O; the next admitted poll persists the
+interruption. Predecessor custody is checked around replay and every live policy
+callback, with a final complete-family verification before success is returned.
+A missing, uncertain or replaced original insertion cannot start this monitor.
+
 ## Recovery and integration boundary
 
 Use this executor with the durable coordinator described in

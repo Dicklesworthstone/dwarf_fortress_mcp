@@ -2,7 +2,8 @@
 //! Recognition chooses a source-policy contract; it grants no source authority
 //! and does not attribute observed inventory to the manager order.
 
-use dfmcp_intent::{Action, PreparedPlan};
+use dfmcp_core::StepId;
+use dfmcp_intent::{Action, PlanStep, PreparedPlan};
 use dfmcp_world::{CompareOp, EntityKind, Predicate, Value};
 
 /// An explicitly selected minimum of observed stack units of one furniture type.
@@ -23,6 +24,19 @@ impl ObservedInventoryObjective {
     pub fn from_plan(plan: &PreparedPlan) -> Option<Self> {
         super::original(plan).ok()?;
         let step = plan.steps.first()?;
+        Self::from_step(step, &plan.terminal_condition)
+    }
+
+    /// Recognize a selected production step without slicing or resealing its
+    /// complete parent. This proves only the step's retained inventory objective;
+    /// the parent terminal and other steps still require their own evidence.
+    pub fn from_selected_plan(plan: &PreparedPlan, step_id: StepId) -> Option<Self> {
+        super::selected_original(plan, step_id).ok()?;
+        let step = super::selected_step(plan, step_id).ok()?;
+        Self::from_step(step, &step.obligation.as_ref()?.terminal)
+    }
+
+    fn from_step(step: &PlanStep, terminal: &Predicate) -> Option<Self> {
         let Action::CreateWorkOrder { job_token, .. } = &step.action else {
             return None;
         };
@@ -40,7 +54,7 @@ impl ObservedInventoryObjective {
             quantity_field: Some(quantity_field),
             op: CompareOp::Ge,
             value,
-        } = &plan.terminal_condition
+        } = terminal
         else {
             return None;
         };
@@ -53,8 +67,8 @@ impl ObservedInventoryObjective {
         }
         let obligation = step.obligation.as_ref()?;
         if obligation.failure.is_some()
-            || obligation.terminal.normalized() != plan.terminal_condition
-            || Predicate::All(step.postconditions.clone()).normalized() != plan.terminal_condition
+            || obligation.terminal.normalized() != *terminal
+            || Predicate::All(step.postconditions.clone()).normalized() != *terminal
         {
             return None;
         }

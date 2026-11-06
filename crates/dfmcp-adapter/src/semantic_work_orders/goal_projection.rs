@@ -136,7 +136,7 @@ impl WorkOrderGoalProjection {
                 "complete original-goal operations projection exceeds its bounded domain",
             ));
         }
-        let order_entity = created_entity_id(&review.original.steps[0].idempotency_key, 0);
+        let order_entity = created_entity_id(&review.selected_step().idempotency_key, 0);
         if graph.entities.contains_key(&order_entity) {
             return Err(error(
                 ErrorCode::Conflict,

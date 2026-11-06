@@ -453,6 +453,27 @@ pub fn open_private_goal_history_store(
     read_only: bool,
     context: &OperationContext,
 ) -> Result<PrivateGoalHistoryStore> {
+    super::super::original(&review.original)?;
+    open_private_selected_goal_history_store(
+        path,
+        native_journal,
+        review,
+        initialize,
+        read_only,
+        context,
+    )
+}
+
+/// Selected reviews stay private to the combined owner; accepting them here
+/// must not widen the public one-step history constructor.
+pub(crate) fn open_private_selected_goal_history_store(
+    path: &Path,
+    native_journal: Digest32,
+    review: &SemanticWorkOrderReview,
+    initialize: bool,
+    read_only: bool,
+    context: &OperationContext,
+) -> Result<PrivateGoalHistoryStore> {
     validate_binding(native_journal, review, context)?;
     if initialize && read_only {
         return Err(error(
@@ -477,7 +498,7 @@ pub fn open_private_goal_history_store(
     if created != initialize {
         return Err(custody());
     }
-    GoalHistoryStore::open(
+    GoalHistoryStore::open_selected(
         storage,
         native_journal,
         review,
@@ -496,7 +517,7 @@ fn validate_binding(
     let mut current = c.clone();
     current.anchor.tick = current.anchor.tick.max(review.original.anchor.tick);
     current.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
-    super::super::original(&review.original)?;
+    super::super::validate_review_original(&review.original, review.step)?;
     if native == Digest32::ZERO
         || review.seal != review.association.seal(native)
         || review.association.semantic != review.original.digest
@@ -504,8 +525,8 @@ fn validate_binding(
         || review.association.native != review.native.digest()
         || review.association.witness != review.native.observation().witness()
         || review.association.key != review.native.key()
-        || review.association.key != review.original.steps[0].idempotency_key
-        || review.association.step != dfmcp_core::StepId::ZERO
+        || review.association.key != review.selected_step().idempotency_key
+        || review.association.step != review.step
         || review.association.source == Digest32::ZERO
         || c.anchor.fortress_id != review.original.anchor.fortress_id
         || c.anchor.cursor.epoch != review.original.anchor.cursor.epoch
@@ -517,6 +538,18 @@ fn validate_binding(
 
 impl<S: EffectJournalStorage> GoalHistoryStore<S> {
     pub fn open(
+        storage: S,
+        native: Digest32,
+        review: &SemanticWorkOrderReview,
+        initialize: bool,
+        read_only: bool,
+        context: &OperationContext,
+    ) -> Result<Self> {
+        super::super::original(&review.original)?;
+        Self::open_selected(storage, native, review, initialize, read_only, context)
+    }
+
+    pub(crate) fn open_selected(
         mut storage: S,
         native: Digest32,
         review: &SemanticWorkOrderReview,

@@ -26,11 +26,18 @@ use super::{
 };
 
 mod store;
+pub(crate) use store::open_private_selected_goal_history_store;
 use store::{Event, MAX_EVENT_BYTES, MAX_POLL_BYTES, MAX_POLL_EVENTS, policy_fingerprint};
 pub use store::{
     GoalHistoryStore, MAX_GOAL_HISTORY_BYTES, MAX_GOAL_HISTORY_EVENTS, PrivateGoalHistoryStore,
     open_private_goal_history_store,
 };
+
+#[derive(Clone, Copy)]
+enum GoalScope {
+    Original,
+    Selected,
+}
 
 /// One exact proof owner and its exclusively held history. Neither can be cloned
 /// or detached to branch around a contradiction or an ambiguous publication.
@@ -312,10 +319,73 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage, N: WorkOrderSource>
     /// fences fresh polling because an unrecorded source reset cannot be ruled out.
     pub fn begin_durable_goal_monitor<H, A>(
         &mut self,
+        history: GoalHistoryStore<H>,
+        seal: Digest32,
+        context: &OperationContext,
+        authorize_history: A,
+    ) -> Result<DurableWorkOrderGoalMonitor<H>>
+    where
+        H: EffectJournalStorage,
+        A: FnMut(&WorkOrderGoalProjection, &OperationContext) -> Result<EvidencePolicy>,
+    {
+        self.begin_goal_history(
+            history,
+            seal,
+            context,
+            authorize_history,
+            GoalScope::Original,
+        )
+    }
+
+    /// The combined executor supplies the storage and retains the whole parent.
+    /// No selected monitor or selected history can escape into a legacy public
+    /// constructor that promises one original work-order goal.
+    pub(crate) fn begin_selected_goal_history<H, O, A>(
+        &mut self,
+        seal: Digest32,
+        context: &OperationContext,
+        open_history: O,
+        authorize_history: A,
+    ) -> Result<DurableWorkOrderGoalMonitor<H>>
+    where
+        H: EffectJournalStorage,
+        O: FnOnce(
+            Digest32,
+            &super::SemanticWorkOrderReview,
+            &OperationContext,
+        ) -> Result<GoalHistoryStore<H>>,
+        A: FnMut(&WorkOrderGoalProjection, &OperationContext) -> Result<EvidencePolicy>,
+    {
+        let mut call = Call::new(context)?;
+        self.floor.authority(&mut call)?;
+        let (summary, _) = self.view(&mut call)?;
+        let review = self.attached(seal)?;
+        self.exact(&review)?;
+        super::selected_original(&review.original, review.step)?;
+        authorize(review.original.anchor, &call.current()?)?;
+        // Covers the bounded history reader, its full verification and the
+        // private descriptor shell without replenishing the outer allowance.
+        let history = open_history(
+            summary.journal_id,
+            &review,
+            &call.reserve(8 * MAX_GOAL_HISTORY_BYTES as u64 + LOCAL_BYTES)?,
+        )?;
+        self.begin_goal_history(
+            history,
+            seal,
+            &call.current()?,
+            authorize_history,
+            GoalScope::Selected,
+        )
+    }
+
+    fn begin_goal_history<H, A>(
+        &mut self,
         mut history: GoalHistoryStore<H>,
         seal: Digest32,
         context: &OperationContext,
         mut authorize_history: A,
+        scope: GoalScope,
     ) -> Result<DurableWorkOrderGoalMonitor<H>>
     where
         H: EffectJournalStorage,
@@ -347,8 +417,18 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage, N: WorkOrderSource>
         // Constructor input only. All I/O and policy authority below use `call`,
         // whose tick already includes current, journal and complete history floors.
         historical_context.anchor = review.original.anchor;
-        let mut monitor =
-            WorkOrderGoalMonitor::new(review.clone(), &historical_context, Arc::downgrade(&owner))?;
+        let mut monitor = match scope {
+            GoalScope::Original => WorkOrderGoalMonitor::new(
+                review.clone(),
+                &historical_context,
+                Arc::downgrade(&owner),
+            )?,
+            GoalScope::Selected => WorkOrderGoalMonitor::new_selected(
+                review.clone(),
+                &historical_context,
+                Arc::downgrade(&owner),
+            )?,
+        };
         let mut retained = self.floor.clone();
         let mut replay_floor = SourceFloor::default();
         replay_floor.retain_anchor(review.original.anchor)?;
@@ -562,6 +642,57 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage, N: WorkOrderSource>
         G: FnOnce(&OperationContext) -> Result<O>,
         A: FnMut(&WorkOrderGoalProjection, &OperationContext) -> Result<EvidencePolicy>,
     {
+        if let Err(cause) = super::original(monitor.original_plan()) {
+            monitor.invalidate_current_sample()?;
+            return Err(cause);
+        }
+        self.poll_goal_history(
+            monitor,
+            cursor,
+            context,
+            (progress_factory, operations_factory),
+            policy,
+        )
+    }
+
+    /// Selected monitors have a separate entry; no combined review widens the
+    /// public original-goal contract even when the acquisition code is shared.
+    pub(crate) fn poll_selected_goal_durable<H, P, O, F, G, A>(
+        &mut self,
+        monitor: &mut DurableWorkOrderGoalMonitor<H>,
+        cursor: ObservationCursor,
+        context: &OperationContext,
+        factories: (F, G),
+        policy: A,
+    ) -> Result<WorkOrderGoalResult>
+    where
+        H: EffectJournalStorage,
+        P: ProgressSource,
+        O: OperationsGoalSource,
+        F: FnOnce(&OperationContext) -> Result<P>,
+        G: FnOnce(&OperationContext) -> Result<O>,
+        A: FnMut(&WorkOrderGoalProjection, &OperationContext) -> Result<EvidencePolicy>,
+    {
+        super::selected_original(monitor.original_plan(), monitor.monitor.review.step)?;
+        self.poll_goal_history(monitor, cursor, context, factories, policy)
+    }
+
+    fn poll_goal_history<H, P, O, F, G, A>(
+        &mut self,
+        monitor: &mut DurableWorkOrderGoalMonitor<H>,
+        cursor: ObservationCursor,
+        context: &OperationContext,
+        factories: (F, G),
+        policy: A,
+    ) -> Result<WorkOrderGoalResult>
+    where
+        H: EffectJournalStorage,
+        P: ProgressSource,
+        O: OperationsGoalSource,
+        F: FnOnce(&OperationContext) -> Result<P>,
+        G: FnOnce(&OperationContext) -> Result<O>,
+        A: FnMut(&WorkOrderGoalProjection, &OperationContext) -> Result<EvidencePolicy>,
+    {
         let mut publication = HistoryPublication {
             history: &mut monitor.history,
             budget: None,
@@ -571,7 +702,7 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage, N: WorkOrderSource>
             &mut monitor.monitor,
             cursor,
             context,
-            (progress_factory, operations_factory),
+            factories,
             policy,
             &mut publication,
         );

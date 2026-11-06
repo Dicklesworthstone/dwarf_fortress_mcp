@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-11-05 — Durable selected-step production goals
+
+- Add an exclusive selected work-order monitor to the real labor/order executor,
+  preserving the whole parent, original StepId/key/archive/review and exact
+  Created receipt. Historical predecessor custody remains checked at replay and
+  live policy boundaries.
+- Evaluate selected postconditions and obligation separately from the complete
+  parent terminal. Explicit inventory minima may survive native order retirement
+  without claiming current labor, physical completion or order attribution.
+- Reuse durable captures, first achievement and original timing; clear current
+  proof and unfinished stability after recovery or failed publication. Keep
+  legacy public one-step history/open/poll entry points strict and unchanged.
+- Pass 23 focused production and 65 legacy work-order integration cases at stable
+  source hashes. Full-workspace, transport, native/live and admission qualification
+  remain unclaimed; the broader executor bead stays in progress.
+
 ## 2026-11-05 — Complete citizen rosters beyond a single native page
 
 - Support complete rosters through 200 citizens in both semantic native shells

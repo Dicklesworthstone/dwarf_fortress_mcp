@@ -138,7 +138,7 @@ impl WorkOrderGoalResult {
         self.native_state
     }
     pub fn original_goal_proven(&self) -> bool {
-        self.progress.current_goal_proven()
+        self.progress.current_goal_proven() && self.progress.plan_terminal == PredicateTruth::True
     }
     pub fn semantic_completion_proven(&self) -> bool {
         self.original_goal_proven()
@@ -175,12 +175,32 @@ impl WorkOrderGoalMonitor {
         owner: Weak<()>,
     ) -> Result<Self> {
         original(&review.original)?;
-        let step = &review.original.steps[0];
+        Self::with_scope(review, context, owner, true)
+    }
+
+    /// Only the combined owner can construct this scope. The legacy public
+    /// monitor constructor above continues to require a one-step original plan.
+    pub(super) fn new_selected(
+        review: SemanticWorkOrderReview,
+        context: &OperationContext,
+        owner: Weak<()>,
+    ) -> Result<Self> {
+        super::selected_original(&review.original, review.step)?;
+        Self::with_scope(review, context, owner, false)
+    }
+
+    fn with_scope(
+        review: SemanticWorkOrderReview,
+        context: &OperationContext,
+        owner: Weak<()>,
+        include_parent_terminal: bool,
+    ) -> Result<Self> {
+        let step = review.selected_step();
         let postconditions = Predicate::All(step.postconditions.clone()).normalized();
-        let mut terms = vec![
-            postconditions.clone(),
-            review.original.terminal_condition.clone(),
-        ];
+        let mut terms = vec![postconditions.clone()];
+        if include_parent_terminal {
+            terms.push(review.original.terminal_condition.clone());
+        }
         if let Some(spec) = &step.obligation {
             terms.push(spec.terminal.clone());
         }
@@ -350,7 +370,7 @@ impl WorkOrderGoalMonitor {
         if !continuous && let Some(runtime) = &mut runtime {
             runtime.observation_interrupted(self.action_id)?;
         }
-        let spec = self.review.original.steps[0].obligation.as_ref();
+        let spec = self.review.selected_step().obligation.as_ref();
         let postconditions = evidence.evaluate(&self.postconditions)?;
         let plan_terminal = evidence.evaluate(&self.review.original.terminal_condition)?;
         let obligation_terminal = spec

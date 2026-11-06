@@ -38,6 +38,8 @@ use crate::workforce_control::rpc::WorkforceSource;
 
 pub mod policy;
 pub use policy::{MAX_PLAN_BYTES, MAX_STEPS, archive_limits, validate as validate_plan};
+mod goal_monitor;
+pub use goal_monitor::{SelectedWorkOrderGoalMonitor, SelectedWorkOrderGoalResult};
 
 const MIB: u64 = 1024 * 1024;
 // A native workforce journal is <=64 MiB plus <=64 bounded latest records.
