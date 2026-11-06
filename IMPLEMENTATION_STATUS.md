@@ -1,5 +1,28 @@
 # Implementation Status
 
+## Unreleased — Selected original inventory clock target
+
+Run/1.13 can now bind its immutable inventory target to the actual selected order
+within a complete original combined plan. The constructor reuses the verified
+selected-order custody validator, including full archive, actual StepId/key,
+original review, creation journal and Created receipt. A distinct combined
+inventory target domain prevents cross-owner key/review reuse. The selected
+obligation's absolute deadline and legacy standalone clock bytes are unchanged.
+
+Three focused target regressions cover later slices against the same absolute
+deadline, frozen key/review framing, target/journal separation, original scope
+and paused source requirements without assuming a present manager-order row.
+These target fixtures do not fabricate opaque semantic results or replace the
+combined executor's custody acquisition. All 19 actual-source clock component
+tests pass (three new target tests and 16 existing supervisor tests), with zero
+failures or ignored tests. All 436 inventoried source/dependency inputs remain
+unchanged across execution. The focused crate uses real core/world/intent/adapter
+dependencies at repository lockfile versions; it omits runtime orchestration and
+MCP transport. Formatting and diff checks pass.
+At this checkpoint only target construction is implemented: the combined host's
+independent inventory clock dispatch and recovery remain pending. Owning beads
+remain in progress; no MCP transport, live-game or admission pass is claimed.
+
 ## 2026-11-06 — Executed combined clock recovery and immutable parent custody
 
 Three actual-source Runtime/native-TCP component scenarios now pass after a

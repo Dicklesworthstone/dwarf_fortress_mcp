@@ -4,7 +4,8 @@ use super::bounded_goal_clock::{self, GoalClockTarget};
 use super::{denied, invalid};
 use dfmcp_adapter::bounded_run::{RunObservation, RunPlan};
 use dfmcp_adapter::semantic_work_orders::{
-    NativeOrderCreation, ObservedInventoryObjective, SemanticWorkOrderReview,
+    NativeOrderCreation, ObservedInventoryObjective, SemanticWorkOrderResult,
+    SemanticWorkOrderReview,
 };
 use dfmcp_core::{Capability, Digest32, ErrorCode, FortressId, OperationContext, Result, RiskTier};
 use dfmcp_intent::PreparedPlan;
@@ -35,7 +36,7 @@ impl RunRequest {
     pub fn parse(raw: &str) -> Result<Self> {
         bounded_goal_clock::RunRequest::parse(raw, ClockTarget::REQUEST_KIND).map(Self)
     }
-    pub(super) fn inner(&self) -> &bounded_goal_clock::RunRequest {
+    pub(crate) fn inner(&self) -> &bounded_goal_clock::RunRequest {
         &self.0
     }
 }
@@ -131,6 +132,49 @@ impl ClockTarget {
     pub fn digest(&self) -> Digest32 {
         self.digest
     }
+
+    /// Bind inventory stability to the exact selected order in its complete
+    /// original parent. The verified Created receipt remains historical custody
+    /// after normal queue retirement; it does not establish current inventory.
+    /// The combined owner must independently recheck all predecessor custody
+    /// and fresh qualified goal evidence at every native clock effect boundary.
+    pub fn for_selected_original(
+        plan: &PreparedPlan,
+        archive: PlanArchiveSeal,
+        creation_journal: Digest32,
+        result: &SemanticWorkOrderResult,
+    ) -> Result<Self> {
+        let custody = super::clock::ClockTarget::for_selected_original(
+            plan,
+            archive,
+            creation_journal,
+            result,
+        )?;
+        let review = result.review();
+        if ObservedInventoryObjective::from_selected_plan(plan, review.step_id()).is_none() {
+            return Err(denied(
+                "selected inventory clock requires the exact original inventory objective",
+            ));
+        }
+        let deadline = review
+            .selected_step()
+            .obligation
+            .as_ref()
+            .ok_or_else(|| corrupt("selected inventory clock obligation is absent"))?
+            .deadline_tick
+            .get();
+        Ok(Self {
+            digest: hash(
+                b"dfmcp-combined-inventory-clock-target/1",
+                &[custody.digest().as_bytes()],
+            ),
+            original_seal: review.seal(),
+            fortress: plan.anchor.fortress_id,
+            epoch: plan.anchor.cursor.epoch,
+            original_tick: plan.anchor.tick.get(),
+            deadline,
+        })
+    }
 }
 impl GoalClockTarget for ClockTarget {
     const REQUEST_KIND: &'static str = "inventory_run";
@@ -197,3 +241,7 @@ impl GoalClockTarget for ClockTarget {
         )
     }
 }
+
+#[cfg(test)]
+#[path = "inventory_clock_target_tests.rs"]
+mod tests;

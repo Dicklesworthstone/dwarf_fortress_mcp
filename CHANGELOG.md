@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased — Preserve combined inventory goals in independent clock targets
+
+- Add a Run/1.13 inventory clock target for the actual selected order in its
+  complete original labor/order plan. Reuse the existing selected-order custody
+  validator and bind the full archive, selected key/review and verified Created
+  receipt without requiring a present native order row.
+- Keep the original absolute deadline and legacy standalone key/review bytes.
+  Domain-separate combined inventory targets from standalone and order clocks;
+  retain independent canonical and native source authority.
+- Pass all 19 unchanged-source clock component tests, including three new
+  deadline, identity and paused-source regressions. Combined host
+  dispatch and recovery wiring follows in the next implementation checkpoint;
+  this target constructor alone does not enable any new native effect.
+
 ## 2026-11-06 — Repair combined parent sampling and execute clock recovery
 
 - Keep original-plan custody at its immutable original cursor/hash while
