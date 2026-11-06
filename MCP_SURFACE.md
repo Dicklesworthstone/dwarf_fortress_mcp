@@ -314,6 +314,17 @@ Executes bounded structured DfQL at a concrete anchor. Query plans are staticall
 Deterministic result ordering is mandatory. Coverage says exactly what an empty or partial answer
 can establish.
 
+Structured `dfmcp.query/1` requests also accept `kind: "events"` for inclusive
+retained-event tick windows, exact kind and historical subject filters,
+explicit typed field projection and ascending/descending chronological pages.
+Continuations bind the complete source anchor, session and selection. The
+response identifies every canonical event while keeping unknown retention
+coverage, source authenticity and per-field provenance explicit. It neither
+collects new native events nor proves absence outside the supplied retained
+projection. The default laboratory uses the existing `mode: "structured"`
+wrapper, including exact retained `at` hashes; see
+[`docs/LAB_STRUCTURED_QUERY.md`](docs/LAB_STRUCTURED_QUERY.md).
+
 ### `fortress.plan`
 
 Compiles an objective/intent without effects. Returns immutable candidate plan(s), digest, action

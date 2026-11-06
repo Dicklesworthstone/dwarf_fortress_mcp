@@ -434,6 +434,78 @@ fn lab_structured_unknown_facts_do_not_match_even_under_negation() -> TestResult
 }
 
 #[test]
+fn lab_structured_events_reach_the_facade_and_resume_exact_retained_history() -> TestResult {
+    let _serial = crate::test_serial();
+    let (session_id, _) = open_fixture()?;
+    let before = {
+        let session = resolve_session(Some(session_id.clone()))?;
+        let mut guard = session.lock().map_err(|_| "session poisoned")?;
+        let mut snapshot = guard.adapter.snapshot().clone();
+        for (id, tick) in [(9, 2), (1, 4), (2, 4)] {
+            let event_id = dfmcp_core::EventId::new(id);
+            snapshot.graph.events.insert(
+                event_id,
+                dfmcp_world::WorldEvent {
+                    id: event_id,
+                    tick: GameTick(tick),
+                    kind: dfmcp_world::WorldEventKind::JobChanged,
+                    subject: Some(EntityId::new(1)),
+                    summary: format!("job observation {id}"),
+                    fields: BTreeMap::from([("count".to_owned(), WorldValue::U64(id as u64))]),
+                },
+            );
+        }
+        snapshot.refresh_hash();
+        guard.adapter.inject_snapshot(snapshot.clone())?;
+        snapshot
+    };
+    let mut request = wrapper(
+        json!({"kind":"events", "from_tick":2,"through_tick":4,
+        "kinds":["job_changed"],"subjects":["1"],"fields":["count","missing"],"limit":1}),
+        None,
+    );
+    let first = query(&session_id, request.clone())?;
+    assert_eq!(first["ok"], true, "{first}");
+    assert_eq!(
+        first["rows"][0]["event_id"],
+        dfmcp_core::EventId::new(9).to_string()
+    );
+    assert_eq!(first["rows"][0]["fields"]["missing"]["presence"], "unknown");
+    assert_eq!(first["agent_turn"]["anchor"], anchor_json(&before.anchor()));
+    assert_eq!(first["coverage"]["history_complete"], false);
+    assert_eq!(first["coverage"]["absence_proven"], false);
+    request["request"]["query"]["continuation"] = first["continuation"].clone();
+    let current = advance(&session_id)?;
+    expect_refusal(&query(&session_id, request.clone())?, "stale_anchor");
+    request["at"] = json!(before.state_hash.to_string());
+    let historical = query(&session_id, request.clone())?;
+    assert_eq!(historical["ok"], true, "{historical}");
+    assert_eq!(
+        historical["rows"][0]["event_id"],
+        dfmcp_core::EventId::new(1).to_string()
+    );
+    assert_eq!(historical["anchor"], anchor_json(&before.anchor()));
+    assert_eq!(
+        historical["agent_turn"]["anchor"],
+        anchor_json(&current.anchor())
+    );
+    assert_eq!(historical["agent_turn"]["continuity"]["status"], "stale");
+    assert_eq!(historical["historical"], true);
+    {
+        let session = resolve_session(Some(session_id.clone()))?;
+        let mut guard = session.lock().map_err(|_| "session poisoned")?;
+        guard
+            .grants
+            .iter_mut()
+            .find(|grant| grant.capability == Capability::Query)
+            .ok_or("Query grant missing")?
+            .expires_at_tick = Some(GameTick(before.tick.0));
+    }
+    expect_refusal(&query(&session_id, request)?, "capability_denied");
+    Ok(())
+}
+
+#[test]
 fn lab_structured_closed_wrapper_refuses_stateful_modes_and_keeps_legacy_queries() -> TestResult {
     let _serial = crate::test_serial();
     let (session_id, source) = open_fixture()?;

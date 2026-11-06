@@ -6,6 +6,9 @@
 #[path = "semantic_query_core.rs"]
 #[allow(clippy::duplicate_mod)]
 mod core_query;
+#[path = "event_query.rs"]
+#[allow(clippy::duplicate_mod)]
+mod event_query;
 #[path = "operational_query.rs"]
 #[allow(clippy::duplicate_mod)]
 mod operational_query;
@@ -91,10 +94,18 @@ pub(super) fn parse(raw: &str) -> Result<Option<Request>> {
     }
     if !matches!(
         request.request["query"]["kind"].as_str(),
-        Some("entities" | "inspect" | "traverse" | "dependencies" | "aggregate" | "search")
+        Some(
+            "entities"
+                | "inspect"
+                | "traverse"
+                | "dependencies"
+                | "aggregate"
+                | "search"
+                | "events"
+        )
     ) {
         return Err(invalid(
-            "structured laboratory queries support only entities, inspect, traverse, dependencies, aggregate, and search",
+            "structured laboratory queries support only entities, inspect, traverse, dependencies, aggregate, search, and events",
         ));
     }
     Ok(Some(request))
@@ -112,7 +123,7 @@ pub(super) fn execute(
     if snapshot.fortress_id != current.anchor.fortress_id {
         return Err(invalid("retained query source belongs to another fortress"));
     }
-    // Both executors verify the entire canonical source. A small page must not
+    // All executors verify the entire canonical source. A small page must not
     // bypass the work needed to verify chunks, events, or graph relationships.
     let records = snapshot
         .graph
@@ -138,6 +149,7 @@ pub(super) fn execute(
         Some("aggregate" | "search") => {
             operational_query::execute(snapshot, &source_context, &request.request)?
         }
+        Some("events") => event_query::execute(snapshot, &source_context, &request.request)?,
         _ => core_query::execute(snapshot, &source_context, &request.request)?,
     };
     if started.elapsed() >= Duration::from_millis(current.budget.max_wall_millis) {

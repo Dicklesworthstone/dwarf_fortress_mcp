@@ -114,6 +114,21 @@
         }
       },
       {
+        "type": "object", "additionalProperties": false, "required": ["kind"],
+        "properties": {
+          "kind": {"const": "events"},
+          "from_tick": {"anyOf": [{"type": "integer", "minimum": 0, "maximum": 18446744073709551615}, {"type": "null"}]},
+          "through_tick": {"anyOf": [{"type": "integer", "minimum": 0, "maximum": 18446744073709551615}, {"type": "null"}]},
+          "kinds": {"type": "array", "items": {"$ref": "#/$defs/name"}, "maxItems": 32, "description": "Exact canonical event kind names, including custom names; empty selects every retained kind."},
+          "subjects": {"type": "array", "items": {"$ref": "#/$defs/entity_id"}, "maxItems": 64, "description": "Exact historical subject IDs. Empty also includes subjectless events; this does not resolve a current entity generation."},
+          "fields": {"type": "array", "items": {"$ref": "#/$defs/name"}, "maxItems": 32},
+          "order": {"anyOf": [{"enum": ["tick_ascending", "tick_descending"]}, {"type": "null"}]},
+          "limit": {"anyOf": [{"type": "integer", "minimum": 1, "maximum": 128}, {"type": "null"}]},
+          "continuation": {"anyOf": [{"type": "string", "maxLength": 256}, {"type": "null"}]}
+        },
+        "description": "Inclusive tick window over the exact retained canonical event projection; defaults to tick zero through the source tick, ascending tick then EventId, four rows and no additional fields. The runtime rejects reversed/future windows. Every selector and the complete anchor/session bind continuation; page width may change. Retention completeness, per-field provenance and source authenticity remain unestablished, and results cannot authorize effects."
+      },
+      {
         "type":"object", "additionalProperties":false, "required":["kind","key","select","max_game_ticks"],
         "properties":{"kind":{"const":"capture"}, "key":{"type":"string", "pattern":"^[A-Za-z0-9._-]{1,64}$"},
           "select":{"$ref":"#/$defs/capture_selection"}, "max_game_ticks":{"type":"integer", "minimum":1, "maximum":18446744073709551615}},

@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased — Query bounded retained event windows
+
+- Add shared typed event-window queries to laboratory and structured live query
+  paths, with inclusive ticks, kind/subject filters, explicit fields and stable
+  ascending or descending pages.
+- Bind continuations to the complete source, session and selection. Keep whole
+  rows under negotiated output limits and charge excluded source records.
+- Report partial retained history and missing event provenance explicitly;
+  empty projections do not prove that no event occurred.
+- Pass 22 actual-source query component tests on current nightly. Track public
+  facade and live-handler regressions separately from full MCP qualification.
+
 ## Unreleased — Expose structured queries in laboratory sessions
 
 - Connect the existing entity, inspect, traversal, dependency, aggregate and

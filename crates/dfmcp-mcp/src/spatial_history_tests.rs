@@ -317,6 +317,7 @@ fn discovery_and_historical_requests_reject_wrong_record_scope_and_stateful_work
                 "dependencies",
                 "aggregate",
                 "search",
+                "events",
                 "capture",
                 "changes",
                 "baselines",

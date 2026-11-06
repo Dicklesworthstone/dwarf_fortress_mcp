@@ -5,6 +5,8 @@
 mod core_query;
 #[path = "dominance_query.rs"]
 mod dominance_query;
+#[path = "event_query.rs"]
+mod event_query;
 #[cfg(test)]
 #[path = "query_history_tests.rs"]
 mod history_tests;
@@ -145,6 +147,7 @@ pub fn execute(
         .and_then(Value::as_str)
     {
         Some("aggregate" | "search") => operational_query::execute(snapshot, context, input),
+        Some("events") => event_query::execute(snapshot, context, input),
         Some("item_quantity") => query_watch::quantity_query(snapshot, context, input),
         Some("condition_evaluation") => query_watch::condition_query(snapshot, context, input),
         Some("dominators") => dominance_query::execute(snapshot, context, input),

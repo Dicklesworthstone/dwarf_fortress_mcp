@@ -338,7 +338,7 @@ pub(crate) fn anchor_json(anchor: StateAnchor) -> Value {
         "state_hash": anchor.state_hash.to_string()})
 }
 
-fn world_value(value: &WorldValue) -> Value {
+pub(super) fn world_value(value: &WorldValue) -> Value {
     match value {
         WorldValue::Null => json!({"type":"null"}),
         WorldValue::Bool(v) => json!({"type":"bool","value":v}),

@@ -117,6 +117,62 @@ requests preserve their previous result fields and values.
 The filter is available to existing structured live-read consumers. It performs
 no bridge read, creates no watch and grants no effect authority.
 
+## Bounded retained-event windows
+
+The shared stateless `dfmcp.query/1` executor accepts `kind: "events"` on the
+default laboratory's structured wrapper and existing structured live-read
+consumers. The closed query accepts optional `from_tick`, `through_tick`,
+`kinds`, `subjects`, `fields`, `order`, `limit` and `continuation`. Tick bounds
+are inclusive and default to zero through the source snapshot's tick. Reversed
+windows and future end ticks are refused. Canonical event kinds are exact name
+sets; subject IDs are canonical positive decimal u64 strings. A subject filter
+matches the ID recorded in the event, without inventing a current generation.
+
+The query verifies its exact source and scans the complete retained projection
+before producing deterministic `(tick, EventId)` order. `tick_descending`
+reverses both components. Selected fields retain typed null, signed/unsigned
+integers, fixed values, coordinates, entity IDs, bytes and nested values. A
+requested field missing from the retained record has unknown presence. The
+canonical event type lacks individual Fact provenance, so the result declares
+that limitation and does not promote its values to authoritative observations.
+The complete source anchor plus event ID identify each returned record. Text
+remains tainted and no event query is mutation evidence.
+
+An `ev1` continuation binds the session, every complete anchor component, the
+time window, kind/subject/field sets, ordering and last returned `(tick, EventId)`.
+Set ordering and duplicate selectors do not change identity. Page width may
+change; every other semantic selection must remain the same. A cursor naming a
+missing or final record cannot manufacture an empty successful continuation.
+Like other query cursors, its digest is integrity binding, not read authority.
+
+There are at most 32 kind selectors, 64 subjects, 32 selected fields and 128 rows
+per page (default four). Source scanning is bounded by the session record budget,
+100,000 retained events, 16 MiB of estimated event data and 4,000,000 value visits;
+nested values are bounded to depth 64 before projection. The complete source
+fits the session's record budget and the canonical snapshot byte ceiling, and
+its hash is verified. The laboratory wrapper separately charges canonical
+source bytes against its original session work budget; live response reservation
+does not relabel an already-published source as oversized input.
+Excluded events still consume scan work. Whole rows are paged under both byte
+and token budgets. An oversized first row is refused; an oversized later row
+leaves the cursor at the last published row. The enclosing runtime still checks
+the full Agent Turn envelope and current authority.
+
+Coverage is explicitly `retained_event_projection`. The retained tick extrema
+do not establish a continuous retained interval. `history_complete`,
+`absence_proven` and `eligible_as_mutation_evidence` remain false. This query
+adds neither a native event collector nor synthetic laboratory events; sources
+with no canonical events return an empty retained projection with those same
+limits. Laboratory exact historical reads recheck grants at the current tick
+before selecting a retained snapshot.
+
+`event_query_tests.rs` exercises filters, both chronological orders, full-width
+IDs, exact field types, complete-row paging, source/session/selector binding,
+historical authority prerequisites, corruption and scan limits.
+`lab_structured_query_tests.rs` drives the public facade across retained history
+and grant expiry. `live_spatial_server_tests.rs` exercises the actual live query
+handler over its published canonical fixture without a bridge refresh.
+
 ## Qualified entity quantities
 
 The typed `Predicate::EntityQuantity` counts matching entity records or sums a

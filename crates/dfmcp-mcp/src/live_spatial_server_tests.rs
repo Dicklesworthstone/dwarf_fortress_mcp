@@ -178,6 +178,34 @@ fn stock(s: &Registered, count: u32) -> Result<()> {
     lock(&handle)?.state = state;
     Ok(())
 }
+
+#[test]
+fn structured_event_window_uses_published_live_projection_without_bridge_refresh() -> Result<()> {
+    let _serial = crate::test_serial();
+    let s = full()?;
+    let before = decode(&fortress_query(
+        s.handle(),
+        Some("summary".to_owned()),
+        None,
+    ))?;
+    let result = ask(&s, json!({"kind":"events","limit":4}))?;
+    assert_eq!(result["ok"], true, "{result}");
+    assert_eq!(result["anchor"], before["anchor"]);
+    assert_eq!(result["matched"], 0);
+    assert_eq!(result["rows"], json!([]));
+    assert_eq!(result["coverage"]["history_complete"], false);
+    assert_eq!(result["coverage"]["absence_proven"], false);
+    assert_eq!(result["coverage"]["eligible_as_mutation_evidence"], false);
+    assert_eq!(result["provenance"]["source_anchor"], result["anchor"]);
+    assert_eq!(s.calls.load(Ordering::SeqCst), 0);
+    let denied = register(8192, vec![Capability::Observe])?;
+    let refusal = ask(&denied, json!({"kind":"events"}))?;
+    assert_eq!(refusal["ok"], false);
+    assert_eq!(refusal["error"]["code"], "capability_denied");
+    assert!(refusal.get("rows").is_none());
+    assert_eq!(denied.calls.load(Ordering::SeqCst), 0);
+    Ok(())
+}
 #[test]
 fn one_handler_exposes_inventory_terrain_and_same_anchor_route_drill() -> Result<()> {
     let _serial = crate::test_serial();
@@ -222,6 +250,7 @@ fn one_handler_exposes_inventory_terrain_and_same_anchor_route_drill() -> Result
                 "dependencies",
                 "aggregate",
                 "search",
+                "events",
                 "capture",
                 "changes",
                 "baselines",

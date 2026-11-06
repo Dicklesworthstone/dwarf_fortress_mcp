@@ -26,7 +26,7 @@ Pass a JSON string as the existing `mode` argument:
 The closed outer wrapper accepts only `mode`, `request` and optional `at`.
 `at` is the exact lowercase state hash of a current or retained world. The
 inner envelope accepts the existing schema, `query`, and optional complete
-`expected_anchor`. These six query kinds are available:
+`expected_anchor`. These seven query kinds are available:
 
 | Kind | Purpose |
 | --- | --- |
@@ -36,6 +36,7 @@ inner envelope accepts the existing schema, `query`, and optional complete
 | `search` | Bounded lexical retrieval over selected kinds, fields and labels |
 | `traverse` | Bounded observed graph traversal and a witnessed path to an optional target |
 | `dependencies` | Prerequisite order, cycle components, cycle blockers and an unweighted critical chain |
+| `events` | Inclusive retained-event windows, kind/subject selection, typed fields and chronological pages |
 
 There is no watch, baseline, native capture, plan or effect dispatch through
 this wrapper. Existing `summary`, `entities`, `terrain`, `path`, `search`,
@@ -113,6 +114,35 @@ Cycles return their components and affected dependents rather than a fake
 schedule. This is graph structure, not a game-time forecast. Source anchor,
 scope identity and decision digests accompany the results.
 
+## Retained event windows
+
+```json
+{"kind":"events","from_tick":100,"through_tick":200,"kinds":["job_changed","announcement"],"subjects":["100"],"fields":["message"],"order":"tick_descending","limit":4}
+```
+
+Time bounds are inclusive, default to zero through the exact source tick, and
+must not be reversed or reach into that source's future. Kinds are exact
+canonical event names, including custom names. A nonempty subject set selects
+only events naming those historical IDs; it does not resolve current entity
+generations. Empty selectors include every retained kind and subject, including
+subjectless events. Ordering uses `(tick, EventId)` ascending by default; the
+descending order reverses both components. IDs retain their full 128-bit
+canonical hexadecimal representation.
+
+Each row contains the retained event's ID, tick, kind, optional subject and
+summary. Additional fields are explicit and use the same lossless typed-value
+encoding as entity inspection. Known null is separate from an unrecorded field.
+The source anchor identifies the canonical record, but `WorldEvent` does not
+carry the per-field source/provenance contract of an entity `Fact`. Event values
+therefore remain `assumed`, and source authenticity and field provenance remain
+unestablished. Event text is tainted data and cannot authorize effects.
+
+The query scans only events present in that immutable canonical snapshot. Its
+retained minimum/maximum tick do not prove coverage between those ticks. Empty
+results never prove a complete history or absence of unobserved events. This
+does not convert the laboratory's control transcript into world events or add a
+native event collector. See `QUERY_EXECUTION.md` for cursor and budget bounds.
+
 ## Exact history, authority and pagination
 
 Every call resolves the session and checks current whole-fortress Query
@@ -128,10 +158,12 @@ continuity in the Agent Turn. It cannot supply fresh mutation evidence.
 An unknown or collected hash returns `stale_anchor`; there is no substitution
 of a newer world or another session's retained source.
 
-For entity or search pages, copy the returned `continuation` string into
+For entity, search or event pages, copy the returned `continuation` string into
 `request.query.continuation`. Keep the query selection unchanged. Entity
 continuations also bind selected fields, ordering, source anchor and session.
-The requested page width may change. After the current world advances, resume
+Event continuations bind the time window, kind and subject sets, selected
+fields, order, complete source anchor and session. The requested page width may
+change. After the current world advances, resume
 by explicitly adding the original `at` hash while that source is retained,
 or restart from the new world. Historical reads do not pin retention.
 
@@ -156,7 +188,7 @@ budget-error envelope.
 ## Verification scope
 
 `lab_structured_query_tests.rs` drives the actual public laboratory façade for
-the six kinds, exact historical/current anchors, capability refusal, unavailable
+the seven kinds, exact historical/current anchors, capability refusal, unavailable
 facts, continuation integrity, legacy grammar, source work and complete-packet
 budgets. These source regressions do not establish live DFHack compatibility,
 game effects, production admission or full workspace qualification.

@@ -1,5 +1,33 @@
 # Implementation Status
 
+## Unreleased — Typed event windows in the shared query loop
+
+The closed dfmcp.query/1 events query now selects an inclusive tick window,
+canonical event kinds, subject identities and explicit typed fields. Both the
+default laboratory structured wrapper and existing structured live query paths
+use the same bounded executor. Pages are ordered by (tick, EventId), can run in
+either direction, and retain complete rows. Continuations bind the complete
+source anchor, session and normalized selection; changing any of those refuses.
+
+Current authority precedes historical laboratory selection. Source record,
+event-value, work, response and wall limits are checked, including excluded
+records. The response distinguishes unavailable fields, retained projection
+coverage and complete history. Canonical WorldEvent records do not carry field
+provenance or native authenticity; the result says so. This query does not create
+a native or laboratory event producer, invent events from state differences,
+prove absence from an empty page, or provide mutation evidence.
+
+Executed validation on Rust 1.101.0-nightly (249c1e4e3): 22 actual-source component
+tests pass, including 13 event selection/pagination/budget/custody cases and nine
+existing typed-query tests. The harness includes the repository executor and
+query module unchanged and links the actual core/world crates. Schema JSON,
+scoped formatting and whitespace checks pass. Added real public-facade historical
+paging/expired-grant and live spatial-handler empty-coverage regressions are
+tracked but not executed by that component harness. Full MCP/workspace
+qualification and native admission are not claimed. The scoped bead
+`df-typed-event-windows-k4e` remains in progress for public-path qualification.
+See `docs/QUERY_EXECUTION.md` and `docs/LAB_STRUCTURED_QUERY.md`.
+
 ## Unreleased — Structured inspection in the default laboratory MCP loop
 
 The existing fortress.query entry point now accepts the closed

@@ -458,6 +458,7 @@ mod tests {
                 "dependencies",
                 "aggregate",
                 "search",
+                "events",
                 "capture",
                 "changes",
                 "baselines",
