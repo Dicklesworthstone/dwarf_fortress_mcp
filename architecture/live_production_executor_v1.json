@@ -201,7 +201,7 @@
     "wait_dispatches_or_advances_time": false,
     "checkpoint_or_restore_supported": false,
     "current_state_proven": false,
-    "original_goal_proven": false,
+    "original_goal_proven_by_historical_effects": false,
     "new_bridge_generation": false,
     "production_admission_added": false,
     "source_paths": [
@@ -233,7 +233,9 @@
       "scripts/qualify_local.sh",
       "crates/dfmcp-mcp/src/semantic_citizens.rs",
       "crates/dfmcp-mcp/src/semantic_citizens_tests.rs",
-      "crates/dfmcp-mcp/src/live_production_runtime/goals.rs"
+      "crates/dfmcp-mcp/src/live_production_runtime/goals.rs",
+      "crates/dfmcp-adapter/src/live_production/parent_goal.rs",
+      "crates/dfmcp-adapter/src/live_production/parent_goal_tests.rs"
     ],
     "private_custody_platforms": [
       "linux-x86_64",
@@ -250,6 +252,29 @@
     "optional_parent_files": [
       "goal.history"
     ],
+    "current_parent_goal": {
+      "response_field": "current_parent_goal",
+      "scope": "complete_original_labor_and_inventory_goal",
+      "sample_tool": "fortress.wait",
+      "adapter_entry": "Executor::poll_selected_parent_goal",
+      "requires_explicit_original_inventory_objective": true,
+      "requires_settled_original_effects": true,
+      "acquisition": "equal current selected-workforce captures bracket the durable inventory sample",
+      "child_source_policies_independently_checked": true,
+      "same_original_identity_epoch_fortress_and_paused_tick": true,
+      "composite_and_selected_anchors_distinct": true,
+      "terminal_predicate": "unchanged complete original parent",
+      "proof": "current parent True and original selected inventory temporal requirement fulfilled",
+      "current_state_proven_for_whole_world": false,
+      "historical_labor_receipt_supplies_current_facts": false,
+      "query_and_explain_acquire_new_sample": false,
+      "failed_acquisition_or_publication_withdraws_current_proof": true,
+      "consumed_workforce_source_floors_retained": true,
+      "source_or_identity_regression_fences_parent_reads": true,
+      "restored_from_inventory_history": false,
+      "new_deadline_or_obligation": false,
+      "production_attribution_proven": false
+    },
     "selected_inventory_goal": {
       "request_field": "objective",
       "kind": "observed_inventory_minimum",

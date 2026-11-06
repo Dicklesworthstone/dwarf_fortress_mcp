@@ -32,6 +32,8 @@ pub(super) fn compact(view: &Value) -> Value {
         "frontier":{"entries":entries,"next_ready":view["frontier"]["next_ready"].as_u64(),"needs_reconciliation":view["frontier"]["needs_reconciliation"].as_bool(),
             "all_applied":view["frontier"]["all_applied"].as_bool(),"review":null},
         "selected_inventory_goal":compact_goal(&view["selected_inventory_goal"]),
+        "current_parent_goal":null,
+        "parent_goal_observation_fenced":view["parent_goal_observation_fenced"] == true,
         "original_goal_proven":false,"current_state_proven":false,"details_omitted":true})
 }
 fn compact_goal(value: &Value) -> Value {
@@ -103,6 +105,36 @@ fn encode(
         Value::Null
     };
     let selected_proven = selected_goal["proven_at_anchor"] == true;
+    let parent_fenced = view["parent_goal_observation_fenced"] == true;
+    // The joined sample has a different state hash from its inventory child.
+    // Present it only at the exact composite anchor, linked to that child; a
+    // retained receipt, inventory achievement or top-level flag cannot fill it.
+    let candidate = &view["current_parent_goal"];
+    let parent_goal = if verified
+        && !uncertain
+        && !parent_fenced
+        && mode != Some("offline")
+        && candidate["scope"] == "complete_original_labor_and_inventory_goal"
+        && matches!(
+            candidate["current_truth"].as_str(),
+            Some("true" | "false" | "unknown")
+        )
+        && anchor.is_some_and(|a| candidate["anchor"] == anchor_value(a))
+        && candidate["selected_anchor"].is_object()
+        && candidate["selected_anchor"] == selected_goal["anchor"]
+        && ["fortress_id", "epoch", "sequence", "tick"]
+            .iter()
+            .all(|&field| candidate["anchor"][field] == candidate["selected_anchor"][field])
+        && candidate["original_goal_proven"]
+            == (candidate["current_truth"] == "true" && selected_proven)
+        && candidate["original_goal_proven"] == view["original_goal_proven"]
+    {
+        candidate.clone()
+    } else {
+        Value::Null
+    };
+    let parent_proven = parent_goal["original_goal_proven"] == true;
+    let parent_truth = parent_goal["current_truth"].as_str();
     let recommendation = if session.is_none() || result["closed"] == true {
         None
     } else if uncertain && mode == Some("offline") {
@@ -119,7 +151,7 @@ fn encode(
             false,
             json!({}),
         ))
-    } else if !verified {
+    } else if !verified || parent_proven || parent_fenced {
         None
     } else if !review.is_null() {
         Some((
@@ -146,7 +178,7 @@ fn encode(
     {
         Some((
             "fortress_wait",
-            "Take one fresh sample of the selected original inventory goal; additional stability samples require separately managed game-time progress.",
+            "Take one coherent sample of the original labor and inventory goal; additional stability samples require separately managed game-time progress.",
             false,
             json!({}),
         ))
@@ -202,18 +234,69 @@ fn encode(
                 "request":view["observation"]["workforce_choices"]["next_observation_request"].to_string()}),
         ));
     }
+    let mut partial_domains = vec!["retained_original_plan"];
+    if selected_goal.is_object() {
+        partial_domains.push("selected_original_inventory_goal");
+    }
+    let mut omitted_domains = vec![
+        "physical_output",
+        "production_attribution",
+        "other_controllers",
+    ];
+    if parent_goal.is_object() {
+        partial_domains.push("current_parent_terminal_predicate");
+    } else {
+        omitted_domains.insert(0, "current_parent_goal");
+    }
+    let uncertainty = if parent_fenced {
+        vec![json!({
+            "scope":"complete_original_labor_and_inventory_goal",
+            "epistemic_status":"unknown", "state":"observation_fenced",
+            "retryable_in_session":false,
+            "finding":"Current parent observation is fenced after a source-lineage failure.",
+            "resolution":"Retain the original recovery reference and reconcile any uncertain effect under its original key. Inspect custody with fortress_doctor and resolve the source lineage before reopening; further goal waits in this session cannot clear this fence."
+        })]
+    } else {
+        match parent_truth {
+            Some("false") => vec![json!({
+                "scope":"complete_original_labor_and_inventory_goal",
+                "epistemic_status":"contradicted", "anchor":parent_goal["anchor"],
+                "finding":"The complete original terminal predicate is false at this sample anchor.",
+                "resolution":"Review the current parent predicate and original plan before choosing any corrective action; inventory polling alone does not establish labor truth.",
+                "selected_inventory_goal_proven_at_anchor":selected_proven
+            })],
+            Some("unknown") => vec![json!({
+                "scope":"complete_original_labor_and_inventory_goal",
+                "epistemic_status":"unknown", "anchor":parent_goal["anchor"],
+                "finding":"Current evidence does not establish the complete original terminal predicate.",
+                "resolution":"Review source coverage and current authority before another bounded sample.",
+                "selected_inventory_goal_proven_at_anchor":selected_proven
+            })],
+            None if selected_goal.is_object() => vec![json!({
+                "scope":"complete_original_labor_and_inventory_goal",
+                "epistemic_status":"unknown",
+                "finding":"No current joined labor and inventory sample is published.",
+                "resolution":"A fresh coherent parent sample is required; selected inventory history and historical labor receipts are insufficient."
+            })],
+            _ => Vec::new(),
+        }
+    };
     let mut turn = AgentTurnBuilder::new(operation, phase)
         .continuity(if uncertain { ContinuityStatus::Indeterminate } else if verified { ContinuityStatus::Partial } else if retained.is_some() { ContinuityStatus::Stale } else { ContinuityStatus::Bootstrap }, None, None, None)
         .briefing(json!({"runtime":"unadmitted_combined_production_development", "runtime_admitted":false,"mode":mode,
-            "retained_state_currently_verified":verified,"current_state_proven":false,"original_goal_proven":false,
+            "retained_state_currently_verified":verified,"current_state_proven":false,"original_goal_proven":parent_proven,
+            "current_parent_goal_truth":parent_truth,
+            "parent_goal_observation_fenced":parent_fenced,
             "selected_inventory_goal_proven_at_anchor":selected_proven}))
         .active_work(json!({"pending_plans":[],"actions":entries,
-            "obligations":if selected_goal.is_null() {vec![]} else {vec![selected_goal]},"cancellation_drains":[],
+            "obligations":if selected_goal.is_null() {vec![]} else {vec![selected_goal]},
+            "current_parent_goal":parent_goal,"cancellation_drains":[],
             "indeterminate_effects":if uncertain {vec![json!({"state":"unknown","reconcile_original_key":true})]} else {vec![]},
             "publications":[],"confirmations":if review.is_null(){vec![]} else {vec![review]}}))
         .recommendations(recommendations)
-        .coverage(json!({"status":"partial","complete_domains":[],"partial_domains":["retained_original_plan"],
-            "omitted_domains":["current_goal_completion","physical_output","other_controllers"],"continuation":null}));
+        .uncertainty(uncertainty)
+        .coverage(json!({"status":"partial","complete_domains":[],"partial_domains":partial_domains,
+            "omitted_domains":omitted_domains,"continuation":null}));
     if let Some(id) = session {
         turn = turn.session_id(id.to_string());
     }
@@ -294,6 +377,293 @@ pub(super) fn packet(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use dfmcp_core::{Digest32, FortressId, GameTick, ObservationCursor};
+
+    fn joined_goal_view(truth: &str, stable: bool) -> (StateAnchor, Value) {
+        let anchor = StateAnchor {
+            fortress_id: FortressId::new(7),
+            tick: GameTick(130),
+            cursor: ObservationCursor {
+                epoch: 1,
+                sequence: 5,
+            },
+            state_hash: Digest32::of_bytes(b"joined parent"),
+        };
+        let selected_anchor = StateAnchor {
+            state_hash: Digest32::of_bytes(b"inventory child"),
+            ..anchor
+        };
+        let proven = truth == "true" && stable;
+        let view = json!({"anchor":anchor_value(anchor),
+            "original_plan":{"plan_digest":"a".repeat(64)},
+            "frontier":{"all_applied":true,"next_ready":null,"entries":[]},
+            "review":null,"original_goal_proven":proven,
+            "selected_inventory_goal":{"scope":"selected_original_order_step",
+                "step_id":1,"kind":"observed_inventory_minimum","item_type":"BED",
+                "minimum_stack_units":1,"current_truth":"true","proven_at_anchor":stable,
+                "anchor":anchor_value(selected_anchor),
+                "parent_terminal_truth":"unknown","original_goal_proven":false,
+                "history":{"present":true,"fenced":false},"terminal_failure":false,
+                "first_satisfied_anchor":if stable {anchor_value(selected_anchor)} else {Value::Null}},
+            "current_parent_goal":{"scope":"complete_original_labor_and_inventory_goal",
+                "anchor":anchor_value(anchor),"selected_anchor":anchor_value(selected_anchor),
+                "current_truth":truth,"original_goal_proven":proven,
+                "source_digest":"b".repeat(64),"workforce_source_digest":"c".repeat(64)}});
+        (anchor, view)
+    }
+
+    fn joined_packet(
+        anchor: StateAnchor,
+        view: &Value,
+        mode: &str,
+        verified: bool,
+        uncertain: bool,
+    ) -> Value {
+        let (raw, overflow) = packet(
+            "fortress.wait",
+            Some(SessionId::new((1u128 << 127) | (24u128 << 57) | 1)),
+            Some(anchor),
+            Some(mode),
+            None,
+            None,
+            json!({"ok":verified}),
+            Some(view),
+            verified,
+            uncertain,
+        );
+        assert!(!overflow);
+        serde_json::from_str(&raw).expect("joined packet")
+    }
+
+    #[test]
+    fn joined_parent_truth_requires_original_inventory_stability_and_preserves_both_anchors() {
+        for stable in [false, true] {
+            let (anchor, view) = joined_goal_view("true", stable);
+            let value = joined_packet(anchor, &view, "control", true, false);
+            let turn = &value["agent_turn"];
+            assert_eq!(turn["briefing"]["original_goal_proven"], stable);
+            assert_eq!(turn["briefing"]["current_parent_goal_truth"], "true");
+            assert_eq!(turn["briefing"]["current_state_proven"], false);
+            assert_eq!(turn["briefing"]["runtime_admitted"], false);
+            assert_eq!(turn["anchor"], view["current_parent_goal"]["anchor"]);
+            assert_eq!(
+                turn["active_work"]["current_parent_goal"],
+                view["current_parent_goal"]
+            );
+            assert_eq!(
+                turn["active_work"]["obligations"][0]["anchor"],
+                view["selected_inventory_goal"]["anchor"]
+            );
+            assert_ne!(
+                turn["anchor"]["state_hash"],
+                turn["active_work"]["obligations"][0]["anchor"]["state_hash"]
+            );
+            assert_eq!(turn["coverage"]["complete_domains"], json!([]));
+            assert!(
+                turn["coverage"]["partial_domains"]
+                    .as_array()
+                    .expect("domains")
+                    .contains(&json!("current_parent_terminal_predicate"))
+            );
+            if stable {
+                assert_eq!(turn["recommendations"], json!([]));
+            } else {
+                assert_eq!(turn["recommendations"][0]["tool"], "fortress_wait");
+            }
+        }
+    }
+
+    #[test]
+    fn satisfied_inventory_with_false_or_unknown_parent_stops_inventory_only_polling() {
+        for (truth, epistemic) in [("false", "contradicted"), ("unknown", "unknown")] {
+            let (anchor, view) = joined_goal_view(truth, true);
+            let value = joined_packet(anchor, &view, "control", true, false);
+            let turn = &value["agent_turn"];
+            assert_eq!(
+                turn["briefing"]["selected_inventory_goal_proven_at_anchor"],
+                true
+            );
+            assert_eq!(turn["briefing"]["original_goal_proven"], false);
+            assert_eq!(turn["briefing"]["current_parent_goal_truth"], truth);
+            assert_eq!(
+                turn["active_work"]["current_parent_goal"]["current_truth"],
+                truth
+            );
+            assert_eq!(turn["recommendations"], json!([]));
+            assert_eq!(turn["uncertainty"][0]["epistemic_status"], epistemic);
+            assert_eq!(
+                turn["uncertainty"][0]["anchor"],
+                view["current_parent_goal"]["anchor"]
+            );
+        }
+    }
+
+    #[test]
+    fn missing_unverified_recovered_or_mismatched_parent_never_promotes_inventory_history() {
+        let (anchor, original) = joined_goal_view("true", true);
+        for case in 0..10 {
+            let mut view = original.clone();
+            let mut verified = true;
+            let mut uncertain = false;
+            let mut mode = "control";
+            match case {
+                0 => view["current_parent_goal"] = Value::Null,
+                1 => verified = false,
+                2 => uncertain = true,
+                3 => mode = "offline",
+                4 => view["current_parent_goal"]["anchor"]["state_hash"] = json!("d".repeat(64)),
+                5 => view["current_parent_goal"]["selected_anchor"]["tick"] = json!(131),
+                6 => view["selected_inventory_goal"]["proven_at_anchor"] = json!(false),
+                7 => view["current_parent_goal"]["current_truth"] = json!("false"),
+                8 => view["original_goal_proven"] = json!(false),
+                _ => {
+                    // Recovery can retain first achievement without a current
+                    // sample. Replaying history never recreates the join.
+                    view["current_parent_goal"] = Value::Null;
+                    view["selected_inventory_goal"]["current_truth"] = Value::Null;
+                    view["selected_inventory_goal"]["anchor"] = Value::Null;
+                    view["selected_inventory_goal"]["proven_at_anchor"] = json!(false);
+                    mode = "reconcile";
+                }
+            }
+            let value = joined_packet(anchor, &view, mode, verified, uncertain);
+            let turn = &value["agent_turn"];
+            assert_eq!(
+                turn["briefing"]["original_goal_proven"], false,
+                "case {case}"
+            );
+            assert!(
+                turn["briefing"]["current_parent_goal_truth"].is_null(),
+                "case {case}"
+            );
+            assert!(
+                turn["active_work"]["current_parent_goal"].is_null(),
+                "case {case}"
+            );
+            assert!(
+                turn["coverage"]["omitted_domains"]
+                    .as_array()
+                    .expect("omissions")
+                    .contains(&json!("current_parent_goal"))
+            );
+        }
+    }
+
+    #[test]
+    fn compact_and_overflow_withdraw_joined_proof_but_preserve_selected_achievement() {
+        let (anchor, view) = joined_goal_view("true", true);
+        let compacted = compact(&view);
+        assert!(compacted["current_parent_goal"].is_null());
+        assert_eq!(compacted["original_goal_proven"], false);
+        assert_eq!(
+            compacted["selected_inventory_goal"]["proven_at_anchor"],
+            false
+        );
+        assert_eq!(
+            compacted["selected_inventory_goal"]["first_satisfied_anchor"],
+            view["selected_inventory_goal"]["first_satisfied_anchor"]
+        );
+        let (raw, overflow) = packet(
+            "fortress.wait",
+            Some(SessionId::new((1u128 << 127) | (24u128 << 57) | 1)),
+            Some(anchor),
+            Some("control"),
+            None,
+            None,
+            json!({"ok":true,"payload":"x".repeat(70_000)}),
+            Some(&view),
+            true,
+            false,
+        );
+        assert!(overflow);
+        let value: Value = serde_json::from_str(&raw).expect("overflow packet");
+        assert_eq!(value["original_goal_proven"], false);
+        assert!(value["retained_reference"]["current_parent_goal"].is_null());
+        assert_eq!(
+            value["agent_turn"]["briefing"]["original_goal_proven"],
+            false
+        );
+        assert!(value["agent_turn"]["active_work"]["current_parent_goal"].is_null());
+        assert_eq!(
+            value["retained_reference"]["selected_inventory_goal"]["first_satisfied_anchor"],
+            view["selected_inventory_goal"]["first_satisfied_anchor"]
+        );
+        assert_eq!(value["agent_turn"]["recommendations"], json!([]));
+    }
+    #[test]
+    fn fenced_parent_observation_preserves_inspection_guidance_without_goal_waits() {
+        let (anchor, mut view) = joined_goal_view("true", true);
+        view["parent_goal_observation_fenced"] = json!(true);
+        for verified in [false, true] {
+            let value = joined_packet(anchor, &view, "control", verified, false);
+            let turn = &value["agent_turn"];
+            assert_eq!(turn["briefing"]["parent_goal_observation_fenced"], true);
+            assert_eq!(turn["briefing"]["original_goal_proven"], false);
+            assert!(turn["active_work"]["current_parent_goal"].is_null());
+            assert_eq!(turn["recommendations"], json!([]));
+            assert_eq!(turn["uncertainty"][0]["state"], "observation_fenced");
+            assert_eq!(turn["uncertainty"][0]["retryable_in_session"], false);
+            assert!(
+                turn["uncertainty"][0]["resolution"]
+                    .as_str()
+                    .expect("recovery guidance")
+                    .contains("fortress_doctor")
+            );
+        }
+        // Clearing current proof after a failure must not hide the fence.
+        view["current_parent_goal"] = Value::Null;
+        view["original_goal_proven"] = json!(false);
+        view["selected_inventory_goal"]["proven_at_anchor"] = json!(false);
+        assert_eq!(compact(&view)["parent_goal_observation_fenced"], true);
+        let compacted = compact(&view);
+        let turn = joined_packet(anchor, &compacted, "control", false, false);
+        assert_eq!(
+            turn["agent_turn"]["briefing"]["parent_goal_observation_fenced"],
+            true
+        );
+        assert_eq!(
+            turn["agent_turn"]["uncertainty"][0]["retryable_in_session"],
+            false
+        );
+        assert_eq!(turn["agent_turn"]["recommendations"], json!([]));
+        let (raw, overflow) = packet(
+            "fortress.wait",
+            Some(SessionId::new((1u128 << 127) | (24u128 << 57) | 1)),
+            Some(anchor),
+            Some("control"),
+            None,
+            None,
+            json!({"ok":true,"payload":"x".repeat(70_000)}),
+            Some(&view),
+            true,
+            false,
+        );
+        assert!(overflow);
+        let value: Value = serde_json::from_str(&raw).expect("fenced overflow packet");
+        assert_eq!(
+            value["retained_reference"]["parent_goal_observation_fenced"],
+            true
+        );
+        assert_eq!(
+            value["agent_turn"]["briefing"]["parent_goal_observation_fenced"],
+            true
+        );
+        assert_eq!(value["agent_turn"]["recommendations"], json!([]));
+        // Uncertain effects still require same-key reconciliation. This is not
+        // another ordinary parent acquisition and takes priority over the fence.
+        let uncertain = joined_packet(anchor, &view, "reconcile", false, true);
+        assert_eq!(
+            uncertain["agent_turn"]["recommendations"][0]["tool"],
+            "fortress_wait"
+        );
+        assert!(
+            uncertain["agent_turn"]["recommendations"][0]["reason"]
+                .as_str()
+                .expect("reconciliation guidance")
+                .contains("original uncertain key")
+        );
+    }
+
     #[test]
     fn selected_inventory_proof_guides_polling_without_promoting_parent_success() {
         let session = SessionId::new((1u128 << 127) | (24u128 << 57) | 1);

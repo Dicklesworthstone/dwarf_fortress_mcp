@@ -53,6 +53,10 @@ fn merge_recovery(old: &mut Option<Value>, latest: &Value) {
     }
     retained["review"] = Value::Null;
     retained["selected_inventory_goal"] = latest["selected_inventory_goal"].clone();
+    retained["current_parent_goal"] = Value::Null;
+    retained["parent_goal_observation_fenced"] = latest["parent_goal_observation_fenced"].clone();
+    retained["original_goal_proven"] = json!(false);
+    retained["current_state_proven"] = json!(false);
     if retained["frontier"].is_object() {
         retained["frontier"]["review"] = Value::Null;
     }
@@ -518,7 +522,7 @@ pub fn fortress_commit(session_id: String, paired_seal: String, confirmed: bool)
     })
 }
 #[tool(
-    description = "Reconcile the original active key once; after both effects settle, sample an explicitly selected inventory goal with durable original timing. No dispatch or game-time advance."
+    description = "Reconcile the original active key once; after both effects settle, sample current labor and the explicit inventory goal together, preserving original inventory timing. No dispatch or game-time advance."
 )]
 pub fn fortress_wait(session_id: String, max_wall_millis: Option<u64>) -> String {
     with_session(session_id, "fortress.wait", max_wall_millis, || {
@@ -582,7 +586,7 @@ pub fn run_stdio() {
     let server = ServerBuilder::new("dfmcp-live-combined-production-dev", env!("CARGO_PKG_VERSION"))
         .tool(FortressOpenSession).tool(FortressObserve).tool(FortressQuery).tool(FortressPlan).tool(FortressCommit)
         .tool(FortressWait).tool(FortressCancel).tool(FortressCheckpoint).tool(FortressRestore).tool(FortressExplain).tool(FortressDoctor)
-        .instructions("Unadmitted development only. Observe, compile one original labor and finite-order plan, prepare and confirm each dependency-satisfied step, and reconcile uncertainty under its original key. All-applied does not prove the original goal or physical goods. An explicit inventory objective can be sampled with Wait after both effects settle; its success does not prove current labor or whole-plan completion. No clock is exposed.")
+        .instructions("Unadmitted development only. Observe, compile one original labor and finite-order plan, prepare and confirm each dependency-satisfied step, and reconcile uncertainty under its original key. All-applied does not prove the original goal or physical goods. With an explicit inventory objective, Wait samples current labor around complete inventory reads. The complete original goal requires current parent truth and original selected inventory stability at the reported anchor. Inventory presence does not prove order-attributed production. Parent proof is process-local and withdrawn on failure or reopening. No clock is exposed.")
         .build();
     crate::run_modern_stdio(server);
 }
@@ -655,6 +659,8 @@ mod tests {
     #[test]
     fn failed_inventory_publication_keeps_new_history_custody_without_old_success() {
         let mut retained = Some(json!({"selected_inventory_goal":{"proven_at_anchor":true},
+            "current_parent_goal":{"current_truth":"true","original_goal_proven":true},
+            "original_goal_proven":true,
             "recovery":{"goal_history_present":false}}));
         merge_recovery(
             &mut retained,
@@ -665,6 +671,9 @@ mod tests {
         );
         let value = retained.expect("retained custody");
         assert_eq!(value["recovery"]["goal_history_present"], true);
+        assert!(value["current_parent_goal"].is_null());
+        assert_eq!(value["original_goal_proven"], false);
+        assert_eq!(value["current_state_proven"], false);
         assert_eq!(value["selected_inventory_goal"]["proven_at_anchor"], false);
         assert_eq!(
             value["selected_inventory_goal"]["current_truth"],

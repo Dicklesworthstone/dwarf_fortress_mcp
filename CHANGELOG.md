@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-11-05 — Complete original production goals through MCP
+
+- Connect the combined development host's foreground Wait to the executor's
+  current-parent acquisition. Fresh matching labor captures bracket complete
+  inventory evidence while the original plan, keys, deadline and stability remain
+  unchanged.
+- Expose separate selected inventory and complete-parent truth, anchors and source
+  digests. Report original-goal proof only when current parent truth and selected
+  temporal proof both hold; retain unknown physical completion and causal output.
+- Withdraw current proof on failed reads/publication and reopening. Retain source
+  fences and historical inventory achievement, with Agent Turn guidance that
+  distinguishes completion, unfinished stability and contradicted current labor.
+- Preserve the frozen eleven tools, existing native generations and development
+  isolation. Executed validation for this increment is recorded in
+  `IMPLEMENTATION_STATUS.md`; no live-game or admission claim is added.
+
 ## 2026-11-06 — Current original labor and inventory goal proof
 
 - Add a bounded executor parent poll that joins fresh selected workforce evidence

@@ -1,6 +1,8 @@
-//! Foreground proof of a selected inventory objective in the complete original
-//! labor/order plan. Historical labor receipts never become current labor facts.
+//! Foreground proof of the complete original labor/inventory goal. Current
+//! labor brackets the selected inventory sample; historical receipts only
+//! establish custody and never become current labor facts.
 use super::*;
+use dfmcp_adapter::live_routing::LiveRoutingEvidence;
 use dfmcp_adapter::semantic_work_orders::{ObservedInventoryObjective, WorkOrderGoalProgress};
 use dfmcp_core::StepId;
 use dfmcp_intent::ObligationStatus;
@@ -34,6 +36,68 @@ fn truth(value: PredicateTruth) -> &'static str {
 }
 
 impl Runtime {
+    pub(super) fn parent_goal_observation_fenced(&self) -> bool {
+        self.goal_monitor
+            .as_ref()
+            .is_some_and(|monitor| monitor.parent_observation_fenced())
+    }
+
+    fn current_parent_goal(&self) -> Option<&SelectedParentGoalProgress> {
+        let parent = self.parent_goal.as_ref()?;
+        let selected = self.goal_monitor.as_ref()?.latest()?;
+        // A durable selected history alone cannot revive a parent observation.
+        // Both projections must still belong to the same published sample.
+        (parent.anchor == self.anchor
+            && parent.selected_anchor == selected.anchor
+            && parent.anchor.cursor == selected.anchor.cursor
+            && parent.anchor.tick == selected.anchor.tick)
+            .then_some(parent)
+    }
+
+    pub(super) fn parent_goal_proven(&self) -> bool {
+        self.current_parent_goal().is_some_and(|parent| {
+            parent.original_goal_proven
+                && parent.current_truth == PredicateTruth::True
+                && self
+                    .goal_monitor
+                    .as_ref()
+                    .and_then(|monitor| monitor.latest())
+                    .is_some_and(WorkOrderGoalProgress::current_goal_proven)
+        })
+    }
+
+    pub(super) fn parent_goal_json(&self) -> Value {
+        self.current_parent_goal().map_or(Value::Null, |parent| {
+            json!({
+                "scope":"complete_original_labor_and_inventory_goal",
+                "current_truth":truth(parent.current_truth),
+                "original_goal_proven":self.parent_goal_proven(),
+                "anchor":anchor_json(parent.anchor),
+                "selected_anchor":anchor_json(parent.selected_anchor),
+                "source_digest":parent.source_digest.to_hex(),
+                "workforce_source_digest":parent.workforce_source_digest.to_hex(),
+                "historical_labor_receipt_is_current_evidence":false,
+                "restored_from_history":false,
+                "production_attribution":"unknown"
+            })
+        })
+    }
+
+    pub(super) fn goal_coverage_omissions(&self) -> Vec<&'static str> {
+        let mut omissions = Vec::new();
+        if self.current_parent_goal().is_none() {
+            omissions.extend(["parent goal completion", "current labor after its receipt"]);
+        } else if !self.parent_goal_proven() {
+            omissions.push("parent goal completion");
+        }
+        omissions.extend([
+            "order-attributed output",
+            "workshop/material feasibility",
+            "game clock control",
+        ]);
+        omissions
+    }
+
     pub(super) fn selected_goal_json(&self) -> Value {
         let Some((step, objective)) = self.original.as_ref().and_then(selected) else {
             return Value::Null;
@@ -65,6 +129,7 @@ impl Runtime {
             "anchor":current.map(|sample| anchor_json(sample.anchor)),
             "source_digest":current.map(|sample| sample.source_digest.to_hex()),
             "parent_terminal_truth":current.map(|sample| truth(sample.plan_terminal)),
+            "parent_terminal_evidence_scope":"selected_inventory_projection_only",
             "original_goal_proven":false,
             "receipt_linked":current.map(|sample| sample.receipt_linked),
             "physical_work":current.map(|sample| format!("{:?}",sample.physical_work)),
@@ -168,6 +233,9 @@ impl Runtime {
     }
 
     pub(super) fn wait_with_goal(&mut self, c: &OperationContext) -> Result<View> {
+        // No earlier complete-parent proof survives an attempted new sample,
+        // including failures before the first durable selected-history event.
+        self.parent_goal = None;
         let result = self.wait_with_goal_inner(c);
         self.raise_goal_floor();
         if result.is_err() {
@@ -234,6 +302,22 @@ impl Runtime {
                 .as_ref()
                 .ok_or_else(|| denied("original plan absent"))?
                 .clone();
+            let basis = self
+                .basis
+                .as_ref()
+                .ok_or_else(|| denied("original citizen identity absent"))?;
+            let identity_context = work.take(MIB)?;
+            custody.verify(&identity_context)?;
+            let identity_policy = self.config.workforce.acceptance().historical_citizens(
+                &basis.capsule,
+                &basis.projection,
+                &identity_context,
+            )?;
+            let identity = LiveRoutingEvidence::citizens_v1(
+                PredicateEvidence::scoped(&basis.projection.snapshot, identity_policy)?,
+                &basis.projection,
+                &basis.capsule,
+            )?;
             let monitor = self
                 .goal_monitor
                 .as_mut()
@@ -254,36 +338,50 @@ impl Runtime {
                 .execution
                 .as_mut()
                 .ok_or_else(|| denied("original executor absent"))?
-                .poll_selected_order_goal(
+                .poll_selected_parent_goal(
                     monitor,
+                    &identity,
                     cursor,
                     &work.rest(MAX_BYTES)?,
-                    |current| {
-                        config.current()?;
-                        custody.verify(current)?;
-                        config.orders.progress(current)
-                    },
-                    |current| {
-                        config.current()?;
-                        custody.verify(current)?;
-                        config.orders.operations(current)
-                    },
-                    |projection, current| {
-                        config.current()?;
-                        custody.verify(current)?;
-                        config
-                            .orders
-                            .acceptance()
-                            .goal_for_selected(&original, step, projection, current)
-                    },
+                    (
+                        |current| {
+                            config.current()?;
+                            custody.verify(current)?;
+                            config.orders.progress(current)
+                        },
+                        |current| {
+                            config.current()?;
+                            custody.verify(current)?;
+                            config.orders.operations(current)
+                        },
+                    ),
+                    (
+                        |projection, current| {
+                            config.current()?;
+                            custody.verify(current)?;
+                            config
+                                .orders
+                                .acceptance()
+                                .goal_for_selected(&original, step, projection, current)
+                        },
+                        |projection, current| {
+                            config.current()?;
+                            custody.verify(current)?;
+                            config.workforce.acceptance().goal(projection, current)
+                        },
+                    ),
                 );
             self.raise_goal_floor();
             work.context.anchor = self.anchor;
             let verified = custody.verify(&work.narrow(&output)?);
             let disarmed = custody.disarm();
-            result?;
+            let result = result?;
             verified?;
             disarmed?;
+            // The joined snapshot has its own digest; the selected inventory
+            // anchor remains separately visible and is never relabelled.
+            self.anchor = result.parent_progress().anchor;
+            self.parent_goal = Some(result.parent_progress().clone());
         }
         self.config.current()?;
         work.context.anchor = self.anchor;

@@ -141,11 +141,39 @@ fn machine_host_contract_preserves_bounded_development_scope() -> Result<()> {
         "wait_dispatches_or_advances_time",
         "checkpoint_or_restore_supported",
         "current_state_proven",
-        "original_goal_proven",
+        "original_goal_proven_by_historical_effects",
         "new_bridge_generation",
         "production_admission_added",
     ] {
         assert_eq!(host[field], false, "{field}");
+    }
+    let parent = &host["current_parent_goal"];
+    assert_eq!(parent["response_field"], "current_parent_goal");
+    assert_eq!(
+        parent["adapter_entry"],
+        "Executor::poll_selected_parent_goal"
+    );
+    for field in [
+        "requires_explicit_original_inventory_objective",
+        "requires_settled_original_effects",
+        "child_source_policies_independently_checked",
+        "same_original_identity_epoch_fortress_and_paused_tick",
+        "composite_and_selected_anchors_distinct",
+        "failed_acquisition_or_publication_withdraws_current_proof",
+        "consumed_workforce_source_floors_retained",
+        "source_or_identity_regression_fences_parent_reads",
+    ] {
+        assert_eq!(parent[field], true, "{field}");
+    }
+    for field in [
+        "current_state_proven_for_whole_world",
+        "historical_labor_receipt_supplies_current_facts",
+        "query_and_explain_acquire_new_sample",
+        "restored_from_inventory_history",
+        "new_deadline_or_obligation",
+        "production_attribution_proven",
+    ] {
+        assert_eq!(parent[field], false, "{field}");
     }
     Ok(())
 }

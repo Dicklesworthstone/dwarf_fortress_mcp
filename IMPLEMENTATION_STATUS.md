@@ -1,5 +1,27 @@
 # Implementation Status
 
+## 2026-11-05 — MCP publication of fresh complete-parent production goals
+
+The combined labor/order development host now calls the executor's current-parent
+poll for an explicitly selected inventory objective. Current selected-workforce
+captures bracket the original durable inventory sample under independently
+checked policies. The unchanged complete parent terminal and original selected
+temporal requirement determine `original_goal_proven` at a composite anchor;
+the selected inventory anchor and proof remain separate.
+
+The MCP view and Agent Turn expose `current_parent_goal`, the two anchors, source
+digests and parent observation fencing. Current labor reversal cannot be hidden
+by inventory success or an Applied receipt. Reopening, failed acquisition and
+failed publication withdraw current parent proof; selected inventory first
+achievement remains historical. Query and Explain retain the exact sampled
+anchor without claiming a new read. No game-time control, native generation,
+causal-production evidence or production admission is introduced.
+
+Validation is in progress against the real workspace's exact locked dependency
+pins and current nightly toolchain. No test or compiler pass for this increment
+is claimed at this source checkpoint. The broader real-game acceptance in bead
+`df-dfhack-bridge-plane-c-pic.4.1` remains in progress.
+
 ## 2026-11-06 — Fresh complete-parent labor and inventory evidence
 
 The concrete production executor now exposes a bounded foreground parent-goal

@@ -12,8 +12,9 @@ platforms refuse private-journal opening.
 Owner: `df-dfhack-bridge-plane-c-pic.4.1`. The broader dispatcher and recovery
 tasks `.4` and `.5` remain open. This host does not supply a complete fortress
 controller, game clock or material/workshop planning. An explicitly selected
-inventory objective can now be monitored for the original order step; this
-does not establish the complete parent goal.
+inventory objective can be monitored for the original order step. A separate
+fresh labor-and-inventory observation can establish the complete original
+parent goal at its exact reported anchor.
 
 ## Operator configuration
 
@@ -91,7 +92,8 @@ retain the frozen eleven-tool waist; this profile's wire names are underscores.
 
 Wait performs one original-key reconciliation. Once both original effects are
 settled, it can acquire one qualified sample for an explicitly selected inventory
-objective. It never dispatches, sleeps, polls indefinitely or advances game time. An uncertain effect prohibits a
+objective, bracketed by matching current selected-labor captures. It never
+dispatches, sleeps, polls indefinitely or advances game time. An uncertain effect prohibits a
 replacement key or a fresh original plan. Cancel with `scope="step"` retires
 a proven preparation; it does not undo an Applied effect. `scope="session"`
 releases local ownership while preserving custody and makes no native
@@ -178,7 +180,9 @@ when the combined read fails, so retry cannot publish an older canonical tick.
 The returned `frontier.all_applied` means both historical native effects were
 proved at their respective boundaries. It does not mean current labor, produced
 goods, workshop/material feasibility or the original terminal predicate is true.
-This host always leaves `current_state_proven` and `original_goal_proven` false.
+`current_state_proven` remains false because the host does not prove the whole
+world. `original_goal_proven` requires the separate qualified current-parent
+sample described below; native receipts alone always leave it false.
 After an original exists, default Observe reports retained original custody.
 A nondefault selection or page request is refused before native contact; the
 host cannot acquire a replacement canonical world or rebase the original
@@ -232,22 +236,57 @@ The response's `selected_inventory_goal` separates current and historical proof:
 | `scope`, `step_id` | The actual original order step within the complete parent. |
 | `current_truth`, `anchor` | The selected inventory predicate at a complete published sample. |
 | `proven_at_anchor` | That selected predicate satisfies its original temporal requirement at the sample. |
-| `parent_terminal_truth` | Separate evaluation of the complete parent terminal; historical labor receipts cannot supply current labor facts. |
+| `parent_terminal_truth` | Evaluation using only the selected inventory projection; the accompanying `parent_terminal_evidence_scope` states that current labor is not supplied here. |
 | `first_satisfied_anchor` | First qualified selected achievement, retained across later consumption, failure and recovery. |
 | `history` | Whether exact selected history exists, its retained size and whether it is fenced. |
 
-`original_goal_proven` remains false in this host. Qualified inventory can be
+The selected object keeps its own `original_goal_proven` false. Qualified inventory can be
 true after the order retires even while receipt linkage or physical work is
 unknown. Preexisting and unrelated matching stock counts. Material, usability,
 new production and order attribution remain unproved. Inventory truth cannot
 reconcile uncertain insertion, release another mutation or authorize redispatch.
 
 Agent Turn recommends a bounded Wait while the selected temporal requirement is
-unfinished, and stops requesting it after selected proof. Additional stability
+unfinished. Additional stability
 samples need separately managed game-time progress and coherent paused reads;
 repeated reads at one tick cannot supply advancing samples. A failed call clears
 current proof and unfinished continuity without extra I/O. The next admitted
 sample persists that interruption; historical first achievement remains intact.
+
+### Prove the complete original parent
+
+Each fresh goal Wait reads the selected citizens' current workforce state,
+publishes the original selected inventory sample, and reads the same workforce
+state again. The workforce captures must agree exactly, including their source
+incarnation, sequence, original citizen identities, labor schema and paused tick.
+The inventory and labor observations must also share the same fortress, restore
+epoch and tick. Each source receives its own independently checked operator
+policy. Historical Applied receipts establish custody and identity only.
+
+`current_parent_goal` is a separate object containing `current_truth`,
+`original_goal_proven`, a combined `anchor`, the original `selected_anchor`, and
+the composite and workforce source digests. Its truth evaluates the unchanged
+complete parent terminal. Its proof additionally requires the selected inventory
+obligation's original cadence and stability. The top-level `original_goal_proven`
+and Agent Turn briefing reflect that same scoped result. The combined anchor has
+its own state hash; the selected inventory anchor remains distinct and visible.
+
+Current labor reversal makes the parent false even when inventory remains proved.
+Missing qualified labor leaves it unknown. A changed capture during the bracket,
+lost custody, revoked source policy or failed response publication withdraws both
+current parent proof and the selected current sample. A proved parent stops
+completion polling. If inventory is proved but current labor contradicts the
+original goal, guidance exposes the contradiction without proposing another
+dispatch under the already-used original keys.
+
+Parent evidence is process-local and valid at its reported anchor. Query and
+Explain inspect that retained sample without new native reads. Reopening starts
+with `current_parent_goal=null` and `original_goal_proven=false`, even when durable
+inventory history records a first achievement. A fresh coherent Wait is required
+to obtain parent proof again. No parent achievement is reconstructed from the
+inventory-only history. Completion still makes no causal claim that this order
+produced the counted items, and no claim about material, usability or workshop
+feasibility.
 
 ## Recovery and failure
 
@@ -305,7 +344,7 @@ custody and effects are rechecked through their owners at preparation, commit
 and reconciliation boundaries; Query is not a new native effect observation. Selected history replays under
 newly reissued exact source policy and retained predecessor custody. Offline
 replay retains first achievement and terminal history but restores neither
-current proof nor unfinished stability. Recovery never renews the deadline or
+current inventory/parent proof nor unfinished stability. Recovery never renews the deadline or
 reconstructs a native commit permit.
 
 ## Bounds and evidence

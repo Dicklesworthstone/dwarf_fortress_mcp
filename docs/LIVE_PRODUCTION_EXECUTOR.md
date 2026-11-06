@@ -117,6 +117,22 @@ interruption. Predecessor custody is checked around replay and every live policy
 callback, with a final complete-family verification before success is returned.
 A missing, uncertain or replaced original insertion cannot start this monitor.
 
+For the closed original two-step labor/order pair,
+`Executor::poll_selected_parent_goal` additionally brackets the selected inventory
+sample with exact current workforce captures. Independent labor and inventory
+policies qualify the joined evidence. `SelectedParentGoalProgress` evaluates the
+unchanged complete parent terminal at a new composite anchor, preserving the
+selected inventory anchor separately. Complete-parent proof requires both current
+parent truth and the original selected temporal proof. It does not introduce a
+new obligation, renew a deadline, or infer current labor from a native receipt.
+
+This parent result is process-local. It is never recovered from inventory-only
+history. Any failed acquisition or publication withdraws current proof and
+unfinished selected stability; consumed native source floors remain retained.
+Within-bracket drift, changed original citizen identity, source regression,
+policy withdrawal and custody loss refuse publication. The combined development
+MCP host consumes this path through its existing foreground Wait operation.
+
 ## Recovery and integration boundary
 
 Use this executor with the durable coordinator described in

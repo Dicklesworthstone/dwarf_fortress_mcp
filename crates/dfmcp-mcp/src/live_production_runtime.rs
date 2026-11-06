@@ -4,7 +4,9 @@ use crate::{semantic_work_order_runtime as orders, semantic_workforce_runtime as
 use dfmcp_adapter::LiveObservationCapsule;
 use dfmcp_adapter::build_placement::journal::BuildMode;
 use dfmcp_adapter::live_dispatch::durable::{self, Coordinator, Phase};
-use dfmcp_adapter::live_production::{self, Executor, SelectedWorkOrderGoalMonitor};
+use dfmcp_adapter::live_production::{
+    self, Executor, SelectedParentGoalProgress, SelectedWorkOrderGoalMonitor,
+};
 use dfmcp_adapter::live_projection::{LiveWorldProjection, project_live_capsule};
 use dfmcp_adapter::plan_archive::{create_private_plan_archive, open_private_plan_archive};
 use dfmcp_adapter::semantic_work_orders::SemanticWorkOrderSession;
@@ -150,6 +152,7 @@ pub(crate) struct Runtime {
     fenced: bool,
     goal_monitor: Option<SelectedWorkOrderGoalMonitor<File>>,
     goal_history_present: bool,
+    parent_goal: Option<SelectedParentGoalProgress>,
 }
 
 pub(crate) struct View {
@@ -295,6 +298,7 @@ impl Runtime {
             fenced: false,
             goal_monitor: None,
             goal_history_present: false,
+            parent_goal: None,
         };
         let c = out.context(false)?;
         let mut work = Work::new(&c)?;
@@ -559,6 +563,7 @@ impl Runtime {
         Ok(())
     }
     pub(crate) fn abandon_preparation(&mut self) {
+        self.parent_goal = None;
         if let Some(basis) = &mut self.basis {
             basis.choices = None;
         }
@@ -605,6 +610,8 @@ impl Runtime {
             "observation_tick_floor":self.observation_tick_floor.get(),
             "original_plan":self.original.as_ref().map(plan_json),"runtime_admitted":false,
             "selected_inventory_goal":self.selected_goal_json(),
+            "current_parent_goal":null,
+            "parent_goal_observation_fenced":self.parent_goal_observation_fenced(),
             "current_state_proven":false,"original_goal_proven":false,"automatic_redispatch":false})
     }
     fn view(&mut self, work: &mut Work) -> Result<View> {
@@ -673,11 +680,13 @@ impl Runtime {
             "observation_tick_floor":self.observation_tick_floor.get(),
             "frontier":frontier,"review":review,
             "selected_inventory_goal":self.selected_goal_json(),
+            "current_parent_goal":self.parent_goal_json(),
+            "parent_goal_observation_fenced":self.parent_goal_observation_fenced(),
             "recovery":self.recovery_json(),"labor_control_enabled":self.labor_enabled(),"production_control_enabled":self.orders_enabled(),
             "native_custody":{"workforce_journal_id":self.workforce_journal.to_hex(),"order_journal_id":self.order_journal.to_hex()},
-            "current_state_proven":false,"original_goal_proven":false,"clock_advanced":false,
+            "current_state_proven":false,"original_goal_proven":self.parent_goal_proven(),"clock_advanced":false,
             "automatic_redispatch":false,"custody_initialization_may_be_partial":self.initialization_failed,
-            "coverage_omissions":["parent goal completion","order-attributed output","current labor after its receipt","workshop/material feasibility","game clock control"]});
+            "coverage_omissions":self.goal_coverage_omissions()});
         if let Some(custody) = &self.custody {
             custody.disarm()?;
         }
