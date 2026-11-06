@@ -1,5 +1,32 @@
 # Implementation Status
 
+## Unreleased — Filtered canonical aggregate queries
+
+Structured `dfmcp.query/1` aggregates now accept the same closed typed `where`
+filter as entity queries. Only True rows enter groups and exact integer/fixed
+statistics; False and Unknown exclusions are counted separately. Negation cannot
+turn unavailable, stale, redacted or contradictory facts into selected rows.
+Metric availability remains separate from filter truth, and filtered totals
+never establish full-fortress absence or mutation authority.
+
+The shared decoder and canonical three-valued evaluator preserve entity-query
+semantics. Combined predicate, grouping and metric work is bounded before any
+scan, including requests whose selected kind is empty. Complete results retain
+byte/token bounds and exact source/session query identity. Unfiltered responses
+retain their prior fields and values. The existing structured live-read routes
+consume this change; the default laboratory route is a separate integration.
+
+Executed validation: all 28 actual-source query component tests pass with zero
+failures or ignored tests, including seven added aggregate regressions and the
+18-case Boolean truth table. The focused crate directly includes the unchanged
+query implementation files and real core/world sources, with exact repository
+serialization dependency versions. Execution used rustc 1.100.0-nightly
+(908501772); scoped formatting also passed the current resolved nightly
+1.101.0-nightly (249c1e4e3, 2026-11-05). The eleven-tool agent contract passes.
+Full MCP transport, complete workspace qualification and native-game admission
+are not claimed. Bead `df-lab-structured-query-f7q` remains in progress for the
+laboratory route and its complete public-response verification.
+
 ## Unreleased — Complete default retained-order goal monitoring
 
 The combined live labor/order owner now monitors the original default finite-order

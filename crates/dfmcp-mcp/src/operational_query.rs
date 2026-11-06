@@ -9,7 +9,8 @@ use dfmcp_core::{
     StateAnchor,
 };
 use dfmcp_world::{
-    EntityKind, EntityRecord, Fact, FactPresence, FactSource, Value as WorldValue, WorldSnapshot,
+    EntityKind, EntityRecord, Fact, FactPresence, FactSource, Predicate, PredicateTruth,
+    Value as WorldValue, WorldSnapshot, evaluate_truth_for,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -37,6 +38,8 @@ enum Query {
     Aggregate {
         #[serde(default)]
         kinds: Vec<String>,
+        #[serde(rename = "where")]
+        predicate: Option<Value>,
         group_by: Option<GroupBy>,
         #[serde(default)]
         metrics: Vec<Metric>,
@@ -360,15 +363,21 @@ pub(super) fn execute(
     match request.query {
         Query::Aggregate {
             kinds: selected,
+            predicate,
             group_by,
             metrics,
             max_groups,
         } => {
-            let selected = kinds(selected)?;
-            let max_groups = max_groups.unwrap_or(32);
-            aggregate(
-                snapshot, identity, &selected, group_by, &metrics, max_groups, maximum,
-            )
+            let spec = AggregateSpec {
+                kinds: kinds(selected)?,
+                predicate: predicate
+                    .map(super::core_query::decode_filter)
+                    .transpose()?,
+                group_by,
+                metrics,
+                max_groups: max_groups.map_or(32, |value| value),
+            };
+            aggregate(snapshot, identity, &spec, maximum)
         }
         Query::Search {
             text,
@@ -483,21 +492,33 @@ fn group_key(entity: &EntityRecord, group_by: Option<&GroupBy>) -> Result<GroupK
     })
 }
 
+struct AggregateSpec {
+    kinds: BTreeSet<String>,
+    predicate: Option<Predicate>,
+    group_by: Option<GroupBy>,
+    metrics: Vec<Metric>,
+    max_groups: usize,
+}
+
 fn aggregate(
     snapshot: &WorldSnapshot,
     identity: Digest32,
-    selected: &BTreeSet<String>,
-    group_by: Option<GroupBy>,
-    metrics: &[Metric],
-    max_groups: usize,
+    spec: &AggregateSpec,
     maximum: usize,
 ) -> Result<Value> {
-    if max_groups == 0 || max_groups > MAX_GROUPS || metrics.len() > MAX_METRICS {
+    let AggregateSpec {
+        kinds: selected,
+        predicate,
+        group_by,
+        metrics,
+        max_groups,
+    } = spec;
+    if *max_groups == 0 || *max_groups > MAX_GROUPS || metrics.len() > MAX_METRICS {
         return Err(exhausted(
             "aggregate group or metric count exceeds its bound",
         ));
     }
-    if let Some(GroupBy::Field { field }) = &group_by {
+    if let Some(GroupBy::Field { field }) = group_by {
         names(vec![field.clone()], 1)?;
     }
     let mut metric_names = BTreeSet::new();
@@ -512,12 +533,18 @@ fn aggregate(
             ));
         }
     }
-    if snapshot
-        .graph
-        .entities
-        .len()
-        .saturating_mul(metrics.len() + 2)
-        > MAX_WORK
+    // The public evaluator validates shape and quantity bounds as well as
+    // evaluating truth. Charge all three predicate visits before scanning;
+    // rejected/unknown rows do not make a larger request admissible.
+    let predicate_work = predicate
+        .as_ref()
+        .map_or(0, |predicate| predicate.complexity().saturating_mul(3));
+    if snapshot.graph.entities.len().saturating_mul(
+        metrics
+            .len()
+            .saturating_add(2)
+            .saturating_add(predicate_work),
+    ) > MAX_WORK
     {
         return Err(exhausted("aggregate scan exceeds its operation bound"));
     }
@@ -532,12 +559,29 @@ fn aggregate(
         );
     }
     let mut matched = 0u64;
+    let mut selected_entities = 0u64;
+    let mut excluded_false = 0u64;
+    let mut excluded_unknown = 0u64;
     for entity in snapshot.graph.entities.values() {
         if !selected.is_empty() && !selected.contains(&kind_name(&entity.kind)) {
             continue;
         }
+        selected_entities += 1;
+        if let Some(predicate) = predicate {
+            match evaluate_truth_for(snapshot, entity.id, predicate) {
+                PredicateTruth::True => {}
+                PredicateTruth::False => {
+                    excluded_false += 1;
+                    continue;
+                }
+                PredicateTruth::Unknown => {
+                    excluded_unknown += 1;
+                    continue;
+                }
+            }
+        }
         let key = group_key(entity, group_by.as_ref())?;
-        if !groups.contains_key(&key) && groups.len() >= max_groups {
+        if !groups.contains_key(&key) && groups.len() >= *max_groups {
             return Err(exhausted(
                 "aggregate group cardinality exceeded max_groups; no partial summary was published",
             ));
@@ -571,14 +615,21 @@ fn aggregate(
             Ok(json!({"key":key,"count":group.count,"metrics":statistics}))
         })
         .collect::<Result<Vec<_>>>()?;
-    finish(
-        snapshot,
-        identity,
-        json!({"kind":"aggregate","matched":matched,"groups":rows,
+    let mut result = json!({"kind":"aggregate","matched":matched,"groups":rows,
         "truncated":false,"continuation":null,"epistemic_state":"inferred",
-        "scanned_entities":snapshot.graph.entities.len(),"metric_evaluations":matched.saturating_mul(metrics.len() as u64)}),
-        maximum,
-    )
+        "scanned_entities":snapshot.graph.entities.len(),"metric_evaluations":matched.saturating_mul(metrics.len() as u64)});
+    if predicate.is_some() {
+        result["selection"] = json!({
+            "selected_entities":selected_entities,
+            "matched":matched,
+            "excluded_false":excluded_false,
+            "excluded_unknown":excluded_unknown,
+            "predicate_evaluations":selected_entities,
+            "complete_within_projection":excluded_unknown == 0,
+            "note":"only True rows contribute; Unknown is not False and filtered totals do not establish complete-world absence"
+        });
+    }
+    finish(snapshot, identity, result, maximum)
 }
 
 struct SearchSpec {
@@ -1215,5 +1266,224 @@ mod tests {
         let mut version = search_query();
         version["schema"] = json!("dfmcp.query/99");
         assert!(execute(&snapshot, &ctx, &version).is_err());
+    }
+
+    fn boolean_filter(field: &str) -> Value {
+        json!({"op":"compare","field":field,"comparison":"eq",
+            "value":{"type":"bool","value":true}})
+    }
+
+    #[test]
+    fn filtered_totals_share_entity_selection_and_account_for_unknown_rows() -> Result<()> {
+        let (snapshot, ctx) = fixture();
+        let mut request = numeric_query();
+        request["query"]["kinds"] = json!(["unit"]);
+        request["query"]["where"] = boolean_filter("alive");
+        let result = execute(&snapshot, &ctx, &request)?;
+        assert_eq!(result, execute(&snapshot, &ctx, &request)?);
+        assert_eq!(result["matched"], 1);
+        assert_eq!(
+            result["groups"][0]["metrics"]["stock"]["sum"],
+            u64::MAX.to_string()
+        );
+        assert_eq!(result["metric_evaluations"], 1);
+        assert_eq!(result["selection"]["selected_entities"], 3);
+        assert_eq!(result["selection"]["excluded_false"], 1);
+        assert_eq!(result["selection"]["excluded_unknown"], 1);
+        assert_eq!(result["selection"]["complete_within_projection"], false);
+        assert_eq!(result["coverage"]["absence_proven"], false);
+        let rows = super::super::core_query::execute(
+            &snapshot,
+            &ctx,
+            &envelope(json!({"kind":"entities","kinds":["unit"],
+                "where":boolean_filter("alive"),"fields":["stock"]})),
+        )?;
+        assert_eq!(rows["rows"].as_array().map(Vec::len), Some(1));
+        assert_eq!(rows["rows"][0]["entity_id"], "1");
+        Ok(())
+    }
+
+    #[test]
+    fn negation_never_selects_unavailable_or_conflicting_filter_values() -> Result<()> {
+        let (source, source_ctx) = fixture();
+        for presence in [
+            FactPresence::Absent,
+            FactPresence::Unknown("unread".to_owned()),
+            FactPresence::Unsupported("version".to_owned()),
+            FactPresence::Omitted("projection".to_owned()),
+            FactPresence::Redacted("private".to_owned()),
+            FactPresence::Stale(source.anchor()),
+            FactPresence::Known(WorldValue::Bool(true)),
+        ] {
+            let mut snapshot = source.clone();
+            let mut ctx = source_ctx.clone();
+            let entity = snapshot
+                .graph
+                .entities
+                .get_mut(&EntityId::new(1))
+                .ok_or_else(|| invalid("missing fixture entity"))?;
+            let mut unavailable = fact(WorldValue::Bool(false));
+            unavailable.presence = Some(presence);
+            entity.fields.insert("alive".to_owned(), unavailable);
+            snapshot.refresh_hash();
+            ctx.anchor = snapshot.anchor();
+            let result = execute(
+                &snapshot,
+                &ctx,
+                &envelope(json!({
+                    "kind":"aggregate","kinds":["unit"],
+                    "where":{"op":"not","arg":boolean_filter("alive")}
+                })),
+            )?;
+            assert_eq!(result["matched"], 1);
+            assert_eq!(result["selection"]["excluded_false"], 0);
+            assert_eq!(result["selection"]["excluded_unknown"], 2);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn aggregate_boolean_filters_preserve_the_complete_three_valued_truth_table() -> Result<()> {
+        let (mut snapshot, mut ctx) = fixture();
+        snapshot
+            .graph
+            .entities
+            .retain(|id, _| *id == EntityId::new(1));
+        // 0=False, 1=True, 2=Unknown. These are independent expected truth tables.
+        let all = [[0, 0, 0], [0, 1, 2], [0, 2, 2]];
+        let any = [[0, 1, 2], [1, 1, 1], [2, 1, 2]];
+        for left in 0..3 {
+            for right in 0..3 {
+                let entity = snapshot
+                    .graph
+                    .entities
+                    .get_mut(&EntityId::new(1))
+                    .ok_or_else(|| invalid("missing fixture entity"))?;
+                for (name, state) in [("left", left), ("right", right)] {
+                    let mut value = fact(WorldValue::Bool(state == 1));
+                    if state == 2 {
+                        value.presence = Some(FactPresence::Unknown("unread".to_owned()));
+                    }
+                    entity.fields.insert(name.to_owned(), value);
+                }
+                snapshot.refresh_hash();
+                ctx.anchor = snapshot.anchor();
+                for (op, expected) in [("all", all[left][right]), ("any", any[left][right])] {
+                    let result = execute(
+                        &snapshot,
+                        &ctx,
+                        &envelope(json!({
+                            "kind":"aggregate","where":{"op":op,
+                                "args":[boolean_filter("left"),boolean_filter("right")]}
+                        })),
+                    )?;
+                    assert_eq!(result["matched"], u64::from(expected == 1));
+                    assert_eq!(
+                        result["selection"]["excluded_false"],
+                        u64::from(expected == 0)
+                    );
+                    assert_eq!(
+                        result["selection"]["excluded_unknown"],
+                        u64::from(expected == 2)
+                    );
+                }
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn filtering_precedes_group_cardinality_and_keeps_empty_statistics_unknown() -> Result<()> {
+        let (snapshot, ctx) = fixture();
+        let result = execute(
+            &snapshot,
+            &ctx,
+            &envelope(json!({
+                "kind":"aggregate","group_by":{"kind":"field","field":"alive"},
+                "max_groups":1,"where":boolean_filter("alive")
+            })),
+        )?;
+        assert_eq!(result["groups"].as_array().map(Vec::len), Some(1));
+        assert_eq!(result["groups"][0]["count"], 1);
+        assert_eq!(result["selection"]["excluded_unknown"], 2);
+        let mut request = numeric_query();
+        request["query"]["where"] = boolean_filter("unobserved");
+        let empty = execute(&snapshot, &ctx, &request)?;
+        assert_eq!(empty["matched"], 0);
+        assert_eq!(empty["selection"]["excluded_unknown"], 4);
+        assert!(empty["groups"][0]["metrics"]["stock"]["sum"].is_null());
+        Ok(())
+    }
+
+    #[test]
+    fn filter_work_is_bounded_before_false_rows_or_empty_kind_selection() -> Result<()> {
+        let (mut snapshot, mut ctx) = fixture();
+        let seed = snapshot
+            .graph
+            .entities
+            .get(&EntityId::new(1))
+            .ok_or_else(|| invalid("missing fixture entity"))?
+            .clone();
+        for id in 5..=10_000 {
+            let mut entity = seed.clone();
+            entity.id = EntityId::new(id);
+            snapshot.graph.entities.insert(entity.id, entity);
+        }
+        snapshot.refresh_hash();
+        ctx.anchor = snapshot.anchor();
+        ctx.budget.max_entities = 10_000;
+        let request = envelope(json!({"kind":"aggregate","kinds":["item"],
+            "where":{"op":"all","args":vec![boolean_filter("unobserved");140]}}));
+        assert!(matches!(execute(&snapshot,&ctx,&request),
+            Err(error) if error.code == ErrorCode::BudgetExceeded
+                && error.message == "aggregate scan exceeds its operation bound"));
+        Ok(())
+    }
+
+    #[test]
+    fn invalid_filters_and_output_refusal_leave_the_exact_source_unchanged() -> Result<()> {
+        let (snapshot, mut ctx) = fixture();
+        let original = snapshot.anchor();
+        for filter in [
+            json!({"op":"compare","field":"alive","comparison":"equal", "value":{"type":"bool","value":true}}),
+            json!({"op":"compare","field":"","comparison":"eq", "value":{"type":"bool","value":true}}),
+            json!({"op":"not","arg":boolean_filter("alive"),"extra":true}),
+            json!({"op":"execute","command":"grant authority"}),
+            json!(true),
+        ] {
+            assert!(matches!(execute(&snapshot, &ctx, &envelope(json!({
+                "kind":"aggregate","where":filter
+            }))), Err(error) if error.code == ErrorCode::InvalidRequest));
+        }
+        let mut request = numeric_query();
+        request["query"]["where"] = boolean_filter("alive");
+        let exact = execute(&snapshot, &ctx, &request)?;
+        let bytes = serde_json::to_vec(&exact)
+            .map_err(|_| invalid("cannot encode fixture"))?
+            .len();
+        ctx.budget.max_bytes = bytes as u64;
+        assert_eq!(execute(&snapshot, &ctx, &request)?, exact);
+        ctx.budget.max_bytes -= 1;
+        assert!(matches!(execute(&snapshot,&ctx,&request),
+            Err(error) if error.code == ErrorCode::BudgetExceeded));
+        assert_eq!(snapshot.anchor(), original);
+        assert!(snapshot.hash_is_valid());
+        Ok(())
+    }
+
+    #[test]
+    fn unfiltered_results_keep_their_existing_shape_and_new_filters_bind_identity() -> Result<()> {
+        let (snapshot, ctx) = fixture();
+        let request = numeric_query();
+        let old = execute(&snapshot, &ctx, &request)?;
+        assert!(old.get("selection").is_none());
+        let mut filtered = request.clone();
+        filtered["query"]["where"] = json!({"op":"all","args":[]});
+        let new = execute(&snapshot, &ctx, &filtered)?;
+        assert_eq!(old["groups"], new["groups"]);
+        assert_ne!(old["query_digest"], new["query_digest"]);
+        assert_eq!(new["selection"]["complete_within_projection"], true);
+        assert_eq!(new["selection"]["excluded_unknown"], 0);
+        Ok(())
     }
 }

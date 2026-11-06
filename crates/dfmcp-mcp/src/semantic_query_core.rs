@@ -321,6 +321,17 @@ impl Filter {
     }
 }
 
+/// Decode the same closed row-filter grammar for other stateless projections.
+/// No aggregate or cross-entity predicate can enter through this boundary.
+pub(super) fn decode_filter(input: Value) -> Result<Predicate> {
+    validate_input(&input)?;
+    let filter: Filter = serde_json::from_value(input)
+        .map_err(|error| invalid(format!("invalid structured row filter: {error}")))?;
+    let predicate = filter.into_world()?;
+    predicate.validate_shape()?;
+    Ok(predicate)
+}
+
 pub(crate) fn anchor_json(anchor: StateAnchor) -> Value {
     json!({"fortress_id": anchor.fortress_id.to_string(), "epoch": anchor.cursor.epoch,
         "sequence": anchor.cursor.sequence, "game_tick": anchor.tick.0,

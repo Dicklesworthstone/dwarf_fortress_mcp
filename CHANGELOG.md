@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased — Filter structured aggregate queries
+
+- Support typed Boolean row filters in canonical aggregate queries, reusing
+  entity-query comparison and three-valued truth semantics.
+- Count known False and Unknown exclusions separately; preserve exact statistics,
+  unavailable metric samples, source identity and complete response bounds.
+- Bound combined predicate/aggregate work before scanning. Preserve unfiltered
+  result behavior and the frozen MCP surface.
+- Pass all 28 actual-source query component tests, including seven new aggregate
+  regressions. Full workspace and live qualification remain separate.
+
 ## Unreleased — Monitor default combined order completion
 
 - Monitor the original retained-order counter/status goal when a combined

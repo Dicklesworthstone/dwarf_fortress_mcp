@@ -64,6 +64,59 @@ source anchor in its normal Agent Turn. Search results are advisory retrieval
 over the supplied projection. Neither an empty result nor a known value alone
 proves complete-world absence, source authenticity or mutation eligibility.
 
+## Filtered operational aggregates
+
+The stateless `dfmcp.query/1` aggregate accepts the same typed `where` grammar as
+entity queries. This permits a count or exact numeric total for a selected
+population without downloading every record. For example:
+
+```json
+{
+  "schema": "dfmcp.query/1",
+  "query": {
+    "kind": "aggregate",
+    "kinds": ["unit"],
+    "where": {
+      "op": "all",
+      "args": [
+        {
+          "op": "compare", "field": "alive", "comparison": "eq",
+          "value": {"type": "bool", "value": true}
+        },
+        {
+          "op": "compare", "field": "labor.MINING", "comparison": "eq",
+          "value": {"type": "bool", "value": true}
+        }
+      ]
+    }
+  }
+}
+```
+
+Only rows whose complete predicate is True contribute to groups and metrics.
+`selection` separately reports the kind-selected population, matches, known
+False exclusions and Unknown exclusions. `complete_within_projection` means
+every selected row's filter was decidable; it does not establish full fortress
+coverage, source authority or a mutation precondition. Missing, unavailable,
+redacted, stale and contradictory filter values remain Unknown under negation.
+Boolean combinations use the same three-valued evaluator as entity selection.
+
+Metric availability is a separate question: a matching row with an unavailable
+numeric field remains a selected row and contributes to that metric's existing
+excluded-sample counts. A metric with no eligible samples retains a null sum and
+mean. Filtering runs before grouping, so excluded rows do not consume the group
+cardinality allowance or reveal their group values.
+
+The entire predicate is validated before scanning. A conservative work bound
+charges predicate validation and evaluation together with grouping and metrics
+against the existing 4,000,000-operation ceiling, including rows that might be
+excluded. Results publish atomically under the caller's byte/token budget. The
+query identity covers the filter, exact snapshot and session. Unfiltered
+requests preserve their previous result fields and values.
+
+The filter is available to existing structured live-read consumers. It performs
+no bridge read, creates no watch and grants no effect authority.
+
 ## Qualified entity quantities
 
 The typed `Predicate::EntityQuantity` counts matching entity records or sums a

@@ -99,6 +99,7 @@
         "type": "object", "additionalProperties": false, "required": ["kind"],
         "properties": {
           "kind": {"const": "aggregate"}, "kinds": {"type": "array", "items": {"$ref": "#/$defs/entity_kind"}, "maxItems": 32, "minItems": 0},
+          "where": {"anyOf": [{"$ref": "#/$defs/filter"}, {"type": "null"}], "description": "Only True rows contribute. Unavailable filter facts remain Unknown and are counted separately from False in selection coverage."},
           "group_by": {"anyOf": [{"$ref": "#/$defs/group_by"}, {"type": "null"}]}, "metrics": {"type": "array", "items": {"$ref": "#/$defs/numeric_metric"}, "maxItems": 16, "minItems": 0},
           "max_groups": {"anyOf": [{"type": "integer", "minimum": 1, "maximum": 128}, {"type": "null"}]}
         }
