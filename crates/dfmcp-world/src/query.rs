@@ -77,6 +77,15 @@ pub enum Predicate {
         op: CompareOp,
         value: u64,
     },
+    /// Bounded FLOOR/STAIR access with vertical movement only between paired
+    /// adjacent generic laboratory STAIR tiles. Furnishing approaches remain
+    /// horizontal. This is a separate policy from the legacy same-level model
+    /// and does not establish native directional-stair pathfinding.
+    LaboratoryRoomAccessPairedStairs {
+        area: MapCuboid,
+        entry: MapCoord,
+        targets: Vec<MapCoord>,
+    },
 }
 
 impl Predicate {
@@ -121,7 +130,8 @@ impl Predicate {
             match predicate {
                 Self::All(children) | Self::Any(children) => pending.extend(children),
                 Self::Not(child) => pending.push(child),
-                Self::LaboratoryRoomAccess { area, targets, .. } => {
+                Self::LaboratoryRoomAccess { area, targets, .. }
+                | Self::LaboratoryRoomAccessPairedStairs { area, targets, .. } => {
                     work = work.saturating_add(crate::laboratory_access::work_bound(
                         *area,
                         targets.len(),
@@ -181,6 +191,20 @@ impl Predicate {
                 targets.sort_unstable_by_key(|target| (target.z, target.y, target.x));
                 // Keep duplicates so normalization cannot erase invalid input.
                 Self::LaboratoryRoomAccess {
+                    area: *area,
+                    entry: *entry,
+                    targets,
+                }
+            }
+            Self::LaboratoryRoomAccessPairedStairs {
+                area,
+                entry,
+                targets,
+            } => {
+                let mut targets = targets.clone();
+                targets.sort_unstable_by_key(|target| (target.z, target.y, target.x));
+                // Preserve duplicates so normalization cannot erase invalidity.
+                Self::LaboratoryRoomAccessPairedStairs {
                     area: *area,
                     entry: *entry,
                     targets,
@@ -319,6 +343,25 @@ impl Predicate {
                 });
                 put_u64(output, *value);
             }
+            Self::LaboratoryRoomAccessPairedStairs {
+                area,
+                entry,
+                targets,
+            } => {
+                use crate::canonical::put_i32;
+                output.push(13);
+                for at in [area.min, area.max, *entry] {
+                    put_i32(output, at.x);
+                    put_i32(output, at.y);
+                    put_i32(output, at.z);
+                }
+                put_u64(output, targets.len() as u64);
+                for at in targets {
+                    put_i32(output, at.x);
+                    put_i32(output, at.y);
+                    put_i32(output, at.z);
+                }
+            }
         }
     }
 }
@@ -454,6 +497,12 @@ fn evaluate_truth(
             entry,
             targets,
         } => crate::laboratory_room_access_truth(snapshot, *area, *entry, targets)
+            .map_or(PredicateTruth::Unknown, |truth| truth),
+        Predicate::LaboratoryRoomAccessPairedStairs {
+            area,
+            entry,
+            targets,
+        } => crate::laboratory_room_access_paired_stairs_truth(snapshot, *area, *entry, targets)
             .map_or(PredicateTruth::Unknown, |truth| truth),
         Predicate::EntityQuantity { .. } => {
             entity_quantity_truth(snapshot, predicate, Fact::known_value)
@@ -803,8 +852,19 @@ fn validate_predicate_shape(root: &Predicate) -> Result<()> {
                 area,
                 entry,
                 targets,
+            }
+            | Predicate::LaboratoryRoomAccessPairedStairs {
+                area,
+                entry,
+                targets,
             } => {
-                crate::laboratory_access::validate_request(*area, *entry, targets)?;
+                if matches!(predicate, Predicate::LaboratoryRoomAccess { .. }) {
+                    crate::laboratory_access::validate_request(*area, *entry, targets)?;
+                } else {
+                    crate::laboratory_access::validate_paired_stairs_request(
+                        *area, *entry, targets,
+                    )?;
+                }
                 access_work = access_work.saturating_add(crate::laboratory_access::work_bound(
                     *area,
                     targets.len(),

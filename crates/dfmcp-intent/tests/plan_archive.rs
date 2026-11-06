@@ -334,6 +334,135 @@ fn laboratory_room_access_appends_a_lossless_predicate_tag() -> Result<()> {
 }
 
 #[test]
+fn paired_stair_access_appends_tag_thirteen_and_preserves_original_obligation() -> Result<()> {
+    let region = MapCuboid {
+        min: MapCoord::new(-4, -2, 2),
+        max: MapCoord::new(1, 2, 4),
+    };
+    let goal = Predicate::LaboratoryRoomAccessPairedStairs {
+        area: region,
+        entry: region.min,
+        targets: vec![MapCoord::new(1, 2, 4), MapCoord::new(-1, 0, 3)],
+    };
+    let mut plan = make(
+        vec![Action::DesignateDig {
+            area: MapCuboid {
+                min: MapCoord::new(0, 0, 2),
+                max: MapCoord::new(0, 0, 4),
+            },
+            mode: DigMode::UpDownStair,
+        }],
+        goal.clone(),
+        false,
+    );
+    if let Some(obligation) = &mut plan.steps[0].obligation {
+        obligation.terminal = goal.normalized();
+    }
+    plan.digest = plan.compute_digest();
+    plan.id = plan.expected_id();
+    let (bytes, _) = roundtrip(&plan)?;
+    let predicate = 12 + 16 + 16 + 64 + 4 + plan.summary.len();
+    assert_eq!(bytes[predicate], 13);
+    assert_eq!(&bytes[predicate + 37..predicate + 41], &2u32.to_be_bytes());
+    assert_eq!(
+        plan.steps[0].obligation.as_ref().map(|obligation| (
+            obligation.deadline_tick,
+            obligation.poll_interval_ticks,
+            obligation.stable_for_observations,
+        )),
+        Some((GameTick(180), 5, 2)),
+    );
+    Ok(())
+}
+
+#[test]
+fn paired_stair_archive_keeps_legacy_access_payload_and_policy_identity_distinct() -> Result<()> {
+    let region = area();
+    let targets = vec![MapCoord::new(1, 3, 3), MapCoord::new(2, 3, 3)];
+    let legacy = make(
+        vec![Action::Pause { paused: false }],
+        Predicate::LaboratoryRoomAccess {
+            area: region,
+            entry: region.min,
+            targets: targets.clone(),
+        },
+        false,
+    );
+    let paired = make(
+        vec![Action::Pause { paused: false }],
+        Predicate::LaboratoryRoomAccessPairedStairs {
+            area: region,
+            entry: region.min,
+            targets: targets.clone(),
+        },
+        false,
+    );
+    let (legacy_bytes, legacy_seal) = roundtrip(&legacy)?;
+    let (paired_bytes, paired_seal) = roundtrip(&paired)?;
+    assert_ne!(legacy_seal.plan_digest, paired_seal.plan_digest);
+    assert_ne!(legacy_seal.object_digest, paired_seal.object_digest);
+    let predicate = 12 + 16 + 16 + 64 + 4 + legacy.summary.len();
+    let mut expected = vec![11];
+    for at in [region.min, region.max, region.min] {
+        for component in [at.x, at.y, at.z] {
+            expected.extend_from_slice(&component.to_be_bytes());
+        }
+    }
+    expected.extend_from_slice(&2u32.to_be_bytes());
+    for target in targets {
+        for component in [target.x, target.y, target.z] {
+            expected.extend_from_slice(&component.to_be_bytes());
+        }
+    }
+    assert_eq!(
+        &legacy_bytes[predicate..predicate + expected.len()],
+        expected
+    );
+    expected[0] = 13;
+    assert_eq!(
+        &paired_bytes[predicate..predicate + expected.len()],
+        expected
+    );
+    Ok(())
+}
+
+#[test]
+fn paired_stair_archive_refuses_excessive_volume_or_invalid_targets() -> Result<()> {
+    let access = Predicate::LaboratoryRoomAccessPairedStairs {
+        area: MapCuboid {
+            min: MapCoord::new(1, 2, 3),
+            max: MapCoord::new(2, 3, 4),
+        },
+        entry: MapCoord::new(1, 2, 3),
+        targets: vec![MapCoord::new(1, 3, 4), MapCoord::new(2, 3, 4)],
+    };
+    let plan = make(vec![Action::Pause { paused: false }], access, false);
+    let (bytes, seal) = roundtrip(&plan)?;
+    let predicate = 12 + 16 + 16 + 64 + 4 + plan.summary.len();
+    for count in [0u32, 17, u32::MAX] {
+        let mut changed = bytes.clone();
+        changed[predicate + 37..predicate + 41].copy_from_slice(&count.to_be_bytes());
+        let (changed, expected) = resigned(&changed, seal.plan_digest);
+        assert!(archive::decode(&changed, expected, ArchiveLimits::default()).is_err());
+    }
+    for mutation in 0..3 {
+        let mut changed = bytes.clone();
+        let start = predicate + 41;
+        match mutation {
+            0 => {
+                let first = changed[start..start + 12].to_vec();
+                changed[start + 12..start + 24].copy_from_slice(&first);
+            }
+            1 => changed[start..start + 4].copy_from_slice(&i32::MAX.to_be_bytes()),
+            _ => changed[predicate + 21..predicate + 25].copy_from_slice(&1024i32.to_be_bytes()),
+        }
+        let (changed, expected) = resigned(&changed, seal.plan_digest);
+        assert!(archive::decode(&changed, expected, ArchiveLimits::default()).is_err());
+    }
+    Ok(())
+}
+
+#[test]
 fn inventory_quantity_roundtrips_exactly_with_original_obligation_and_tag_twelve() -> Result<()> {
     for quantity_field in [None, Some("stack_size".to_owned())] {
         for op in [

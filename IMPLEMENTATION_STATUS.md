@@ -1,5 +1,51 @@
 # Implementation Status
 
+## Unreleased — Furnished rooms connected across laboratory levels
+
+The explicit connected_room_stairs_v1 planner now composes bounded corridor
+mining and paired UpDownStair shafts with complete item-backed room production,
+shared-workforce setup and furnishing. It reuses observed stairs, keeps shafts
+outside original room floor masks and protected bedroom walls, avoids current
+and planned building footprints, and minimizes new wall tiles before path length
+and canonical tie-breaking. Every furnishing depends on the required access
+work; terminal goals retain original room terrain, exact installation custody,
+new connector/stair terrain and current entrance-to-furnishing access.
+
+The new LaboratoryRoomAccessPairedStairs predicate supports at most 1024 cells
+across levels. FLOOR/STAIR permit horizontal travel, but a vertical edge requires
+stairs at both adjacent cells. Targets require horizontal approaches. Unknown
+terrain and occupancy cannot prove access; a bounded 3-D difference raster clips
+buildings to their actual levels. Canonical/archive tag 13 is additive; legacy
+same-level tag 11 and original source/continuation identities are preserved.
+The distinct connected_room_stairs_residual_v1 continuation retains the complete
+original model, entry and domain and can repair a stair without replacing valid
+furnishings or spending more wood. This is the generic paired bidirectional
+laboratory model, not native directional stairs, hauling or room ownership.
+
+The new starter_fortress_multilevel scenario extends the finite workforce,
+construction-material and provisions model with observed rock levels z=8..12.
+Its additional hazard halos permit lower or upper rooms while all earlier
+scenario facts and snapshots remain unchanged. Agent discovery and the existing
+public plan/commit/wait/goal route expose the new opt-in marker. Usage and a
+complete lower-bedroom request are in `docs/LAB_CONNECTED_ROOM_ACCESS.md`.
+
+Executed validation on Rust 1.101.0-nightly (249c1e4e3): 587 actual world/intent
+tests pass (343 intent, 244 world), including independent access oracles over
+4096 unknown-inclusive two-level cases and 6561 known-terrain 3-D cubes, old
+archive vectors and new predicate recovery. All 230 actual-source laboratory
+component tests pass, including eight new compiler/forecast/execution/repair
+cases and existing production, staffing, room, continuation and witness tests.
+The repair test proves one physical stair-cell repair, retained already-satisfied
+room designations, no new corridor tiles, unchanged wood and installations, and
+restoration of the original exact goal. Forecast comparison uses its reported
+observation cadence. A public-facade scenario/plan/commit/wait/archive regression
+is tracked but not executed by this component harness. Full MCP transport,
+exact-head workspace qualification and native admission remain unclaimed.
+
+The required verify.sh run passes 20 static/contract stages and stops at
+bead coverage because the environment has no br executable. No gate is skipped
+or substituted. Scoped Rust formatting and git diff whitespace checks pass.
+
 ## Unreleased — Bounded progress for default combined production orders
 
 The combined labor/order development runtime now prepares and confirms the

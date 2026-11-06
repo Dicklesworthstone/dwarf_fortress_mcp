@@ -33,6 +33,15 @@ fn in_session<T>(session: &str, body: impl FnOnce(&mut LabSession) -> Result<T>)
 }
 
 fn open(selector: &str, shared: bool, durable: bool) -> TestResult<String> {
+    open_scenario(selector, shared, durable, "starter_fortress")
+}
+
+fn open_scenario(
+    selector: &str,
+    shared: bool,
+    durable: bool,
+    scenario: &str,
+) -> TestResult<String> {
     let opened = parsed(&facade::fortress_open_session(
         Some(false),
         Some(selector.to_owned()),
@@ -59,12 +68,62 @@ fn open(selector: &str, shared: bool, durable: bool) -> TestResult<String> {
         None,
         Some(8_192),
         Some(64),
-        Some("starter_fortress".to_owned()),
+        Some(scenario.to_owned()),
         Some(shared),
         Some(durable),
     ))?;
     assert_eq!(opened["ok"], true, "{opened}");
     identity(&opened, "session_id")
+}
+
+#[test]
+fn multilevel_room_completes_through_the_public_plan_commit_wait_goal_loop() -> TestResult {
+    let _serial = serialized_durable_tests();
+    let session = open_scenario("964390", false, false, "starter_fortress_multilevel")?;
+    let mut blueprint = request();
+    blueprint["planner"] = json!("connected_room_stairs_v1");
+    blueprint["room"]["layout"]["origin"] = json!([2, 6, 9]);
+    blueprint["room"]["prerequisites"]["workforce"] = json!("complete_project_v1");
+    blueprint["access"]["region"]["min"] = json!([0, 0, 9]);
+    let before = effects_before(&session)?;
+    let planned = parsed(&facade::fortress_plan(
+        Some(session.clone()),
+        Some("connected lower-level bedrooms".to_owned()),
+        None,
+        None,
+        Some(blueprint.to_string()),
+    ))?;
+    assert_eq!(planned["ok"], true, "{planned}");
+    assert_eq!(effects_before(&session)?, before);
+    in_session(&session, |guard| {
+        let pending = guard
+            .pending
+            .as_ref()
+            .ok_or_else(|| fixture_error("room plan missing"))?;
+        assert!(matches!(pending.source, PlanSource::ConnectedRoom { .. }));
+        assert!(pending.plan.steps.iter().any(|step| matches!(
+            step.action,
+            Action::DesignateDig {
+                mode: dfmcp_intent::DigMode::UpDownStair,
+                ..
+            }
+        )));
+        let limits = dfmcp_intent::plan_archive::ArchiveLimits::default();
+        let (bytes, seal) = dfmcp_intent::plan_archive::encode(&pending.plan, limits)?;
+        assert_eq!(
+            dfmcp_intent::plan_archive::decode(&bytes, seal, limits)?,
+            pending.plan
+        );
+        Ok(())
+    })?;
+    let digest = identity(&planned, "plan_digest")?;
+    commit_ok(&session, &planned)?;
+    wait(&session, 2_000)?;
+    let completed = goal(&session, &digest)?;
+    assert_eq!(completed["predicate_truth"], "true", "{completed}");
+    assert_eq!(completed["physical_quiescent"], true, "{completed}");
+    assert!(completed["continuation_request"].is_null(), "{completed}");
+    Ok(())
 }
 
 fn request() -> Json {

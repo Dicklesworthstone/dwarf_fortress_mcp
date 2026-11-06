@@ -12,11 +12,18 @@ use dfmcp_world::{
 use serde::Deserialize;
 use serde_json::{Value as Json, json};
 
-use super::room_provisioning::{ProvisionedRoomRequest, RoomAccessComposition};
+use super::room_provisioning::{
+    ProvisionedRoomRequest, RoomAccessComposition, RoomAccessExcavation,
+};
 use crate::lab_world::spatial_index;
+
+#[path = "connected_room_stairs.rs"]
+mod stairs;
 
 const PLANNER: &str = "connected_room_v1";
 const RESIDUAL_PLANNER: &str = "connected_room_residual_v1";
+const STAIRS_PLANNER: &str = "connected_room_stairs_v1";
+const STAIRS_RESIDUAL_PLANNER: &str = "connected_room_stairs_residual_v1";
 const ROUTING_POLICY: &str = "laboratory-room-mining-cardinal/1";
 const MAX_REQUEST_BYTES: usize = 64 * 1_024;
 const MAX_CELLS: u64 = 1_024;
@@ -29,6 +36,7 @@ pub(crate) struct ConnectedRoomRequest {
     room: ProvisionedRoomRequest,
     entry: MapCoord,
     area: MapCuboid,
+    paired_stairs: bool,
 }
 
 pub(crate) fn is_connected_room(raw: &str) -> bool {
@@ -79,13 +87,13 @@ impl ConnectedRoomRequest {
             .map_err(|error| invalid(format!("invalid connected room source: {error}")))?;
         if input.template != "connected_room"
             || !match input.planner.as_deref() {
-                Some(PLANNER) => true,
+                Some(PLANNER | STAIRS_PLANNER) => true,
                 None => current,
                 _ => false,
             }
         {
             return Err(invalid(
-                "connected_room requires the fixed connected_room_v1 planner",
+                "connected_room requires a supported fixed connected_room planner",
             ));
         }
         let room = if current {
@@ -95,6 +103,7 @@ impl ConnectedRoomRequest {
         };
         let request = Self {
             room,
+            paired_stairs: input.planner.as_deref() == Some(STAIRS_PLANNER),
             entry: coordinate(input.access.entry),
             area: MapCuboid::new(
                 coordinate(input.access.region.min),
@@ -115,13 +124,30 @@ impl ConnectedRoomRequest {
         // Both components are generated JSON, so embedding the room preserves
         // its exact canonical generation without a fallible parse round trip.
         format!(
-            "{{\"access\":{},\"planner\":\"{PLANNER}\",\"room\":{},\"template\":\"connected_room\"}}",
+            "{{\"access\":{},\"planner\":\"{}\",\"room\":{},\"template\":\"connected_room\"}}",
             json!({
                 "entry":position(self.entry),
                 "region":{"min":position(self.area.min),"max":position(self.area.max)},
             }),
+            self.planner(),
             self.room.canonical_json(),
         )
+    }
+
+    fn planner(&self) -> &'static str {
+        if self.paired_stairs {
+            STAIRS_PLANNER
+        } else {
+            PLANNER
+        }
+    }
+
+    pub(crate) fn residual_planner(&self) -> &'static str {
+        if self.paired_stairs {
+            STAIRS_RESIDUAL_PLANNER
+        } else {
+            RESIDUAL_PLANNER
+        }
     }
 
     pub(crate) fn compile(
@@ -181,7 +207,11 @@ impl ConnectedRoomRequest {
         }
         analysis["template"] = json!("connected_room");
         analysis["room_planner"] = analysis["planner"].clone();
-        analysis["planner"] = json!(if residual { RESIDUAL_PLANNER } else { PLANNER });
+        analysis["planner"] = json!(if residual {
+            self.residual_planner()
+        } else {
+            self.planner()
+        });
         analysis["source_binding"]["connected_room_source_digest"] = json!(digest.to_hex());
         analysis["source_binding"]["access_request_preserved"] = json!(true);
         analysis["goal"] = json!(
@@ -191,14 +221,14 @@ impl ConnectedRoomRequest {
     }
 
     fn validate_geometry(&self, layout: &BlueprintLayout, targets: &[MapCoord]) -> Result<()> {
-        if self.area.min.z != self.area.max.z
+        if (!self.paired_stairs && self.area.min.z != self.area.max.z)
             || self
                 .area
                 .tile_count()
                 .is_none_or(|count| count == 0 || count > MAX_CELLS)
         {
             return Err(bounds(
-                "connected room access requires at most 1024 cells on one level",
+                "connected room access requires at most 1024 cells; multiple levels require connected_room_stairs_v1",
             ));
         }
         if !self.area.contains(self.entry)
@@ -269,6 +299,9 @@ impl ConnectedRoomRequest {
         production: &[RequestedAction],
         source_work: u64,
     ) -> Result<RoomAccessComposition> {
+        if self.paired_stairs {
+            return stairs::build(self, snapshot, layout, targets, production, source_work);
+        }
         self.validate_geometry(layout, targets)?;
         let mut work = Work::default();
         work.charge(source_work)?;
@@ -429,7 +462,13 @@ impl ConnectedRoomRequest {
             "native_pathfinding_proven":false, "entry_global_fortress_membership_proven":false,
         });
         Ok(RoomAccessComposition {
-            excavations,
+            excavations: excavations
+                .into_iter()
+                .map(|area| RoomAccessExcavation {
+                    area,
+                    mode: dfmcp_intent::DigMode::Mine,
+                })
+                .collect(),
             terminal,
             analysis,
         })
@@ -476,12 +515,12 @@ fn project_occupancy(
         MapCoord::new(
             footprint.min.x.max(domain.min.x),
             footprint.min.y.max(domain.min.y),
-            domain.min.z,
+            footprint.min.z.max(domain.min.z),
         ),
         MapCoord::new(
             footprint.max.x.min(domain.max.x),
             footprint.max.y.min(domain.max.y),
-            domain.max.z,
+            footprint.max.z.min(domain.max.z),
         ),
     )?;
     for at in dfmcp_world::terrain::region_tiles(clipped) {
@@ -625,6 +664,16 @@ fn minimum_path(
     costs: &BTreeMap<MapCoord, u32>,
     work: &mut Work,
 ) -> Result<Vec<MapCoord>> {
+    minimum_path_using(entry, endpoint, costs, work, |at| neighbors(area, at))
+}
+
+fn minimum_path_using(
+    entry: MapCoord,
+    endpoint: MapCoord,
+    costs: &BTreeMap<MapCoord, u32>,
+    work: &mut Work,
+    adjacent: impl Fn(MapCoord) -> Vec<MapCoord>,
+) -> Result<Vec<MapCoord>> {
     if !costs.contains_key(&entry) || !costs.contains_key(&endpoint) {
         return Err(precondition(
             "the required entry or room endpoint is unavailable to the route",
@@ -642,7 +691,7 @@ fn minimum_path(
             .get(&at)
             .copied()
             .ok_or_else(|| invalid("routing frontier escaped the eligible domain"))?;
-        for previous in neighbors(area, at) {
+        for previous in adjacent(at) {
             work.charge(1)?;
             if !costs.contains_key(&previous) {
                 continue;
@@ -679,7 +728,7 @@ fn minimum_path(
             .get(&at)
             .copied()
             .ok_or_else(|| invalid("route distance missing"))?;
-        let next = neighbors(area, at)
+        let next = adjacent(at)
             .into_iter()
             .find(|next| match (distance.get(next), costs.get(next)) {
                 (Some((walls, length)), Some(cost)) => {

@@ -86,13 +86,14 @@ const MAX_NAME_BYTES: usize = 128;
 const MAX_LIST_ITEMS: usize = 64;
 
 /// Built-in laboratory scenarios.
-pub(crate) const SCENARIOS: [&str; 6] = [
+pub(crate) const SCENARIOS: [&str; 7] = [
     "empty",
     "starter_fortress",
     "besieged_fortress",
     "starter_fortress_workforce",
     "starter_fortress_economy",
     "starter_fortress_provisions",
+    "starter_fortress_multilevel",
 ];
 
 /// Starter-fortress entity identities.
@@ -161,6 +162,7 @@ pub(crate) fn scenario_snapshot(
         "starter_fortress_workforce" => workforce_starter_graph(fortress_id)?,
         "starter_fortress_economy" => economy_starter_graph(fortress_id)?,
         "starter_fortress_provisions" => provisions_starter_graph(fortress_id)?,
+        "starter_fortress_multilevel" => multilevel_starter_graph(fortress_id)?,
         "besieged_fortress" => {
             let mut graph = starter_graph()?;
             graph.entities.insert(
@@ -279,6 +281,23 @@ fn provisions_starter_graph(fortress_id: FortressId) -> Result<WorldGraph> {
         effects::STOCK_PLANT_FIELD.to_owned(),
         lab_fact(Value::U64(starter::OPENING_PLANTS)),
     );
+    Ok(graph)
+}
+
+/// Separate source generation with complete hazard coverage for rooms one
+/// level above or below the entrance. Earlier scenarios keep their exact bytes.
+fn multilevel_starter_graph(fortress_id: FortressId) -> Result<WorldGraph> {
+    let mut graph = provisions_starter_graph(fortress_id)?;
+    for z in [starter::LEVEL_Z - 2, starter::LEVEL_Z + 2] {
+        for x in -1..=1 {
+            for y in -1..=1 {
+                let coord = ChunkCoord { x, y, z };
+                graph
+                    .chunks
+                    .insert(coord, uniform_chunk(coord, tile_codes::SOLID_WALL));
+            }
+        }
+    }
     Ok(graph)
 }
 
@@ -924,6 +943,16 @@ pub(crate) fn predicate_json(predicate: &Predicate) -> Json {
             targets,
         } => json!({"laboratory_room_access": {
             "policy":dfmcp_world::laboratory_access::LABORATORY_ACCESS_POLICY,
+            "region":{"min":[area.min.x,area.min.y,area.min.z],"max":[area.max.x,area.max.y,area.max.z]},
+            "entry":[entry.x,entry.y,entry.z],
+            "targets":targets.iter().map(|at| [at.x,at.y,at.z]).collect::<Vec<_>>(),
+        }}),
+        Predicate::LaboratoryRoomAccessPairedStairs {
+            area,
+            entry,
+            targets,
+        } => json!({"laboratory_room_access_paired_stairs": {
+            "policy":dfmcp_world::laboratory_access::LABORATORY_ACCESS_PAIRED_STAIRS_POLICY,
             "region":{"min":[area.min.x,area.min.y,area.min.z],"max":[area.max.x,area.max.y,area.max.z]},
             "entry":[entry.x,entry.y,entry.z],
             "targets":targets.iter().map(|at| [at.x,at.y,at.z]).collect::<Vec<_>>(),

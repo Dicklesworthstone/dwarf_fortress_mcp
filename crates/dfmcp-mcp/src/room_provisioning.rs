@@ -110,9 +110,14 @@ pub(crate) struct ProvisionedRoomRequest {
 /// Optional work composed before exact furnishing step identities are derived.
 /// Existing room compiler generations never install this hook.
 pub(crate) struct RoomAccessComposition {
-    pub excavations: Vec<MapCuboid>,
+    pub excavations: Vec<RoomAccessExcavation>,
     pub terminal: Predicate,
     pub analysis: Json,
+}
+
+pub(crate) struct RoomAccessExcavation {
+    pub area: MapCuboid,
+    pub mode: dfmcp_intent::DigMode,
 }
 
 pub(crate) type RoomAccessBuilder<'a> =
@@ -543,17 +548,17 @@ impl ProvisionedRoomRequest {
         }
         let mut access_steps = Vec::new();
         if let Some(access) = &access {
-            for area in &access.excavations {
+            for excavation in &access.excavations {
                 let postcondition = Predicate::RegionTerrain {
-                    area: *area,
-                    tile_code: effects::dig_target_tile_code(dfmcp_intent::DigMode::Mine),
+                    area: excavation.area,
+                    tile_code: effects::dig_target_tile_code(excavation.mode),
                 };
                 terminal.push(postcondition.clone());
                 access_steps.push(step_number(requested_actions.len())?);
                 requested_actions.push(RequestedAction {
                     action: Action::DesignateDig {
-                        area: *area,
-                        mode: dfmcp_intent::DigMode::Mine,
+                        area: excavation.area,
+                        mode: excavation.mode,
                     },
                     preconditions: Vec::new(),
                     postconditions: vec![postcondition],

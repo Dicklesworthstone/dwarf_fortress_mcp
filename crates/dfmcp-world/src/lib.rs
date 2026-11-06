@@ -66,7 +66,10 @@ pub use evidence::{
     EvidenceCoverage, EvidencePolicy, EvidenceSource, PredicateEvidence, lab_fact_is_eligible,
     laboratory_fact_value,
 };
-pub use laboratory_access::{laboratory_building_footprints, laboratory_room_access_truth};
+pub use laboratory_access::{
+    laboratory_building_footprints, laboratory_room_access_paired_stairs_truth,
+    laboratory_room_access_truth,
+};
 pub use ledger::{DurableLedger, EffectJournalRecord, ObservationCapsule, WitnessSet};
 pub use model::{
     ChunkCoord, EdgeKind, EdgeRecord, EntityKind, EntityRecord, Fact, FactPresence, FactSource,

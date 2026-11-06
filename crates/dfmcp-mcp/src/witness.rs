@@ -76,7 +76,8 @@ impl ReadWitness {
             }
             Predicate::Paused(_) => self.pause = true,
             Predicate::RegionTerrain { area, .. } => self.region(*area),
-            Predicate::LaboratoryRoomAccess { area, .. } => {
+            Predicate::LaboratoryRoomAccess { area, .. }
+            | Predicate::LaboratoryRoomAccessPairedStairs { area, .. } => {
                 self.region(*area);
                 self.building_domain = true;
             }

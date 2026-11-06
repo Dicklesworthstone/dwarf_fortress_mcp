@@ -87,7 +87,10 @@ a connector while retaining every valid installation. Their distinct
 `connected_room_residual_v1` compiler and private source envelope preserve the
 ordinary `provisioned_room_residual_v1` behavior described here. See
 [connected rooms and access repair](LAB_CONNECTED_ROOM_ACCESS.md#continue-an-interrupted-room-or-repair-access)
-for the request, routing limits and current access proof.
+for the request, routing limits and current access proof. The explicit
+`connected_room_stairs_v1` generation retains its paired-stair model through
+`connected_room_stairs_residual_v1`; a continuation cannot change it to the older
+single-level model, substitute an entrance or enlarge the original volume.
 
 Ordinary provisioned-room continuation lineage makes this distinction explicit:
 

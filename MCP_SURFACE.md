@@ -721,3 +721,18 @@ independent: the MCP wire layer renders the dotted tool names with underscores, 
 request routing is provided by the pinned `fastmcp-rust` facade rather than by this repository.
 The Agent Turn Packet is currently an additive executable projection and will move into the shared
 schema catalog as Gate A1 hardens.
+
+### Multi-level connected laboratory rooms
+
+The existing `fortress.open_session` accepts `starter_fortress_multilevel`, which
+extends the finite-workforce/economy/provisions scenario with complete hazard
+coverage around the entrance level and its immediate neighbors. The existing
+`fortress.plan` connected-room blueprint accepts the explicit
+`planner: "connected_room_stairs_v1"` marker. Its bounded 3-D routing composes
+ordinary mining with paired `UpDownStair` shafts outside original room floor
+masks, then installs exact furnishings and proves current entrance access.
+
+`continue_goal` retains that exact model and volume through the distinct
+`connected_room_stairs_residual_v1` compiler. Existing single-level source and
+archive bytes remain unchanged. See [multi-level connected rooms](docs/LAB_CONNECTED_ROOM_ACCESS.md#connect-rooms-across-levels)
+for the complete request, geometry limits and laboratory-only stair semantics.

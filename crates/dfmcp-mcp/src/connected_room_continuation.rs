@@ -13,6 +13,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 const SOURCE_SCHEMA: &str = "dfmcp.connected-room-continuation/1";
+#[cfg(test)]
 const PLANNER: &str = "connected_room_residual_v1";
 const SOURCE_DOMAIN: &[u8] = b"dfmcp-connected-room-continuation-source/1\0";
 
@@ -77,12 +78,17 @@ impl ConnectedRoomContinuation {
         bounded(raw)?;
         let source: Source = serde_json::from_str(raw)
             .map_err(|error| invalid(format!("invalid retained room continuation: {error}")))?;
-        if source.schema != SOURCE_SCHEMA || source.planner != PLANNER {
+        if source.schema != SOURCE_SCHEMA {
             return Err(invalid(
                 "unknown room continuation schema or residual compiler",
             ));
         }
         let request = ConnectedRoomRequest::parse(&source.connected_room.to_string())?;
+        if source.planner != request.residual_planner() {
+            return Err(invalid(
+                "room continuation compiler differs from the retained access model",
+            ));
+        }
         Self::new(
             digest(&source.parent_plan_digest)?,
             digest(&source.root_plan_digest)?,
@@ -98,7 +104,8 @@ impl ConnectedRoomContinuation {
         // Embed the complete connected request unchanged, including both fixed
         // marker and supplied setup options that happen not to be needed now.
         format!(
-            "{{\"schema\":\"{SOURCE_SCHEMA}\",\"planner\":\"{PLANNER}\",\"parent_plan_digest\":\"{}\",\"root_plan_digest\":\"{}\",\"connected_room\":{}}}",
+            "{{\"schema\":\"{SOURCE_SCHEMA}\",\"planner\":\"{}\",\"parent_plan_digest\":\"{}\",\"root_plan_digest\":\"{}\",\"connected_room\":{}}}",
+            self.request.residual_planner(),
             self.parent.to_hex(),
             self.root.to_hex(),
             self.request.canonical_json(),
@@ -114,7 +121,7 @@ impl ConnectedRoomContinuation {
     pub(crate) fn lineage_json(&self) -> Value {
         json!({
             "source_schema":SOURCE_SCHEMA,
-            "planner":PLANNER,
+            "planner":self.request.residual_planner(),
             "parent_plan_digest":self.parent.to_hex(),
             "root_plan_digest":self.root.to_hex(),
             "continuation_source_digest":self.source_digest().to_hex(),

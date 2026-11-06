@@ -517,6 +517,22 @@ impl<'a> PredicateEvidence<'a> {
                 crate::laboratory_room_access_truth(self.snapshot, *area, *entry, targets)
                     .map_or(Unknown, |truth| truth)
             }
+            Predicate::LaboratoryRoomAccessPairedStairs {
+                area,
+                entry,
+                targets,
+            } => {
+                if !self.laboratory {
+                    return Unknown;
+                }
+                crate::laboratory_room_access_paired_stairs_truth(
+                    self.snapshot,
+                    *area,
+                    *entry,
+                    targets,
+                )
+                .map_or(Unknown, |truth| truth)
+            }
             Predicate::All(children) => {
                 let mut result = True;
                 for child in children {

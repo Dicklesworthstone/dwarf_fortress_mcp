@@ -14,6 +14,9 @@ mod workforce;
 #[path = "connected_room_setup_staffing_tests.rs"]
 mod setup_staffing;
 
+#[path = "connected_room_stairs_tests.rs"]
+mod paired_stairs;
+
 fn source() -> Result<WorldSnapshot> {
     crate::lab_world::scenario_snapshot("starter_fortress", FortressId::new(981), false)
 }

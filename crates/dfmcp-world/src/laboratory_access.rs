@@ -1,4 +1,4 @@
-//! Bounded access in the reference laboratory's single-level FLOOR model.
+//! Bounded access in the reference laboratory's registered movement models.
 //!
 //! This is not native unit pathfinding. Furnishing targets and every occupied
 //! building footprint block traversal. Missing terrain can establish only a
@@ -14,6 +14,11 @@ use crate::{
 };
 
 pub const LABORATORY_ACCESS_POLICY: &str = "dfmcp.laboratory-room-access/1";
+/// Opt-in movement policy with horizontal FLOOR/STAIR traversal and vertical
+/// movement only between paired adjacent STAIR tiles. Generic laboratory stairs
+/// are bidirectional in this model; native directional stairs are not inferred.
+pub const LABORATORY_ACCESS_PAIRED_STAIRS_POLICY: &str =
+    "dfmcp.laboratory-room-access-paired-stairs/1";
 pub const MAX_LABORATORY_ACCESS_TILES: u64 = 1_024;
 pub const MAX_LABORATORY_ACCESS_TARGETS: usize = 16;
 pub const MAX_LABORATORY_ACCESS_ENTITIES: usize = 65_536;
@@ -60,6 +65,33 @@ pub(crate) fn validate_request(
     }
     if targets.iter().copied().collect::<BTreeSet<_>>().len() != targets.len() {
         return Err(invalid("laboratory room access targets must be distinct"));
+    }
+    Ok(tiles)
+}
+
+pub(crate) fn validate_paired_stairs_request(
+    area: MapCuboid,
+    entry: MapCoord,
+    targets: &[MapCoord],
+) -> Result<u64> {
+    let tiles = crate::terrain::validate_region(area)?;
+    if tiles > MAX_LABORATORY_ACCESS_TILES
+        || targets.is_empty()
+        || targets.len() > MAX_LABORATORY_ACCESS_TARGETS
+    {
+        return Err(bounded(
+            "laboratory paired-stair room access requires at most 1024 tiles and 1..=16 targets",
+        ));
+    }
+    if !area.contains(entry) || targets.iter().any(|target| !area.contains(*target)) {
+        return Err(invalid(
+            "laboratory paired-stair room access entry and targets must lie inside its area",
+        ));
+    }
+    if targets.iter().copied().collect::<BTreeSet<_>>().len() != targets.len() {
+        return Err(invalid(
+            "laboratory paired-stair room access targets must be distinct",
+        ));
     }
     Ok(tiles)
 }
@@ -384,6 +416,231 @@ pub fn laboratory_room_access_truth(
     Ok(result)
 }
 
+/// Three-dimensional indexing stays separate from the original single-level
+/// model so old predicates retain their exact FLOOR-only movement meaning.
+struct PairedStairsGrid {
+    area: MapCuboid,
+    width: usize,
+    height: usize,
+    depth: usize,
+}
+
+impl PairedStairsGrid {
+    fn new(area: MapCuboid) -> Result<Self> {
+        let dimension = |min: i32, max: i32| {
+            usize::try_from(i64::from(max) - i64::from(min) + 1)
+                .map_err(|_| bounded("paired-stair access dimension cannot be represented"))
+        };
+        Ok(Self {
+            area,
+            width: dimension(area.min.x, area.max.x)?,
+            height: dimension(area.min.y, area.max.y)?,
+            depth: dimension(area.min.z, area.max.z)?,
+        })
+    }
+
+    fn index(&self, at: MapCoord) -> Option<usize> {
+        if !self.area.contains(at) {
+            return None;
+        }
+        let x = usize::try_from(i64::from(at.x) - i64::from(self.area.min.x)).ok()?;
+        let y = usize::try_from(i64::from(at.y) - i64::from(self.area.min.y)).ok()?;
+        let z = usize::try_from(i64::from(at.z) - i64::from(self.area.min.z)).ok()?;
+        Some((z * self.height + y) * self.width + x)
+    }
+
+    fn horizontal_neighbors(&self, index: usize) -> impl Iterator<Item = usize> {
+        let x = index % self.width;
+        let y = (index / self.width) % self.height;
+        [
+            (x > 0).then(|| index - 1),
+            (x + 1 < self.width).then_some(index + 1),
+            (y > 0).then(|| index - self.width),
+            (y + 1 < self.height).then_some(index + self.width),
+        ]
+        .into_iter()
+        .flatten()
+    }
+
+    fn reached(
+        &self,
+        terrain: &[Option<u32>],
+        occupied: &[bool],
+        entry: usize,
+        potential: bool,
+    ) -> Vec<bool> {
+        let passable = |index: usize| {
+            !occupied[index]
+                && match terrain[index] {
+                    Some(tile_codes::FLOOR | tile_codes::STAIR) => true,
+                    None => potential,
+                    _ => false,
+                }
+        };
+        let stairs = |index: usize| {
+            terrain[index] == Some(tile_codes::STAIR) || (potential && terrain[index].is_none())
+        };
+        let mut reached = vec![false; terrain.len()];
+        let mut pending = VecDeque::new();
+        if passable(entry) {
+            reached[entry] = true;
+            pending.push_back(entry);
+        }
+        let layer = self.width * self.height;
+        while let Some(current) = pending.pop_front() {
+            let z = current / layer;
+            let vertical = [
+                (z > 0).then(|| current - layer),
+                (z + 1 < self.depth).then_some(current + layer),
+            ];
+            for next in self.horizontal_neighbors(current).chain(
+                vertical
+                    .into_iter()
+                    .flatten()
+                    .filter(|next| stairs(current) && stairs(*next)),
+            ) {
+                if !reached[next] && passable(next) {
+                    reached[next] = true;
+                    pending.push_back(next);
+                }
+            }
+        }
+        reached
+    }
+
+    /// A bounded three-dimensional difference array clips each footprint once.
+    /// This avoids a buildings-times-levels scan when a thin region is tall.
+    fn occupied(&self, footprints: &BTreeMap<EntityId, MapCuboid>) -> Vec<bool> {
+        let stride = self.width + 1;
+        let plane = stride * (self.height + 1);
+        let mut difference = vec![0i64; plane * (self.depth + 1)];
+        for footprint in footprints.values() {
+            let min = MapCoord::new(
+                footprint.min.x.max(self.area.min.x),
+                footprint.min.y.max(self.area.min.y),
+                footprint.min.z.max(self.area.min.z),
+            );
+            let max = MapCoord::new(
+                footprint.max.x.min(self.area.max.x),
+                footprint.max.y.min(self.area.max.y),
+                footprint.max.z.min(self.area.max.z),
+            );
+            if min.x > max.x || min.y > max.y || min.z > max.z {
+                continue;
+            }
+            let (Some(start), Some(end)) = (self.index(min), self.index(max)) else {
+                continue;
+            };
+            let layer = self.width * self.height;
+            let (left, top, front) = (
+                start % self.width,
+                (start / self.width) % self.height,
+                start / layer,
+            );
+            let (right, bottom, back) = (
+                end % self.width + 1,
+                (end / self.width) % self.height + 1,
+                end / layer + 1,
+            );
+            for (x, x_sign) in [(left, 1), (right, -1)] {
+                for (y, y_sign) in [(top, 1), (bottom, -1)] {
+                    for (z, z_sign) in [(front, 1), (back, -1)] {
+                        difference[z * plane + y * stride + x] += x_sign * y_sign * z_sign;
+                    }
+                }
+            }
+        }
+        for z in 0..=self.depth {
+            for y in 0..=self.height {
+                for x in 1..=self.width {
+                    let index = z * plane + y * stride + x;
+                    difference[index] += difference[index - 1];
+                }
+            }
+        }
+        for z in 0..=self.depth {
+            for y in 1..=self.height {
+                for x in 0..=self.width {
+                    let index = z * plane + y * stride + x;
+                    difference[index] += difference[index - stride];
+                }
+            }
+        }
+        for z in 1..=self.depth {
+            for y in 0..=self.height {
+                for x in 0..=self.width {
+                    let index = z * plane + y * stride + x;
+                    difference[index] += difference[index - plane];
+                }
+            }
+        }
+        let mut occupied = Vec::with_capacity(self.width * self.height * self.depth);
+        for z in 0..self.depth {
+            for y in 0..self.height {
+                for x in 0..self.width {
+                    occupied.push(difference[z * plane + y * stride + x] > 0);
+                }
+            }
+        }
+        occupied
+    }
+}
+
+/// Current bounded access under the paired bidirectional laboratory stair model.
+/// FLOOR and STAIR permit horizontal movement; changing levels requires STAIR
+/// at both endpoints at the same (x,y). Every furnishing requires a horizontal
+/// approach, and targets block traversal. Unknown terrain can establish only a
+/// potential route. This never establishes native directional-stair pathfinding
+/// or accessibility outside the selected region.
+pub fn laboratory_room_access_paired_stairs_truth(
+    snapshot: &WorldSnapshot,
+    area: MapCuboid,
+    entry: MapCoord,
+    targets: &[MapCoord],
+) -> Result<PredicateTruth> {
+    let tiles = validate_paired_stairs_request(area, entry, targets)?;
+    let footprints = match laboratory_building_footprints(snapshot) {
+        Ok(footprints) => footprints,
+        Err(error) if error.code == ErrorCode::BudgetExceeded => return Err(error),
+        Err(_) => return Ok(PredicateTruth::Unknown),
+    };
+    let grid = PairedStairsGrid::new(area)?;
+    let mut occupied = grid.occupied(&footprints);
+    for target in targets {
+        let index = grid
+            .index(*target)
+            .ok_or_else(|| invalid("paired-stair access target left its area"))?;
+        occupied[index] = true;
+    }
+    let mut terrain = Vec::with_capacity(tiles as usize);
+    for at in crate::terrain::region_tiles(area) {
+        terrain.push(bounded_tile_code(snapshot, at).filter(|code| *code != tile_codes::UNKNOWN));
+    }
+    let entry = grid
+        .index(entry)
+        .ok_or_else(|| invalid("paired-stair access entry left its area"))?;
+    let clear = grid.reached(&terrain, &occupied, entry, false);
+    let potential = grid.reached(&terrain, &occupied, entry, true);
+    let mut result = PredicateTruth::True;
+    for target in targets {
+        let index = grid
+            .index(*target)
+            .ok_or_else(|| invalid("paired-stair access target left its area"))?;
+        if grid.horizontal_neighbors(index).any(|next| clear[next]) {
+            continue;
+        }
+        if !grid.horizontal_neighbors(index).any(|next| potential[next]) {
+            return Ok(PredicateTruth::False);
+        }
+        result = PredicateTruth::Unknown;
+    }
+    Ok(result)
+}
+
 #[cfg(test)]
 #[path = "laboratory_access_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "laboratory_access_paired_stairs_tests.rs"]
+mod paired_stairs_tests;

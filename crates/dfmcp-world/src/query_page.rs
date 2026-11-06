@@ -207,8 +207,19 @@ fn encode_predicate(bytes: &mut Vec<u8>, predicate: &Predicate) -> Result<()> {
             area,
             entry,
             targets,
+        }
+        | Predicate::LaboratoryRoomAccessPairedStairs {
+            area,
+            entry,
+            targets,
         } => {
-            bytes.push(11);
+            bytes.push(
+                if matches!(predicate, Predicate::LaboratoryRoomAccess { .. }) {
+                    11
+                } else {
+                    13
+                },
+            );
             for at in [area.min, area.max, *entry] {
                 bytes.extend_from_slice(&at.x.to_be_bytes());
                 bytes.extend_from_slice(&at.y.to_be_bytes());

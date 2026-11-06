@@ -295,8 +295,19 @@ impl<F: FnMut() -> Result<()>> Writer<'_, F> {
                 area,
                 entry,
                 targets,
+            }
+            | Predicate::LaboratoryRoomAccessPairedStairs {
+                area,
+                entry,
+                targets,
             } => {
-                self.byte(11)?;
+                self.byte(
+                    if matches!(predicate, Predicate::LaboratoryRoomAccess { .. }) {
+                        11
+                    } else {
+                        13
+                    },
+                )?;
                 self.area(*area)?;
                 self.coord(*entry)?;
                 self.count(
@@ -630,7 +641,7 @@ impl<F: FnMut() -> Result<()>> Reader<'_, '_, F> {
                 area: self.area()?,
                 tile_code: self.u32()?,
             },
-            11 => {
+            tag @ (11 | 13) => {
                 let area = self.area()?;
                 let entry = self.coord()?;
                 let count = self.count(
@@ -641,10 +652,18 @@ impl<F: FnMut() -> Result<()>> Reader<'_, '_, F> {
                 for _ in 0..count {
                     targets.push(self.coord()?);
                 }
-                Predicate::LaboratoryRoomAccess {
-                    area,
-                    entry,
-                    targets,
+                if tag == 11 {
+                    Predicate::LaboratoryRoomAccess {
+                        area,
+                        entry,
+                        targets,
+                    }
+                } else {
+                    Predicate::LaboratoryRoomAccessPairedStairs {
+                        area,
+                        entry,
+                        targets,
+                    }
                 }
             }
             12 => {

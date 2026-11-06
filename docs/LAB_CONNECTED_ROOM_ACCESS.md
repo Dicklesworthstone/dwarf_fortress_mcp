@@ -8,8 +8,9 @@ to every furnishing from that original entrance. Use the existing
 `fortress.plan`, `fortress.commit`, wait and prove workflow; no tool is added.
 
 This is the bounded reference simulator's structural movement model. The
-completion predicate is `Predicate::LaboratoryRoomAccess`, with fixed policy
-`dfmcp.laboratory-room-access/1`. It retains the entrance, domain and furnishing
+default completion predicate is `Predicate::LaboratoryRoomAccess`, with fixed policy
+`dfmcp.laboratory-room-access/1`. The explicit multi-level generation below uses
+a separate paired-stair predicate. Both retain the entrance, domain and furnishing
 targets and is evaluated against the current snapshot whenever an original
 goal, forecast or archived proof is checked. Implementation and development
 checks do not establish full runtime qualification or native compatibility;
@@ -23,7 +24,80 @@ the necessary workers to be already enabled. See
 [LAB_SHARED_WORKFORCE.md](LAB_SHARED_WORKFORCE.md#staff-a-complete-project) for
 the complete setup policy. The request below keeps the original default policy.
 
-## Plan a connected room
+## Connect rooms across levels
+
+Open `scenario: "starter_fortress_multilevel"` for a built-in world with the finite
+shared workforce, construction WOOD and PLANT provisions models, plus five
+observed rock levels at z=8 through z=12. The entrance remains at z=10; the extra
+outer levels provide the hazard halos needed for room and shaft work at z=9 or
+z=11. Existing scenarios keep their exact opening snapshots.
+
+Choose the new planner explicitly. This example connects the entrance hall to
+two furnished bedrooms one level below it:
+
+```json
+{
+  "template": "connected_room",
+  "planner": "connected_room_stairs_v1",
+  "room": {
+    "template": "provisioned_room",
+    "planner": "provisioned_room_v1",
+    "layout": {
+      "template": "bedroom_cluster",
+      "origin": [2, 6, 9],
+      "rooms": 2,
+      "room_size": [3, 3]
+    },
+    "prerequisites": {
+      "assign_labor": true,
+      "workforce": "complete_project_v1"
+    }
+  },
+  "access": {
+    "entry": [0, 2, 10],
+    "region": {"min": [0, 0, 9], "max": [12, 12, 10]}
+  }
+}
+```
+
+The routing policy is `laboratory-room-mining-paired-stairs/1`. It minimizes new
+ordinary wall tiles, then path length, then the complete `(z, y, x)` path. A wall
+costs one new tile whether it becomes a horizontal corridor or part of a shaft.
+A vertical step requires the same `(x, y)` on adjacent levels and both cells to
+be existing stairs or safe ordinary rock. Selected shaft rock becomes
+`UpDownStair`; other selected wall cells become `Mine`. Existing stair cells and
+floor cells are reused. Floor cells are never converted into new shafts, and
+original room floor masks and protected bedroom walls cannot host a shaft.
+
+The entry may be observed FLOOR or STAIR. The entire supplied volume must be
+observed and still contains at most 1,024 cells, with one to sixteen furnishing
+targets. Occupancy is clipped to each building's actual levels; a building above
+or below a route does not block unrelated cells. Every new stair/corridor part
+passes the existing hazard checks and shares the total 64-action limit with
+staffing, production, room excavation and furnishing. Each furnishing waits for
+all required access excavation. The analysis adds `new_stair_tiles`,
+`stair_parts`, `vertical_edges`, `stair_model` and `shaft_policy`.
+
+The terminal predicate is `Predicate::LaboratoryRoomAccessPairedStairs`, with
+policy `dfmcp.laboratory-room-access-paired-stairs/1`. FLOOR and STAIR permit
+horizontal travel; vertical travel requires **both adjacent cells to be STAIR**.
+Every furnishing still needs a horizontal approach, and furnishing cells and
+occupied building footprints remain blocked. A lone stair does not prove an
+inter-level connection. Missing terrain supports only a potential route;
+unqualified occupancy remains Unknown. Generic laboratory stairs are treated as
+bidirectional pairs. This does not establish native up/down stair semantics,
+native unit pathfinding, actual hauling or room ownership.
+
+`continue_goal` preserves this exact model, entrance, volume and complete room.
+Its private envelope names `connected_room_stairs_residual_v1` and refuses a
+mismatched residual compiler. A lost stair half can be repaired while keeping
+completed installations and spending no additional WOOD; retained room floor
+designations may remain as already-satisfied steps. The new predicate uses
+canonical/archive tag 13. Original `connected_room_v1` sources, single-level
+predicate tag 11, ordinary room compilers and old continuation bytes are unchanged.
+Omitting the outer planner continues to select the original single-level model.
+
+## Plan a connected room on one level
 
 Pass this object as the JSON string in `fortress.plan`'s `blueprint` argument:
 
@@ -280,7 +354,7 @@ cannot turn an old connected request into implicitly authorized current work.
 | --- | --- |
 | Connected request and its canonical source | 65,536 bytes |
 | Private continuation envelope | 16,384 bytes, including the retained request |
-| Routing region | At most 1,024 cells on one level |
+| Routing region | At most 1,024 cells; one level by default, multiple levels only with `connected_room_stairs_v1` |
 | Furnishing targets | 1 to 16 distinct tiles, all inside the region |
 | Combined setup, production, excavation and placement | At most 64 actions |
 | Source census | At most 65,536 entities and 4,096 terrain chunks |

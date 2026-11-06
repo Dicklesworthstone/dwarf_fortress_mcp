@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased — Connect furnished laboratory rooms across levels
+
+- Add explicit connected_room_stairs_v1 routing that composes safe exact mining
+  and paired stair shafts with production, staffing and exact-item furnishing.
+- Prove current 3-D access with a distinct bounded laboratory predicate, correct
+  per-level building occupancy, horizontal furnishing approaches and preserved
+  Unknown evidence. Append archive tag 13 without changing legacy tag 11.
+- Preserve original geometry, model and lineage through stair-aware continuation
+  and repair; keep completed installations and avoid new wood consumption.
+- Add starter_fortress_multilevel with finite workforce/economy/provisions and
+  sufficient observed hazard halos; preserve all older scenario snapshots.
+- Pass 587 world/intent tests and 230 actual-source laboratory component tests,
+  including lower-level completion, forecast, existing stair reuse, repair,
+  compatibility and independent 3-D graph oracles. Track the public facade
+  regression separately from full MCP and native qualification.
+
 ## Unreleased — Run default combined production orders to their original goal
 
 - Let reviewed bounded order-clock runs advance default retained-order completion
