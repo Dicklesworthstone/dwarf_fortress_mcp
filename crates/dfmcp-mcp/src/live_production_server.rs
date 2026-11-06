@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 //! Unadmitted combined labor and finite-order MCP host.
 use crate::live_production_runtime::{Config, Mode, ObserveRequest, Request, Runtime, View};
+use crate::semantic_work_order_runtime::clock::RunRequest;
 use crate::semantic_workforce_runtime::digest;
 use dfmcp_core::{
     DfmcpError, Digest32, ErrorCode, OperationContext, RequestId, Result, SessionId, WorkBudget,
@@ -24,6 +25,7 @@ const MAX_BYTES: u64 = 32 * 1024 * 1024 * 1024;
 const DEFAULT_BYTES: u64 = 8 * 1024 * 1024 * 1024;
 const OPEN_INSPECTION_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_OUTPUT: u32 = 32_768;
+const MAX_GAME_TICKS: u64 = 1200;
 static NEXT: AtomicU64 = AtomicU64::new(1);
 static SESSION: Mutex<Option<State>> = Mutex::new(None);
 
@@ -53,6 +55,12 @@ fn merge_recovery(old: &mut Option<Value>, latest: &Value) {
     }
     retained["review"] = Value::Null;
     retained["selected_inventory_goal"] = latest["selected_inventory_goal"].clone();
+    if latest.get("clock").is_some() {
+        retained["clock"] = latest["clock"].clone();
+    }
+    retained["clock_invalidates_goal"] = json!(
+        retained["clock_invalidates_goal"] == true || latest["clock_invalidates_goal"] == true
+    );
     retained["current_parent_goal"] = Value::Null;
     // A negative source fence survives an incomplete later recovery reference;
     // retaining it grants no current truth or native-effect authority.
@@ -70,20 +78,32 @@ enum Action {
     Observe(ObserveRequest),
     Inspect,
     Plan(Request),
+    PlanRun(RunRequest),
     Prepare(Digest32),
     Commit(Digest32, bool),
+    CommitRun(Digest32, bool),
     Wait,
     Cancel,
+    CancelRun,
     Unavailable,
 }
 impl Action {
     fn may_dispatch(&self) -> bool {
-        matches!(self, Self::Commit(..))
+        matches!(
+            self,
+            Self::Commit(..) | Self::CommitRun(..) | Self::CancelRun
+        )
     }
     fn may_need_reconciliation(&self) -> bool {
         matches!(
             self,
-            Self::Prepare(_) | Self::Commit(..) | Self::Wait | Self::Cancel
+            Self::Prepare(_)
+                | Self::PlanRun(_)
+                | Self::Commit(..)
+                | Self::CommitRun(..)
+                | Self::Wait
+                | Self::Cancel
+                | Self::CancelRun
         )
     }
     fn perform(self, runtime: &mut Runtime, c: &OperationContext) -> Result<View> {
@@ -91,10 +111,13 @@ impl Action {
             Self::Observe(request) => runtime.observe(request, c),
             Self::Inspect => runtime.inspect(c),
             Self::Plan(request) => runtime.plan(request, c),
+            Self::PlanRun(request) => runtime.plan_run(request, c),
             Self::Prepare(id) => runtime.prepare_next(id, c),
             Self::Commit(seal, confirmed) => runtime.commit(seal, confirmed, c),
+            Self::CommitRun(seal, confirmed) => runtime.commit_run(seal, confirmed, c),
             Self::Wait => runtime.wait(c),
             Self::Cancel => runtime.cancel(c),
+            Self::CancelRun => runtime.cancel_run(c),
             Self::Unavailable => Err(error(
                 ErrorCode::CapabilityDenied,
                 "combined development runtime cannot checkpoint or restore",
@@ -173,6 +196,7 @@ fn budgets(
     wall: Option<u64>,
     bytes: Option<u64>,
     output: Option<u32>,
+    game_ticks: Option<u64>,
 ) -> Result<(WorkBudget, WorkBudget)> {
     let display = WorkBudget {
         max_wall_millis: wall.unwrap_or(5000),
@@ -180,17 +204,18 @@ fn budgets(
         max_entities: 8192,
         max_actions: 2,
         max_output_tokens: output.unwrap_or(MAX_OUTPUT),
-        max_game_ticks: 0,
+        max_game_ticks: game_ticks.unwrap_or(0),
     };
     display.validate()?;
     if display.max_wall_millis > 60_000
         || display.max_bytes > MAX_BYTES
         || display.max_output_tokens > MAX_OUTPUT
+        || display.max_game_ticks > MAX_GAME_TICKS
         || u64::from(display.max_output_tokens) * 4 < RESPONSE_RESERVE
     {
         return Err(error(
             ErrorCode::BudgetExceeded,
-            "combined limits require at most 60000ms, 32GiB and a full response reservation",
+            "combined limits require at most 60000ms, 32GiB, 1200 ticks and a full response reservation",
         ));
     }
     let mut work = display;
@@ -263,7 +288,8 @@ fn render(
     let result = match outcome {
         Ok(view) => {
             let mut value = view.to_json();
-            state.uncertain = value["frontier"]["needs_reconciliation"] == true;
+            state.uncertain = value["frontier"]["needs_reconciliation"] == true
+                || value["clock"]["unresolved"] == true;
             value["session_id"] = json!(state.runtime.session_id().to_string());
             value["retained_state_currently_verified"] = json!(true);
             state.retained = Some(value.clone());
@@ -406,7 +432,9 @@ fn plan_action(raw: &str) -> Result<Action> {
     }
     let value: Value = serde_json::from_str(raw)
         .map_err(|_| error(ErrorCode::InvalidRequest, "invalid combined request"))?;
-    if value.get("kind").and_then(Value::as_str) == Some("step") {
+    if value.get("kind").and_then(Value::as_str) == Some("run") {
+        RunRequest::parse(raw).map(Action::PlanRun)
+    } else if value.get("kind").and_then(Value::as_str) == Some("step") {
         let request: StepRequest = serde_json::from_str(raw)
             .map_err(|_| error(ErrorCode::InvalidRequest, "invalid closed step request"))?;
         if request.kind != "step" {
@@ -418,20 +446,49 @@ fn plan_action(raw: &str) -> Result<Action> {
     }
 }
 
+fn commit_action(scope: Option<&str>, seal: &str, confirmed: bool) -> Result<Action> {
+    let seal = digest(seal)?;
+    match scope {
+        None | Some("step") => Ok(Action::Commit(seal, confirmed)),
+        Some("run") => Ok(Action::CommitRun(seal, confirmed)),
+        _ => Err(error(
+            ErrorCode::InvalidRequest,
+            "commit scope must be step or run",
+        )),
+    }
+}
+
+fn cancel_action(scope: Option<&str>) -> Result<Action> {
+    match scope {
+        None | Some("step") => Ok(Action::Cancel),
+        Some("run") => Ok(Action::CancelRun),
+        _ => Err(error(
+            ErrorCode::InvalidRequest,
+            "cancel scope must be step, run or session",
+        )),
+    }
+}
+
 #[tool(
-    description = "Open one operator-configured unadmitted combined labor and finite-order session. No game ticks are granted."
+    description = "Open one operator-configured unadmitted combined labor and finite-order session. Optional max_game_ticks defaults to zero and is capped at 1200; clock control additionally requires independent operator authority. Opening never unpauses."
 )]
 pub fn fortress_open_session(
     mode: Option<String>,
     max_wall_millis: Option<u64>,
     max_bytes: Option<u64>,
     max_output_tokens: Option<u32>,
+    max_game_ticks: Option<u64>,
 ) -> String {
     let result = (|| -> Result<String> {
         let started = Instant::now();
         runtime_io()?;
         let mode = Mode::parse(mode.as_deref().unwrap_or("offline"))?;
-        let (display, mut work) = budgets(max_wall_millis, max_bytes, max_output_tokens)?;
+        let (display, mut work) = budgets(
+            max_wall_millis,
+            max_bytes,
+            max_output_tokens,
+            max_game_ticks,
+        )?;
         let config = Config::from_environment(runtime_io)?;
         let mut guard = session_lock()?;
         if guard.is_some() {
@@ -513,21 +570,26 @@ pub fn fortress_query(session_id: String) -> String {
     with_session(session_id, "fortress.query", None, || Ok(Action::Inspect))
 }
 #[tool(
-    description = "Compile one original labor and finite-order plan, optionally with an explicit observed_inventory_minimum objective; kind=step with original_plan_digest prepares the next eligible original step."
+    description = "Compile one original labor and finite-order plan, optionally with an explicit observed_inventory_minimum objective; kind=step with original_plan_digest prepares the next eligible original step. After both effects settle, separately configured kind=run with original_paired_seal, game_ticks and wall_millis prepares a bounded clock review for that original inventory plan. Planning never unpauses."
 )]
 pub fn fortress_plan(session_id: String, request: String) -> String {
     with_session(session_id, "fortress.plan", None, || plan_action(&request))
 }
 #[tool(
-    description = "Confirm exactly one current paired step review; lost replies require reconciliation of the same key."
+    description = "scope=step (default) confirms one current paired step review. scope=run confirms a separate bounded clock review in paired_seal under independent clock authority. Both require confirmed=true; lost replies require reconciliation of the original key without repeated insertion or unpause."
 )]
-pub fn fortress_commit(session_id: String, paired_seal: String, confirmed: bool) -> String {
+pub fn fortress_commit(
+    session_id: String,
+    paired_seal: String,
+    confirmed: bool,
+    scope: Option<String>,
+) -> String {
     with_session(session_id, "fortress.commit", None, || {
-        Ok(Action::Commit(digest(&paired_seal)?, confirmed))
+        commit_action(scope.as_deref(), &paired_seal, confirmed)
     })
 }
 #[tool(
-    description = "Reconcile the original active key once; after both effects settle, sample current labor and the explicit inventory goal together, preserving original inventory timing. No dispatch or game-time advance."
+    description = "Reconcile original effect and clock keys before sampling current labor and the explicit inventory goal together under original timing. Unresolved clocks block paused sampling. Wait never inserts, starts a run or retries unpause."
 )]
 pub fn fortress_wait(session_id: String, max_wall_millis: Option<u64>) -> String {
     with_session(session_id, "fortress.wait", max_wall_millis, || {
@@ -535,7 +597,7 @@ pub fn fortress_wait(session_id: String, max_wall_millis: Option<u64>) -> String
     })
 }
 #[tool(
-    description = "Cancel a prepared step, or scope=session releases local resources without erasing custody or claiming cancellation."
+    description = "scope=step (default) cancels a prepared step. scope=run retires a prepared clock or requests its retained native safety pause under independent clock authority. scope=session releases local resources without erasing custody or claiming effects were cancelled."
 )]
 pub fn fortress_cancel(session_id: String, scope: Option<String>) -> String {
     if scope.as_deref() == Some("session") {
@@ -555,13 +617,7 @@ pub fn fortress_cancel(session_id: String, scope: Option<String>) -> String {
         return result.unwrap_or_else(|cause| unbound("fortress.cancel", &cause));
     }
     with_session(session_id, "fortress.cancel", None, || {
-        match scope.as_deref() {
-            None | Some("step") => Ok(Action::Cancel),
-            _ => Err(error(
-                ErrorCode::InvalidRequest,
-                "cancel scope must be step or session",
-            )),
-        }
+        cancel_action(scope.as_deref())
     })
 }
 #[tool(
@@ -591,7 +647,7 @@ pub fn run_stdio() {
     let server = ServerBuilder::new("dfmcp-live-combined-production-dev", env!("CARGO_PKG_VERSION"))
         .tool(FortressOpenSession).tool(FortressObserve).tool(FortressQuery).tool(FortressPlan).tool(FortressCommit)
         .tool(FortressWait).tool(FortressCancel).tool(FortressCheckpoint).tool(FortressRestore).tool(FortressExplain).tool(FortressDoctor)
-        .instructions("Unadmitted development only. Observe, compile one original labor and finite-order plan, prepare and confirm each dependency-satisfied step, and reconcile uncertainty under its original key. All-applied does not prove the original goal or physical goods. With an explicit inventory objective, Wait samples current labor around complete inventory reads. The complete original goal requires current parent truth and original selected inventory stability at the reported anchor. Inventory presence does not prove order-attributed production. Parent proof is process-local and withdrawn on failure or reopening. No clock is exposed.")
+        .instructions("Unadmitted development only. Observe, compile one original labor and finite-order plan, prepare and confirm each dependency-satisfied step, and reconcile uncertainty under its original key. All-applied does not prove the original goal or physical goods. With an explicit inventory objective, Wait joins current labor and inventory under the original stability requirement. Separately configured clock control can prepare kind=run and confirm scope=run within the same original deadline; no automatic advancement or repeated unpause is permitted. Unresolved runs must reconcile before paused sampling. Inventory presence does not prove order-attributed production. Parent proof is process-local and withdrawn on failure or reopening.")
         .build();
     crate::run_modern_stdio(server);
 }
@@ -626,8 +682,8 @@ mod tests {
     }
 
     #[test]
-    fn opening_reserves_full_output_and_never_grants_game_ticks() -> Result<()> {
-        let (display, work) = budgets(None, None, None)?;
+    fn opening_reserves_full_output_and_defaults_to_no_game_ticks() -> Result<()> {
+        let (display, work) = budgets(None, None, None, None)?;
         assert_eq!(display.max_bytes, DEFAULT_BYTES);
         assert_eq!(
             display.max_bytes - work.max_bytes,
@@ -635,9 +691,62 @@ mod tests {
         );
         assert_eq!(work.max_game_ticks, 0);
         assert_eq!(work.max_actions, 2);
-        assert!(budgets(Some(60_001), None, None).is_err());
-        assert!(budgets(None, Some(MAX_BYTES + 1), None).is_err());
-        assert!(budgets(None, None, Some(MAX_OUTPUT - 1)).is_err());
+        assert!(budgets(Some(60_001), None, None, None).is_err());
+        assert!(budgets(None, Some(MAX_BYTES + 1), None, None).is_err());
+        assert!(budgets(None, None, Some(MAX_OUTPUT - 1), None).is_err());
+        let (display, work) = budgets(None, None, None, Some(MAX_GAME_TICKS))?;
+        assert_eq!(display.max_game_ticks, MAX_GAME_TICKS);
+        assert_eq!(work.max_game_ticks, MAX_GAME_TICKS);
+        assert!(budgets(None, None, None, Some(MAX_GAME_TICKS + 1)).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn clock_requests_keep_original_review_identity_and_distinct_commit_scope() -> Result<()> {
+        let seal = "a".repeat(64);
+        let request = json!({"kind":"run","original_paired_seal":seal,
+            "game_ticks":5,"wall_millis":1000});
+        assert!(matches!(
+            plan_action(&request.to_string())?,
+            Action::PlanRun(_)
+        ));
+        for field in [
+            "path",
+            "order_id",
+            "generation",
+            "native_method",
+            "deadline_tick",
+        ] {
+            let mut invalid = request.clone();
+            invalid[field] = json!(1);
+            assert!(plan_action(&invalid.to_string()).is_err());
+        }
+        for ticks in [0, 1201] {
+            let mut invalid = request.clone();
+            invalid["game_ticks"] = json!(ticks);
+            assert!(plan_action(&invalid.to_string()).is_err());
+        }
+        assert!(matches!(
+            commit_action(None, &seal, true)?,
+            Action::Commit(..)
+        ));
+        assert!(matches!(
+            commit_action(Some("step"), &seal, false)?,
+            Action::Commit(_, false)
+        ));
+        assert!(matches!(
+            commit_action(Some("run"), &seal, true)?,
+            Action::CommitRun(..)
+        ));
+        assert!(matches!(cancel_action(Some("run"))?, Action::CancelRun));
+        for scope in ["goal", "inventory_run", "all", "session"] {
+            assert!(commit_action(Some(scope), &seal, true).is_err());
+            assert!(cancel_action(Some(scope)).is_err());
+        }
+        assert!(commit_action(Some("run"), "invalid", true).is_err());
+        assert!(Action::CommitRun(digest(&seal)?, true).may_dispatch());
+        assert!(Action::CancelRun.may_dispatch());
+        assert!(Action::CancelRun.may_need_reconciliation());
         Ok(())
     }
 
@@ -715,6 +824,30 @@ mod tests {
             assert!(compacted["current_parent_goal"].is_null());
             assert_eq!(compacted["original_goal_proven"], false);
         }
+    }
+
+    #[test]
+    fn failed_clock_publication_keeps_newest_custody_without_current_goal_or_review() {
+        let mut retained = Some(json!({"clock_invalidates_goal":false,
+            "clock":{"head":"old","review_available":true},
+            "current_parent_goal":{"original_goal_proven":true},
+            "original_goal_proven":true}));
+        merge_recovery(
+            &mut retained,
+            &json!({"clock_invalidates_goal":true,
+            "clock":{"head":"new","review_available":false,"unresolved":true},
+            "recovery":{"clock_journal_id":"a".repeat(64)},
+            "selected_inventory_goal":{"proven_at_anchor":false}}),
+        );
+        merge_recovery(&mut retained, &json!({"clock_invalidates_goal":false}));
+        let value = retained.expect("clock recovery retained");
+        assert_eq!(value["clock_invalidates_goal"], true);
+        assert_eq!(value["clock"]["head"], "new");
+        assert_eq!(value["clock"]["review_available"], false);
+        assert_eq!(value["clock"]["unresolved"], true);
+        assert_eq!(value["recovery"]["clock_journal_id"], "a".repeat(64));
+        assert_eq!(value["original_goal_proven"], false);
+        assert!(value["current_parent_goal"].is_null());
     }
 
     #[test]

@@ -27,6 +27,7 @@ pub(super) fn compact(view: &Value) -> Value {
         "recovery":{"plan_digest":bounded(&r["plan_digest"],64),
         "object_digest":bounded(&r["object_digest"],64), "identity_digest":bounded(&r["identity_digest"],64),
         "goal_history_present":r["goal_history_present"].as_bool(),
+        "clock_journal_id":digest(&r["clock_journal_id"]),
         "anchor":compact_anchor(&r["anchor"]),
         "frontier":{"journal_id":bounded(&r["frontier"]["journal_id"],64),
             "head":bounded(&r["frontier"]["head"],64),"authority_tick_floor":r["frontier"]["authority_tick_floor"].as_u64()}},
@@ -35,6 +36,8 @@ pub(super) fn compact(view: &Value) -> Value {
         "selected_inventory_goal":compact_goal(&view["selected_inventory_goal"]),
         "current_parent_goal":null,
         "parent_goal_observation_fenced":view["parent_goal_observation_fenced"] == true,
+        "clock":clock_summary(&view["clock"],false),"clock_control_enabled":false,
+        "clock_invalidates_goal":view["clock_invalidates_goal"] == true || clock_unresolved(&view["clock"]),
         "original_goal_proven":false,"current_state_proven":false,"details_omitted":true})
 }
 fn compact_goal(value: &Value) -> Value {
@@ -45,6 +48,9 @@ fn compact_goal(value: &Value) -> Value {
         "step_id":value["step_id"].as_u64(),"kind":bounded(&value["kind"],64),
         "item_type":bounded(&value["item_type"],16),
         "minimum_stack_units":value["minimum_stack_units"].as_u64(),
+        "deadline_tick":value["deadline_tick"].as_u64(),
+        "poll_interval_ticks":value["poll_interval_ticks"].as_u64(),
+        "stable_samples":value["stable_samples"].as_u64(),
         "first_satisfied_anchor":if value["first_satisfied_anchor"].is_object() {
             compact_anchor(&value["first_satisfied_anchor"])
         } else {Value::Null},
@@ -57,6 +63,59 @@ fn bounded(value: &Value, max: usize) -> Option<&str> {
     value
         .as_str()
         .filter(|s| s.len() <= max && !s.chars().any(char::is_control))
+}
+fn digest(value: &Value) -> Option<&str> {
+    bounded(value, 64).filter(|s| {
+        s.len() == 64
+            && s.bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+            && s.bytes().any(|b| b != b'0')
+    })
+}
+fn clock_unresolved(clock: &Value) -> bool {
+    clock["inspection_required"] == true
+        || clock["unresolved"] == true
+        || clock["may_be_running"] == true
+        || clock["active_run"]["unresolved"] == true
+        || matches!(
+            clock["active_run"]["state"].as_str(),
+            Some("dispatch_started" | "tracking" | "cancel_requested")
+        )
+        || matches!(
+            clock["active_run"]["native"]["phase"].as_str(),
+            Some("running" | "stopping" | "source_lost")
+        )
+}
+/// Preserve bounded recovery identity without carrying an old confirmation.
+fn clock_summary(clock: &Value, reviewed: bool) -> Value {
+    if !clock.is_object() {
+        return Value::Null;
+    }
+    let active = &clock["active_run"];
+    let native = &active["native"];
+    json!({"journal_id":digest(&clock["journal_id"]),"head":digest(&clock["head"]),
+        "mode":bounded(&clock["mode"],16),"source":bounded(&clock["source"],32),
+        "target_scope":bounded(&clock["target_scope"],64),
+        "target_digest":digest(&clock["target_digest"]),"original_paired_seal":digest(&clock["original_paired_seal"]),
+        "pending":clock["pending"].as_bool(),"unresolved":clock_unresolved(clock),
+        "may_be_running":clock_unresolved(clock),"needs_reconciliation":clock["needs_reconciliation"].as_bool(),
+        "inspection_required":clock["inspection_required"] == true,
+        "run_count":clock["run_count"].as_u64().filter(|n|*n<=32),"high_tick":clock["high_tick"].as_u64(),
+        "review_available":reviewed,"current_pause_proven":false,"original_goal_proven":false,
+        "active_run":if active.is_object() {json!({
+            "review_seal":if reviewed {digest(&active["review_seal"])}else{None},
+            "key":bounded(&active["key"],128),"plan_digest":digest(&active["plan_digest"]),
+            "state":bounded(&active["state"],32),"pending":active["pending"].as_bool(),
+            "unresolved":active["unresolved"].as_bool(),"native_order_id":active["native_order_id"].as_u64(),
+            "before_tick":active["before_tick"].as_u64(),"game_ticks":active["game_ticks"].as_u64(),
+            "wall_millis":active["wall_millis"].as_u64(),"purpose":bounded(&active["purpose"],64),
+            "native":if native.is_object(){json!({"phase":bounded(&native["phase"],32),
+                "reason":bounded(&native["reason"],64),"trigger":bounded(&native["trigger"],64),
+                "receipt":digest(&native["receipt"]),"observed_tick":native["observed_tick"].as_u64(),
+                "unpause_attempted":native["unpause_attempted"].as_bool(),
+                "historical_pause_verified":native["historical_pause_verified"].as_bool(),
+                "current_pause_proven":false,"original_goal_proven":false})}else{Value::Null}
+        })}else{Value::Null}})
 }
 fn compact_anchor(value: &Value) -> Value {
     json!({"fortress_id":bounded(&value["fortress_id"],20),"epoch":value["epoch"].as_u64(),
@@ -157,17 +216,28 @@ fn encode(
         _ => AgentPhase::Inspect,
     };
     let view = retained.unwrap_or(&Value::Null);
+    let clock = &view["clock"];
+    let clock_active = &clock["active_run"];
+    let clock_uncertain = clock_unresolved(clock);
+    let clock_reconciliation = clock_uncertain
+        || (clock["needs_reconciliation"] == true && clock_active["state"] != "prepared");
+    let uncertain = uncertain || clock_reconciliation;
+    let clock_invalidates_goal = view["clock_invalidates_goal"] == true || clock_uncertain;
     let entries = view["frontier"]["entries"]
         .as_array()
         .cloned()
         .unwrap_or_default();
-    let review = if verified {
+    let review = if verified && !uncertain {
         view["review"].clone()
     } else {
         Value::Null
     };
     let selected_goal = if verified && !uncertain {
-        view["selected_inventory_goal"].clone()
+        if clock_invalidates_goal {
+            compact_goal(&view["selected_inventory_goal"])
+        } else {
+            view["selected_inventory_goal"].clone()
+        }
     } else {
         Value::Null
     };
@@ -179,6 +249,7 @@ fn encode(
     let candidate = &view["current_parent_goal"];
     let parent_goal = if verified
         && !uncertain
+        && !clock_invalidates_goal
         && !parent_fenced
         && mode != Some("offline")
         && candidate["scope"] == "complete_original_labor_and_inventory_goal"
@@ -202,6 +273,128 @@ fn encode(
     };
     let parent_proven = parent_goal["original_goal_proven"] == true;
     let parent_truth = parent_goal["current_truth"].as_str();
+    let clock_authority = verified
+        && session.is_some()
+        && result["closed"] != true
+        && mode == Some("control")
+        && view["clock_control_enabled"] == true
+        && clock["mode"] == "control";
+    let clock_linked = clock["source"] == "order-run/1.14"
+        && clock["target_scope"] == "selected_original_order_step"
+        && digest(&clock["journal_id"]).is_some()
+        && clock["journal_id"] == view["recovery"]["clock_journal_id"]
+        && digest(&clock["target_digest"]).is_some()
+        && digest(&clock["original_paired_seal"]).is_some();
+    let selected_step = view["original_plan"]["steps"].as_array().and_then(|steps| {
+        steps.iter().find(|step| {
+            step["step_id"] == selected_goal["step_id"]
+                && step["action"]["kind"] == "create_work_order"
+        })
+    });
+    let deadline = selected_goal["deadline_tick"]
+        .as_u64()
+        .filter(|deadline| {
+            selected_step.is_some_and(|step| step["obligation"]["deadline_tick"] == *deadline)
+        })
+        .map(|deadline| {
+            deadline.min(
+                view["original_plan"]["expires_at_tick"]
+                    .as_u64()
+                    .unwrap_or(deadline),
+            )
+        });
+    let known_tick = anchor.map(|a| {
+        a.tick
+            .get()
+            .max(view["observation_tick_floor"].as_u64().unwrap_or(0))
+            .max(clock["high_tick"].as_u64().unwrap_or(0))
+    });
+    let current_tick = anchor
+        .is_some_and(|a| view["anchor"] == anchor_value(a) && known_tick == Some(a.tick.get()));
+    let clock_goal_ready = !uncertain
+        && !clock_invalidates_goal
+        && !parent_fenced
+        && parent_goal.is_object()
+        && !parent_proven
+        && view["frontier"]["all_applied"] == true
+        && view["frontier"]["needs_reconciliation"] != true
+        && selected_goal["scope"] == "selected_original_order_step"
+        && selected_goal["kind"] == "observed_inventory_minimum"
+        && selected_goal["receipt_linked"] == true
+        && !selected_proven
+        && selected_goal["terminal_failure"] != true
+        && selected_goal["history"]["fenced"] != true
+        && current_tick
+        && ((selected_goal["current_truth"] == "false" && parent_truth == Some("false"))
+            || (selected_goal["current_truth"] == "true" && parent_truth == Some("true")));
+    let allowed_ticks = deadline
+        .zip(known_tick)
+        .and_then(|(deadline, tick)| deadline.checked_sub(tick))
+        .zip(budget)
+        .map(|(remaining, budget)| remaining.min(budget.max_game_ticks).min(1200))
+        .filter(|ticks| *ticks > 0);
+    let proposed_ticks = if selected_goal["current_truth"] == "true" {
+        allowed_ticks
+            .zip(selected_goal["poll_interval_ticks"].as_u64())
+            .map(|(ticks, cadence)| ticks.min(cadence))
+            .filter(|ticks| *ticks > 0)
+    } else {
+        allowed_ticks
+    };
+    let proposed_wall = budget
+        .map(|b| b.max_wall_millis.min(5000))
+        .filter(|wall| *wall > 0);
+    let new_run_proposal = (clock_authority
+        && clock_linked
+        && clock_goal_ready
+        && clock["pending"] == false
+        && clock["unresolved"] == false
+        && clock["may_be_running"] == false
+        && clock_active.is_null()
+        && clock["run_count"].as_u64().is_some_and(|count| count < 32))
+    .then_some(proposed_ticks.zip(proposed_wall))
+    .flatten()
+    .map(|(ticks, wall)| {
+        json!({"kind":"run","original_paired_seal":clock["original_paired_seal"],
+            "game_ticks":ticks,"wall_millis":wall})
+    });
+    let clock_prepared = clock_authority
+        && clock_linked
+        && clock_goal_ready
+        && clock["pending"] == true
+        && !clock_uncertain
+        && clock_active["state"] == "prepared"
+        && clock_active["pending"] == true
+        && clock_active["unresolved"] == false
+        && digest(&clock_active["review_seal"]).is_some()
+        && clock_active["before_tick"].as_u64() == known_tick
+        && clock_active["game_ticks"]
+            .as_u64()
+            .zip(allowed_ticks)
+            .is_some_and(|(ticks, allowed)| ticks > 0 && ticks <= allowed)
+        && clock_active["wall_millis"]
+            .as_u64()
+            .zip(budget)
+            .is_some_and(|(wall, budget)| {
+                wall > 0 && wall <= 60000 && wall <= budget.max_wall_millis
+            });
+    let clock_commit = clock_prepared && clock["review_available"] == true;
+    let clock_rereview = clock_prepared && clock["review_available"] == false;
+    let clock_proposal = if clock_rereview {
+        Some(
+            json!({"kind":"run","original_paired_seal":clock["original_paired_seal"],
+            "game_ticks":clock_active["game_ticks"],"wall_millis":clock_active["wall_millis"]}),
+        )
+    } else {
+        new_run_proposal
+    };
+    // Stopping an existing run does not require an unexpired or unsatisfied goal.
+    let clock_cancel = clock_authority
+        && clock_linked
+        && clock_active.is_object()
+        && (clock["pending"] == true || clock_uncertain);
+    let clock_source_lost =
+        clock_active["native"]["phase"] == "source_lost" && clock["needs_reconciliation"] == false;
     let labor = parent_labor_diagnostics(&parent_goal);
     let recommendation = if session.is_none() || result["closed"] == true {
         None
@@ -213,7 +406,19 @@ fn encode(
             json!({"scope":"session"}),
         ))
     } else if uncertain
+        && clock_source_lost
+        && view["frontier"]["all_applied"] == true
+        && view["frontier"]["needs_reconciliation"] != true
+    {
+        Some((
+            "fortress_doctor",
+            "Inspect the original clock custody and resolve the lost source; its receipt cannot establish that the fortress is paused.",
+            false,
+            json!({}),
+        ))
+    } else if uncertain
         && parent_fenced
+        && !clock_reconciliation
         && view["frontier"]["all_applied"] == true
         && view["frontier"]["needs_reconciliation"] != true
     {
@@ -223,11 +428,38 @@ fn encode(
     } else if uncertain {
         Some((
             "fortress_wait",
-            "Reconcile the original uncertain key before any new dispatch.",
+            if clock_reconciliation {
+                "Reconcile the retained clock run before another dispatch or fresh goal sample; wait does not start another run."
+            } else {
+                "Reconcile the original uncertain key before any new dispatch."
+            },
             false,
             json!({}),
         ))
-    } else if !verified || parent_proven || parent_fenced {
+    } else if !verified {
+        None
+    } else if clock_commit {
+        Some((
+            "fortress_commit",
+            "Confirm this separate clock review to attempt one bounded unpause after fresh original-custody checks.",
+            true,
+            json!({"paired_seal":clock_active["review_seal"],"confirmed":true,"scope":"run"}),
+        ))
+    } else if clock_rereview {
+        Some((
+            "fortress_plan",
+            "Request a fresh review of the exact retained prepared run; this does not start game time or restore the prior confirmation.",
+            false,
+            json!({"request":clock_proposal.as_ref().map(Value::to_string)}),
+        ))
+    } else if clock_cancel && clock_active["state"] == "prepared" {
+        Some((
+            "fortress_cancel",
+            "Cancel the retained run preparation before choosing a new bounded clock slice.",
+            false,
+            json!({"scope":"run"}),
+        ))
+    } else if parent_proven || parent_fenced {
         None
     } else if !review.is_null() {
         Some((
@@ -245,6 +477,17 @@ fn encode(
             false,
             json!({"request":json!({"kind":"step", "original_plan_digest":view["original_plan"]["plan_digest"]}).to_string()}),
         ))
+    } else if let Some(request) = &clock_proposal {
+        Some((
+            "fortress_plan",
+            if selected_goal["current_truth"] == "true" {
+                "Prepare bounded game-time progress for the original inventory stability interval, then review its separate clock seal."
+            } else {
+                "Prepare a bounded run for the pending original inventory minimum, then review its separate clock seal."
+            },
+            false,
+            json!({"request":request.to_string()}),
+        ))
     } else if mode != Some("offline")
         && view["frontier"]["all_applied"] == true
         && selected_goal.is_object()
@@ -254,7 +497,11 @@ fn encode(
     {
         Some((
             "fortress_wait",
-            "Take one coherent sample of the original labor and inventory goal; additional stability samples require separately managed game-time progress.",
+            if clock.is_object() {
+                "Take one fresh coherent sample of the original labor and inventory goal; wait does not start a clock run."
+            } else {
+                "Take one coherent sample of the original labor and inventory goal; additional stability samples require separately managed game-time progress."
+            },
             false,
             json!({}),
         ))
@@ -293,6 +540,20 @@ fn encode(
             recommendation_fn(tool, reason, confirm, arguments)
         })
         .collect::<Vec<_>>();
+    if clock_cancel
+        && result["closed"] != true
+        && let Some(id) = session
+        && !recommendations
+            .iter()
+            .any(|item| item["tool"] == "fortress_cancel" && item["arguments"]["scope"] == "run")
+    {
+        recommendations.push(recommendation_fn(
+            "fortress_cancel",
+            "Cancel the retained clock run; an active run requests a stop and keeps its original recovery custody.",
+            false,
+            json!({"session_id":id.to_string(),"scope":"run"}),
+        ));
+    }
     // This suggestion requests a new capture; it never joins pages into a
     // canonical snapshot or carries mutation/preparation authority.
     if verified
@@ -323,6 +584,10 @@ fn encode(
         partial_domains.push("current_parent_terminal_predicate");
     } else {
         omitted_domains.insert(0, "current_parent_goal");
+    }
+    if clock.is_object() {
+        partial_domains.push("original_order_clock_custody");
+        omitted_domains.push("current_pause");
     }
     let mut uncertainty = if parent_fenced {
         vec![json!({
@@ -357,6 +622,49 @@ fn encode(
             _ => Vec::new(),
         }
     };
+    if clock_reconciliation || clock_invalidates_goal {
+        uncertainty.push(json!({"scope":"run","epistemic_status":"unknown",
+            "clock_may_be_running":clock_uncertain,"current_pause_proven":false,
+            "finding":"Native clock custody cannot establish current pause or completion of the original goal.",
+            "resolution":if clock_source_lost {
+                "Inspect custody and resolve the original clock source; repeated polling cannot prove pause after source loss."
+            } else if clock_reconciliation {
+                "Reconcile or cancel the original run before a fresh joined labor and inventory sample."
+            } else {
+                "Take a fresh joined labor and inventory sample after the run has settled."
+            }}));
+    }
+    let clock_view = clock_summary(clock, clock_commit);
+    let mut actions = entries;
+    if clock_active.is_object() {
+        actions.push(json!({"scope":"run","clock_run":clock_view["active_run"],
+            "currently_verified":verified,"clock_receipt_is_goal_proof":false}));
+    }
+    let mut confirmations = if review.is_null() {
+        vec![]
+    } else {
+        vec![review]
+    };
+    let pending_plans = if clock_commit {
+        let confirmation = json!({"scope":"run","paired_seal":clock_active["review_seal"],
+            "game_ticks":clock_active["game_ticks"],"wall_millis":clock_active["wall_millis"],
+            "requires_confirmation":true,"commit_available":true,
+            "purpose":"bounded game-time progress for the original inventory goal"});
+        confirmations.push(confirmation.clone());
+        vec![confirmation]
+    } else {
+        vec![]
+    };
+    if clock_invalidates_goal {
+        result["original_goal_proven"] = json!(false);
+        result["current_state_proven"] = json!(false);
+        if result.get("current_parent_goal").is_some() {
+            result["current_parent_goal"] = Value::Null;
+        }
+        if result.get("selected_inventory_goal").is_some() {
+            result["selected_inventory_goal"] = compact_goal(&result["selected_inventory_goal"]);
+        }
+    }
     if let Some(labor) = &labor
         && let Some(finding) = uncertainty.first_mut()
     {
@@ -375,12 +683,26 @@ fn encode(
             "current_parent_goal_truth":parent_truth,
             "current_parent_labor":labor.as_ref().map(|labor| &labor.summary),
             "parent_goal_observation_fenced":parent_fenced,
+            "clock_control_enabled":clock_authority,"clock_may_be_running":clock_uncertain,
+            "clock_invalidates_goal":clock_invalidates_goal,"current_pause_proven":false,
+            "clock_receipt_is_goal_proof":false,
             "selected_inventory_goal_proven_at_anchor":selected_proven}))
-        .active_work(json!({"pending_plans":[],"actions":entries,
+        .active_work(json!({"pending_plans":pending_plans,"actions":actions,"clock":clock_view,
             "obligations":if selected_goal.is_null() {vec![]} else {vec![selected_goal]},
-            "current_parent_goal":parent_goal,"cancellation_drains":[],
-            "indeterminate_effects":if uncertain {vec![json!({"state":"unknown","reconcile_original_key":true})]} else {vec![]},
-            "publications":[],"confirmations":if review.is_null(){vec![]} else {vec![review]}}))
+            "current_parent_goal":parent_goal,"cancellation_drains":if clock_active["state"] == "cancel_requested" {
+                vec![json!({"scope":"run","key":bounded(&clock_active["key"],128),"currently_verified":verified})]
+            }else{vec![]},
+            "indeterminate_effects":if uncertain {vec![json!({"state":"unknown","reconcile_original_key":true,
+                "clock_may_be_running":clock_uncertain})]} else {vec![]},
+            "publications":[],"confirmations":confirmations}))
+        .affordances(if clock.is_object() {vec![
+            json!({"action":"fortress_plan","scope":"run","enabled":clock_proposal.is_some(),
+                "request_kind":"run","grants_authority":false}),
+            json!({"action":"fortress_commit","scope":"run","enabled":clock_commit,
+                "requires_confirmation":true,"grants_authority":false}),
+            json!({"action":"fortress_cancel","scope":"run","enabled":clock_cancel,
+                "grants_authority":false})
+        ]}else{vec![]})
         .recommendations(recommendations)
         .uncertainty(uncertainty)
         .coverage(json!({"status":"partial","complete_domains":[],"partial_domains":partial_domains,
@@ -409,13 +731,21 @@ fn encode(
     result.to_string()
 }
 fn recommendation_fn(tool: &str, reason: &str, confirm: bool, arguments: Value) -> Value {
+    let clock_control = arguments["scope"] == "run"
+        || arguments["request"].as_str().is_some_and(|raw| {
+            serde_json::from_str::<Value>(raw).is_ok_and(|request| request["kind"] == "run")
+        });
     recommendation(
         tool,
         tool,
         reason,
         "advance the retained original plan",
         "resolve the next bounded step",
-        if confirm { "guarded" } else { "read_only" },
+        if confirm || clock_control {
+            "guarded"
+        } else {
+            "read_only"
+        },
         "not_assessed",
         confirm,
         arguments,
@@ -435,13 +765,14 @@ pub(super) fn packet(
     verified: bool,
     uncertain: bool,
 ) -> (String, bool) {
+    let closed = result["closed"] == true;
     let full = encode(
         operation, session, anchor, mode, request, budget, result, retained, verified, uncertain,
     );
     if serde_json::to_string(&full).is_ok_and(|s| s.len() <= TEXT_LIMIT) {
         return (full, false);
     }
-    let fallback = json!({"ok":false,"error":{"code":"budget_exceeded","message":"complete response exceeds output limit; local review withdrawn","retryable":false},
+    let fallback = json!({"ok":false,"closed":closed,"error":{"code":"budget_exceeded","message":"complete response exceeds output limit; local review withdrawn","retryable":false},
         "output_limit_bytes":TEXT_LIMIT,"retained_reference":retained.map(compact),"retained_state_currently_verified":false,
         "automatic_redispatch":false,"current_state_proven":false,"original_goal_proven":false});
     let compacted = retained.map(compact);
@@ -461,6 +792,10 @@ pub(super) fn packet(
         true,
     )
 }
+
+#[cfg(test)]
+#[path = "live_production_presentation_clock_tests.rs"]
+mod clock_tests;
 
 #[cfg(test)]
 mod tests {
@@ -685,6 +1020,38 @@ mod tests {
             turn["active_work"]["current_parent_goal"]["labor"],
             json!(rows)
         );
+    }
+
+    #[test]
+    fn clock_advancement_withdraws_current_labor_findings_until_a_fresh_parent_sample() {
+        for case in 0..3 {
+            let (anchor, mut view) = joined_goal_view("false", true);
+            match case {
+                0 => view["clock_invalidates_goal"] = json!(true),
+                1 => view["clock"] = json!({"unresolved":true}),
+                _ => view["clock"] = json!({"inspection_required":true}),
+            }
+            let value = joined_packet(anchor, &view, "control", true, false);
+            let turn = &value["agent_turn"];
+            assert!(
+                turn["active_work"]["current_parent_goal"].is_null(),
+                "case {case}"
+            );
+            assert!(
+                turn["briefing"]["current_parent_labor"].is_null(),
+                "case {case}"
+            );
+            assert!(
+                turn["uncertainty"]
+                    .as_array()
+                    .expect("uncertainty")
+                    .iter()
+                    .all(|finding| finding.get("labor_blockers").is_none()),
+                "case {case}"
+            );
+            assert!(compact(&view)["current_parent_goal"].is_null());
+            assert_eq!(turn["briefing"]["original_goal_proven"], false);
+        }
     }
 
     #[test]

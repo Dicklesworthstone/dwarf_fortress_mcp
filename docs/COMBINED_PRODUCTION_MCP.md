@@ -11,7 +11,8 @@ platforms refuse private-journal opening.
 
 Owner: `df-dfhack-bridge-plane-c-pic.4.1`. The broader dispatcher and recovery
 tasks `.4` and `.5` remain open. This host does not supply a complete fortress
-controller, game clock or material/workshop planning. An explicitly selected
+controller or material/workshop planning. Separately configured bounded clock
+runs can advance an original receipt-linked production order. An explicitly selected
 inventory objective can be monitored for the original order step. A separate
 fresh labor-and-inventory observation can establish the complete original
 parent goal at its exact reported anchor.
@@ -27,17 +28,18 @@ Set all three opt-ins to exactly `1`:
 Supply the existing `DFMCP_SEMANTIC_WORKFORCE_CONFIG` and
 `DFMCP_SEMANTIC_WORK_ORDER_CONFIG` described in
 [the workforce guide](SEMANTIC_WORKFORCE_MCP.md) and
-[the work-order guide](SEMANTIC_WORK_ORDER_MCP.md). Their optional standalone
-`clock`, `inventory_clock` and original single-goal `recovery` objects are
-forbidden in this host. Their standalone clock environment names are also
-forbidden; the combined host does not inherit either clock authority.
+[the work-order guide](SEMANTIC_WORK_ORDER_MCP.md). Their original single-goal
+`recovery` objects, workforce `clock`, and order `inventory_clock` remain forbidden
+in this host. The order `clock` is optional and must exactly match the combined
+parent's explicit clock configuration described below. Its independent authority
+is never inferred from permission to assign labor or insert orders.
 Both must use the same numeric loopback endpoint, initialization mode and exact
 citizen world/site/DF/DFHack/bridge-version/generation pins. Native family
 generations remain independently pinned; they need not equal each other.
 
 `DFMCP_COMBINED_PRODUCTION_CONFIG` is a closed JSON object with schema
 `dfmcp.combined-production-development/1`, an absolute normalized `directory`,
-Boolean `initialize`, and optional `recovery`. All three custody directories
+Boolean `initialize`, and optional `recovery` and `clock`. All three custody directories
 must be separate and nonnested. Existing private-file owners require real
 owner-private directories and regular no-follow files with canonical modes;
 the host neither repairs nor silently replaces custody.
@@ -52,6 +54,8 @@ Only the following additional family environment names are accepted:
 - `DFMCP_SEMANTIC_WORK_ORDER_ORDER_TOKEN`
 - `DFMCP_SEMANTIC_WORK_ORDER_PROGRESS_TOKEN`
 - `DFMCP_SEMANTIC_WORK_ORDER_OPERATIONS_TOKEN`
+- `DFMCP_SEMANTIC_WORK_ORDER_ALLOW_CLOCK`
+- `DFMCP_SEMANTIC_WORK_ORDER_CLOCK_TOKEN`
 
 Authority flags are absent or exactly `1`. Initializing in Control requires
 both write flags. Opening authority can later be reduced; it cannot be
@@ -98,6 +102,83 @@ replacement key or a fresh original plan. Cancel with `scope="step"` retires
 a proven preparation; it does not undo an Applied effect. `scope="session"`
 releases local ownership while preserving custody and makes no native
 cancellation claim. Checkpoint and Restore return explicit capability refusals.
+
+If a clock is configured, Wait first reconciles its retained original run key.
+An unresolved run blocks paused goal acquisition. Explicit `scope="run"`
+cancellation retires a prepared run or requests the native owner's safety pause;
+it does not change the labor assignment or remove the manager order.
+
+## Advance the original production order with a reviewed clock
+
+Clock control uses the existing `order-run/1.14` native owner and a separate
+private `clock.journal` under the order custody directory. It applies only after
+both original effects settle and the original request explicitly selected an
+inventory objective. The complete parent archive, selected StepId and native
+key, paired review, Created receipt, allocation identity and predecessor custody
+remain bound to every run. The original deadline, cadence and sampled stability
+are unchanged.
+
+To enable it, put the same closed object in the parent combined configuration
+and the order child configuration:
+
+```json
+{"clock":{"generation":77}}
+```
+
+Here `77` is only an example; use the exact operator-pinned native clock
+generation. Set `DFMCP_SEMANTIC_WORK_ORDER_ALLOW_CLOCK=1` and supply its separate
+`DFMCP_SEMANTIC_WORK_ORDER_CLOCK_TOKEN`. Open Control mode with an explicit
+`max_game_ticks` between 1 and 1200. The default is zero. Neither configuring nor
+opening a clock advances game time, and a reconcile/offline owner cannot become
+a control owner within its session.
+
+After the original order is created, obtain `clock.original_paired_seal` from
+the current response. Prepare through the existing Plan tool:
+
+```json
+{
+  "kind": "run",
+  "original_paired_seal": "<clock.original_paired_seal>",
+  "game_ticks": 5,
+  "wall_millis": 1000
+}
+```
+
+Preparation acquires fresh joined labor/inventory evidence and a paused native
+order capture. It refuses a completed inventory obligation, a retired/unlinked
+order, expired original time, unresolved clock, replaced custody or missing
+independent clock authority. Both native prepare and commit recheck the exact
+original custody after the durable clock marker. False stock can advance toward
+the requested goods; true stock can advance unfinished sampled stability while
+the original native order remains eligible.
+
+Review `clock.active_run`, then Commit with `scope="run"`, its `review_seal` in
+`paired_seal`, and `confirmed=true`. That confirms only this bounded run. The
+clock has at most 32 retained runs; each is limited by the session budget and
+the remaining original deadline. A native stopping receipt is historical clock
+evidence. Commit withdraws current goal proof, and a subsequent Wait must obtain
+fresh coherent labor and inventory evidence before reporting success.
+
+Lost replies retain the original run key. Wait queries that key without another
+unpause. While the native owner may still be running, goal reads and new runs
+remain blocked. A failed response or restart withdraws the process-local clock
+review. Inspecting a historical Prepared record does not restore confirmation
+authority; an explicit fresh preparation is required. `scope="run"` cancellation
+uses current Query and clock authority and remains available after the original
+goal deadline for the retained native safety pause.
+
+For recovery, retain the returned parent `recovery.clock_journal_id`. Copy that
+same identity into `clock.journal_id` in both parent and order child configurations,
+set all `initialize` values to false, and supply the complete original parent
+recovery reference. Missing, omitted or replaced clock custody refuses; recovery
+never creates a replacement journal. Offline opening and inspection perform no
+native contact and restore no current goal proof or local clock review.
+
+This host's clock requires the original native order to remain eligible. When
+the engine retires the order, inventory monitoring still works, but further
+stability samples need separately managed game-time progress. The standalone
+work-order profile's inventory clock is a distinct owner and is not imported by
+this combined configuration.
 
 The newer `.4.2` source exposes pre-plan advisory workforce choices; its current
 test and live evidence remains explicit in `IMPLEMENTATION_STATUS.md`. BB's

@@ -27,6 +27,8 @@ const ALLOWED: &[&str] = &[
     "DFMCP_SEMANTIC_WORK_ORDER_ORDER_TOKEN",
     "DFMCP_SEMANTIC_WORK_ORDER_PROGRESS_TOKEN",
     "DFMCP_SEMANTIC_WORK_ORDER_OPERATIONS_TOKEN",
+    "DFMCP_SEMANTIC_WORK_ORDER_ALLOW_CLOCK",
+    "DFMCP_SEMANTIC_WORK_ORDER_CLOCK_TOKEN",
 ];
 const MAX_CONFIG_BYTES: usize = 16 * 1024;
 
@@ -37,6 +39,42 @@ pub(crate) struct Recovery {
     pub(crate) identity_digest: Digest32,
     pub(crate) frontier: durable::Recovery,
     pub(crate) goal_history_present: bool,
+    pub(crate) clock_journal_id: Option<Digest32>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ClockConfig {
+    pub(crate) generation: u64,
+    pub(crate) journal_id: Option<Digest32>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ClockInput {
+    generation: u64,
+    #[serde(default, deserialize_with = "journal_identity")]
+    journal_id: Option<String>,
+}
+fn journal_identity<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> std::result::Result<Option<String>, D::Error> {
+    String::deserialize(deserializer).map(Some)
+}
+impl ClockInput {
+    fn validate(self, initialize: bool) -> Result<ClockConfig> {
+        if self.generation == 0
+            || self.generation == u64::MAX
+            || initialize == self.journal_id.is_some()
+        {
+            return Err(invalid(
+                "combined clock requires an exact incarnation and a retained journal identity only when reopening",
+            ));
+        }
+        Ok(ClockConfig {
+            generation: self.generation,
+            journal_id: self.journal_id.as_deref().map(digest).transpose()?,
+        })
+    }
 }
 
 #[derive(Deserialize)]
@@ -46,6 +84,7 @@ struct Input {
     directory: PathBuf,
     initialize: bool,
     recovery: Option<RecoveryInput>,
+    clock: Option<ClockInput>,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -57,6 +96,7 @@ struct RecoveryInput {
     frontier: FrontierInput,
     #[serde(default)]
     goal_history_present: bool,
+    clock_journal_id: Option<String>,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -79,6 +119,7 @@ pub(crate) struct Config {
     pub(crate) directory: PathBuf,
     pub(crate) initialize: bool,
     pub(crate) recovery: Option<Recovery>,
+    pub(crate) clock: Option<ClockConfig>,
     pub(crate) workforce: workforce::native::NativeShell,
     pub(crate) orders: orders::native::NativeShell,
     check: Arc<dyn Fn() -> Result<()> + Send + Sync>,
@@ -131,7 +172,7 @@ fn matches_digests(raw: &[String; 3], expected: [Digest32; 3]) -> bool {
         == expected
 }
 
-fn parse(raw: &str) -> Result<(PathBuf, bool, Option<Recovery>)> {
+fn parse(raw: &str) -> Result<(PathBuf, bool, Option<Recovery>, Option<ClockConfig>)> {
     if raw.is_empty() || raw.len() > MAX_CONFIG_BYTES {
         return Err(invalid("combined operator configuration exceeds 16 KiB"));
     }
@@ -150,6 +191,10 @@ fn parse(raw: &str) -> Result<(PathBuf, bool, Option<Recovery>)> {
             "invalid combined schema, custody directory or recovery mode",
         ));
     }
+    let clock = input
+        .clock
+        .map(|clock| clock.validate(input.initialize))
+        .transpose()?;
     let recovery = input
         .recovery
         .map(|r| {
@@ -187,10 +232,18 @@ fn parse(raw: &str) -> Result<(PathBuf, bool, Option<Recovery>)> {
                 },
                 frontier,
                 goal_history_present: r.goal_history_present,
+                clock_journal_id: r.clock_journal_id.as_deref().map(digest).transpose()?,
             })
         })
         .transpose()?;
-    Ok((input.directory, input.initialize, recovery))
+    if let Some(recovery) = recovery
+        && recovery.clock_journal_id != clock.and_then(|clock| clock.journal_id)
+    {
+        return Err(denied(
+            "combined clock recovery must name its exact independently retained journal",
+        ));
+    }
+    Ok((input.directory, input.initialize, recovery, clock))
 }
 
 fn distinct_directories(paths: [&Path; 3]) -> bool {
@@ -219,7 +272,7 @@ impl Config {
         let digests = raw
             .each_ref()
             .map(|value| Digest32::of_bytes(value.as_bytes()));
-        let (directory, initialize, recovery) = parse(&raw[0])?;
+        let (directory, initialize, recovery, clock) = parse(&raw[0])?;
         let check: Arc<dyn Fn() -> Result<()> + Send + Sync> = Arc::new(move || {
             let current = environment()?;
             if !matches_digests(&current, digests) {
@@ -233,8 +286,18 @@ impl Config {
             Arc::clone(&check),
             runtime_check,
         )?;
-        let o =
-            orders::native::Config::from_combined_environment(Arc::clone(&check), runtime_check)?;
+        let o = match clock {
+            Some(clock) => orders::native::Config::from_combined_clock_environment(
+                Arc::clone(&check),
+                runtime_check,
+                clock.generation,
+                clock.journal_id,
+            )?,
+            None => orders::native::Config::from_combined_environment(
+                Arc::clone(&check),
+                runtime_check,
+            )?,
+        };
         if !distinct_directories([&directory, w.custody_directory(), o.custody_directory()])
             || w.endpoint() != o.endpoint()
             || w.initializing() != initialize
@@ -261,6 +324,7 @@ impl Config {
             directory,
             initialize,
             recovery,
+            clock,
             workforce,
             orders,
             check,

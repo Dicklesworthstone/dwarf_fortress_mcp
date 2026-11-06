@@ -91,6 +91,8 @@ fn machine_host_contract_preserves_bounded_development_scope() -> Result<()> {
     );
     assert_eq!(host["wall_millis_max"], MAX_WALL_MILLIS);
     assert_eq!(host["byte_work_max"], MAX_BYTES);
+    assert_eq!(host["game_ticks_default"], 0);
+    assert_eq!(host["game_ticks_max"], 1200);
     assert_eq!(
         host["original_steps"],
         json!(["SetLabor", "CreateWorkOrder"])
@@ -131,7 +133,7 @@ fn machine_host_contract_preserves_bounded_development_scope() -> Result<()> {
     let paths = host["source_paths"]
         .as_array()
         .ok_or_else(|| invalid("missing source inventory"))?;
-    for file in ["choices.rs", "choices_tests.rs"] {
+    for file in ["choices.rs", "choices_tests.rs", "clock.rs"] {
         assert!(paths.contains(&json!(format!(
             "crates/dfmcp-mcp/src/live_production_runtime/{file}"
         ))));
@@ -184,6 +186,29 @@ fn machine_host_contract_preserves_bounded_development_scope() -> Result<()> {
         "production_attribution_proven",
     ] {
         assert_eq!(parent[field], false, "{field}");
+    }
+    let clock = &host["optional_order_clock"];
+    assert_eq!(clock["protocol"], "order-run/1.14");
+    assert_eq!(clock["parent_recovery_field"], "clock_journal_id");
+    assert_eq!(clock["new_unpause_attempts_per_run"], 1);
+    for field in [
+        "requires_explicit_original_inventory_objective",
+        "requires_settled_original_effects",
+        "original_deadline_cadence_stability_unchanged",
+        "original_custody_rechecked_after_durable_clock_marker",
+        "independent_operator_clock_authority",
+        "unresolved_run_blocks_goal_sampling",
+        "missing_replaced_or_omitted_journal_refused",
+    ] {
+        assert_eq!(clock[field], true, "{field}");
+    }
+    for field in [
+        "local_review_restored_after_restart_or_failed_publication",
+        "native_clock_receipt_proves_current_pause_or_goal",
+        "supports_retired_original_order",
+        "legacy_single_step_clock_target_bytes_changed",
+    ] {
+        assert_eq!(clock[field], false, "{field}");
     }
     Ok(())
 }

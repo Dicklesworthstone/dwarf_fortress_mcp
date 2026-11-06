@@ -43,6 +43,9 @@ impl Runtime {
     }
 
     fn current_parent_goal(&self) -> Option<&SelectedParentGoalProgress> {
+        if self.clock_withholds_goal() {
+            return None;
+        }
         let parent = self.parent_goal.as_ref()?;
         let selected = self.goal_monitor.as_ref()?.latest()?;
         // A durable selected history alone cannot revive a parent observation.
@@ -97,11 +100,10 @@ impl Runtime {
         } else if !self.parent_goal_proven() {
             omissions.push("parent goal completion");
         }
-        omissions.extend([
-            "order-attributed output",
-            "workshop/material feasibility",
-            "game clock control",
-        ]);
+        omissions.extend(["order-attributed output", "workshop/material feasibility"]);
+        if !self.clock_control_enabled() {
+            omissions.push("game clock control");
+        }
         omissions
     }
 
@@ -115,7 +117,9 @@ impl Runtime {
             .as_ref()
             .and_then(|plan| plan.steps.iter().find(|candidate| candidate.id == step))
             .and_then(|step| step.obligation.as_ref());
-        let current = monitor.and_then(|monitor| monitor.latest());
+        let current = monitor
+            .and_then(|monitor| monitor.latest())
+            .filter(|_| !self.clock_withholds_goal());
         let status = monitor.and_then(|monitor| monitor.historical_obligation_status());
         let failed = status.is_some_and(|status| {
             matches!(
@@ -245,6 +249,7 @@ impl Runtime {
         self.parent_goal = None;
         let result = self.wait_with_goal_inner(c);
         self.raise_goal_floor();
+        self.raise_clock_floor();
         if result.is_err() {
             // Includes refusals before the first durable poll event. The next
             // poll persists the interruption; no failed call preserves a streak.
@@ -285,8 +290,13 @@ impl Runtime {
         let settled = frontier.inspect(&work.narrow(&settled_budget)?)?;
         custody.verify(&work.current()?)?;
         custody.disarm()?;
+        self.reconcile_clock(&mut work)?;
         let should_sample = settled.all_applied()
             && !settled.needs_reconciliation()
+            && !self
+                .clock
+                .as_ref()
+                .is_some_and(ProductionClock::may_be_running)
             && self.original.as_ref().and_then(selected).is_some();
         if should_sample {
             c.authorize(Capability::Observe, RiskTier::ReadOnly, &[], None)?;
@@ -341,6 +351,7 @@ impl Runtime {
                     .ok_or_else(|| exhausted("selected goal cursor exhausted"))?,
             };
             let config = &self.config;
+            let clock_floor = self.clock.as_ref().map_or(0, ProductionClock::high_tick);
             let result = self
                 .execution
                 .as_mut()
@@ -366,6 +377,11 @@ impl Runtime {
                         |projection, current| {
                             config.current()?;
                             custody.verify(current)?;
+                            if projection.anchor().tick.get() < clock_floor {
+                                return Err(denied(
+                                    "inventory evidence predates consumed clock time",
+                                ));
+                            }
                             config
                                 .orders
                                 .acceptance()
@@ -374,6 +390,9 @@ impl Runtime {
                         |projection, current| {
                             config.current()?;
                             custody.verify(current)?;
+                            if projection.anchor().tick.get() < clock_floor {
+                                return Err(denied("labor evidence predates consumed clock time"));
+                            }
                             config.workforce.acceptance().goal(projection, current)
                         },
                     ),
@@ -389,6 +408,7 @@ impl Runtime {
             // anchor remains separately visible and is never relabelled.
             self.anchor = result.parent_progress().anchor;
             self.parent_goal = Some(result.parent_progress().clone());
+            self.clock_invalidates_goal = false;
         }
         self.config.current()?;
         work.context.anchor = self.anchor;

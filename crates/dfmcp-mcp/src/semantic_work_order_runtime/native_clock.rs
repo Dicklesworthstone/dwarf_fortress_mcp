@@ -37,6 +37,9 @@ impl ClockConfig {
     pub(super) fn journal_id(&self) -> Option<Digest32> {
         self.journal_id
     }
+    pub(super) fn identity(&self) -> (u64, Option<Digest32>) {
+        (self.generation, self.journal_id)
+    }
 }
 impl ClockInput {
     pub(super) fn validate(self, initialize: bool) -> Result<ClockConfig> {

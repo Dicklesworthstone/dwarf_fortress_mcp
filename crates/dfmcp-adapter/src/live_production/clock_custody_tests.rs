@@ -1,0 +1,173 @@
+use super::*;
+use crate::semantic_work_orders::NativeOrderCreation;
+
+fn native_calls(f: &ProductionFixture) -> ([usize; 5], [usize; 4]) {
+    let orders = f.orders.borrow();
+    (
+        f.workforce.data.borrow().calls,
+        [
+            orders.reads,
+            orders.prepares,
+            orders.commits,
+            orders.queries,
+        ],
+    )
+}
+
+fn custody_bytes(f: &ProductionFixture) -> Vec<Vec<u8>> {
+    [
+        &f.workforce.journal,
+        &f.workforce.associations,
+        &f.order_journal,
+        &f.order_associations,
+    ]
+    .into_iter()
+    .map(|storage| storage.0.borrow().file.get_ref().clone())
+    .collect()
+}
+
+#[test]
+fn selected_clock_custody_is_query_only_exact_and_has_no_native_or_file_effects() -> Result<()> {
+    let mut f = ProductionFixture::new(1)?;
+    f.applied(0)?;
+    f.applied(1)?;
+    let calls = native_calls(&f);
+    let bytes = custody_bytes(&f);
+    let mut query = f.c.clone();
+    query
+        .grants
+        .retain(|grant| grant.capability == Capability::Query);
+    let inspected = f
+        .executor
+        .inspect_selected_order_custody(StepId::new(1), &query)?;
+    assert_eq!(inspected.review().original_plan(), &f.plan);
+    assert_eq!(inspected.review().step_id(), StepId::new(1));
+    assert_eq!(inspected.review().selected_step(), &f.plan.steps[1]);
+    assert_eq!(inspected.native_record().state(), CreationState::Created);
+    assert_eq!(
+        inspected.native_record().plan().key(),
+        f.plan.steps[1].idempotency_key
+    );
+    let NativeOrderCreation::Inserted {
+        native_order_id,
+        receipt,
+    } = inspected.creation_result()
+    else {
+        return Err(invalid("selected fixture insertion must be verified"));
+    };
+    assert_eq!(
+        inspected.native_record().effect().created_order_id(),
+        Some(*native_order_id)
+    );
+    assert_eq!(inspected.native_record().effect().receipt(), Some(*receipt));
+    assert_eq!(
+        inspected.pending_obligation(),
+        f.plan.steps[1].obligation.as_ref()
+    );
+    assert!(!inspected.original_goal_proven());
+    assert_eq!(native_calls(&f), calls);
+    assert_eq!(custody_bytes(&f), bytes);
+    assert!(f.executor.prepared.is_none());
+    Ok(())
+}
+
+#[test]
+fn selected_clock_custody_recovers_without_sources_or_restoring_dispatch_authority() -> Result<()> {
+    let mut f = ProductionFixture::new(1)?;
+    f.applied(0)?;
+    f.applied(1)?;
+    let expected = f
+        .executor
+        .inspect_selected_order_custody(StepId::new(1), &f.c)?;
+    let mut f = f.reopen_query()?;
+    f.workforce.data.borrow_mut().fail_connect = true;
+    let calls = native_calls(&f);
+    let bytes = custody_bytes(&f);
+    assert!(f.executor.evidence.is_none());
+    assert!(f.executor.latest_step_evidence().is_none());
+    let inspected = f
+        .executor
+        .inspect_selected_order_custody(StepId::new(1), &f.c)?;
+    assert_eq!(inspected.review().seal(), expected.review().seal());
+    assert_eq!(inspected.native_record(), expected.native_record());
+    assert_eq!(inspected.creation_result(), expected.creation_result());
+    assert_eq!(inspected.review().original_plan(), &f.plan);
+    assert!(f.executor.prepared.is_none());
+    assert!(f.executor.latest_step_evidence().is_none());
+    assert!(f.prepare(1).is_err());
+    assert_eq!(native_calls(&f), calls);
+    assert_eq!(custody_bytes(&f), bytes);
+    Ok(())
+}
+
+#[test]
+fn selected_clock_custody_refuses_absent_prepared_and_uncertain_original_insertions() -> Result<()>
+{
+    let mut f = ProductionFixture::new(1)?;
+    f.applied(0)?;
+    let calls = native_calls(&f);
+    for step in [StepId::ZERO, StepId::new(1), StepId::new(2)] {
+        assert!(
+            f.executor
+                .inspect_selected_order_custody(step, &f.c)
+                .is_err()
+        );
+    }
+    assert_eq!(native_calls(&f), calls);
+    f.prepare(1)?;
+    let calls = native_calls(&f);
+    assert!(
+        f.executor
+            .inspect_selected_order_custody(StepId::new(1), &f.c)
+            .is_err()
+    );
+    assert!(f.executor.prepared.is_none());
+    assert_eq!(native_calls(&f), calls);
+
+    let mut uncertain = ProductionFixture::new(1)?;
+    uncertain.applied(0)?;
+    let prepared = uncertain.prepare(1)?;
+    uncertain.orders.borrow_mut().lose_reply = true;
+    assert!(uncertain.commit(1, prepared).is_err());
+    let calls = native_calls(&uncertain);
+    assert!(
+        uncertain
+            .executor
+            .inspect_selected_order_custody(StepId::new(1), &uncertain.c)
+            .is_err()
+    );
+    assert_eq!(native_calls(&uncertain), calls);
+    assert_eq!(uncertain.orders.borrow().commits, 1);
+    Ok(())
+}
+
+#[test]
+fn selected_clock_custody_rejects_revoked_query_and_corrupt_predecessor_without_replay()
+-> Result<()> {
+    let mut f = ProductionFixture::new(1)?;
+    f.applied(0)?;
+    f.applied(1)?;
+    let floor = f.executor.high_tick();
+    let calls = native_calls(&f);
+    let mut revoked = f.c.clone();
+    revoked.grants.clear();
+    assert!(
+        f.executor
+            .inspect_selected_order_custody(StepId::new(1), &revoked)
+            .is_err()
+    );
+    assert_eq!(native_calls(&f), calls);
+    f.workforce.associations.0.borrow_mut().file.get_mut()[0] ^= 1;
+    let bytes = custody_bytes(&f);
+    assert!(
+        f.executor
+            .inspect_selected_order_custody(StepId::new(1), &f.c)
+            .is_err()
+    );
+    assert!(f.executor.high_tick() >= floor);
+    assert!(f.executor.prepared.is_none());
+    assert!(f.executor.latest_step_evidence().is_none());
+    assert_eq!(native_calls(&f), calls);
+    assert_eq!(custody_bytes(&f), bytes);
+    Ok(())
+}

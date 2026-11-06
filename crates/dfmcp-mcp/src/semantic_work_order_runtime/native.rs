@@ -284,13 +284,38 @@ impl Config {
         combined_check: Arc<dyn Fn() -> Result<()> + Send + Sync>,
         runtime_check: fn() -> Result<()>,
     ) -> Result<Self> {
+        Self::from_combined_environment_inner(combined_check, runtime_check, None)
+    }
+    /// Only the combined parent configuration can admit this optional source.
+    /// Its incarnation and private journal identity must exactly match the
+    /// separately configured child; no MCP request supplies either value.
+    pub(crate) fn from_combined_clock_environment(
+        combined_check: Arc<dyn Fn() -> Result<()> + Send + Sync>,
+        runtime_check: fn() -> Result<()>,
+        generation: u64,
+        journal_id: Option<Digest32>,
+    ) -> Result<Self> {
+        Self::from_combined_environment_inner(
+            combined_check,
+            runtime_check,
+            Some((generation, journal_id)),
+        )
+    }
+    fn from_combined_environment_inner(
+        combined_check: Arc<dyn Fn() -> Result<()> + Send + Sync>,
+        runtime_check: fn() -> Result<()>,
+        clock: Option<(u64, Option<Digest32>)>,
+    ) -> Result<Self> {
         runtime_check()?;
         combined_check()?;
         Self::validate_family_environment()?;
         let raw = std::env::var(CONFIG)
             .map_err(|_| denied("operator semantic runtime configuration is missing"))?;
         let mut config = Self::parse(&raw)?;
-        config.validate_combined_custody()?;
+        match clock {
+            Some(expected) => config.validate_combined_clock_custody(expected)?,
+            None => config.validate_combined_custody()?,
+        }
         config.runtime_check = Some(runtime_check);
         config.combined_check = Some(combined_check);
         config.current()?;
@@ -298,13 +323,32 @@ impl Config {
     }
     fn validate_combined_custody(&self) -> Result<()> {
         if self.clock.is_some()
-            || self.inventory_clock.is_some()
+            || std::env::var_os(CLOCK_AUTHORITY).is_some()
+            || std::env::var_os(CLOCK_TOKEN).is_some()
+        {
+            return Err(denied(
+                "combined clock requires explicit matching parent configuration",
+            ));
+        }
+        self.validate_combined_nonclock_custody()
+    }
+    fn validate_combined_clock_custody(&self, expected: (u64, Option<Digest32>)) -> Result<()> {
+        self.validate_combined_nonclock_custody()?;
+        if self.clock.as_ref().map(ClockConfig::identity) != Some(expected) {
+            return Err(denied(
+                "combined clock incarnation or journal differs from its parent configuration",
+            ));
+        }
+        Ok(())
+    }
+    fn validate_combined_nonclock_custody(&self) -> Result<()> {
+        if self.inventory_clock.is_some()
             || self.recovery.is_some()
             || std::env::var_os(INVENTORY_CLOCK_AUTHORITY).is_some()
             || std::env::var_os(INVENTORY_CLOCK_TOKEN).is_some()
         {
             return Err(denied(
-                "combined work orders exclude standalone clock and recovery",
+                "combined work orders exclude standalone inventory clock and recovery",
             ));
         }
         Ok(())
@@ -783,6 +827,66 @@ mod runtime_checkpoint_tests {
             cause.message,
             "installed runtime checkpoint rejected native access"
         );
+    }
+
+    #[test]
+    fn combined_clock_matches_parent_incarnation_and_external_journal_exactly() -> Result<()> {
+        let mut raw = json!({
+            "schema":"dfmcp.semantic-work-order-development/1",
+            "directory":"/tmp/dfmcp-combined-clock-config-test",
+            "endpoint":"127.0.0.1:5000", "initialize":true,
+            "clock":{"generation":50},
+            "sources":{
+                "kind":"operator-development-source-acceptance/1",
+                "world_folder":"region1","site_id":7,
+                "df_version":"df","dfhack_version":"dfhack",
+                "citizen_bridge_version":"citizens","citizen_generation":10,
+                "work_order_generation":20,"progress_generation":30,"operations_generation":40
+            }
+        });
+        let initialized = Config::parse(&raw.to_string())?;
+        initialized.validate_combined_clock_custody((50, None))?;
+        assert!(initialized.validate_combined_custody().is_err());
+        assert!(
+            initialized
+                .validate_combined_clock_custody((51, None))
+                .is_err()
+        );
+        let identity = Digest32::of_bytes(b"external combined clock journal");
+        assert!(
+            initialized
+                .validate_combined_clock_custody((50, Some(identity)))
+                .is_err()
+        );
+        raw["initialize"] = json!(false);
+        assert!(Config::parse(&raw.to_string()).is_err());
+        raw["clock"]["journal_id"] = json!(identity.to_hex());
+        let reopened = Config::parse(&raw.to_string())?;
+        reopened.validate_combined_clock_custody((50, Some(identity)))?;
+        assert!(
+            reopened
+                .validate_combined_clock_custody((50, None))
+                .is_err()
+        );
+        assert!(
+            reopened
+                .validate_combined_clock_custody((50, Some(Digest32::of_bytes(b"substituted"))))
+                .is_err()
+        );
+        raw["inventory_clock"] = json!({"generation":60, "journal_id":identity.to_hex()});
+        assert!(
+            Config::parse(&raw.to_string())?
+                .validate_combined_clock_custody((50, Some(identity)))
+                .is_err()
+        );
+        raw["inventory_clock"] = Value::Null;
+        raw["clock"] = Value::Null;
+        assert!(
+            Config::parse(&raw.to_string())?
+                .validate_combined_clock_custody((50, Some(identity)))
+                .is_err()
+        );
+        Ok(())
     }
 
     #[test]

@@ -1,5 +1,56 @@
 # Implementation Status
 
+## 2026-11-06 — Bounded production advancement in the combined owner
+
+The combined labor/order MCP host now supports separately reviewed order-run/1.14
+clock slices for an explicit original inventory objective. Both original effects
+must be settled, and a fresh joined sample must remain bound to the original
+native order. The target uses the complete parent archive, actual selected
+StepId/key, exact semantic review, Created receipt and allocation identity. It
+uses the selected original obligation's deadline without slicing or resealing
+the parent. The legacy one-step clock constructor and identity bytes remain
+unchanged.
+
+Optional parent and order-child clock pins must match. The independent operator
+flag/token and explicit session `max_game_ticks` (default zero, maximum 1200)
+are required for advancement. `kind=run` prepares a separate local review;
+`scope=run` Commit confirms it. The native owner retains one unpause attempt per
+key. Original custody is rechecked after durable markers, unresolved clocks
+block paused goal sampling, and Wait reconciles retained keys without starting
+new runs. Native run receipts are historical clock evidence, never current
+pause or original-goal proof.
+
+Current parent and selected proof are withheld after advancement until a new
+joined sample succeeds. The private order-child `clock.journal` and exact
+`recovery.clock_journal_id` survive handoff; missing/replaced/omitted custody
+refuses. Restart and failed publication withdraw local confirmation reviews.
+If a failed operation cannot reread the journal within its remaining budget,
+the response conservatively retains an inspection-required unresolved clock.
+The retained run can be cancelled under Query and current clock authority after
+the original goal deadline. The host does not import the standalone inventory
+clock; an already retired order still requires separately managed time for
+additional stability samples.
+
+Four adapter custody tests and three new actual-binary modern-stdio/TCP scenarios
+cover the new boundaries. The full combined executable suite now contains 28
+scenarios, including the three parent-proof scenarios from the earlier checkpoint.
+The independent existing Python order-run decoder accepts the new fixture's ten
+prepared/running/stopped/cancelled record variants, Python syntax and scoped
+format/diff checks pass. Actual new Rust/MCP/stdio execution is pending here:
+both full MCP builds were SIGKILLed while compiling pinned Asupersync, and a
+subsequent normal adapter lib-test build was also killed under shared-memory
+pressure. The earlier 32 adapter production tests remain the executed result
+for their earlier source. The normal complete-source adapter `cargo check --tests` now passes, including
+the four new custody test bodies; this is type checking, not execution. The complete MCP metadata check was also SIGKILLed in pinned Asupersync.
+A temporary component crate typechecks the unchanged complete combined runtime,
+clock/config/goals, real workforce/order native shells and required citizen/JSON
+projection helpers against the exact real semantic dependencies. All 15 resolved
+dependencies match repository lockfile versions, sources and checksums. This
+component check passes with no source rewriting or fake production APIs; it
+omits entire facade, admission, transport and Agent Turn presentation boundaries
+and executes no tests. Direct runtime integration execution is pending. No full-workspace, native DFHack, game or admission qualification is claimed;
+owning beads remain in progress. See docs/COMBINED_PRODUCTION_MCP.md.
+
 ## 2026-11-06 — Parent source drift and read-only achieved-history recovery
 
 The combined production modern-stdio suite now contains 18 scenarios. A new

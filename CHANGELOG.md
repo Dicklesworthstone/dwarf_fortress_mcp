@@ -1,5 +1,27 @@
 # Changelog
 
+## 2026-11-06 — Reviewed production clock in the combined MCP session
+
+- Connect optional order-run/1.14 control to the original combined inventory
+  goal. Preserve the whole original plan, actual selected step/key, Created
+  receipt, predecessor custody and original deadline; retain legacy one-step
+  clock target bytes.
+- Require independently configured parent/child source pins, operator clock
+  authority, an explicit session tick budget and a separately confirmed run
+  review. Recheck original custody after each durable effect marker.
+- Reconcile pending runs before goal acquisition; never retry unpause after a
+  lost reply. Withdraw current goal proof after advancement and require a fresh
+  joined sample. Retain exact external clock journal identity and withhold
+  process-local reviews after errors or restart.
+- Add actual-binary stdio/TCP scenarios for advancing false stock to complete
+  parent proof, lost-reply recovery without another unpause, and offline review
+  withdrawal/missing journal refusal. Native order retirement still requires
+  independently managed time for further samples. Full runtime execution remains
+  pending under the documented build resource blocker; no gameplay/admission
+  claim is added. Normal complete adapter test-source type checking and an
+  unchanged-source production runtime/native-shell component check pass; MCP
+  facade/transport/presentation compilation and scenario execution remain pending.
+
 ## 2026-11-06 — Exercise parent-proof loss and read-only production recovery
 
 - Add a real-CLI regression for workforce source-generation drift after complete

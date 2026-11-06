@@ -284,6 +284,10 @@ mod actual {
     mod selected_goal_tests {
         include!("selected_goal_tests.rs");
     }
+
+    mod clock_custody_tests {
+        include!("clock_custody_tests.rs");
+    }
     fn original_plan(snapshot: &WorldSnapshot, orders: usize) -> Result<PreparedPlan> {
         let intent = IntentId::new(501);
         let mut steps = Vec::new();

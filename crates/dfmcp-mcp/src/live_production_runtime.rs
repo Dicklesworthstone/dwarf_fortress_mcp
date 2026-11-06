@@ -24,12 +24,14 @@ use serde_json::{Value, json};
 use std::time::{Duration, Instant};
 
 mod choices;
+mod clock;
 mod config;
 mod custody;
 mod goals;
 mod request;
 mod review;
 pub(crate) use choices::ObserveRequest;
+use clock::ProductionClock;
 pub(crate) use config::Config;
 use custody::{GuardedEvidence, SharedCustody};
 use orders::Shell as OrderShell;
@@ -138,6 +140,10 @@ pub(crate) struct Runtime {
     observation_tick_floor: GameTick,
     opening_labor: bool,
     opening_orders: bool,
+    opening_clock: bool,
+    clock: Option<ProductionClock>,
+    clock_invalidates_goal: bool,
+    clock_review: Option<Digest32>,
     parts: Option<(Labor, Order)>,
     execution: Option<Execution>,
     frontier: Option<Coordinator<File>>,
@@ -252,14 +258,16 @@ impl Runtime {
             || budget.max_actions != 2
             || budget.max_entities < 4096
             || budget.max_output_tokens > MAX_OUTPUT_TOKENS
-            || budget.max_game_ticks != 0
+            || budget.max_game_ticks > 1200
+            || (config.clock.is_none() && budget.max_game_ticks != 0)
         {
             return Err(exhausted(
-                "combined runtime requires two actions, 4096 entities and zero game ticks",
+                "combined runtime requires two actions, 4096 entities and at most 1200 independently configured clock ticks",
             ));
         }
         let opening_labor = mode == Mode::Control && config.workforce.labor_enabled();
         let opening_orders = mode == Mode::Control && config.orders.production_enabled();
+        let opening_clock = mode == Mode::Control && config.orders.clock_enabled();
         if config.initialize && (!opening_labor || !opening_orders) {
             return Err(denied(
                 "initializing both native custodians requires both explicit family authorities",
@@ -284,6 +292,10 @@ impl Runtime {
             observation_tick_floor,
             opening_labor,
             opening_orders,
+            opening_clock,
+            clock: None,
+            clock_invalidates_goal: false,
+            clock_review: None,
             parts: None,
             execution: None,
             frontier: None,
@@ -302,6 +314,7 @@ impl Runtime {
         };
         let c = out.context(false)?;
         let mut work = Work::new(&c)?;
+        let clock_output = work.take(8 * MIB)?;
         let (w, wa, wid) = out
             .config
             .workforce
@@ -315,6 +328,13 @@ impl Runtime {
         out.workforce_journal = wid;
         out.order_journal = oid;
         out.parts = Some((labor, order));
+        // Even an omitted clock configuration must prove the fixed child clock
+        // path absent; an existing journal cannot be hidden by dropping pins.
+        out.clock = out
+            .config
+            .orders
+            .open_clock(order_mode(mode), &work.take(128 * MIB)?)?
+            .map(ProductionClock::new);
         if let Some(recovery) = out.config.recovery {
             let mut archive = open_private_plan_archive(
                 &out.config.path("original.plan"),
@@ -364,6 +384,7 @@ impl Runtime {
                 false,
             )?);
             out.create_executor(&mut work)?;
+            out.restore_clock_target(&mut work)?;
             if recovery.goal_history_present {
                 out.goal_history_present = true;
                 out.start_goal_monitor(false, &mut work)?;
@@ -382,6 +403,8 @@ impl Runtime {
                 ));
             }
         }
+        out.refresh_clock_view(&work.narrow(&clock_output)?)?;
+        out.clock_invalidates_goal = out.clock.as_ref().is_some_and(ProductionClock::has_runs);
         out.config.current()?;
         work.current()?;
         Ok(out)
@@ -411,7 +434,10 @@ impl Runtime {
     }
     fn grants(&self) -> Vec<CapabilityGrant> {
         let mut capabilities = vec![Capability::Query, Capability::Observe];
-        if self.labor_enabled() || self.orders_enabled() {
+        if self.labor_enabled()
+            || self.orders_enabled()
+            || (self.opening_clock && self.config.orders.clock_enabled())
+        {
             capabilities.push(Capability::Plan);
         }
         if self.labor_enabled() {
@@ -419,6 +445,9 @@ impl Runtime {
         }
         if self.orders_enabled() {
             capabilities.push(Capability::ConfigureProduction);
+        }
+        if self.opening_clock && self.config.orders.clock_enabled() {
+            capabilities.push(Capability::ControlClock);
         }
         capabilities
             .into_iter()
@@ -459,7 +488,7 @@ impl Runtime {
             || c.budget.max_entities > self.budget.max_entities
             || c.budget.max_actions > 2
             || c.budget.max_output_tokens > self.budget.max_output_tokens
-            || c.budget.max_game_ticks != 0
+            || c.budget.max_game_ticks > self.budget.max_game_ticks
         {
             return Err(denied(
                 "combined operation differs from retained scope or widens its budget",
@@ -563,6 +592,7 @@ impl Runtime {
         Ok(())
     }
     pub(crate) fn abandon_preparation(&mut self) {
+        self.clock_review = None;
         self.parent_goal = None;
         if let Some(basis) = &mut self.basis {
             basis.choices = None;
@@ -600,6 +630,7 @@ impl Runtime {
                 json!({"plan_digest":seal.plan_digest.to_hex(),"object_digest":seal.object_digest.to_hex(),
                     "anchor":anchor_json(p.anchor),"identity_digest":identity.to_hex(),
                     "goal_history_present":self.goal_history_present,
+                    "clock_journal_id":self.clock.as_ref().and_then(ProductionClock::journal_id).map(|id|id.to_hex()),
                     "frontier":{"journal_id":r.journal_id.to_hex(),"head":r.head.to_hex(),"authority_tick_floor":floor}})
             }
             _ => Value::Null,
@@ -610,6 +641,8 @@ impl Runtime {
             "observation_tick_floor":self.observation_tick_floor.get(),
             "original_plan":self.original.as_ref().map(plan_json),"runtime_admitted":false,
             "selected_inventory_goal":self.selected_goal_json(),
+            "clock":self.clock_json(),"clock_control_enabled":self.clock_control_enabled(),
+            "clock_invalidates_goal":self.clock_invalidates_goal,
             "current_parent_goal":null,
             "parent_goal_observation_fenced":self.parent_goal_observation_fenced(),
             "current_state_proven":false,"original_goal_proven":false,"automatic_redispatch":false})
@@ -639,6 +672,14 @@ impl Runtime {
             return Err(denied(
                 "unattached native records require exact original recovery",
             ));
+        }
+        self.bind_created_clock_target(
+            frontier
+                .as_ref()
+                .is_some_and(|frontier| frontier.all_applied() && !frontier.needs_reconciliation()),
+        )?;
+        if self.clock.is_some() {
+            self.refresh_clock_view(&work.take(8 * MIB)?)?;
         }
         self.config.current()?;
         work.current()?;
@@ -672,7 +713,9 @@ impl Runtime {
             None => Value::Null,
         };
         let frontier = frontier.as_ref().map(frontier_json);
-        let observation=self.basis.as_ref().map(|b|json!({"seal":b.seal.to_hex(),"source_digest":b.capsule.content_digest.to_hex(),
+        let observation=self.basis.as_ref()
+            .filter(|basis| basis.projection.snapshot.anchor() == self.anchor && !self.clock_withholds_goal())
+            .map(|b|json!({"seal":b.seal.to_hex(),"source_digest":b.capsule.content_digest.to_hex(),
             "paused":true,"citizens":b.projection.snapshot.graph.entities.iter().filter(|(_,r)|r.kind==dfmcp_world::EntityKind::Unit).map(|(id,_)|json!({"entity_id":id.get().to_string()})).collect::<Vec<_>>(),
             "workforce_choices":if self.original.is_none(){b.choices.as_ref()}else{None} }));
         let value = json!({"ok":true,"mode":self.mode.as_str(),"anchor":anchor_json(self.anchor),
@@ -680,11 +723,14 @@ impl Runtime {
             "observation_tick_floor":self.observation_tick_floor.get(),
             "frontier":frontier,"review":review,
             "selected_inventory_goal":self.selected_goal_json(),
+            "clock":self.clock_json(),"clock_control_enabled":self.clock_control_enabled(),
+            "clock_invalidates_goal":self.clock_invalidates_goal,
             "current_parent_goal":self.parent_goal_json(),
             "parent_goal_observation_fenced":self.parent_goal_observation_fenced(),
             "recovery":self.recovery_json(),"labor_control_enabled":self.labor_enabled(),"production_control_enabled":self.orders_enabled(),
             "native_custody":{"workforce_journal_id":self.workforce_journal.to_hex(),"order_journal_id":self.order_journal.to_hex()},
-            "current_state_proven":false,"original_goal_proven":self.parent_goal_proven(),"clock_advanced":false,
+            "current_state_proven":false,"original_goal_proven":self.parent_goal_proven(),"clock_advanced":self.clock_advancement_json(),
+            "clock_advance_evidence_scope":"historical_native_receipts",
             "automatic_redispatch":false,"custody_initialization_may_be_partial":self.initialization_failed,
             "coverage_omissions":self.goal_coverage_omissions()});
         if let Some(custody) = &self.custody {

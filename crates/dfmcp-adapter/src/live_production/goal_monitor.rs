@@ -181,6 +181,15 @@ where
     ) -> Result<(SemanticWorkOrderReview, Dependencies)> {
         call.current()?
             .authorize(Capability::Observe, RiskTier::ReadOnly, &[], None)?;
+        let (result, dependencies) = self.selected_order_custody(step, call)?;
+        Ok((result.review().clone(), dependencies))
+    }
+
+    fn selected_order_custody(
+        &mut self,
+        step: StepId,
+        call: &mut Call,
+    ) -> Result<(SemanticWorkOrderResult, Dependencies)> {
         let selected = policy::selected(&self.original, step)?.clone();
         if policy::route(&selected)?.family != LiveFamily::WorkOrdersV1_10 {
             return Err(error(
@@ -218,7 +227,38 @@ where
         {
             return Err(custody());
         }
-        Ok((review, dependencies))
+        Ok((inspected, dependencies))
+    }
+
+    /// Inspect the original verified insertion and all original predecessor
+    /// receipts under Query alone. This reads the existing private custodians;
+    /// it performs no native observation, preparation, reconciliation or effect.
+    /// A recovered review is historical identity, never a commit permit.
+    pub fn inspect_selected_order_custody(
+        &mut self,
+        step: StepId,
+        context: &OperationContext,
+    ) -> Result<SemanticWorkOrderResult> {
+        let mut call = self.call(context)?;
+        let result = (|| {
+            let (inspected, dependencies) = self.selected_order_custody(step, &mut call)?;
+            let publication = call.take(WORKFORCE_VIEW_BYTES + ORDER_VIEW_BYTES + 2 * MIB)?;
+            let dependency_check = call.take(dependencies.check_bytes)?;
+            self.final_check(&publication, &mut call)?;
+            dependencies.verify(
+                &mut self.workforce,
+                &call.edge(&dependency_check, self.high_tick)?,
+            )?;
+            self.retain_floor(&mut call);
+            call.current()?
+                .authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
+            Ok(inspected)
+        })();
+        self.retain_floor(&mut call);
+        if result.is_err() {
+            self.abandon_preparation();
+        }
+        result
     }
 
     /// Open or recover a selected objective over caller-owned bounded storage.

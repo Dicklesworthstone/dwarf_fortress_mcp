@@ -11,7 +11,9 @@ use dfmcp_adapter::order_run::rpc::{OrderRunManifest, OrderRunSource, authorize_
 use dfmcp_adapter::order_run::{
     FortressIdentity, OrderCapture, OrderPredicate, OrderRunPlan, OrderRunRecord, OrderRunSpec,
 };
-use dfmcp_adapter::semantic_work_orders::{NativeOrderCreation, SemanticWorkOrderReview};
+use dfmcp_adapter::semantic_work_orders::{
+    NativeOrderCreation, SemanticWorkOrderResult, SemanticWorkOrderReview,
+};
 use dfmcp_core::{
     Capability, DfmcpError, Digest32, ErrorCode, GameTick, OperationContext, Result, RiskTier,
 };
@@ -137,6 +139,97 @@ impl ClockTarget {
     }
     pub fn digest(&self) -> Digest32 {
         self.digest
+    }
+
+    /// Bind the actual selected order without slicing or resealing its parent.
+    /// The combined owner must freshly verify every predecessor and the retained
+    /// archive at each clock effect boundary. This target itself grants neither
+    /// clock authority nor a new semantic/native preparation permit.
+    pub(crate) fn for_selected_original(
+        plan: &PreparedPlan,
+        archive: PlanArchiveSeal,
+        creation_journal: Digest32,
+        result: &SemanticWorkOrderResult,
+    ) -> Result<Self> {
+        let review = result.review();
+        let selected = review.selected_step();
+        if plan.steps.len() < 2
+            || dfmcp_adapter::live_production::validate_plan(plan)? != archive
+            || plan != review.original_plan()
+            || creation_journal == Digest32::ZERO
+            || review.seal() == Digest32::ZERO
+            || plan.steps.iter().find(|step| step.id == review.step_id()) != Some(selected)
+            || selected.depends_on.is_empty()
+            || result.native_record().state()
+                != dfmcp_adapter::work_order_control::CreationState::Created
+            || result.native_record().plan() != review.native_plan()
+            || selected.idempotency_key != review.native_plan().key()
+        {
+            return Err(corrupt(
+                "selected clock target differs from its complete original parent or verified custody",
+            ));
+        }
+        let NativeOrderCreation::Inserted {
+            native_order_id,
+            receipt,
+        } = result.creation_result()
+        else {
+            return Err(denied(
+                "selected clock requires the original verified Created receipt",
+            ));
+        };
+        let native = review.native_plan();
+        let before = native.observation();
+        let effect = result.native_record().effect();
+        if *receipt == Digest32::ZERO
+            || *native_order_id > i32::MAX as u32
+            || *native_order_id != before.next_order_id()
+            || effect.created_order_id() != Some(*native_order_id)
+            || effect.receipt() != Some(*receipt)
+        {
+            return Err(corrupt(
+                "selected clock insertion differs from its original allocation and receipt",
+            ));
+        }
+        let fortress = FortressIdentity::new(before.world_folder(), before.site_id())?;
+        if fortress.fortress_id() != plan.anchor.fortress_id {
+            return Err(corrupt("selected clock belongs to another fortress"));
+        }
+        let deadline = selected
+            .obligation
+            .as_ref()
+            .ok_or_else(|| denied("selected clock requires the original order obligation"))?
+            .deadline_tick
+            .get();
+        if deadline <= plan.anchor.tick.get() {
+            return Err(corrupt(
+                "selected clock deadline precedes its original observation",
+            ));
+        }
+        let digest = hash(
+            b"dfmcp-combined-order-clock-target/1",
+            &[
+                plan.digest.as_bytes(),
+                archive.object_digest.as_bytes(),
+                creation_journal.as_bytes(),
+                &review.step_id().get().to_be_bytes(),
+                selected.idempotency_key.as_bytes(),
+                review.seal().as_bytes(),
+                receipt.as_bytes(),
+                &native_order_id.to_be_bytes(),
+            ],
+        );
+        Ok(Self {
+            digest,
+            original_seal: review.seal(),
+            fortress,
+            epoch: plan.anchor.cursor.epoch,
+            original_tick: plan.anchor.tick.get(),
+            order: *native_order_id,
+            recipe: native.spec().recipe() as u8,
+            amount: native.spec().amount(),
+            deadline,
+        })
     }
     fn context(&self, c: &OperationContext) -> Result<()> {
         if c.anchor.fortress_id != self.fortress.fortress_id()
@@ -356,6 +449,11 @@ impl<J: EffectJournalStorage> Clock<J> {
     }
     pub fn is_control(&self) -> bool {
         self.mode() == OrderRunMode::Control
+    }
+    /// A complete native capture can raise authority time even when the caller
+    /// subsequently refuses the operation. It is never a canonical state anchor.
+    pub fn observed_tick_floor(&self) -> u64 {
+        self.observed_tick_floor
     }
     fn view(&mut self, target: Option<&ClockTarget>, c: &OperationContext) -> Result<ClockView> {
         if let Some(t) = target {
