@@ -259,7 +259,7 @@ impl Request {
         Ok(plan)
     }
 }
-fn recipe(raw: &str) -> Result<(WorkOrderRecipe, &'static str)> {
+pub(super) fn recipe(raw: &str) -> Result<(WorkOrderRecipe, &'static str)> {
     match raw {
         "wooden_bed" => Ok((WorkOrderRecipe::WoodenBed, "CONSTRUCT_BED")),
         "wooden_door" => Ok((WorkOrderRecipe::WoodenDoor, "CONSTRUCT_DOOR")),

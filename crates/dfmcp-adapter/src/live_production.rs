@@ -44,6 +44,8 @@ mod parent_goal;
 pub use parent_goal::{
     SelectedParentGoalProgress, SelectedParentGoalResult, SelectedParentLaborFinding,
 };
+mod portfolio_goal;
+pub use portfolio_goal::{ProductionPortfolioGoalProgress, compose_production_portfolio_goal};
 mod selected_clock_custody;
 pub use selected_clock_custody::SelectedOrderClockCustody;
 

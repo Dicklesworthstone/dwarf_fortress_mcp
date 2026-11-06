@@ -138,6 +138,36 @@ Within-bracket drift, changed original citizen identity, source regression,
 policy withdrawal and custody loss refuse publication. The combined development
 MCP host consumes this path through its existing foreground Wait operation.
 
+## Bounded portfolio source and proof ownership
+
+The combined consumer also compiles one original labor action and one to four
+finite furniture leaves. `open_private_portfolio_order_goal_monitor` explicitly
+opens a separate strict source-cursor lane for each selected review. Its strong
+owner is retained by exact review seal, bounded to four; reopening that same
+review invalidates its prior owner. Each lane retains its own canonical floor.
+The semantic order owner still shares native incarnation, native sequence and
+authority tick floors across all leaves. Legacy original and selected-pair
+monitor APIs keep their existing single-owner and canonical-gap rules.
+
+`poll_selected_portfolio_goal` publishes one selected labor/production pair at a
+separate parent publication cursor. It cannot call that pair the complete
+original goal. `compose_production_portfolio_goal` accepts only adapter-owned
+qualified results and joins all original leaves inside one complete progress
+bracket. It rechecks every exact source policy, common raw operations and labor
+capture, selected receipt/native identity, paused tick and complete original
+terminal predicate. The new composite digest binds all original samples and
+outer captures. A subset, caller truth flag or historical receipt cannot
+substitute for any member.
+
+The host samples one leaf per shrinking-budget Wait. A successful owned clock
+withdraws current certificates without fabricating a source gap in an inactive
+leaf; each later qualified sample remains strictly consecutive within its own
+history. Failures and restart preserve the existing unfinished-stability reset.
+A whole-parent publication cursor advances from the retained public and selected
+source number floors but always carries a newly composed hash. A failed outer
+publication cannot strand recovery behind an already consumed source sequence
+or promote a selected-only hash to the public parent anchor.
+
 ## Recovery and integration boundary
 
 Use this executor with the durable coordinator described in
@@ -156,7 +186,7 @@ The adapter boundary itself adds no MCP tool, bridge method, protocol generation
 source issuer, capability grant, production runner or admitted live tuple.
 The separate [combined development MCP host](COMBINED_PRODUCTION_MCP.md) consumes
 this executor and durable coordinator through the existing eleven tools. It
-retains one original two-step labor/order plan with parent archive/identity
+retains one original labor/order plan or bounded furniture portfolio with parent archive/identity
 custody and independently pinned real family shells. Concrete native clients
 remain unadmitted development implementations.
 Synthetic component execution is distinct from full workspace, ambient runtime,

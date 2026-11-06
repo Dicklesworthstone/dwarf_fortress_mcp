@@ -57,7 +57,10 @@ impl ProductionClock {
         let target = ClockTarget::for_selected_original(original, archive, journal, result)?;
         self.bind_target(target)
     }
-    fn bind_target(&mut self, target: ClockTarget) -> Result<()> {
+    pub(super) fn needs_target(&self) -> bool {
+        self.target.is_none()
+    }
+    pub(super) fn bind_target(&mut self, target: ClockTarget) -> Result<()> {
         if self
             .target
             .as_ref()
@@ -191,15 +194,19 @@ impl Runtime {
             json!(false),
             ProductionInventoryClock::historical_advancement,
         );
-        if order == true || inventory == true {
+        let inactive = self.inactive_portfolio_advancement();
+        if order == true || inventory == true || inactive.iter().any(|value| *value == true) {
             json!(true)
-        } else if order.is_null() || inventory.is_null() {
+        } else if order.is_null() || inventory.is_null() || inactive.iter().any(Value::is_null) {
             Value::Null
         } else {
             json!(false)
         }
     }
     pub(super) fn raise_clock_floor(&mut self) {
+        self.observation_tick_floor = self
+            .observation_tick_floor
+            .max(GameTick(self.portfolio_floors()));
         if let Some(clock) = &self.clock {
             self.observation_tick_floor =
                 self.observation_tick_floor.max(GameTick(clock.high_tick()));
@@ -215,7 +222,9 @@ impl Runtime {
         }
     }
     pub(super) fn clock_withholds_goal(&self) -> bool {
-        self.clock_invalidates_goal
+        self.goal_current_withdrawn
+            || self.inactive_clock_may_be_running()
+            || self.clock_invalidates_goal
             || self.inventory_clock_invalidates_goal
             || self
                 .clock
@@ -252,7 +261,9 @@ impl Runtime {
             .original
             .as_ref()
             .ok_or_else(|| invalid("original plan absent"))?;
-        if !recognized_objective(original, result.review().step_id()) {
+        if Some(result.review().step_id()) != self.selected_order_step()
+            || !recognized_objective(original, result.review().step_id())
+        {
             return Ok(());
         }
         self.clock
@@ -279,10 +290,9 @@ impl Runtime {
         let Some(original) = &self.original else {
             return Ok(());
         };
-        if !original
-            .steps
-            .iter()
-            .any(|step| recognized_objective(original, step.id))
+        if !self
+            .selected_order_step()
+            .is_some_and(|step| recognized_objective(original, step))
         {
             return Ok(());
         }
@@ -345,11 +355,9 @@ impl Runtime {
                 .original
                 .as_ref()
                 .ok_or_else(|| denied("original plan absent"))?;
-            let step = original
-                .steps
-                .iter()
-                .find(|step| recognized_objective(original, step.id))
-                .map(|step| step.id)
+            let step = self
+                .selected_order_step()
+                .filter(|step| recognized_objective(original, *step))
                 .ok_or_else(|| {
                     denied("clock requires the original order-completion or inventory objective")
                 })?;
@@ -389,6 +397,12 @@ impl Runtime {
     pub(super) fn reconcile_clock(&mut self, work: &mut Work) -> Result<()> {
         if self.clock.is_none() {
             return Ok(());
+        }
+        if self.portfolio.is_some() && self.clock.as_ref().is_some_and(|clock| !clock.has_runs()) {
+            self.refresh_clock_view(&work.take(CLOCK_VIEW_BYTES)?)?;
+            if self.clock.as_ref().is_some_and(|clock| !clock.has_runs()) {
+                return Ok(());
+            }
         }
         self.restore_clock_target(work)?;
         self.refresh_clock_view(&work.take(CLOCK_VIEW_BYTES)?)?;
@@ -466,7 +480,7 @@ impl Runtime {
             .latest()
             .filter(|sample| {
                 sample.anchor.tick == self.anchor.tick
-                    && sample.anchor.cursor == self.anchor.cursor
+                    && (self.portfolio.is_some() || sample.anchor.cursor == self.anchor.cursor)
                     && sample.receipt_linked
             })
             .ok_or_else(|| {
@@ -503,6 +517,7 @@ impl Runtime {
         }
         c.authorize(Capability::ControlClock, RiskTier::Guarded, &[], None)?;
         let mut work = Work::new(c)?;
+        self.verify_other_portfolio_clocks(&mut work)?;
         if self.inventory_clock.is_some() {
             self.refresh_inventory_clock_view(&work.take(CLOCK_VIEW_BYTES)?)?;
         }
@@ -589,12 +604,21 @@ impl Runtime {
         advancing: bool,
     ) -> Result<View> {
         self.check_clock_control(c, true)?;
+        self.clear_portfolio_cohort();
         let mut work = Work::new(c)?;
         let output = work.take(256 * MIB)?;
         let source_context = work.take(4 * MIB)?;
         let mut guard_context = Some(work.take(GUARDED_TARGET_BYTES)?);
         let run_context = work.take(CLOCK_ACTION_BYTES)?;
         let error_view = work.take(CLOCK_VIEW_BYTES)?;
+        if self.portfolio.is_some()
+            && self
+                .clock
+                .as_ref()
+                .is_some_and(|clock| clock.target.is_none())
+        {
+            self.restore_clock_target(&mut work)?;
+        }
         let target = self.sample_clock_target(&work.rest(MAX_BYTES)?)?;
         work.context.anchor = self.anchor;
         let mut source = self
@@ -602,6 +626,7 @@ impl Runtime {
             .orders
             .clock_source(&work.narrow(&source_context)?)?;
         if advancing {
+            self.withdraw_portfolio_current();
             self.clock_invalidates_goal = true;
             self.parent_goal = None;
             if let Some(basis) = &mut self.basis {
@@ -677,6 +702,7 @@ impl Runtime {
             None
         };
         self.clock_invalidates_goal = true;
+        self.withdraw_portfolio_current();
         self.parent_goal = None;
         let clock = self
             .clock

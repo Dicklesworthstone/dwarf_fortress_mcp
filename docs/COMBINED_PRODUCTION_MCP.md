@@ -1,9 +1,10 @@
-# One labor and finite-order plan through MCP
+# Labor and bounded furniture production through MCP
 
 `dwarf-fortress-mcp serve-gameplay-dev labor-order` connects the real
 `live_production::Executor` and durable mutation dispatcher to the eleven-tool
-MCP surface. One session owns one complete original two-step plan: configure
-one labor for selected citizens, then insert a dependent finite furniture order.
+MCP surface. One session owns one complete original plan: configure one labor
+for selected citizens, then insert one dependent finite furniture order or an
+explicit portfolio of up to four distinct furniture recipes.
 The source is explicitly unadmitted development work. Current executed checks,
 qualification and real-game evidence belong in `IMPLEMENTATION_STATUS.md`.
 The private custody implementation supports Linux x86_64/aarch64; unsupported
@@ -98,11 +99,11 @@ retain the frozen eleven-tool waist; this profile's wire names are underscores.
 5. Review that response and immediately Commit its exact `paired_seal` with
    `confirmed=true`. Native preparations expire; an extra Explain call is
    unnecessary before confirmation. Explain remains available afterward.
-6. Repeat steps 4–5 for the dependent order only after the first step has a
+6. Repeat steps 4–5 for each dependent order only after the first step has a
    verified historical labor receipt. The actual original StepIds, keys, anchor,
    deadline and whole plan digest are retained throughout.
 
-Wait performs one original-key reconciliation. Once both original effects are
+Wait performs one original-key reconciliation. Once all original effects are
 settled, it can acquire one qualified sample for the original order-completion or
 explicit inventory objective, bracketed by matching current selected-labor captures. It never
 dispatches, sleeps, polls indefinitely or advances game time. An uncertain effect prohibits a
@@ -116,6 +117,113 @@ Either unresolved run blocks paused goal acquisition. Explicit `scope="run"` or
 `scope="inventory_run"` cancellation retires that owner's prepared run or requests
 its native safety pause;
 it does not change the labor assignment or remove the manager order.
+
+## One original production portfolio
+
+Use `kind="portfolio"` to configure the shared labor once and retain several
+independent furniture goals in the same original plan. The existing single-order
+request remains unchanged. A portfolio accepts one to four distinct recipes,
+normalizes them by recipe name, and assigns original StepIds 1 through N after
+labor StepId 0. Every order depends on that exact original labor receipt. It does
+not add native order conditions, workshop construction or material procurement.
+
+```json
+{
+  "kind": "portfolio",
+  "expected_observation": "<observation.seal>",
+  "units": ["43"],
+  "labor": "CARPENTER",
+  "enabled": true,
+  "orders": [
+    {"recipe": "wooden_bed", "amount": 4},
+    {"recipe": "wooden_door", "amount": 2},
+    {
+      "recipe": "wooden_table",
+      "amount": 2,
+      "objective": {
+        "kind": "observed_inventory_minimum",
+        "item_type": "TABLE",
+        "minimum_stack_units": 2
+      }
+    }
+  ],
+  "deadline_tick": 300,
+  "poll_interval_ticks": 5,
+  "stable_samples": 2
+}
+```
+
+Use a citizen and supported labor from the actual observation choices. Every
+amount is between 1 and 100. An optional objective belongs to its own leaf and
+must match that recipe; omitted objectives require that leaf's exact retained
+order to finish. The portfolio has a separate request identity. All normalized
+orders, objectives, citizens, labor and timing fields bind it; reordering the
+input cannot create another original key. The whole parent terminal retains the
+labor requirements and every requested production goal.
+
+Plan `kind="step"` and confirm each returned original review in sequence, as for
+the single-order request. An uncertain insertion blocks subsequent work until
+Wait reconciles that original key. It never recreates already inserted leaves
+or replaces the complete original plan.
+
+### Observe and advance the original leaves
+
+Portfolio Wait initializes or replays at most one missing goal history, then
+samples one original order per bounded call. A complete portfolio cohort uses a
+single paused all-order progress bracket around those samples. All leaves must
+agree on the exact current operations/inventory capture, workforce capture,
+source generations and paused tick. A changed leaf or source refuses the whole
+join. `portfolio.sampled_orders` reports progress through the current cohort.
+`current_parent_goal.scope="complete_original_production_portfolio"` is published
+only after all original leaves join. Its `selected_anchors` preserve each leaf's
+separately qualified source anchor and original StepId. The top-level and Agent
+Turn `original_goal_proven` require every original temporal obligation and
+current labor requirement to hold together.
+
+Each exact selected review owns its own sequential source cursor and durable
+history. The parent has a separate monotonically increasing publication cursor.
+Observing another leaf cannot create a fictitious observation gap or advance
+this leaf's stability. A successful bounded clock withdraws every current
+certificate while retaining each unfinished streak; a fresh complete cohort at
+the next eligible tick can advance all original streaks. Failed observations,
+failed response publication and restart still interrupt unfinished stability.
+No deadline, cadence or required sample count is renewed. Repeated same-tick
+reads cannot supply another temporal sample.
+
+Use Query with `order_step_id` to select an original leaf and inspect its exact
+retained clock seals. For portfolios, every Plan `kind="run"` or
+`kind="inventory_run"` request and every Commit/Cancel with either clock scope
+must include that original `order_step_id`. The first order is StepId 1; a native
+manager-order ID is not a selector. Single-order sessions reject selectors.
+For example, a reviewed order-clock request adds `"order_step_id":2` to the run
+request below, and its confirmation adds `order_step_id=2` beside `scope="run"`.
+The separate run and inventory authority requirements remain unchanged. Any
+pending or uncertain clock in any leaf blocks another clock's dispatch.
+Guidance selects an inactive leaf that owns retained prepared work before
+suggesting a new run. Clock advancement reports all retained portfolio clocks.
+
+### Retain the complete portfolio recovery
+
+The response adds ordered `recovery.portfolio` entries for every original
+StepId, each containing `goal_history_present`, `clock_journal_id` and
+`inventory_clock_journal_id`. Preserve the complete array. The legacy top-level
+history/clock fields always mirror StepId 1, regardless of current selection.
+The first leaf keeps the existing filenames. Further histories are
+`goal-2.history` through `goal-4.history` in the parent directory. Additional
+clock files are `portfolio-2-clock.journal` and
+`portfolio-2-inventory-clock.journal` through the corresponding StepId 4 files
+in the order directory. Each initialized slot has its own journal identity.
+These are fixed host paths, never tool arguments.
+
+Reopening verifies every original selected association and configured clock
+journal under the complete parent custody. Both clock families reuse only the
+same immutable selected identity; they retain independent journals, authority
+and review. Parent archive/identity reads share one prepaid allowance so the
+four-leaf, two-clock-family shape fits the default public byte-work budget.
+Missing, replaced, omitted or extra fixed custody refuses. Offline opening
+performs no native contact or writes and restores no current proof or review.
+Lost replies reconcile the original leaf/run key without another insertion or
+unpause. A partial cohort is process-local and never restored from history.
 
 ## Advance the original production order with a reviewed clock
 
@@ -568,7 +676,7 @@ reconstructs a native commit permit.
 
 ## Bounds and evidence
 
-Each call admits at most 60 seconds, two actions, zero game ticks and 32 GiB of
+Each call admits at most 60 seconds, five original actions, zero game ticks by default and 32 GiB of
 logical byte-work, defaulting to five seconds and 8 GiB. This accounts for
 repeated bounded custody validation; it is not an eager memory allocation or
 frame size. One shrinking deadline covers the nested work. Existing-history

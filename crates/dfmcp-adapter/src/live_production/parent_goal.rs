@@ -49,10 +49,16 @@ pub struct SelectedParentGoalProgress {
 
 #[derive(Clone, Debug)]
 pub struct SelectedParentGoalResult {
-    selected: SelectedWorkOrderGoalResult,
-    parent: SelectedParentGoalProgress,
+    pub(super) step: StepId,
+    pub(super) selected: SelectedWorkOrderGoalResult,
+    pub(super) parent: SelectedParentGoalProgress,
+    pub(super) workforce: WorkforceGoalProjection,
+    pub(super) workforce_policy: EvidencePolicy,
 }
 impl SelectedParentGoalResult {
+    pub const fn step_id(&self) -> StepId {
+        self.step
+    }
     pub fn progress(&self) -> &WorkOrderGoalProgress {
         self.selected.progress()
     }
@@ -182,6 +188,7 @@ fn compose(
     workforce: &WorkforceGoalProjection,
     workforce_policy: &EvidencePolicy,
     context: &OperationContext,
+    parent_cursor: Option<ObservationCursor>,
 ) -> Result<SelectedParentGoalProgress> {
     let order = selected.inner.projection();
     let selected_anchor = order.anchor();
@@ -229,10 +236,23 @@ fn compose(
         }
         graph.entities.insert(*id, entity.clone());
     }
+    let publication_cursor = parent_cursor.unwrap_or(selected_anchor.cursor);
+    if publication_cursor.epoch != selected_anchor.cursor.epoch
+        || publication_cursor.sequence < selected_anchor.cursor.sequence
+    {
+        return Err(stale(
+            "portfolio parent publication cursor precedes its selected source",
+        ));
+    }
+    if parent_cursor.is_some() {
+        for entity in graph.entities.values_mut() {
+            entity.revision = publication_cursor.sequence;
+        }
+    }
     let snapshot = WorldSnapshot::new(
         selected_anchor.fortress_id,
         selected_anchor.tick,
-        selected_anchor.cursor,
+        publication_cursor,
         true,
         graph,
     );
@@ -254,8 +274,28 @@ fn compose(
         .extend(workforce_policy.sources.iter().cloned());
     policy.paused &= workforce_policy.paused;
     let evidence = PredicateEvidence::scoped(&snapshot, policy)?;
-    let current_truth = evidence.evaluate(&original.terminal_condition)?;
-    let mut identity = b"dfmcp-selected-parent-goal/1\0".to_vec();
+    let current_truth = if original.steps.len() == 2 {
+        evidence.evaluate(&original.terminal_condition)?
+    } else {
+        let order_step = original
+            .steps
+            .iter()
+            .find(|step| {
+                step.id != original.steps[0].id
+                    && matches!(step.action, Action::CreateWorkOrder { .. })
+                    && dfmcp_intent::effects::created_entity_id(&step.idempotency_key, 0)
+                        == order.original_order_entity()
+            })
+            .ok_or_else(custody)?;
+        let mut predicates = original.steps[0].postconditions.clone();
+        predicates.extend(order_step.postconditions.clone());
+        evidence.evaluate(&Predicate::All(predicates))?
+    };
+    let mut identity = if parent_cursor.is_some() {
+        b"dfmcp-selected-parent-goal/2\0".to_vec()
+    } else {
+        b"dfmcp-selected-parent-goal/1\0".to_vec()
+    };
     for digest in [
         original.digest,
         order.review_seal(),
@@ -273,7 +313,9 @@ fn compose(
         anchor: snapshot.anchor(),
         selected_anchor,
         current_truth,
-        original_goal_proven: current_truth == PredicateTruth::True
+        original_goal_proven: parent_cursor.is_none()
+            && original.steps.len() == 2
+            && current_truth == PredicateTruth::True
             && selected.selected_goal_proven(),
         source_digest: Digest32::of_bytes(&identity),
         workforce_source_digest: workforce.source_digest(),
@@ -313,6 +355,70 @@ where
         A: FnMut(&WorkOrderGoalProjection, &OperationContext) -> Result<EvidencePolicy>,
         W: FnMut(&WorkforceGoalProjection, &OperationContext) -> Result<EvidencePolicy>,
     {
+        self.poll_selected_parent_goal_inner(
+            monitor,
+            original_identity,
+            cursor,
+            context,
+            sources,
+            policies,
+            None,
+        )
+    }
+
+    /// Portfolio leaves own separate, strictly sequential source cursors in
+    /// their exact selected review/history. The parent publication cursor is a
+    /// different monotone namespace; interleaving another original leaf cannot
+    /// manufacture a missing sample in this leaf's retained history.
+    pub fn poll_selected_portfolio_goal<H, P, O, PF, OF, A, W>(
+        &mut self,
+        monitor: &mut SelectedWorkOrderGoalMonitor<H>,
+        original_identity: &LiveRoutingEvidence<'_>,
+        cursor: ObservationCursor,
+        context: &OperationContext,
+        sources: (PF, OF),
+        policies: (A, W),
+        parent_cursor: ObservationCursor,
+    ) -> Result<SelectedParentGoalResult>
+    where
+        H: EffectJournalStorage,
+        P: ProgressSource,
+        O: OperationsGoalSource,
+        PF: FnOnce(&OperationContext) -> Result<P>,
+        OF: FnOnce(&OperationContext) -> Result<O>,
+        A: FnMut(&WorkOrderGoalProjection, &OperationContext) -> Result<EvidencePolicy>,
+        W: FnMut(&WorkforceGoalProjection, &OperationContext) -> Result<EvidencePolicy>,
+    {
+        self.poll_selected_parent_goal_inner(
+            monitor,
+            original_identity,
+            cursor,
+            context,
+            sources,
+            policies,
+            Some(parent_cursor),
+        )
+    }
+
+    fn poll_selected_parent_goal_inner<H, P, O, PF, OF, A, W>(
+        &mut self,
+        monitor: &mut SelectedWorkOrderGoalMonitor<H>,
+        original_identity: &LiveRoutingEvidence<'_>,
+        cursor: ObservationCursor,
+        context: &OperationContext,
+        sources: (PF, OF),
+        policies: (A, W),
+        parent_cursor: Option<ObservationCursor>,
+    ) -> Result<SelectedParentGoalResult>
+    where
+        H: EffectJournalStorage,
+        P: ProgressSource,
+        O: OperationsGoalSource,
+        PF: FnOnce(&OperationContext) -> Result<P>,
+        OF: FnOnce(&OperationContext) -> Result<O>,
+        A: FnMut(&WorkOrderGoalProjection, &OperationContext) -> Result<EvidencePolicy>,
+        W: FnMut(&WorkforceGoalProjection, &OperationContext) -> Result<EvidencePolicy>,
+    {
         let (progress_factory, operations_factory) = sources;
         let (mut order_policy, mut workforce_policy) = policies;
         let result = (|| {
@@ -322,6 +428,9 @@ where
                 call.current()?
                     .authorize(Capability::Observe, RiskTier::ReadOnly, &[], None)?;
                 if monitor.original_plan() != &self.original || monitor.archive != self.archive {
+                    return Err(custody());
+                }
+                if monitor.portfolio != parent_cursor.is_some() {
                     return Err(custody());
                 }
                 if monitor.is_read_only() {
@@ -343,15 +452,19 @@ where
                 }
                 let selected = policy::selected(&self.original, monitor.step)?.clone();
                 let labor = self.original.steps.first().ok_or_else(custody)?.clone();
-                if self.original.steps.len() != 2
+                if !(2..=5).contains(&self.original.steps.len())
                     || monitor.step == labor.id
                     || selected.depends_on != [labor.id]
                     || labor.obligation.is_some()
                     || !matches!(labor.action, Action::SetLabor { .. })
+                    || self.original.steps.iter().skip(1).any(|step| {
+                        !matches!(step.action, Action::CreateWorkOrder { .. })
+                            || step.depends_on != [labor.id]
+                    })
                 {
                     return Err(error(
                         ErrorCode::AdapterRejected,
-                        "current parent proof requires the original labor followed by one dependent order",
+                        "current labor/order proof requires original labor and one to four dependent order leaves",
                     ));
                 }
                 let (review, dependencies) = self.selected_goal_review(monitor.step, &mut call)?;
@@ -460,6 +573,7 @@ where
                     &after,
                     &granted_workforce,
                     context,
+                    parent_cursor,
                 )?;
                 self.final_check(&publication, &mut call)?;
                 dependencies.verify(
@@ -494,8 +608,11 @@ where
                 call.current()?
                     .authorize(Capability::Observe, RiskTier::ReadOnly, &[], None)?;
                 Ok(SelectedParentGoalResult {
+                    step: monitor.step,
                     selected: sampled,
                     parent,
+                    workforce: after,
+                    workforce_policy: granted_workforce,
                 })
             })();
             self.retain_floor(&mut call);

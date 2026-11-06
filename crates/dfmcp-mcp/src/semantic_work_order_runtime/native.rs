@@ -530,6 +530,94 @@ pub struct NativeShell {
     config: Arc<Config>,
 }
 impl NativeShell {
+    /// Additional fixed portfolio slots share only independently pinned native
+    /// sources. Each original order retains its own private clock journal.
+    pub(crate) fn open_portfolio_clock(
+        &self,
+        step: u32,
+        mode: Mode,
+        initialize: bool,
+        expected: Option<Digest32>,
+        c: &OperationContext,
+    ) -> Result<Option<OrderRunJournal<PrivateOrderRunFile>>> {
+        self.portfolio_slot(step, initialize, expected, self.config.clock.is_some())?;
+        clock::open_at(
+            &self.config,
+            mode,
+            c,
+            &self.config.path(&format!("portfolio-{step}-clock.journal")),
+            initialize,
+            expected,
+        )
+    }
+    pub(crate) fn open_portfolio_inventory_clock(
+        &self,
+        step: u32,
+        mode: Mode,
+        initialize: bool,
+        expected: Option<Digest32>,
+        c: &OperationContext,
+    ) -> Result<
+        Option<
+            dfmcp_adapter::bounded_run::journal::RunJournal<
+                dfmcp_adapter::bounded_run::private_file::PrivateRunFile,
+            >,
+        >,
+    > {
+        self.portfolio_slot(
+            step,
+            initialize,
+            expected,
+            self.config.inventory_clock.is_some(),
+        )?;
+        inventory_clock::open_at(
+            &self.config,
+            mode,
+            c,
+            &self
+                .config
+                .path(&format!("portfolio-{step}-inventory-clock.journal")),
+            initialize,
+            expected,
+        )
+    }
+    fn portfolio_slot(
+        &self,
+        step: u32,
+        initialize: bool,
+        expected: Option<Digest32>,
+        configured: bool,
+    ) -> Result<()> {
+        self.config.current()?;
+        if !(2..=4).contains(&step)
+            || initialize != self.config.initialize
+            || (configured && initialize == expected.is_some())
+            || (!configured && expected.is_some())
+        {
+            return Err(denied(
+                "portfolio clock slot requires exact original initialization and external custody",
+            ));
+        }
+        Ok(())
+    }
+    pub(crate) fn require_absent_portfolio_clocks(&self, first: u32) -> Result<()> {
+        self.config.current()?;
+        for step in first.max(2)..=4 {
+            for suffix in ["clock.journal", "inventory-clock.journal"] {
+                match std::fs::symlink_metadata(
+                    self.config.path(&format!("portfolio-{step}-{suffix}")),
+                ) {
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                    _ => {
+                        return Err(denied(
+                            "omitted portfolio clock custody must be restored with its complete original plan",
+                        ));
+                    }
+                }
+            }
+        }
+        self.config.current()
+    }
     pub(crate) fn from_combined_config(config: Config) -> Result<Self> {
         if config.combined_check.is_none() {
             return Err(denied("combined work-order environment was not installed"));

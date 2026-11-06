@@ -162,6 +162,7 @@ impl WorkOrderGoalResult {
 #[derive(Debug)]
 pub struct WorkOrderGoalMonitor {
     pub(super) owner: Weak<()>,
+    pub(super) portfolio_floor: Option<super::SourceFloor>,
     pub(super) review: SemanticWorkOrderReview,
     pub(super) operations: LiveOperationsState,
     pub(super) progress_manifest: Option<ProgressManifest>,
@@ -228,6 +229,7 @@ impl WorkOrderGoalMonitor {
         };
         Ok(Self {
             owner,
+            portfolio_floor: None,
             cursor_floor: ObservationCursor {
                 epoch: review.original.anchor.cursor.epoch,
                 sequence: review
@@ -258,6 +260,7 @@ impl WorkOrderGoalMonitor {
     pub(super) fn pending_sample(&self) -> Self {
         Self {
             owner: self.owner.clone(),
+            portfolio_floor: self.portfolio_floor.clone(),
             review: self.review.clone(),
             operations: self.operations.clone(),
             progress_manifest: self.progress_manifest.clone(),
@@ -651,11 +654,12 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage, N: WorkOrderSource>
                     "original-goal monitor belongs to a replaced or closed owner",
                 )
             })?;
-            if self
-                .goal_owner
-                .as_ref()
-                .is_none_or(|current| !Arc::ptr_eq(current, &owner))
-            {
+            let current_owner = if monitor.portfolio_floor.is_some() {
+                self.portfolio_goal_owners.get(&monitor.review.seal)
+            } else {
+                self.goal_owner.as_ref()
+            };
+            if current_owner.is_none_or(|current| !Arc::ptr_eq(current, &owner)) {
                 return Err(error(
                     ErrorCode::StaleAnchor,
                     "original-goal monitor belongs to another session opening",
@@ -671,7 +675,10 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage, N: WorkOrderSource>
                 .sequence
                 .max(context.anchor.cursor.sequence)
                 .max(
-                    self.floor
+                    monitor
+                        .portfolio_floor
+                        .as_ref()
+                        .unwrap_or(&self.floor)
                         .canonical
                         .map_or(0, |anchor| anchor.cursor.sequence),
                 );
@@ -862,7 +869,11 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage, N: WorkOrderSource>
                 final_queue,
                 cursor,
             )?;
-            self.floor.permit_anchor(projection.anchor())?;
+            monitor
+                .portfolio_floor
+                .as_ref()
+                .unwrap_or(&self.floor)
+                .permit_anchor(projection.anchor())?;
             if projection.anchor().tick < monitor.high_tick {
                 return Err(error(
                     ErrorCode::StaleAnchor,
@@ -893,7 +904,13 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage, N: WorkOrderSource>
             self.associations
                 .verify(&call.reserve(super::STORE_BYTES)?)?;
             authorize(review.original.anchor, &call.current()?)?;
-            self.floor.retain_anchor(projection.anchor())?;
+            if let Some(floor) = &mut pending.portfolio_floor {
+                floor.retain_anchor(projection.anchor())?;
+                self.floor
+                    .retain_tick(projection.anchor().cursor.epoch, projection.anchor().tick)?;
+            } else {
+                self.floor.retain_anchor(projection.anchor())?;
+            }
             publication.published(&projection, &granted, record, &mut call)?;
             *monitor = pending;
             Ok(WorkOrderGoalResult {

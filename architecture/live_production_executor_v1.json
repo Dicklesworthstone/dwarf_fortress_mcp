@@ -89,13 +89,17 @@
       "labor-order"
     ],
     "configuration_schema": "dfmcp.combined-production-development/1",
-    "request_schema": "closed labor, citizens and finite furniture request with an optional explicit inventory-minimum objective",
+    "request_schema": "closed legacy labor/citizens/finite furniture request, or kind=portfolio with one to four distinct recipes and per-leaf optional inventory minimum",
     "original_steps": [
       "SetLabor",
       "CreateWorkOrder"
     ],
     "order_depends_on_original_labor_step": true,
-    "steps": 2,
+    "steps": {
+      "legacy": 2,
+      "portfolio_min": 2,
+      "portfolio_max": 5
+    },
     "selected_citizens_max": 32,
     "workforce_choices": {
       "owner_bead": "df-dfhack-bridge-plane-c-pic.4.2",
@@ -246,7 +250,12 @@
       "crates/dfmcp-mcp/src/live_production_runtime/inventory_clock.rs",
       "crates/dfmcp-mcp/src/semantic_work_order_runtime/inventory_clock.rs",
       "crates/dfmcp-mcp/src/semantic_work_order_runtime/bounded_goal_clock.rs",
-      "crates/dfmcp-mcp/src/live_production_presentation_inventory_clock_tests.rs"
+      "crates/dfmcp-mcp/src/live_production_presentation_inventory_clock_tests.rs",
+      "crates/dfmcp-mcp/src/live_production_runtime/portfolio.rs",
+      "crates/dfmcp-mcp/src/live_production_runtime/portfolio_request.rs",
+      "crates/dfmcp-adapter/src/live_production/portfolio_goal.rs",
+      "tests/stdio/combined_portfolio.py",
+      "crates/dwarf-fortress-mcp/tests/combined_portfolio_cli.rs"
     ],
     "private_custody_platforms": [
       "linux-x86_64",
@@ -454,6 +463,31 @@
       "run_withdraws_current_parent_and_selected_proof": true,
       "native_clock_receipt_proves_current_pause_or_goal": false,
       "legacy_standalone_inventory_clock_target_bytes_changed": false
+    },
+    "portfolio": {
+      "request_kind": "portfolio",
+      "request_identity_domain": "dfmcp-native-production-portfolio-request/1",
+      "orders_max": 4,
+      "distinct_recipes": true,
+      "normalization": "recipe_ascending",
+      "labor_step_id": 0,
+      "order_step_ids": "1..N",
+      "complete_original_terminal_preserved": true,
+      "samples_per_wait": 1,
+      "whole_parent_bracket": "all original native order IDs, equal paused progress/operations/workforce sources",
+      "source_cursor": "strict sequential per original selected review",
+      "parent_cursor": "independent monotone publication with fresh composite hash",
+      "current_proof_restored_on_recovery": false,
+      "successful_clock_preserves_unfinished_streaks": true,
+      "failed_observation_or_restart_interrupts_streaks": true,
+      "clock_selector": "order_step_id required for portfolio run/inventory_run Plan/Commit/Cancel",
+      "query_selector": "optional original order_step_id",
+      "legacy_selectors_accepted": false,
+      "one_pending_clock_across_all_leaves": true,
+      "recovery": "complete ordered per-leaf history/order-clock/inventory-clock identities; legacy fields always mirror leaf 1",
+      "extra_history_paths": "goal-{2,3,4}.history",
+      "extra_clock_paths": "portfolio-{2,3,4}-{clock,inventory-clock}.journal",
+      "new_protocol_or_admission": false
     }
   },
   "selected_work_order_goal_monitor": {

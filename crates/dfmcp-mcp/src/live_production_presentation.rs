@@ -29,6 +29,10 @@ pub(super) fn compact(view: &Value) -> Value {
         "goal_history_present":r["goal_history_present"].as_bool(),
         "clock_journal_id":digest(&r["clock_journal_id"]),
         "inventory_clock_journal_id":digest(&r["inventory_clock_journal_id"]),
+        "portfolio":r["portfolio"].as_array().map(|rows|rows.iter().take(4).map(|row|json!({
+            "step_id":row["step_id"].as_u64(),"goal_history_present":row["goal_history_present"].as_bool(),
+            "clock_journal_id":digest(&row["clock_journal_id"]),"inventory_clock_journal_id":digest(&row["inventory_clock_journal_id"])
+        })).collect::<Vec<_>>()),
         "anchor":compact_anchor(&r["anchor"]),
         "frontier":{"journal_id":bounded(&r["frontier"]["journal_id"],64),
             "head":bounded(&r["frontier"]["head"],64),"authority_tick_floor":r["frontier"]["authority_tick_floor"].as_u64()}},
@@ -36,6 +40,8 @@ pub(super) fn compact(view: &Value) -> Value {
             "all_applied":view["frontier"]["all_applied"].as_bool(),"review":null},
         "selected_inventory_goal":compact_goal(&view["selected_inventory_goal"]),
         "selected_order_goal":compact_goal(&view["selected_order_goal"]),
+        "portfolio":compact_portfolio(&view["portfolio"]),
+        "selected_parent_goal":null,
         "current_parent_goal":null,
         "parent_goal_observation_fenced":view["parent_goal_observation_fenced"] == true,
         "clock":clock_summary(&view["clock"],false,ORDER_CLOCK),"clock_control_enabled":false,
@@ -44,6 +50,102 @@ pub(super) fn compact(view: &Value) -> Value {
         "clock_invalidates_goal":ORDER_CLOCK.invalidates_goal(view),
         "inventory_clock_invalidates_goal":INVENTORY_CLOCK.invalidates_goal(view),
         "original_goal_proven":false,"current_state_proven":false,"details_omitted":true})
+}
+fn compact_portfolio(value: &Value) -> Value {
+    if value["schema"] != "dfmcp.production-portfolio/1" {
+        return Value::Null;
+    }
+    json!({"schema":"dfmcp.production-portfolio/1","selected_order_step_id":value["selected_order_step_id"].as_u64(),
+        "orders":value["orders"].as_array().map(|orders|orders.iter().take(4).map(|order|json!({
+            "step_id":order["step_id"].as_u64(),"goal":compact_goal(&order["goal"]),
+            "clock":clock_summary(&order["clock"],false,ORDER_CLOCK),
+            "inventory_clock":clock_summary(&order["inventory_clock"],false,INVENTORY_CLOCK)
+        })).collect::<Vec<_>>()), "complete_original_goal_proven":false,"sampled_orders":0})
+}
+
+fn portfolio_parent_valid(view: &Value, parent: &Value, anchor: Option<StateAnchor>) -> bool {
+    let Some(orders) = view["portfolio"]["orders"].as_array() else {
+        return false;
+    };
+    let Some(steps) = view["original_plan"]["steps"].as_array() else {
+        return false;
+    };
+    let Some(anchors) = parent["selected_anchors"].as_array() else {
+        return false;
+    };
+    if view["portfolio"]["schema"] != "dfmcp.production-portfolio/1"
+        || orders.is_empty()
+        || orders.len() > 4
+        || steps.len() != orders.len() + 1
+        || anchors.len() != orders.len()
+        || parent["scope"] != "complete_original_production_portfolio"
+        || !anchor.is_some_and(|a| parent["anchor"] == anchor_value(a))
+        || parent_labor_diagnostics(parent).is_none()
+        || parent["original_goal_proven"] != view["original_goal_proven"]
+        || parent["original_goal_proven"] != view["portfolio"]["complete_original_goal_proven"]
+    {
+        return false;
+    }
+    let mut all_proven = true;
+    let mut false_goal = false;
+    let mut unknown = false;
+    for (index, ((order, selected), step)) in orders
+        .iter()
+        .zip(anchors)
+        .zip(steps.iter().skip(1))
+        .enumerate()
+    {
+        let goal = &order["goal"];
+        if order["step_id"] != (index + 1)
+            || selected["step_id"] != order["step_id"]
+            || step["step_id"] != order["step_id"]
+            || goal["step_id"] != order["step_id"]
+            || step["action"]["kind"] != "create_work_order"
+            || goal["scope"] != "selected_original_order_step"
+            || goal["anchor"] != selected["anchor"]
+            || !["fortress_id", "epoch", "tick"]
+                .iter()
+                .all(|field| selected["anchor"][field] == parent["anchor"][field])
+            || !selected["anchor"]["sequence"]
+                .as_u64()
+                .zip(parent["anchor"]["sequence"].as_u64())
+                .is_some_and(|(child, parent)| child <= parent)
+            || goal["deadline_tick"] != step["obligation"]["deadline_tick"]
+            || goal["poll_interval_ticks"] != step["obligation"]["poll_interval_ticks"]
+            || goal["stable_samples"] != step["obligation"]["stable_samples"]
+            || !matches!(
+                goal["kind"].as_str(),
+                Some("retained_order_completion" | "observed_inventory_minimum")
+            )
+            || !matches!(
+                goal["current_truth"].as_str(),
+                Some("true" | "false" | "unknown")
+            )
+            || (goal["proven_at_anchor"] == true
+                && (goal["current_truth"] != "true" || goal["history"]["fenced"] == true))
+            || (goal["kind"] == "retained_order_completion"
+                && goal["proven_at_anchor"] == true
+                && goal["receipt_linked"] != true)
+        {
+            return false;
+        }
+        all_proven &= goal["proven_at_anchor"] == true;
+        false_goal |= goal["current_truth"] == "false";
+        unknown |= goal["current_truth"] == "unknown";
+    }
+    for labor in parent["labor"].as_array().into_iter().flatten() {
+        false_goal |= labor["current_truth"] == "false";
+        unknown |= labor["current_truth"] == "unknown";
+    }
+    let truth = if false_goal {
+        "false"
+    } else if unknown {
+        "unknown"
+    } else {
+        "true"
+    };
+    parent["current_truth"] == truth
+        && parent["original_goal_proven"] == (truth == "true" && all_proven)
 }
 fn compact_goal(value: &Value) -> Value {
     if !value.is_object() {
@@ -134,10 +236,22 @@ impl ClockOwner {
     }
     fn linked(self, view: &Value) -> bool {
         let clock = self.view(view);
+        let recovery = if view["portfolio"]["schema"] == "dfmcp.production-portfolio/1" {
+            view["recovery"]["portfolio"]
+                .as_array()
+                .and_then(|entries| {
+                    entries.iter().find(|entry| {
+                        entry["step_id"] == view["portfolio"]["selected_order_step_id"]
+                    })
+                })
+                .unwrap_or(&Value::Null)
+        } else {
+            &view["recovery"]
+        };
         clock["source"] == self.source
             && clock["target_scope"] == self.target_scope
             && digest(&clock["journal_id"]).is_some()
-            && clock["journal_id"] == view["recovery"][self.recovery_field]
+            && clock["journal_id"] == recovery[self.recovery_field]
             && digest(&clock["target_digest"]).is_some()
             && digest(&clock["original_paired_seal"]).is_some()
     }
@@ -320,9 +434,18 @@ fn encode(
         _ => AgentPhase::Inspect,
     };
     let view = retained.unwrap_or(&Value::Null);
+    let portfolio = view["portfolio"]["schema"] == "dfmcp.production-portfolio/1";
     let clock_reconciliation_needed = CLOCK_OWNERS
         .iter()
-        .any(|owner| clock_reconciliation(owner.view(view)));
+        .any(|owner| clock_reconciliation(owner.view(view)))
+        || view["portfolio"]["orders"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|order| {
+                clock_reconciliation(&order["clock"])
+                    || clock_reconciliation(&order["inventory_clock"])
+            });
     let uncertain = uncertain || clock_reconciliation_needed;
     let clock_invalidates_goal = CLOCK_OWNERS
         .iter()
@@ -350,7 +473,9 @@ fn encode(
     } else {
         &Value::Null
     };
-    let parent_scope = if retained_order {
+    let parent_scope = if portfolio {
+        "selected_original_labor_and_production_goal"
+    } else if retained_order {
         "complete_original_labor_and_order_goal"
     } else {
         "complete_original_labor_and_inventory_goal"
@@ -369,8 +494,12 @@ fn encode(
     // The joined sample has a different state hash from its selected child.
     // Present it only at the exact composite anchor, linked to that child; a
     // retained receipt, inventory achievement or top-level flag cannot fill it.
-    let candidate = &view["current_parent_goal"];
-    let parent_goal = if verified
+    let candidate = if portfolio {
+        &view["selected_parent_goal"]
+    } else {
+        &view["current_parent_goal"]
+    };
+    let joined_goal = if verified
         && !uncertain
         && !clock_invalidates_goal
         && !parent_fenced
@@ -383,16 +512,39 @@ fn encode(
         && anchor.is_some_and(|a| candidate["anchor"] == anchor_value(a))
         && candidate["selected_anchor"].is_object()
         && candidate["selected_anchor"] == selected_goal["anchor"]
-        && ["fortress_id", "epoch", "sequence", "tick"]
+        && ["fortress_id", "epoch", "tick"]
             .iter()
             .all(|&field| candidate["anchor"][field] == candidate["selected_anchor"][field])
+        && if portfolio {
+            candidate["selected_anchor"]["sequence"]
+                .as_u64()
+                .zip(candidate["anchor"]["sequence"].as_u64())
+                .is_some_and(|(source, published)| source <= published)
+        } else {
+            candidate["anchor"]["sequence"] == candidate["selected_anchor"]["sequence"]
+        }
         && candidate["original_goal_proven"]
-            == (candidate["current_truth"] == "true" && selected_proven)
-        && candidate["original_goal_proven"] == view["original_goal_proven"]
+            == (!portfolio && candidate["current_truth"] == "true" && selected_proven)
+        && (portfolio || candidate["original_goal_proven"] == view["original_goal_proven"])
     {
         candidate.clone()
     } else {
         Value::Null
+    };
+    let parent_goal = if portfolio {
+        if verified
+            && !uncertain
+            && !clock_invalidates_goal
+            && !parent_fenced
+            && mode != Some("offline")
+            && portfolio_parent_valid(view, &view["current_parent_goal"], anchor)
+        {
+            view["current_parent_goal"].clone()
+        } else {
+            Value::Null
+        }
+    } else {
+        joined_goal.clone()
     };
     let parent_proven = parent_goal["original_goal_proven"] == true;
     let parent_truth = parent_goal["current_truth"].as_str();
@@ -433,7 +585,7 @@ fn encode(
     let current_goal_ready = !uncertain
         && !clock_invalidates_goal
         && !parent_fenced
-        && parent_goal.is_object()
+        && joined_goal.is_object()
         && !parent_proven
         && view["frontier"]["all_applied"] == true
         && view["frontier"]["needs_reconciliation"] != true
@@ -451,13 +603,13 @@ fn encode(
             && if owner == INVENTORY_CLOCK {
                 selected_goal["kind"] == "observed_inventory_minimum"
                     && selected_goal["current_truth"] == "true"
-                    && parent_truth == Some("true")
+                    && joined_goal["current_truth"] == "true"
             } else {
                 selected_goal["receipt_linked"] == true
                     && ((selected_goal["current_truth"] == "false"
-                        && parent_truth == Some("false"))
+                        && joined_goal["current_truth"] == "false")
                         || (selected_goal["current_truth"] == "true"
-                            && parent_truth == Some("true")))
+                            && joined_goal["current_truth"] == "true"))
             }
     };
     let allowed_ticks = deadline
@@ -477,9 +629,26 @@ fn encode(
     let proposed_wall = budget
         .map(|b| b.max_wall_millis.min(5000))
         .filter(|wall| *wall > 0);
+    let inactive_pending_order = if portfolio {
+        view["portfolio"]["orders"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .find_map(|order| {
+                (order["step_id"] != view["portfolio"]["selected_order_step_id"]
+                    && ["clock", "inventory_clock"].iter().any(|field| {
+                        order[*field]["pending"] == true
+                            || order[*field]["active_run"]["state"] == "prepared"
+                    }))
+                .then(|| order["step_id"].as_u64())
+                .flatten()
+            })
+    } else {
+        None
+    };
     let new_run_proposal = |owner: ClockOwner| {
         let clock = owner.view(view);
-        (clock_authority(owner)
+        (inactive_pending_order.is_none() && clock_authority(owner)
             && owner.linked(view)
             && clock_goal_ready(owner)
             && clock_settled(clock)
@@ -490,8 +659,10 @@ fn encode(
         .then_some(proposed_ticks.zip(proposed_wall))
         .flatten()
         .map(|(ticks, wall)| {
-            json!({"kind":owner.scope,"original_paired_seal":clock["original_paired_seal"],
-                "game_ticks":ticks,"wall_millis":wall})
+            let mut request = json!({"kind":owner.scope,"original_paired_seal":clock["original_paired_seal"],
+                "game_ticks":ticks,"wall_millis":wall});
+            if portfolio { request["order_step_id"] = view["portfolio"]["selected_order_step_id"].clone(); }
+            request
         })
     };
     let order_proposal = new_run_proposal(ORDER_CLOCK);
@@ -541,7 +712,7 @@ fn encode(
             });
     let clock_commit = clock_prepared && clock["review_available"] == true;
     let clock_rereview = clock_prepared && clock["review_available"] == false;
-    let clock_proposal = if clock_rereview {
+    let mut clock_proposal = if clock_rereview {
         Some(
             json!({"kind":clock_owner.scope,"original_paired_seal":clock["original_paired_seal"],
             "game_ticks":clock_active["game_ticks"],"wall_millis":clock_active["wall_millis"]}),
@@ -551,6 +722,9 @@ fn encode(
     } else {
         order_proposal.clone()
     };
+    if portfolio && let Some(request) = &mut clock_proposal {
+        request["order_step_id"] = view["portfolio"]["selected_order_step_id"].clone();
+    }
     // Stopping an existing run does not require an unexpired or unsatisfied goal.
     let clock_cancel = |owner: ClockOwner| {
         let clock = owner.view(view);
@@ -604,6 +778,13 @@ fn encode(
         ))
     } else if !verified {
         None
+    } else if let Some(step) = inactive_pending_order {
+        Some((
+            "fortress_query",
+            "Inspect the original portfolio order with retained clock work before reviewing another run.",
+            false,
+            json!({"order_step_id":step}),
+        ))
     } else if clock_commit {
         Some((
             "fortress_commit",
@@ -657,6 +838,29 @@ fn encode(
             },
             false,
             json!({"request":request.to_string()}),
+        ))
+    } else if portfolio
+        && current_goal_ready
+        && CLOCK_OWNERS
+            .iter()
+            .any(|owner| clock_authority(*owner) && !owner.linked(view))
+    {
+        Some((
+            "fortress_query",
+            "Inspect this original portfolio order's retained clock custody before reviewing a bounded run.",
+            false,
+            json!({"order_step_id":view["portfolio"]["selected_order_step_id"]}),
+        ))
+    } else if portfolio
+        && mode != Some("offline")
+        && view["frontier"]["all_applied"] == true
+        && !parent_proven
+    {
+        Some((
+            "fortress_wait",
+            "Observe the next original portfolio goal; whole-plan proof requires the complete coherent cohort.",
+            false,
+            json!({}),
         ))
     } else if mode != Some("offline")
         && view["frontier"]["all_applied"] == true
@@ -714,6 +918,9 @@ fn encode(
             if let Some(id) = session {
                 arguments["session_id"] = json!(id.to_string());
             }
+            if portfolio && matches!(arguments["scope"].as_str(), Some("run" | "inventory_run")) {
+                arguments["order_step_id"] = view["portfolio"]["selected_order_step_id"].clone();
+            }
             recommendation_fn(tool, reason, confirm, arguments)
         })
         .collect::<Vec<_>>();
@@ -725,11 +932,15 @@ fn encode(
                 item["tool"] == "fortress_cancel" && item["arguments"]["scope"] == owner.scope
             })
         {
+            let mut arguments = json!({"session_id":id.to_string(),"scope":owner.scope});
+            if portfolio {
+                arguments["order_step_id"] = view["portfolio"]["selected_order_step_id"].clone();
+            }
             recommendations.push(recommendation_fn(
                 "fortress_cancel",
                 "Cancel the retained clock run; an active run requests a stop and keeps its original recovery custody.",
                 false,
-                json!({"session_id":id.to_string(),"scope":owner.scope}),
+                arguments,
             ));
         }
     }

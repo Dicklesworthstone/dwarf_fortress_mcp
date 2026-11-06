@@ -37,6 +37,7 @@ pub use store::{
 enum GoalScope {
     Original,
     Selected,
+    Portfolio,
 }
 
 /// One exact proof owner and its exclusively held history. Neither can be cloned
@@ -46,6 +47,13 @@ pub struct DurableWorkOrderGoalMonitor<H> {
     history: GoalHistoryStore<H>,
 }
 impl<H: EffectJournalStorage> DurableWorkOrderGoalMonitor<H> {
+    pub(crate) fn native_order_id(&self) -> u32 {
+        self.monitor
+            .review
+            .native_plan()
+            .observation()
+            .next_order_id()
+    }
     pub fn review_seal(&self) -> Digest32 {
         self.monitor.review_seal()
     }
@@ -346,6 +354,7 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage, N: WorkOrderSource>
         context: &OperationContext,
         open_history: O,
         authorize_history: A,
+        portfolio: bool,
     ) -> Result<DurableWorkOrderGoalMonitor<H>>
     where
         H: EffectJournalStorage,
@@ -375,7 +384,11 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage, N: WorkOrderSource>
             seal,
             &call.current()?,
             authorize_history,
-            GoalScope::Selected,
+            if portfolio {
+                GoalScope::Portfolio
+            } else {
+                GoalScope::Selected
+            },
         )
     }
 
@@ -412,6 +425,13 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage, N: WorkOrderSource>
             .ok_or_else(custody)?;
         authorize(review.original.anchor, &call.current()?)?;
 
+        let portfolio = matches!(scope, GoalScope::Portfolio);
+        if portfolio
+            && !self.portfolio_goal_owners.contains_key(&seal)
+            && self.portfolio_goal_owners.len() >= 4
+        {
+            return Err(super::exhausted());
+        }
         let owner = Arc::new(());
         let mut historical_context = call.current()?;
         // Constructor input only. All I/O and policy authority below use `call`,
@@ -423,13 +443,17 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage, N: WorkOrderSource>
                 &historical_context,
                 Arc::downgrade(&owner),
             )?,
-            GoalScope::Selected => WorkOrderGoalMonitor::new_selected(
+            GoalScope::Selected | GoalScope::Portfolio => WorkOrderGoalMonitor::new_selected(
                 review.clone(),
                 &historical_context,
                 Arc::downgrade(&owner),
             )?,
         };
         let mut retained = self.floor.clone();
+        if portfolio {
+            retained.canonical = None;
+            retained.retain_anchor(review.original.anchor)?;
+        }
         let mut replay_floor = SourceFloor::default();
         replay_floor.retain_anchor(review.original.anchor)?;
         replay_floor.retain_native(NativeClock::observed(
@@ -583,7 +607,11 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage, N: WorkOrderSource>
             .cursor_floor
             .sequence
             .max(history.high_cursor().sequence)
-            .max(context.anchor.cursor.sequence)
+            .max(if portfolio {
+                review.original.anchor.cursor.sequence
+            } else {
+                context.anchor.cursor.sequence
+            })
             .max(
                 retained
                     .canonical
@@ -602,7 +630,7 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage, N: WorkOrderSource>
         if !final_records.contains(record) {
             return Err(custody());
         }
-        if let Some(anchor) = self.floor.canonical {
+        if !portfolio && let Some(anchor) = self.floor.canonical {
             retained.retain_anchor(anchor)?;
             monitor.cursor_floor.sequence =
                 monitor.cursor_floor.sequence.max(anchor.cursor.sequence);
@@ -616,8 +644,19 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage, N: WorkOrderSource>
         }
         authorize(review.original.anchor, &call.current()?)?;
         self.native.clear_selection();
-        self.floor = retained;
-        self.goal_owner = Some(owner);
+        if portfolio {
+            if let Some(clock) = retained.native {
+                self.floor.retain_native(clock)?;
+            }
+            if let Some((epoch, tick)) = retained.authority_tick {
+                self.floor.retain_tick(epoch, tick)?;
+            }
+            monitor.portfolio_floor = Some(retained);
+            self.portfolio_goal_owners.insert(seal, owner);
+        } else {
+            self.floor = retained;
+            self.goal_owner = Some(owner);
+        }
         Ok(DurableWorkOrderGoalMonitor { monitor, history })
     }
 

@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased — Execute complete native production portfolios
+
+- Add an explicit bounded portfolio request for one original labor assignment
+  and up to four distinct finite furniture orders, preserving the single-order
+  request and original native effect identities.
+- Keep independent goal histories and both reviewed clock families for each
+  exact original order; require explicit selectors and exclude overlapping runs.
+- Prove the complete parent only from coherent current labor and all original
+  goals, preserving their original deadlines and stability through bounded runs.
+- Recover lost middle insertions and clock replies under the original keys;
+  retain every journal without restoring confirmations or dispatching twice.
+- Fit four-leaf dual-clock recovery within the existing default work budget by
+  sharing immutable parent reads and bounding additional journal reservations.
+- Pass nine new portfolio and ten existing single-order public-handler/TCP
+  scenarios, 49 presentation/budget cases and 65 public adapter integration
+  tests. Full MCP transport, real-game execution and admission remain separate.
+
 ## Unreleased — Carry civilian recovery through a guarded reviewed release
 
 - Keep stable-clear monitoring in the private/shared world owner across normal

@@ -43,6 +43,14 @@ pub(crate) struct Recovery {
     pub(crate) goal_history_present: bool,
     pub(crate) clock_journal_id: Option<Digest32>,
     pub(crate) inventory_clock_journal_id: Option<Digest32>,
+    pub(crate) portfolio: Option<[Option<PortfolioRecovery>; 4]>,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct PortfolioRecovery {
+    pub(crate) goal_history_present: bool,
+    pub(crate) clock_journal_id: Option<Digest32>,
+    pub(crate) inventory_clock_journal_id: Option<Digest32>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -99,6 +107,15 @@ struct RecoveryInput {
     anchor: AnchorInput,
     frontier: FrontierInput,
     #[serde(default)]
+    goal_history_present: bool,
+    clock_journal_id: Option<String>,
+    inventory_clock_journal_id: Option<String>,
+    portfolio: Option<Vec<PortfolioRecoveryInput>>,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PortfolioRecoveryInput {
+    step_id: u32,
     goal_history_present: bool,
     clock_journal_id: Option<String>,
     inventory_clock_journal_id: Option<String>,
@@ -240,6 +257,26 @@ fn parse(
                 authority_tick_floor: r.frontier.authority_tick_floor,
             };
             frontier.validate()?;
+            let portfolio = r.portfolio.map(|entries| {
+                if entries.is_empty() || entries.len() > 4 {
+                    return Err(invalid("portfolio recovery requires one to four complete original order slots"));
+                }
+                let mut result = [None; 4];
+                for (index, entry) in entries.into_iter().enumerate() {
+                    if entry.step_id as usize != index + 1 {
+                        return Err(invalid("portfolio recovery slots must name each original order in order"));
+                    }
+                    let value = PortfolioRecovery { goal_history_present: entry.goal_history_present,
+                        clock_journal_id: entry.clock_journal_id.as_deref().map(digest).transpose()?,
+                        inventory_clock_journal_id: entry.inventory_clock_journal_id.as_deref().map(digest).transpose()? };
+                    if value.clock_journal_id.is_some() != clock.is_some()
+                        || value.inventory_clock_journal_id.is_some() != inventory_clock.is_some() {
+                        return Err(denied("every portfolio slot must retain its independently configured clock custody"));
+                    }
+                    result[index] = Some(value);
+                }
+                Ok(result)
+            }).transpose()?;
             Ok(Recovery {
                 seal: PlanArchiveSeal {
                     plan_digest: digest(&r.plan_digest)?,
@@ -263,10 +300,23 @@ fn parse(
                     .as_deref()
                     .map(digest)
                     .transpose()?,
+                portfolio,
             })
         })
         .transpose()?;
     if let Some(recovery) = recovery {
+        if let Some(entries) = recovery.portfolio {
+            let first =
+                entries[0].ok_or_else(|| invalid("first portfolio recovery slot absent"))?;
+            if first.goal_history_present != recovery.goal_history_present
+                || first.clock_journal_id != recovery.clock_journal_id
+                || first.inventory_clock_journal_id != recovery.inventory_clock_journal_id
+            {
+                return Err(denied(
+                    "first portfolio slot differs from original legacy custody paths",
+                ));
+            }
+        }
         if recovery.clock_journal_id != clock.and_then(|clock| clock.journal_id) {
             return Err(denied(
                 "combined clock recovery must name its exact independently retained journal",

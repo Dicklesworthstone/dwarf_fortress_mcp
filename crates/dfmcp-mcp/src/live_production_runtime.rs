@@ -29,6 +29,8 @@ mod config;
 mod custody;
 mod goals;
 mod inventory_clock;
+mod portfolio;
+mod portfolio_request;
 mod request;
 mod review;
 pub(crate) use choices::ObserveRequest;
@@ -37,6 +39,8 @@ pub(crate) use config::Config;
 use custody::{GuardedEvidence, SharedCustody};
 use inventory_clock::ProductionInventoryClock;
 use orders::Shell as OrderShell;
+use portfolio::PortfolioState;
+pub(crate) use portfolio_request::PortfolioRequest;
 pub(crate) use request::Request;
 pub(crate) use workforce::Mode;
 use workforce::Shell as WorkforceShell;
@@ -164,7 +168,10 @@ pub(crate) struct Runtime {
     fenced: bool,
     goal_monitor: Option<SelectedWorkOrderGoalMonitor<File>>,
     goal_history_present: bool,
+    goal_current_withdrawn: bool,
     parent_goal: Option<SelectedParentGoalProgress>,
+    portfolio: Option<PortfolioState>,
+    portfolio_sample: Option<live_production::SelectedParentGoalResult>,
 }
 
 pub(crate) struct View {
@@ -192,14 +199,21 @@ fn order_mode(mode: Mode) -> orders::Mode {
 }
 fn host_plan(plan: &PreparedPlan) -> Result<PlanArchiveSeal> {
     let seal = live_production::validate_plan(plan)?;
-    if plan.steps.len() != 2
+    if !(2..=5).contains(&plan.steps.len())
         || !matches!(plan.steps[0].action, Action::SetLabor { .. })
-        || !matches!(plan.steps[1].action, Action::CreateWorkOrder { .. })
         || !plan.steps[0].depends_on.is_empty()
-        || plan.steps[1].depends_on != [plan.steps[0].id]
+        || plan
+            .steps
+            .iter()
+            .enumerate()
+            .any(|(index, step)| step.id.get() as usize != index)
+        || plan.steps.iter().skip(1).any(|step| {
+            !matches!(step.action, Action::CreateWorkOrder { .. })
+                || step.depends_on != [plan.steps[0].id]
+        })
     {
         return Err(invalid(
-            "combined host requires its original labor then dependent order plan",
+            "combined host requires original labor followed by one to four dependent finite order leaves",
         ));
     }
     Ok(seal)
@@ -261,7 +275,7 @@ impl Runtime {
         if session == SessionId::NIL
             || budget.max_bytes > MAX_BYTES
             || budget.max_wall_millis > MAX_WALL_MILLIS
-            || budget.max_actions != 2
+            || !(2..=5).contains(&budget.max_actions)
             || budget.max_entities < 4096
             || budget.max_output_tokens > MAX_OUTPUT_TOKENS
             || budget.max_game_ticks > 1200
@@ -270,7 +284,7 @@ impl Runtime {
                 && budget.max_game_ticks != 0)
         {
             return Err(exhausted(
-                "combined runtime requires two actions, 4096 entities and at most 1200 independently configured clock ticks",
+                "combined runtime requires two to five actions, 4096 entities and at most 1200 independently configured clock ticks",
             ));
         }
         let opening_labor = mode == Mode::Control && config.workforce.labor_enabled();
@@ -324,7 +338,10 @@ impl Runtime {
             fenced: false,
             goal_monitor: None,
             goal_history_present: false,
+            goal_current_withdrawn: false,
             parent_goal: None,
+            portfolio: None,
+            portfolio_sample: None,
         };
         let c = out.context(false)?;
         let mut work = Work::new(&c)?;
@@ -404,14 +421,29 @@ impl Runtime {
                 false,
             )?);
             out.create_executor(&mut work)?;
+            if let Some(entries) = recovery.portfolio {
+                out.initialize_portfolio(Some(entries), &mut work)?;
+            } else {
+                if out
+                    .original
+                    .as_ref()
+                    .is_some_and(|plan| plan.steps.len() != 2)
+                {
+                    return Err(denied(
+                        "portfolio recovery must retain every original goal and clock slot",
+                    ));
+                }
+                out.config.orders.require_absent_portfolio_clocks(2)?;
+            }
             out.restore_clock_target(&mut work)?;
             out.restore_inventory_clock_target(&mut work)?;
-            if recovery.goal_history_present {
+            if recovery.goal_history_present && out.portfolio.is_none() {
                 out.goal_history_present = true;
                 out.start_goal_monitor(false, &mut work)?;
                 out.raise_goal_floor();
             }
         } else {
+            out.config.orders.require_absent_portfolio_clocks(2)?;
             let (labor, order) = out
                 .parts
                 .as_mut()
@@ -515,7 +547,7 @@ impl Runtime {
             || c.budget.max_bytes > self.budget.max_bytes
             || c.budget.max_wall_millis > self.budget.max_wall_millis
             || c.budget.max_entities > self.budget.max_entities
-            || c.budget.max_actions > 2
+            || c.budget.max_actions > self.budget.max_actions
             || c.budget.max_output_tokens > self.budget.max_output_tokens
             || c.budget.max_game_ticks > self.budget.max_game_ticks
         {
@@ -625,6 +657,7 @@ impl Runtime {
         Ok(())
     }
     pub(crate) fn abandon_preparation(&mut self) {
+        self.invalidate_portfolio_samples();
         self.clock_review = None;
         self.inventory_clock_review = None;
         self.parent_goal = None;
@@ -661,12 +694,20 @@ impl Runtime {
                     .authority_tick_floor
                     .max(self.observation_tick_floor.get())
                     .max(self.execution.as_ref().map_or(0, Execution::high_tick));
-                json!({"plan_digest":seal.plan_digest.to_hex(),"object_digest":seal.object_digest.to_hex(),
+                let mut value = json!({"plan_digest":seal.plan_digest.to_hex(),"object_digest":seal.object_digest.to_hex(),
                     "anchor":anchor_json(p.anchor),"identity_digest":identity.to_hex(),
                     "goal_history_present":self.goal_history_present,
                     "clock_journal_id":self.clock.as_ref().and_then(ProductionClock::journal_id).map(|id|id.to_hex()),
                     "inventory_clock_journal_id":self.inventory_clock.as_ref().and_then(ProductionInventoryClock::journal_id).map(|id|id.to_hex()),
-                    "frontier":{"journal_id":r.journal_id.to_hex(),"head":r.head.to_hex(),"authority_tick_floor":floor}})
+                    "frontier":{"journal_id":r.journal_id.to_hex(),"head":r.head.to_hex(),"authority_tick_floor":floor}});
+                if let Some(portfolio) = self.portfolio_recovery() {
+                    value["goal_history_present"] = portfolio[0]["goal_history_present"].clone();
+                    value["clock_journal_id"] = portfolio[0]["clock_journal_id"].clone();
+                    value["inventory_clock_journal_id"] =
+                        portfolio[0]["inventory_clock_journal_id"].clone();
+                    value["portfolio"] = portfolio;
+                }
+                value
             }
             _ => Value::Null,
         }
@@ -674,6 +715,8 @@ impl Runtime {
     pub(crate) fn opening_recovery_reference(&self) -> Value {
         let selected_goal = self.selected_goal_json();
         json!({"mode":self.mode.as_str(),"anchor":anchor_json(self.anchor),"recovery":self.recovery_json(),
+            "portfolio":self.portfolio_json(),
+            "selected_parent_goal":null,
             "observation_tick_floor":self.observation_tick_floor.get(),
             "original_plan":self.original.as_ref().map(plan_json),"runtime_admitted":false,
             "selected_inventory_goal":if selected_goal["kind"] == "observed_inventory_minimum" {Some(&selected_goal)}else{None},
@@ -768,6 +811,8 @@ impl Runtime {
             "workforce_choices":if self.original.is_none(){b.choices.as_ref()}else{None} }));
         let selected_goal = self.selected_goal_json();
         let value = json!({"ok":true,"mode":self.mode.as_str(),"anchor":anchor_json(self.anchor),
+            "portfolio":self.portfolio_json(),
+            "selected_parent_goal":if self.portfolio.is_some(){self.selected_parent_goal_json()}else{Value::Null},
             "runtime_admitted":false,"observation":observation,"original_plan":self.original.as_ref().map(plan_json),
             "observation_tick_floor":self.observation_tick_floor.get(),
             "frontier":frontier,"review":review,
@@ -903,6 +948,26 @@ impl Runtime {
         self.view(&mut work)
     }
     pub(crate) fn plan(&mut self, request: Request, c: &OperationContext) -> Result<View> {
+        self.plan_compiled(request.observation()?, false, c, |evidence, current| {
+            request.compile(evidence, current)
+        })
+    }
+    pub(crate) fn plan_portfolio(
+        &mut self,
+        request: PortfolioRequest,
+        c: &OperationContext,
+    ) -> Result<View> {
+        self.plan_compiled(request.observation()?, true, c, |evidence, current| {
+            request.compile(evidence, current)
+        })
+    }
+    fn plan_compiled(
+        &mut self,
+        observation: Digest32,
+        portfolio: bool,
+        c: &OperationContext,
+        compile: impl FnOnce(&PredicateEvidence<'_>, &OperationContext) -> Result<PreparedPlan>,
+    ) -> Result<View> {
         self.check(c, true)?;
         if self.original.is_some() {
             return Err(invalid(
@@ -913,7 +978,7 @@ impl Runtime {
             .basis
             .as_ref()
             .ok_or_else(|| invalid("observe the canonical roster before combined planning"))?;
-        if request.observation()? != basis.seal {
+        if observation != basis.seal {
             return Err(denied("combined request names another observation seal"));
         }
         let mut work = Work::new(c)?;
@@ -923,7 +988,7 @@ impl Runtime {
             &work.take(MIB)?,
         )?;
         let evidence = PredicateEvidence::scoped(&basis.projection.snapshot, policy)?;
-        let plan = request.compile(&evidence, &work.take(8 * MIB)?)?;
+        let plan = compile(&evidence, &work.take(8 * MIB)?)?;
         let expected = host_plan(&plan)?;
         // From this point failures preserve partial publication and forbid another
         // plan in this owner. No native prepare/commit has been reached.
@@ -957,6 +1022,9 @@ impl Runtime {
             true,
         )?);
         self.create_executor(&mut work)?;
+        if portfolio {
+            self.initialize_portfolio(None, &mut work)?;
+        }
         self.initialization_failed = false;
         self.view(&mut Work::new(&work.current()?)?)
     }
@@ -985,7 +1053,11 @@ impl Runtime {
         })
     }
     pub(crate) fn wait(&mut self, c: &OperationContext) -> Result<View> {
-        self.wait_with_goal(c)
+        if self.portfolio.is_some() {
+            self.wait_portfolio(c)
+        } else {
+            self.wait_with_goal(c)
+        }
     }
     pub(crate) fn cancel(&mut self, c: &OperationContext) -> Result<View> {
         self.check(c, true)?;

@@ -215,7 +215,8 @@ work orders asking for a Manager. Use `manager-v1-23` with its distinct host
 configuration, credentials and custody when testing production control.
 
 The `labor-order` profile owns one original labor step and a dependent finite
-furniture-order insertion in a single session. Its per-step confirmations,
+furniture order, or an explicit portfolio of up to four furniture recipes, in a
+single session. Its per-step confirmations,
 strict historical labor receipt and retained original custody control advancement;
 insertion does not prove produced goods or original-goal completion.
 With an explicit inventory minimum, Wait joins current labor and inventory under
@@ -223,6 +224,8 @@ the original deadline and sampled stability. Independently authorized, separatel
 confirmed clocks can advance the original order or finish inventory stability
 after that order retires. Lost replies reconcile their original run keys without
 repeating unpause; fresh joined evidence is still required for goal completion.
+Portfolio Wait samples each original leaf and proves the complete parent only
+when all original goals and current labor join at one coherent paused frontier.
 Each process selects one runtime. A complete Tree-to-workshop-to-bed controller
 remains unfinished. Changing profile requires a
 separate configured process and preserves the previous original custody.

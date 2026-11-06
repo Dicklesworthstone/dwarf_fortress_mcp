@@ -57,6 +57,8 @@ fn merge_recovery(old: &mut Option<Value>, latest: &Value) {
     retained["review"] = Value::Null;
     retained["selected_inventory_goal"] = latest["selected_inventory_goal"].clone();
     retained["selected_order_goal"] = latest["selected_order_goal"].clone();
+    retained["portfolio"] = latest["portfolio"].clone();
+    retained["selected_parent_goal"] = Value::Null;
     if latest.get("clock").is_some() {
         retained["clock"] = latest["clock"].clone();
     }
@@ -86,17 +88,19 @@ fn merge_recovery(old: &mut Option<Value>, latest: &Value) {
 enum Action {
     Observe(ObserveRequest),
     Inspect,
+    InspectOrder(u32),
     Plan(Request),
-    PlanRun(RunRequest),
-    PlanInventoryRun(InventoryRunRequest),
+    PlanPortfolio(crate::live_production_runtime::PortfolioRequest),
+    PlanRun(RunRequest, Option<u32>),
+    PlanInventoryRun(InventoryRunRequest, Option<u32>),
     Prepare(Digest32),
     Commit(Digest32, bool),
-    CommitRun(Digest32, bool),
-    CommitInventoryRun(Digest32, bool),
+    CommitRun(Digest32, bool, Option<u32>),
+    CommitInventoryRun(Digest32, bool, Option<u32>),
     Wait,
     Cancel,
-    CancelRun,
-    CancelInventoryRun,
+    CancelRun(Option<u32>),
+    CancelInventoryRun(Option<u32>),
     Unavailable,
 }
 impl Action {
@@ -106,42 +110,60 @@ impl Action {
             Self::Commit(..)
                 | Self::CommitRun(..)
                 | Self::CommitInventoryRun(..)
-                | Self::CancelRun
-                | Self::CancelInventoryRun
+                | Self::CancelRun(..)
+                | Self::CancelInventoryRun(..)
         )
     }
     fn may_need_reconciliation(&self) -> bool {
         matches!(
             self,
             Self::Prepare(_)
-                | Self::PlanRun(_)
-                | Self::PlanInventoryRun(_)
+                | Self::PlanRun(..)
+                | Self::PlanInventoryRun(..)
                 | Self::Commit(..)
                 | Self::CommitRun(..)
                 | Self::CommitInventoryRun(..)
                 | Self::Wait
                 | Self::Cancel
-                | Self::CancelRun
-                | Self::CancelInventoryRun
+                | Self::CancelRun(..)
+                | Self::CancelInventoryRun(..)
         )
     }
     fn perform(self, runtime: &mut Runtime, c: &OperationContext) -> Result<View> {
         match self {
             Self::Observe(request) => runtime.observe(request, c),
             Self::Inspect => runtime.inspect(c),
+            Self::InspectOrder(step) => runtime.inspect_order(Some(step), c),
             Self::Plan(request) => runtime.plan(request, c),
-            Self::PlanRun(request) => runtime.plan_run(request, c),
-            Self::PlanInventoryRun(request) => runtime.plan_inventory_run(request, c),
+            Self::PlanPortfolio(request) => runtime.plan_portfolio(request, c),
+            Self::PlanRun(request, step) => {
+                runtime.select_order(step, c)?;
+                runtime.plan_run(request, c)
+            }
+            Self::PlanInventoryRun(request, step) => {
+                runtime.select_order(step, c)?;
+                runtime.plan_inventory_run(request, c)
+            }
             Self::Prepare(id) => runtime.prepare_next(id, c),
             Self::Commit(seal, confirmed) => runtime.commit(seal, confirmed, c),
-            Self::CommitRun(seal, confirmed) => runtime.commit_run(seal, confirmed, c),
-            Self::CommitInventoryRun(seal, confirmed) => {
+            Self::CommitRun(seal, confirmed, step) => {
+                runtime.select_order(step, c)?;
+                runtime.commit_run(seal, confirmed, c)
+            }
+            Self::CommitInventoryRun(seal, confirmed, step) => {
+                runtime.select_order(step, c)?;
                 runtime.commit_inventory_run(seal, confirmed, c)
             }
             Self::Wait => runtime.wait(c),
             Self::Cancel => runtime.cancel(c),
-            Self::CancelRun => runtime.cancel_run(c),
-            Self::CancelInventoryRun => runtime.cancel_inventory_run(c),
+            Self::CancelRun(step) => {
+                runtime.select_order(step, c)?;
+                runtime.cancel_run(c)
+            }
+            Self::CancelInventoryRun(step) => {
+                runtime.select_order(step, c)?;
+                runtime.cancel_inventory_run(c)
+            }
             Self::Unavailable => Err(error(
                 ErrorCode::CapabilityDenied,
                 "combined development runtime cannot checkpoint or restore",
@@ -226,7 +248,7 @@ fn budgets(
         max_wall_millis: wall.unwrap_or(5000),
         max_bytes: bytes.unwrap_or(DEFAULT_BYTES),
         max_entities: 8192,
-        max_actions: 2,
+        max_actions: 5,
         max_output_tokens: output.unwrap_or(MAX_OUTPUT),
         max_game_ticks: game_ticks.unwrap_or(0),
     };
@@ -448,18 +470,22 @@ struct StepRequest {
     original_plan_digest: String,
 }
 fn plan_action(raw: &str) -> Result<Action> {
-    if raw.len() > 4096 {
+    if raw.len() > 8192 {
         return Err(error(
             ErrorCode::BudgetExceeded,
-            "combined request exceeds 4096 bytes",
+            "combined request exceeds 8192 bytes",
         ));
     }
     let value: Value = serde_json::from_str(raw)
         .map_err(|_| error(ErrorCode::InvalidRequest, "invalid combined request"))?;
     if value.get("kind").and_then(Value::as_str) == Some("run") {
-        RunRequest::parse(raw).map(Action::PlanRun)
+        let (raw, step) = scoped_run(raw)?;
+        RunRequest::parse(&raw).map(|request| Action::PlanRun(request, step))
     } else if value.get("kind").and_then(Value::as_str) == Some("inventory_run") {
-        InventoryRunRequest::parse(raw).map(Action::PlanInventoryRun)
+        let (raw, step) = scoped_run(raw)?;
+        InventoryRunRequest::parse(&raw).map(|request| Action::PlanInventoryRun(request, step))
+    } else if value.get("kind").and_then(Value::as_str) == Some("portfolio") {
+        crate::live_production_runtime::PortfolioRequest::parse(raw).map(Action::PlanPortfolio)
     } else if value.get("kind").and_then(Value::as_str) == Some("step") {
         let request: StepRequest = serde_json::from_str(raw)
             .map_err(|_| error(ErrorCode::InvalidRequest, "invalid closed step request"))?;
@@ -472,12 +498,56 @@ fn plan_action(raw: &str) -> Result<Action> {
     }
 }
 
-fn commit_action(scope: Option<&str>, seal: &str, confirmed: bool) -> Result<Action> {
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ScopedRun {
+    kind: String,
+    original_paired_seal: String,
+    game_ticks: u32,
+    wall_millis: u32,
+    #[serde(default, deserialize_with = "explicit_order_step")]
+    order_step_id: Option<u32>,
+}
+fn explicit_order_step<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> std::result::Result<Option<u32>, D::Error> {
+    u32::deserialize(deserializer).map(Some)
+}
+fn scoped_run(raw: &str) -> Result<(String, Option<u32>)> {
+    let value: ScopedRun = serde_json::from_str(raw).map_err(|_| {
+        error(
+            ErrorCode::InvalidRequest,
+            "invalid closed original clock request",
+        )
+    })?;
+    if value
+        .order_step_id
+        .is_some_and(|step| !(1..=4).contains(&step))
+    {
+        return Err(error(
+            ErrorCode::InvalidRequest,
+            "order_step_id must name an original order from one through four",
+        ));
+    }
+    Ok((
+        json!({"kind":value.kind,"original_paired_seal":value.original_paired_seal,
+        "game_ticks":value.game_ticks,"wall_millis":value.wall_millis})
+        .to_string(),
+        value.order_step_id,
+    ))
+}
+
+fn commit_action(
+    scope: Option<&str>,
+    seal: &str,
+    confirmed: bool,
+    step: Option<u32>,
+) -> Result<Action> {
     let seal = digest(seal)?;
     match scope {
-        None | Some("step") => Ok(Action::Commit(seal, confirmed)),
-        Some("run") => Ok(Action::CommitRun(seal, confirmed)),
-        Some("inventory_run") => Ok(Action::CommitInventoryRun(seal, confirmed)),
+        None | Some("step") if step.is_none() => Ok(Action::Commit(seal, confirmed)),
+        Some("run") => Ok(Action::CommitRun(seal, confirmed, step)),
+        Some("inventory_run") => Ok(Action::CommitInventoryRun(seal, confirmed, step)),
         _ => Err(error(
             ErrorCode::InvalidRequest,
             "commit scope must be step, run or inventory_run",
@@ -485,11 +555,11 @@ fn commit_action(scope: Option<&str>, seal: &str, confirmed: bool) -> Result<Act
     }
 }
 
-fn cancel_action(scope: Option<&str>) -> Result<Action> {
+fn cancel_action(scope: Option<&str>, step: Option<u32>) -> Result<Action> {
     match scope {
-        None | Some("step") => Ok(Action::Cancel),
-        Some("run") => Ok(Action::CancelRun),
-        Some("inventory_run") => Ok(Action::CancelInventoryRun),
+        None | Some("step") if step.is_none() => Ok(Action::Cancel),
+        Some("run") => Ok(Action::CancelRun(step)),
+        Some("inventory_run") => Ok(Action::CancelInventoryRun(step)),
         _ => Err(error(
             ErrorCode::InvalidRequest,
             "cancel scope must be step, run, inventory_run or session",
@@ -593,27 +663,32 @@ pub fn fortress_observe(session_id: String, request: Option<String>) -> String {
         Ok(Action::Observe(request))
     })
 }
-#[tool(description = "Inspect retained original plan, frontier, review and recovery custody.")]
-pub fn fortress_query(session_id: String) -> String {
-    with_session(session_id, "fortress.query", None, || Ok(Action::Inspect))
+#[tool(
+    description = "Inspect retained original plan, frontier, review and recovery custody. For a portfolio, optional order_step_id selects that exact original order and its clock seals without native contact."
+)]
+pub fn fortress_query(session_id: String, order_step_id: Option<u32>) -> String {
+    with_session(session_id, "fortress.query", None, || {
+        Ok(order_step_id.map_or(Action::Inspect, Action::InspectOrder))
+    })
 }
 #[tool(
-    description = "Compile one original labor and finite-order plan, optionally with an explicit observed_inventory_minimum objective; kind=step with original_plan_digest prepares the next eligible original step. After both effects settle, kind=run prepares an independently authorized clock for the original retained-order or inventory goal. After Wait observes True original labor and explicitly selected inventory, kind=inventory_run prepares an independent stability clock even after order retirement. Both name original_paired_seal, game_ticks and wall_millis. Planning never unpauses."
+    description = "Compile one original labor and finite-order plan, or kind=portfolio with one to four distinct furniture orders and per-order optional observed_inventory_minimum objectives; kind=step with original_plan_digest prepares the next eligible original step. After all original effects settle, kind=run prepares an independently authorized clock for the original retained-order or inventory goal. After Wait observes True original labor and explicitly selected inventory, kind=inventory_run prepares an independent stability clock even after order retirement. Both name original_paired_seal, game_ticks and wall_millis; portfolio clock requests also require the exact original order_step_id. Planning never unpauses."
 )]
 pub fn fortress_plan(session_id: String, request: String) -> String {
     with_session(session_id, "fortress.plan", None, || plan_action(&request))
 }
 #[tool(
-    description = "scope=step (default) confirms one current paired step review. scope=run or scope=inventory_run confirms that separate clock owner's review in paired_seal under its independent authority. All require confirmed=true; lost replies require reconciliation of the original key without repeated insertion or unpause."
+    description = "scope=step (default) confirms one current paired step review. scope=run or scope=inventory_run confirms that separate clock owner's review in paired_seal under its independent authority. All require confirmed=true; portfolio clock confirmation also requires its original order_step_id. Lost replies require reconciliation of the original key without repeated insertion or unpause."
 )]
 pub fn fortress_commit(
     session_id: String,
     paired_seal: String,
     confirmed: bool,
     scope: Option<String>,
+    order_step_id: Option<u32>,
 ) -> String {
     with_session(session_id, "fortress.commit", None, || {
-        commit_action(scope.as_deref(), &paired_seal, confirmed)
+        commit_action(scope.as_deref(), &paired_seal, confirmed, order_step_id)
     })
 }
 #[tool(
@@ -627,8 +702,12 @@ pub fn fortress_wait(session_id: String, max_wall_millis: Option<u64>) -> String
 #[tool(
     description = "scope=step (default) cancels a prepared step. scope=run or scope=inventory_run retires the selected prepared clock or requests its retained native safety pause under its independent authority. scope=session releases local resources without erasing custody or claiming effects were cancelled."
 )]
-pub fn fortress_cancel(session_id: String, scope: Option<String>) -> String {
-    if scope.as_deref() == Some("session") {
+pub fn fortress_cancel(
+    session_id: String,
+    scope: Option<String>,
+    order_step_id: Option<u32>,
+) -> String {
+    if scope.as_deref() == Some("session") && order_step_id.is_none() {
         let result = (|| -> Result<String> {
             let id = self::session_id(&session_id)?;
             let mut guard = session_lock()?;
@@ -645,7 +724,7 @@ pub fn fortress_cancel(session_id: String, scope: Option<String>) -> String {
         return result.unwrap_or_else(|cause| unbound("fortress.cancel", &cause));
     }
     with_session(session_id, "fortress.cancel", None, || {
-        cancel_action(scope.as_deref())
+        cancel_action(scope.as_deref(), order_step_id)
     })
 }
 #[tool(
@@ -675,7 +754,7 @@ pub fn run_stdio() {
     let server = ServerBuilder::new("dfmcp-live-combined-production-dev", env!("CARGO_PKG_VERSION"))
         .tool(FortressOpenSession).tool(FortressObserve).tool(FortressQuery).tool(FortressPlan).tool(FortressCommit)
         .tool(FortressWait).tool(FortressCancel).tool(FortressCheckpoint).tool(FortressRestore).tool(FortressExplain).tool(FortressDoctor)
-        .instructions("Unadmitted development only. Observe, compile one original labor and finite-order plan, prepare and confirm each dependency-satisfied step, and reconcile uncertainty under its original key. All-applied does not prove the original goal or physical goods. Wait joins current labor with the original retained-order completion or explicitly selected inventory goal under the original stability requirement. Separately configured clock control can prepare kind=run and confirm scope=run for either objective while the exact original order remains eligible; after a True original labor/inventory sample, kind/scope=inventory_run can finish explicitly selected inventory stability after native order retirement. Both preserve the original deadline and exclude competing pending clocks; no automatic advancement or repeated unpause is permitted. Unresolved runs must reconcile before paused sampling. A disappeared order leaves default completion unknown. Inventory presence does not prove order-attributed production. Parent proof is process-local and withdrawn on failure or reopening.")
+        .instructions("Unadmitted development only. Observe, compile one original labor and finite-order plan or an explicit portfolio of up to four furniture orders, prepare and confirm each dependency-satisfied step, and reconcile uncertainty under its original key. All-applied does not prove the original goal or physical goods. Wait joins current labor with the original retained-order completion or explicitly selected inventory goal under the original stability requirement. Separately configured clock control can prepare kind=run and confirm scope=run for either objective while the exact original order remains eligible; after a True original labor/inventory sample, kind/scope=inventory_run can finish explicitly selected inventory stability after native order retirement. Portfolio clock Plan/Commit/Cancel calls require the original order_step_id; Query can select that leaf. Portfolio Wait samples one original leaf per call and proves the parent only after a coherent complete cohort. Both clock owners preserve every original deadline and exclude competing pending clocks across all leaves; no automatic advancement or repeated unpause is permitted. Unresolved runs must reconcile before paused sampling. A disappeared order leaves default completion unknown. Inventory presence does not prove order-attributed production. Parent proof is process-local and withdrawn on failure or reopening.")
         .build();
     crate::run_modern_stdio(server);
 }
@@ -718,7 +797,7 @@ mod tests {
             RESPONSE_RESERVE + OPEN_INSPECTION_BYTES
         );
         assert_eq!(work.max_game_ticks, 0);
-        assert_eq!(work.max_actions, 2);
+        assert_eq!(work.max_actions, 5);
         assert!(budgets(Some(60_001), None, None, None).is_err());
         assert!(budgets(None, Some(MAX_BYTES + 1), None, None).is_err());
         assert!(budgets(None, None, Some(MAX_OUTPUT - 1), None).is_err());
@@ -736,7 +815,7 @@ mod tests {
             "game_ticks":5,"wall_millis":1000});
         assert!(matches!(
             plan_action(&request.to_string())?,
-            Action::PlanRun(_)
+            Action::PlanRun(..)
         ));
         for field in [
             "path",
@@ -755,43 +834,46 @@ mod tests {
             assert!(plan_action(&invalid.to_string()).is_err());
         }
         assert!(matches!(
-            commit_action(None, &seal, true)?,
+            commit_action(None, &seal, true, None)?,
             Action::Commit(..)
         ));
         assert!(matches!(
-            commit_action(Some("step"), &seal, false)?,
+            commit_action(Some("step"), &seal, false, None)?,
             Action::Commit(_, false)
         ));
         assert!(matches!(
-            commit_action(Some("run"), &seal, true)?,
+            commit_action(Some("run"), &seal, true, None)?,
             Action::CommitRun(..)
         ));
-        assert!(matches!(cancel_action(Some("run"))?, Action::CancelRun));
+        assert!(matches!(
+            cancel_action(Some("run"), None)?,
+            Action::CancelRun(..)
+        ));
         for scope in ["goal", "all", "session"] {
-            assert!(commit_action(Some(scope), &seal, true).is_err());
-            assert!(cancel_action(Some(scope)).is_err());
+            assert!(commit_action(Some(scope), &seal, true, None).is_err());
+            assert!(cancel_action(Some(scope), None).is_err());
         }
-        assert!(commit_action(Some("run"), "invalid", true).is_err());
-        assert!(Action::CommitRun(digest(&seal)?, true).may_dispatch());
-        assert!(Action::CancelRun.may_dispatch());
-        assert!(Action::CancelRun.may_need_reconciliation());
+        assert!(commit_action(Some("run"), "invalid", true, None).is_err());
+        assert!(Action::CommitRun(digest(&seal)?, true, None).may_dispatch());
+        assert!(Action::CancelRun(None).may_dispatch());
+        assert!(Action::CancelRun(None).may_need_reconciliation());
         let mut inventory = request;
         inventory["kind"] = json!("inventory_run");
         assert!(matches!(
             plan_action(&inventory.to_string())?,
-            Action::PlanInventoryRun(_)
+            Action::PlanInventoryRun(..)
         ));
         assert!(matches!(
-            commit_action(Some("inventory_run"), &seal, true)?,
+            commit_action(Some("inventory_run"), &seal, true, None)?,
             Action::CommitInventoryRun(..)
         ));
         assert!(matches!(
-            cancel_action(Some("inventory_run"))?,
-            Action::CancelInventoryRun
+            cancel_action(Some("inventory_run"), None)?,
+            Action::CancelInventoryRun(..)
         ));
-        assert!(Action::CommitInventoryRun(digest(&seal)?, true).may_dispatch());
-        assert!(Action::CancelInventoryRun.may_dispatch());
-        assert!(Action::CancelInventoryRun.may_need_reconciliation());
+        assert!(Action::CommitInventoryRun(digest(&seal)?, true, None).may_dispatch());
+        assert!(Action::CancelInventoryRun(None).may_dispatch());
+        assert!(Action::CancelInventoryRun(None).may_need_reconciliation());
         Ok(())
     }
 

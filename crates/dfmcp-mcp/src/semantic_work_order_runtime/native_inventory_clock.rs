@@ -239,9 +239,30 @@ pub(super) fn open(
     mode: Mode,
     canonical: &OperationContext,
 ) -> Result<Option<RunJournal<PrivateRunFile>>> {
+    open_at(
+        config,
+        mode,
+        canonical,
+        &config.path("inventory-clock.journal"),
+        config.initialize,
+        config
+            .inventory_clock
+            .as_ref()
+            .and_then(|clock| clock.journal_id),
+    )
+}
+
+pub(super) fn open_at(
+    config: &Arc<Config>,
+    mode: Mode,
+    canonical: &OperationContext,
+    path: &std::path::Path,
+    initialize: bool,
+    expected_id: Option<Digest32>,
+) -> Result<Option<RunJournal<PrivateRunFile>>> {
     config.current()?;
     let Some(clock) = &config.inventory_clock else {
-        match std::fs::symlink_metadata(config.path("inventory-clock.journal")) {
+        match std::fs::symlink_metadata(path) {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             _ => {
                 return Err(denied(
@@ -255,7 +276,7 @@ pub(super) fn open(
         Mode::Control if Config::inventory_clock_enabled() => RunMode::Control,
         _ => RunMode::Recover,
     };
-    if config.initialize && mode != RunMode::Control {
+    if initialize && mode != RunMode::Control {
         return Err(denied(
             "inventory clock initialization requires independent operator inventory clock control",
         ));
@@ -271,15 +292,23 @@ pub(super) fn open(
         },
     )?;
     let inspect = work.reserve(8 * MIB)?;
+    let mut journal_context = work.rest()?;
+    if initialize && path != config.path("inventory-clock.journal") {
+        let mut identity = b"dfmcp-portfolio-inventory-clock-slot/1\0".to_vec();
+        identity.extend_from_slice(&journal_context.request_id.get().to_be_bytes());
+        identity.extend_from_slice(path.as_os_str().as_encoded_bytes());
+        journal_context.request_id =
+            dfmcp_core::RequestId::new(Digest32::of_bytes(&identity).first_u128().max(1));
+    }
     let mut journal = open_private_run_journal_exact(
-        &config.path("inventory-clock.journal"),
-        &work.rest()?,
+        &path,
+        &journal_context,
         mode,
         Some(binding.clone()),
-        config.initialize,
+        initialize,
     )?;
     journal.records(&work.narrow(&inspect)?)?;
-    if journal.binding() != &binding || clock.journal_id.is_some_and(|id| id != journal.id()) {
+    if journal.binding() != &binding || expected_id.is_some_and(|id| id != journal.id()) {
         return Err(denied(
             "inventory clock custody differs from its exact source or externally retained journal identity",
         ));

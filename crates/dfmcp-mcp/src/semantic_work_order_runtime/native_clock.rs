@@ -225,16 +225,34 @@ pub(super) fn open(
     mode: Mode,
     c: &OperationContext,
 ) -> Result<Option<OrderRunJournal<PrivateOrderRunFile>>> {
+    open_at(
+        config,
+        mode,
+        c,
+        &config.path("clock.journal"),
+        config.initialize,
+        config.clock.as_ref().and_then(|clock| clock.journal_id),
+    )
+}
+
+pub(super) fn open_at(
+    config: &Arc<Config>,
+    mode: Mode,
+    c: &OperationContext,
+    path: &std::path::Path,
+    initialize: bool,
+    expected_id: Option<Digest32>,
+) -> Result<Option<OrderRunJournal<PrivateOrderRunFile>>> {
     config.current()?;
     let fortress = FortressIdentity::new(&config.sources.world_folder, config.sources.site_id)?;
     authorize(c, &fortress, false)?;
     let mut work = Work::new(c)?;
-    let Some(clock) = config.clock.as_ref() else {
+    let Some(_clock) = config.clock.as_ref() else {
         // Omission is compatible with old, clock-free custody only. An existing
         // clock history may retain an unresolved unpause and cannot disappear
         // from the handoff merely because the operator omitted its config.
         work.reserve(4096)?;
-        match std::fs::symlink_metadata(config.path("clock.journal")) {
+        match std::fs::symlink_metadata(path) {
             Err(cause) if cause.kind() == std::io::ErrorKind::NotFound => {}
             _ => {
                 return Err(denied(
@@ -254,13 +272,13 @@ pub(super) fn open(
         Mode::Control if Config::clock_enabled() => OrderRunMode::Control,
         Mode::Control => OrderRunMode::Recover,
     };
-    if config.initialize && mode != OrderRunMode::Control {
+    if initialize && mode != OrderRunMode::Control {
         return Err(denied(
             "initial clock custody requires explicit clock control",
         ));
     }
     let view_context = work.reserve(3 * MIB)?;
-    let binding = if config.initialize {
+    let binding = if initialize {
         let source = connect(config, &work.reserve(3 * MIB)?)?;
         Some(OrderRunBinding::from_source(&source)?)
     } else {
@@ -270,18 +288,26 @@ pub(super) fn open(
         None
     };
     config.current()?;
-    if config.initialize && !Config::clock_enabled() {
+    if initialize && !Config::clock_enabled() {
         return Err(denied(
             "operator clock authority was revoked during initialization",
         ));
     }
+    let mut journal_context = work.rest()?;
+    if initialize && path != config.path("clock.journal") {
+        let mut identity = b"dfmcp-portfolio-clock-slot/1\0".to_vec();
+        identity.extend_from_slice(&journal_context.request_id.get().to_be_bytes());
+        identity.extend_from_slice(path.as_os_str().as_encoded_bytes());
+        journal_context.request_id =
+            dfmcp_core::RequestId::new(Digest32::of_bytes(&identity).first_u128().max(1));
+    }
     let mut journal = open_private_order_journal_exact(
-        &config.path("clock.journal"),
+        &path,
         &fortress,
-        &work.rest()?,
+        &journal_context,
         mode,
         binding,
-        config.initialize,
+        initialize,
     )?;
     let view = journal.view(&work.narrow(&view_context)?)?;
     identity(
@@ -290,7 +316,7 @@ pub(super) fn open(
         Some(view.binding.endpoint()),
         view.binding.fortress(),
     )?;
-    if clock.journal_id.is_some_and(|expected| expected != view.id) {
+    if expected_id.is_some_and(|expected| expected != view.id) {
         return Err(denied(
             "clock journal differs from the externally retained identity",
         ));

@@ -278,6 +278,9 @@ class Peer:
         finally:
             self.socket.close()
 
+    def decode_request(self, plugin, raw):
+        return workforce_fields(raw) if plugin == 'dfmcp_workforce_v1_17' else fields(raw)
+
     def connection(self, stream):
         try:
             with stream:
@@ -290,9 +293,7 @@ class Peer:
                     except EOFError: break
                     assert pad == 0 and 0 <= size <= 131072
                     wire_request = receive(stream, size)
-                    req = (workforce_fields(wire_request)
-                           if method and bound[method][0] == 'dfmcp_workforce_v1_17'
-                           else fields(wire_request))
+                    req = self.decode_request(bound[method][0], wire_request) if method else fields(wire_request)
                     if method == 0:
                         op, plugin = req[1].decode(), req[4].decode()
                         ident = len(bound) + 2

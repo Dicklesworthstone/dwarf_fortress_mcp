@@ -28,7 +28,10 @@ impl ProductionInventoryClock {
             inspection_required: false,
         }
     }
-    fn bind_target(&mut self, target: ClockTarget) -> Result<()> {
+    pub(super) fn needs_target(&self) -> bool {
+        self.target.is_none()
+    }
+    pub(super) fn bind_target(&mut self, target: ClockTarget) -> Result<()> {
         if self
             .target
             .as_ref()
@@ -99,7 +102,7 @@ impl ProductionInventoryClock {
         }
         json!(false)
     }
-    fn to_json(&self) -> Value {
+    pub(super) fn to_json(&self) -> Value {
         self.latest.as_ref().map_or(Value::Null, |view| {
             let mut value = view.to_json();
             value["source"] = json!("run/1.13");
@@ -182,8 +185,9 @@ impl Runtime {
             .original
             .as_ref()
             .ok_or_else(|| invalid("original plan absent"))?;
-        if ObservedInventoryObjective::from_selected_plan(original, result.review().step_id())
-            .is_none()
+        if Some(result.review().step_id()) != self.selected_order_step()
+            || ObservedInventoryObjective::from_selected_plan(original, result.review().step_id())
+                .is_none()
         {
             return Ok(());
         }
@@ -210,11 +214,9 @@ impl Runtime {
         let Some(original) = &self.original else {
             return Ok(());
         };
-        if !original
-            .steps
-            .iter()
-            .any(|step| ObservedInventoryObjective::from_selected_plan(original, step.id).is_some())
-        {
+        if !self.selected_order_step().is_some_and(|step| {
+            ObservedInventoryObjective::from_selected_plan(original, step).is_some()
+        }) {
             return Ok(());
         }
         let ready = self
@@ -258,6 +260,21 @@ impl Runtime {
     pub(super) fn reconcile_inventory_clock(&mut self, work: &mut Work) -> Result<()> {
         if self.inventory_clock.is_none() {
             return Ok(());
+        }
+        if self.portfolio.is_some()
+            && self
+                .inventory_clock
+                .as_ref()
+                .is_some_and(|clock| !clock.has_runs())
+        {
+            self.refresh_inventory_clock_view(&work.take(VIEW_BYTES)?)?;
+            if self
+                .inventory_clock
+                .as_ref()
+                .is_some_and(|clock| !clock.has_runs())
+            {
+                return Ok(());
+            }
         }
         self.restore_inventory_clock_target(work)?;
         self.refresh_inventory_clock_view(&work.take(VIEW_BYTES)?)?;
@@ -323,7 +340,7 @@ impl Runtime {
             .latest()
             .filter(|sample| {
                 sample.anchor.tick == self.anchor.tick
-                    && sample.anchor.cursor == self.anchor.cursor
+                    && (self.portfolio.is_some() || sample.anchor.cursor == self.anchor.cursor)
                     && sample.current_goal == PredicateTruth::True
                     && sample.failure_predicate != Some(PredicateTruth::True)
             })
@@ -396,6 +413,7 @@ impl Runtime {
         }
         c.authorize(Capability::ControlClock, RiskTier::Guarded, &[], None)?;
         let mut work = Work::new(c)?;
+        self.verify_other_portfolio_clocks(&mut work)?;
         let current = self.inspect_original_goal_clock_target(
             &work.take(TARGET_BYTES)?,
             ClockTarget::for_selected_original,
@@ -484,6 +502,7 @@ impl Runtime {
         advancing: bool,
     ) -> Result<View> {
         self.check_inventory_clock_control(c, true)?;
+        self.clear_portfolio_cohort();
         let mut work = Work::new(c)?;
         self.refresh_inventory_clock_view(&work.take(VIEW_BYTES)?)?;
         if self.clock.is_some() {
@@ -509,6 +528,14 @@ impl Runtime {
         };
         let run_context = work.take(ACTION_BYTES)?;
         let error_view = work.take(VIEW_BYTES)?;
+        if self.portfolio.is_some()
+            && self
+                .inventory_clock
+                .as_ref()
+                .is_some_and(|clock| clock.target.is_none())
+        {
+            self.restore_inventory_clock_target(&mut work)?;
+        }
         let target = self.sample_inventory_clock_target(&work.rest(MAX_BYTES)?, reviewing)?;
         work.context.anchor = self.anchor;
         let source_context = self
@@ -527,6 +554,7 @@ impl Runtime {
             .ok_or_else(|| denied("inventory clock owner absent"))?;
         clock.inspection_required = true;
         if advancing {
+            self.withdraw_portfolio_current();
             self.inventory_clock_invalidates_goal = true;
             self.parent_goal = None;
         }
@@ -551,6 +579,7 @@ impl Runtime {
         // The guard observes before unpause. It cannot publish a current proof
         // after an attempted advancing effect, including a lost native reply.
         if advancing {
+            self.withdraw_portfolio_current();
             self.inventory_clock_invalidates_goal = true;
             self.parent_goal = None;
             if let Some(basis) = &mut self.basis {
@@ -618,6 +647,7 @@ impl Runtime {
             .orders
             .inventory_clock_context(&canonical, true)?;
         self.inventory_clock_invalidates_goal = true;
+        self.withdraw_portfolio_current();
         self.parent_goal = None;
         let clock = self
             .inventory_clock

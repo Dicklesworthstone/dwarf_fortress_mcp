@@ -5,7 +5,7 @@
 use std::path::Path;
 
 use dfmcp_core::{ObservationCursor, StateAnchor};
-use dfmcp_intent::ObligationStatus;
+use dfmcp_intent::{Action, ObligationStatus};
 use dfmcp_world::{EvidencePolicy, PredicateTruth};
 
 use crate::build_placement::journal::private_file::PrivateBuildFile;
@@ -22,6 +22,7 @@ use super::*;
 /// passed to the legacy one-step APIs or detached from its predecessor custody.
 pub struct SelectedWorkOrderGoalMonitor<H> {
     pub(super) step: StepId,
+    pub(super) portfolio: bool,
     pub(super) archive: PlanArchiveSeal,
     pub(super) dependencies: Dependencies,
     pub(super) parent_workforce_floor: Option<crate::workforce_control::WorkforceCapture>,
@@ -41,6 +42,11 @@ impl<H: EffectJournalStorage> SelectedWorkOrderGoalMonitor<H> {
     }
     pub fn review_seal(&self) -> Digest32 {
         self.inner.review_seal()
+    }
+    /// The allocation retained by the exact original selected review, used only
+    /// for an independently authorized whole-portfolio observation bracket.
+    pub fn native_order_id(&self) -> u32 {
+        self.inner.native_order_id()
     }
     /// `current_goal` refers to the selected step. `plan_terminal` retains the
     /// separate truth of the complete parent's original terminal predicate.
@@ -284,6 +290,7 @@ where
                 GoalHistoryStore::open_selected(storage, journal, review, initialize, read_only, c)
             },
             authorize_history,
+            false,
         )
     }
 
@@ -309,6 +316,48 @@ where
                 )
             },
             authorize_history,
+            false,
+        )
+    }
+
+    /// Open one exact original portfolio leaf in its own strict source-cursor
+    /// lane. The complete parent owns at most four such lanes; this policy is
+    /// never reconstructed from caller-supplied history or a selected result.
+    pub fn open_private_portfolio_order_goal_monitor<A>(
+        &mut self,
+        step: StepId,
+        path: &Path,
+        initialize: bool,
+        read_only: bool,
+        context: &OperationContext,
+        authorize_history: A,
+    ) -> Result<SelectedWorkOrderGoalMonitor<PrivateBuildFile>>
+    where
+        A: FnMut(&WorkOrderGoalProjection, &OperationContext) -> Result<EvidencePolicy>,
+    {
+        let first = self.original.steps.first().ok_or_else(custody)?;
+        if !(2..=5).contains(&self.original.steps.len())
+            || !matches!(first.action, Action::SetLabor { .. })
+            || self.original.steps.iter().skip(1).any(|leaf| {
+                !matches!(leaf.action, Action::CreateWorkOrder { .. })
+                    || leaf.depends_on != [first.id]
+            })
+        {
+            return Err(error(
+                ErrorCode::AdapterRejected,
+                "portfolio histories require one labor and at most four original order leaves",
+            ));
+        }
+        self.begin_selected_order_goal_with(
+            step,
+            context,
+            |journal, review, c| {
+                open_private_selected_goal_history_store(
+                    path, journal, review, initialize, read_only, c,
+                )
+            },
+            authorize_history,
+            true,
         )
     }
 
@@ -318,6 +367,7 @@ where
         context: &OperationContext,
         open_history: O,
         authorize_history: A,
+        portfolio: bool,
     ) -> Result<SelectedWorkOrderGoalMonitor<H>>
     where
         H: EffectJournalStorage,
@@ -339,6 +389,7 @@ where
                 &remaining,
                 open_history,
                 authorize_history,
+                portfolio,
             );
             self.retain_floor(&mut call);
             let inner = inner?;
@@ -353,6 +404,7 @@ where
                 .authorize(Capability::Observe, RiskTier::ReadOnly, &[], None)?;
             Ok(SelectedWorkOrderGoalMonitor {
                 step,
+                portfolio,
                 archive: self.archive,
                 dependencies,
                 parent_workforce_floor: None,

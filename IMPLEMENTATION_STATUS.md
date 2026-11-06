@@ -1,5 +1,54 @@
 # Implementation Status
 
+## Unreleased — Complete bounded native production portfolios
+
+The combined labor/order development host accepts an explicit `kind: portfolio`
+request with one original workforce assignment and one to four distinct finite
+bed, chair, door or table orders. Each original leaf retains its exact StepId,
+key, dependency, receipt, goal history and independently reviewed clock custody.
+Default retained-order completion and explicit inventory-minimum objectives can
+coexist. The legacy single-order request and its identity domains are unchanged.
+
+Original effects advance through the durable execution frontier. A lost middle
+insertion is reconciled under its original key before later orders can proceed.
+Portfolio clock requests, commits and cancellation require the exact original
+`order_step_id`; another leaf's review cannot authorize the selected effect.
+At most one clock may remain pending across all leaves and both clock families.
+Recovery retains every original history and configured journal, restores no
+review confirmation and performs no automatic redispatch.
+
+One foreground Wait samples one original goal. Complete-parent proof requires
+the whole bounded cohort inside matching before/after progress captures, with
+identical current workforce and operations evidence at one paused tick. Each
+leaf has its own contiguous history lane; reviewed clock advancement withdraws
+current certificates without resetting otherwise valid unfinished stability.
+Failed observations interrupt stability, and changed labor, inventory, source,
+custody or order presence cannot be hidden by an older leaf's success. Absolute
+deadlines and sampled-stability requirements are never extended. Retired default
+orders remain Unknown; an explicit inventory goal still proves observed stock,
+not which order produced it.
+
+Four original leaves with both clock families reopen within the unchanged
+default 8 GiB logical work budget. Shared immutable parent reads and a derived
+16 MiB allowance for each additional bounded journal avoid repeated excessive
+reservations while preserving every original selected custody check.
+
+Executed on Rust 1.101.0-nightly (249c1e4e3): all nine new portfolio and ten
+existing single-order public-handler/TCP component scenarios pass, along with
+49 presentation/Agent Turn/budget component cases and all 65 existing public
+semantic-work-order adapter integration tests. The portfolio campaign covers
+complete four-order proof, partial/changed evidence, separate original clocks,
+tight shared deadlines, wrong selectors, lost insertion/unpause replies and
+exact offline recovery with no native contact or custody writes. The formatted
+source was regenerated and rebuilt before the final two TCP campaigns. The
+component executes the actual foreground handlers, Runtime, NativeShell and
+Agent Turn with real private stores and synthetic TCP peers; modern tool macros,
+stdio assembly and the asynchronous runtime gate are excluded. No full MCP or
+live-game qualification or native admission is claimed. A bounded actual MCP
+library check timed out after 300 seconds while compiling unchanged dependencies,
+before reaching the MCP crate. Scoped Rust formatting, Python/JSON parsing and
+diff whitespace checks pass. See `docs/COMBINED_PRODUCTION_MCP.md`.
+
 ## Unreleased — Owned civilian recovery and reviewed safe release
 
 The default laboratory keeps civilian recovery with the private/shared world

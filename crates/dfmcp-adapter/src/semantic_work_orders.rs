@@ -404,7 +404,7 @@ impl Call {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 struct NativeClock {
     epoch: u64,
     generation: u64,
@@ -425,7 +425,7 @@ impl NativeClock {
 /// This owner does not issue restore epochs or bridge incarnations. A retained
 /// source binds one of each; a separately established recovery/session owns any
 /// transition. Canonical cursors and native intervention sequences stay distinct.
-#[derive(Clone, Default)]
+#[derive(Clone, Debug, Default)]
 struct SourceFloor {
     canonical: Option<StateAnchor>,
     native: Option<NativeClock>,
@@ -596,6 +596,10 @@ pub struct SemanticWorkOrderSession<S, B, N> {
     // A foreground proof streak belongs to exactly one current monitor and
     // this opening. A new monitor or reopened session cannot reuse an old streak.
     goal_owner: Option<std::sync::Arc<()>>,
+    // Only the explicit portfolio history constructor uses these independent
+    // review-bound owners. Replacing the same review invalidates its old owner;
+    // native and authorization floors remain shared across all original leaves.
+    portfolio_goal_owners: std::collections::BTreeMap<Digest32, std::sync::Arc<()>>,
 }
 impl<S: EffectJournalStorage, B: EffectJournalStorage, N: WorkOrderSource>
     SemanticWorkOrderSession<S, B, N>
@@ -611,6 +615,7 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage, N: WorkOrderSource>
             attached: None,
             floor: SourceFloor::default(),
             goal_owner: None,
+            portfolio_goal_owners: std::collections::BTreeMap::new(),
         };
         out.view(&mut Call::new(c)?)?;
         Ok(out)
