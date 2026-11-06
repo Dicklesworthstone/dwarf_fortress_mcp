@@ -120,9 +120,9 @@ it does not change the labor assignment or remove the manager order.
 ## Advance the original production order with a reviewed clock
 
 Clock control uses the existing `order-run/1.14` native owner and a separate
-private `clock.journal` under the order custody directory. It applies only after
-both original effects settle and the original request explicitly selected an
-inventory objective. The complete parent archive, selected StepId and native
+private `clock.journal` under the order custody directory. It applies after
+both original effects settle, for either the default retained-order completion
+goal or an explicitly selected inventory objective. The complete parent archive, selected StepId and native
 key, paired review, Created receipt, allocation identity and predecessor custody
 remain bound to every run. The original deadline, cadence and sampled stability
 are unchanged.
@@ -153,20 +153,23 @@ the current response. Prepare through the existing Plan tool:
 }
 ```
 
-Preparation acquires fresh joined labor/inventory evidence and a paused native
-order capture. It refuses a completed inventory obligation, a retired/unlinked
+Preparation acquires fresh joined labor and selected-goal evidence and a paused native
+order capture. It refuses a completed original obligation, a retired/unlinked
 order, expired original time, unresolved clock, replaced custody or missing
 independent clock authority. Both native prepare and commit recheck the exact
-original custody after the durable clock marker. False stock can advance toward
-the requested goods; true stock can advance unfinished sampled stability while
-the original native order remains eligible.
+original custody after the durable clock marker. A pending finite order can
+advance toward completion. A retained validated, inactive order with zero
+remaining work can advance the original unfinished sampled stability interval;
+unexpected reactivation stops that run and does not prove the goal. For an
+explicit inventory objective, the same owner can advance toward the requested
+stock or finish sampled stability while the original native order remains eligible.
 
 Review `clock.active_run`, then Commit with `scope="run"`, its `review_seal` in
 `paired_seal`, and `confirmed=true`. That confirms only this bounded run. The
 clock has at most 32 retained runs; each is limited by the session budget and
 the remaining original deadline. A native stopping receipt is historical clock
 evidence. Commit withdraws current goal proof, and a subsequent Wait must obtain
-fresh coherent labor and inventory evidence before reporting success.
+fresh coherent labor and selected-goal evidence before reporting success.
 
 Lost replies retain the original run key. Wait queries that key without another
 unpause. While the native owner may still be running, goal reads and new runs
@@ -183,9 +186,11 @@ recovery reference. Missing, omitted or replaced clock custody refuses; recovery
 never creates a replacement journal. Offline opening and inspection perform no
 native contact and restore no current goal proof or local clock review.
 
-The order clock requires the original native order to remain eligible. The
-independent inventory clock below handles unfinished sampled stability after
-normal engine retirement.
+The order clock requires the original native order to remain eligible. A
+retired default-order goal remains unknown, and no clock receipt can turn its
+disappearance into completion. The independent inventory clock below handles
+unfinished sampled stability after normal engine retirement only when the
+original request explicitly selected the inventory objective.
 
 ## Finish original inventory stability after order retirement
 
@@ -370,10 +375,13 @@ proves the observed retained order state, without attributing produced goods.
 `history` have the same current-versus-historical meaning described below for
 inventory goals. The original deadline, cadence and sampled stability apply;
 repeated reads at one tick cannot complete advancing stability. Agent Turn
-recommends bounded Wait calls while this requirement remains unfinished.
-Current game-time progression must be managed separately for this default
-objective; the optional reviewed clocks retain their explicit inventory-objective
-requirement.
+recommends Wait for a fresh joined sample and, when the separately authorized
+order clock is configured, a bounded `kind="run"` preparation for the original
+order. That review and explicit confirmation advance time toward completion or
+the remaining stability interval within the unchanged deadline. Without clock
+authority or a positive session game-tick budget, game-time progression must be
+managed separately. The independent `inventory_run` clock continues to require
+an explicitly selected original inventory objective.
 
 The selected object alone keeps `original_goal_proven=false`. A fresh current
 labor bracket can establish the whole parent under

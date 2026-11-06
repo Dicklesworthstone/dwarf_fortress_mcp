@@ -39,10 +39,21 @@ fn selected(plan: &PreparedPlan) -> Option<(StepId, SelectedObjective)> {
 
 /// Empty initialization has a fixed bound; a retained history may use the
 /// caller's larger configured allowance. Custody/output reservations have
-/// already been removed, and this does not allocate those bytes eagerly.
+/// already been removed, and this does not allocate those bytes eagerly. Keep
+/// enough of the ordinary allowance for the first joined sample when an order
+/// clock has also prepaid its separate native and original-custody checks.
+///
+/// The host has one labor predecessor. Its 144 MiB inventory reservation pays
+/// two native views, bounding each view cost below 72 MiB. Selected custody,
+/// predecessor checks and final publication therefore reserve at most 937 MiB:
+/// 160 MiB inventories + 32 MiB order reattachment/inspection + 162 MiB final
+/// publication + eight workforce views + 7 MiB local work. Empty history adds
+/// the 129 MiB bounded reader, three order views and two small header checks,
+/// keeping the complete initialization below 1080 MiB. Nonempty replay keeps
+/// its separate caller-sized allowance because it can reproject many captures.
 pub(super) fn history_budget(work: &mut Work, initialize: bool) -> Result<OperationContext> {
     if initialize {
-        work.take(2 * 1024 * MIB)
+        work.take(1536 * MIB)
     } else {
         work.rest(MAX_BYTES)
     }

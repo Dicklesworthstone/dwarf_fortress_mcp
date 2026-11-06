@@ -438,7 +438,10 @@ fn encode(
         && view["frontier"]["all_applied"] == true
         && view["frontier"]["needs_reconciliation"] != true
         && selected_goal["scope"] == "selected_original_order_step"
-        && selected_goal["kind"] == "observed_inventory_minimum"
+        && matches!(
+            selected_goal["kind"].as_str(),
+            Some("observed_inventory_minimum" | "retained_order_completion")
+        )
         && !selected_proven
         && selected_goal["terminal_failure"] != true
         && selected_goal["history"]["fenced"] != true
@@ -446,7 +449,9 @@ fn encode(
     let clock_goal_ready = |owner: ClockOwner| {
         current_goal_ready
             && if owner == INVENTORY_CLOCK {
-                selected_goal["current_truth"] == "true" && parent_truth == Some("true")
+                selected_goal["kind"] == "observed_inventory_minimum"
+                    && selected_goal["current_truth"] == "true"
+                    && parent_truth == Some("true")
             } else {
                 selected_goal["receipt_linked"] == true
                     && ((selected_goal["current_truth"] == "false"
@@ -641,7 +646,11 @@ fn encode(
     } else if let Some(request) = &clock_proposal {
         Some((
             "fortress_plan",
-            if selected_goal["current_truth"] == "true" {
+            if retained_order && selected_goal["current_truth"] == "true" {
+                "Prepare bounded game-time progress for the original retained-order stability interval, then review its separate clock seal."
+            } else if retained_order {
+                "Prepare a bounded run for the pending original finite order, then review its separate clock seal."
+            } else if selected_goal["current_truth"] == "true" {
                 "Prepare bounded game-time progress for the original inventory stability interval, then review its separate clock seal."
             } else {
                 "Prepare a bounded run for the pending original inventory minimum, then review its separate clock seal."
@@ -658,7 +667,9 @@ fn encode(
     {
         Some((
             "fortress_wait",
-            if retained_order {
+            if retained_order && view["clock"].is_object() {
+                "Take one fresh coherent sample of the original labor and retained-order completion goal; disappearance is unknown and wait does not start a clock run."
+            } else if retained_order {
                 "Take one coherent sample of the original labor and retained-order completion goal; disappearance is unknown and additional stability samples require separately managed game-time progress."
             } else if CLOCK_OWNERS
                 .iter()

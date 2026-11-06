@@ -71,10 +71,24 @@ fn prepaid_work_cannot_be_reused_or_renew_the_operation_deadline() -> Result<()>
     recovery.until = Instant::now();
     assert!(recovery.narrow(&final_check).is_err());
     let mut initial = Work::new(&large)?;
-    assert_eq!(
-        goals::history_budget(&mut initial, true)?.budget.max_bytes,
-        2 * 1024 * MIB
-    );
+    let initial = goals::history_budget(&mut initial, true)?.budget.max_bytes;
+    assert_eq!(initial, 1536 * MIB);
+    // Cross-check the empty-history reservation against the bounded native
+    // custody path and the actual child codec limits, not the size of this
+    // fixture's tiny journals. A 144 MiB semantic workforce inventory charges
+    // two native views, so each subsequent native-view cost is below 72 MiB.
+    let selected_custody = (160 + 32 + 162 + 7 + 8 * 72) * MIB;
+    let order_view = 2 * dfmcp_adapter::semantic_work_orders::store::MAX_STORE_BYTES as u64
+        + 2 * dfmcp_adapter::semantic_work_orders::store::MAX_ASSOCIATIONS as u64
+            * dfmcp_adapter::work_order_control::MAX_RECORD_BYTES as u64
+        + 4096;
+    let history_reader =
+        8 * dfmcp_adapter::semantic_work_orders::goal_history::MAX_GOAL_HISTORY_BYTES as u64 + MIB;
+    let header_checks = 2 * (MIB + 112 + 8192);
+    let maximum_initialization =
+        selected_custody + history_reader + 3 * order_view + header_checks + 1;
+    assert!(maximum_initialization < 1080 * MIB);
+    assert!(initial > maximum_initialization);
     Ok(())
 }
 
@@ -222,8 +236,11 @@ fn machine_host_contract_preserves_bounded_development_scope() -> Result<()> {
     assert_eq!(clock["protocol"], "order-run/1.14");
     assert_eq!(clock["parent_recovery_field"], "clock_journal_id");
     assert_eq!(clock["new_unpause_attempts_per_run"], 1);
+    assert_eq!(
+        clock["supported_original_objectives"],
+        json!(["retained_order_completion", "observed_inventory_minimum"])
+    );
     for field in [
-        "requires_explicit_original_inventory_objective",
         "requires_settled_original_effects",
         "original_deadline_cadence_stability_unchanged",
         "original_custody_rechecked_after_durable_clock_marker",
@@ -234,9 +251,11 @@ fn machine_host_contract_preserves_bounded_development_scope() -> Result<()> {
         assert_eq!(clock[field], true, "{field}");
     }
     for field in [
+        "requires_explicit_original_inventory_objective",
         "local_review_restored_after_restart_or_failed_publication",
         "native_clock_receipt_proves_current_pause_or_goal",
         "supports_retired_original_order",
+        "existing_selected_target_digest_bytes_changed",
         "legacy_single_step_clock_target_bytes_changed",
     ] {
         assert_eq!(clock[field], false, "{field}");

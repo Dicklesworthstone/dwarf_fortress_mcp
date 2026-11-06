@@ -1,5 +1,36 @@
 # Implementation Status
 
+## Unreleased — Bounded progress for default combined production orders
+
+The combined labor/order development runtime now prepares and confirms the
+existing order-run/1.14 clock for the original default retained-order-completion
+goal, as well as explicit inventory-minimum goals. Agent Turn supplies the
+separate Plan/Commit review for pending work and the original sampled stability
+interval. Exact original archive, selected step/key, Created receipt, labor
+predecessors, current authority, absolute deadline and cadence remain required.
+Retirement is still Unknown for default order completion; the independent
+inventory_run clock still requires an explicit original inventory objective.
+No clock target bytes, wire generation, authority or native admission changed.
+
+Actual Runtime testing also exposed and fixed first-use budget exhaustion for
+both objective kinds when Plan(run) immediately followed insertion. The empty
+history reservation is now 1536 MiB; the derived maximum initialization work is
+below 1080 MiB and is checked against the child codec limits. Retained-history
+replay, public defaults, current authority and every work/deadline check remain
+unchanged. These are logical work allowances, not resident memory allocations.
+
+Executed validation on Rust 1.101.0-nightly (249c1e4e3): 49 actual-source
+presentation/budget/contract tests and 10 actual Runtime/NativeShell component
+scenarios pass. The latter use real private disk custody and loopback native
+peers; both first-run objectives succeed without a preceding Wait, original
+stability is preserved, retirement and inventory-clock substitution refuse,
+and a lost reply recovers under the original key with exactly one unpause.
+The checked-in modern stdio campaign now contains 43 cases, including three new
+ones exercised through the component driver. Full MCP transport, live-game
+execution, exact-head qualification and native admission are not claimed.
+Scoped Rust formatting, Python/JSON syntax and whitespace checks pass. See
+`docs/COMBINED_PRODUCTION_MCP.md`; scoped bead `df-combined-order-clock-c8m`.
+
 ## Unreleased — Typed event windows in the shared query loop
 
 The closed dfmcp.query/1 events query now selects an inclusive tick window,

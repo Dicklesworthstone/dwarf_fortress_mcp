@@ -598,7 +598,7 @@ pub fn fortress_query(session_id: String) -> String {
     with_session(session_id, "fortress.query", None, || Ok(Action::Inspect))
 }
 #[tool(
-    description = "Compile one original labor and finite-order plan, optionally with an explicit observed_inventory_minimum objective; kind=step with original_plan_digest prepares the next eligible original step. After both effects settle, kind=run prepares an independently authorized order clock. After Wait observes True original labor and inventory, kind=inventory_run prepares an independent stability clock even after order retirement. Both name original_paired_seal, game_ticks and wall_millis. Planning never unpauses."
+    description = "Compile one original labor and finite-order plan, optionally with an explicit observed_inventory_minimum objective; kind=step with original_plan_digest prepares the next eligible original step. After both effects settle, kind=run prepares an independently authorized clock for the original retained-order or inventory goal. After Wait observes True original labor and explicitly selected inventory, kind=inventory_run prepares an independent stability clock even after order retirement. Both name original_paired_seal, game_ticks and wall_millis. Planning never unpauses."
 )]
 pub fn fortress_plan(session_id: String, request: String) -> String {
     with_session(session_id, "fortress.plan", None, || plan_action(&request))
@@ -617,7 +617,7 @@ pub fn fortress_commit(
     })
 }
 #[tool(
-    description = "Reconcile original effect and clock keys before sampling current labor and the explicit inventory goal together under original timing. Unresolved clocks block paused sampling. Wait never inserts, starts a run or retries unpause."
+    description = "Reconcile original effect and clock keys before sampling current labor and the original retained-order or explicit inventory goal together under original timing. Unresolved clocks block paused sampling. Wait never inserts, starts a run or retries unpause."
 )]
 pub fn fortress_wait(session_id: String, max_wall_millis: Option<u64>) -> String {
     with_session(session_id, "fortress.wait", max_wall_millis, || {
@@ -675,7 +675,7 @@ pub fn run_stdio() {
     let server = ServerBuilder::new("dfmcp-live-combined-production-dev", env!("CARGO_PKG_VERSION"))
         .tool(FortressOpenSession).tool(FortressObserve).tool(FortressQuery).tool(FortressPlan).tool(FortressCommit)
         .tool(FortressWait).tool(FortressCancel).tool(FortressCheckpoint).tool(FortressRestore).tool(FortressExplain).tool(FortressDoctor)
-        .instructions("Unadmitted development only. Observe, compile one original labor and finite-order plan, prepare and confirm each dependency-satisfied step, and reconcile uncertainty under its original key. All-applied does not prove the original goal or physical goods. With an explicit inventory objective, Wait joins current labor and inventory under the original stability requirement. Separately configured clock control can prepare kind=run and confirm scope=run; after a True original labor/inventory sample, kind/scope=inventory_run can finish original stability after native order retirement. Both preserve the original deadline and exclude competing pending clocks; no automatic advancement or repeated unpause is permitted. Unresolved runs must reconcile before paused sampling. Inventory presence does not prove order-attributed production. Parent proof is process-local and withdrawn on failure or reopening.")
+        .instructions("Unadmitted development only. Observe, compile one original labor and finite-order plan, prepare and confirm each dependency-satisfied step, and reconcile uncertainty under its original key. All-applied does not prove the original goal or physical goods. Wait joins current labor with the original retained-order completion or explicitly selected inventory goal under the original stability requirement. Separately configured clock control can prepare kind=run and confirm scope=run for either objective while the exact original order remains eligible; after a True original labor/inventory sample, kind/scope=inventory_run can finish explicitly selected inventory stability after native order retirement. Both preserve the original deadline and exclude competing pending clocks; no automatic advancement or repeated unpause is permitted. Unresolved runs must reconcile before paused sampling. A disappeared order leaves default completion unknown. Inventory presence does not prove order-attributed production. Parent proof is process-local and withdrawn on failure or reopening.")
         .build();
     crate::run_modern_stdio(server);
 }

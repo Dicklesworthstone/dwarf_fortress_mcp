@@ -387,7 +387,11 @@
       "parent_recovery_field": "clock_journal_id",
       "max_retained_runs": 32,
       "target_digest_domain": "dfmcp-combined-order-clock-target/1",
-      "requires_explicit_original_inventory_objective": true,
+      "requires_explicit_original_inventory_objective": false,
+      "supported_original_objectives": [
+        "retained_order_completion",
+        "observed_inventory_minimum"
+      ],
       "requires_settled_original_effects": true,
       "requires_fresh_joined_parent_and_receipt_linked_order": true,
       "full_original_archive_and_selected_step_key_retained": true,
@@ -406,6 +410,7 @@
       "native_clock_receipt_proves_current_pause_or_goal": false,
       "supports_retired_original_order": false,
       "supports_standalone_inventory_clock": false,
+      "existing_selected_target_digest_bytes_changed": false,
       "legacy_single_step_clock_target_bytes_changed": false
     },
     "optional_inventory_clock": {

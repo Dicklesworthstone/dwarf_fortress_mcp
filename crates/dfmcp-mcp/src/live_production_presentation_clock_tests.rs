@@ -46,6 +46,24 @@ fn fixture(prepared: bool) -> (StateAnchor, Value) {
     (anchor, view)
 }
 
+fn retained_order_fixture(prepared: bool) -> (StateAnchor, Value) {
+    let (anchor, mut view) = fixture(prepared);
+    let mut goal = view["selected_inventory_goal"].take();
+    goal["kind"] = json!("retained_order_completion");
+    goal["order_entity_id"] = json!("18446744073709550000");
+    goal["required_order_state"] = json!({
+        "amount_total":1,"amount_remaining":0,"validated":true,"active":false
+    });
+    goal["disappearance_proves_completion"] = json!(false);
+    if let Some(object) = goal.as_object_mut() {
+        object.remove("item_type");
+        object.remove("minimum_stack_units");
+    }
+    view["selected_order_goal"] = goal;
+    view["current_parent_goal"]["scope"] = json!("complete_original_labor_and_order_goal");
+    (anchor, view)
+}
+
 fn output(anchor: StateAnchor, view: &Value, mode: &str, verified: bool, ticks: u64) -> Value {
     let (raw, overflow) = packet(
         "fortress.query",
@@ -115,6 +133,102 @@ fn clock_proposals_keep_original_identity_deadline_and_stability_cadence() {
             false
         );
     }
+}
+
+#[test]
+fn default_order_clock_guidance_preserves_original_deadline_and_stability() {
+    for (truth, ticks, deadline, expected) in [
+        ("false", 1200, 300, 170),
+        ("false", 9, 300, 9),
+        ("true", 1200, 300, 5),
+        ("true", 1200, 133, 3),
+    ] {
+        let (anchor, mut view) = retained_order_fixture(false);
+        view["selected_order_goal"]["current_truth"] = json!(truth);
+        view["current_parent_goal"]["current_truth"] = json!(truth);
+        view["selected_order_goal"]["deadline_tick"] = json!(deadline);
+        view["original_plan"]["steps"][1]["obligation"]["deadline_tick"] = json!(deadline);
+        let value = output(anchor, &view, "control", true, ticks);
+        assert!(enabled(&value, "fortress_plan"));
+        let next = &value["agent_turn"]["recommendations"][0];
+        let request: Value =
+            serde_json::from_str(next["arguments"]["request"].as_str().expect("request"))
+                .expect("closed original-order clock request");
+        assert_eq!(
+            request,
+            json!({
+                "kind":"run","original_paired_seal":"4".repeat(64),
+                "game_ticks":expected,"wall_millis":5000
+            })
+        );
+        assert!(value["selected_inventory_goal"].is_null());
+        assert_eq!(
+            value["selected_order_goal"]["kind"],
+            "retained_order_completion"
+        );
+        assert_eq!(value["original_goal_proven"], false);
+    }
+    let (anchor, view) = retained_order_fixture(true);
+    let value = output(anchor, &view, "control", true, 1200);
+    assert!(enabled(&value, "fortress_commit"));
+    assert_eq!(
+        value["agent_turn"]["recommendations"][0]["arguments"],
+        json!({"session_id":SessionId::new((1u128 << 127) | (24u128 << 57) | 10).to_string(),
+            "paired_seal":"e".repeat(64),"confirmed":true,"scope":"run"})
+    );
+}
+
+#[test]
+fn default_order_clock_guidance_rejects_retirement_stale_proof_and_inventory_clock_substitution() {
+    for case in 0..10 {
+        let (anchor, mut view) = retained_order_fixture(true);
+        match case {
+            0 => view["selected_order_goal"]["receipt_linked"] = json!(false),
+            1 => view["selected_order_goal"]["current_truth"] = json!("unknown"),
+            2 => {
+                view["current_parent_goal"]["scope"] =
+                    json!("complete_original_labor_and_inventory_goal")
+            }
+            3 => view["current_parent_goal"]["selected_anchor"]["tick"] = json!(129),
+            4 => view["selected_order_goal"]["terminal_failure"] = json!(true),
+            5 => view["selected_order_goal"]["history"]["fenced"] = json!(true),
+            6 => view["clock_control_enabled"] = json!(false),
+            7 => view["original_plan"]["expires_at_tick"] = json!(130),
+            8 => view["clock"]["high_tick"] = json!(131),
+            _ => {
+                view["selected_inventory_goal"] =
+                    fixture(false).1["selected_inventory_goal"].clone();
+            }
+        }
+        let value = output(anchor, &view, "control", true, 1200);
+        assert!(!enabled(&value, "fortress_plan"), "case {case}");
+        assert!(!enabled(&value, "fortress_commit"), "case {case}");
+    }
+
+    // Even a current True retained-order sample cannot grant the independent
+    // inventory clock authority that was absent from the sealed original goal.
+    let (anchor, mut view) = retained_order_fixture(false);
+    view["selected_order_goal"]["current_truth"] = json!("true");
+    view["current_parent_goal"]["current_truth"] = json!("true");
+    let mut inventory = view["clock"].take();
+    inventory["source"] = json!("run/1.13");
+    inventory["target_scope"] = json!("selected_original_inventory_goal");
+    view["inventory_clock"] = inventory;
+    view["inventory_clock_control_enabled"] = json!(true);
+    view["recovery"]["inventory_clock_journal_id"] = json!("1".repeat(64));
+    let value = output(anchor, &view, "control", true, 1200);
+    assert!(
+        value["agent_turn"]["affordances"]
+            .as_array()
+            .expect("affordances")
+            .iter()
+            .filter(|item| item["scope"] == "inventory_run")
+            .all(|item| item["enabled"] != true)
+    );
+    assert_eq!(
+        value["agent_turn"]["recommendations"][0]["tool"],
+        "fortress_wait"
+    );
 }
 
 #[test]

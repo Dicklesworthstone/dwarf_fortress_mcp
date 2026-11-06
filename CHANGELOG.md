@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased — Run default combined production orders to their original goal
+
+- Let reviewed bounded order-clock runs advance default retained-order completion
+  and its original stability interval, preserving exact original custody and
+  fresh joined labor/order evidence.
+- Expose the corresponding agent Plan/Commit guidance and retain strict refusal
+  for retired default orders or substitution of the separate inventory clock.
+- Fix first-run logical-budget exhaustion for default and inventory objectives
+  by deriving a smaller bounded empty-history reservation; public limits stay fixed.
+- Pass 49 actual-source unit/helper tests and ten real Runtime/NativeShell tests
+  against synthetic TCP peers, including lost-reply recovery with one unpause.
+  Full modern stdio, live-game and admission evidence remain separate.
+
 ## Unreleased — Query bounded retained event windows
 
 - Add shared typed event-window queries to laboratory and structured live query

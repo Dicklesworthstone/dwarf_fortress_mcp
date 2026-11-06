@@ -4,15 +4,25 @@
 //! and recovery semantics. This parent retains the complete original archive
 //! and predecessor receipts at every dispatch edge. Native clock receipts are
 //! historical time-control evidence; current parent proof still requires fresh
-//! joined labor and inventory observations.
+//! joined labor and selected order-completion or inventory observations.
 use super::*;
 use dfmcp_adapter::live_production::StepEvidence;
 use dfmcp_adapter::order_run::journal::{OrderRunJournal, OrderRunState};
 use dfmcp_adapter::order_run::private_file::PrivateOrderRunFile;
-use dfmcp_adapter::semantic_work_orders::{ObservedInventoryObjective, SemanticWorkOrderResult};
+use dfmcp_adapter::semantic_work_orders::{
+    ObservedInventoryObjective, RetainedOrderObjective, SemanticWorkOrderResult,
+};
 use dfmcp_adapter::work_order_control::CreationState;
 use dfmcp_intent::ObligationStatus;
 use orders::clock::{Clock, ClockTarget, ClockView, RunRequest};
+
+/// The order clock advances the exact retained finite order for either supported
+/// original goal. This does not broaden the independent inventory clock, whose
+/// target constructor still requires an explicit original inventory objective.
+fn recognized_objective(original: &PreparedPlan, step: dfmcp_core::StepId) -> bool {
+    ObservedInventoryObjective::from_selected_plan(original, step).is_some()
+        || RetainedOrderObjective::from_selected_plan(original, step).is_some()
+}
 
 /// Retained target identity is immutable historical custody, never a dispatch
 /// permit. Only a fresh source sample plus the guarded original custody check
@@ -39,11 +49,9 @@ impl ProductionClock {
         journal: Digest32,
         result: &SemanticWorkOrderResult,
     ) -> Result<()> {
-        if ObservedInventoryObjective::from_selected_plan(original, result.review().step_id())
-            .is_none()
-        {
+        if !recognized_objective(original, result.review().step_id()) {
             return Err(denied(
-                "combined clock requires the original explicit inventory objective",
+                "combined clock requires the original order-completion or inventory objective",
             ));
         }
         let target = ClockTarget::for_selected_original(original, archive, journal, result)?;
@@ -244,9 +252,7 @@ impl Runtime {
             .original
             .as_ref()
             .ok_or_else(|| invalid("original plan absent"))?;
-        if ObservedInventoryObjective::from_selected_plan(original, result.review().step_id())
-            .is_none()
-        {
+        if !recognized_objective(original, result.review().step_id()) {
             return Ok(());
         }
         self.clock
@@ -276,7 +282,7 @@ impl Runtime {
         if !original
             .steps
             .iter()
-            .any(|step| ObservedInventoryObjective::from_selected_plan(original, step.id).is_some())
+            .any(|step| recognized_objective(original, step.id))
         {
             return Ok(());
         }
@@ -342,12 +348,10 @@ impl Runtime {
             let step = original
                 .steps
                 .iter()
-                .find(|step| {
-                    ObservedInventoryObjective::from_selected_plan(original, step.id).is_some()
-                })
+                .find(|step| recognized_objective(original, step.id))
                 .map(|step| step.id)
                 .ok_or_else(|| {
-                    denied("clock requires the original explicit inventory objective")
+                    denied("clock requires the original order-completion or inventory objective")
                 })?;
             let result = self
                 .execution
@@ -457,7 +461,7 @@ impl Runtime {
         let monitor = self
             .goal_monitor
             .as_ref()
-            .ok_or_else(|| denied("clock requires a fresh original inventory observation"))?;
+            .ok_or_else(|| denied("clock requires a fresh original production-goal observation"))?;
         let sample = monitor
             .latest()
             .filter(|sample| {
@@ -466,24 +470,26 @@ impl Runtime {
                     && sample.receipt_linked
             })
             .ok_or_else(|| {
-                denied("clock requires a fresh receipt-linked original inventory sample")
+                denied("clock requires a fresh receipt-linked original production-goal sample")
             })?;
         if self.parent_goal.as_ref().is_none_or(|parent| {
             parent.anchor != self.anchor || parent.selected_anchor != sample.anchor
         }) || self.clock_withholds_goal()
         {
             return Err(denied(
-                "clock requires a fresh joined original labor and inventory sample",
+                "clock requires a fresh joined original labor and production-goal sample",
             ));
         }
         if sample.current_goal_proven() {
-            return Err(denied("the original inventory objective is already proved"));
+            return Err(denied(
+                "the original production objective is already proved",
+            ));
         }
         if matches!(
             monitor.historical_obligation_status(),
             Some(ObligationStatus::Failed { .. } | ObligationStatus::Cancelled { .. })
         ) {
-            return Err(denied("the original inventory obligation is terminal"));
+            return Err(denied("the original production obligation is terminal"));
         }
         clock
             .target

@@ -130,11 +130,12 @@ def progress_capture(tick, sequence, present=True, amount=1, remaining=None, sta
     return raw
 
 
-def clock_capture(sequence, tick, retired=False):
+def clock_capture(sequence, tick, retired=False, remaining=None, status=3):
     return (b'DFMOR014' + struct.pack('>QQQI', CLOCK_GENERATION, sequence, tick, SITE)
             + text(b'region1') + struct.pack('>BIIBBiiI', 1, 100, 101, int(not retired),
                                            0 if retired else 1, 0 if retired else 1,
-                                           0 if retired else 1, 0 if retired else 3))
+                                           0 if retired else (1 if remaining is None else remaining),
+                                           0 if retired else status))
 
 
 def clock_record(encoded_plan, key, phase=0, reason=0, observed=None):
@@ -256,6 +257,7 @@ class Peer:
         self.clock_commits = []
         self.hold_clock = False
         self.drop_clock_reply = False
+        self.complete_order_on_clock = False
         self.inventory_clock_sequence = 0
         self.inventory_clock_plans = {}
         self.inventory_clock_records = {}
@@ -367,9 +369,11 @@ class Peer:
                         + number(6, CLOCK_GENERATION) + blob(7, DF) + blob(8, DFH))
             if op == 'ObserveRun':
                 assert req[11] == 100
-                response += blob(9, clock_capture(self.clock_sequence, self.order_tick, self.order_retired))
+                response += blob(9, clock_capture(self.clock_sequence, self.order_tick, self.order_retired,
+                                                 self.order_remaining, self.order_status))
             elif op == 'PrepareRun':
-                assert req[8] == clock_capture(self.clock_sequence, self.order_tick, self.order_retired)
+                assert req[8] == clock_capture(self.clock_sequence, self.order_tick, self.order_retired,
+                                               self.order_remaining, self.order_status)
                 assert req[11] == 100
                 plan = (b'DFMOP014' + struct.pack('>IIBIII', req[6], req[7], req[12], req[13],
                                                 req[14], req[15]) + text(req[8]))
@@ -506,6 +510,9 @@ class Peer:
         self.goal_tick(parsed['before']['tick'] + parsed['game_ticks'])
         self.clock_sequence += 1
         self.inventory_stack = 1
+        if self.complete_order_on_clock:
+            self.order_remaining = 0
+            self.order_status = 1
         self.clock_records[key] = clock_record(plan, key, phase=3, reason=1, observed=self.order_tick)
 
     def inventory_clock_active(self):
@@ -627,8 +634,8 @@ class CombinedProduction(unittest.TestCase):
     def inventory_plan(self, stable_samples=1, max_game_ticks=0):
         return self.production_plan(stable_samples, max_game_ticks, inventory=True)
 
-    def order_plan(self, stable_samples=1):
-        return self.production_plan(stable_samples, inventory=False)
+    def order_plan(self, stable_samples=1, max_game_ticks=0):
+        return self.production_plan(stable_samples, max_game_ticks, inventory=False)
 
     def production_plan(self, stable_samples=1, max_game_ticks=0, *, inventory):
         options = {'max_wall_millis': 60000}
@@ -1200,6 +1207,135 @@ class CombinedProduction(unittest.TestCase):
         rejected = self.prepare_clock(sid, current)
         self.assertFalse(rejected['ok'], rejected)
         self.assertEqual(len(self.peer.clock_commits), committed_count)
+
+    def test_default_reviewed_clock_completes_original_order_and_stability(self):
+        self.enable_clock()
+        self.peer.complete_order_on_clock = True
+        sid, original, current = self.order_plan(stable_samples=2, max_game_ticks=10)
+        self.assertTrue(current['clock_control_enabled'])
+        target = current['clock']['target_digest']
+        for expected_tick, predicate in ((125, 3), (130, 2)):
+            prepared = self.prepare_clock(sid, current)
+            self.assertTrue(prepared['ok'], prepared)
+            self.assertTrue(prepared['clock']['review_available'])
+            self.assertEqual(prepared['clock']['target_digest'], target)
+            self.assertEqual(prepared['selected_order_goal']['kind'], 'retained_order_completion')
+            self.assertIsNone(prepared['selected_inventory_goal'])
+            self.assertFalse(prepared['original_goal_proven'])
+            native_plan = next(reversed(self.peer.clock_plans.values()))
+            self.assertEqual(run_wire.plan(native_plan)['predicate'], predicate)
+            run = prepared['clock']['active_run']
+            next_action = prepared['agent_turn']['recommendations'][0]
+            self.assertEqual(next_action['tool'], 'fortress_commit')
+            self.assertEqual(next_action['arguments']['scope'], 'run')
+            committed = self.client.tool('commit', session_id=sid, scope='run',
+                                         paired_seal=run['review_seal'], confirmed=True)
+            self.assertTrue(committed['ok'], committed)
+            self.assertFalse(committed['original_goal_proven'])
+            self.assertIsNone(committed['current_parent_goal'])
+            self.assertFalse(committed['selected_order_goal']['proven_at_anchor'])
+            self.assertEqual(self.peer.order_tick, expected_tick)
+            current = self.client.tool('wait', session_id=sid, max_wall_millis=60000)
+            self.assertTrue(current['ok'], current)
+            self.assertEqual(current['selected_order_goal']['current_truth'], 'true')
+            self.assertEqual(current['current_parent_goal']['scope'], 'complete_original_labor_and_order_goal')
+            self.assertEqual(current['selected_order_goal']['deadline_tick'], 300)
+            self.assertEqual(current['selected_order_goal']['poll_interval_ticks'], 5)
+            self.assertEqual(current['selected_order_goal']['stable_samples'], 2)
+            self.assertEqual(current['original_goal_proven'], expected_tick == 130)
+            self.assert_single_original_effects(current, original)
+            if expected_tick == 125:
+                next_action = current['agent_turn']['recommendations'][0]
+                request = json.loads(next_action['arguments']['request'])
+                self.assertEqual(next_action['tool'], 'fortress_plan')
+                self.assertEqual(request['kind'], 'run')
+                self.assertEqual(request['game_ticks'], 5)
+        self.assertTrue(current['agent_turn']['briefing']['original_goal_proven'])
+        self.assertEqual(len(self.peer.clock_commits), 2)
+        self.assertEqual(len(set(self.peer.clock_commits)), 2)
+        self.assertEqual(self.peer.inventory_clock_commits, [])
+        self.assertFalse(self.prepare_clock(sid, current)['ok'])
+        self.assertEqual(len(self.peer.clock_commits), 2)
+
+    def test_default_order_clock_refuses_retirement_and_inventory_clock_substitution(self):
+        self.enable_clock()
+        self.enable_inventory_clock()
+        sid, original, created = self.order_plan(stable_samples=2, max_game_ticks=10)
+        self.assertIsNone(created['inventory_clock']['target_digest'])
+        # A caller cannot use the valid original order seal to select a different
+        # objective or gain inventory-clock authority through the shared custody path.
+        denied = self.client.tool('plan', session_id=sid, request=json.dumps({
+            'kind': 'inventory_run', 'original_paired_seal': created['clock']['original_paired_seal'],
+            'game_ticks': 5, 'wall_millis': 1000}))
+        self.assertFalse(denied['ok'], denied)
+        self.assertEqual(self.peer.inventory_clock_plans, {})
+        self.peer.order_retired = True
+        self.peer.inventory_stack = 999
+        current = self.client.tool('wait', session_id=sid, max_wall_millis=60000)
+        self.assertTrue(current['ok'], current)
+        self.assertEqual(current['selected_order_goal']['current_truth'], 'unknown')
+        self.assertFalse(current['selected_order_goal']['receipt_linked'])
+        self.assertFalse(current['original_goal_proven'])
+        denied = self.prepare_clock(sid, current)
+        self.assertFalse(denied['ok'], denied)
+        self.assertEqual(self.peer.clock_plans, {})
+        self.assertEqual(self.peer.clock_commits, [])
+        self.assertEqual(self.peer.inventory_clock_commits, [])
+        self.assert_single_original_effects(current, original)
+
+    def test_default_order_lost_clock_reply_recovers_original_target_without_repeating_unpause(self):
+        self.enable_clock()
+        self.peer.complete_order_on_clock = True
+        sid, original, created = self.order_plan(stable_samples=2, max_game_ticks=10)
+        prepared = self.prepare_clock(sid, created)
+        self.assertTrue(prepared['ok'], prepared)
+        target = prepared['clock']['target_digest']
+        seal = prepared['clock']['active_run']['review_seal']
+        self.peer.hold_clock = True
+        self.peer.drop_clock_reply = True
+        lost = self.client.tool('commit', session_id=sid, scope='run', paired_seal=seal, confirmed=True)
+        self.assertFalse(lost['ok'], lost)
+        self.assertEqual(len(self.peer.clock_commits), 1)
+        self.client.close(crash=True)
+        env = reopen_environment(self.env, lost['retained_reference']['recovery'],
+                                 created['native_custody']['workforce_journal_id'])
+        before, calls = custody_files(self.directory), list(self.peer.calls)
+        self.client = stdio.Client(self.directory, {}, suffix='default-clock-offline', env=env)
+        offline = self.client.open(mode='offline', max_wall_millis=60000)
+        self.assertTrue(offline['ok'], offline)
+        self.assertEqual(offline['clock']['target_digest'], target)
+        self.assertFalse(offline['clock']['review_available'])
+        self.assertFalse(offline['original_goal_proven'])
+        self.assertIsNone(offline['current_parent_goal'])
+        self.assertEqual(before, custody_files(self.directory))
+        self.assertEqual(calls, self.peer.calls)
+        self.client.close()
+        env = reopen_environment(self.env, offline['recovery'],
+                                 created['native_custody']['workforce_journal_id'])
+        self.client = stdio.Client(self.directory, {}, suffix='default-clock-reconcile', env=env)
+        reopened = self.client.open(mode='reconcile', max_wall_millis=60000, max_game_ticks=10)
+        self.assertTrue(reopened['ok'], reopened)
+        self.assertEqual(reopened['clock']['target_digest'], target)
+        self.assertFalse(reopened['clock']['review_available'])
+        sid = reopened['agent_turn']['session_id']
+        reads = sum(op == 'ReadObservation' for plugin, op in self.peer.calls
+                    if plugin == 'dfmcp_work_order_progress_v1_12')
+        pending = self.client.tool('wait', session_id=sid, max_wall_millis=60000)
+        self.assertTrue(pending['ok'], pending)
+        self.assertTrue(pending['clock']['unresolved'])
+        self.assertEqual(reads, sum(op == 'ReadObservation' for plugin, op in self.peer.calls
+                                  if plugin == 'dfmcp_work_order_progress_v1_12'))
+        self.peer.finish_clock(self.peer.clock_commits[0])
+        current = self.client.tool('wait', session_id=sid, max_wall_millis=60000)
+        self.assertTrue(current['ok'], current)
+        self.assertFalse(current['clock']['unresolved'])
+        self.assertEqual(current['selected_order_goal']['current_truth'], 'true')
+        self.assertEqual(current['current_parent_goal']['current_truth'], 'true')
+        self.assertFalse(current['original_goal_proven'])
+        self.assert_single_original_effects(current, original)
+        denied = self.client.tool('commit', session_id=sid, scope='run', paired_seal=seal, confirmed=True)
+        self.assertFalse(denied['ok'], denied)
+        self.assertEqual(len(self.peer.clock_commits), 1)
 
     def test_lost_clock_reply_reopens_and_reconciles_without_repeating_unpause(self):
         self.enable_clock()
@@ -2120,7 +2256,7 @@ def main():
     print(json.dumps({'schema': 'dfmcp.combined-production-stdio/1', 'tests': result.testsRun,
         'failed': len(result.failures), 'errors': len(result.errors), 'skipped': len(result.skipped),
         'actual_modern_stdio': True, 'loopback_peers_are_doubles': True, 'live_game': False}))
-    raise SystemExit(0 if result.wasSuccessful() and result.testsRun == 40 and not result.skipped else 1)
+    raise SystemExit(0 if result.wasSuccessful() and result.testsRun == 43 and not result.skipped else 1)
 
 
 if __name__ == '__main__': main()
