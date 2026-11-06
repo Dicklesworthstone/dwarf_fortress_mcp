@@ -271,6 +271,16 @@ obligation's original cadence and stability. The top-level `original_goal_proven
 and Agent Turn briefing reflect that same scoped result. The combined anchor has
 its own state hash; the selected inventory anchor remains distinct and visible.
 
+The object's bounded `labor` array identifies the original selected citizens in
+canonical ID order. Each row names `unit_id`, `labor`, `requested_enabled`,
+`observed_enabled` and `current_truth`. The observed Boolean is exposed only when
+the independent workforce evidence policy qualifies it; otherwise it is null and
+the comparison is unknown. These rows share the parent's anchor and workforce
+source digest. They do not claim complete-roster coverage or describe unselected
+citizens. Agent Turn summarizes comparison counts and at most eight false or
+unknown labor blockers, with an explicit omitted count and the full bounded
+array available in `active_work.current_parent_goal`.
+
 Current labor reversal makes the parent false even when inventory remains proved.
 Missing qualified labor leaves it unknown. A changed capture during the bracket,
 lost custody, revoked source policy or failed response publication withdraws both
@@ -287,6 +297,12 @@ to obtain parent proof again. No parent achievement is reconstructed from the
 inventory-only history. Completion still makes no causal claim that this order
 produced the counted items, and no claim about material, usability or workshop
 feasibility.
+
+`parent_goal_observation_fenced=true` means a source/identity regression prevents
+another parent acquisition in this process. It remains visible in compact error
+and recovery output. Retain the original custody, inspect the failure and resolve
+the source lineage before reopening; ordinary repeated Wait calls cannot clear
+the fence.
 
 ## Recovery and failure
 

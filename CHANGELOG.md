@@ -43,6 +43,20 @@
   stdio scenarios remain pending at this checkpoint; no live-game or admission
   qualification is claimed.
 
+## 2026-11-05 — Explain current production labor blockers
+
+- Derive a bounded, canonical-ID-ordered comparison for every original selected
+  citizen under the independent workforce evidence policy. Report requested and
+  qualified observed labor settings; missing or unqualified values remain unknown.
+- Include the full comparison in current-parent evidence and summarize matched,
+  mismatched and unknown citizens in Agent Turn, with up to eight exact blockers
+  and an explicit omitted count. Invalid or stale projections expose no derived
+  blocker claims, and guidance never redispatches the original completed keys.
+- Extend adapter/presentation regressions and the actual combined CLI/modern
+  stdio suite to 25 scenarios, including original inventory stability, retirement,
+  labor reversal, bracket drift, custody failure, restart and source fencing.
+  Execution and its limitations are recorded in `IMPLEMENTATION_STATUS.md`.
+
 ## 2026-11-05 — Complete original production goals through MCP
 
 - Connect the combined development host's foreground Wait to the executor's

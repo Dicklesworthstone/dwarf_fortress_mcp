@@ -5,10 +5,11 @@
 //! labor captured on both sides of it. Native effect receipts supply custody and
 //! identity only; they never supply any field in this current projection.
 
-use dfmcp_core::{ObservationCursor, StateAnchor};
+use dfmcp_core::{EntityId, ObservationCursor, StateAnchor};
 use dfmcp_intent::Action;
 use dfmcp_world::{
-    EntityKind, EvidenceCoverage, EvidencePolicy, PredicateEvidence, PredicateTruth, WorldSnapshot,
+    CompareOp, EntityKind, EvidenceCoverage, EvidencePolicy, Predicate, PredicateEvidence,
+    PredicateTruth, Value, WorldSnapshot,
 };
 
 use crate::semantic_work_orders::{
@@ -20,6 +21,18 @@ use crate::workforce_control::WorkforceCapture;
 
 use super::*;
 
+/// One requested citizen/labor comparison at the parent's complete anchor.
+/// The optional observed value is exposed only through separately qualified
+/// workforce evidence. A retained native receipt cannot populate this finding.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SelectedParentLaborFinding {
+    pub unit_id: EntityId,
+    pub labor: String,
+    pub requested_enabled: bool,
+    pub observed_enabled: Option<bool>,
+    pub current_truth: PredicateTruth,
+}
+
 /// Current evidence, not a durable achievement record or an authority token.
 /// Reopening never reconstructs this value from selected-inventory history.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -30,6 +43,8 @@ pub struct SelectedParentGoalProgress {
     pub original_goal_proven: bool,
     pub source_digest: Digest32,
     pub workforce_source_digest: Digest32,
+    /// The original selection only, in numeric canonical-ID order, at most 32.
+    pub labor: Vec<SelectedParentLaborFinding>,
 }
 
 #[derive(Clone, Debug)]
@@ -54,6 +69,78 @@ impl SelectedParentGoalResult {
 
 fn stale(message: &str) -> DfmcpError {
     error(ErrorCode::StaleAnchor, message)
+}
+
+pub(super) fn labor_findings(
+    action: &Action,
+    workforce: &PredicateEvidence<'_>,
+) -> Result<Vec<SelectedParentLaborFinding>> {
+    let Action::SetLabor {
+        units,
+        labor,
+        enabled,
+    } = action
+    else {
+        return Err(error(
+            ErrorCode::AdapterRejected,
+            "parent labor findings require the original selected labor action",
+        ));
+    };
+    if units.is_empty()
+        || units.len() > 32
+        || units.contains(&EntityId::NIL)
+        || labor.is_empty()
+        || labor.len() > 64
+        || labor.contains('\0')
+    {
+        return Err(error(
+            ErrorCode::AdapterRejected,
+            "parent labor findings exceed the original selection bounds",
+        ));
+    }
+    let mut units = units.clone();
+    units.sort_unstable();
+    if units.windows(2).any(|pair| pair[0] == pair[1]) {
+        return Err(error(
+            ErrorCode::AdapterRejected,
+            "parent labor findings require distinct canonical citizens",
+        ));
+    }
+    let field = format!("labor.{labor}");
+    units
+        .into_iter()
+        .map(|unit_id| {
+            let observed = |value| {
+                workforce.establishes(&Predicate::FieldCompare {
+                    entity_id: unit_id,
+                    field: field.clone(),
+                    op: CompareOp::Eq,
+                    value: Value::Bool(value),
+                })
+            };
+            // A false comparison alone does not establish the opposite bool:
+            // absence, incompatible values and withheld grants stay unknown.
+            let observed_enabled = if observed(true)? {
+                Some(true)
+            } else if observed(false)? {
+                Some(false)
+            } else {
+                None
+            };
+            let current_truth = match observed_enabled {
+                Some(value) if value == *enabled => PredicateTruth::True,
+                Some(_) => PredicateTruth::False,
+                None => PredicateTruth::Unknown,
+            };
+            Ok(SelectedParentLaborFinding {
+                unit_id,
+                labor: labor.clone(),
+                requested_enabled: *enabled,
+                observed_enabled,
+                current_truth,
+            })
+        })
+        .collect()
 }
 
 fn retain_workforce_floor<H: EffectJournalStorage>(
@@ -117,7 +204,11 @@ fn compose(
     // Each child independently enforces its source/domain ceiling before any
     // grants are combined. Unit observation never expands inventory coverage.
     order.evidence(selected.inner.policy().clone())?;
-    workforce.evidence(workforce_policy.clone())?;
+    let workforce_evidence = workforce.evidence(workforce_policy.clone())?;
+    let labor = labor_findings(
+        &original.steps.first().ok_or_else(custody)?.action,
+        &workforce_evidence,
+    )?;
     let total = order
         .snapshot()
         .graph
@@ -175,6 +266,9 @@ fn compose(
     ] {
         identity.extend_from_slice(digest.as_bytes());
     }
+    // Findings are a bounded projection of the already bound original action
+    // and workforce snapshot under its independent policy. They neither change
+    // canonical state nor add another source or durable publication identity.
     Ok(SelectedParentGoalProgress {
         anchor: snapshot.anchor(),
         selected_anchor,
@@ -183,6 +277,7 @@ fn compose(
             && selected.selected_goal_proven(),
         source_digest: Digest32::of_bytes(&identity),
         workforce_source_digest: workforce.source_digest(),
+        labor,
     })
 }
 

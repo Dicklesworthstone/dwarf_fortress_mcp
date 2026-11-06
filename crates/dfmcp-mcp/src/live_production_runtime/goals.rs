@@ -76,6 +76,13 @@ impl Runtime {
                 "selected_anchor":anchor_json(parent.selected_anchor),
                 "source_digest":parent.source_digest.to_hex(),
                 "workforce_source_digest":parent.workforce_source_digest.to_hex(),
+                "labor":parent.labor.iter().map(|finding| json!({
+                    "unit_id":finding.unit_id.get().to_string(),
+                    "labor":finding.labor,
+                    "requested_enabled":finding.requested_enabled,
+                    "observed_enabled":finding.observed_enabled,
+                    "current_truth":truth(finding.current_truth)
+                })).collect::<Vec<_>>(),
                 "historical_labor_receipt_is_current_evidence":false,
                 "restored_from_history":false,
                 "production_attribution":"unknown"

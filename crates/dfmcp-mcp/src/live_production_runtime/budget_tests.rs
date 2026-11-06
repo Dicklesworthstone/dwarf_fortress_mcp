@@ -153,6 +153,16 @@ fn machine_host_contract_preserves_bounded_development_scope() -> Result<()> {
         parent["adapter_entry"],
         "Executor::poll_selected_parent_goal"
     );
+    assert_eq!(
+        parent["labor_findings"]["maximum"],
+        dfmcp_adapter::workforce_control::MAX_UNITS
+    );
+    assert_eq!(parent["labor_findings"]["agent_turn_blockers_max"], 8);
+    assert_eq!(
+        parent["labor_findings"]["raw_capture_is_fact_authority"],
+        false
+    );
+    assert!(parent["labor_findings"]["unqualified_observed_enabled"].is_null());
     for field in [
         "requires_explicit_original_inventory_objective",
         "requires_settled_original_effects",

@@ -81,6 +81,39 @@ memory pressure; MCP unit and stdio execution remain pending at this checkpoint.
 No full-workspace, native-game or compatibility-admission qualification is
 claimed. Beads df-dfhack-bridge-plane-c-pic.4 and .4.1 remain in progress.
 
+## 2026-11-05 — Source-qualified citizen labor blockers
+
+Current complete-parent production evidence now includes one bounded comparison
+per original selected citizen, in canonical ID order. Independent workforce
+qualification determines whether an observed Boolean is available; withheld
+coverage, missing facts or another source digest produce null/Unknown. These
+diagnostics share the existing exact workforce digest and composite anchor and
+do not alter source, canonical snapshot or durable history identities.
+
+Agent Turn reports matched, mismatched and unknown counts, at most eight exact
+false/unknown labor blockers and their omitted count. The full at-most-32-row
+array remains in current-parent active work. Diagnostics disappear with stale,
+inconsistent, failed, compacted or reopened current proof. Corrective guidance
+requires fresh observation and a newly authorized plan, never a replacement
+dispatch under the completed original keys.
+
+Adapter tests cover qualified enabled/disabled settings, missing and withheld
+facts, deterministic 32-citizen ordering and invalid selection bounds. Presentation
+tests cover bounded blockers, malformed comparisons, large canonical IDs and
+proof withdrawal. The actual CLI/modern-stdio suite now contains 25 scenarios,
+with joined loopback peers for workforce, order, progress and operations sources.
+Its new lifecycle cases include retirement, same-tick stability, labor reversal,
+in-bracket drift, late custody refusal, recovery, inventory withdrawal and a
+permanent source-regression fence. These peers are doubles, not DFHack or a game.
+
+Scoped Rust formatting, Python syntax/fixture checks, JSON parsing and diff checks
+pass. Actual locked/offline MCP checking was killed by SIGKILL while compiling the
+unchanged Asupersync dependency under the shared 8 GiB memory limit. The full
+adapter test compiler was also killed during code generation without a source
+diagnostic. A bounded compiler retry is in progress; no Rust execution pass is
+claimed for these diagnostic changes at this checkpoint.
+The broader real-game acceptance bead remains in progress.
+
 ## 2026-11-05 — MCP publication of fresh complete-parent production goals
 
 The combined labor/order development host now calls the executor's current-parent
@@ -98,9 +131,10 @@ achievement remains historical. Query and Explain retain the exact sampled
 anchor without claiming a new read. No game-time control, native generation,
 causal-production evidence or production admission is introduced.
 
-Validation is in progress against the real workspace's exact locked dependency
-pins and current nightly toolchain. No test or compiler pass for this increment
-is claimed at this source checkpoint. The broader real-game acceptance in bead
+Scoped Rust formatting, contract JSON parsing and diff checks pass. Validation is
+in progress against the real workspace's exact locked dependency pins and current
+nightly toolchain. No test or compiler pass for this increment is claimed at this
+source checkpoint. The broader real-game acceptance in bead
 `df-dfhack-bridge-plane-c-pic.4.1` remains in progress.
 
 ## 2026-11-06 — Fresh complete-parent labor and inventory evidence

@@ -1,7 +1,10 @@
 use super::*;
 use crate::live_production::SelectedParentGoalResult;
+use crate::live_production::parent_goal::labor_findings;
 use crate::semantic_workforce::WorkforceGoalProjection;
+use crate::semantic_workforce::projection::LABOR_SOURCE;
 use crate::workforce_control::WorkforceCapture;
+use dfmcp_world::{EntityRecord, Fact, WorldGraph};
 
 fn setup() -> Result<(ProductionFixture, SelectedWorkOrderGoalMonitor<Storage>)> {
     setup_with_history(Storage::default())
@@ -94,6 +97,13 @@ fn parent_truth_needs_current_labor_and_original_inventory_stability() -> Result
         (|p, _| Ok(grant(p)), workforce_grant),
     )?;
     assert_eq!(first.parent_progress().current_truth, PredicateTruth::True);
+    let findings = &first.parent_progress().labor;
+    assert_eq!(findings.len(), 1);
+    assert_eq!(findings[0].unit_id, EntityId::new(43));
+    assert_eq!(findings[0].labor, "MINE");
+    assert!(findings[0].requested_enabled);
+    assert_eq!(findings[0].observed_enabled, Some(true));
+    assert_eq!(findings[0].current_truth, PredicateTruth::True);
     assert!(!first.original_goal_proven());
     assert!(!first.selected_goal_proven());
     assert_eq!(first.progress().plan_terminal, PredicateTruth::Unknown);
@@ -136,6 +146,18 @@ fn parent_truth_needs_current_labor_and_original_inventory_stability() -> Result
         (|p, _| Ok(grant(p)), workforce_grant),
     )?;
     assert_eq!(lost.parent_progress().current_truth, PredicateTruth::False);
+    assert_eq!(
+        lost.parent_progress().labor[0].observed_enabled,
+        Some(false)
+    );
+    assert_eq!(
+        lost.parent_progress().labor[0].current_truth,
+        PredicateTruth::False
+    );
+    assert_ne!(
+        lost.parent_progress().workforce_source_digest,
+        achieved.parent_progress().workforce_source_digest
+    );
     assert!(lost.selected_goal_proven());
     assert!(!lost.original_goal_proven());
     assert_eq!(f.orders.borrow().commits, 1);
@@ -181,6 +203,16 @@ fn historical_labor_receipt_or_unqualified_labor_never_proves_parent() -> Result
     )?;
     assert_eq!(
         unknown.parent_progress().current_truth,
+        PredicateTruth::Unknown
+    );
+    assert_eq!(unknown.parent_progress().labor.len(), 1);
+    assert_eq!(
+        unknown.parent_progress().labor[0].unit_id,
+        EntityId::new(43)
+    );
+    assert_eq!(unknown.parent_progress().labor[0].observed_enabled, None);
+    assert_eq!(
+        unknown.parent_progress().labor[0].current_truth,
         PredicateTruth::Unknown
     );
     assert!(!unknown.original_goal_proven());
@@ -513,5 +545,177 @@ fn native_post_read_custody_failure_retains_consumed_parent_source_floor() -> Re
     assert_eq!(f.workforce.data.borrow().calls, calls);
     assert_eq!(f.orders.borrow().commits, 1);
     assert_eq!(f.workforce.data.borrow().calls[2], 1);
+    Ok(())
+}
+
+fn finding_world(values: &[(u64, Option<Value>)]) -> (WorldSnapshot, EvidencePolicy) {
+    let tick = GameTick(125);
+    let source_digest = Digest32::of_bytes(b"exact test workforce capture");
+    let mut graph = WorldGraph::default();
+    for (id, value) in values {
+        let id = EntityId::new(*id);
+        let fields = value
+            .iter()
+            .map(|value| {
+                (
+                    "labor.MINE".to_owned(),
+                    Fact::known(
+                        value.clone(),
+                        tick,
+                        FactSource::DfhackField(LABOR_SOURCE.into()),
+                        source_digest,
+                    ),
+                )
+            })
+            .collect();
+        graph.entities.insert(
+            id,
+            EntityRecord {
+                id,
+                generation: 0,
+                revision: 1,
+                kind: EntityKind::Unit,
+                label: format!("citizen {}", id.get()),
+                fields,
+            },
+        );
+    }
+    let snapshot = WorldSnapshot::new(
+        crate::workforce_control::fortress_id("region1", 4),
+        tick,
+        ObservationCursor {
+            epoch: 1,
+            sequence: 1,
+        },
+        true,
+        graph,
+    );
+    let mut policy = EvidencePolicy::at(snapshot.anchor());
+    policy
+        .entity_kinds
+        .insert(EntityKind::Unit, EvidenceCoverage::Observed);
+    policy.sources.insert(EvidenceSource::Observed {
+        field: LABOR_SOURCE.into(),
+        source_digest,
+    });
+    (snapshot, policy)
+}
+
+#[test]
+fn labor_findings_keep_disabled_requests_missing_facts_and_withheld_sources_distinct() -> Result<()>
+{
+    let (snapshot, granted) = finding_world(&[
+        (1, Some(Value::Bool(true))),
+        (2, Some(Value::Bool(false))),
+        (3, Some(Value::Text("false".into()))),
+        (4, None),
+    ]);
+    let action = Action::SetLabor {
+        units: [99, 4, 2, 3, 1].map(EntityId::new).to_vec(),
+        labor: "MINE".into(),
+        enabled: false,
+    };
+    let findings = labor_findings(
+        &action,
+        &PredicateEvidence::scoped(&snapshot, granted.clone())?,
+    )?;
+    assert_eq!(
+        findings
+            .iter()
+            .map(|row| row.unit_id.get())
+            .collect::<Vec<_>>(),
+        vec![1, 2, 3, 4, 99]
+    );
+    assert!(findings.iter().all(|row| !row.requested_enabled));
+    assert_eq!(findings[0].observed_enabled, Some(true));
+    assert_eq!(findings[0].current_truth, PredicateTruth::False);
+    assert_eq!(findings[1].observed_enabled, Some(false));
+    assert_eq!(findings[1].current_truth, PredicateTruth::True);
+    assert!(findings[2..].iter().all(|row| {
+        row.observed_enabled.is_none() && row.current_truth == PredicateTruth::Unknown
+    }));
+    for withheld in 0..3 {
+        let mut policy = granted.clone();
+        match withheld {
+            0 => policy.sources.clear(),
+            1 => policy.entity_kinds.clear(),
+            _ => {
+                policy.sources = BTreeSet::from([EvidenceSource::Observed {
+                    field: LABOR_SOURCE.into(),
+                    source_digest: Digest32::of_bytes(b"different workforce capture"),
+                }]);
+            }
+        }
+        let findings = labor_findings(&action, &PredicateEvidence::scoped(&snapshot, policy)?)?;
+        assert!(findings.iter().all(|row| {
+            row.observed_enabled.is_none() && row.current_truth == PredicateTruth::Unknown
+        }));
+    }
+    Ok(())
+}
+
+#[test]
+fn labor_findings_preserve_the_full_32_citizen_selection_in_numeric_order() -> Result<()> {
+    let values = (1..=32)
+        .map(|id| (id, Some(Value::Bool(id % 2 == 0))))
+        .collect::<Vec<_>>();
+    let (snapshot, policy) = finding_world(&values);
+    let evidence = PredicateEvidence::scoped(&snapshot, policy)?;
+    let action = Action::SetLabor {
+        units: (1..=32).rev().map(EntityId::new).collect(),
+        labor: "MINE".into(),
+        enabled: true,
+    };
+    let findings = labor_findings(&action, &evidence)?;
+    assert_eq!(findings.len(), 32);
+    assert_eq!(
+        findings
+            .iter()
+            .map(|row| row.unit_id.get())
+            .collect::<Vec<_>>(),
+        (1..=32).collect::<Vec<_>>()
+    );
+    for row in &findings {
+        assert_eq!(row.labor, "MINE");
+        assert!(row.requested_enabled);
+        assert_eq!(row.observed_enabled, Some(row.unit_id.get() % 2 == 0));
+        assert_eq!(
+            row.current_truth,
+            if row.unit_id.get() % 2 == 0 {
+                PredicateTruth::True
+            } else {
+                PredicateTruth::False
+            }
+        );
+    }
+    assert_eq!(findings, labor_findings(&action, &evidence)?);
+    Ok(())
+}
+
+#[test]
+fn labor_findings_reject_empty_duplicate_nil_and_oversized_original_selections() -> Result<()> {
+    let (snapshot, policy) = finding_world(&[(1, Some(Value::Bool(true)))]);
+    let evidence = PredicateEvidence::scoped(&snapshot, policy)?;
+    for units in [vec![], vec![0], vec![1, 1], (1..=33).collect()] {
+        let action = Action::SetLabor {
+            units: units.into_iter().map(EntityId::new).collect(),
+            labor: "MINE".into(),
+            enabled: true,
+        };
+        assert_eq!(
+            labor_findings(&action, &evidence)
+                .expect_err("invalid selection cannot be truncated or deduplicated")
+                .code,
+            ErrorCode::AdapterRejected
+        );
+    }
+    for labor in [String::new(), "x".repeat(65), "MINE\0".into()] {
+        let action = Action::SetLabor {
+            units: vec![EntityId::new(1)],
+            labor,
+            enabled: true,
+        };
+        assert!(labor_findings(&action, &evidence).is_err());
+    }
     Ok(())
 }

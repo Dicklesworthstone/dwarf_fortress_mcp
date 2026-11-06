@@ -125,6 +125,11 @@ unchanged complete parent terminal at a new composite anchor, preserving the
 selected inventory anchor separately. Complete-parent proof requires both current
 parent truth and the original selected temporal proof. It does not introduce a
 new obligation, renew a deadline, or infer current labor from a native receipt.
+Its bounded `labor` findings compare the exact original selected citizen/labor
+settings under the independent workforce policy before any child policies are
+combined. Canonical-ID order is deterministic. Unqualified values remain unknown
+and never appear as observed Booleans; the combined anchor and workforce source
+digest bind the diagnostics to the same sample as parent truth.
 
 This parent result is process-local. It is never recovered from inventory-only
 history. Any failed acquisition or publication withdraws current proof and

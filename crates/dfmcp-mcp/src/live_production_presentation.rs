@@ -5,6 +5,7 @@ use serde_json::{Value, json};
 
 pub(super) const RESPONSE_RESERVE: u64 = 128 * 1024;
 const TEXT_LIMIT: usize = 60_000;
+const LABOR_BLOCKER_LIMIT: usize = 8;
 
 pub(super) fn compact(view: &Value) -> Value {
     let entries: Vec<Value> = view["frontier"]["entries"]
@@ -65,6 +66,72 @@ fn compact_anchor(value: &Value) -> Value {
 fn anchor_value(a: StateAnchor) -> Value {
     json!({"fortress_id":a.fortress_id.get().to_string(),"epoch":a.cursor.epoch,
         "sequence":a.cursor.sequence,"tick":a.tick.get(),"state_hash":a.state_hash.to_hex()})
+}
+
+struct ParentLaborDiagnostics {
+    summary: Value,
+    blockers: Vec<Value>,
+    omitted: usize,
+}
+
+fn parent_labor_diagnostics(parent: &Value) -> Option<ParentLaborDiagnostics> {
+    let rows = parent["labor"].as_array()?;
+    if rows.is_empty() || rows.len() > 32 {
+        return None;
+    }
+    let mut previous_id = 0;
+    let (mut matched, mut mismatched, mut unknown) = (0, 0, 0);
+    let mut blockers = Vec::with_capacity(LABOR_BLOCKER_LIMIT);
+    for row in rows {
+        let unit_id = bounded(&row["unit_id"], 20)?;
+        let id = unit_id.parse::<u64>().ok()?;
+        let labor = bounded(&row["labor"], 64).filter(|labor| !labor.is_empty())?;
+        let requested = row["requested_enabled"].as_bool()?;
+        let observed = match row.get("observed_enabled")? {
+            Value::Null => None,
+            Value::Bool(enabled) => Some(*enabled),
+            _ => return None,
+        };
+        // Diagnostics are all-or-nothing: missing or inconsistent rows cannot
+        // become a zero-blocker summary. Canonical IDs stay decimal strings.
+        if id <= previous_id || id.to_string() != unit_id {
+            return None;
+        }
+        previous_id = id;
+        let truth = match observed {
+            Some(enabled) if enabled == requested => {
+                matched += 1;
+                "true"
+            }
+            Some(_) => {
+                mismatched += 1;
+                "false"
+            }
+            None => {
+                unknown += 1;
+                "unknown"
+            }
+        };
+        if row["current_truth"] != truth {
+            return None;
+        }
+        if truth != "true" && blockers.len() < LABOR_BLOCKER_LIMIT {
+            blockers.push(json!({"unit_id":unit_id,"labor":labor,
+                "requested_enabled":requested,"observed_enabled":observed,
+                "current_truth":truth}));
+        }
+    }
+    if (parent["current_truth"] == "true" && mismatched + unknown > 0)
+        || (parent["current_truth"] == "unknown" && mismatched > 0)
+    {
+        return None;
+    }
+    Some(ParentLaborDiagnostics {
+        summary: json!({"citizens":rows.len(),"matched":matched,
+            "mismatched":mismatched,"unknown":unknown}),
+        omitted: mismatched + unknown - blockers.len(),
+        blockers,
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -135,6 +202,7 @@ fn encode(
     };
     let parent_proven = parent_goal["original_goal_proven"] == true;
     let parent_truth = parent_goal["current_truth"].as_str();
+    let labor = parent_labor_diagnostics(&parent_goal);
     let recommendation = if session.is_none() || result["closed"] == true {
         None
     } else if uncertain && mode == Some("offline") {
@@ -256,7 +324,7 @@ fn encode(
     } else {
         omitted_domains.insert(0, "current_parent_goal");
     }
-    let uncertainty = if parent_fenced {
+    let mut uncertainty = if parent_fenced {
         vec![json!({
             "scope":"complete_original_labor_and_inventory_goal",
             "epistemic_status":"unknown", "state":"observation_fenced",
@@ -289,11 +357,23 @@ fn encode(
             _ => Vec::new(),
         }
     };
+    if let Some(labor) = &labor
+        && let Some(finding) = uncertainty.first_mut()
+    {
+        finding["labor_blockers"] = json!(labor.blockers);
+        finding["labor_blockers_omitted"] = json!(labor.omitted);
+        if !labor.blockers.is_empty() {
+            finding["resolution"] = json!(
+                "Review the listed mismatched or unobserved labor settings against the original plan. Any corrective action requires a fresh observation and newly authorized plan. Preserve completed original keys for reconciliation only."
+            );
+        }
+    }
     let mut turn = AgentTurnBuilder::new(operation, phase)
         .continuity(if uncertain { ContinuityStatus::Indeterminate } else if verified { ContinuityStatus::Partial } else if retained.is_some() { ContinuityStatus::Stale } else { ContinuityStatus::Bootstrap }, None, None, None)
         .briefing(json!({"runtime":"unadmitted_combined_production_development", "runtime_admitted":false,"mode":mode,
             "retained_state_currently_verified":verified,"current_state_proven":false,"original_goal_proven":parent_proven,
             "current_parent_goal_truth":parent_truth,
+            "current_parent_labor":labor.as_ref().map(|labor| &labor.summary),
             "parent_goal_observation_fenced":parent_fenced,
             "selected_inventory_goal_proven_at_anchor":selected_proven}))
         .active_work(json!({"pending_plans":[],"actions":entries,
@@ -416,6 +496,9 @@ mod tests {
             "current_parent_goal":{"scope":"complete_original_labor_and_inventory_goal",
                 "anchor":anchor_value(anchor),"selected_anchor":anchor_value(selected_anchor),
                 "current_truth":truth,"original_goal_proven":proven,
+                "labor":[{"unit_id":"43","labor":"MINE","requested_enabled":true,
+                    "observed_enabled":if truth == "unknown" {Value::Null} else {json!(truth == "true")},
+                    "current_truth":truth}],
                 "source_digest":"b".repeat(64),"workforce_source_digest":"c".repeat(64)}});
         (anchor, view)
     }
@@ -453,6 +536,10 @@ mod tests {
             assert_eq!(turn["briefing"]["current_parent_goal_truth"], "true");
             assert_eq!(turn["briefing"]["current_state_proven"], false);
             assert_eq!(turn["briefing"]["runtime_admitted"], false);
+            assert_eq!(
+                turn["briefing"]["current_parent_labor"],
+                json!({"citizens":1,"matched":1,"mismatched":0,"unknown":0})
+            );
             assert_eq!(turn["anchor"], view["current_parent_goal"]["anchor"]);
             assert_eq!(
                 turn["active_work"]["current_parent_goal"],
@@ -507,6 +594,141 @@ mod tests {
     }
 
     #[test]
+    fn parent_labor_blockers_identify_each_mismatched_or_unknown_citizen() {
+        for requested in [false, true] {
+            let (anchor, mut view) = joined_goal_view("false", true);
+            let rows = json!([
+                {"unit_id":"43","labor":"MINE","requested_enabled":requested,
+                    "observed_enabled":requested,"current_truth":"true"},
+                {"unit_id":"101","labor":"MINE","requested_enabled":requested,
+                    "observed_enabled":!requested,"current_truth":"false"},
+                {"unit_id":"9007199254740993","labor":"MINE","requested_enabled":requested,
+                    "observed_enabled":null,"current_truth":"unknown"}
+            ]);
+            view["current_parent_goal"]["labor"] = rows.clone();
+            let value = joined_packet(anchor, &view, "control", true, false);
+            let turn = &value["agent_turn"];
+            assert_eq!(
+                turn["briefing"]["current_parent_labor"],
+                json!({"citizens":3,"matched":1,"mismatched":1,"unknown":1})
+            );
+            assert_eq!(
+                turn["uncertainty"][0]["labor_blockers"],
+                json!([rows[1], rows[2]])
+            );
+            assert_eq!(turn["uncertainty"][0]["labor_blockers_omitted"], 0);
+            assert_eq!(turn["uncertainty"][0]["anchor"], anchor_value(anchor));
+            assert_eq!(turn["active_work"]["current_parent_goal"]["labor"], rows);
+            assert_eq!(turn["recommendations"], json!([]));
+            assert_eq!(turn["briefing"]["original_goal_proven"], false);
+            assert!(
+                turn["uncertainty"][0]["resolution"]
+                    .as_str()
+                    .expect("corrective guidance")
+                    .contains("newly authorized plan")
+            );
+            for invalidated in [false, true] {
+                let mut stale = view.clone();
+                if invalidated {
+                    stale["current_parent_goal"] = Value::Null;
+                } else {
+                    stale["current_parent_goal"]["anchor"]["state_hash"] = json!("d".repeat(64));
+                }
+                let value = joined_packet(anchor, &stale, "control", true, false);
+                let turn = &value["agent_turn"];
+                assert!(turn["active_work"]["current_parent_goal"].is_null());
+                assert!(turn["briefing"]["current_parent_labor"].is_null());
+                assert!(
+                    turn["uncertainty"]
+                        .as_array()
+                        .expect("uncertainty")
+                        .iter()
+                        .all(|finding| finding.get("labor_blockers").is_none())
+                );
+            }
+        }
+
+        let (anchor, view) = joined_goal_view("unknown", true);
+        let value = joined_packet(anchor, &view, "control", true, false);
+        let turn = &value["agent_turn"];
+        assert_eq!(
+            turn["briefing"]["current_parent_labor"],
+            json!({"citizens":1,"matched":0,"mismatched":0,"unknown":1})
+        );
+        assert_eq!(turn["uncertainty"][0]["labor_blockers"][0]["unit_id"], "43");
+        assert!(turn["uncertainty"][0]["labor_blockers"][0]["observed_enabled"].is_null());
+        assert_eq!(turn["uncertainty"][0]["epistemic_status"], "unknown");
+    }
+
+    #[test]
+    fn parent_labor_blockers_bound_repetition_and_report_omitted_citizens() {
+        let (anchor, mut view) = joined_goal_view("false", true);
+        let rows = (1..=32)
+            .map(|id| {
+                json!({"unit_id":id.to_string(),"labor":"MINE",
+            "requested_enabled":true,"observed_enabled":false,"current_truth":"false"})
+            })
+            .collect::<Vec<_>>();
+        view["current_parent_goal"]["labor"] = json!(rows);
+        let value = joined_packet(anchor, &view, "control", true, false);
+        let turn = &value["agent_turn"];
+        assert_eq!(
+            turn["briefing"]["current_parent_labor"],
+            json!({"citizens":32,"matched":0,"mismatched":32,"unknown":0})
+        );
+        assert_eq!(
+            turn["uncertainty"][0]["labor_blockers"],
+            json!(rows[..LABOR_BLOCKER_LIMIT])
+        );
+        assert_eq!(turn["uncertainty"][0]["labor_blockers_omitted"], 24);
+        assert_eq!(
+            turn["active_work"]["current_parent_goal"]["labor"],
+            json!(rows)
+        );
+    }
+
+    #[test]
+    fn incomplete_or_inconsistent_labor_findings_never_become_successful_summaries() {
+        let (anchor, original) = joined_goal_view("false", true);
+        for case in 0..12 {
+            let mut view = original.clone();
+            let row = &mut view["current_parent_goal"]["labor"][0];
+            match case {
+                0 => {
+                    row.as_object_mut()
+                        .expect("finding")
+                        .remove("observed_enabled");
+                }
+                1 => row["current_truth"] = json!("true"),
+                2 => row["requested_enabled"] = json!("true"),
+                3 => row["unit_id"] = json!("043"),
+                4 => row["unit_id"] = json!(43),
+                5 => row["unit_id"] = json!("0"),
+                6 => row["labor"] = json!("x".repeat(65)),
+                7 => row["current_truth"] = json!("unknown"),
+                8 => view["current_parent_goal"]["labor"] = json!(vec![row.clone(); 33]),
+                9 => view["current_parent_goal"]["labor"] = json!([]),
+                10 => view["current_parent_goal"]["labor"] = json!([row.clone(), row.clone()]),
+                _ => view["current_parent_goal"]["labor"] = Value::Null,
+            }
+            let value = joined_packet(anchor, &view, "control", true, false);
+            let turn = &value["agent_turn"];
+            assert!(
+                turn["briefing"]["current_parent_labor"].is_null(),
+                "case {case}"
+            );
+            assert!(
+                turn["uncertainty"][0].get("labor_blockers").is_none(),
+                "case {case}"
+            );
+            assert_eq!(
+                turn["briefing"]["original_goal_proven"], false,
+                "case {case}"
+            );
+        }
+    }
+
+    #[test]
     fn missing_unverified_recovered_or_mismatched_parent_never_promotes_inventory_history() {
         let (anchor, original) = joined_goal_view("true", true);
         for case in 0..10 {
@@ -546,6 +768,18 @@ mod tests {
             );
             assert!(
                 turn["active_work"]["current_parent_goal"].is_null(),
+                "case {case}"
+            );
+            assert!(
+                turn["briefing"]["current_parent_labor"].is_null(),
+                "case {case}"
+            );
+            assert!(
+                turn["uncertainty"]
+                    .as_array()
+                    .expect("uncertainty")
+                    .iter()
+                    .all(|finding| finding.get("labor_blockers").is_none()),
                 "case {case}"
             );
             assert!(
@@ -592,6 +826,7 @@ mod tests {
             false
         );
         assert!(value["agent_turn"]["active_work"]["current_parent_goal"].is_null());
+        assert!(value["agent_turn"]["briefing"]["current_parent_labor"].is_null());
         assert_eq!(
             value["retained_reference"]["selected_inventory_goal"]["first_satisfied_anchor"],
             view["selected_inventory_goal"]["first_satisfied_anchor"]
@@ -608,6 +843,7 @@ mod tests {
             assert_eq!(turn["briefing"]["parent_goal_observation_fenced"], true);
             assert_eq!(turn["briefing"]["original_goal_proven"], false);
             assert!(turn["active_work"]["current_parent_goal"].is_null());
+            assert!(turn["briefing"]["current_parent_labor"].is_null());
             assert_eq!(turn["recommendations"], json!([]));
             assert_eq!(turn["uncertainty"][0]["state"], "observation_fenced");
             assert_eq!(turn["uncertainty"][0]["retryable_in_session"], false);

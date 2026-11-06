@@ -27,6 +27,8 @@ DFH = b'0.51.11-r1'
 GEN = 701
 WGEN = 7
 OGEN = 53
+PGEN = 70
+IGEN = 71
 TICK = 120
 SITE = 4
 TOKEN = b't' * 32
@@ -105,30 +107,34 @@ def workforce_effect(plan, applied):
     return raw + wf.hashed(b'dfmcp-workforce-receipt/1', raw)
 
 
-def order_queue(created=False, tick=TICK, retired=False):
+def order_queue(created=False, *, tick=TICK, sequence=None, retired=False):
     present = created and not retired
-    return (b'DFMWO010' + struct.pack('>QQQII', OGEN, 11 + created + retired, tick, 100 + created, SITE)
+    return (b'DFMWO010' + struct.pack('>QQQII', OGEN, 11 + created if sequence is None else sequence,
+                                   tick, 100 + created, SITE)
             + b'\x01' + text(b'region1') + struct.pack('>I', int(present))
             + (struct.pack('>I', 100) if present else b''))
 
 
-def progress_capture(sequence, tick, retired=False):
-    raw = b'DFMWP012' + struct.pack('>QQQIIIB', 70, sequence, tick, SITE, 101, int(not retired), 1)
-    raw += text(b'region1') + struct.pack('>IIB', 1, 100, int(not retired))
-    if not retired:
-        raw += struct.pack('>iBiiIiiiiiII', 77, 1, 1, 1, 3, 0, -1, 1, 0, 0, 0, 0)
-        raw += text(b'ConstructBed') + text(b'')
+def progress_capture(tick, sequence, present=True, amount=1):
+    """Independent progress/1.12 bytes; absent orders retain their allocation horizon."""
+    raw = (b'DFMWP012' + struct.pack('>QQQIIIB', PGEN, sequence, tick, SITE, 101, int(present), 1)
+           + text(b'region1') + struct.pack('>IIB', 1, 100, int(present)))
+    if present:
+        raw += (struct.pack('>iBiiIiiiiiII', 69, 1, amount, amount, 3, 0, -1, 1, -1, -1, 0, 0)
+                + text(b'ConstructBed') + text(b''))
     return raw
 
 
-def operations_capture(tick, stock):
-    jobs = (b'DFMJ1200' + struct.pack('>IIBiI', 0, tick, 1, SITE, 100)
+def operations_capture(tick, stack=1):
+    """One complete operations/1.3 inventory, with no job/output attribution."""
+    year, annual = divmod(tick, 403200)
+    jobs = (b'DFMJ1200' + struct.pack('>IIBiI', year, annual, 1, SITE, 100)
             + text(b'region1') + struct.pack('>I', 0))
-    raw = b'DFMO1300' + struct.pack('>I', len(jobs)) + jobs
-    raw += struct.pack('>IIII', 100, 100, 0, int(stock > 0))
-    if stock:
-        raw += struct.pack('>Ii', 2, 5) + text(b'BED')
-        raw += struct.pack('>iiiIiiiI', -1, 420, 0, stock, 1, 1, 1, 64) + b'\0\0'
+    raw = b'DFMO1300' + struct.pack('>I', len(jobs)) + jobs + struct.pack('>III', 100, 100, 0)
+    raw += struct.pack('>I', int(stack > 0))
+    if stack > 0:
+        raw += (struct.pack('>Ii', 2, 5) + text(b'BED') + struct.pack('>iiiIiiiI', -1, 420, 0, stack, 1, 1, 1, 64)
+                + b'\x00\x00')
     return raw + struct.pack('>I', 0)
 
 
@@ -190,15 +196,17 @@ class Peer:
         self.order_plan = None
         self.workforce_applied = False
         self.workforce_generation = WGEN
+        self.workforce_sequence = None
         self.workforce_tick = TICK
-        self.workforce_sequence = 3
-        self.labor_reversed = False
+        self.workforce_labor = None
+        self.after_workforce_read = None
         self.order_created = False
         self.order_retired = False
-        self.goal_tick = TICK
-        self.stock = 1
+        self.order_tick = TICK
+        self.order_sequence = 11
         self.progress_sequence = 0
-        self.reverse_during_operations = False
+        self.inventory_stack = 1
+        self.after_operations_read = None
         self.drop_workforce_reply = False
         self.acceptor = threading.Thread(target=self.accept, name='combined-peer')
         self.acceptor.start()
@@ -258,21 +266,27 @@ class Peer:
                 assert ids == sorted(set(ids)) and 1 <= len(ids) <= 32
                 assert all(ident in self.citizen_ids for ident in ids)
                 self.workforce_selections.append(ids)
-                capture = bytearray(workforce_capture(ids, self.option_count))
-                capture[8:16] = self.workforce_generation.to_bytes(8, 'big')
-                capture[16:24] = self.workforce_sequence.to_bytes(8, 'big')
-                capture[24:32] = self.workforce_tick.to_bytes(8, 'big')
+                capture = wf.capture(workforce_capture(ids, self.option_count))
                 if self.workforce_applied:
-                    current = wf.capture(bytes(capture))
-                    enabled_now = (not self.workforce_plan['assigned'] if self.labor_reversed
-                                   else self.workforce_plan['assigned'])
-                    current['details'][self.workforce_plan['detail_index']]['members'] = ids if enabled_now else []
-                    for unit in current['units']:
-                        for column, enabled in enumerate(current['details'][self.workforce_plan['detail_index']]['labors']):
-                            if enabled:
-                                unit['labors'][column] = int(enabled_now)
-                    capture = wf.encode_capture(current)
-                response += blob(9, bytes(capture))
+                    before = wf.capture(bytes.fromhex(self.workforce_plan['capture_hex']))
+                    assert [unit['id'] for unit in before['units']] == ids
+                    capture, _ = wf.expected(before, self.workforce_plan['detail_index'],
+                                             self.workforce_plan['assigned'])
+                    enabled = (self.workforce_plan['assigned'] if self.workforce_labor is None
+                               else self.workforce_labor)
+                    detail = capture['details'][self.workforce_plan['detail_index']]
+                    detail['members'] = ids if enabled else []
+                    for unit in capture['units']:
+                        for column, assigned in enumerate(detail['labors']):
+                            if assigned:
+                                unit['labors'][column] = int(enabled)
+                capture['generation'] = self.workforce_generation
+                if self.workforce_sequence is not None:
+                    capture['sequence'] = self.workforce_sequence
+                capture['tick'] = self.workforce_tick
+                response += blob(9, wf.encode_capture(capture))
+                if self.after_workforce_read is not None:
+                    self.after_workforce_read()
             if op == 'PrepareAssignment':
                 capture = workforce_capture(req[11], self.option_count)
                 self.workforce_plan = wf.make_plan(req[5].decode(), req[6], bool(req[7]), capture)
@@ -284,7 +298,6 @@ class Peer:
                 assert req[10] == bytes.fromhex(self.workforce_plan['prepare_token'])
                 assert not self.workforce_applied
                 self.workforce_applied = True
-                self.workforce_sequence += 1
                 if self.drop_workforce_reply:
                     raise ConnectionResetError("injected lost commit reply after retained effect")
                 response += blob(10, workforce_effect(self.workforce_plan, True))
@@ -292,31 +305,36 @@ class Peer:
                 response += blob(10, workforce_effect(self.workforce_plan, self.workforce_applied))
             return response + number(11, 0) + number(12, int(self.workforce_plan is not None))
         if plugin == 'dfmcp_work_order_progress_v1_12':
+            assert req[3] == 1 and req[4] == 12
+            assert op in ('Handshake', 'ReadObservation')
             response = (number(1, 1) + number(2, 0) + blob(3, req[2]) + number(4, 1) + number(5, 12)
-                        + number(6, 70) + blob(7, DF) + blob(8, DFH))
+                        + number(6, PGEN) + blob(7, DF) + blob(8, DFH))
             if op == 'ReadObservation':
-                assert req[5] == 100
+                assert req[5] == 100 and self.order_created
                 self.progress_sequence += 1
-                response += blob(9, progress_capture(self.progress_sequence, self.goal_tick, self.order_retired))
-            else:
-                assert op == 'Handshake'
+                response += blob(9, progress_capture(self.order_tick, self.progress_sequence,
+                                                    not self.order_retired, self.order_plan['amount']))
             return response
         if plugin == 'dfmcp_operations_v1_3':
+            assert req[3] == 1 and req[4] == 3
+            assert {key: req[key] for key in (5, 6, 7, 8)} == {
+                5: 1024, 6: 1024, 7: 2046, 8: 2 * 1024 * 1024}
+            assert op in ('Handshake', 'ReadObservation')
             response = (number(1, 1) + number(2, 0) + blob(3, req[2]) + number(4, 1) + number(5, 3)
-                        + number(6, 71) + blob(7, DF) + blob(8, DFH))
+                        + number(6, IGEN) + blob(7, DF) + blob(8, DFH))
             if op == 'ReadObservation':
-                response += blob(9, operations_capture(self.goal_tick, self.stock))
-                if self.reverse_during_operations:
-                    self.labor_reversed = True
-                    self.workforce_sequence += 1
-                    self.reverse_during_operations = False
-            else:
-                assert op == 'Handshake'
+                assert self.order_created
+                response += blob(9, operations_capture(self.order_tick, self.inventory_stack))
+                if self.after_operations_read is not None:
+                    hook, self.after_operations_read = self.after_operations_read, None
+                    hook()
             return response
         assert plugin == 'dfmcp_work_orders_v1_10'
         response = (number(1, 1) + number(2, 0) + blob(3, req[2]) + number(4, 1) + number(5, 10)
                     + number(6, OGEN) + blob(7, DF) + blob(8, DFH))
-        if op == 'ReadOrders': response += blob(9, order_queue(self.order_created, self.goal_tick, self.order_retired))
+        if op == 'ReadOrders':
+            response += blob(9, order_queue(self.order_created, tick=self.order_tick,
+                                           sequence=self.order_sequence, retired=self.order_retired))
         if op == 'PrepareOrder':
             self.order_plan = {'key': req[5], 'recipe': req[6], 'amount': req[7], 'digest': req[9]}
             assert req[8] == hashlib.sha256(order_queue(False)).digest()
@@ -327,10 +345,18 @@ class Peer:
             assert req[10] == token
             assert not self.order_created
             self.order_created = True
+            self.order_sequence += 1
             response += blob(10, order_effect(self.order_plan, True))
         if op == 'QueryOrder' and self.order_plan:
             response += blob(10, order_effect(self.order_plan, self.order_created))
         return response
+
+    def goal_tick(self, tick):
+        """Advance the double explicitly; no native clock or real game is executed."""
+        assert self.order_created and self.workforce_applied and tick >= self.order_tick
+        if tick > self.order_tick:
+            self.order_sequence += 1
+        self.order_tick = self.workforce_tick = tick
 
     def close(self):
         self.stop.set(); self.acceptor.join(3)
@@ -401,7 +427,7 @@ class CombinedProduction(unittest.TestCase):
         try: self.client.close()
         finally: self.peer.close()
 
-    def original_inventory_plan(self, stable_samples=2):
+    def inventory_plan(self, stable_samples=1):
         opened = self.client.open(max_wall_millis=60000)
         self.assertTrue(opened['ok'], opened)
         sid = opened['agent_turn']['session_id']
@@ -414,42 +440,71 @@ class CombinedProduction(unittest.TestCase):
                                  'minimum_stack_units': 1}}
         current = self.client.tool('plan', session_id=sid, request=json.dumps(request))
         self.assertTrue(current['ok'], current)
-        original = copy.deepcopy(current['original_plan'])
-        for step in (0, 1):
+        original = current['original_plan']
+        self.assertEqual(len(original['steps']), 2)
+        self.assertEqual(original['steps'][1]['depends_on'], [0])
+        for index in (0, 1):
             prepared = self.client.execute_next(current)
             self.assertTrue(prepared['ok'], prepared)
-            self.assertEqual(prepared['review']['step_id'], step)
+            self.assertEqual(prepared['review']['step_id'], index)
+            self.assertEqual(prepared['review']['idempotency_key'], original['steps'][index]['key'])
             current = self.client.execute_next(prepared)
             self.assertTrue(current['ok'], current)
         self.assertTrue(current['frontier']['all_applied'])
         self.assertFalse(current['original_goal_proven'])
+        self.assertIsNone(current['current_parent_goal'])
+        self.assertFalse(current['selected_inventory_goal']['proven_at_anchor'])
         return sid, original, current
 
-    def sample_goal(self, sid, tick):
-        self.peer.goal_tick = tick
-        self.peer.workforce_tick = tick
-        return self.client.tool('wait', session_id=sid, max_wall_millis=60000)
+    def goal_sample(self, sid, tick):
+        self.peer.goal_tick(tick)
+        result = self.client.tool('wait', session_id=sid)
+        self.assertTrue(result['ok'], result)
+        self.assertFalse(result['current_state_proven'])
+        self.assertFalse(result['clock_advanced'])
+        self.assertFalse(result['automatic_redispatch'])
+        self.assertFalse(result['runtime_admitted'])
+        parent = result['current_parent_goal']
+        self.assertEqual(parent['scope'], 'complete_original_labor_and_inventory_goal')
+        self.assertEqual(parent['anchor'], result['anchor'])
+        self.assertEqual(parent['selected_anchor'], result['selected_inventory_goal']['anchor'])
+        for field in ('fortress_id', 'epoch', 'sequence', 'tick'):
+            self.assertEqual(parent['anchor'][field], parent['selected_anchor'][field])
+        self.assertNotEqual(parent['anchor']['state_hash'], parent['selected_anchor']['state_hash'])
+        self.assertNotEqual(parent['source_digest'], result['selected_inventory_goal']['source_digest'])
+        self.assertEqual(len(parent['workforce_source_digest']), 64)
+        self.assertEqual(parent['original_goal_proven'], result['original_goal_proven'])
+        self.assertFalse(parent['historical_labor_receipt_is_current_evidence'])
+        self.assertFalse(parent['restored_from_history'])
+        self.assertEqual(parent['production_attribution'], 'unknown')
+        labor = self.peer.workforce_labor is not False
+        self.assertEqual(parent['labor'], [{'unit_id': '43', 'labor': 'MINE',
+            'requested_enabled': True, 'observed_enabled': labor,
+            'current_truth': 'true' if labor else 'false'}])
+        self.assert_single_dispatch()
+        return result
+
+    def assert_single_dispatch(self):
+        self.assertEqual(sum(op == 'CommitAssignment' for _, op in self.peer.calls), 1)
+        self.assertEqual(sum(op == 'CommitOrder' for _, op in self.peer.calls), 1)
+        self.assertFalse(any('Run' in op for _, op in self.peer.calls))
 
     def assert_single_original_effects(self, result, original):
         self.assertEqual(result['original_plan'], original)
-        self.assertEqual(sum(op == 'CommitAssignment' for _, op in self.peer.calls), 1)
-        self.assertEqual(sum(op == 'CommitOrder' for _, op in self.peer.calls), 1)
+        self.assert_single_dispatch()
         self.assertEqual([entry['idempotency_key'] for entry in result['frontier']['entries']],
                          [step['key'] for step in original['steps']])
 
     def test_current_parent_requires_labor_and_original_stability_after_order_retirement(self):
-        sid, original, _ = self.original_inventory_plan()
-        first = self.sample_goal(sid, 125)
-        self.assertTrue(first['ok'], first)
+        sid, original, _ = self.inventory_plan(stable_samples=2)
+        first = self.goal_sample(sid, 125)
         self.assertEqual(first['current_parent_goal']['current_truth'], 'true')
         self.assertFalse(first['current_parent_goal']['original_goal_proven'])
         self.assertFalse(first['original_goal_proven'])
-        duplicate = self.sample_goal(sid, 125)
-        self.assertTrue(duplicate['ok'], duplicate)
+        duplicate = self.goal_sample(sid, 125)
         self.assertFalse(duplicate['original_goal_proven'])
         self.peer.order_retired = True
-        achieved = self.sample_goal(sid, 130)
-        self.assertTrue(achieved['ok'], achieved)
+        achieved = self.goal_sample(sid, 130)
         self.assertTrue(achieved['original_goal_proven'])
         self.assertFalse(achieved['current_state_proven'])
         self.assertTrue(achieved['current_parent_goal']['original_goal_proven'])
@@ -468,10 +523,9 @@ class CombinedProduction(unittest.TestCase):
         self.assertTrue(queried['ok'], queried)
         self.assertEqual(queried['current_parent_goal'], achieved['current_parent_goal'])
         self.assertEqual(self.peer.calls, calls)
-        self.peer.labor_reversed = True
-        self.peer.workforce_sequence += 1
-        reversed_goal = self.sample_goal(sid, 135)
-        self.assertTrue(reversed_goal['ok'], reversed_goal)
+        self.peer.workforce_labor = False
+        self.peer.workforce_sequence = 5
+        reversed_goal = self.goal_sample(sid, 135)
         self.assertEqual(reversed_goal['current_parent_goal']['current_truth'], 'false')
         self.assertTrue(reversed_goal['selected_inventory_goal']['proven_at_anchor'])
         self.assertFalse(reversed_goal['original_goal_proven'])
@@ -479,11 +533,15 @@ class CombinedProduction(unittest.TestCase):
         self.assert_single_original_effects(reversed_goal, original)
 
     def test_parent_bracket_failure_withdraws_proof_and_breaks_unfinished_stability(self):
-        sid, original, _ = self.original_inventory_plan(stable_samples=3)
-        first = self.sample_goal(sid, 125)
-        self.assertTrue(first['ok'], first)
-        self.peer.reverse_during_operations = True
-        rejected = self.sample_goal(sid, 130)
+        sid, original, _ = self.inventory_plan(stable_samples=3)
+        first = self.goal_sample(sid, 125)
+        self.assertFalse(first['original_goal_proven'])
+        def reverse_during_inventory():
+            self.peer.workforce_labor = False
+            self.peer.workforce_sequence = 5
+        self.peer.after_operations_read = reverse_during_inventory
+        self.peer.goal_tick(130)
+        rejected = self.client.tool('wait', session_id=sid, max_wall_millis=60000)
         self.assertFalse(rejected['ok'], rejected)
         self.assertFalse(rejected['original_goal_proven'])
         self.assertIsNone(rejected['retained_reference']['current_parent_goal'])
@@ -492,28 +550,26 @@ class CombinedProduction(unittest.TestCase):
         self.assertTrue(inspected['ok'], inspected)
         self.assertIsNone(inspected['current_parent_goal'])
         self.assertFalse(inspected['selected_inventory_goal']['proven_at_anchor'])
-        self.peer.labor_reversed = False
-        self.peer.workforce_sequence += 1
+        self.peer.workforce_labor = True
+        self.peer.workforce_sequence = 6
         for tick in (135, 140):
-            pending = self.sample_goal(sid, tick)
-            self.assertTrue(pending['ok'], pending)
+            pending = self.goal_sample(sid, tick)
             self.assertEqual(pending['current_parent_goal']['current_truth'], 'true')
             self.assertFalse(pending['original_goal_proven'])
-        achieved = self.sample_goal(sid, 145)
-        self.assertTrue(achieved['ok'], achieved)
+        achieved = self.goal_sample(sid, 145)
         self.assertTrue(achieved['original_goal_proven'])
         self.assert_single_original_effects(achieved, original)
 
     def test_source_generation_drift_withdraws_current_parent_proof(self):
-        sid, original, _ = self.original_inventory_plan()
-        self.assertTrue(self.sample_goal(sid, 125)['ok'])
-        achieved = self.sample_goal(sid, 130)
-        self.assertTrue(achieved['ok'], achieved)
+        sid, original, _ = self.inventory_plan(stable_samples=2)
+        self.goal_sample(sid, 125)
+        achieved = self.goal_sample(sid, 130)
         self.assertTrue(achieved['original_goal_proven'])
         first = achieved['selected_inventory_goal']['first_satisfied_anchor']
         self.assertIsNotNone(first)
         self.peer.workforce_generation += 1
-        rejected = self.sample_goal(sid, 135)
+        self.peer.goal_tick(135)
+        rejected = self.client.tool('wait', session_id=sid, max_wall_millis=60000)
         self.assertFalse(rejected['ok'], rejected)
         self.assertFalse(rejected['original_goal_proven'])
         self.assertIsNone(rejected['retained_reference']['current_parent_goal'])
@@ -532,10 +588,9 @@ class CombinedProduction(unittest.TestCase):
         self.assert_single_original_effects(inspected, original)
 
     def test_reopen_keeps_inventory_achievement_without_restoring_parent_proof(self):
-        sid, original, _ = self.original_inventory_plan()
-        self.assertTrue(self.sample_goal(sid, 125)['ok'])
-        achieved = self.sample_goal(sid, 130)
-        self.assertTrue(achieved['ok'], achieved)
+        sid, original, _ = self.inventory_plan(stable_samples=2)
+        self.goal_sample(sid, 125)
+        achieved = self.goal_sample(sid, 130)
         self.assertTrue(achieved['original_goal_proven'])
         first = achieved['selected_inventory_goal']['first_satisfied_anchor']
         self.assertIsNotNone(first)
@@ -566,20 +621,225 @@ class CombinedProduction(unittest.TestCase):
         self.assertEqual(before, custody_files(self.directory))
         self.assertEqual(calls, self.peer.calls)
         self.client.close()
-        self.peer.labor_reversed = True
-        self.peer.workforce_sequence += 1
+        self.peer.workforce_labor = False
+        self.peer.workforce_sequence = 5
         env = reopen_environment(self.env, offline['recovery'], achieved['native_custody']['workforce_journal_id'])
         self.client = stdio.Client(self.directory, {}, suffix='goal-reopened', env=env)
         reopened = self.client.open(mode='reconcile', max_wall_millis=60000)
         self.assertTrue(reopened['ok'], reopened)
         self.assertFalse(reopened['original_goal_proven'])
-        current = self.sample_goal(reopened['agent_turn']['session_id'], 135)
-        self.assertTrue(current['ok'], current)
+        current = self.goal_sample(reopened['agent_turn']['session_id'], 135)
         self.assertEqual(current['current_parent_goal']['current_truth'], 'false')
         self.assertTrue(current['selected_inventory_goal']['proven_at_anchor'])
         self.assertFalse(current['original_goal_proven'])
         self.assertEqual(current['selected_inventory_goal']['first_satisfied_anchor'], first)
         self.assert_single_original_effects(current, original)
+
+    def test_parent_goal_requires_advancing_original_stability_and_survives_order_retirement(self):
+        sid, original, _ = self.inventory_plan(stable_samples=2)
+        first = self.goal_sample(sid, TICK + 5)
+        self.assertEqual(first['current_parent_goal']['current_truth'], 'true')
+        self.assertFalse(first['original_goal_proven'])
+        self.assertFalse(first['selected_inventory_goal']['proven_at_anchor'])
+        duplicate = self.goal_sample(sid, TICK + 5)
+        self.assertFalse(duplicate['original_goal_proven'])
+        self.assertFalse(duplicate['selected_inventory_goal']['proven_at_anchor'])
+
+        # The engine can retire an order; the explicitly sealed inventory goal
+        # remains meaningful, without asserting this order produced the stock.
+        self.peer.order_retired = True
+        achieved = self.goal_sample(sid, TICK + 10)
+        self.assertEqual(achieved['original_plan'], original)
+        self.assertTrue(achieved['original_goal_proven'])
+        selected = achieved['selected_inventory_goal']
+        self.assertTrue(selected['proven_at_anchor'])
+        self.assertFalse(selected['receipt_linked'])
+        self.assertTrue(selected['physical_work'].startswith('Unknown'), selected)
+        self.assertEqual(selected['parent_terminal_truth'], 'unknown')
+        self.assertFalse(selected['original_goal_proven'])
+        self.assertEqual(selected['production_attribution'], 'unknown')
+        self.assertTrue(selected['preexisting_items_included'])
+        self.assertEqual(selected['first_satisfied_anchor'], selected['anchor'])
+        self.assertTrue(achieved['recovery']['goal_history_present'])
+        self.assertIn('parent/goal.history', custody_files(self.directory))
+        calls = list(self.peer.calls)
+        explained = self.client.tool('explain', session_id=sid)
+        self.assertTrue(explained['ok'], explained)
+        self.assertEqual(explained['current_parent_goal'], achieved['current_parent_goal'])
+        self.assertEqual(self.peer.calls, calls)
+
+    def test_parent_goal_reacquires_labor_instead_of_reusing_applied_receipt(self):
+        sid, original, _ = self.inventory_plan()
+        achieved = self.goal_sample(sid, TICK + 5)
+        self.assertTrue(achieved['original_goal_proven'])
+        historical = achieved['selected_inventory_goal']['first_satisfied_anchor']
+        self.peer.workforce_labor = False
+        reversed_labor = self.goal_sample(sid, TICK + 10)
+        self.assertEqual(reversed_labor['original_plan'], original)
+        self.assertTrue(reversed_labor['frontier']['all_applied'])
+        self.assertEqual(reversed_labor['current_parent_goal']['current_truth'], 'false')
+        self.assertFalse(reversed_labor['original_goal_proven'])
+        self.assertTrue(reversed_labor['selected_inventory_goal']['proven_at_anchor'])
+        self.assertEqual(reversed_labor['selected_inventory_goal']['first_satisfied_anchor'], historical)
+        self.assertEqual(reversed_labor['frontier']['entries'][0]['receipt_digest'],
+                         achieved['frontier']['entries'][0]['receipt_digest'])
+
+    def test_parent_goal_rejects_labor_drift_within_inventory_bracket(self):
+        sid, _, _ = self.inventory_plan()
+        achieved = self.goal_sample(sid, TICK + 5)
+        self.assertTrue(achieved['original_goal_proven'])
+        historical = achieved['selected_inventory_goal']['first_satisfied_anchor']
+        self.peer.goal_tick(TICK + 10)
+        self.peer.after_operations_read = lambda: setattr(self.peer, 'workforce_labor', False)
+        start = len(self.peer.calls)
+        refused = self.client.tool('wait', session_id=sid)
+        self.assertFalse(refused['ok'], refused)
+        self.assertFalse(refused['original_goal_proven'])
+        calls = self.peer.calls[start:]
+        workforce_reads = [index for index, call in enumerate(calls)
+                           if call == ('dfmcp_workforce_v1_17', 'ObserveWorkforce')]
+        inventory_read = calls.index(('dfmcp_operations_v1_3', 'ReadObservation'))
+        self.assertEqual(len(workforce_reads), 2)
+        self.assertLess(workforce_reads[0], inventory_read)
+        self.assertLess(inventory_read, workforce_reads[1])
+        current = self.client.tool('query', session_id=sid)
+        self.assertTrue(current['ok'], current)
+        self.assertIsNone(current['current_parent_goal'])
+        self.assertFalse(current['original_goal_proven'])
+        self.assertIsNone(current['selected_inventory_goal']['current_truth'])
+        self.assertFalse(current['selected_inventory_goal']['proven_at_anchor'])
+        self.assertEqual(current['selected_inventory_goal']['first_satisfied_anchor'], historical)
+        self.assert_single_dispatch()
+
+    def test_parent_goal_withdraws_proof_after_late_custody_publication_failure(self):
+        sid, _, _ = self.inventory_plan()
+        achieved = self.goal_sample(sid, TICK + 5)
+        self.assertTrue(achieved['original_goal_proven'])
+        historical = achieved['selected_inventory_goal']['first_satisfied_anchor']
+        archive = self.directory / 'parent/original.plan'
+        history = self.directory / 'parent/goal.history'
+        history_bytes = history.stat().st_size
+        original_bytes = archive.read_bytes()
+        reads = []
+        def refuse_final_publication():
+            reads.append(True)
+            if len(reads) == 2:
+                # The selected sample has published, but the final parent
+                # custody check must reject this noncanonical file mode.
+                archive.chmod(0o400)
+        self.peer.after_workforce_read = refuse_final_publication
+        self.peer.goal_tick(TICK + 10)
+        try:
+            refused = self.client.tool('wait', session_id=sid)
+        finally:
+            archive.chmod(0o600)
+            self.peer.after_workforce_read = None
+        self.assertEqual(len(reads), 2)
+        self.assertFalse(refused['ok'], refused)
+        self.assertFalse(refused['original_goal_proven'])
+        self.assertIsNone(refused['retained_reference']['current_parent_goal'])
+        self.assertEqual(archive.read_bytes(), original_bytes)
+        current = self.client.tool('query', session_id=sid)
+        # A detected archive custody violation fences this owner. Restoring
+        # permissions does not silently rehabilitate it or its last proof.
+        self.assertFalse(current['ok'], current)
+        self.assertFalse(current['original_goal_proven'])
+        retained = current['retained_reference']
+        self.assertIsNone(retained['current_parent_goal'])
+        self.assertFalse(retained['selected_inventory_goal']['proven_at_anchor'])
+        self.assertIsNone(retained['selected_inventory_goal']['current_truth'])
+        self.assertEqual(retained['selected_inventory_goal']['first_satisfied_anchor'], historical)
+        self.assertGreater(history.stat().st_size, history_bytes)
+        self.assert_single_dispatch()
+
+    def test_parent_goal_is_not_restored_from_inventory_history_after_restart(self):
+        sid, original, _ = self.inventory_plan()
+        achieved = self.goal_sample(sid, TICK + 5)
+        self.assertTrue(achieved['original_goal_proven'])
+        historical = achieved['selected_inventory_goal']['first_satisfied_anchor']
+        recovery = achieved['recovery']
+        workforce_id = achieved['native_custody']['workforce_journal_id']
+        self.client.close(crash=True)
+        before = custody_files(self.directory)
+        calls = list(self.peer.calls)
+        env = reopen_environment(self.env, recovery, workforce_id)
+        self.client = stdio.Client(self.directory, {}, suffix='goal-offline', env=env)
+        offline = self.client.open(mode='offline', max_wall_millis=60000)
+        self.assertTrue(offline['ok'], offline)
+        self.assertEqual(offline['original_plan'], original)
+        self.assertEqual(offline['selected_inventory_goal']['first_satisfied_anchor'], historical)
+        self.assertFalse(offline['selected_inventory_goal']['proven_at_anchor'])
+        self.assertIsNone(offline['selected_inventory_goal']['current_truth'])
+        self.assertIsNone(offline['current_parent_goal'])
+        self.assertFalse(offline['original_goal_proven'])
+        self.assertFalse(offline['current_state_proven'])
+        self.assertEqual(self.peer.calls, calls)
+        self.assertEqual(custody_files(self.directory), before)
+
+        self.client.close()
+        self.client = stdio.Client(self.directory, {}, suffix='goal-reconcile', env=env)
+        reopened = self.client.open(mode='reconcile', max_wall_millis=60000)
+        self.assertTrue(reopened['ok'], reopened)
+        self.assertIsNone(reopened['current_parent_goal'])
+        self.assertFalse(reopened['original_goal_proven'])
+        fresh = self.goal_sample(reopened['agent_turn']['session_id'], TICK + 10)
+        self.assertTrue(fresh['original_goal_proven'])
+        self.assertEqual(fresh['original_plan'], original)
+        self.assertEqual(fresh['selected_inventory_goal']['first_satisfied_anchor'], historical)
+
+    def test_parent_goal_withdraws_current_inventory_but_preserves_first_achievement(self):
+        sid, original, _ = self.inventory_plan()
+        self.peer.order_retired = True
+        achieved = self.goal_sample(sid, TICK + 5)
+        self.assertTrue(achieved['original_goal_proven'])
+        historical = achieved['selected_inventory_goal']['first_satisfied_anchor']
+        self.peer.inventory_stack = 0
+        consumed = self.goal_sample(sid, TICK + 10)
+        self.assertEqual(consumed['original_plan'], original)
+        self.assertEqual(consumed['current_parent_goal']['current_truth'], 'false')
+        self.assertFalse(consumed['original_goal_proven'])
+        selected = consumed['selected_inventory_goal']
+        self.assertEqual(selected['current_truth'], 'false')
+        self.assertFalse(selected['proven_at_anchor'])
+        self.assertEqual(selected['first_satisfied_anchor'], historical)
+        self.assertFalse(selected['receipt_linked'])
+        self.assertTrue(selected['physical_work'].startswith('Unknown'), selected)
+        self.assertEqual(selected['production_attribution'], 'unknown')
+
+    def test_parent_source_regression_is_visible_and_fences_subsequent_native_reads(self):
+        sid, _, _ = self.inventory_plan()
+        achieved = self.goal_sample(sid, TICK + 5)
+        self.assertTrue(achieved['original_goal_proven'])
+        self.assertFalse(achieved['parent_goal_observation_fenced'])
+        historical = achieved['selected_inventory_goal']['first_satisfied_anchor']
+        self.peer.goal_tick(TICK + 10)
+        self.peer.workforce_sequence = 3  # Applied source fence was four, in the same incarnation.
+        start = len(self.peer.calls)
+        refused = self.client.tool('wait', session_id=sid)
+        self.assertFalse(refused['ok'], refused)
+        self.assertFalse(refused['original_goal_proven'])
+        retained = refused['retained_reference']
+        self.assertTrue(retained['parent_goal_observation_fenced'])
+        self.assertIsNone(retained['current_parent_goal'])
+        self.assertGreaterEqual(retained['observation_tick_floor'], TICK + 10)
+        calls = self.peer.calls[start:]
+        self.assertEqual(calls.count(('dfmcp_workforce_v1_17', 'ObserveWorkforce')), 1)
+        self.assertNotIn(('dfmcp_operations_v1_3', 'ReadObservation'), calls)
+        current = self.client.tool('query', session_id=sid)
+        self.assertTrue(current['ok'], current)
+        self.assertTrue(current['parent_goal_observation_fenced'])
+        self.assertIsNone(current['current_parent_goal'])
+        self.assertFalse(current['original_goal_proven'])
+        self.assertFalse(current['selected_inventory_goal']['proven_at_anchor'])
+        self.assertEqual(current['selected_inventory_goal']['first_satisfied_anchor'], historical)
+        self.assertNotIn('fortress_wait', [step['tool'] for step in current['agent_turn']['recommendations']])
+        calls = list(self.peer.calls)
+        self.peer.workforce_sequence = 4
+        refused_again = self.client.tool('wait', session_id=sid)
+        self.assertFalse(refused_again['ok'], refused_again)
+        self.assertTrue(refused_again['retained_reference']['parent_goal_observation_fenced'])
+        self.assertEqual(self.peer.calls, calls)
+        self.assert_single_dispatch()
 
     def test_preplan_lifecycle_refusals_do_not_invent_an_uncertain_effect(self):
         opened = self.client.open(max_wall_millis=60000)
@@ -1085,7 +1345,7 @@ def main():
     print(json.dumps({'schema': 'dfmcp.combined-production-stdio/1', 'tests': result.testsRun,
         'failed': len(result.failures), 'errors': len(result.errors), 'skipped': len(result.skipped),
         'actual_modern_stdio': True, 'loopback_peers_are_doubles': True, 'live_game': False}))
-    raise SystemExit(0 if result.wasSuccessful() and result.testsRun == 18 and not result.skipped else 1)
+    raise SystemExit(0 if result.wasSuccessful() and result.testsRun == 25 and not result.skipped else 1)
 
 
 if __name__ == '__main__': main()

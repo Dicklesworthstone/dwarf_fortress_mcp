@@ -265,6 +265,23 @@
       "composite_and_selected_anchors_distinct": true,
       "terminal_predicate": "unchanged complete original parent",
       "proof": "current parent True and original selected inventory temporal requirement fulfilled",
+      "labor_findings": {
+        "maximum": 32,
+        "order": "canonical_unit_id_ascending",
+        "scope": "original selected citizens and requested labor only",
+        "fields": [
+          "unit_id",
+          "labor",
+          "requested_enabled",
+          "observed_enabled",
+          "current_truth"
+        ],
+        "qualification": "independent workforce policy before child source union",
+        "unqualified_observed_enabled": null,
+        "raw_capture_is_fact_authority": false,
+        "agent_turn_blockers_max": 8,
+        "omitted_blockers_explicit": true
+      },
       "current_state_proven_for_whole_world": false,
       "historical_labor_receipt_supplies_current_facts": false,
       "query_and_explain_acquire_new_sample": false,
