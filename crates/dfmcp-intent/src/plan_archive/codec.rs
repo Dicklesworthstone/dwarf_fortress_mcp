@@ -337,6 +337,19 @@ impl<F: FnMut() -> Result<()>> Writer<'_, F> {
                 self.compare_op(*op)?;
                 self.u64(*value)?;
             }
+            Predicate::LaboratoryCivilianReleaseSafety { burrow, civilians } => {
+                self.byte(14)?;
+                self.u64(burrow.id.get())?;
+                self.u32(burrow.generation)?;
+                self.count(
+                    civilians.len(),
+                    dfmcp_world::laboratory_civilian::MAX_LABORATORY_CIVILIANS,
+                )?;
+                for civilian in civilians {
+                    self.u64(civilian.id.get())?;
+                    self.u32(civilian.generation)?;
+                }
+            }
         }
         Ok(())
     }
@@ -683,6 +696,24 @@ impl<F: FnMut() -> Result<()>> Reader<'_, '_, F> {
                     op: self.compare_op()?,
                     value: self.u64()?,
                 }
+            }
+            14 => {
+                let burrow = dfmcp_world::LaboratoryEntityIdentity {
+                    id: EntityId::new(self.u64()?),
+                    generation: self.u32()?,
+                };
+                let count = self.count(
+                    dfmcp_world::laboratory_civilian::MAX_LABORATORY_CIVILIANS,
+                    12,
+                )?;
+                let mut civilians = Vec::with_capacity(count);
+                for _ in 0..count {
+                    civilians.push(dfmcp_world::LaboratoryEntityIdentity {
+                        id: EntityId::new(self.u64()?),
+                        generation: self.u32()?,
+                    });
+                }
+                Predicate::LaboratoryCivilianReleaseSafety { burrow, civilians }
             }
             _ => return Err(invalid("unknown archived predicate")),
         })

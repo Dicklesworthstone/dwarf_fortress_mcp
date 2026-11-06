@@ -27,6 +27,11 @@ reassertion; a cancellation refusal remains a refusal. This neither confirms
 threat clearance nor authorizes a later release. An explicit, separately reviewed
 release plan remains the operator's responsibility.
 
+The additive reviewed reference release compiler and its complete-census,
+per-effect safety and generation-preserving cancellation contract are described
+in [LAB_CIVILIAN_RELEASE.md](LAB_CIVILIAN_RELEASE.md). It does not change this
+named protection workflow's pause policy or canonical representation.
+
 The compiler does not claim missing membership bits mean false. Assigning true
 is an explicit authorized request, including for an unknown prior bit. Since
 cancellation cannot invert it, neither unknown nor already-true prior membership
@@ -66,6 +71,8 @@ Eight core tests and three actual `MemoryAdapter` tests are checked in. They
 cover canonical order, limits, unknown prior membership, qualified source/liveness,
 current versus historical truth, no-op refusal, authority/anchor/budgets, deferred
 guards, real prepare/commit/poll/replay, and cancellation before dispatch with
-pre-existing members. They have not been compiled or executed in this editing
-environment: no Rust toolchain or repository dependency cache is available. No
-Rust, full-workspace, native or live qualification is claimed.
+pre-existing members. All passed on 2026-11-06 with the locked dependencies and
+the current nightly toolchain, including the unchanged legacy cancellation
+behavior after the additive reviewed-release guard. The complete world and
+intent crate suites also passed. These results do not claim full-workspace,
+native game or live transport qualification.

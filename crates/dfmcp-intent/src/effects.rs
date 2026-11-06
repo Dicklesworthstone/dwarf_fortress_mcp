@@ -281,7 +281,7 @@ pub fn produced_item_id(order: EntityId, ordinal: u32) -> EntityId {
 /// Identity of the fortress-wide settings entity that holds standing orders.
 #[must_use]
 pub fn fortress_settings_entity_id(fortress: FortressId) -> EntityId {
-    namespaced(b"dfmcp-fortress-settings-v1", &fortress.get().to_be_bytes())
+    dfmcp_world::laboratory_fortress_settings_entity_id(fortress)
 }
 
 /// Canonical tile code an excavation mode leaves behind.

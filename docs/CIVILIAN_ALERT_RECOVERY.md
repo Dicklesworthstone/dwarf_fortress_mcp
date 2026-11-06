@@ -41,6 +41,30 @@ retires the emergency latch but not the accepted observation floor. This monitor
 is process-local: after restart it must be initialized from the observed defense
 state and build fresh stability, never restore a guessed clear streak.
 
+## Owned laboratory consumer (2026-11-06)
+
+The default laboratory server now retains the FSM with its world and lease book,
+including when several sessions share the fortress. The classifier consumes only
+qualified complete-domain reference facts and binds unit/burrow generations.
+Every accepted world version and foreground wait slice updates that owner;
+duplicate queries never advance recovery. Restore, restart, epoch changes and
+invalid continuity rebuild the interval from current observed configuration.
+
+A pure snapshot alert no longer calls the explicit `transition_to(Peace)`
+override to offer an all-clear after one observation. The owned monitor offers
+`blueprint={"template":"civilian_release","burrow":"3001"}` only after its
+stable clear interval. Plan and commit both require the current owned clearance;
+the private retained source is sealed into the plan and cannot be supplied by a
+caller. Changed anchors require another explicit review. Each deferred release
+effect independently checks current threats, complete civilians and generations.
+
+The current monitor is inspectable using `fortress.query` mode
+`civilian_recovery`. Its 16-burrow/64-civilian release bounds are narrower than the
+reusable FSM's generic proposal bounds below. Durable history can reconstruct an
+old sealed plan but never restore process-local clearance. Public usage and
+limits are in [MCP_CIVILIAN_PROTECTION.md](MCP_CIVILIAN_PROTECTION.md); the core
+predicate/compiler contract is in [LAB_CIVILIAN_RELEASE.md](LAB_CIVILIAN_RELEASE.md).
+
 ## Authority and coverage boundary
 
 These are reference-model proposals, not a native threat detector or a new MCP
@@ -70,8 +94,9 @@ constant-size recovery state, with no I/O, timers or background work.
 Nine Rust module tests cover the original cycle, guarded recovery, replay,
 unknown and partial coverage, gaps, changed epochs/scopes/rosters, paused ticks,
 invalid/stale/conflicting inputs, new civilians, peacetime-clearance invalidation,
-and independent limits. They were source-reviewed but not run: this editing
-environment has no Rust toolchain, Cargo dependencies or DFHack runtime.
+and independent limits. They were source-reviewed only at the original 2026-10-11 increment. The
+2026-11-06 world/intent suite executed these tests successfully; current feature
+validation is recorded in IMPLEMENTATION_STATUS.md. No DFHack runtime is claimed.
 
 The retained independent Python model checker exercises 295,245 synthetic
 transitions against a clear-suffix oracle. This validates the bounded model's

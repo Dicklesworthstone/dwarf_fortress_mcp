@@ -213,6 +213,7 @@ fn source_summary(source: &PlanSource) -> &str {
         | PlanSource::Production { summary, .. }
         | PlanSource::ProductionContinuation { summary, .. }
         | PlanSource::RoomContinuation { summary, .. }
+        | PlanSource::CivilianRelease { summary, .. }
         | PlanSource::ConnectedRoom { summary, .. }
         | PlanSource::ConnectedRoomContinuation { summary, .. } => summary,
     }
@@ -228,6 +229,7 @@ fn source_json(source: &PlanSource) -> Value {
         | PlanSource::Production { raw, .. }
         | PlanSource::ProductionContinuation { raw, .. }
         | PlanSource::RoomContinuation { raw, .. }
+        | PlanSource::CivilianRelease { raw, .. }
         | PlanSource::ConnectedRoom { raw, .. }
         | PlanSource::ConnectedRoomContinuation { raw, .. } => json!({
             "kind": match source {
@@ -235,6 +237,7 @@ fn source_json(source: &PlanSource) -> Value {
                 PlanSource::Blueprint { .. } => "blueprint",
                 PlanSource::ProductionContinuation { .. } => "production_continuation",
                 PlanSource::RoomContinuation { .. } => "room_continuation",
+                PlanSource::CivilianRelease { .. } => "civilian_release",
                 PlanSource::ConnectedRoom { .. } => "connected_room",
                 PlanSource::ConnectedRoomContinuation { .. } => "connected_room_continuation",
                 _ => "production",

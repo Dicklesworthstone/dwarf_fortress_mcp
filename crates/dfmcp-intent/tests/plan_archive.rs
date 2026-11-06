@@ -463,6 +463,77 @@ fn paired_stair_archive_refuses_excessive_volume_or_invalid_targets() -> Result<
 }
 
 #[test]
+fn civilian_release_appends_tag_fourteen_and_roundtrips_exact_incarnations() -> Result<()> {
+    let exact = |id, generation| dfmcp_world::LaboratoryEntityIdentity {
+        id: EntityId::new(id),
+        generation,
+    };
+    let goal = Predicate::LaboratoryCivilianReleaseSafety {
+        burrow: exact(20, 5),
+        civilians: vec![exact(11, 7), exact(12, 9)],
+    };
+    let plan = make(vec![Action::Pause { paused: false }], goal.clone(), false);
+    let (bytes, _) = roundtrip(&plan)?;
+    let predicate = 12 + 16 + 16 + 64 + 4 + plan.summary.len();
+    let mut expected = vec![14];
+    expected.extend_from_slice(&20u64.to_be_bytes());
+    expected.extend_from_slice(&5u32.to_be_bytes());
+    expected.extend_from_slice(&2u32.to_be_bytes());
+    for (id, generation) in [(11u64, 7u32), (12, 9)] {
+        expected.extend_from_slice(&id.to_be_bytes());
+        expected.extend_from_slice(&generation.to_be_bytes());
+    }
+    assert_eq!(&bytes[predicate..predicate + expected.len()], expected);
+    let changed = make(
+        vec![Action::Pause { paused: false }],
+        Predicate::LaboratoryCivilianReleaseSafety {
+            burrow: exact(20, 6),
+            civilians: vec![exact(11, 7), exact(12, 9)],
+        },
+        false,
+    );
+    assert_ne!(plan.digest, changed.digest);
+    Ok(())
+}
+
+#[test]
+fn civilian_release_archive_rejects_invalid_counts_duplicate_ids_and_zero_generations() -> Result<()>
+{
+    let exact = |id| dfmcp_world::LaboratoryEntityIdentity {
+        id: EntityId::new(id),
+        generation: 1,
+    };
+    let plan = make(
+        vec![Action::Pause { paused: false }],
+        Predicate::LaboratoryCivilianReleaseSafety {
+            burrow: exact(20),
+            civilians: vec![exact(11), exact(12)],
+        },
+        false,
+    );
+    let (bytes, seal) = roundtrip(&plan)?;
+    let predicate = 12 + 16 + 16 + 64 + 4 + plan.summary.len();
+    for mutation in 0..6 {
+        let mut changed = bytes.clone();
+        match mutation {
+            0..=2 => {
+                let count = [0u32, 65, u32::MAX][mutation];
+                changed[predicate + 13..predicate + 17].copy_from_slice(&count.to_be_bytes());
+            }
+            3 => changed[predicate + 9..predicate + 13].copy_from_slice(&0u32.to_be_bytes()),
+            4 => changed[predicate + 25..predicate + 29].copy_from_slice(&0u32.to_be_bytes()),
+            _ => {
+                let first = changed[predicate + 17..predicate + 25].to_vec();
+                changed[predicate + 29..predicate + 37].copy_from_slice(&first);
+            }
+        }
+        let (changed, expected) = resigned(&changed, seal.plan_digest);
+        assert!(archive::decode(&changed, expected, ArchiveLimits::default()).is_err());
+    }
+    Ok(())
+}
+
+#[test]
 fn inventory_quantity_roundtrips_exactly_with_original_obligation_and_tag_twelve() -> Result<()> {
     for quantity_field in [None, Some("stack_size".to_owned())] {
         for op in [

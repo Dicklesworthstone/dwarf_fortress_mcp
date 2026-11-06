@@ -145,6 +145,11 @@ pub enum DurablePlanSource {
         summary: String,
         raw: String,
     },
+    /// Exact historical civilian release source; reopening restores no clearance.
+    CivilianRelease {
+        summary: String,
+        raw: String,
+    },
     /// Complete connected-room source, retaining its observed entrance and domain.
     ConnectedRoom {
         summary: String,
@@ -170,6 +175,7 @@ impl DurablePlanSource {
                 ("production_continuation", summary, raw)
             }
             Self::RoomContinuation { summary, raw } => ("room_continuation", summary, raw),
+            Self::CivilianRelease { summary, raw } => ("civilian_release", summary, raw),
             Self::ConnectedRoom { summary, raw } => ("connected_room", summary, raw),
             Self::ConnectedRoomContinuation { summary, raw } => {
                 ("connected_room_continuation", summary, raw)
@@ -476,6 +482,10 @@ fn parse_plan(
             raw: unhex_payload(payload, MAX_PLAN_REQUEST_BYTES)?,
         },
         "room_continuation" => DurablePlanSource::RoomContinuation {
+            summary,
+            raw: unhex_payload(payload, MAX_PLAN_REQUEST_BYTES)?,
+        },
+        "civilian_release" => DurablePlanSource::CivilianRelease {
             summary,
             raw: unhex_payload(payload, MAX_PLAN_REQUEST_BYTES)?,
         },

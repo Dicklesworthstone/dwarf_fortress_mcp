@@ -740,3 +740,23 @@ masks, then installs exact furnishings and proves current entrance access.
 `connected_room_stairs_residual_v1` compiler. Existing single-level source and
 archive bytes remain unchanged. See [multi-level connected rooms](docs/LAB_CONNECTED_ROOM_ACCESS.md#connect-rooms-across-levels)
 for the complete request, geometry limits and laboratory-only stair semantics.
+
+### Owned civilian recovery and guarded release
+
+The laboratory `fortress.query` mode `civilian_recovery` reports process-local
+clearance shared by every session of the same world. It accepts no historical
+selector or caller-supplied threat/clearance claim. Up to 16 burrows and 64
+civilians per release are monitored; the complete census and response must fit
+current query allowances. Duplicate reads do not add stability; restore/restart
+rebuild the interval.
+
+The closed blueprint JSON string `{"template":"civilian_release","burrow":"3001"}`
+uses the owner's current complete census and stable 100-tick clear interval.
+Its private source is sealed for exact historical reconstruction. Commit repeats
+current owned-clearance and complete-work allowance checks; any changed anchor
+requires a fresh Plan/review. Membership removal precedes restriction release,
+and each effect checks current threats and exact civilian/burrow generations.
+The ordinary ConfigureLogistics/Checkpoint grants remain required. Protective
+compensation preserves original generations while permitting returned danger.
+Existing explicit operator action arrays retain their original semantics.
+See `docs/MCP_CIVILIAN_PROTECTION.md` for the complete workflow and limitations.

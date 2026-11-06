@@ -13,6 +13,7 @@ pub mod graph_query;
 pub mod inventory_allocation;
 pub mod journal_delta;
 pub mod laboratory_access;
+pub mod laboratory_civilian;
 mod ledger;
 pub mod map_connectivity;
 pub mod map_reachability;
@@ -69,6 +70,11 @@ pub use evidence::{
 pub use laboratory_access::{
     laboratory_building_footprints, laboratory_room_access_paired_stairs_truth,
     laboratory_room_access_truth,
+};
+pub use laboratory_civilian::{
+    LaboratoryCivilianCensus, LaboratoryEntityIdentity, LaboratoryThreatAssessment,
+    laboratory_civilian_census, laboratory_civilian_release_safety_truth,
+    laboratory_fortress_settings_entity_id,
 };
 pub use ledger::{DurableLedger, EffectJournalRecord, ObservationCapsule, WitnessSet};
 pub use model::{

@@ -584,3 +584,14 @@ This project does not accept:
 
 The standard is not “the command ran.” The standard is exact state, bounded authority,
 deterministic behavior, replayable evidence, and honest uncertainty.
+
+### Civilian recovery in the laboratory
+
+After configuring protection with `civilian_protection_v1`, inspect
+`fortress.query` mode `civilian_recovery`. The world owner tracks consecutive
+qualified clear observations across calls and shared sessions. Once its 100-tick
+clear interval is ready, `fortress.plan.blueprint` accepts the JSON string
+`{"template":"civilian_release","burrow":"3001"}`. Review and commit its digest
+at the same anchor; both dependent release effects recheck current threats and
+the complete civilian roster with exact generations. Restore and restart rebuild
+clearance. See [the protection and recovery workflow](docs/MCP_CIVILIAN_PROTECTION.md).

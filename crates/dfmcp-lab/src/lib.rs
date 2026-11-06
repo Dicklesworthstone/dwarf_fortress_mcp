@@ -25,6 +25,9 @@ pub mod faults;
 pub use faults::{Boundary, CampaignReport, Fault, FaultPoint, FaultSchedule};
 
 #[cfg(test)]
+#[path = "civilian_release_tests.rs"]
+mod civilian_release_tests;
+#[cfg(test)]
 mod effect_drain_tests;
 #[cfg(test)]
 mod furniture_lifecycle_tests;
@@ -1455,6 +1458,10 @@ impl GameAdapter for MemoryAdapter {
                         ));
                     }
                     let compensation_key = format!("{}:compensation", action.step.idempotency_key);
+                    dfmcp_intent::civilian_release::validate_release_compensation_identities(
+                        &action.step,
+                        &self.snapshot,
+                    )?;
                     apply_action(&mut self.snapshot, compensation, &compensation_key)?;
                     let observation = PredicateEvidence::laboratory(&self.snapshot)?;
                     let postconditions = effects::default_postconditions(

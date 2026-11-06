@@ -81,6 +81,11 @@ impl ReadWitness {
                 self.region(*area);
                 self.building_domain = true;
             }
+            Predicate::LaboratoryCivilianReleaseSafety { .. } => {
+                // Clearance reads the complete entity domain, including absence.
+                // It also has owned history outside a snapshot. Never auto-rebase.
+                self.unbounded = true;
+            }
             Predicate::EntityQuantity { kind, .. } => {
                 self.entity_domains.insert(kind.as_str().to_owned());
             }

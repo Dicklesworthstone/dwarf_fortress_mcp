@@ -1,5 +1,39 @@
 # Implementation Status
 
+## Unreleased — Owned civilian recovery and reviewed safe release
+
+The default laboratory keeps civilian recovery with the private/shared world
+owner and consumes accepted observations, including each foreground wait slice.
+A pure snapshot no longer offers all-clear release. The current civilian_recovery
+query reports complete civilian identities/generations, threat quality, partial
+versus complete protection, clear-window duration and samples. Duplicate reads
+do not count; unknown facts, continuity gaps, changed rosters/scopes, restore and
+restart rebuild the window. Protection advice first pauses a running world and
+stops proposing changes once the complete configuration is established.
+
+The closed civilian_release blueprint can only be sourced by the owner's stable
+100-tick clear interval. Its private retained source binds exact census, anchor,
+clearance and policy into the plan seal. Plan and commit check complete-domain
+and compiled-work allowances; commit repeats current clearance and refuses any
+changed anchor without automatic rebase. Both dependent release effects carry
+new laboratory predicate tag 14, checking complete current threats, roster and
+burrow/civilian generations. Normal mutation/checkpoint authority remains
+required. Protective compensation preserves incarnations while permitting
+returned threats. Legacy predicates, archives and explicit operator arrays keep
+their semantics; durable source reconstruction restores no clearance authority.
+
+Executed on Rust 1.101.0-nightly (249c1e4e3): the full world (253)/intent (349) suites
+passed, followed by focused additional classifier and compensation cases. Five
+new real MemoryAdapter release tests and three existing protection tests pass.
+All 24 focused actual-source handler/component cases pass: nine owner/source
+cases, six public recovery flows, eight existing protection workflows and the
+raid-to-stable-release regression. These cover changed threat/roster/generation,
+unknown evidence, revoked capability, narrowed budget, shared ownership, restart,
+exact historical seal, and actionable protection advice. The foreground handler
+component excludes modern macros/stdio assembly, uninstalled Task-service
+supervision and native admission; no full MCP/live-game qualification is claimed.
+See `docs/MCP_CIVILIAN_PROTECTION.md` and `docs/LAB_CIVILIAN_RELEASE.md`.
+
 ## Unreleased — Record useful laboratory event history
 
 The new `starter_fortress_history` scenario enables the explicit

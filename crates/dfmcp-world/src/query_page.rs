@@ -263,6 +263,18 @@ fn encode_predicate(bytes: &mut Vec<u8>, predicate: &Predicate) -> Result<()> {
             });
             put_u64(bytes, *value);
         }
+        Predicate::LaboratoryCivilianReleaseSafety { burrow, civilians } => {
+            bytes.push(14);
+            put_u64(bytes, burrow.id.get());
+            bytes.extend_from_slice(&burrow.generation.to_be_bytes());
+            let mut civilians = civilians.clone();
+            civilians.sort_unstable();
+            put_u64(bytes, civilians.len() as u64);
+            for civilian in civilians {
+                put_u64(bytes, civilian.id.get());
+                bytes.extend_from_slice(&civilian.generation.to_be_bytes());
+            }
+        }
     }
     if bytes.len() > MAX_QUERY_IDENTITY_BYTES {
         return Err(DfmcpError::new(

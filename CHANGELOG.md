@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased — Carry civilian recovery through a guarded reviewed release
+
+- Keep stable-clear monitoring in the private/shared world owner across normal
+  calls and wait slices; reset it on unknown evidence, gaps, restore or restart.
+- Replace one-snapshot all-clear actions with a closed civilian_release blueprint
+  backed by current owned clearance and a complete exact civilian census.
+- Seal current threat/roster/generation checks into both release effects using
+  additive predicate/archive tag 14; retain original generations in compensation.
+- Check complete-census budgets at Plan and Commit, refuse stale automatic rebase,
+  and stop redundant protection advice once the configuration is complete.
+- Pass full world/intent suites plus focused new core cases, eight actual adapter
+  cases and 24 owner/public-workflow component cases; preserve native admission
+  and transport qualification as separate evidence boundaries.
+
 ## Unreleased — Record laboratory events during real workflows
 
 - Add opt-in starter_fortress_history with canonical publication events for

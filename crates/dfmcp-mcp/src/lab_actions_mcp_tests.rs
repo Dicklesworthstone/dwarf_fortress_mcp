@@ -1831,7 +1831,7 @@ fn filters_search_proofs_and_doctor_counts_are_wired_in() -> TestResult {
 #[test]
 fn the_civilian_alert_fsm_locks_down_during_a_raid_and_sounds_the_all_clear() -> TestResult {
     let opened = parsed(&fortress_open_session(
-        Some(false),
+        Some(true),
         Some("72150".to_owned()),
         Some(caps(&[
             ("configure_military", "guarded"),
@@ -1856,16 +1856,14 @@ fn the_civilian_alert_fsm_locks_down_during_a_raid_and_sounds_the_all_clear() ->
             .cloned()
     };
     let follow = |remedy: &Value| -> std::result::Result<Value, Box<dyn std::error::Error>> {
-        let actions = remedy["arguments"]["actions"]
-            .as_str()
-            .ok_or("actions")?
-            .to_owned();
+        let actions = remedy["arguments"]["actions"].as_str().map(str::to_owned);
+        let blueprint = remedy["arguments"]["blueprint"].as_str().map(str::to_owned);
         let planned = parsed(&fortress_plan(
             Some(session.clone()),
             None,
             None,
-            Some(actions),
-            None,
+            actions,
+            blueprint,
         ))?;
         let digest = planned["plan_digest"]
             .as_str()
@@ -1885,10 +1883,26 @@ fn the_civilian_alert_fsm_locks_down_during_a_raid_and_sounds_the_all_clear() ->
     let locked = follow(&lockdown["remedy"])?;
     assert_eq!(locked["ok"], true, "{}", locked["error"]);
     let sheltered = parsed(&fortress_observe(Some(session.clone())))?;
-    assert!(
-        alert(&sheltered, "civilian_lockdown").is_none(),
+    assert_eq!(
+        sheltered["civilian_recovery"]["burrows"][0]["protection_observed"], "true",
         "{sheltered}"
     );
+    assert!(alert(&sheltered, "all_clear").is_none(), "{sheltered}");
+    let unpause = parsed(&fortress_plan(
+        Some(session.clone()),
+        None,
+        Some(false),
+        None,
+        None,
+    ))?;
+    let resumed = parsed(&fortress_commit(
+        Some(session.clone()),
+        unpause["plan_digest"]
+            .as_str()
+            .ok_or("unpause plan")?
+            .to_owned(),
+    ))?;
+    assert_eq!(resumed["ok"], true, "{resumed}");
 
     // The raid comes and goes; nobody dies; the all-clear follows.
     let mut clear = None;

@@ -533,6 +533,13 @@ impl<'a> PredicateEvidence<'a> {
                 )
                 .map_or(Unknown, |truth| truth)
             }
+            Predicate::LaboratoryCivilianReleaseSafety { burrow, civilians } => {
+                if !self.laboratory {
+                    return Unknown;
+                }
+                crate::laboratory_civilian_release_safety_truth(self.snapshot, *burrow, civilians)
+                    .map_or(Unknown, |truth| truth)
+            }
             Predicate::All(children) => {
                 let mut result = True;
                 for child in children {

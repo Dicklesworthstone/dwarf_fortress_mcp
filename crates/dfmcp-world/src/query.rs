@@ -2,7 +2,9 @@
 
 use dfmcp_core::{DfmcpError, EdgeId, EntityId, ErrorCode, MapCoord, MapCuboid, Result};
 
-use crate::{EdgeKind, EntityKind, EntityRecord, Fact, Value, WorldSnapshot};
+use crate::{
+    EdgeKind, EntityKind, EntityRecord, Fact, LaboratoryEntityIdentity, Value, WorldSnapshot,
+};
 
 const MAX_QUERY_KINDS: usize = 64;
 const MAX_QUERY_PREDICATE_DEPTH: usize = 64;
@@ -86,6 +88,13 @@ pub enum Predicate {
         entry: MapCoord,
         targets: Vec<MapCoord>,
     },
+    /// Current complete reference-world threat clearance and an exact full
+    /// civilian roster, including burrow and civilian generations. Historical
+    /// clear-window admission belongs to the observing shell, not this predicate.
+    LaboratoryCivilianReleaseSafety {
+        burrow: LaboratoryEntityIdentity,
+        civilians: Vec<LaboratoryEntityIdentity>,
+    },
 }
 
 impl Predicate {
@@ -140,6 +149,9 @@ impl Predicate {
                 }
                 Self::EntityQuantity { .. } => {
                     work = work.saturating_add((entities as u64).saturating_mul(3));
+                }
+                Self::LaboratoryCivilianReleaseSafety { .. } => {
+                    work = work.saturating_add(crate::laboratory_civilian::work_bound(entities));
                 }
                 _ => {}
             }
@@ -208,6 +220,15 @@ impl Predicate {
                     area: *area,
                     entry: *entry,
                     targets,
+                }
+            }
+            Self::LaboratoryCivilianReleaseSafety { burrow, civilians } => {
+                let mut civilians = civilians.clone();
+                // Do not erase duplicate IDs or conflicting generations.
+                civilians.sort_unstable();
+                Self::LaboratoryCivilianReleaseSafety {
+                    burrow: *burrow,
+                    civilians,
                 }
             }
             other => other.clone(),
@@ -362,6 +383,17 @@ impl Predicate {
                     put_i32(output, at.z);
                 }
             }
+            Self::LaboratoryCivilianReleaseSafety { burrow, civilians } => {
+                use crate::canonical::put_u32;
+                output.push(14);
+                put_u64(output, burrow.id.get());
+                put_u32(output, burrow.generation);
+                put_u64(output, civilians.len() as u64);
+                for civilian in civilians {
+                    put_u64(output, civilian.id.get());
+                    put_u32(output, civilian.generation);
+                }
+            }
         }
     }
 }
@@ -504,6 +536,10 @@ fn evaluate_truth(
             targets,
         } => crate::laboratory_room_access_paired_stairs_truth(snapshot, *area, *entry, targets)
             .map_or(PredicateTruth::Unknown, |truth| truth),
+        Predicate::LaboratoryCivilianReleaseSafety { burrow, civilians } => {
+            crate::laboratory_civilian_release_safety_truth(snapshot, *burrow, civilians)
+                .map_or(PredicateTruth::Unknown, |truth| truth)
+        }
         Predicate::EntityQuantity { .. } => {
             entity_quantity_truth(snapshot, predicate, Fact::known_value)
         }
@@ -760,6 +796,7 @@ fn validate_predicate_shape(root: &Predicate) -> Result<()> {
     let mut nodes = 0usize;
     let mut region_tiles = 0u64;
     let mut access_work = 0u64;
+    let mut civilian_work = 0u64;
     while let Some((predicate, depth)) = pending.pop() {
         nodes = nodes.checked_add(1).ok_or_else(|| {
             DfmcpError::new(
@@ -874,6 +911,21 @@ fn validate_predicate_shape(root: &Predicate) -> Result<()> {
                     return Err(DfmcpError::new(
                         ErrorCode::BudgetExceeded,
                         "laboratory access predicates exceed their combined work bound",
+                    ));
+                }
+            }
+            Predicate::LaboratoryCivilianReleaseSafety { burrow, civilians } => {
+                crate::laboratory_civilian::validate_request(*burrow, civilians)?;
+                civilian_work =
+                    civilian_work.saturating_add(crate::laboratory_civilian::work_bound(
+                        crate::laboratory_civilian::MAX_LABORATORY_CIVILIAN_ENTITIES,
+                    ));
+                if civilian_work
+                    > crate::laboratory_civilian::MAX_PREDICATE_LABORATORY_CIVILIAN_WORK
+                {
+                    return Err(DfmcpError::new(
+                        ErrorCode::BudgetExceeded,
+                        "laboratory civilian predicates exceed their combined census work bound",
                     ));
                 }
             }

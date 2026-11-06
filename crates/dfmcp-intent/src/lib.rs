@@ -4,6 +4,7 @@ mod action;
 pub mod alert_fsm;
 pub mod blueprint;
 pub mod civilian_protection;
+pub mod civilian_release;
 mod construction_planning;
 pub mod effect_quiescence;
 pub mod effects;
@@ -28,6 +29,7 @@ pub use alert_fsm::{
 };
 pub use blueprint::{BlueprintPlanner, BlueprintTemplate, HazardAssessment};
 pub use civilian_protection::{CivilianProtectionPlan, ProtectionProgress};
+pub use civilian_release::CivilianReleasePlan;
 pub use effect_quiescence::{EffectWorkState, inspect_effect_work};
 pub use labor::{
     DwarfLaborProfile, HIGH_STRESS_THRESHOLD, LaborAllocation, LaborAllocationLimits,

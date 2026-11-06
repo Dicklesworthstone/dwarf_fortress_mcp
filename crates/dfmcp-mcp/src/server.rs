@@ -94,6 +94,13 @@ use plan_forecast::forecast_plan;
 #[path = "lab_progress.rs"]
 mod lab_progress;
 
+#[path = "civilian_recovery.rs"]
+mod civilian_recovery;
+
+#[cfg(test)]
+#[path = "civilian_recovery_mcp_tests.rs"]
+mod civilian_recovery_mcp_tests;
+
 #[cfg(test)]
 #[path = "lab_progress_mcp_tests.rs"]
 mod lab_progress_mcp_tests;
@@ -190,6 +197,8 @@ pub(crate) struct LabSession {
     objectives: Vec<Objective>,
     /// Goal abandonment staged by restore, published with that exact world.
     objective_restore: BTreeSet<Digest32>,
+    /// Accepted civilian observations belong to this world, never a caller.
+    civilian_recovery: civilian_recovery::CivilianRecovery,
 }
 
 /// Observe the exact original goal separately from its actions and physical
@@ -220,6 +229,9 @@ fn new_history() -> dfmcp_world::retention::VersionRetention {
 /// the recent window nor a live root reaches. Live roots: the pending plan's
 /// sealed anchor, durable in-flight plans' anchors, and every checkpoint.
 fn remember_version(session: &mut LabSession) {
+    session
+        .civilian_recovery
+        .observe(session.adapter.snapshot());
     let current = session.adapter.snapshot().clone();
     session.history.record(&current);
     let mut roots: std::collections::BTreeSet<Digest32> =
@@ -228,6 +240,15 @@ fn remember_version(session: &mut LabSession) {
     roots.extend(session.durable_plans.values().map(|p| p.anchor.state_hash));
     roots.extend(objective_history_roots(session));
     session.history.collect(&roots);
+}
+
+/// Dynamic civilian advice uses the world's retained monitor. Pure snapshot
+/// alerts cannot establish a historical clear interval.
+fn world_alerts(session: &LabSession) -> Vec<serde_json::Value> {
+    let mut alerts = crate::lab_world::world_alerts(session.adapter.snapshot());
+    alerts.retain(|alert| alert["domain"] != "civilian_safety");
+    alerts.extend(session.civilian_recovery.alerts());
+    alerts
 }
 
 /// Why a version is not readable, as an explicit, honest reason.
@@ -484,6 +505,8 @@ pub(crate) struct SharedWorld {
     durability_fault: Option<String>,
     objectives: Vec<Objective>,
     objective_restore: BTreeSet<Digest32>,
+    /// Accepted civilian observations belong to this world, never a caller.
+    civilian_recovery: civilian_recovery::CivilianRecovery,
 }
 
 /// Admission drains existing calls before changing durable ownership. Calls
@@ -608,6 +631,7 @@ fn join_shared_world(
             .as_ref()
             .map_or_else(Vec::new, |recovery| recovery.objectives.clone()),
         objective_restore: BTreeSet::new(),
+        civilian_recovery: civilian_recovery::CivilianRecovery::default(),
     };
     let view = SharedView {
         anchor: world.adapter.snapshot().anchor(),
@@ -714,7 +738,14 @@ fn with_session_view<T>(
         std::mem::swap(&mut guard.durability_fault, &mut world.durability_fault);
         std::mem::swap(&mut guard.objectives, &mut world.objectives);
         std::mem::swap(&mut guard.objective_restore, &mut world.objective_restore);
+        std::mem::swap(&mut guard.civilian_recovery, &mut world.civilian_recovery);
         guard.shared_members = world.members.len();
+    }
+    if publish_progress {
+        let current = &mut *guard;
+        current
+            .civilian_recovery
+            .observe(current.adapter.snapshot());
     }
     let output = body(&mut guard);
     if publish_progress {
@@ -730,6 +761,7 @@ fn with_session_view<T>(
         std::mem::swap(&mut guard.durability_fault, &mut world.durability_fault);
         std::mem::swap(&mut guard.objectives, &mut world.objectives);
         std::mem::swap(&mut guard.objective_restore, &mut world.objective_restore);
+        std::mem::swap(&mut guard.civilian_recovery, &mut world.civilian_recovery);
     }
     if !publish_progress {
         guard.shared_members = prior_shared_members;
@@ -1613,6 +1645,11 @@ enum PlanSource {
         summary: String,
         raw: String,
     },
+    /// Owned stable clearance and the complete exact civilian census.
+    CivilianRelease {
+        summary: String,
+        raw: String,
+    },
     /// The complete versioned room plus its immutable entrance and routing domain.
     ConnectedRoom {
         summary: String,
@@ -1721,6 +1758,10 @@ impl PlanSource {
                 summary: summary.clone(),
                 raw: raw.clone(),
             },
+            Self::CivilianRelease { summary, raw } => D::CivilianRelease {
+                summary: summary.clone(),
+                raw: raw.clone(),
+            },
             Self::ConnectedRoom { summary, raw } => D::ConnectedRoom {
                 summary: summary.clone(),
                 raw: raw.clone(),
@@ -1756,6 +1797,10 @@ impl PlanSource {
                 raw: raw.clone(),
             },
             D::RoomContinuation { summary, raw } => Self::RoomContinuation {
+                summary: summary.clone(),
+                raw: raw.clone(),
+            },
+            D::CivilianRelease { summary, raw } => Self::CivilianRelease {
                 summary: summary.clone(),
                 raw: raw.clone(),
             },
@@ -1872,6 +1917,9 @@ impl PlanSource {
                     .compile(id, snapshot, summary)
                     .map(|(intent, analysis)| (intent, Some(analysis)))
             }
+            Self::CivilianRelease { summary, raw } => civilian_recovery::ReleaseSource::parse(raw)?
+                .compile(id, snapshot, summary)
+                .map(|(intent, analysis)| (intent, Some(analysis))),
             Self::ConnectedRoom { summary, raw } => {
                 connected_room::ConnectedRoomRequest::parse(raw)?
                     .compile(id, snapshot, summary)
@@ -2705,6 +2753,7 @@ pub(crate) fn open_session_in_scenario(
                 .map_or_else(Vec::new, |recovery| recovery.objectives.clone())
         },
         objective_restore: BTreeSet::new(),
+        civilian_recovery: civilian_recovery::CivilianRecovery::default(),
     }));
     {
         let mut registry = sessions();
@@ -2892,7 +2941,8 @@ pub fn fortress_observe(session_id: Option<String>) -> String {
                         payload["evidence_count"] = json!(frame.evidence.len());
                         payload["world"] = crate::lab_world::briefing(&snapshot);
                         payload["untracked_work"] = untracked_work_json(guard);
-                        payload["world_alerts"] = json!(crate::lab_world::world_alerts(&snapshot));
+                        payload["world_alerts"] = json!(world_alerts(guard));
+                        payload["civilian_recovery"] = guard.civilian_recovery.projection();
                         payload["objectives"] = objectives_json(guard);
                         payload.to_string()
                     }
@@ -2947,6 +2997,30 @@ pub fn fortress_query(session_id: Option<String>, mode: Option<String>) -> Strin
             };
             if let Err(error) = authorize_entry(&ctx, Capability::Query, RiskTier::ReadOnly) {
                 return dfmcp_error_payload("fortress.query", &error);
+            }
+            match civilian_recovery::is_recovery_query(&mode) {
+                Ok(true) => {
+                    let mut payload = guard.civilian_recovery.projection();
+                    payload["ok"] = json!(true);
+                    payload["session_id"] = json!(guard.session_id.to_string());
+                    payload["mode"] = json!("civilian_recovery");
+                    let encoded = payload.to_string();
+                    if guard.adapter.snapshot().graph.entities.len()
+                        > ctx.budget.max_entities as usize
+                        || encoded.len() as u64 > ctx.budget.max_bytes
+                        || encoded.len() as u64
+                            > u64::from(ctx.budget.max_output_tokens).saturating_mul(4)
+                    {
+                        return coded_error_payload(
+                            "fortress.query",
+                            ErrorCode::BudgetExceeded,
+                            "complete civilian recovery census exceeds the negotiated query allowance",
+                        );
+                    }
+                    return encoded;
+                }
+                Ok(false) => {}
+                Err(error) => return dfmcp_error_payload("fortress.query", &error),
             }
             if let Some(request) = &structured {
                 // Select historical state only after authorizing at the current
@@ -3218,6 +3292,41 @@ pub(crate) fn plan_request(
                             raw: request.canonical_json(),
                         }
                     }
+                    (_, _, Some(raw)) if civilian_recovery::is_release_request(&raw) => {
+                        if paused_target.is_some() {
+                            return coded_error_payload(
+                                "fortress.plan",
+                                ErrorCode::InvalidRequest,
+                                "civilian release cannot be combined with a pause target",
+                            );
+                        }
+                        if guard.adapter.snapshot().graph.entities.len()
+                            > ctx.budget.max_entities as usize
+                        {
+                            return coded_error_payload(
+                                "fortress.plan",
+                                ErrorCode::BudgetExceeded,
+                                "civilian release requires allowance for the complete current census",
+                            );
+                        }
+                        let source =
+                            civilian_recovery::parse_release_request(&raw).and_then(|burrow| {
+                                guard
+                                    .civilian_recovery
+                                    .release_source(guard.adapter.snapshot(), burrow)
+                            });
+                        let source = match source {
+                            Ok(source) => source,
+                            Err(error) => return dfmcp_error_payload("fortress.plan", &error),
+                        };
+                        if let Err(error) = source.validate_budget(guard.adapter.snapshot(), &ctx) {
+                            return dfmcp_error_payload("fortress.plan", &error);
+                        }
+                        PlanSource::CivilianRelease {
+                            summary,
+                            raw: source.canonical_json(),
+                        }
+                    }
                     (_, _, Some(raw)) if connected_room::is_connected_room(&raw) => {
                         let request =
                             match connected_room::ConnectedRoomRequest::parse_current(&raw) {
@@ -3270,7 +3379,8 @@ pub(crate) fn plan_request(
                         "steps": crate::lab_world::plan_steps_json(&plan),
                         "forecast": source.forecast(&guard.adapter, &plan, &ctx),
                         "live_routing": live_routing_json(&plan),
-                        "production": production_analysis,
+                        "production": if matches!(&source, PlanSource::CivilianRelease { .. }) { None } else { production_analysis.as_ref() },
+                        "civilian_release": if matches!(&source, PlanSource::CivilianRelease { .. }) { production_analysis.as_ref() } else { None },
                         "continuation": source.continuation_json(),
                         "note": "sealed plan; commit it with fortress_commit before expiry",
                     });
@@ -3396,7 +3506,7 @@ pub(crate) fn handoff_json(session: &LabSession) -> serde_json::Value {
             })
         });
     }
-    let alerts = crate::lab_world::world_alerts(snapshot);
+    let alerts = world_alerts(session);
     if session.carried.iter().any(|carried| !carried.is_final()) && !snapshot.paused {
         resume.push(json!({
             "tool": "fortress.wait",
@@ -3424,6 +3534,7 @@ pub(crate) fn handoff_json(session: &LabSession) -> serde_json::Value {
         "schema": "dfmcp.lab-handoff/1",
         "durability": durability_json(session),
         "world_alerts": alerts,
+        "civilian_recovery": session.civilian_recovery.projection(),
         "objectives": objectives_json(session),
         "orientation": {
             "replay_bundle": format!("df://session/{}/replay", session.session_id),
@@ -3908,6 +4019,11 @@ fn rebase_by_witness(
     session: &mut LabSession,
     stale: &PendingPlan,
 ) -> std::result::Result<(PreparedPlan, serde_json::Value), serde_json::Value> {
+    if matches!(stale.source, PlanSource::CivilianRelease { .. }) {
+        return Err(
+            json!({"accepted":false, "reason":"civilian release requires a newly reviewed current owned clearance"}),
+        );
+    }
     if dfmcp_intent::workforce_planning::plan_uses_shared_workforce(&stale.plan) {
         return Err(json!({
             "accepted": false,
@@ -3970,6 +4086,14 @@ fn rebase_by_witness(
 }
 
 fn replay_stale_plan(session: &mut LabSession, stale: PendingPlan) -> String {
+    if matches!(stale.source, PlanSource::CivilianRelease { .. }) {
+        session.pending = Some(stale);
+        return coded_error_payload(
+            "fortress.commit",
+            ErrorCode::StaleAnchor,
+            "civilian release observation changed; request and review a fresh release plan",
+        );
+    }
     if let Err(error) = objectives::validate_continuation(session, &stale.source, None) {
         session.pending = Some(stale);
         return dfmcp_error_payload("fortress.commit", &error);
@@ -4236,6 +4360,21 @@ pub fn fortress_commit(session_id: Option<String>, plan_digest: String) -> Strin
                     ErrorCode::Conflict,
                     "plan digest does not match the pending prepared plan; plans are sealed over their digest",
                 );
+            }
+            if let PlanSource::CivilianRelease { raw, .. } = &pending.source {
+                let validated = civilian_recovery::ReleaseSource::parse(raw)
+                    .and_then(|source| {
+                        source.validate_budget(guard.adapter.snapshot(), &read_context(guard))
+                    })
+                    .and_then(|()| {
+                        guard
+                            .civilian_recovery
+                            .validate_release(guard.adapter.snapshot(), raw)
+                    });
+                if let Err(error) = validated {
+                    guard.pending = Some(pending);
+                    return dfmcp_error_payload("fortress.commit", &error);
+                }
             }
             // New pursuit is reviewed separately from old goal history. Repeat
             // current truth/authority and complete-lineage quiescence checks
@@ -4786,8 +4925,8 @@ pub(crate) fn wait_with_ticks(session_id: Option<String>, max_game_ticks: Option
             if max_game_ticks.is_some() {
                 payload["advanced_game_ticks"] = json!(advanced);
                 payload["game_tick"] = json!(snapshot.tick.0);
-                payload["world_alerts"] =
-                    json!(crate::lab_world::world_alerts(guard.adapter.snapshot()));
+                payload["world_alerts"] = json!(world_alerts(guard));
+                payload["civilian_recovery"] = guard.civilian_recovery.projection();
                 payload["objectives"] = objectives_json(guard);
                 if !guard.carried.is_empty() {
                     // The bounded evaluation above owns proof status; a raw
