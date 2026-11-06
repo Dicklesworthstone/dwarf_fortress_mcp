@@ -44,6 +44,8 @@ mod parent_goal;
 pub use parent_goal::{
     SelectedParentGoalProgress, SelectedParentGoalResult, SelectedParentLaborFinding,
 };
+mod selected_clock_custody;
+pub use selected_clock_custody::SelectedOrderClockCustody;
 
 const MIB: u64 = 1024 * 1024;
 // A native workforce journal is <=64 MiB plus <=64 bounded latest records.

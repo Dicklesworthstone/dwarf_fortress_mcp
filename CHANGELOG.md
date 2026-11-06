@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased — Preserve complete original custody across production clocks
+
+- Centralize selected original plan, step/key, Created receipt and deadline
+  validation in an authority-free adapter descriptor used by the existing
+  combined order-clock target, preserving its identity bytes.
+- Validate optional order and inventory clock source/journal pins independently;
+  reject omitted, swapped or substituted recovery custody while retaining
+  existing entry-point restrictions.
+- Add focused custody/configuration regressions. Execution remains unverified
+  after the full workspace filesystem disconnected; the combined inventory-run
+  consumer is still unfinished. See IMPLEMENTATION_STATUS.md for exact limits.
+
 ## Unreleased — Preserve combined inventory goals in independent clock targets
 
 - Add a Run/1.13 inventory clock target for the actual selected order in its

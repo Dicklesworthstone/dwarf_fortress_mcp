@@ -1,5 +1,34 @@
 # Implementation Status
 
+## Unreleased — Shared original production clock custody
+
+Selected production clocks now have one authority-free custody descriptor for
+the complete original parent, actual selected StepId/key, archived plan, verified
+Created record and receipt, allocated native order, fortress and original selected
+deadline. The existing combined order-clock target consumes that descriptor;
+its target identity and the legacy standalone constructor remain unchanged.
+The selected inventory target added in 3b00c1f also inherits these checks through
+the selected order constructor, while retaining its independent identity domain.
+The shared binding preserves the original goal after native order retirement
+without slicing or resealing its plan.
+
+Native configuration now validates order-run and inventory-run pins independently.
+Each optional child clock requires matching explicit parent source/journal pins;
+omitted, swapped or mismatched identities and standalone recovery substitution
+refuse. Existing no-clock and order-clock entry points retain their restrictions.
+The combined MCP inventory-run consumer remains unfinished and is not enabled
+by this checkpoint. No new native protocol or production admission is introduced.
+
+The completed native configuration changes passed scoped formatting before the
+shared 63 GiB filesystem filled and the execution environment disconnected.
+The subsequent recovery reconstructed this checkpoint from exact committed source
+through GitHub and reviewed the resulting diff and source identities. New
+regressions are present but have not executed. The MCP dependency warmup has no
+verified result; earlier test counts do not qualify these changed sources.
+Incomplete local runtime/presentation edits were excluded. Broader acceptance in
+beads df-dfhack-bridge-plane-c-pic.4.1 and dfmcp-reality-wiring-proof-4bf.14.5 remains
+in progress.
+
 ## Unreleased — Selected original inventory clock target
 
 Run/1.13 can now bind its immutable inventory target to the actual selected order

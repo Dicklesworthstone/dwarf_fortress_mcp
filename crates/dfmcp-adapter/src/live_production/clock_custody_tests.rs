@@ -171,3 +171,127 @@ fn selected_clock_custody_rejects_revoked_query_and_corrupt_predecessor_without_
     assert_eq!(custody_bytes(&f), bytes);
     Ok(())
 }
+
+
+#[test]
+fn shared_clock_custody_preserves_nonzero_selection_deadline_and_identity_bytes() -> Result<()> {
+    use crate::live_production::SelectedOrderClockCustody;
+
+    let mut f = ProductionFixture::new(2)?;
+    f.applied(0)?;
+    f.applied(1)?;
+    f.applied(2)?;
+    let archive = validate_plan(&f.plan)?;
+    let journal = WorkOrderJournal::open(
+        f.order_journal.clone(),
+        &f.c,
+        JournalMode::Offline,
+        false,
+    )?
+    .summary(&f.c)?
+    .journal_id;
+    let calls = native_calls(&f);
+    let bytes = custody_bytes(&f);
+    let mut identities = Vec::new();
+    assert!(f.plan.steps[0].obligation.is_none());
+    for index in 1..=2 {
+        let result = f
+            .executor
+            .inspect_selected_order_custody(StepId::new(index as u32), &f.c)?;
+        let custody = SelectedOrderClockCustody::new(&f.plan, archive, journal, &result)?;
+        let NativeOrderCreation::Inserted {
+            native_order_id,
+            receipt,
+        } = result.creation_result()
+        else {
+            return Err(invalid("fixture must retain its verified Created receipt"));
+        };
+        assert_eq!(custody.step_id(), f.plan.steps[index].id);
+        assert_ne!(custody.step_id(), StepId::ZERO);
+        assert_eq!(custody.original_anchor(), f.plan.anchor);
+        assert_eq!(custody.deadline_tick(), GameTick(220));
+        assert_eq!(custody.review_seal(), result.review().seal());
+        assert_eq!(custody.native_plan(), result.review().native_plan());
+        assert_eq!(custody.native_order_id(), *native_order_id);
+
+        // The existing order-clock target's exact domain, widths and field
+        // order are a durable identity contract, including the original StepId.
+        let fields = [
+            f.plan.digest.as_bytes().to_vec(),
+            archive.object_digest.as_bytes().to_vec(),
+            journal.as_bytes().to_vec(),
+            (index as u32).to_be_bytes().to_vec(),
+            f.plan.steps[index].idempotency_key.as_bytes().to_vec(),
+            result.review().seal().as_bytes().to_vec(),
+            receipt.as_bytes().to_vec(),
+            native_order_id.to_be_bytes().to_vec(),
+        ];
+        let mut previous = b"dfmcp-combined-order-clock-target/1\0".to_vec();
+        for field in fields {
+            previous.extend_from_slice(&(field.len() as u64).to_be_bytes());
+            previous.extend_from_slice(&field);
+        }
+        let mut shared = b"dfmcp-combined-order-clock-target/1\0".to_vec();
+        shared.extend_from_slice(custody.identity_bytes());
+        assert_eq!(shared, previous);
+        identities.push(shared);
+    }
+    assert_ne!(identities[0], identities[1]);
+    assert_eq!(native_calls(&f), calls);
+    assert_eq!(custody_bytes(&f), bytes);
+    assert!(!f.executor.original_goal_proven());
+    assert!(
+        f.c.grants
+            .iter()
+            .all(|grant| grant.capability != Capability::ControlClock)
+    );
+    Ok(())
+}
+
+#[test]
+fn shared_clock_custody_rejects_uncreated_results_and_foreign_parent_bindings() -> Result<()> {
+    use crate::live_production::SelectedOrderClockCustody;
+
+    let mut f = ProductionFixture::new(1)?;
+    f.applied(0)?;
+    let prepared = f.prepare(1)?;
+    let archive = validate_plan(&f.plan)?;
+    let journal = WorkOrderJournal::open(
+        f.order_journal.clone(),
+        &f.c,
+        JournalMode::Offline,
+        false,
+    )?
+    .summary(&f.c)?
+    .journal_id;
+    let Some(StepEvidence::WorkOrder(result)) = f.executor.latest_step_evidence() else {
+        return Err(invalid("fixture must retain its original prepared order"));
+    };
+    assert_eq!(result.native_record().state(), CreationState::Prepared);
+    assert!(SelectedOrderClockCustody::new(&f.plan, archive, journal, result).is_err());
+
+    f.commit(1, prepared)?;
+    let result = f
+        .executor
+        .inspect_selected_order_custody(StepId::new(1), &f.c)?;
+    let calls = native_calls(&f);
+    let bytes = custody_bytes(&f);
+    let mut wrong_archive = archive;
+    wrong_archive.object_digest = Digest32::of_bytes(b"another original plan archive");
+    assert!(SelectedOrderClockCustody::new(&f.plan, wrong_archive, journal, &result).is_err());
+    assert!(SelectedOrderClockCustody::new(&f.plan, archive, Digest32::ZERO, &result).is_err());
+    let other = ProductionFixture::new(2)?;
+    assert!(
+        SelectedOrderClockCustody::new(
+            &other.plan,
+            validate_plan(&other.plan)?,
+            journal,
+            &result,
+        )
+        .is_err()
+    );
+    assert_eq!(native_calls(&f), calls);
+    assert_eq!(custody_bytes(&f), bytes);
+    assert!(!result.original_goal_proven());
+    Ok(())
+}

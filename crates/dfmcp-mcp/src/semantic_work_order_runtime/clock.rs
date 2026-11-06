@@ -151,84 +151,27 @@ impl ClockTarget {
         creation_journal: Digest32,
         result: &SemanticWorkOrderResult,
     ) -> Result<Self> {
-        let review = result.review();
-        let selected = review.selected_step();
-        if plan.steps.len() < 2
-            || dfmcp_adapter::live_production::validate_plan(plan)? != archive
-            || plan != review.original_plan()
-            || creation_journal == Digest32::ZERO
-            || review.seal() == Digest32::ZERO
-            || plan.steps.iter().find(|step| step.id == review.step_id()) != Some(selected)
-            || selected.depends_on.is_empty()
-            || result.native_record().state()
-                != dfmcp_adapter::work_order_control::CreationState::Created
-            || result.native_record().plan() != review.native_plan()
-            || selected.idempotency_key != review.native_plan().key()
-        {
-            return Err(corrupt(
-                "selected clock target differs from its complete original parent or verified custody",
-            ));
-        }
-        let NativeOrderCreation::Inserted {
-            native_order_id,
-            receipt,
-        } = result.creation_result()
-        else {
-            return Err(denied(
-                "selected clock requires the original verified Created receipt",
-            ));
-        };
-        let native = review.native_plan();
+        let custody = dfmcp_adapter::live_production::SelectedOrderClockCustody::new(
+            plan,
+            archive,
+            creation_journal,
+            result,
+        )?;
+        let native = custody.native_plan();
         let before = native.observation();
-        let effect = result.native_record().effect();
-        if *receipt == Digest32::ZERO
-            || *native_order_id > i32::MAX as u32
-            || *native_order_id != before.next_order_id()
-            || effect.created_order_id() != Some(*native_order_id)
-            || effect.receipt() != Some(*receipt)
-        {
-            return Err(corrupt(
-                "selected clock insertion differs from its original allocation and receipt",
-            ));
-        }
-        let fortress = FortressIdentity::new(before.world_folder(), before.site_id())?;
-        if fortress.fortress_id() != plan.anchor.fortress_id {
-            return Err(corrupt("selected clock belongs to another fortress"));
-        }
-        let deadline = selected
-            .obligation
-            .as_ref()
-            .ok_or_else(|| denied("selected clock requires the original order obligation"))?
-            .deadline_tick
-            .get();
-        if deadline <= plan.anchor.tick.get() {
-            return Err(corrupt(
-                "selected clock deadline precedes its original observation",
-            ));
-        }
-        let digest = hash(
-            b"dfmcp-combined-order-clock-target/1",
-            &[
-                plan.digest.as_bytes(),
-                archive.object_digest.as_bytes(),
-                creation_journal.as_bytes(),
-                &review.step_id().get().to_be_bytes(),
-                selected.idempotency_key.as_bytes(),
-                review.seal().as_bytes(),
-                receipt.as_bytes(),
-                &native_order_id.to_be_bytes(),
-            ],
-        );
+        let anchor = custody.original_anchor();
+        let mut identity = b"dfmcp-combined-order-clock-target/1\0".to_vec();
+        identity.extend_from_slice(custody.identity_bytes());
         Ok(Self {
-            digest,
-            original_seal: review.seal(),
-            fortress,
-            epoch: plan.anchor.cursor.epoch,
-            original_tick: plan.anchor.tick.get(),
-            order: *native_order_id,
+            digest: Digest32::of_bytes(&identity),
+            original_seal: custody.review_seal(),
+            fortress: FortressIdentity::new(before.world_folder(), before.site_id())?,
+            epoch: anchor.cursor.epoch,
+            original_tick: anchor.tick.get(),
+            order: custody.native_order_id(),
             recipe: native.spec().recipe() as u8,
             amount: native.spec().amount(),
-            deadline,
+            deadline: custody.deadline_tick().get(),
         })
     }
     fn context(&self, c: &OperationContext) -> Result<()> {

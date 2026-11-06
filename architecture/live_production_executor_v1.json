@@ -241,7 +241,8 @@
       "crates/dfmcp-mcp/src/semantic_work_order_runtime/native_clock.rs",
       "crates/dfmcp-adapter/src/live_production/goal_monitor.rs",
       "crates/dfmcp-adapter/src/live_production/clock_custody_tests.rs",
-      "crates/dfmcp-mcp/src/live_production_presentation_clock_tests.rs"
+      "crates/dfmcp-mcp/src/live_production_presentation_clock_tests.rs",
+      "crates/dfmcp-adapter/src/live_production/selected_clock_custody.rs"
     ],
     "private_custody_platforms": [
       "linux-x86_64",
@@ -404,5 +405,21 @@
       "crates/dfmcp-adapter/src/semantic_work_orders/goal_projection.rs",
       "crates/dfmcp-adapter/src/semantic_work_orders/inventory_objective.rs"
     ]
+  },
+  "selected_clock_custody": {
+    "adapter_type": "dfmcp_adapter::live_production::SelectedOrderClockCustody",
+    "source_path": "crates/dfmcp-adapter/src/live_production/selected_clock_custody.rs",
+    "current_consumer": "semantic_work_order_runtime::clock::ClockTarget::for_selected_original",
+    "complete_original_archive_verified": true,
+    "actual_selected_step_key_and_dependency_retained": true,
+    "created_plan_receipt_and_native_allocation_verified": true,
+    "deadline_from_selected_original_obligation": true,
+    "historical_custody_only": true,
+    "grants_clock_or_mutation_authority": false,
+    "current_goal_evidence": false,
+    "selected_order_target_digest_changed": false,
+    "legacy_single_step_target_changed": false,
+    "combined_inventory_run_consumer_enabled": false,
+    "test_path": "crates/dfmcp-adapter/src/live_production/clock_custody_tests.rs"
   }
 }
