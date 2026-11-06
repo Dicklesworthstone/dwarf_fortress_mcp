@@ -11,6 +11,10 @@ use dfmcp_core::MapCoord;
 use dfmcp_intent::ObligationStatus;
 use dfmcp_world::PredicateTruth;
 
+mod parent_goal_tests {
+    include!("parent_goal_tests.rs");
+}
+
 fn inventory_fixture(count: usize) -> Result<ProductionFixture> {
     let mut f = ProductionFixture::new(count)?;
     f.c.grants.push(CapabilityGrant {

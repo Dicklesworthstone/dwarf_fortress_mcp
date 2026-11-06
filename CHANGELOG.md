@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-11-06 — Current original labor and inventory goal proof
+
+- Add a bounded executor parent poll that joins fresh selected workforce evidence
+  with the existing original inventory monitor at one coherent paused frontier.
+- Require independent policies, exact original citizen/source/custody bindings,
+  both workforce bracket captures and the original inventory stability before
+  proving the complete parent. Historical effect receipts are never current
+  labor evidence; retired orders do not become causal production witnesses.
+- Retain consumed workforce floors through later failures and fence invalid
+  identity/source lineage. Keep parent proof process-local and clear it on
+  recovery; selected history and native wire formats remain unchanged.
+- Add nine focused parent regression groups. Actual latest-nightly locked/offline
+  adapter production checking and scoped formatting/diff checks pass. Test
+  execution remains pending under resource pressure at this checkpoint; no full
+  runtime, native/live or admission qualification is claimed.
+
 ## 2026-11-05 — Independently reviewed inventory stability clock
 
 - Add explicit inventory_run planning/confirmation/cancellation over existing

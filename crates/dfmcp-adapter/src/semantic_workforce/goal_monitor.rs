@@ -16,8 +16,10 @@ use crate::live_routing::LiveRoutingEvidence;
 use crate::workforce_control::journal::{
     AssignmentRecord, AssignmentState, MAX_FRAME, WorkforceBinding, WorkforceView,
 };
-use crate::workforce_control::rpc::{CONNECT_BYTES, RPC_BYTES, WorkforceSource};
-use crate::workforce_control::{AssignmentPhase, WorkforceCapture};
+use crate::workforce_control::rpc::{CONNECT_BYTES, RPC_BYTES, WorkforceManifest, WorkforceSource};
+use crate::workforce_control::{
+    AssignmentEffect, AssignmentPhase, AssignmentPlan, WorkforceCapture,
+};
 use crate::workforce_session::view_cost;
 
 use super::projection::{IdentityBinding, WorkforceGoalProjection};
@@ -415,7 +417,141 @@ impl GoalPublication for ProcessLocalPublication {
     }
 }
 
+/// The parent owns consumed source floors even if the native journal refuses
+/// custody or authority after a decoded source reply. This wrapper preserves
+/// only that negative boundary; the native owner still validates the capture
+/// before it can become evidence, and no assignment method is reachable here.
+struct SelectedObservationSource<N, C> {
+    source: N,
+    retain_capture: C,
+}
+impl<N, C> WorkforceSource for SelectedObservationSource<N, C>
+where
+    N: WorkforceSource,
+    C: FnMut(&WorkforceCapture) -> Result<()>,
+{
+    fn manifest(&self) -> &WorkforceManifest {
+        self.source.manifest()
+    }
+    fn endpoint(&self) -> Option<std::net::SocketAddr> {
+        self.source.endpoint()
+    }
+    fn observe(&mut self, ids: &[u32], context: &OperationContext) -> Result<WorkforceCapture> {
+        let capture = self.source.observe(ids, context)?;
+        (self.retain_capture)(&capture)?;
+        Ok(capture)
+    }
+    fn prepare(&mut self, _: &AssignmentPlan, _: &OperationContext) -> Result<AssignmentEffect> {
+        Err(observation_only())
+    }
+    fn commit(&mut self, _: &AssignmentPlan, _: &OperationContext) -> Result<AssignmentEffect> {
+        Err(observation_only())
+    }
+    fn query(
+        &mut self,
+        _: &AssignmentPlan,
+        _: &OperationContext,
+    ) -> Result<Option<AssignmentEffect>> {
+        Err(observation_only())
+    }
+    fn cancel(&mut self, _: &AssignmentPlan, _: &OperationContext) -> Result<AssignmentEffect> {
+        Err(observation_only())
+    }
+}
+fn observation_only() -> dfmcp_core::DfmcpError {
+    error(
+        ErrorCode::CapabilityDenied,
+        "selected parent workforce source permits observation only",
+    )
+}
+
 impl<S: EffectJournalStorage, B: EffectJournalStorage> SemanticWorkforceSession<S, B> {
+    /// Read the actual selected citizens of an already verified original labor
+    /// step. The combined parent owner brackets its other family captures with
+    /// two such reads. This does not construct a one-step replacement plan or a
+    /// temporal labor monitor, and it cannot leave a native planning selection.
+    pub(crate) fn observe_selected_goal_projection<N, F, C>(
+        &mut self,
+        seal: Digest32,
+        original_identity: &LiveRoutingEvidence<'_>,
+        cursor: ObservationCursor,
+        context: &OperationContext,
+        callbacks: (F, C),
+    ) -> Result<WorkforceGoalProjection>
+    where
+        N: WorkforceSource,
+        F: FnOnce(&WorkforceBinding, &OperationContext) -> Result<N>,
+        C: FnMut(&WorkforceCapture) -> Result<()>,
+    {
+        let (factory, retain_capture) = callbacks;
+        let result = (|| {
+            let mut call = Call::new(context)?;
+            call.reserve(PROJECTION_RESERVE)?;
+            let view = self.view(&mut call)?;
+            let review = self.attached(seal)?;
+            self.exact_association(&review)?;
+            let record = view
+                .records
+                .iter()
+                .find(|record| record.plan() == &review.native)
+                .ok_or_else(custody)?;
+            if !matches!(
+                action_result(&review, record)?,
+                SingleLaborResult::Verified { .. }
+            ) {
+                return Err(custody());
+            }
+            let sequence_floor = native_sequence_floor(record)?;
+            let identities = IdentityBinding::new(&review, original_identity)?;
+            authorize_observation(&identities, review.original.anchor, &call.context()?)?;
+            let ids = identities.native_ids();
+            let native_context = read_reserve(&mut call, &view)?;
+            let store = &mut self.associations;
+            let original_anchor = review.original.anchor;
+            let guard_call = &mut call;
+            let guarded_factory = |binding: &WorkforceBinding, c: &OperationContext| {
+                store.verify(&guard_call.context()?)?;
+                let current = guard_call.edge(c)?;
+                authorize_observation(&identities, original_anchor, &current)?;
+                let source = factory(binding, &current)?;
+                store.verify(&guard_call.context()?)?;
+                authorize_observation(&identities, original_anchor, &guard_call.context()?)?;
+                Ok(SelectedObservationSource {
+                    source,
+                    retain_capture,
+                })
+            };
+            let acquisition = self.native.observe(&ids, &native_context, guarded_factory);
+            self.native.clear_selection();
+            call.context.anchor.tick = call
+                .context
+                .anchor
+                .tick
+                .max(GameTick(self.native.high_tick()));
+            let capture = acquisition?;
+            authorize_observation(&identities, original_anchor, &call.context()?)?;
+            if !capture.paused()
+                || capture.tick() < call.context.anchor.tick.get()
+                || capture.sequence() < sequence_floor
+            {
+                return Err(error(
+                    ErrorCode::StaleAnchor,
+                    "selected parent labor capture is unpaused or below its original authority floor",
+                ));
+            }
+            let projection = identities.project(capture, cursor)?;
+            let final_view = self.view(&mut call)?;
+            self.exact_association(&review)?;
+            if !final_view.records.contains(record) {
+                return Err(custody());
+            }
+            authorize_observation(&identities, original_anchor, &call.context()?)?;
+            Ok(projection)
+        })();
+        self.native.clear_selection();
+        result
+    }
+
     /// Start a process-local proof monitor without creating or changing native
     /// work. The exact original typed identity evidence is required, including
     /// after restart; archived receipt labor masks are never observation inputs.

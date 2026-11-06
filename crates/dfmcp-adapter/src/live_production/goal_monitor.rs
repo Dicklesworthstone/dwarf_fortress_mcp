@@ -21,9 +21,12 @@ use super::*;
 /// An exclusive selected-step proof owner. The private inner monitor cannot be
 /// passed to the legacy one-step APIs or detached from its predecessor custody.
 pub struct SelectedWorkOrderGoalMonitor<H> {
-    step: StepId,
-    archive: PlanArchiveSeal,
-    dependencies: Dependencies,
+    pub(super) step: StepId,
+    pub(super) archive: PlanArchiveSeal,
+    pub(super) dependencies: Dependencies,
+    pub(super) parent_workforce_floor: Option<crate::workforce_control::WorkforceCapture>,
+    pub(super) parent_workforce_fenced: bool,
+    pub(super) parent_high_tick: GameTick,
     inner: DurableWorkOrderGoalMonitor<H>,
 }
 impl<H: EffectJournalStorage> SelectedWorkOrderGoalMonitor<H> {
@@ -54,10 +57,16 @@ impl<H: EffectJournalStorage> SelectedWorkOrderGoalMonitor<H> {
         self.inner.high_cursor()
     }
     pub fn high_tick(&self) -> GameTick {
-        self.inner.high_tick()
+        self.inner.high_tick().max(self.parent_high_tick)
     }
     pub fn is_fenced(&self) -> bool {
         self.inner.is_fenced()
+    }
+    /// Current-parent source lineage is separate from the selected inventory
+    /// history. A source replacement/regression cannot be repaired by retrying
+    /// another parent sample in this process.
+    pub const fn parent_observation_fenced(&self) -> bool {
+        self.parent_workforce_fenced
     }
     pub fn is_read_only(&self) -> bool {
         self.inner.history_store().is_read_only()
@@ -80,7 +89,7 @@ impl<H: EffectJournalStorage> SelectedWorkOrderGoalMonitor<H> {
 
 #[derive(Clone, Debug)]
 pub struct SelectedWorkOrderGoalResult {
-    inner: WorkOrderGoalResult,
+    pub(super) inner: WorkOrderGoalResult,
 }
 impl SelectedWorkOrderGoalResult {
     pub fn progress(&self) -> &WorkOrderGoalProgress {
@@ -165,7 +174,7 @@ where
     E: WorkforceEvidenceOwner + WorkOrderEvidenceOwner,
     F: WorkforceFactory,
 {
-    fn selected_goal_review(
+    pub(super) fn selected_goal_review(
         &mut self,
         step: StepId,
         call: &mut Call,
@@ -306,6 +315,9 @@ where
                 step,
                 archive: self.archive,
                 dependencies,
+                parent_workforce_floor: None,
+                parent_workforce_fenced: false,
+                parent_high_tick: self.original.anchor.tick,
                 inner,
             })
         })();

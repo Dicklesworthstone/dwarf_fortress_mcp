@@ -6,8 +6,7 @@ use crate::live_projection::{LiveWorldProjection, project_live_capsule};
 use crate::live_routing::LiveRoutingEvidence;
 use crate::semantic_workforce::store::AssociationStore;
 use crate::semantic_workforce::{
-    SemanticWorkforceReview, SemanticWorkforceSession, SingleLaborResult,
-    WorkforceEvidenceOwner,
+    SemanticWorkforceReview, SemanticWorkforceSession, SingleLaborResult, WorkforceEvidenceOwner,
 };
 use crate::workforce_control::journal::{
     AssignmentState, WorkforceBinding, WorkforceJournal, WorkforceMode,
@@ -487,6 +486,8 @@ fn effect(
 }
 struct NativeState {
     fixture: WorkforceFixture,
+    observed_historical_id: Option<u32>,
+    corrupt_journal_on_observe: bool,
     calls: [usize; 5],
     effect: Option<AssignmentEffect>,
     labors: Vec<u8>,
@@ -559,8 +560,20 @@ impl WorkforceSource for Native {
         self.record_edge(0, c);
         let mut data = self.data.borrow_mut();
         data.calls[0] += 1;
-        let capture = data.fixture.capture()?;
+        let mut capture = data.fixture.capture()?;
         assert_eq!(ids, capture.ids());
+        if let Some(historical_id) = data.observed_historical_id {
+            let mut bytes = capture.canonical_bytes().to_vec();
+            let row_bytes = 9 + capture.labor_keys().len();
+            let at = bytes.len() - capture.citizens().len() * row_bytes + 4;
+            bytes[at..at + 4].copy_from_slice(&historical_id.to_be_bytes());
+            capture = WorkforceCapture::decode(&bytes)?;
+        }
+        if data.corrupt_journal_on_observe {
+            if let Some(byte) = self.journal.0.borrow_mut().file.get_mut().last_mut() {
+                *byte ^= 1;
+            }
+        }
         Ok(capture)
     }
     fn prepare(&mut self, plan: &AssignmentPlan, c: &OperationContext) -> Result<AssignmentEffect> {
@@ -654,6 +667,8 @@ fn fixture() -> Result<Fixture> {
         associations: association_storage,
         data: Rc::new(RefCell::new(NativeState {
             fixture: WorkforceFixture::default(),
+            observed_historical_id: None,
+            corrupt_journal_on_observe: false,
             calls: [0; 5],
             effect: None,
             labors: vec![1, 0],

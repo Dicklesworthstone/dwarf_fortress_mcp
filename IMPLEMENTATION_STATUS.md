@@ -1,5 +1,34 @@
 # Implementation Status
 
+## 2026-11-06 — Fresh complete-parent labor and inventory evidence
+
+The concrete production executor now exposes a bounded foreground parent-goal
+poll for the original two-step labor/order plan. Current selected-citizen
+workforce captures bracket the existing durable inventory sample, with identical
+paused tick, original identity, native incarnation and source sequence. Independent
+child policies qualify the joined Unit and inventory evidence before the unchanged
+original terminal predicate is evaluated. Historical Applied receipts supply
+custody and identity, never current labor facts.
+
+The selected order retains its original deadline, cadence, stability, archive,
+StepId and key. Its inventory proof can survive native order retirement while
+physical completion and order-attributed output remain unknown. The separate
+parent result requires current labor truth and the selected temporal proof. It is
+process-local and is not reconstructed from inventory history after reopening.
+Failed reads and publication withdraw current proof and unfinished stability;
+consumed workforce floors remain retained, and invalid original identity or
+source lineage fences subsequent parent acquisition.
+
+The new regressions cover labor reversal, same-tick drift, incomplete stability,
+independent source policy, original custody, source regression and recovery.
+Scoped formatting and diff checks pass. Actual latest-nightly locked/offline
+production checking passes for dfmcp-adapter and its core/world/intent dependencies,
+including the final raw-source floor wrapper. The full unit-test attempt was
+interrupted under severe shared-memory contention; focused tests are pending.
+No test pass, full-workspace, native DFHack, real-game or admission qualification
+is claimed. MCP wiring is the next commit; bead df-dfhack-bridge-plane-c-pic.4
+remains in progress.
+
 ## 2026-11-05 — Finish original inventory stability after native order retirement
 
 The standalone semantic work-order MCP runtime now has an optional, separately

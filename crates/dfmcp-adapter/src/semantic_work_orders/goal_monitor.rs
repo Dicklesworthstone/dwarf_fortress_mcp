@@ -126,8 +126,18 @@ pub struct WorkOrderGoalResult {
     progress: WorkOrderGoalProgress,
     creation: NativeOrderCreation,
     native_state: CreationState,
+    projection: WorkOrderGoalProjection,
+    policy: EvidencePolicy,
 }
 impl WorkOrderGoalResult {
+    /// Exact immutable sample and independently issued scope retained only
+    /// after its ordinary durable publication has succeeded.
+    pub(crate) fn projection(&self) -> &WorkOrderGoalProjection {
+        &self.projection
+    }
+    pub(crate) fn policy(&self) -> &EvidencePolicy {
+        &self.policy
+    }
     pub fn progress(&self) -> &WorkOrderGoalProgress {
         &self.progress
     }
@@ -890,6 +900,8 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage, N: WorkOrderSource>
                 progress,
                 creation,
                 native_state,
+                projection,
+                policy: granted,
             })
         })();
         self.native.clear_selection();
