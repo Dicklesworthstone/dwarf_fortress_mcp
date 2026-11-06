@@ -99,7 +99,7 @@ mod lab_progress;
 mod lab_progress_mcp_tests;
 
 #[path = "goal_continuation.rs"]
-mod goal_continuation;
+pub(crate) mod goal_continuation;
 
 #[path = "goal_custody.rs"]
 mod goal_custody;

@@ -324,6 +324,10 @@ collects new native events nor proves absence outside the supplied retained
 projection. The default laboratory uses the existing `mode: "structured"`
 wrapper, including exact retained `at` hashes; see
 [`docs/LAB_STRUCTURED_QUERY.md`](docs/LAB_STRUCTURED_QUERY.md).
+The explicit `starter_fortress_history` scenario supplies events through normal
+atomic laboratory action, tick, cancellation, restore and recovery publication.
+Its `coverage.producer` describes bounded retention and omitted details;
+[`docs/LAB_EVENT_HISTORY.md`](docs/LAB_EVENT_HISTORY.md) defines the source model.
 
 ### `fortress.plan`
 

@@ -505,7 +505,7 @@ pub(super) fn execute(
             .filter(|offset| *offset < matching.len())
             .ok_or_else(|| stale("event continuation does not name a resumable selected record"))?,
     };
-    let base = json!({"schema":"dfmcp.query.result/1", "kind":"events", "anchor":anchor,
+    let mut base = json!({"schema":"dfmcp.query.result/1", "kind":"events", "anchor":anchor,
         "query_digest":identity.to_string(), "matched":matching.len(),
         "order":if spec.order == Order::TickAscending {"tick_ascending"} else {"tick_descending"},
         "provenance":{"kind":"canonical_retained_events", "source_anchor":anchor,
@@ -523,6 +523,28 @@ pub(super) fn execute(
         "work":{"scanned_events":snapshot.graph.events.len(), "event_bytes":scan_bytes,
             "event_value_visits":scan_work, "source_records":source_records,
             "canonical_source_bytes":source_bytes.len()}});
+    if let Some(history) = dfmcp_lab::event_history::coverage(snapshot)? {
+        base["coverage"]["producer"] = json!({
+            "model": dfmcp_lab::event_history::MODEL,
+            "basis": "validated_canonical_model_structure",
+            "source_authenticity": "not_established",
+            "observation_boundary": "atomic_laboratory_publication",
+            "intermediate_states_observed": false,
+            "edge_and_terrain_details": "changed_record_counts_only",
+            "retention_limit": dfmcp_lab::event_history::MAX_RETAINED_EVENTS,
+            "entity_events_per_publication_limit": dfmcp_lab::event_history::MAX_ENTITY_EVENTS_PER_PUBLICATION,
+            "changed_fields_per_entity_limit": dfmcp_lab::event_history::MAX_CHANGED_FIELDS,
+            "captured_value_byte_limit": dfmcp_lab::event_history::MAX_CAPTURED_VALUE_BYTES,
+            "published_events_on_branch": history.total_events,
+            "evicted_events_on_branch": history.evicted_events,
+            "omitted_entity_changes_on_branch": history.omitted_entity_changes,
+            "omitted_fields_on_branch": history.omitted_fields,
+            "omitted_values_on_branch": history.omitted_values,
+            "oldest_retained_ordinal": history.oldest_ordinal,
+            "newest_retained_ordinal": history.newest_ordinal,
+            "note": "bounded endpoint observations; restore retains the checkpoint branch; counters do not prove complete history or confer mutation authority"
+        });
+    }
     let mut rows = Vec::new();
     let mut result = page(&base, &rows, &matching, start, identity);
     for event in matching.iter().skip(start).take(limit) {

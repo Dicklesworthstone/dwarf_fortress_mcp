@@ -506,6 +506,111 @@ fn lab_structured_events_reach_the_facade_and_resume_exact_retained_history() ->
 }
 
 #[test]
+fn history_scenario_produces_queryable_events_through_the_normal_public_workflow() -> TestResult {
+    let _serial = crate::test_serial();
+    let opened = parsed(&crate::agent_facade::fortress_open_session(
+        Some(false),
+        None,
+        Some(
+            [
+                ("observe", "read_only"),
+                ("query", "read_only"),
+                ("plan", "read_only"),
+                ("control_clock", "reversible"),
+                ("configure_production", "reversible"),
+            ]
+            .into_iter()
+            .map(|(capability, risk)| (capability.to_owned(), risk.to_owned()))
+            .collect(),
+        ),
+        Some(60_000),
+        Some(1_000),
+        Some(1_000),
+        Some(1024 * 1024),
+        Some(16_384),
+        Some(16),
+        Some("starter_fortress_history".to_owned()),
+        Some(false),
+        Some(false),
+    ))?;
+    assert_eq!(opened["ok"], true, "{opened}");
+    let session = opened["session_id"]
+        .as_str()
+        .ok_or("session missing")?
+        .to_owned();
+    let initial = query(
+        &session,
+        wrapper(json!({"kind":"events", "fields":["transition"]}), None),
+    )?;
+    assert_eq!(initial["ok"], true, "{initial}");
+    assert_eq!(initial["matched"], 1);
+    assert_eq!(
+        initial["coverage"]["producer"]["model"],
+        dfmcp_lab::event_history::MODEL
+    );
+    let planned = parsed(&crate::agent_facade::fortress_plan(
+        Some(session.clone()),
+        None,
+        None,
+        Some(
+            json!([{"action":{"kind":"create_work_order","name":"queryable brewing history",
+            "job_token":"BREW_DRINK","amount":1}}])
+            .to_string(),
+        ),
+        None,
+    ))?;
+    assert_eq!(planned["ok"], true, "{planned}");
+    let order = planned["steps"][0]["creates_entity_id"]
+        .as_str()
+        .ok_or("order identity missing")?;
+    let committed = parsed(&crate::agent_facade::fortress_commit(
+        Some(session.clone()),
+        planned["plan_digest"]
+            .as_str()
+            .ok_or("plan digest missing")?
+            .to_owned(),
+    ))?;
+    assert_eq!(committed["ok"], true, "{committed}");
+    let waited = parsed(&crate::agent_facade::fortress_wait(
+        Some(session.clone()),
+        Some(50),
+    ))?;
+    assert_eq!(waited["ok"], true, "{waited}");
+    let mut request = wrapper(
+        json!({"kind":"events", "kinds":["job_changed"],
+        "subjects":[order], "fields":["change"], "limit":1}),
+        None,
+    );
+    let first = query(&session, request.clone())?;
+    assert_eq!(first["ok"], true, "{first}");
+    assert!(
+        first["matched"].as_u64().is_some_and(|count| count >= 2),
+        "{first}"
+    );
+    assert_eq!(first["coverage"]["history_complete"], false);
+    assert_eq!(first["coverage"]["eligible_as_mutation_evidence"], false);
+    assert!(first["continuation"].is_string(), "{first}");
+    let retained_hash = first["anchor"]["state_hash"]
+        .as_str()
+        .ok_or("event anchor missing")?
+        .to_owned();
+    request["request"]["query"]["continuation"] = first["continuation"].clone();
+    let waited = parsed(&crate::agent_facade::fortress_wait(
+        Some(session.clone()),
+        Some(1),
+    ))?;
+    assert_eq!(waited["ok"], true, "{waited}");
+    expect_refusal(&query(&session, request.clone())?, "stale_anchor");
+    request["at"] = json!(retained_hash);
+    let resumed = query(&session, request)?;
+    assert_eq!(resumed["ok"], true, "{resumed}");
+    assert_eq!(resumed["historical"], true);
+    assert_eq!(resumed["anchor"], first["anchor"]);
+    assert_ne!(resumed["rows"][0]["event_id"], first["rows"][0]["event_id"]);
+    Ok(())
+}
+
+#[test]
 fn lab_structured_closed_wrapper_refuses_stateful_modes_and_keeps_legacy_queries() -> TestResult {
     let _serial = crate::test_serial();
     let (session_id, source) = open_fixture()?;

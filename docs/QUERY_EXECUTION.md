@@ -160,11 +160,14 @@ the full Agent Turn envelope and current authority.
 
 Coverage is explicitly `retained_event_projection`. The retained tick extrema
 do not establish a continuous retained interval. `history_complete`,
-`absence_proven` and `eligible_as_mutation_evidence` remain false. This query
-adds neither a native event collector nor synthetic laboratory events; sources
-with no canonical events return an empty retained projection with those same
-limits. Laboratory exact historical reads recheck grants at the current tick
-before selecting a retained snapshot.
+`absence_proven` and `eligible_as_mutation_evidence` remain false. Sources without
+canonical events return an empty retained projection with those same limits.
+The explicit `starter_fortress_history` laboratory scenario populates canonical
+events at atomic publication boundaries and supplies bounded validated
+`coverage.producer` metadata. The model's recorded/evicted/omitted counts do not
+upgrade source authenticity or mutation eligibility; see `LAB_EVENT_HISTORY.md`.
+Native event capture is unchanged. Laboratory exact historical reads recheck
+grants at the current tick before selecting a retained snapshot.
 
 `event_query_tests.rs` exercises filters, both chronological orders, full-width
 IDs, exact field types, complete-row paging, source/session/selector binding,

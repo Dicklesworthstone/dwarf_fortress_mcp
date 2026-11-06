@@ -86,7 +86,7 @@ const MAX_NAME_BYTES: usize = 128;
 const MAX_LIST_ITEMS: usize = 64;
 
 /// Built-in laboratory scenarios.
-pub(crate) const SCENARIOS: [&str; 7] = [
+pub(crate) const SCENARIOS: [&str; 8] = [
     "empty",
     "starter_fortress",
     "besieged_fortress",
@@ -94,6 +94,7 @@ pub(crate) const SCENARIOS: [&str; 7] = [
     "starter_fortress_economy",
     "starter_fortress_provisions",
     "starter_fortress_multilevel",
+    "starter_fortress_history",
 ];
 
 /// Starter-fortress entity identities.
@@ -161,7 +162,9 @@ pub(crate) fn scenario_snapshot(
         "starter_fortress" => starter_graph()?,
         "starter_fortress_workforce" => workforce_starter_graph(fortress_id)?,
         "starter_fortress_economy" => economy_starter_graph(fortress_id)?,
-        "starter_fortress_provisions" => provisions_starter_graph(fortress_id)?,
+        "starter_fortress_provisions" | "starter_fortress_history" => {
+            provisions_starter_graph(fortress_id)?
+        }
         "starter_fortress_multilevel" => multilevel_starter_graph(fortress_id)?,
         "besieged_fortress" => {
             let mut graph = starter_graph()?;
@@ -194,13 +197,17 @@ pub(crate) fn scenario_snapshot(
             )));
         }
     };
-    Ok(WorldSnapshot::new(
+    let mut snapshot = WorldSnapshot::new(
         fortress_id,
         GameTick(1),
         ObservationCursor::ORIGIN,
         paused,
         graph,
-    ))
+    );
+    if scenario == "starter_fortress_history" {
+        dfmcp_lab::event_history::enable(&mut snapshot)?;
+    }
+    Ok(snapshot)
 }
 
 /// The finite workforce is an explicit new scenario. The original starter

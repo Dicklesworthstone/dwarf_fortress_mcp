@@ -139,9 +139,14 @@ unestablished. Event text is tainted data and cannot authorize effects.
 
 The query scans only events present in that immutable canonical snapshot. Its
 retained minimum/maximum tick do not prove coverage between those ticks. Empty
-results never prove a complete history or absence of unobserved events. This
-does not convert the laboratory's control transcript into world events or add a
-native event collector. See `QUERY_EXECUTION.md` for cursor and budget bounds.
+results never prove a complete history or absence of unobserved events.
+The explicit `starter_fortress_history` scenario populates this source through
+normal atomic action, tick and cancellation publication. Its bounded producer
+metadata appears at `coverage.producer`, including retention and omission
+counters. This is publication-boundary laboratory history; it does not convert
+the control transcript into world events or add a native event collector.
+See `LAB_EVENT_HISTORY.md` for production, restore and durable-recovery semantics
+and `QUERY_EXECUTION.md` for cursor and budget bounds.
 
 ## Exact history, authority and pagination
 

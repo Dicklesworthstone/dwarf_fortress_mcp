@@ -1,5 +1,34 @@
 # Implementation Status
 
+## Unreleased — Record useful laboratory event history
+
+The new `starter_fortress_history` scenario enables the explicit
+`dfmcp.lab-event-history/1` model over the finite provisions world. Normal
+MemoryAdapter action publication, deferred dispatch, tick advancement and
+cancellation now record canonical job, unit, construction and inventory changes.
+Reads, preparation, checkpoint creation and idempotent replay add no events.
+Effects and event batches publish atomically. Old scenarios retain their hashes
+and established behavior.
+
+The model retains 128 events, emits at most 32 entity records per publication,
+and captures at most eight bounded changed fields per entity. Before/after
+presence and source claims remain explicit; unavailable values stay concealed.
+Publication identities bind endpoint content without self-reference. Coverage
+reports retained ordinals, eviction and omission counters. Query cursors retain
+the exact source/session/selection binding; changed-current pages refuse and
+exact retained sources can continue. Complete history and mutation evidence
+remain unproved. Restore follows the checkpoint branch with a reset notice;
+durable recovery preserves the suffix and begins a new observation epoch.
+
+Executed validation on Rust 1.101.0-nightly (249c1e4e3): 12 actual MemoryAdapter
+producer/durability tests and 23 actual-source event/core query tests pass. The
+normal public history scenario also passes through the actual foreground
+server/facade handlers: order plan/commit/wait, query, changed-source refusal and
+retained-source pagination. That component omits modern tool macros, stdio
+assembly, the uninstalled asynchronous Task service and native admission; it
+is not MCP transport, full workspace or live-game qualification. No native
+protocol or compatibility admission changes. See `docs/LAB_EVENT_HISTORY.md`.
+
 ## Unreleased — Furnished rooms connected across laboratory levels
 
 The explicit connected_room_stairs_v1 planner now composes bounded corridor

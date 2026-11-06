@@ -19,6 +19,7 @@ use dfmcp_intent::{
     inspect_effect_work,
 };
 pub mod durable;
+pub mod event_history;
 pub mod faults;
 
 pub use faults::{Boundary, CampaignReport, Fault, FaultPoint, FaultSchedule};
@@ -189,12 +190,19 @@ impl MemoryAdapter {
                 "recovered snapshot failed its content-hash seal",
             ));
         }
+        let recovered_from = snapshot.anchor();
         snapshot.cursor = snapshot.cursor.checked_reset_epoch().ok_or_else(|| {
             DfmcpError::new(
                 ErrorCode::CursorGap,
                 "cannot recover because the observation epoch is exhausted",
             )
         })?;
+        event_history::record_boundary(
+            &mut snapshot,
+            event_history::Boundary::Recovery {
+                from: recovered_from,
+            },
+        )?;
         snapshot.refresh_hash();
         let mut adapter = Self::new(snapshot);
         adapter.record_event(LabEvent::Recovered(adapter.snapshot.anchor()));
@@ -498,6 +506,11 @@ impl MemoryAdapter {
         if !next.paused {
             effects::advance_effects(&mut next, amount)?;
         }
+        event_history::record_publication(
+            &self.snapshot,
+            &mut next,
+            event_history::Publication::AdvanceTicks { amount },
+        )?;
         next.refresh_hash();
         self.snapshot = next;
         self.record_event(LabEvent::TickAdvanced(self.snapshot.tick));
@@ -1535,9 +1548,19 @@ impl GameAdapter for MemoryAdapter {
                 "cannot restore because the observation epoch is exhausted",
             )
         })?;
-        self.snapshot = checkpoint;
-        self.snapshot.cursor = restored_cursor;
-        self.snapshot.refresh_hash();
+        let checkpoint_anchor = checkpoint.anchor();
+        let mut restored = checkpoint;
+        restored.cursor = restored_cursor;
+        event_history::record_boundary(
+            &mut restored,
+            event_history::Boundary::Restore {
+                prior: prior_anchor,
+                checkpoint: checkpoint_id,
+                checkpoint_anchor,
+            },
+        )?;
+        restored.refresh_hash();
+        self.snapshot = restored;
         self.invalidate_active_work();
         self.record_event(LabEvent::Restored(checkpoint_id));
         Ok(RestoreReceipt {
@@ -1678,14 +1701,19 @@ fn action_is_supported(action: &Action) -> bool {
 }
 
 /// Publish a changed snapshot as the next observation.
-fn publish_change(snapshot: &mut WorldSnapshot) -> Result<()> {
-    let next_cursor = snapshot.cursor.checked_next().ok_or_else(|| {
+fn publish_change(
+    before: &WorldSnapshot,
+    snapshot: &mut WorldSnapshot,
+    publication: event_history::Publication<'_>,
+) -> Result<()> {
+    let next_cursor = before.cursor.checked_next().ok_or_else(|| {
         DfmcpError::new(
             ErrorCode::CursorGap,
             "cannot publish a laboratory mutation because the observation cursor is exhausted",
         )
     })?;
     snapshot.cursor = next_cursor;
+    event_history::record_publication(before, snapshot, publication)?;
     snapshot.refresh_hash();
     Ok(())
 }
@@ -1693,7 +1721,14 @@ fn publish_change(snapshot: &mut WorldSnapshot) -> Result<()> {
 fn stop_action_work(snapshot: &mut WorldSnapshot, step: &PlanStep) -> Result<()> {
     let mut next = snapshot.clone();
     if effects::cancel_effect(&mut next, &step.action, &step.idempotency_key)? {
-        publish_change(&mut next)?;
+        publish_change(
+            snapshot,
+            &mut next,
+            event_history::Publication::CancelWork {
+                action: &step.action,
+                key: &step.idempotency_key,
+            },
+        )?;
         *snapshot = next;
     }
     Ok(())
@@ -1756,7 +1791,14 @@ fn apply_action(
 ) -> Result<()> {
     let mut next = snapshot.clone();
     if effects::apply_effect(&mut next, action, idempotency_key)? {
-        publish_change(&mut next)?;
+        publish_change(
+            snapshot,
+            &mut next,
+            event_history::Publication::Action {
+                action,
+                key: idempotency_key,
+            },
+        )?;
         *snapshot = next;
     }
     Ok(())

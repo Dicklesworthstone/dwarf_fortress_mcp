@@ -98,6 +98,72 @@ fn expected(values: &[u128]) -> Vec<String> {
 }
 
 #[test]
+fn normal_laboratory_publications_are_queryable_with_exact_retained_source_pages() -> Result<()> {
+    let (fixture, mut context) = fixture();
+    let mut snapshot = WorldSnapshot::new(
+        fixture.fortress_id,
+        GameTick(1),
+        ObservationCursor::ORIGIN,
+        true,
+        WorldGraph::default(),
+    );
+    dfmcp_lab::event_history::enable(&mut snapshot)?;
+    let mut adapter = dfmcp_lab::MemoryAdapter::new(snapshot);
+    adapter.advance_ticks(1)?;
+    adapter.advance_ticks(1)?;
+    let retained = adapter.snapshot().clone();
+    context.anchor = retained.anchor();
+    let first = execute(
+        &retained,
+        &context,
+        &request(json!({
+            "kind":"events", "fields":["transition", "predecessor_anchor"], "limit":1
+        })),
+    )?;
+    assert_eq!(first["matched"], 3);
+    assert_eq!(
+        first["coverage"]["producer"]["model"],
+        dfmcp_lab::event_history::MODEL
+    );
+    assert_eq!(
+        first["coverage"]["producer"]["published_events_on_branch"],
+        3
+    );
+    assert_eq!(first["coverage"]["producer"]["evicted_events_on_branch"], 0);
+    assert_eq!(first["coverage"]["history_complete"], false);
+    assert_eq!(first["coverage"]["eligible_as_mutation_evidence"], false);
+    let continuation = first["continuation"]
+        .as_str()
+        .ok_or_else(|| invalid("test expected continuation"))?;
+    let next = request(json!({
+        "kind":"events", "fields":["transition", "predecessor_anchor"], "limit":4,
+        "continuation":continuation
+    }));
+    let second = execute(&retained, &context, &next)?;
+    assert_eq!(second["rows"].as_array().map(Vec::len), Some(2));
+    adapter.advance_ticks(1)?;
+    let mut current_context = context.clone();
+    current_context.anchor = adapter.snapshot().anchor();
+    assert_eq!(
+        execute(adapter.snapshot(), &current_context, &next).map_err(|error| error.code),
+        Err(ErrorCode::StaleAnchor)
+    );
+    assert_eq!(execute(&retained, &context, &next)?, second);
+    let mut corrupted = retained;
+    if let Some(event) = corrupted.graph.events.values_mut().next() {
+        event.summary.push_str(" changed");
+    }
+    corrupted.refresh_hash();
+    context.anchor = corrupted.anchor();
+    assert_eq!(
+        execute(&corrupted, &context, &request(json!({"kind":"events"})))
+            .map_err(|error| error.code),
+        Err(ErrorCode::CorruptLedger)
+    );
+    Ok(())
+}
+
+#[test]
 fn event_windows_intersect_inclusive_time_kind_and_subject_sets() -> Result<()> {
     let (snapshot, context) = fixture();
     let input = request(json!({"kind":"events", "from_tick":8,"through_tick":13,

@@ -290,7 +290,7 @@ fn retained_prior_orders_cannot_alias_new_reviewed_pursuit_names() -> Result<()>
 
 #[test]
 fn continuation_and_verified_recovery_preserve_the_original_order_policy() -> Result<()> {
-    use crate::goal_continuation::{ProductionContinuation, RecoveredGoalLineage};
+    use crate::server::goal_continuation::{ProductionContinuation, RecoveredGoalLineage};
 
     let original =
         dependency_request(json!([{"item":"DRINK","minimum":45},{"item":"FOOD","minimum":65}]))?;

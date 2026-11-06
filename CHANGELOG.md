@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased — Record laboratory events during real workflows
+
+- Add opt-in starter_fortress_history with canonical publication events for
+  jobs, units, construction, inventory, clock changes, cancellation and resets.
+- Preserve old scenarios; publish world effects and bounded history atomically,
+  with typed before/after presence and explicit eviction/omission coverage.
+- Retain checkpoint branches and durable event suffixes; do not resurrect action
+  authority or imply complete native history.
+- Connect producer coverage to typed event queries and exact retained pagination.
+- Pass 12 actual adapter tests, 23 actual-source query tests and the normal
+  foreground public scenario workflow. Full MCP transport/admission stays separate.
+
 ## Unreleased — Connect furnished laboratory rooms across levels
 
 - Add explicit connected_room_stairs_v1 routing that composes safe exact mining
