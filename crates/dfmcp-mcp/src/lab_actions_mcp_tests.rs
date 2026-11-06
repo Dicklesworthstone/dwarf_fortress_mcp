@@ -1591,6 +1591,102 @@ fn unrelated_concurrent_work_commits_by_unchanged_read_witness() -> TestResult {
 }
 
 #[test]
+fn elapsed_time_requires_review_of_a_new_temporal_deadline() -> TestResult {
+    let a = open_shared("73011", Some("starter_fortress"), &ALL_EFFECTS)?;
+    let b = open_shared("73011", None, &ALL_EFFECTS)?;
+    let (a, b) = (
+        a["session_id"].as_str().ok_or("a")?.to_owned(),
+        b["session_id"].as_str().ok_or("b")?.to_owned(),
+    );
+    let planned = parsed(&fortress_plan(
+        Some(a.clone()),
+        None,
+        None,
+        Some(dig([0, 3, 10], [0, 3, 10])),
+        None,
+    ))?;
+    assert_eq!(planned["ok"], true, "{planned}");
+    let original_deadline = planned["steps"][0]["obligation"]["deadline_tick"]
+        .as_u64()
+        .ok_or("original deadline")?;
+    let original_digest = planned["plan_digest"].as_str().ok_or("digest")?.to_owned();
+    // A's terrain and hazard halo do not change. Only unrelated work and the
+    // shared clock advance, which used to silently resynthesize its deadline.
+    assert_eq!(
+        plan_and_commit(&b, &dig([8, 3, 10], [8, 3, 10]))?["ok"],
+        true
+    );
+    let advanced = parsed(&fortress_wait(Some(b), Some(20)))?;
+    assert_eq!(advanced["ok"], true, "{advanced}");
+    let refused = parsed(&fortress_commit(Some(a.clone()), original_digest))?;
+    assert_eq!(refused["ok"], false, "{refused}");
+    assert_eq!(refused["error"]["code"], "stale_anchor");
+    assert_eq!(refused["witness_check"]["accepted"], false);
+    assert!(refused["witness_check"]["change"].is_null());
+    let reviewed = &refused["rebased_plan"];
+    assert!(
+        reviewed["steps"][0]["obligation"]["deadline_tick"]
+            .as_u64()
+            .is_some_and(|tick| tick > original_deadline),
+        "{refused}"
+    );
+    let digest = reviewed["plan_digest"]
+        .as_str()
+        .ok_or("reviewed digest")?
+        .to_owned();
+    let committed = parsed(&fortress_commit(Some(a), digest))?;
+    assert_eq!(committed["ok"], true, "{committed}");
+    assert!(committed["witness_rebase"].is_null());
+    Ok(())
+}
+
+#[test]
+fn an_expired_original_plan_cannot_be_automatically_rejuvenated() -> TestResult {
+    let a = open_shared("73012", Some("starter_fortress"), &ALL_EFFECTS)?;
+    let b = open_shared("73012", None, &ALL_EFFECTS)?;
+    let (a, b) = (
+        a["session_id"].as_str().ok_or("a")?.to_owned(),
+        b["session_id"].as_str().ok_or("b")?.to_owned(),
+    );
+    let planned = parsed(&fortress_plan(
+        Some(a.clone()),
+        None,
+        Some(true),
+        None,
+        None,
+    ))?;
+    assert_eq!(planned["ok"], true, "{planned}");
+    let old_expiry = planned["expires_at_tick"]
+        .as_u64()
+        .ok_or("original expiry")?;
+    let digest = planned["plan_digest"].as_str().ok_or("digest")?.to_owned();
+    // There is no obligation or entity witness to trigger a conflict: the
+    // original pause target remains false, but its preparation has expired.
+    let advanced = parsed(&fortress_wait(Some(b), Some(old_expiry + 1)))?;
+    assert_eq!(advanced["ok"], true, "{advanced}");
+    let refused = parsed(&fortress_commit(Some(a.clone()), digest))?;
+    assert_eq!(refused["ok"], false, "{refused}");
+    assert_eq!(refused["error"]["code"], "stale_anchor");
+    assert_eq!(refused["witness_check"]["accepted"], false);
+    assert!(refused["witness_check"]["change"].is_null());
+    assert!(
+        refused["rebased_plan"]["expires_at_tick"]
+            .as_u64()
+            .is_some_and(|tick| tick > old_expiry),
+        "{refused}"
+    );
+    let reviewed = refused["rebased_plan"]["plan_digest"]
+        .as_str()
+        .ok_or("reviewed digest")?
+        .to_owned();
+    let committed = parsed(&fortress_commit(Some(a), reviewed))?;
+    assert_eq!(committed["ok"], true, "{committed}");
+    assert_eq!(committed["actions"][0]["state"], "Verified");
+    assert!(committed["witness_rebase"].is_null());
+    Ok(())
+}
+
+#[test]
 fn every_response_fits_the_negotiated_output_budget() -> TestResult {
     // A tight negotiated budget: 1,500 tokens (conservatively 6,000 bytes).
     let opened = parsed(&fortress_open_session(

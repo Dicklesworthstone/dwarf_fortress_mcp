@@ -1,5 +1,31 @@
 # Implementation Status
 
+## 2026-11-06 — Preserve reviewed contracts during automatic intent replay
+
+The laboratory MCP host no longer accepts a stale-plan replay merely because
+its actions match. The replay must preserve the complete reviewed execution
+contract: terminal goal, expiry, risk and capabilities, checkpoint requirement,
+all guards and postconditions, compensation, dependencies, and every temporal
+obligation field. A later shared tick can otherwise silently extend a synthesized
+deadline or revive an expired preparation without changing any read witness.
+
+Changed contracts now follow the existing explicit-review path: commit returns
+`stale_anchor` and a newly sealed `rebased_plan`, whose new digest must be
+reviewed and committed separately. Same-tick independent changes still qualify
+for automatic replay when the contract is unchanged. The refusal explains the
+contract mismatch rather than claiming an action mismatch.
+
+Executed validation uses the exact production `witness.rs` module and actual
+local core/world/intent planner dependencies in a focused temporary harness.
+All three new regressions fail against the original comparator; the changed
+source passes all six witness tests (three new and three existing), with no
+ignored tests. The harness excludes the MCP server and transport. Two additional
+public shared-session regressions are present but not yet executed pending the
+full MCP build. Scoped formatting and diff checks pass. This fixes a prerequisite
+of bead `dfmcp-reality-wiring-proof-4bf.10`; the structural merge fallback and its
+runtime certificate admission remain unfinished, and the bead stays in progress.
+No full-workspace, native-game or compatibility-admission pass is claimed.
+
 ## 2026-11-06 — Complete original production goals through MCP
 
 The combined labor/order MCP host now uses the executor's joined parent poll

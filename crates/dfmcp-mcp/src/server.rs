@@ -3883,8 +3883,9 @@ fn authorize_drain_budget(
 /// and the new plan becomes pending for an explicit commit of its digest.
 /// Revalidate a stale plan by its read witness: when nothing the plan read
 /// changed between the version it was sealed on and now, replay its intent
-/// at the current anchor and accept the replay if it performs the very same
-/// actions. Returns the re-sealed plan and its certificate, or why not.
+/// at the current anchor and accept the replay only if it preserves the entire
+/// reviewed execution contract. Returns the re-sealed plan and its certificate,
+/// or why explicit review of the new plan is required.
 fn rebase_by_witness(
     session: &mut LabSession,
     stale: &PendingPlan,
@@ -3943,7 +3944,7 @@ fn rebase_by_witness(
         .map_err(refused)?;
     if !crate::witness::same_actions(&stale.plan, &plan) {
         return Err(
-            json!({"accepted": false, "reason": "the replayed intent no longer yields the same actions"}),
+            json!({"accepted": false, "reason": "the replayed intent changed the reviewed execution contract"}),
         );
     }
     let certificate = crate::witness::certificate(&stale.plan, &plan, &base, &now, &witness);

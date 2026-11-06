@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-11-06 — Keep original deadlines and approvals through stale-plan recovery
+
+- Require automatic intent replay to preserve the complete reviewed contract,
+  including preparation expiry, temporal deadlines, cadence, stability, guards,
+  compensation, risk and authority requirements.
+- Return a reviewable newly sealed plan when that contract changes. Independent
+  same-tick work remains eligible for automatic witness replay; elapsed time
+  cannot silently renew an old deadline or revive an expired preparation.
+- Reproduce three failures against the old comparator and pass all six focused
+  witness tests with the exact changed production module and real planner
+  dependencies. Add two public shared-session regressions; their execution is
+  pending the full MCP build. Structural fallback remains separate open work.
+
 ## 2026-11-06 — Complete original production goals in the combined MCP host
 
 - Wire foreground Wait to fresh joined labor and inventory evidence for the

@@ -216,13 +216,28 @@ impl ReadWitness {
     }
 }
 
-/// Whether two sealed plans perform the same actions in the same structure
-/// (identifiers derived from the anchor may differ).
+/// Whether two sealed plans preserve the complete reviewed execution contract.
+/// Identifiers derived from the anchor may differ; goals, guards, temporal
+/// obligations, compensation and authority requirements must remain identical.
 pub(crate) fn same_actions(a: &PreparedPlan, b: &PreparedPlan) -> bool {
-    a.steps.len() == b.steps.len()
+    // Replaying at a later anchor can resynthesize deadlines and preparation
+    // expiry without changing any action or read witness. Only identities and
+    // derived keys may change automatically; a changed execution contract must
+    // be reviewed through the ordinary stale-plan replay path.
+    a.summary == b.summary
+        && a.terminal_condition == b.terminal_condition
+        && a.max_risk == b.max_risk
+        && a.required_capabilities == b.required_capabilities
+        && a.requires_checkpoint == b.requires_checkpoint
+        && a.expires_at_tick == b.expires_at_tick
+        && a.steps.len() == b.steps.len()
         && a.steps.iter().zip(&b.steps).all(|(x, y)| {
             x.id == y.id
                 && x.action == y.action
+                && x.preconditions == y.preconditions
+                && x.postconditions == y.postconditions
+                && x.compensation == y.compensation
+                && x.obligation == y.obligation
                 && x.depends_on == y.depends_on
                 && x.required_capability == y.required_capability
                 && x.risk == y.risk
@@ -255,6 +270,180 @@ mod tests {
     use super::*;
     use dfmcp_core::{FortressId, GameTick, ObservationCursor, Result};
     use dfmcp_world::{EntityKind, EntityRecord, WorldGraph};
+
+    fn replay_fixture(
+        tick: u64,
+        sequence: u64,
+        temporal: bool,
+    ) -> Result<(WorldSnapshot, PreparedPlan)> {
+        use dfmcp_core::{
+            Capability, CapabilityGrant, CapabilityScope, IntentId, OperationContext, RequestId,
+            RiskTier, SessionId, WorkBudget,
+        };
+        use dfmcp_intent::{Action, Constraint, DigMode, Intent, RequestedAction, StaticPlanner};
+        let snapshot = WorldSnapshot::new(
+            FortressId::new(1),
+            GameTick(tick),
+            ObservationCursor { epoch: 1, sequence },
+            false,
+            WorldGraph::default(),
+        );
+        let action = if temporal {
+            Action::DesignateDig {
+                area: MapCuboid::new(MapCoord::new(0, 0, 0), MapCoord::new(0, 0, 0))?,
+                mode: DigMode::Mine,
+            }
+        } else {
+            Action::Pause { paused: true }
+        };
+        let intent = Intent {
+            id: IntentId::new(u128::from(sequence) + 1),
+            anchor: snapshot.anchor(),
+            summary: "retain the reviewed execution contract".into(),
+            terminal_condition: Predicate::All(dfmcp_intent::effects::default_postconditions(
+                &action,
+                "fixture",
+                snapshot.fortress_id,
+            )),
+            constraints: vec![Constraint::MaxRisk(RiskTier::Guarded)],
+            requested_actions: vec![RequestedAction {
+                action,
+                preconditions: Vec::new(),
+                postconditions: Vec::new(),
+                compensation: None,
+                obligation: None,
+                depends_on: Vec::new(),
+            }],
+        };
+        let context = OperationContext {
+            session_id: SessionId::new(1),
+            request_id: RequestId::new(1),
+            anchor: snapshot.anchor(),
+            budget: WorkBudget::default(),
+            grants: vec![CapabilityGrant {
+                capability: Capability::Plan,
+                scope: CapabilityScope {
+                    fortress_id: Some(snapshot.fortress_id),
+                    ..CapabilityScope::default()
+                },
+                max_risk: RiskTier::ReadOnly,
+                expires_at_tick: None,
+                remaining_uses: None,
+            }],
+            cancellation_requested: false,
+        };
+        let plan = StaticPlanner::default().prepare_laboratory(&snapshot, &intent, &context)?;
+        Ok((snapshot, plan))
+    }
+
+    #[test]
+    fn replay_rejects_a_resynthesized_obligation_deadline() -> Result<()> {
+        let (base, original) = replay_fixture(10, 0, true)?;
+        let (current, replayed) = replay_fixture(20, 1, true)?;
+        assert!(
+            ReadWitness::of(&original)
+                .first_change(&base, &current)
+                .is_none()
+        );
+        assert_eq!(original.steps[0].action, replayed.steps[0].action);
+        assert!(
+            original.steps[0]
+                .obligation
+                .as_ref()
+                .zip(replayed.steps[0].obligation.as_ref())
+                .is_some_and(|(old, new)| new.deadline_tick.0 == old.deadline_tick.0 + 10)
+        );
+        // Even equal preparation lifetimes cannot hide a changed temporal goal.
+        let mut same_expiry = replayed.clone();
+        same_expiry.expires_at_tick = original.expires_at_tick;
+        assert!(!same_actions(&original, &same_expiry));
+        assert!(!same_actions(&original, &replayed));
+        Ok(())
+    }
+
+    #[test]
+    fn replay_cannot_revive_an_expired_preparation() -> Result<()> {
+        let (base, original) = replay_fixture(10, 0, false)?;
+        let (current, replayed) = replay_fixture(original.expires_at_tick.0 + 1, 1, false)?;
+        assert!(
+            ReadWitness::of(&original)
+                .first_change(&base, &current)
+                .is_none()
+        );
+        assert_eq!(original.steps[0].action, replayed.steps[0].action);
+        assert!(current.tick > original.expires_at_tick);
+        assert!(replayed.expires_at_tick > original.expires_at_tick);
+        assert!(!same_actions(&original, &replayed));
+        Ok(())
+    }
+
+    #[test]
+    fn same_tick_replay_requires_the_complete_reviewed_contract() -> Result<()> {
+        use dfmcp_core::{Capability, RiskTier};
+        use dfmcp_intent::Action;
+        let (base, original) = replay_fixture(10, 0, true)?;
+        let (current, replayed) = replay_fixture(10, 1, true)?;
+        assert!(
+            ReadWitness::of(&original)
+                .first_change(&base, &current)
+                .is_none()
+        );
+        assert_ne!(original.anchor, replayed.anchor);
+        assert_ne!(
+            original.steps[0].idempotency_key,
+            replayed.steps[0].idempotency_key
+        );
+        assert!(same_actions(&original, &replayed));
+        let mut changes = Vec::new();
+        let mut changed = replayed.clone();
+        changed.summary.push_str(" changed");
+        changes.push(("summary", changed));
+        let mut changed = replayed.clone();
+        changed.terminal_condition = Predicate::Paused(true);
+        changes.push(("whole goal", changed));
+        let mut changed = replayed.clone();
+        changed.max_risk = RiskTier::ReadOnly;
+        changes.push(("risk ceiling", changed));
+        let mut changed = replayed.clone();
+        changed.required_capabilities.insert(Capability::Query);
+        changes.push(("capability summary", changed));
+        let mut changed = replayed.clone();
+        changed.requires_checkpoint = !changed.requires_checkpoint;
+        changes.push(("checkpoint", changed));
+        let mut changed = replayed.clone();
+        changed.steps[0].preconditions.push(Predicate::Paused(true));
+        changes.push(("preconditions", changed));
+        let mut changed = replayed.clone();
+        changed.steps[0]
+            .postconditions
+            .push(Predicate::Paused(true));
+        changes.push(("postconditions", changed));
+        let mut changed = replayed.clone();
+        changed.steps[0].compensation = Some(Action::Pause { paused: true });
+        changes.push(("compensation", changed));
+        let mut changed = replayed.clone();
+        changed.steps[0].obligation = None;
+        changes.push(("removed obligation", changed));
+        for field in ["terminal", "failure", "cadence", "stability"] {
+            let mut changed = replayed.clone();
+            if let Some(obligation) = &mut changed.steps[0].obligation {
+                match field {
+                    "terminal" => obligation.terminal = Predicate::Paused(true),
+                    "failure" => obligation.failure = Some(Predicate::Paused(false)),
+                    "cadence" => obligation.poll_interval_ticks += 1,
+                    _ => obligation.stable_for_observations += 1,
+                }
+            }
+            changes.push((field, changed));
+        }
+        for (field, changed) in changes {
+            assert!(
+                !same_actions(&original, &changed),
+                "accepted changed {field}"
+            );
+        }
+        Ok(())
+    }
 
     #[test]
     fn room_access_witness_detects_phantom_buildings_and_kind_aliases() -> Result<()> {

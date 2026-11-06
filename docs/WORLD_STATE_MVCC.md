@@ -221,6 +221,23 @@ For concurrent compatible plans, merge follows the ladder:
 
 A merge certificate contains the canonical normal form. Unknown commutativity is conflict, not permission.
 
+### Current laboratory intent replay
+
+The laboratory MCP host currently implements the unchanged-read-witness replay
+path. Automatic replay also compares the complete reviewed execution contract:
+the terminal goal, preparation expiry, risk and capability requirements,
+checkpoint requirement, and every step's action, guards, postconditions,
+compensation, temporal obligation and dependencies. Only anchor-derived plan
+identities and step keys may change automatically.
+
+Advancing the shared clock can change a planner-synthesized deadline or expiry
+even when all entity and spatial reads remain unchanged. Such a replay returns
+`stale_anchor` with a newly sealed `rebased_plan` for explicit review and commit.
+It does not extend the original deadline or revive an expired preparation under
+the old approval. Same-tick independent work can still use automatic replay when
+the full contract remains identical. Structural merge fallback and its runtime
+certificate admission remain separate unfinished work.
+
 ## 14. External effect journal
 
 For each effect the ledger persists, in order where possible:
