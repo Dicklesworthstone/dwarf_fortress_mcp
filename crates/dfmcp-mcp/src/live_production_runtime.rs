@@ -508,7 +508,11 @@ impl Runtime {
     fn arm(&self, work: &mut Work) -> Result<()> {
         if let Some(custody) = &self.custody {
             let allowance = (work.bytes / 2).min(512 * MIB);
-            custody.arm(&work.take(allowance)?)?;
+            let mut reserved = work.take(allowance)?;
+            // This is an authorization-time floor for immutable private reads,
+            // not a new canonical snapshot or a native effect context.
+            reserved.anchor.tick = reserved.anchor.tick.max(self.observation_tick_floor);
+            custody.arm(&reserved)?;
         }
         Ok(())
     }

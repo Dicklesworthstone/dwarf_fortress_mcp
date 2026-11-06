@@ -8,7 +8,7 @@ use dfmcp_adapter::semantic_work_orders::WorkOrderEvidenceOwner;
 use dfmcp_adapter::semantic_workforce::WorkforceEvidenceOwner;
 use dfmcp_adapter::work_orders::WorkOrderObservation;
 use dfmcp_adapter::workforce_control::WorkforceCapture;
-use dfmcp_core::{OperationContext, Result};
+use dfmcp_core::{GameTick, OperationContext, Result};
 use dfmcp_intent::PreparedPlan;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -25,6 +25,7 @@ struct Custody {
     archive: PlanArchiveStore<PrivateBuildFile>,
     identity: CapsuleStore<PrivateBuildFile>,
     original: PreparedPlan,
+    authority_tick_floor: GameTick,
     armed: Option<Armed>,
     generation: u64,
 }
@@ -40,6 +41,7 @@ impl SharedCustody {
         Self(Arc::new(Mutex::new(Custody {
             archive,
             identity,
+            authority_tick_floor: original.anchor.tick,
             original,
             armed: None,
             generation: 0,
@@ -58,6 +60,17 @@ impl SharedCustody {
             .0
             .try_lock()
             .map_err(|_| denied("custody is unavailable"))?;
+        let original = state.original.anchor;
+        if c.anchor.fortress_id != original.fortress_id
+            || c.anchor.cursor.epoch != original.cursor.epoch
+            || c.anchor.cursor.sequence < original.cursor.sequence
+            || c.anchor.tick < original.tick
+            || (c.anchor.cursor == original.cursor && c.anchor.state_hash != original.state_hash)
+        {
+            return Err(denied(
+                "custody operation differs from its original anchor scope",
+            ));
+        }
         if state.armed.is_some() {
             return Err(denied("custody operation already armed"));
         }
@@ -65,6 +78,7 @@ impl SharedCustody {
             .generation
             .checked_add(1)
             .ok_or_else(|| exhausted("custody generation exhausted"))?;
+        state.authority_tick_floor = state.authority_tick_floor.max(c.anchor.tick);
         state.armed = Some(Armed {
             context: c.clone(),
             until,
@@ -94,6 +108,8 @@ impl SharedCustody {
             .generation
             .checked_add(1)
             .ok_or_else(|| exhausted("custody generation exhausted"))?;
+        let original_anchor = state.original.anchor;
+        let retained_tick_floor = state.authority_tick_floor;
         let armed = state
             .armed
             .as_mut()
@@ -101,6 +117,12 @@ impl SharedCustody {
         if c.session_id != armed.context.session_id
             || c.request_id != armed.context.request_id
             || c.cancellation_requested
+            || c.anchor.fortress_id != armed.context.anchor.fortress_id
+            || c.anchor.cursor.epoch != armed.context.anchor.cursor.epoch
+            || c.anchor.cursor.sequence < armed.context.anchor.cursor.sequence
+            || c.anchor.tick < original_anchor.tick
+            || (c.anchor.cursor == armed.context.anchor.cursor
+                && c.anchor.state_hash != armed.context.anchor.state_hash)
         {
             return Err(denied("custody operation context changed or was cancelled"));
         }
@@ -114,6 +136,14 @@ impl SharedCustody {
             .checked_add(Duration::from_millis(c.budget.max_wall_millis))
             .ok_or_else(|| exhausted("custody deadline overflow"))?;
         let until = armed.until.min(incoming_until);
+        // Source policies inspect independent provisional projections at the
+        // same future cursor. None is the joined canonical world anchor. Keep
+        // immutable custody at the retained original cursor/hash and authorize
+        // every read at the highest consumed tick, including after a refusal.
+        let authority_tick = retained_tick_floor
+            .max(armed.context.anchor.tick)
+            .max(c.anchor.tick);
+        state.authority_tick_floor = authority_tick;
         let context = |bytes| -> Result<OperationContext> {
             let remaining = until
                 .checked_duration_since(Instant::now())
@@ -123,12 +153,18 @@ impl SharedCustody {
                 return Err(exhausted("custody deadline expired"));
             }
             let mut current = c.clone();
+            current.anchor = original_anchor;
+            current.anchor.tick = authority_tick;
             current.budget.max_wall_millis =
                 u64::try_from(remaining).map_err(|_| exhausted("custody deadline overflow"))?;
             current.budget.max_bytes = bytes;
             Ok(current)
         };
-        if state.archive.recover(&context(ARCHIVE_BYTES)?)? != state.original {
+        if state
+            .archive
+            .recover_at_authority_floor(&context(ARCHIVE_BYTES)?)?
+            != state.original
+        {
             return Err(denied(
                 "original plan archive changed at the effect boundary",
             ));

@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-11-06 — Repair combined parent sampling and execute clock recovery
+
+- Keep original-plan custody at its immutable original cursor/hash while
+  authorizing private reads at the highest consumed game tick. Independent
+  provisional labor/inventory projections no longer invalidate later source
+  callbacks; session, source scope, expiry and backward-context refusals remain.
+- Add a regression for distinct provisional hashes, intervening canonical
+  callbacks, non-rewinding authority, cross-epoch refusal and unchanged files.
+- Forward optional clock tick budgets through the shared modern-stdio client.
+- Execute three actual-source Runtime/native-TCP scenarios: two reviewed runs
+  through original parent stability; lost-reply restart/reconciliation with one
+  unpause; and offline prepared-review/missing-journal refusal with no native
+  calls or custody changes. The offline case used tmpfs; no disk/power-loss,
+  MCP/Agent Turn, production Cx, live-game or admission evidence is claimed.
+- Record verify.sh's passing preceding gates and its unrelated baseline Rust
+  formatting failure. The 28-case actual-CLI suite, final adapter tests and new
+  MCP unit regressions remain unexecuted under the documented full-build and
+  resource limitations. Strict qualification could not start before the
+  execution environment became unavailable.
+
 ## 2026-11-06 — Reviewed production clock in the combined MCP session
 
 - Connect optional order-run/1.14 control to the original combined inventory

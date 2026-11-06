@@ -308,13 +308,15 @@ class Client:
         assert step["tool"].startswith("fortress_")
         return self.tool(step["tool"][len("fortress_"):], **step["arguments"])
 
-    def open(self, mode="control", max_wall_millis=None):
+    def open(self, mode="control", max_wall_millis=None, max_game_ticks=None):
         self.call("server/discover", {})
         tools = self.call("tools/list", {})["result"]["tools"]
         assert len(tools) == 11
         arguments = {"mode": mode}
         if max_wall_millis is not None:
             arguments["max_wall_millis"] = max_wall_millis
+        if max_game_ticks is not None:
+            arguments["max_game_ticks"] = max_game_ticks
         return self.tool("open_session", **arguments)
 
     def close(self, crash=False):

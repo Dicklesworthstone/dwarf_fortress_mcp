@@ -1,5 +1,59 @@
 # Implementation Status
 
+## 2026-11-06 — Executed combined clock recovery and immutable parent custody
+
+Three actual-source Runtime/native-TCP component scenarios now pass after a
+concrete custody correction. Two separately reviewed five-tick runs move the
+fixture from tick 120 through 125 to 130 and prove the original complete parent
+only after its two stable observations. The complete plan, original keys,
+deadline 300 and cadence 5 remain unchanged; labor and order insertion each
+commit once, and no additional run is accepted after proof. A lost CommitRun
+reply survives process restart and reconciliation with exactly one unpause
+attempt, no goal reads while the retained run remains active, and unfinished
+stability after the first fresh joined observation. A prepared-run offline
+reopen and inspection make zero native calls and zero custody changes, restore
+no review/current proof, reject the old confirmation and refuse a missing
+clock journal without recreating it.
+
+Execution exposed a pre-existing combined-parent custody defect: independently
+proposed workforce and inventory projections were being installed as the
+archive's canonical authority anchor. The next source callback then correctly
+failed the archive's monotonic-anchor check. Immutable private reads now retain
+the original cursor/hash through the existing Query-only authority-floor API,
+while preserving the maximum consumed tick even after a refusal. Explicit
+session, request, fortress, epoch, armed cursor and canonical-hash checks remain.
+A focused real-private-file regression covers independent projection hashes,
+intervening canonical callbacks, newer cursors, expired grants, cross-epoch and
+backward contexts, and byte immutability. Fresh source policies and joined goal
+proof are unchanged. The shared modern-stdio test client now forwards an
+explicit optional max_game_ticks, allowing all three new clock cases to reach
+the host instead of failing at Python argument binding.
+
+The successful component driver compiles and calls the unchanged production
+Runtime and native shells against the exact locked real semantic dependencies.
+It injects a clearly identified test checkpoint through the existing callback
+API; it does not exercise MCP transport, Agent Turn, production Cx, or admission.
+The offline scenario used private tmpfs files after the shared overlay filled;
+it establishes process-restart/private-custody behavior, not disk or power-loss
+durability. The other two scenarios used the ordinary scratch filesystem.
+All 28 actual-binary stdio scenarios remain pending execution of a full MCP
+build. New Rust unit regressions likewise are not claimed executed here.
+
+The required verify.sh run passed its preceding integrity, contract, dependency,
+bead-coverage, Python, native SDK-double, excavation/blueprint and syntax gates,
+then exited 1 at workspace Rust formatting. Reported formatting differences are
+in untouched lexical-search, workforce-choice and world-search files; no global
+formatting sweep was applied. Earlier full MCP attempts remain blocked by
+SIGKILL in pinned Asupersync. A further actual adapter-test attempt did not reach
+compilation: this nightly removed the old backend-worker flag, and the shared
+overlay subsequently ran out of space. The final 39 adapter tests remain
+unexecuted; earlier executed adapter and metadata results retain their documented
+source scope. The execution environment then became unavailable before strict
+qualify_local.sh or a final post-case source-inventory check could run. The
+reviewed correction was preserved through GitHub after that interruption.
+No aggregate qualification, native DFHack/game pass or admission is claimed;
+owning beads remain in progress.
+
 ## 2026-11-06 — Bounded production advancement in the combined owner
 
 The combined labor/order MCP host now supports separately reviewed order-run/1.14

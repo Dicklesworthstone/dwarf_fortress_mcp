@@ -75,6 +75,109 @@ impl Drop for Directory {
 }
 
 #[test]
+fn provisional_source_anchors_do_not_replace_canonical_custody_or_rewind_authority()
+-> std::result::Result<(), Box<dyn std::error::Error>> {
+    let (capsule, projection) = observation(&[42])?;
+    let mut c = context(&projection.snapshot);
+    c.budget.max_bytes = 512 * 1024 * 1024;
+    c.budget.max_actions = 2;
+    let request = Request {
+        expected_observation: "11".repeat(32),
+        units: vec!["43".into()],
+        labor: "MINE".into(),
+        enabled: true,
+        recipe: "wooden_bed".into(),
+        amount: 1,
+        deadline_tick: 300,
+        poll_interval_ticks: 5,
+        stable_samples: 2,
+        objective: None,
+    };
+    let evidence = PredicateEvidence::scoped(&projection.snapshot, policy(&projection.snapshot))?;
+    let plan = request.compile(&evidence, &c)?;
+    let id = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)?
+        .as_nanos();
+    let directory = Directory(std::env::temp_dir().join(format!(
+        "dfmcp-combined-provisional-custody-{}-{id}",
+        std::process::id()
+    )));
+    std::fs::create_dir(&directory.0)?;
+    std::fs::set_permissions(&directory.0, std::fs::Permissions::from_mode(0o700))?;
+    let plan_path = directory.0.join("original.plan");
+    let identity_path = directory.0.join("original.citizens");
+    let archive = create_private_plan_archive(
+        &plan_path,
+        &plan,
+        dfmcp_adapter::live_production::archive_limits(),
+        &c,
+    )?;
+    let identity = create_private_capsule(&identity_path, &capsule, &c)?;
+    let before = (std::fs::read(&plan_path)?, std::fs::read(&identity_path)?);
+    let custody = SharedCustody::new(archive, identity, plan);
+    custody.arm(&c)?;
+
+    // Independent labor and inventory projections intentionally have different
+    // hashes at one proposed cursor. Between them factories still carry the
+    // operation's earlier canonical anchor. These are immutable Query reads.
+    let mut labor = c.clone();
+    labor.anchor.cursor.sequence += 1;
+    labor.anchor.tick = GameTick(125);
+    labor.anchor.state_hash = Digest32::of_bytes(b"provisional labor projection");
+    custody.verify(&labor)?;
+    custody.verify(&c)?;
+    let mut inventory = labor.clone();
+    inventory.anchor.state_hash = Digest32::of_bytes(b"provisional inventory projection");
+    custody.verify(&inventory)?;
+    let mut later = inventory.clone();
+    later.anchor.cursor.sequence += 1;
+    later.anchor.tick = GameTick(130);
+    later.anchor.state_hash = Digest32::of_bytes(b"later independent projection");
+    custody.verify(&later)?;
+
+    // The older canonical anchor cannot restore a grant that expired at the
+    // consumed source time, including after the first refused check.
+    let mut expired = c.clone();
+    for grant in &mut expired.grants {
+        if grant.capability == Capability::Query {
+            grant.expires_at_tick = Some(GameTick(129));
+        }
+    }
+    assert!(custody.verify(&expired).is_err());
+    assert!(custody.verify(&expired).is_err());
+    custody.verify(&c)?;
+    for changed in ["fortress", "epoch", "tick", "canonical_hash", "request"] {
+        let mut bad = c.clone();
+        match changed {
+            "fortress" => bad.anchor.fortress_id = dfmcp_core::FortressId::new(1),
+            "epoch" => bad.anchor.cursor.epoch += 1,
+            "tick" => bad.anchor.tick = GameTick(119),
+            "canonical_hash" => {
+                bad.anchor.state_hash = Digest32::of_bytes(b"replaced canonical state")
+            }
+            _ => bad.request_id = RequestId::new(99),
+        }
+        assert!(custody.verify(&bad).is_err(), "changed {changed}");
+    }
+    custody.disarm()?;
+    let mut published = later;
+    published.anchor.cursor.sequence += 1;
+    published.anchor.state_hash = Digest32::of_bytes(b"published complete parent projection");
+    custody.arm(&published)?;
+    custody.verify(&published)?;
+    assert!(
+        custody.verify(&c).is_err(),
+        "earlier operation cursor cannot re-enter a newer operation"
+    );
+    custody.disarm()?;
+    assert_eq!(
+        before,
+        (std::fs::read(&plan_path)?, std::fs::read(&identity_path)?)
+    );
+    Ok(())
+}
+
+#[test]
 fn real_custody_and_owner_refuse_corruption_after_refresh()
 -> std::result::Result<(), Box<dyn std::error::Error>> {
     for corrupted in ["plan", "identity"] {
