@@ -14,6 +14,9 @@ use dfmcp_world::{FactPresence, PredicateEvidence, PredicateTruth};
 #[path = "production_material_tests.rs"]
 mod materials;
 
+#[path = "production_setup_workforce_tests.rs"]
+mod setup_workforce;
+
 fn context(snapshot: &WorldSnapshot) -> OperationContext {
     OperationContext {
         session_id: SessionId::new(1),

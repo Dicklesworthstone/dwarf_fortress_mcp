@@ -274,6 +274,89 @@ fn reserve_admission_rejects_unregistered_actions_and_setup_without_production()
 }
 
 #[test]
+fn reserve_constructor_setup_requires_shared_model_workshop_and_real_production() -> Result<()> {
+    let mut snapshot = source();
+    let id = crate::effects::fortress_settings_entity_id(snapshot.fortress_id);
+    snapshot.graph.entities.insert(
+        id,
+        EntityRecord {
+            id,
+            generation: 1,
+            revision: 1,
+            kind: EntityKind::Other(crate::effects::FORTRESS_SETTINGS_KIND.to_owned()),
+            label: "explicit project workforce".to_owned(),
+            fields: [(
+                crate::effects::LABORATORY_WORKFORCE_MODEL_FIELD.to_owned(),
+                Fact::known(
+                    Value::Text(crate::effects::LABORATORY_WORKFORCE_MODEL.to_owned()),
+                    snapshot.tick,
+                    FactSource::Derived("dfmcp.lab-scenario/1".to_owned()),
+                    Digest32::ZERO,
+                ),
+            )]
+            .into_iter()
+            .collect(),
+        },
+    );
+    snapshot.refresh_hash();
+    let mut intent = reserve_intent(&snapshot, 2401);
+    intent.requested_actions.push(requested(Action::SetLabor {
+        units: vec![EntityId::new(1)],
+        labor: "CONSTRUCTION".to_owned(),
+        enabled: true,
+    }));
+    let at = MapCoord { x: 0, y: 0, z: 0 };
+    intent.requested_actions.push(requested(Action::Build {
+        kind: BuildingKind::Workshop("Still".to_owned()),
+        location: at,
+        footprint: MapCuboid { min: at, max: at },
+        material: Default::default(),
+    }));
+    let evidence = PredicateEvidence::laboratory(&snapshot)?;
+    assert_eq!(
+        laboratory_reserve_horizon(&intent, &evidence, true)?,
+        Some(GameTick(2401))
+    );
+    for variant in 0..4 {
+        let mut invalid = intent.clone();
+        match variant {
+            0 => {
+                invalid.requested_actions.pop();
+            }
+            1 => {
+                invalid.requested_actions.remove(0);
+            }
+            2 => {
+                invalid.requested_actions[1].action = Action::SetLabor {
+                    units: vec![EntityId::new(1)],
+                    labor: "CONSTRUCTION".to_owned(),
+                    enabled: false,
+                };
+            }
+            _ => {
+                invalid.requested_actions[1].action = Action::SetLabor {
+                    units: vec![EntityId::new(1)],
+                    labor: "MINING".to_owned(),
+                    enabled: true,
+                };
+            }
+        }
+        assert!(
+            laboratory_reserve_horizon(&invalid, &evidence, true)
+                .is_err_and(|error| error.code == ErrorCode::InvalidIntent)
+        );
+    }
+    snapshot.graph.entities.remove(&id);
+    snapshot.refresh_hash();
+    let evidence = PredicateEvidence::laboratory(&snapshot)?;
+    assert!(
+        laboratory_reserve_horizon(&intent, &evidence, true)
+            .is_err_and(|error| error.code == ErrorCode::InvalidIntent)
+    );
+    Ok(())
+}
+
+#[test]
 fn reserve_admission_preserves_plan_authority_risk_and_budget_bounds() -> Result<()> {
     let snapshot = source();
     let planner = StaticPlanner::default();

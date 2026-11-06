@@ -1070,8 +1070,18 @@ impl ProductionPlanner {
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct ProductionPrerequisites {
     assign_labor: bool,
+    workforce: Option<ProductionWorkforce>,
     workshops: BTreeMap<String, ProductionWorkshopSite>,
 }
+
+/// Explicit policy generation: old sources keep their recipe-only staffing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum ProductionWorkforce {
+    CompleteProjectV1,
+}
+
+pub(crate) const PROJECT_WORKFORCE_POLICY: &str = "complete_project_v1";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct ProductionWorkshopSite {
@@ -1109,6 +1119,7 @@ impl ProductionRequest {
         struct Prerequisites {
             #[serde(default)]
             assign_labor: bool,
+            workforce: Option<ProductionWorkforce>,
             #[serde(default)]
             workshops: Vec<Workshop>,
         }
@@ -1230,10 +1241,20 @@ impl ProductionRequest {
                 }
                 Ok(ProductionPrerequisites {
                     assign_labor: setup.assign_labor,
+                    workforce: setup.workforce,
                     workshops,
                 })
             })
             .transpose()?;
+        if prerequisites
+            .as_ref()
+            .is_some_and(|setup| setup.workforce.is_some())
+            && planner.is_none()
+        {
+            return Err(invalid(
+                "complete_project_v1 staffing requires a retained production compiler generation",
+            ));
+        }
         Ok(Self {
             quotas,
             prerequisites,
@@ -1261,6 +1282,12 @@ impl ProductionRequest {
         self.reserve_until_tick
     }
 
+    pub(crate) fn setup_workforce(&self) -> Option<bool> {
+        self.prerequisites
+            .as_ref()
+            .and_then(|setup| setup.workforce.map(|_| setup.assign_labor))
+    }
+
     pub(crate) fn canonical_json(&self) -> String {
         let mut request = json!({
             "template": "production",
@@ -1279,6 +1306,9 @@ impl ProductionRequest {
                     "max": [site.footprint.max.x, site.footprint.max.y, site.footprint.max.z],
                 })).collect::<Vec<_>>(),
             });
+            if setup.workforce.is_some() {
+                request["prerequisites"]["workforce"] = json!(PROJECT_WORKFORCE_POLICY);
+            }
         }
         if let Some(planner) = self.planner {
             request["planner"] = json!(planner.as_str());
@@ -1518,6 +1548,7 @@ impl ProductionRequest {
                         &jobs,
                         &ProductionPrerequisites {
                             assign_labor: false,
+                            workforce: None,
                             workshops: BTreeMap::new(),
                         },
                     )?
@@ -1676,6 +1707,10 @@ impl ProductionRequest {
                     .map(|step| step.action.capability().as_str())
                     .collect::<BTreeSet<_>>()
             );
+            if let Some(staffing) = &setup.setup_workforce {
+                analysis["prerequisites"]["setup_workforce"] =
+                    crate::project_staffing::report(staffing);
+            }
         } else if joint_staffing {
             analysis["staffing"] = json!({
                 "workers": setup.staffing,
@@ -1691,6 +1726,7 @@ impl ProductionRequest {
             workload,
             consumption_horizon: None,
             satisfied_goal_reserve_until: None,
+            setup_workforce: setup.setup_workforce,
         })
     }
 }
@@ -1743,6 +1779,7 @@ struct ProductionSetup {
     serial_after: BTreeMap<String, BTreeSet<String>>,
     workshops: Vec<Json>,
     staffing: Vec<Json>,
+    setup_workforce: Option<dfmcp_intent::workforce_planning::ProjectSetupStaffing>,
 }
 
 fn construction_setup_wood(snapshot: &WorldSnapshot, setup: &ProductionSetup) -> Result<u64> {
@@ -1908,6 +1945,19 @@ fn select_production_workers<'a>(
     production_staffing::select(tick, living, fields, assign_labor)
 }
 
+fn ready_production_workshop<'a>(
+    snapshot: &'a WorldSnapshot,
+    workshop: &str,
+) -> Option<&'a EntityRecord> {
+    snapshot.graph.entities.values().find(|building| {
+        building.kind == EntityKind::Building
+            && production_fact(building, "building_kind", snapshot.tick)
+                == Some(&Value::Text(workshop.to_owned()))
+            && production_fact(building, effects::CONSTRUCTION_STAGE_FIELD, snapshot.tick)
+                == Some(&Value::Text(effects::STAGE_COMPLETE.to_owned()))
+    })
+}
+
 fn compile_production_prerequisites(
     snapshot: &WorldSnapshot,
     jobs: &[(&str, &str)],
@@ -1962,6 +2012,27 @@ fn compile_production_prerequisites(
     let mut labor_actions = BTreeMap::<(EntityId, String), u32>::new();
     let mut workshop_actions = BTreeMap::<String, u32>::new();
     let mut setup = ProductionSetup::default();
+    let mut construction_dependency = None;
+    if options.workforce.is_some() {
+        use dfmcp_intent::workforce_planning::{ProjectSetupLabor, ProjectSetupStaffing};
+        let required = if requirements
+            .iter()
+            .any(|(_, _, workshop, _, _)| ready_production_workshop(snapshot, workshop).is_none())
+        {
+            vec![ProjectSetupLabor::Construction]
+        } else {
+            Vec::new()
+        };
+        let staffing = ProjectSetupStaffing::plan(snapshot, &required, options.assign_labor)?;
+        for requested in &staffing.actions {
+            setup
+                .actions
+                .push(crate::project_staffing::action_json(requested)?);
+        }
+        construction_dependency =
+            crate::project_staffing::dependency(&staffing, ProjectSetupLabor::Construction);
+        setup.setup_workforce = Some(staffing);
+    }
     for ((output, job, workshop, field, labor), family) in requirements.iter().zip(family_for_job) {
         let worker = workers
             .get(family)
@@ -2040,13 +2111,7 @@ fn compile_production_prerequisites(
                 _ => "unknown",
             },
         }));
-        let ready = snapshot.graph.entities.values().find(|building| {
-            building.kind == EntityKind::Building
-                && production_fact(building, "building_kind", snapshot.tick)
-                    == Some(&Value::Text((*workshop).to_owned()))
-                && production_fact(building, effects::CONSTRUCTION_STAGE_FIELD, snapshot.tick)
-                    == Some(&Value::Text(effects::STAGE_COMPLETE.to_owned()))
-        });
+        let ready = ready_production_workshop(snapshot, workshop);
         if let Some(building) = ready {
             setup.workshops.push(json!({
                 "job_token": job,
@@ -2075,7 +2140,7 @@ fn compile_production_prerequisites(
                         "min": [site.footprint.min.x, site.footprint.min.y, site.footprint.min.z],
                         "max": [site.footprint.max.x, site.footprint.max.y, site.footprint.max.z],
                     },
-                    "depends_on": [],
+                    "depends_on": construction_dependency.into_iter().collect::<Vec<_>>(),
                 }));
                 workshop_actions.insert((*workshop).to_owned(), index);
                 index
@@ -2107,6 +2172,7 @@ pub(crate) struct ProductionCompilation {
     // already true need the typed admission rule. Earlier valid plans retain
     // their original summary and prepared seal.
     satisfied_goal_reserve_until: Option<GameTick>,
+    setup_workforce: Option<dfmcp_intent::workforce_planning::ProjectSetupStaffing>,
 }
 
 impl ProductionCompilation {
@@ -2146,6 +2212,9 @@ impl ProductionCompilation {
                 .push(dfmcp_intent::Constraint::LaboratoryProductionReserveUntil(
                     until,
                 ));
+        }
+        if let Some(staffing) = &self.setup_workforce {
+            crate::project_staffing::bind_actions(staffing, &mut proposed)?;
         }
         *intent = proposed;
         Ok(())

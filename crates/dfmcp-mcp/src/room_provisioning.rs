@@ -104,6 +104,7 @@ impl RoomLayout {
 pub(crate) struct ProvisionedRoomRequest {
     layout: RoomLayout,
     prerequisites: Option<Json>,
+    setup_workforce: Option<bool>,
 }
 
 /// Optional work composed before exact furnishing step identities are derived.
@@ -170,6 +171,7 @@ impl ProvisionedRoomRequest {
         // Reuse the closed production setup grammar, including unused sites.
         // Positive dummy quotas establish only its relevant recipe families;
         // no snapshot is read and no candidate work is compiled here.
+        let mut setup_workforce = None;
         let prerequisites = if let Some(options) = input.prerequisites {
             let production = ProductionRequest::parse_current(
                 &json!({
@@ -181,6 +183,7 @@ impl ProvisionedRoomRequest {
                 })
                 .to_string(),
             )?;
+            setup_workforce = production.setup_workforce();
             let canonical: Json = serde_json::from_str(&production.canonical_json())
                 .map_err(|_| invariant("canonical production request could not be decoded"))?;
             Some(canonical.get("prerequisites").cloned().ok_or_else(|| {
@@ -192,6 +195,7 @@ impl ProvisionedRoomRequest {
         Ok(Self {
             layout: input.layout,
             prerequisites,
+            setup_workforce,
         })
     }
 
@@ -349,6 +353,14 @@ impl ProvisionedRoomRequest {
             let mut source = json!({"template":"production", "quotas":quotas});
             if let Some(options) = &self.prerequisites {
                 source["prerequisites"] = options.clone();
+                // The complete room owns one setup staffing decision, including
+                // its mining and installation. Avoid a second constructor
+                // prefix inside the intermediate furniture procurement.
+                if self.setup_workforce.is_some()
+                    && let Some(options) = source["prerequisites"].as_object_mut()
+                {
+                    options.remove("workforce");
+                }
             }
             let compiled =
                 ProductionRequest::parse_current(&source.to_string())?.compile(snapshot)?;
@@ -370,6 +382,76 @@ impl ProvisionedRoomRequest {
                 build(&layout, &targets, &requested_actions)
             })
             .transpose()?;
+        let mut excavation_parts = Vec::new();
+        for requested in excavations.requested_actions {
+            excavation_parts.push(if residual {
+                residual_excavations(snapshot, requested, retained.values())?
+            } else {
+                vec![requested]
+            });
+        }
+        let mut mining_dependency = None;
+        let mut construction_dependency = None;
+        let setup_staffing = if let Some(allow_assign) = self.setup_workforce {
+            use dfmcp_intent::workforce_planning::{ProjectSetupLabor, ProjectSetupStaffing};
+            let mut required = Vec::new();
+            let evidence = dfmcp_world::PredicateEvidence::laboratory(snapshot)?;
+            let mut needs_mining = access
+                .as_ref()
+                .is_some_and(|part| !part.excavations.is_empty());
+            for step in excavation_parts.iter().flatten() {
+                if let Action::DesignateDig { area, mode } = step.action
+                    && !evidence.establishes(&Predicate::RegionTerrain {
+                        area,
+                        tile_code: effects::dig_target_tile_code(mode),
+                    })?
+                {
+                    needs_mining = true;
+                    break;
+                }
+            }
+            // Keep original terrain goals and designation identities, but an
+            // already completed designation needs no worker. Unknown terrain
+            // never establishes that this prerequisite can be omitted.
+            if needs_mining {
+                required.push(ProjectSetupLabor::Mining);
+            }
+            if slots.len() > retained.len()
+                || requested_actions
+                    .iter()
+                    .any(|step| matches!(step.action, Action::Build { .. }))
+            {
+                required.push(ProjectSetupLabor::Construction);
+            }
+            let staffing = ProjectSetupStaffing::plan(snapshot, &required, allow_assign)?;
+            mining_dependency =
+                crate::project_staffing::dependency(&staffing, ProjectSetupLabor::Mining);
+            construction_dependency =
+                crate::project_staffing::dependency(&staffing, ProjectSetupLabor::Construction);
+            let offset = step_number(staffing.actions.len())?;
+            for requested in &mut requested_actions {
+                for dependency in &mut requested.depends_on {
+                    *dependency = dependency
+                        .checked_add(offset)
+                        .ok_or_else(|| bounds("project setup dependency overflow"))?;
+                }
+                if matches!(requested.action, Action::Build { .. }) {
+                    crate::project_staffing::require_dependency(requested, construction_dependency);
+                }
+                // These are generated procurement defaults, never caller
+                // deadlines. Seal them only after the complete room program
+                // exists, so mining and placement share its finite queue and
+                // every created-entity predicate uses the final step identity.
+                requested.obligation = None;
+            }
+            let mut actions = staffing.actions.clone();
+            actions.extend(requested_actions);
+            requested_actions = actions;
+            crate::project_staffing::shift_production_report(&mut production_analysis, offset)?;
+            Some(staffing)
+        } else {
+            None
+        };
         let mut production_dependencies = Vec::new();
         for (index, requested) in requested_actions.iter().enumerate() {
             match &requested.action {
@@ -424,12 +506,7 @@ impl ProvisionedRoomRequest {
         let excavation_offset = step_number(requested_actions.len())?;
         let mut terminal = vec![excavations.terminal_condition];
         let mut excavation_steps: Vec<Vec<u32>> = Vec::new();
-        for requested in excavations.requested_actions {
-            let parts = if residual {
-                residual_excavations(snapshot, requested, retained.values())?
-            } else {
-                vec![requested]
-            };
+        for parts in excavation_parts {
             let mut steps = Vec::new();
             for mut requested in parts {
                 // This compiler generation uses the reference model's work-scaled
@@ -458,6 +535,7 @@ impl ProvisionedRoomRequest {
                             .ok_or_else(|| bounds("room excavation dependency overflow"))?;
                     }
                 }
+                crate::project_staffing::require_dependency(&mut requested, mining_dependency);
                 steps.push(step_number(requested_actions.len())?);
                 requested_actions.push(requested);
             }
@@ -481,7 +559,7 @@ impl ProvisionedRoomRequest {
                     postconditions: vec![postcondition],
                     compensation: None,
                     obligation: None,
-                    depends_on: Vec::new(),
+                    depends_on: mining_dependency.into_iter().collect(),
                 });
             }
             terminal.push(access.terminal.clone());
@@ -543,6 +621,7 @@ impl ProvisionedRoomRequest {
                 depends_on.extend(excavation_steps.iter().flatten().copied());
                 depends_on.extend_from_slice(&access_steps);
             }
+            depends_on.extend(construction_dependency);
             depends_on.sort_unstable();
             depends_on.dedup();
             requested_actions.push(RequestedAction {
@@ -623,6 +702,9 @@ impl ProvisionedRoomRequest {
         }
         if let Some(access) = access {
             analysis["access"] = access.analysis;
+        }
+        if let Some(staffing) = setup_staffing {
+            analysis["setup_workforce"] = crate::project_staffing::report(&staffing);
         }
         Ok((intent, analysis))
     }

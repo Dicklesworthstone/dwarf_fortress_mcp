@@ -11,6 +11,9 @@ use dfmcp_world::{PredicateEvidence, PredicateTruth, Value, laboratory_fact_valu
 #[path = "connected_room_workforce_tests.rs"]
 mod workforce;
 
+#[path = "connected_room_setup_staffing_tests.rs"]
+mod setup_staffing;
+
 fn source() -> Result<WorldSnapshot> {
     crate::lab_world::scenario_snapshot("starter_fortress", FortressId::new(981), false)
 }
@@ -70,6 +73,14 @@ fn request(dining: bool) -> Result<ConnectedRoomRequest> {
 }
 
 fn execute(snapshot: WorldSnapshot, intent: &Intent) -> Result<(WorldSnapshot, PreparedPlan)> {
+    execute_with_cadence(snapshot, intent, effects::DEFAULT_POLL_INTERVAL_TICKS)
+}
+
+fn execute_with_cadence(
+    snapshot: WorldSnapshot,
+    intent: &Intent,
+    cadence: u64,
+) -> Result<(WorldSnapshot, PreparedPlan)> {
     let plan =
         StaticPlanner::default().prepare_laboratory(&snapshot, intent, &context(&snapshot))?;
     let horizon = plan
@@ -83,9 +94,7 @@ fn execute(snapshot: WorldSnapshot, intent: &Intent) -> Result<(WorldSnapshot, P
     let receipt = adapter.commit(&plan, &prepared, &context(adapter.snapshot()))?;
     let mut states: Vec<_> = receipt.actions.iter().map(|action| action.state).collect();
     while adapter.snapshot().tick.0 < horizon && states.iter().any(|state| !state.is_terminal()) {
-        adapter.advance_ticks(
-            effects::DEFAULT_POLL_INTERVAL_TICKS.min(horizon - adapter.snapshot().tick.0),
-        )?;
+        adapter.advance_ticks(cadence.min(horizon - adapter.snapshot().tick.0))?;
         for (action, state) in receipt.actions.iter().zip(&mut states) {
             if !state.is_terminal() {
                 *state = adapter

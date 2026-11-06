@@ -1,5 +1,47 @@
 # Implementation Status
 
+## Unreleased — Complete project workforce in production and room plans
+
+Laboratory production, provisioned-room and connected-room sources now accept
+`prerequisites.workforce: "complete_project_v1"`. The explicit policy adds
+qualified construction labor before missing workshops and furniture installation,
+and qualified mining labor before remaining room/connector excavation. Existing
+enabled capacity is reused; `assign_labor:true` permits source-qualified enables
+with ordinary ConfigureLabor authority, guarded review and inverse compensation.
+A single worker can serve successive stages. Already completed terrain needs no
+miner, even when mining facts are unavailable. Unsupported models or unavailable
+required capacity refuse. Unmarked sources retain their previous canonical bytes
+and behavior; the named policy survives source restoration and continuation.
+
+Production binds its guarded setup only after validating the entire original
+program and consumption horizon. Rooms insert setup before deriving work-order,
+produced-item and placement identities, remap dependencies and reports, and seal
+fresh generated obligations against the complete physical workload. Every original
+terrain, exact-item and access goal remains intact. The reported proposal reserves
+no workers and does not guarantee completion. Explicit future stock reserves now
+admit construction enables only with registered workshop construction in the
+qualified shared-workforce model, still requiring registered production and the
+original established stock minima. Mining, disables and unrelated setup remain
+outside that narrow admission rule.
+
+Executed component validation: all 212 intent library tests and all 220 MCP
+semantic-module tests pass with zero failures or ignored tests, including the new
+reserve-admission regression and eleven new production/connected-room regressions.
+The tests execute the actual compilers, StaticPlanner, MemoryAdapter and finite
+workforce effects through material consumption and complete original goal proof.
+They cover an unstaffed workshop, one-worker complete rooms, completed excavation,
+unknown labor, missing mutation authority, canonical recovery, future drink
+reserves and forecast/execution parity at the forecast's declared polling cadence.
+
+The focused workspaces use the unchanged five pure-crate source/manifests and
+actual MCP semantic source modules with exact repository-locked serde dependencies;
+there are no replacement planner/adapter implementations. Component execution used
+rustc 1.100.0-nightly (908501772). Scoped latest-nightly formatting, diff whitespace,
+repository integrity and the 34-declaration dependency check pass. These results
+exclude the FastMCP/asupersync facade and actual-game execution; complete workspace
+qualification and native admission remain unclaimed. Bead
+`df-lab-shared-workforce-8n4` remains in progress for that broader scope.
+
 ## Unreleased — Qualified setup staffing for complete laboratory projects
 
 `ProjectSetupStaffing` now supplies a bounded, read-only proposal for the mining

@@ -63,6 +63,52 @@ labor changes. If the original obligation has already expired, its historical
 failure remains immutable; use the established drain/reconcile/continuation
 workflow rather than treating restored capacity as a new success receipt.
 
+## Staff a complete project
+
+Production, `provisioned_room` and `connected_room` requests can opt into
+`complete_project_v1` inside their existing `prerequisites` object:
+
+```json
+{
+  "assign_labor": true,
+  "workforce": "complete_project_v1",
+  "workshops": [
+    {"building": "workshop:Carpenters", "location": [1, 0, 10]}
+  ]
+}
+```
+
+For a connected room, this object belongs in `room.prerequisites`. Use it in an
+explicit `shared-workforce/1` world, including the workforce, provisions and
+economy scenarios. Ordinary recipe staffing still handles brewing, cooking and
+carpentry. The complete-project policy additionally supplies a qualified
+constructor before a missing workshop or furniture installation and a qualified
+miner before remaining room or connector excavation. Already completed terrain
+does not require a new miner. Workshop sites remain explicit.
+
+The policy first reuses a living worker whose required labor is established as
+enabled. When a new enable is necessary, `assign_labor: true` permits selecting
+a qualified disabled labor; the selection prefers known nonmilitary workers and
+then canonical identity. Missing, unknown, future or unqualified labor facts
+cannot authorize an enable or supply its compensation. `assign_labor: false`
+permits reuse only. The resulting `SetLabor` actions still require ordinary
+ConfigureLabor authority, review and commit. One worker may handle successive
+stages; the shared engine still allows only one activity per worker at a time.
+
+Room plans insert setup before deriving produced-item identities and placement
+dependencies. The final deadline covers the complete room workload, including
+the current queue, excavation, workshop service, production and installation.
+The original terrain, exact-item and access goals remain intact. Production's
+consumption and explicit future-reserve calculations include its new setup too.
+
+The analysis returns `setup_workforce` for rooms and
+`prerequisites.setup_workforce` for production, with the source hash/tick,
+selected worker generations, observed versus planned labor and enabling action
+indices. This is a bounded proposal; it reserves no workers and guarantees no
+completion. Saved requests retain the explicit policy, and changed observations
+still require reviewed replay. Requests without the policy retain their existing
+compiler behavior and canonical source bytes.
+
 ## Explicit model identity
 
 The canonical fortress-settings entity has a qualified

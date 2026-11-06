@@ -177,9 +177,12 @@ fn existing_capacity_wins_before_nonmilitary_preference_and_canonical_identity()
     assert!(staffing.actions.is_empty());
     assert_eq!(staffing.selections[0].worker, EntityId::new(2));
     assert_eq!(staffing.selections[1].worker, EntityId::new(4));
-    assert!(staffing.selections.iter().all(|choice| {
-        choice.previously_enabled && choice.action_index.is_none()
-    }));
+    assert!(
+        staffing
+            .selections
+            .iter()
+            .all(|choice| { choice.previously_enabled && choice.action_index.is_none() })
+    );
     assert_eq!(
         staffing,
         ProjectSetupStaffing::plan(
@@ -205,10 +208,8 @@ fn enabling_prefers_explicit_nonmembership_then_unknown_then_membership() -> Res
         .entities
         .get_mut(&EntityId::new(3))
         .ok_or_else(|| refused("fixture worker missing"))?;
-    unit.fields.insert(
-        "alive".to_owned(),
-        fact(Value::Bool(false), snapshot.tick),
-    );
+    unit.fields
+        .insert("alive".to_owned(), fact(Value::Bool(false), snapshot.tick));
     snapshot.refresh_hash();
     let staffing = ProjectSetupStaffing::plan(&snapshot, &required, true)?;
     assert_eq!(staffing.selections[0].worker, EntityId::new(2));

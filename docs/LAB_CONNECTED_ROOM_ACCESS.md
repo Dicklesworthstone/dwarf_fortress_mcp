@@ -16,6 +16,13 @@ checks do not establish full runtime qualification or native compatibility;
 the exact evidence posture remains in
 [IMPLEMENTATION_STATUS.md](../IMPLEMENTATION_STATUS.md).
 
+In a shared-workforce scenario, add `"workforce":"complete_project_v1"` to
+`room.prerequisites` to plan missing mining and construction labor along with
+carpentry. `assign_labor:true` permits qualified labor enables; `false` requires
+the necessary workers to be already enabled. See
+[LAB_SHARED_WORKFORCE.md](LAB_SHARED_WORKFORCE.md#staff-a-complete-project) for
+the complete setup policy. The request below keeps the original default policy.
+
 ## Plan a connected room
 
 Pass this object as the JSON string in `fortress.plan`'s `blueprint` argument:

@@ -60,6 +60,14 @@ service, earned partial progress, setup deadlines and shared-worker dependencies
 contribute to the complete horizon. Observation cadence still matters: deferred
 work starts only when a foreground observation verifies its prerequisites.
 
+When explicit setup must build a missing workshop in a shared-workforce world,
+`prerequisites.workforce: "complete_project_v1"` also selects a qualified
+constructor. With `assign_labor:true` it can propose an authorized labor enable
+before the build; otherwise it requires observed enabled construction labor.
+The complete action program participates in both consumption sizing and the
+sealed work deadline, including requests with `reserve_until_tick`. See
+[LAB_SHARED_WORKFORCE.md](LAB_SHARED_WORKFORCE.md#staff-a-complete-project).
+
 ## Read the analysis and forecast
 
 `production.requirements` retains `minimum_stock` and adds

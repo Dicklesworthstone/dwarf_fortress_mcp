@@ -53,6 +53,7 @@ pub mod manager_appointment_server;
 pub mod manager_appointment_v1_23_server;
 mod observation_projection;
 mod output_budget;
+mod project_staffing;
 pub mod replay;
 pub mod resources;
 mod semantic_citizens;

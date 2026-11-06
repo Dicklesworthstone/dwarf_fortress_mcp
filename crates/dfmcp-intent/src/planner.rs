@@ -382,6 +382,11 @@ fn laboratory_reserve_horizon(
                 "laboratory reserve admission requires qualified established original production stock minima",
             ));
         }
+        let constructs_workshop = intent.requested_actions.iter().any(|requested| {
+            matches!(&requested.action,
+                Action::Build { kind: BuildingKind::Workshop(kind), .. }
+                    if matches!(kind.as_str(), "Still" | "Kitchen" | "Carpenters"))
+        });
         let mut production = false;
         for requested in &intent.requested_actions {
             let allowed = match &requested.action {
@@ -403,6 +408,13 @@ fn laboratory_reserve_horizon(
                     ..
                 } => {
                     matches!(labor.as_str(), "BREW" | "COOK" | "CARPENTRY")
+                        // Explicit complete-project setup may need a constructor
+                        // before its workshop. This is not a general exception
+                        // for unrelated labor changes beside a satisfied goal.
+                        || (labor == "CONSTRUCTION"
+                            && constructs_workshop
+                            && crate::effects::laboratory_workforce_model(evidence.snapshot())?
+                                == Some(crate::effects::LABORATORY_WORKFORCE_MODEL))
                 }
                 _ => false,
             };

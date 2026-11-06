@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased — Staff complete production and room workflows
+
+- Add explicit `prerequisites.workforce: "complete_project_v1"` to laboratory
+  production, provisioned-room and connected-room requests. Plan missing qualified
+  construction and mining capacity alongside existing recipe labor; reuse workers
+  across sequential stages without bypassing finite scheduling or mutation grants.
+- Preserve old source behavior, exact produced-item identities, all original room
+  goals and complete-workload deadlines. Fully excavated rooms need no miner.
+- Include constructor setup in consumption-aware and explicit future-reserve
+  production, with a narrow registered-workshop/shared-model admission rule.
+- Pass 212 intent tests and 220 actual-source MCP semantic tests, including eleven
+  complete workflow regressions and the new reserve boundary test. Document the
+  explicit request policy and its component-only validation scope.
+
 ## Unreleased — Plan qualified mining and construction setup
 
 - Add bounded, deterministic setup staffing for complete laboratory projects in
