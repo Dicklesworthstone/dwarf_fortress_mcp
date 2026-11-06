@@ -10,6 +10,12 @@ use dfmcp_world::{CompareOp, Predicate, Value, WorldSnapshot};
 
 use crate::{Action, PreparedPlan, RequestedAction, effects};
 
+#[path = "project_setup_staffing.rs"]
+mod project_setup;
+pub use project_setup::{
+    MAX_PROJECT_SETUP_ENTITIES, ProjectSetupLabor, ProjectSetupSelection, ProjectSetupStaffing,
+};
+
 const MAX_NEW_ACTIVITIES: usize = 64;
 
 #[derive(Clone, Debug, PartialEq, Eq)]

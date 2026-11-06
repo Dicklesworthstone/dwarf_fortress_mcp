@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased — Plan qualified mining and construction setup
+
+- Add bounded, deterministic setup staffing for complete laboratory projects in
+  the explicit shared-workforce model. Reuse qualified enabled workers or propose
+  authorized enables with source guards and exact inverse compensation.
+- Reject missing or unqualified capacity, unsupported models, invalid source
+  custody and oversized inputs. Sequential stages may share one worker; the
+  existing engine still enforces finite capacity.
+- Keep the helper authority-free and preserve existing compilers until an
+  explicit consumer opts in. See `IMPLEMENTATION_STATUS.md` for validation scope.
+
 ## Unreleased — Complete combined inventory stability after order retirement
 
 - Wire the independent Run/1.13 inventory clock into the combined labor/order

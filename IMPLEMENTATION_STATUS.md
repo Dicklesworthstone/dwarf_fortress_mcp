@@ -1,5 +1,30 @@
 # Implementation Status
 
+## Unreleased — Qualified setup staffing for complete laboratory projects
+
+`ProjectSetupStaffing` now supplies a bounded, read-only proposal for the mining
+and construction labor required by complete projects in `shared-workforce/1`
+worlds (bead `df-lab-shared-workforce-8n4`). It reuses qualified enabled workers
+before proposing explicit disabled-to-enabled changes, prefers known nonmilitary
+workers, records exact source/worker generation custody, and permits a worker to
+serve successive stages without reserving capacity. Unknown or unqualified facts,
+wrong models, malformed source hashes and oversized input refuse. Proposed
+SetLabor actions carry original source guards, postconditions and explicit inverse
+compensations; normal planning, mutation authority and reviewed replay still apply.
+
+This core checkpoint adds no MCP request grammar or native behavior. The complete
+production/room consumer is a separate integration checkpoint. All eight new
+actual-source helper tests pass with zero failures or ignored tests (203 other
+intent tests filtered), using rustc 1.100.0-nightly (908501772). The focused
+workspace retains the unchanged core/world/intent/adapter/lab manifests and full
+source/test trees while excluding the external MCP dependency resolution; the
+command was `cargo test --locked --offline -p dfmcp-intent --lib project_setup`.
+Checks exercise qualified selection, unknown/untrusted/future fact refusal,
+source/model/budget validation, exact guarded actions and real planner/effects
+execution. Scoped formatting and whitespace checks pass. This is component
+validation; full MCP transport, complete workspace qualification and native-game
+admission remain separate and unclaimed.
+
 ## Unreleased — Combined inventory clock and consumed source floors
 
 The combined labor/order owner now supports its own independently configured
