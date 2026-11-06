@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-11-06 — Exercise parent-proof loss and read-only production recovery
+
+- Add a real-CLI regression for workforce source-generation drift after complete
+  parent success: withdraw current proof, retain historical inventory evidence,
+  and preserve the original single-dispatch effect keys.
+- Extend achieved-history reopen coverage to remove both write grants and verify
+  no current proof, no restored authority, no native contact and unchanged
+  private custody before the existing reconciled-recovery checks.
+- Preserve the previous 17 scenarios and require 18 in both executable counters.
+  Syntax and fixture checks pass; actual CLI execution is pending at this
+  checkpoint, with no native-game or admission evidence claimed.
+
 ## 2026-11-06 — Keep original deadlines and approvals through stale-plan recovery
 
 - Require automatic intent replay to preserve the complete reviewed contract,

@@ -1,5 +1,27 @@
 # Implementation Status
 
+## 2026-11-06 — Parent source drift and read-only achieved-history recovery
+
+The combined production modern-stdio suite now contains 18 scenarios. A new
+workforce-generation drift case first proves the original parent goal, then
+requires a failed new sample to withdraw both current parent and selected
+inventory proof while retaining only historical first achievement. Query must
+perform no native reads, and both original effects must still have dispatched
+exactly once under their original keys.
+
+The achieved-history offline/reconciled recovery scenario now also removes both
+write grants before offline reopen. It checks that historical receipts restore
+neither current truth nor authority, commit is refused, private custody bytes
+are unchanged and the peer receives no contact. The original reconciled-reopen
+and labor-reversal assertions remain intact. All 17 earlier scenarios are
+preserved; the CLI wrapper requires the new exact count.
+
+Python syntax, fixture decoding, counter consistency and diff checks pass.
+Execution against the standard CLI remains pending its exact dependency build
+under shared memory pressure at this checkpoint. These tests use bounded TCP
+doubles, not a native game. Bead `df-dfhack-bridge-plane-c-pic.4.1` remains in
+progress; no broader qualification or admission claim is made.
+
 ## 2026-11-06 — Preserve reviewed contracts during automatic intent replay
 
 The laboratory MCP host no longer accepts a stale-plan replay merely because

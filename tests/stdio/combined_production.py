@@ -504,6 +504,33 @@ class CombinedProduction(unittest.TestCase):
         self.assertTrue(achieved['original_goal_proven'])
         self.assert_single_original_effects(achieved, original)
 
+    def test_source_generation_drift_withdraws_current_parent_proof(self):
+        sid, original, _ = self.original_inventory_plan()
+        self.assertTrue(self.sample_goal(sid, 125)['ok'])
+        achieved = self.sample_goal(sid, 130)
+        self.assertTrue(achieved['ok'], achieved)
+        self.assertTrue(achieved['original_goal_proven'])
+        first = achieved['selected_inventory_goal']['first_satisfied_anchor']
+        self.assertIsNotNone(first)
+        self.peer.workforce_generation += 1
+        rejected = self.sample_goal(sid, 135)
+        self.assertFalse(rejected['ok'], rejected)
+        self.assertFalse(rejected['original_goal_proven'])
+        self.assertIsNone(rejected['retained_reference']['current_parent_goal'])
+        self.assertFalse(rejected['retained_reference']['selected_inventory_goal']['proven_at_anchor'])
+        calls = list(self.peer.calls)
+        inspected = self.client.tool('query', session_id=sid)
+        self.assertTrue(inspected['ok'], inspected)
+        self.assertFalse(inspected['original_goal_proven'])
+        self.assertIsNone(inspected['current_parent_goal'])
+        selected = inspected['selected_inventory_goal']
+        self.assertFalse(selected['proven_at_anchor'])
+        for field in ('current_truth', 'anchor', 'source_digest', 'parent_terminal_truth'):
+            self.assertIsNone(selected[field])
+        self.assertEqual(selected['first_satisfied_anchor'], first)
+        self.assertEqual(calls, self.peer.calls)
+        self.assert_single_original_effects(inspected, original)
+
     def test_reopen_keeps_inventory_achievement_without_restoring_parent_proof(self):
         sid, original, _ = self.original_inventory_plan()
         self.assertTrue(self.sample_goal(sid, 125)['ok'])
@@ -519,13 +546,23 @@ class CombinedProduction(unittest.TestCase):
         before = custody_files(self.directory)
         calls = list(self.peer.calls)
         env = reopen_environment(self.env, achieved['recovery'], achieved['native_custody']['workforce_journal_id'])
+        # Historical native receipts cannot recreate operator write grants.
+        del env['DFMCP_SEMANTIC_WORKFORCE_ALLOW_LABOR']
+        del env['DFMCP_SEMANTIC_WORK_ORDER_ALLOW_PRODUCTION']
         self.client = stdio.Client(self.directory, {}, suffix='goal-offline', env=env)
         offline = self.client.open(mode='offline', max_wall_millis=60000)
         self.assertTrue(offline['ok'], offline)
         self.assertFalse(offline['original_goal_proven'])
         self.assertIsNone(offline['current_parent_goal'])
+        self.assertFalse(offline['labor_control_enabled'])
+        self.assertFalse(offline['production_control_enabled'])
+        self.assertEqual(offline['original_plan'], original)
+        self.assertIsNone(offline['selected_inventory_goal']['current_truth'])
         self.assertEqual(offline['selected_inventory_goal']['first_satisfied_anchor'], first)
         self.assertFalse(offline['selected_inventory_goal']['proven_at_anchor'])
+        denied = self.client.tool('commit', session_id=offline['agent_turn']['session_id'],
+                                  paired_seal='a' * 64, confirmed=True)
+        self.assertFalse(denied['ok'], denied)
         self.assertEqual(before, custody_files(self.directory))
         self.assertEqual(calls, self.peer.calls)
         self.client.close()
@@ -1048,7 +1085,7 @@ def main():
     print(json.dumps({'schema': 'dfmcp.combined-production-stdio/1', 'tests': result.testsRun,
         'failed': len(result.failures), 'errors': len(result.errors), 'skipped': len(result.skipped),
         'actual_modern_stdio': True, 'loopback_peers_are_doubles': True, 'live_game': False}))
-    raise SystemExit(0 if result.wasSuccessful() and result.testsRun == 17 and not result.skipped else 1)
+    raise SystemExit(0 if result.wasSuccessful() and result.testsRun == 18 and not result.skipped else 1)
 
 
 if __name__ == '__main__': main()
