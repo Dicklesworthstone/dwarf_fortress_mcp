@@ -106,13 +106,32 @@ Its new lifecycle cases include retirement, same-tick stability, labor reversal,
 in-bracket drift, late custody refusal, recovery, inventory withdrawal and a
 permanent source-regression fence. These peers are doubles, not DFHack or a game.
 
+Executed validation of the source at
+`bb490be8c7d389aecb4a6795e8d86bd0012c5912`: the entire actual adapter test crate
+compiled on the current nightly with exact locked/offline dependencies. The
+`cargo test --locked --offline -p dfmcp-adapter --lib live_production -- --test-threads=1`
+run passed **35 tests, zero failed, zero ignored** (1,343 filtered out), including
+the new diagnostic tests. An initial adapter code-generation attempt was killed;
+the successful retry used one Cargo job, one frontend/backend worker, 256 test
+codegen units, no incremental compilation or debug information, and stripped MIR
+local debug information. No replacement harness, excluded source or dependency
+changes were used.
+
+Both normal and bounded real MCP compiler attempts were killed by SIGKILL while
+compiling unchanged Asupersync 0.5.0 under the shared 8 GiB memory limit. The
+bounded attempt also disabled MIR optimization. Neither reported a Rust source
+diagnostic. Actual MCP unit execution and the 25-case compiled CLI/modern-stdio
+suite remain unverified; queued retries were stopped rather than repeating the
+same dependency failure. There is no GitHub workflow run for that source commit.
+
 Scoped Rust formatting, Python syntax/fixture checks, JSON parsing and diff checks
-pass. Actual locked/offline MCP checking was killed by SIGKILL while compiling the
-unchanged Asupersync dependency under the shared 8 GiB memory limit. The full
-adapter test compiler was also killed during code generation without a source
-diagnostic. A bounded compiler retry is in progress; no Rust execution pass is
-claimed for these diagnostic changes at this checkpoint.
-The broader real-game acceptance bead remains in progress.
+pass. The clean strict local-qualification attempt at the same source commit
+passed its 17 initial static gates, through dependency policy, and was explicitly
+interrupted before repeating broad repository tests. The broad verifier was also
+interrupted after static checks and Python passes. Full-workspace formatting has
+pre-existing differences outside this change. No aggregate qualification receipt,
+full-workspace pass, native DFHack/game evidence or admission is claimed. The
+broader real-game acceptance bead remains in progress.
 
 ## 2026-11-05 — MCP publication of fresh complete-parent production goals
 

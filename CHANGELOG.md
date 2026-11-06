@@ -55,7 +55,10 @@
 - Extend adapter/presentation regressions and the actual combined CLI/modern
   stdio suite to 25 scenarios, including original inventory stability, retirement,
   labor reversal, bracket drift, custody failure, restart and source fencing.
-  Execution and its limitations are recorded in `IMPLEMENTATION_STATUS.md`.
+  All 35 production adapter tests pass on the complete actual test crate with
+  exact dependencies. MCP/CLI execution remains blocked by the Asupersync compiler
+  receiving SIGKILL under shared memory pressure; the exact evidence and broader
+  qualification limits are recorded in `IMPLEMENTATION_STATUS.md`.
 
 ## 2026-11-05 — Complete original production goals through MCP
 
