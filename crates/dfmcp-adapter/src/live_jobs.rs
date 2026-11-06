@@ -323,6 +323,11 @@ impl LiveJobsState {
     pub fn snapshot(&self) -> Option<&WorldSnapshot> {
         self.snapshot.as_ref()
     }
+    /// Move a temporary component projection into its enclosing observation.
+    /// Consuming the state keeps its canonical graph from being copied or reused.
+    pub(crate) fn into_snapshot(self) -> Option<WorldSnapshot> {
+        self.snapshot
+    }
     #[must_use]
     pub fn observation(&self) -> Option<&LiveJobObservation> {
         self.observation.as_ref()

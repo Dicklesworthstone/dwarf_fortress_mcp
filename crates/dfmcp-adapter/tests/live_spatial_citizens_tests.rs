@@ -280,3 +280,86 @@ fn strict_roster_rejects_residents_malformed_skills_and_trailing_bytes() -> dfmc
     );
     Ok(())
 }
+
+#[test]
+fn composite_publication_preserves_frozen_canonical_history() -> dfmcp_core::Result<()> {
+    // These complete-world roots were recorded from the original copy-based
+    // publisher. They cover component facts, redaction, relationships, source
+    // rebinding and identity history, not just the final roster counts.
+    let initial = combined_with_skills(
+        Some(42),
+        42,
+        "Urist",
+        0b1_0101_1111,
+        &[(0, "MINING", 7, 5, 1200), (2, "CARPENTRY", 3, 3, 400)],
+    )?;
+    let reset = LiveSpatialCitizenObservation::decode_payload(
+        &initial.encode_payload()?,
+        8,
+        "df".to_owned(),
+        "dfhack".to_owned(),
+    )?;
+    let changed_software = LiveSpatialCitizenObservation::decode_payload(
+        &initial.encode_payload()?,
+        8,
+        "different-df".to_owned(),
+        "dfhack".to_owned(),
+    )?;
+    let trace = [
+        (
+            initial.clone(),
+            JobPublication::Bootstrap,
+            "67aa036d17fecae5933d324763faa1f0f8ab82fa711f79f0649c5d0d1be6bba2",
+        ),
+        (
+            initial.clone(),
+            JobPublication::Heartbeat,
+            "67aa036d17fecae5933d324763faa1f0f8ab82fa711f79f0649c5d0d1be6bba2",
+        ),
+        (
+            combined(Some(77), 42, "Domas", 0b1_0101_1111)?,
+            JobPublication::Advanced,
+            "ac8c0146446fedca44339ef6fd06f81e84c8dd66e7bc206959199d4b5fce4a0f",
+        ),
+        (
+            combined(Some(43), 43, "Domas", 0b1_0101_1111)?,
+            JobPublication::Advanced,
+            "7eb0a6cda3c030c573ef4dff12e9a2ed8e229df8a7ecc2cb2862639e9cc38993",
+        ),
+        (
+            initial,
+            JobPublication::Advanced,
+            "09cb59955b8555b90c2bd4651895d940e9a264396802e2439c9d7bf9ac7f006f",
+        ),
+        (
+            reset,
+            JobPublication::Reset,
+            "f432531220293bfa9e3d28f9376353c5e909c077b78dbf9eaa233e56e07f1b0b",
+        ),
+    ];
+    let mut state = LiveSpatialCitizenState::default();
+    for (value, publication, expected) in trace {
+        assert_eq!(state.publish(value)?, publication);
+        let snapshot = state.snapshot().ok_or_else(|| {
+            dfmcp_core::DfmcpError::new(
+                dfmcp_core::ErrorCode::InternalInvariantViolation,
+                "canonical trace snapshot absent",
+            )
+        })?;
+        assert_eq!(snapshot.state_hash.to_string(), expected);
+        assert_eq!(
+            dfmcp_core::Digest32::of_bytes(&snapshot.canonical_bytes()).to_string(),
+            expected
+        );
+    }
+    let before = state.snapshot().cloned();
+    assert_eq!(
+        state
+            .publish(changed_software)
+            .err()
+            .map(|error| error.code),
+        Some(dfmcp_core::ErrorCode::StaleAnchor)
+    );
+    assert_eq!(state.snapshot(), before.as_ref());
+    Ok(())
+}

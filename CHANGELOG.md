@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased — Reduce live observation publication memory
+
+- Move canonical component graphs through the coherent jobs, operations,
+  spatial and citizen projection chain, removing repeated full graph copies.
+- Preserve exact snapshots, canonical bytes, generations, source checks and
+  atomic refusal; add a frozen canonical-history regression.
+- Pass 17 exact adapter integration tests on current nightly. A same-binary
+  synthetic-frame comparison reduces peak RSS by 37.20% (190.07 MiB); native
+  latency and SLO qualification remain open.
+- Complete the integrated production follow-up: 162 component tests and seven
+  new core lowering tests pass with unchanged inventoried inputs.
+
 ## Unreleased — Retain production dependencies in executable orders
 
 - Add opt-in `orders: "dependency_preserving_v1"` to laboratory production with

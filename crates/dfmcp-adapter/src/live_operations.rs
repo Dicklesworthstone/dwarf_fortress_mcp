@@ -486,6 +486,11 @@ impl LiveOperationsState {
     pub fn snapshot(&self) -> Option<&WorldSnapshot> {
         self.snapshot.as_ref()
     }
+    /// Move a temporary component projection into its enclosing observation.
+    /// Consuming the state keeps its canonical graph from being copied or reused.
+    pub(crate) fn into_snapshot(self) -> Option<WorldSnapshot> {
+        self.snapshot
+    }
     #[must_use]
     pub fn observation(&self) -> Option<&LiveOperationsObservation> {
         self.observation.as_ref()
@@ -546,10 +551,9 @@ impl LiveOperationsState {
         let mut jobs = LiveJobsState::default();
         jobs.publish(observation.jobs.clone())?;
         let mut graph = jobs
-            .snapshot()
+            .into_snapshot()
             .ok_or_else(|| invalid("jobs projection absent"))?
-            .graph
-            .clone();
+            .graph;
         let prefix = self.profile.fact_prefix();
         let fact = |field: &str, value| {
             Fact::known(

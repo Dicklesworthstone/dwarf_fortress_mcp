@@ -461,10 +461,9 @@ impl LiveSpatialCitizenState {
         let mut base = crate::live_spatial::LiveSpatialState::default();
         base.publish(value.spatial.clone())?;
         let mut graph = base
-            .snapshot()
+            .into_snapshot()
             .ok_or_else(|| invalid("embedded spatial projection absent"))?
-            .graph
-            .clone();
+            .graph;
         let fact = |field: &str, v| {
             Fact::known(
                 v,

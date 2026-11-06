@@ -308,6 +308,11 @@ impl LiveMapState {
     pub fn snapshot(&self) -> Option<&WorldSnapshot> {
         self.snapshot.as_ref()
     }
+    /// Move a temporary component projection into its enclosing observation.
+    /// Consuming the state keeps its canonical graph from being copied or reused.
+    pub(crate) fn into_snapshot(self) -> Option<WorldSnapshot> {
+        self.snapshot
+    }
     pub fn observation(&self) -> Option<&LiveMapObservation> {
         self.observation.as_ref()
     }

@@ -1,5 +1,45 @@
 # Implementation Status
 
+## Unreleased — Reduce memory in coherent live observation publication
+
+The jobs → operations → spatial → citizen projection chain now consumes temporary
+component snapshots and moves their canonical graphs into the enclosing
+observation. It removes three complete graph copies and the terrain entity/field
+copies while preserving validation, source rebinding, collision checks, identity
+history, atomic publication and all canonical output. Public APIs and native
+protocols are unchanged.
+
+A same-executable component comparison on a deterministic 997,650-byte synthetic
+frame (16,384 items, 4,096 terrain cells, 256 citizens, 1,024 jobs and 512 buildings)
+measured peak RSS of 523,240 KiB before and 328,612 KiB after: 194,628 KiB
+(190.07 MiB), or 37.20%, less memory. Separate fresh processes used exact-child
+Linux resource accounting. Both arms produced canonical root
+`8abec015bc2a09f76414a216fcc389b0ca7e2c32b9d8b6b34b1d3cd7615cce71`.
+Full snapshots and canonical bytes also matched through bootstrap, heartbeat,
+retirement, reappearance and reset on a separate five-transition fixture.
+
+The measurement linked complete source modules at opt-level 2 on Rust 1.100
+nightly (908501772) against real debug core/world artifacts, with baseline source
+at `0de2d8c51e315307baa7a176f9395809f94f54ab`. It is a pure projection
+measurement, not a release build or native capture. Shared-host timing was noisy;
+no latency or SLO improvement is established.
+
+All 17 exact repository integration tests pass on Rust 1.101 nightly (249c1e4e3):
+two native-jobs golden cases, nine operations cases and six spatial/citizen cases,
+including the new six-stage canonical-history and failed-publication regression.
+After the overlay filled during Cargo linking, the exact test sources were linked
+directly against the already-built complete real adapter/core/world/intent
+artifacts in available temporary memory storage. No source rewriting or stubs
+were used. All 60 measured source inputs matched repository and compiled inputs.
+Scoped formatting and whitespace checks pass.
+
+The integrated production follow-up also passed all 162 actual-source component
+tests (eight new and 154 existing) and all seven new core lowering tests on the
+same current nightly, with 470 frozen inputs unchanged and all 11 external
+dependency identities matching the repository lock. Full MCP execution,
+workspace qualification and native-game admission remain separate. The broader
+observation-cost bead `dfmcp-reality-wiring-proof-4bf.4` stays in progress.
+
 ## Unreleased — Preserve production dependencies through executable orders
 
 Laboratory production requests now support explicit

@@ -171,6 +171,11 @@ impl LiveSpatialState {
     pub fn snapshot(&self) -> Option<&WorldSnapshot> {
         self.snapshot.as_ref()
     }
+    /// Move a temporary component projection into its enclosing observation.
+    /// Consuming the state keeps its canonical graph from being copied or reused.
+    pub(crate) fn into_snapshot(self) -> Option<WorldSnapshot> {
+        self.snapshot
+    }
     pub fn source_digest(&self) -> Result<Digest32> {
         self.observation
             .as_ref()
@@ -237,26 +242,25 @@ impl LiveSpatialState {
         let mut terrain = LiveMapState::default();
         terrain.publish(value.terrain.clone())?;
         let mut graph = operations
-            .snapshot()
+            .into_snapshot()
             .ok_or_else(|| invalid("operations projection absent"))?
-            .graph
-            .clone();
+            .graph;
         let map = terrain
-            .snapshot()
+            .into_snapshot()
             .ok_or_else(|| invalid("terrain projection absent"))?;
-        for (id, entity) in &map.graph.entities {
-            if *id == EntityId::new(1) {
+        for (id, entity) in map.graph.entities {
+            if id == EntityId::new(1) {
                 let root = graph
                     .entities
-                    .get_mut(id)
+                    .get_mut(&id)
                     .ok_or_else(|| invalid("spatial root absent"))?;
-                for (name, fact) in &entity.fields {
-                    if let Some(existing) = root.fields.get(name) {
+                for (name, fact) in entity.fields {
+                    if let Some(existing) = root.fields.get(&name) {
                         if existing.value != fact.value {
                             return Err(invalid("inconsistent spatial root field"));
                         }
                     } else {
-                        root.fields.insert(name.clone(), fact.clone());
+                        root.fields.insert(name, fact);
                     }
                 }
                 root.label = "Coherent fortress operations and terrain".to_owned();
@@ -269,7 +273,7 @@ impl LiveSpatialState {
                         source,
                     ),
                 );
-            } else if graph.entities.insert(*id, entity.clone()).is_some() {
+            } else if graph.entities.insert(id, entity).is_some() {
                 return Err(invalid("spatial entity namespace collision"));
             }
         }
