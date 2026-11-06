@@ -144,6 +144,14 @@ fn encode(
             false,
             json!({"scope":"session"}),
         ))
+    } else if uncertain
+        && parent_fenced
+        && view["frontier"]["all_applied"] == true
+        && view["frontier"]["needs_reconciliation"] != true
+    {
+        // A failed goal observation cannot be retried past its source fence.
+        // This only removes guidance; retained effects remain indeterminate.
+        None
     } else if uncertain {
         Some((
             "fortress_wait",
@@ -651,6 +659,8 @@ mod tests {
         assert_eq!(value["agent_turn"]["recommendations"], json!([]));
         // Uncertain effects still require same-key reconciliation. This is not
         // another ordinary parent acquisition and takes priority over the fence.
+        view["frontier"]["all_applied"] = json!(false);
+        view["frontier"]["needs_reconciliation"] = json!(true);
         let uncertain = joined_packet(anchor, &view, "reconcile", false, true);
         assert_eq!(
             uncertain["agent_turn"]["recommendations"][0]["tool"],
@@ -662,6 +672,44 @@ mod tests {
                 .expect("reconciliation guidance")
                 .contains("original uncertain key")
         );
+    }
+
+    #[test]
+    fn retained_parent_source_fence_stops_poll_retries_without_clearing_effect_uncertainty() {
+        let (anchor, mut original) = joined_goal_view("true", true);
+        original["parent_goal_observation_fenced"] = json!(true);
+        original["frontier"]["needs_reconciliation"] = json!(false);
+        let compacted = compact(&original);
+        assert_eq!(compacted["parent_goal_observation_fenced"], true);
+        assert!(compacted["current_parent_goal"].is_null());
+        for view in [&original, &compacted] {
+            let result = joined_packet(anchor, view, "control", false, true);
+            let turn = &result["agent_turn"];
+            assert_eq!(turn["briefing"]["parent_goal_observation_fenced"], true);
+            assert_eq!(turn["briefing"]["original_goal_proven"], false);
+            assert!(turn["active_work"]["current_parent_goal"].is_null());
+            assert_eq!(
+                turn["active_work"]["indeterminate_effects"][0]["state"],
+                "unknown"
+            );
+            assert_eq!(turn["uncertainty"][0]["retryable_in_session"], false);
+            assert_eq!(turn["recommendations"], json!([]));
+        }
+        for (all_applied, needs_reconciliation, fenced) in [
+            (false, false, true),
+            (true, true, true),
+            (true, false, false),
+        ] {
+            let mut unsettled = compacted.clone();
+            unsettled["frontier"]["all_applied"] = json!(all_applied);
+            unsettled["frontier"]["needs_reconciliation"] = json!(needs_reconciliation);
+            unsettled["parent_goal_observation_fenced"] = json!(fenced);
+            assert_eq!(
+                joined_packet(anchor, &unsettled, "control", false, true)["agent_turn"]["recommendations"]
+                    [0]["tool"],
+                "fortress_wait"
+            );
+        }
     }
 
     #[test]

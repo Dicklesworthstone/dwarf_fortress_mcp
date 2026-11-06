@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-11-06 — Complete original production goals in the combined MCP host
+
+- Wire foreground Wait to fresh joined labor and inventory evidence for the
+  complete original two-step plan. Preserve its original identity, native keys,
+  deadline, cadence and stability; expose the separate selected inventory proof.
+- Publish current parent truth only at its exact joined anchor. Require the
+  selected temporal proof before reporting original-goal success; withdraw that
+  success after failed publication, cancellation or reopening.
+- Keep historical inventory achievement useful after native order retirement
+  without claiming physical completion, causal output or general fortress proof.
+  Make Agent Turn guidance distinguish unfinished stability, reversed labor and
+  a fenced original source.
+- Add three real-binary modern-stdio/TCP regression scenarios for retirement,
+  labor reversal, bracket failure and recovery. All 32 normal adapter production
+  tests pass, including the nine parent-goal groups. MCP compilation and the new
+  stdio scenarios remain pending at this checkpoint; no live-game or admission
+  qualification is claimed.
+
 ## 2026-11-05 — Complete original production goals through MCP
 
 - Connect the combined development host's foreground Wait to the executor's

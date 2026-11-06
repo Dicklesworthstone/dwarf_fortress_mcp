@@ -54,7 +54,12 @@ fn merge_recovery(old: &mut Option<Value>, latest: &Value) {
     retained["review"] = Value::Null;
     retained["selected_inventory_goal"] = latest["selected_inventory_goal"].clone();
     retained["current_parent_goal"] = Value::Null;
-    retained["parent_goal_observation_fenced"] = latest["parent_goal_observation_fenced"].clone();
+    // A negative source fence survives an incomplete later recovery reference;
+    // retaining it grants no current truth or native-effect authority.
+    retained["parent_goal_observation_fenced"] = json!(
+        retained["parent_goal_observation_fenced"] == true
+            || latest["parent_goal_observation_fenced"] == true
+    );
     retained["original_goal_proven"] = json!(false);
     retained["current_state_proven"] = json!(false);
     if retained["frontier"].is_object() {
@@ -683,6 +688,33 @@ mod tests {
             value["selected_inventory_goal"]["first_satisfied_anchor"]["tick"],
             130
         );
+    }
+
+    #[test]
+    fn failed_parent_publication_retains_source_fence_without_current_proof() {
+        for (old_fenced, new_fenced) in [(true, false), (false, true)] {
+            let mut retained = Some(json!({
+                "parent_goal_observation_fenced":old_fenced,
+                "current_parent_goal":{"current_truth":"true","original_goal_proven":true},
+                "original_goal_proven":true}));
+            merge_recovery(
+                &mut retained,
+                &json!({"parent_goal_observation_fenced":new_fenced}),
+            );
+            // An incomplete later recovery reference cannot erase a refusal.
+            merge_recovery(
+                &mut retained,
+                &json!({"parent_goal_observation_fenced":false}),
+            );
+            let value = retained.expect("retained source refusal");
+            assert_eq!(value["parent_goal_observation_fenced"], true);
+            assert!(value["current_parent_goal"].is_null());
+            assert_eq!(value["original_goal_proven"], false);
+            let compacted = presentation::compact(&value);
+            assert_eq!(compacted["parent_goal_observation_fenced"], true);
+            assert!(compacted["current_parent_goal"].is_null());
+            assert_eq!(compacted["original_goal_proven"], false);
+        }
     }
 
     #[test]

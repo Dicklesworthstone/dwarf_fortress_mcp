@@ -1,5 +1,38 @@
 # Implementation Status
 
+## 2026-11-06 — Complete original production goals through MCP
+
+The combined labor/order MCP host now uses the executor's joined parent poll
+during foreground Wait. It retains the original citizens and independently
+qualified workforce and inventory sources. A separate `current_parent_goal` reports
+current truth at the joined anchor; `original_goal_proven` requires both that
+truth and the selected order's original sampled stability. Selected inventory
+success alone remains insufficient. Native order retirement does not erase an
+explicit inventory goal or establish physical completion or causal attribution.
+
+The response retains the distinct selected inventory anchor and history. Query
+and Explain perform no new native observation. A failed call or failed response
+publication clears the current parent result; reopening restores historical
+inventory achievement without current parent proof. Agent Turn output checks
+scope, source fence, verification, uncertainty and matching anchors before
+advertising complete-parent success. General `current_state_proven` stays false.
+
+Three new executable scenarios exercise the actual compiled modern MCP server
+against bounded native TCP doubles and real private custody files: complete
+parent proof after order retirement followed by labor reversal; workforce
+bracket failure that breaks unfinished stability; and offline/reconciled restart
+that preserves historical inventory achievement without restoring parent proof.
+These are component scenarios, not native DFHack or game evidence.
+
+The normal latest-nightly locked/offline adapter test target passes all 32
+`live_production::` tests, including all nine parent-goal groups, without a
+substitute crate or excluded source modules. Scoped Rust formatting, Python
+compilation, diff checks and bead coverage pass. Full MCP dependency compilation
+is still running after a first Asupersync compilation was killed under shared
+memory pressure; MCP unit and stdio execution remain pending at this checkpoint.
+No full-workspace, native-game or compatibility-admission qualification is
+claimed. Beads df-dfhack-bridge-plane-c-pic.4 and .4.1 remain in progress.
+
 ## 2026-11-05 — MCP publication of fresh complete-parent production goals
 
 The combined labor/order development host now calls the executor's current-parent
