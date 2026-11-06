@@ -56,6 +56,13 @@ use objectives::{Objective, objective_history_roots};
 #[path = "production_source.rs"]
 pub(crate) mod production_source;
 
+#[path = "lab_structured_query.rs"]
+pub(crate) mod structured_query;
+
+#[cfg(test)]
+#[path = "lab_structured_query_tests.rs"]
+mod structured_query_tests;
+
 #[path = "room_provisioning.rs"]
 mod room_provisioning;
 
@@ -2911,11 +2918,15 @@ pub fn fortress_observe(session_id: Option<String>) -> String {
 /// `{"mode":"entities","kind":"unit","limit":25,"offset":0}` /
 /// `{"mode":"terrain","min":[x,y,z],"max":[x,y,z]}`.
 #[tool(
-    description = "Run a bounded laboratory query. mode: \"summary\" (default), \"entities\", or a JSON object {\"mode\":\"entities\",\"kind\":\"unit\",\"limit\":25,\"offset\":0} or {\"mode\":\"terrain\",\"min\":[x,y,z],\"max\":[x,y,z]}. Full DfQL is not implemented."
+    description = "Run a bounded laboratory query. The closed structured wrapper {\"mode\":\"structured\",\"request\":{\"schema\":\"dfmcp.query/1\",\"query\":{...}},\"at\"?:state_hash} exposes stateless typed queries under current Query authority. Other mode: \"summary\" (default), \"entities\", or a JSON object {\"mode\":\"entities\",\"kind\":\"unit\",\"limit\":25,\"offset\":0} or {\"mode\":\"terrain\",\"min\":[x,y,z],\"max\":[x,y,z]}. Full DfQL is not implemented."
 )]
 pub fn fortress_query(session_id: Option<String>, mode: Option<String>) -> String {
     let mode = mode.map_or_else(|| "summary".to_owned(), |value| value);
-    if mode.len() > MAX_MODE_BYTES {
+    let structured = match structured_query::parse(&mode) {
+        Ok(request) => request,
+        Err(error) => return dfmcp_error_payload("fortress.query", &error),
+    };
+    if structured.is_none() && mode.len() > MAX_MODE_BYTES {
         return coded_error_payload(
             "fortress.query",
             ErrorCode::BudgetExceeded,
@@ -2936,6 +2947,13 @@ pub fn fortress_query(session_id: Option<String>, mode: Option<String>) -> Strin
             };
             if let Err(error) = authorize_entry(&ctx, Capability::Query, RiskTier::ReadOnly) {
                 return dfmcp_error_payload("fortress.query", &error);
+            }
+            if let Some(request) = &structured {
+                // Select historical state only after authorizing at the current
+                // game tick. Neither an old source nor its cursor renews a grant.
+                let result = retained_resource_snapshot(guard, request.at.as_deref())
+                    .and_then(|source| structured_query::execute(source, &ctx, request));
+                return structured_query::response(result, &ctx);
             }
             if mode.trim_start().starts_with('{') {
                 match historical_query(guard, &mode) {

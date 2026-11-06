@@ -1415,6 +1415,14 @@ fn continuity_status(
     if operation == "fortress.restore" {
         return ContinuityStatus::Reset;
     }
+    if payload["mode"] == "structured" {
+        if payload["historical"] == true {
+            return ContinuityStatus::Stale;
+        }
+        if payload["truncated"] == true {
+            return ContinuityStatus::Partial;
+        }
+    }
     match (previous_anchor, current_anchor) {
         (Some(previous), Some(current))
             if previous == current && operation == "fortress.observe" =>
@@ -1643,9 +1651,17 @@ fn project_response(
         .get("max_output_tokens")
         .and_then(Value::as_u64)
         .unwrap_or(crate::output_budget::DEFAULT_MAX_OUTPUT_TOKENS);
+    // Structured pages already bind their returned rows to an exact cursor.
+    // Their final publication guard permits lossless compaction or refusal,
+    // never generic row clipping after the executor has advanced the cursor.
+    let structured = payload["mode"] == "structured" && payload["query_budget"].is_object();
     let shaped =
         crate::output_budget::shape_for_profile(&builder.attach(payload), profile.as_str());
-    let output = crate::output_budget::fit(&shaped, max_output_tokens);
+    let output = if structured {
+        shaped
+    } else {
+        crate::output_budget::fit(&shaped, max_output_tokens)
+    };
     crate::task_service::notify_progress();
     output
 }
@@ -1715,9 +1731,10 @@ pub fn fortress_observe(session_id: Option<String>) -> String {
 }
 
 #[tool(
-    description = "Run a bounded laboratory query with explicit coverage, uncertainty, affordances, and next-step guidance. mode: \"summary\" (default), \"entities\", or JSON: {\"mode\":\"observation\",\"completeness_profile\":\"control-minimum|operations|spatial|historical|research-full\",\"section\":\"entities|relations|chunks|events\",\"limit\"?,\"offset\"?} (bounded profile records with distinct source/projected anchors and explicit omissions), {\"mode\":\"entities\",\"kind\"?,\"limit\"?,\"offset\"?}, {\"mode\":\"terrain\",\"min\":[x,y,z],\"max\":[x,y,z]}, {\"mode\":\"search\",\"text\":...,\"limit\"?}, {\"mode\":\"path\",\"from\":[x,y,z],\"to\":[x,y,z]} (walkability route over observed terrain; unproven absence is reported as unknown); entities accept \"where\": {\"field\",\"op\": eq|ne|lt|le|gt|ge,\"value\"} or {\"all\"|\"any\":[...]} or {\"not\":{...}} (unknown facts never match); add \"at\":<state_hash> to read an earlier retained world version exactly; {\"mode\":\"changes\",\"since\":<state_hash>} lists observed changes from that version to now (each session retains its last 32 versions)."
+    description = "Run a bounded laboratory query with explicit coverage, uncertainty, affordances, and next-step guidance. JSON {\"mode\":\"structured\",\"request\":{\"schema\":\"dfmcp.query/1\",\"query\":{\"kind\":\"entities|inspect|traverse|dependencies|aggregate|search\",...}},\"at\"?:state_hash} runs typed field projections, filters, bound continuations, generation-aware inspection, graph dependency analysis, exact integer/fixed aggregates, or lexical search on the current or exact retained world. Structured results never authorize effects; historical reads recheck current Query authority. The complete page and Agent Turn must fit without dropping rows. Other mode: \"summary\" (default), \"entities\", or JSON: {\"mode\":\"observation\",\"completeness_profile\":\"control-minimum|operations|spatial|historical|research-full\",\"section\":\"entities|relations|chunks|events\",\"limit\"?,\"offset\"?} (bounded profile records with distinct source/projected anchors and explicit omissions), {\"mode\":\"entities\",\"kind\"?,\"limit\"?,\"offset\"?}, {\"mode\":\"terrain\",\"min\":[x,y,z],\"max\":[x,y,z]}, {\"mode\":\"search\",\"text\":...,\"limit\"?}, {\"mode\":\"path\",\"from\":[x,y,z],\"to\":[x,y,z]} (walkability route over observed terrain; unproven absence is reported as unknown); entities accept \"where\": {\"field\",\"op\": eq|ne|lt|le|gt|ge,\"value\"} or {\"all\"|\"any\":[...]} or {\"not\":{...}} (unknown facts never match); add \"at\":<state_hash> to read an earlier retained world version exactly; {\"mode\":\"changes\",\"since\":<state_hash>} lists observed changes from that version to now (each session retains its last 32 versions)."
 )]
 pub fn fortress_query(session_id: Option<String>, mode: Option<String>) -> String {
+    let started = std::time::Instant::now();
     let recorded = json!({"mode": mode});
     let response = project_response(
         crate::server::fortress_query(session_id.clone(), mode),
@@ -1726,6 +1743,7 @@ pub fn fortress_query(session_id: Option<String>, mode: Option<String>) -> Strin
         ObservationProfile::Tactical,
         session_id.as_deref(),
     );
+    let response = crate::server::structured_query::finish_response(response, started.elapsed());
     crate::replay::record("fortress.query", session_id.as_deref(), recorded, &response);
     response
 }

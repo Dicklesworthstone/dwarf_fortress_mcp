@@ -1,5 +1,45 @@
 # Implementation Status
 
+## Unreleased — Structured inspection in the default laboratory MCP loop
+
+The existing fortress.query entry point now accepts the closed
+`{"mode":"structured","request":{"schema":"dfmcp.query/1","query":{...}},"at":...}`
+wrapper. It connects the canonical entity projection, generation-aware inspection,
+graph traversal, dependency analysis, exact aggregate and lexical-search engines
+to current or exactly retained laboratory worlds. Aggregate filters use the same
+typed three-valued predicates as entity queries. Legacy mode grammar and the
+frozen eleven-tool surface remain unchanged.
+
+Current Query authority is checked before historical source selection. Retained
+anchors and cursors never renew expired or narrower grants. Results distinguish
+the selected source from the current session and report historical/partial
+coverage without supplying mutation evidence. Complete source record/byte costs
+are charged even for small pages. The final response guard retains a complete
+page and its source-bound continuation through lossless Agent Turn compaction,
+or returns a typed refusal without rows or an advanced cursor. Negotiated byte,
+token and wall budgets extend through presentation.
+
+Executed validation on Rust 1.101 nightly (249c1e4e3): all eight supplemental
+query-helper cases, all 28 shared query-executor cases and all eight existing
+output-budget cases pass (44 total, zero failures or ignored). The direct driver
+includes the actual helper, query and output-budget modules, the actual lab_world
+module and real core/world/intent/adapter/lab artifacts. Its presentation packets
+are explicitly synthetic fixtures; it does not execute session retention
+selection, AgentTurnBuilder or public facade routing. All 472 source hashes and
+39 linked-artifact hashes were unchanged. Scoped formatting, whitespace and the
+agent contract pass.
+
+Eight public-facade regression groups, including a real starter-world/default-
+budget smoke, are tracked in lab_structured_query_tests.rs. Their execution is
+still unverified: both the actual full MCP test build and the subsequent actual
+`cargo check --tests` were SIGKILLed while compiling unchanged asupersync 0.5.0,
+before repository MCP compilation. Shared cgroup OOM counters increased during
+the latter attempt. No dependencies, production budgets or qualification gates
+were weakened. Full MCP compilation/execution, full workspace qualification and
+native admission are not claimed. The scoped bead df-lab-structured-query-f7q
+remains in progress for public-path verification. Usage is documented in
+`docs/LAB_STRUCTURED_QUERY.md`.
+
 ## Unreleased — Reduce memory in coherent live observation publication
 
 The jobs → operations → spatial → citizen projection chain now consumes temporary

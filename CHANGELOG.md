@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased — Expose structured queries in laboratory sessions
+
+- Connect the existing entity, inspect, traversal, dependency, aggregate and
+  lexical-search engines to fortress.query through a closed structured wrapper.
+- Support exact current/retained sources with current authority checks and
+  explicit historical coverage. Keep source-bound pages intact through output
+  budgeting; refuse oversized complete packets without skipping unseen rows.
+- Preserve legacy modes and the eleven-tool surface. Document typed filtered
+  aggregates, source budgets and continuation use.
+- Pass 44 actual-source helper/query/output-budget tests on current nightly.
+  Track eight public-facade regression groups; their execution and the complete
+  MCP check remain blocked by dependency-compiler SIGKILL under host memory limits.
+
 ## Unreleased — Reduce live observation publication memory
 
 - Move canonical component graphs through the coherent jobs, operations,
