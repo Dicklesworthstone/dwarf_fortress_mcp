@@ -36,6 +36,7 @@ pub(crate) struct Recovery {
     pub(crate) anchor: StateAnchor,
     pub(crate) identity_digest: Digest32,
     pub(crate) frontier: durable::Recovery,
+    pub(crate) goal_history_present: bool,
 }
 
 #[derive(Deserialize)]
@@ -54,6 +55,8 @@ struct RecoveryInput {
     identity_digest: String,
     anchor: AnchorInput,
     frontier: FrontierInput,
+    #[serde(default)]
+    goal_history_present: bool,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -183,6 +186,7 @@ fn parse(raw: &str) -> Result<(PathBuf, bool, Option<Recovery>)> {
                     state_hash: digest(&r.anchor.state_hash)?,
                 },
                 frontier,
+                goal_history_present: r.goal_history_present,
             })
         })
         .transpose()?;

@@ -52,6 +52,7 @@ fn merge_recovery(old: &mut Option<Value>, latest: &Value) {
             json!(floor.max(retained["observation_tick_floor"].as_u64().unwrap_or(0)));
     }
     retained["review"] = Value::Null;
+    retained["selected_inventory_goal"] = latest["selected_inventory_goal"].clone();
     if retained["frontier"].is_object() {
         retained["frontier"]["review"] = Value::Null;
     }
@@ -503,7 +504,7 @@ pub fn fortress_query(session_id: String) -> String {
     with_session(session_id, "fortress.query", None, || Ok(Action::Inspect))
 }
 #[tool(
-    description = "Compile one original labor and finite-order plan; kind=step with original_plan_digest prepares the next eligible original step."
+    description = "Compile one original labor and finite-order plan, optionally with an explicit observed_inventory_minimum objective; kind=step with original_plan_digest prepares the next eligible original step."
 )]
 pub fn fortress_plan(session_id: String, request: String) -> String {
     with_session(session_id, "fortress.plan", None, || plan_action(&request))
@@ -517,7 +518,7 @@ pub fn fortress_commit(session_id: String, paired_seal: String, confirmed: bool)
     })
 }
 #[tool(
-    description = "Reconcile the original active key once; never dispatch, sleep or advance game time."
+    description = "Reconcile the original active key once; after both effects settle, sample an explicitly selected inventory goal with durable original timing. No dispatch or game-time advance."
 )]
 pub fn fortress_wait(session_id: String, max_wall_millis: Option<u64>) -> String {
     with_session(session_id, "fortress.wait", max_wall_millis, || {
@@ -581,7 +582,7 @@ pub fn run_stdio() {
     let server = ServerBuilder::new("dfmcp-live-combined-production-dev", env!("CARGO_PKG_VERSION"))
         .tool(FortressOpenSession).tool(FortressObserve).tool(FortressQuery).tool(FortressPlan).tool(FortressCommit)
         .tool(FortressWait).tool(FortressCancel).tool(FortressCheckpoint).tool(FortressRestore).tool(FortressExplain).tool(FortressDoctor)
-        .instructions("Unadmitted development only. Observe, compile one original labor and finite-order plan, prepare and confirm each dependency-satisfied step, and reconcile uncertainty under its original key. All-applied does not prove the original goal or physical goods. No clock is exposed.")
+        .instructions("Unadmitted development only. Observe, compile one original labor and finite-order plan, prepare and confirm each dependency-satisfied step, and reconcile uncertainty under its original key. All-applied does not prove the original goal or physical goods. An explicit inventory objective can be sampled with Wait after both effects settle; its success does not prove current labor or whole-plan completion. No clock is exposed.")
         .build();
     crate::run_modern_stdio(server);
 }
@@ -649,6 +650,30 @@ mod tests {
         assert_eq!(value["frontier"]["entries"][0]["phase"], "dispatch_started");
         assert!(value["frontier"]["review"].is_null());
         assert!(value["review"].is_null());
+    }
+
+    #[test]
+    fn failed_inventory_publication_keeps_new_history_custody_without_old_success() {
+        let mut retained = Some(json!({"selected_inventory_goal":{"proven_at_anchor":true},
+            "recovery":{"goal_history_present":false}}));
+        merge_recovery(
+            &mut retained,
+            &json!({"recovery":{"goal_history_present":true},
+            "selected_inventory_goal":{"scope":"selected_original_order_step","step_id":1,
+                "proven_at_anchor":false,"current_truth":null,"history":{"present":true},
+                "first_satisfied_anchor":{"tick":130}}}),
+        );
+        let value = retained.expect("retained custody");
+        assert_eq!(value["recovery"]["goal_history_present"], true);
+        assert_eq!(value["selected_inventory_goal"]["proven_at_anchor"], false);
+        assert_eq!(
+            value["selected_inventory_goal"]["current_truth"],
+            Value::Null
+        );
+        assert_eq!(
+            value["selected_inventory_goal"]["first_satisfied_anchor"]["tick"],
+            130
+        );
     }
 
     #[test]

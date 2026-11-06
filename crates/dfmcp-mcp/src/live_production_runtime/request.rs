@@ -1,4 +1,5 @@
 //! Closed combined labor and finite furniture-order request compiler.
+use crate::semantic_work_order_runtime::request::Objective;
 use crate::semantic_workforce_runtime::{digest, exhausted, invalid};
 use dfmcp_adapter::work_orders::WorkOrderRecipe;
 use dfmcp_core::{
@@ -26,6 +27,8 @@ pub struct Request {
     pub poll_interval_ticks: u64,
     #[serde(default = "samples")]
     pub stable_samples: u32,
+    #[serde(default)]
+    pub objective: Option<Objective>,
 }
 fn interval() -> u64 {
     10
@@ -63,9 +66,12 @@ impl Request {
     }
     pub fn validate(&self) -> Result<()> {
         self.workforce().validate()?;
-        recipe(&self.recipe)?;
+        let (native, _) = recipe(&self.recipe)?;
         if !(1..=100).contains(&self.amount) {
             return Err(invalid("finite order amount must be between one and 100"));
+        }
+        if let Some(objective) = &self.objective {
+            objective.validate_for(native)?;
         }
         Ok(())
     }
@@ -138,7 +144,11 @@ impl Request {
             amount: self.amount,
             conditions: Vec::new(),
         };
-        let mut bytes = b"dfmcp-native-combined-production-request/1\0".to_vec();
+        let mut bytes = if self.objective.is_some() {
+            b"dfmcp-native-combined-production-request/2\0".to_vec()
+        } else {
+            b"dfmcp-native-combined-production-request/1\0".to_vec()
+        };
         bytes.extend_from_slice(self.observation()?.as_bytes());
         bytes.extend_from_slice(&(units.len() as u32).to_be_bytes());
         for id in &units {
@@ -152,6 +162,9 @@ impl Request {
         bytes.extend_from_slice(&self.deadline_tick.to_be_bytes());
         bytes.extend_from_slice(&self.poll_interval_ticks.to_be_bytes());
         bytes.extend_from_slice(&self.stable_samples.to_be_bytes());
+        if let Some(objective) = &self.objective {
+            objective.append_identity(&mut bytes);
+        }
         let hash = Digest32::of_bytes(&bytes);
         let id = IntentId::new(u128::from_be_bytes(
             hash.as_bytes()[..16]
@@ -169,23 +182,40 @@ impl Request {
             op: CompareOp::Eq,
             value,
         };
-        let order_goal = Predicate::All(vec![
+        let order_completion = Predicate::All(vec![
             equal("amount_total", Value::U64(u64::from(self.amount))),
             equal("amount_remaining", Value::U64(0)),
             equal("validated", Value::Bool(true)),
             equal("active", Value::Bool(false)),
         ]);
+        let order_goal = self
+            .objective
+            .as_ref()
+            .map_or(order_completion, Objective::predicate);
         let labor_goal = Predicate::All(labor_goals);
-        let intent = Intent {
-            id,
-            anchor: context.anchor,
-            summary: format!(
+        let summary = match &self.objective {
+            Some(Objective::ObservedInventoryMinimum {
+                item_type,
+                minimum_stack_units,
+            }) => format!(
+                "Configure {} for {} citizens, insert {} finite {} order units and observe at least {minimum_stack_units} {item_type} stack units; production attribution unknown",
+                self.labor,
+                units.len(),
+                self.amount,
+                native.as_str()
+            ),
+            None => format!(
                 "Configure {} for {} citizens and complete {} finite {} order units",
                 self.labor,
                 units.len(),
                 self.amount,
                 native.as_str()
             ),
+        };
+        let intent = Intent {
+            id,
+            anchor: context.anchor,
+            summary,
             terminal_condition: Predicate::All(vec![labor_goal.clone(), order_goal.clone()]),
             constraints: vec![Constraint::MaxRisk(RiskTier::Guarded)],
             requested_actions: vec![

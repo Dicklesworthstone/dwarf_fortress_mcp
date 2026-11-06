@@ -8,7 +8,7 @@ use dfmcp_adapter::semantic_work_orders::goal_projection::{
 use dfmcp_adapter::semantic_work_orders::{ObservedInventoryObjective, WorkOrderGoalProjection};
 use dfmcp_adapter::work_orders::rpc::WorkOrderManifest;
 use dfmcp_adapter::{BridgeManifest, LiveObservationCapsule};
-use dfmcp_core::{Capability, FortressId, OperationContext, Result, RiskTier};
+use dfmcp_core::{Capability, FortressId, OperationContext, Result, RiskTier, StepId};
 use dfmcp_intent::PreparedPlan;
 use dfmcp_world::{EntityKind, EvidenceCoverage, EvidencePolicy, EvidenceSource};
 use serde::Deserialize;
@@ -275,8 +275,38 @@ impl SourceAcceptance {
         projection: &WorkOrderGoalProjection,
         context: &OperationContext,
     ) -> Result<EvidencePolicy> {
+        self.goal_with_inventory(
+            ObservedInventoryObjective::from_plan(original).is_some(),
+            projection,
+            context,
+        )
+    }
+
+    /// The combined host proves one explicitly selected original inventory
+    /// objective. Selection never slices or reseals the retained parent plan.
+    pub(crate) fn goal_for_selected(
+        &self,
+        original: &PreparedPlan,
+        step: StepId,
+        projection: &WorkOrderGoalProjection,
+        context: &OperationContext,
+    ) -> Result<EvidencePolicy> {
+        if ObservedInventoryObjective::from_selected_plan(original, step).is_none() {
+            return Err(denied(
+                "selected original step has no supported inventory objective",
+            ));
+        }
+        self.goal_with_inventory(true, projection, context)
+    }
+
+    fn goal_with_inventory(
+        &self,
+        inventory: bool,
+        projection: &WorkOrderGoalProjection,
+        context: &OperationContext,
+    ) -> Result<EvidencePolicy> {
         let mut policy = self.goal(projection, context)?;
-        if ObservedInventoryObjective::from_plan(original).is_some() {
+        if inventory {
             let operations = projection.operations();
             let digest = operations.source_digest()?;
             let available = projection.observed_sources();

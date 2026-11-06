@@ -89,7 +89,7 @@
       "labor-order"
     ],
     "configuration_schema": "dfmcp.combined-production-development/1",
-    "request_schema": "closed labor, citizens and finite furniture request",
+    "request_schema": "closed labor, citizens and finite furniture request with an optional explicit inventory-minimum objective",
     "original_steps": [
       "SetLabor",
       "CreateWorkOrder"
@@ -232,7 +232,8 @@
       "scripts/verify.sh",
       "scripts/qualify_local.sh",
       "crates/dfmcp-mcp/src/semantic_citizens.rs",
-      "crates/dfmcp-mcp/src/semantic_citizens_tests.rs"
+      "crates/dfmcp-mcp/src/semantic_citizens_tests.rs",
+      "crates/dfmcp-mcp/src/live_production_runtime/goals.rs"
     ],
     "private_custody_platforms": [
       "linux-x86_64",
@@ -245,6 +246,45 @@
       "complete_roster_max": 200,
       "evidence_refresh_budget_bytes": 16777216,
       "capture_policy": "complete_coherent_or_refuse"
+    },
+    "optional_parent_files": [
+      "goal.history"
+    ],
+    "selected_inventory_goal": {
+      "request_field": "objective",
+      "kind": "observed_inventory_minimum",
+      "item_types": [
+        "BED",
+        "DOOR",
+        "TABLE",
+        "CHAIR"
+      ],
+      "recipe_matched": true,
+      "min_stack_units": [
+        1,
+        1000000
+      ],
+      "request_identity": "dfmcp-native-combined-production-request/2",
+      "omitted_objective_preserves_request_1_bytes": true,
+      "scope": "selected_original_order_step",
+      "requires_settled_original_effects": true,
+      "sample_tool": "fortress.wait",
+      "ordinary_observe_or_query_acquires_goal": false,
+      "fixed_original_deadline_cadence_stability": true,
+      "parent_terminal_retains_labor_and_inventory": true,
+      "history_file": "goal.history",
+      "external_recovery_field": "goal_history_present",
+      "legacy_recovery_default": false,
+      "offline_replay_restores_current_proof": false,
+      "history_replay_uses_remaining_configured_byte_work": true,
+      "history_replay_retry_and_new_sample_use_separate_calls": true,
+      "logical_byte_work_max": 34359738368,
+      "failed_publication_withdraws_current_proof_and_unfinished_stability": true,
+      "consumed_authority_floor_retained_after_failed_replay": true,
+      "whole_parent_completion_proven": false,
+      "inventory_includes_preexisting_and_unrelated_stock": true,
+      "material_eligibility_and_order_attribution_proven": false,
+      "game_time_control": false
     }
   },
   "selected_work_order_goal_monitor": {

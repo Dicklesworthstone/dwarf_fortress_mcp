@@ -21,6 +21,46 @@ pub enum Objective {
     },
 }
 
+impl Objective {
+    pub(crate) fn validate_for(&self, recipe: WorkOrderRecipe) -> Result<()> {
+        let Self::ObservedInventoryMinimum {
+            item_type,
+            minimum_stack_units,
+        } = self;
+        if item_type != output_type(recipe) || !(1..=1_000_000).contains(minimum_stack_units) {
+            return Err(invalid(
+                "inventory objective requires the recipe's exact item type and 1..1000000 stack units",
+            ));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn predicate(&self) -> Predicate {
+        let Self::ObservedInventoryMinimum {
+            item_type,
+            minimum_stack_units,
+        } = self;
+        Predicate::EntityQuantity {
+            kind: EntityKind::Item,
+            filter_field: "type_key".into(),
+            filter_value: Value::Text(item_type.clone()),
+            quantity_field: Some("stack_size".into()),
+            op: CompareOp::Ge,
+            value: *minimum_stack_units,
+        }
+    }
+
+    pub(crate) fn append_identity(&self, bytes: &mut Vec<u8>) {
+        let Self::ObservedInventoryMinimum {
+            item_type,
+            minimum_stack_units,
+        } = self;
+        bytes.extend_from_slice(&(item_type.len() as u64).to_be_bytes());
+        bytes.extend_from_slice(item_type.as_bytes());
+        bytes.extend_from_slice(&minimum_stack_units.to_be_bytes());
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Request {
@@ -66,15 +106,8 @@ impl Request {
                 "finite order requires amount 1..100 and bounded nonzero cadence/stability",
             ));
         }
-        if let Some(Objective::ObservedInventoryMinimum {
-            item_type,
-            minimum_stack_units,
-        }) = &self.objective
-            && (item_type != output_type(native) || !(1..=1_000_000).contains(minimum_stack_units))
-        {
-            return Err(invalid(
-                "inventory objective requires the recipe's exact item type and 1..1000000 stack units",
-            ));
+        if let Some(objective) = &self.objective {
+            objective.validate_for(native)?;
         }
         Ok(())
     }
@@ -121,14 +154,8 @@ impl Request {
         identity.extend_from_slice(&self.deadline_tick.to_be_bytes());
         identity.extend_from_slice(&self.poll_interval_ticks.to_be_bytes());
         identity.extend_from_slice(&self.stable_samples.to_be_bytes());
-        if let Some(Objective::ObservedInventoryMinimum {
-            item_type,
-            minimum_stack_units,
-        }) = &self.objective
-        {
-            identity.extend_from_slice(&(item_type.len() as u64).to_be_bytes());
-            identity.extend_from_slice(item_type.as_bytes());
-            identity.extend_from_slice(&minimum_stack_units.to_be_bytes());
+        if let Some(objective) = &self.objective {
+            objective.append_identity(&mut identity);
         }
         let hash = Digest32::of_bytes(&identity);
         let id = IntentId::new(u128::from_be_bytes(
@@ -154,18 +181,13 @@ impl Request {
             equal("active", Value::Bool(false)),
         ]);
         let (terminal, summary) = match &self.objective {
-            Some(Objective::ObservedInventoryMinimum {
-                item_type,
-                minimum_stack_units,
-            }) => (
-                Predicate::EntityQuantity {
-                    kind: EntityKind::Item,
-                    filter_field: "type_key".into(),
-                    filter_value: Value::Text(item_type.clone()),
-                    quantity_field: Some("stack_size".into()),
-                    op: CompareOp::Ge,
-                    value: *minimum_stack_units,
+            Some(
+                objective @ Objective::ObservedInventoryMinimum {
+                    item_type,
+                    minimum_stack_units,
                 },
+            ) => (
+                objective.predicate(),
                 format!(
                     "Observe at least {minimum_stack_units} {item_type} stack units after inserting {} finite {} order units; production attribution unknown",
                     self.amount,

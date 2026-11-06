@@ -1,5 +1,47 @@
 # Implementation Status
 
+## 2026-11-05 — Observe original inventory goals in the combined production host
+
+The existing combined labor/order MCP host now accepts an optional explicit
+`observed_inventory_minimum` in its original closed request. Recipe-matched
+BED/DOOR/TABLE/CHAIR stack minima receive a distinct request identity; omitted
+objectives keep legacy bytes. The whole two-step plan retains both native keys,
+actual StepIds and dependency, while its parent terminal still requires labor
+and inventory together. Only the selected order obligation changes to the
+expressly chosen inventory predicate.
+
+After both original effects settle, foreground Wait opens the exclusive selected
+monitor and acquires qualified progress/full-inventory evidence. The response
+separates selected truth and temporal proof, full parent terminal truth and first
+achievement. Historical labor receipts do not supply current labor evidence;
+whole-parent completion remains unproved. Existing/unrelated stock counts and
+native order retirement may leave order linkage and physical work Unknown.
+No causal output, material or eligibility claim is introduced.
+
+A separate private goal.history, additive external goal_history_present flag,
+exact source-policy replay and original predecessor custody preserve recovery.
+Offline reopening clears current proof and unfinished stability. Failed outer
+publication also withdraws them and preserves consumed authority floors even
+if replay fails before returning a monitor. Longer retained histories can use
+the existing configured allowance up to32GiB instead of a fixed2GiB replay cap;
+final verification and response work remain separately prepaid. Retrying an
+existing-history open returns historical recovery before a later fresh Wait.
+No clock, new tool, native protocol or admission boundary is added.
+
+All36 combined tests pass (24 runtime/compiler/config/custody/budget/discovery,
+six presentation and six exact pure public-facade helpers) within the shared208
+MCP component suite. Production adapter, actual native Rust shells and MCP
+component Clippy pass with warnings denied. The MCP test-to-Clippy input
+inventory is unchanged across1092 files, aggregate SHA-256
+3fda52b9201c26bbb47f29fcbca0a44d15a12e32c952d82f2f946dc9bdd7bb1b.
+The harness excludes FastMCP/Asupersync transport, one unchanged workforce
+envelope-decoder test and its unused presentation; copied pure facade slices
+and exclusions are tracked. Earlier OOM attempts were retained; final scoped
+runs succeeded after reclaiming only reproducible task-owned build outputs.
+These tests compile the actual combined host but do not execute a native TCP
+combined goal lifecycle, modern stdio or a real DFHack game. Broader bead
+`df-dfhack-bridge-plane-c-pic.4.1` remains in progress pending that acceptance.
+
 ## 2026-11-05 — Monitor a selected production goal without replacing its parent
 
 The concrete labor/order executor now owns a durable selected-work-order goal

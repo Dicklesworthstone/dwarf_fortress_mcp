@@ -99,6 +99,7 @@ fn real_custody_and_owner_refuse_corruption_after_refresh()
             deadline_tick: 300,
             poll_interval_ticks: 5,
             stable_samples: 2,
+            objective: None,
         };
         let evidence =
             PredicateEvidence::scoped(&projection.snapshot, policy(&projection.snapshot))?;

@@ -65,6 +65,7 @@ fn request() -> Request {
         deadline_tick: 300,
         poll_interval_ticks: 10,
         stable_samples: 2,
+        objective: None,
     }
 }
 #[test]
@@ -133,5 +134,120 @@ fn closed_request_and_roster_reject_hostile_inputs() -> Result<()> {
     let mut r = request();
     r.units = (1..=33).map(|n| n.to_string()).collect();
     assert!(r.validate().is_err());
+    Ok(())
+}
+
+#[test]
+fn inventory_objective_retains_whole_parent_and_exact_selected_step() -> Result<()> {
+    use dfmcp_adapter::semantic_work_orders::ObservedInventoryObjective;
+    let snapshot = snapshot();
+    let context = context(&snapshot);
+    let evidence = PredicateEvidence::laboratory(&snapshot)?;
+    let legacy = request().compile(&evidence, &context)?;
+    let mut requested = request();
+    requested.objective = Some(Objective::ObservedInventoryMinimum {
+        item_type: "BED".into(),
+        minimum_stack_units: 3,
+    });
+    let plan = requested.compile(&evidence, &context)?;
+    assert_ne!(plan.intent_id, legacy.intent_id);
+    assert_eq!(plan.anchor, legacy.anchor);
+    assert_eq!(plan.steps.len(), 2);
+    assert_eq!(plan.steps[1].depends_on, [plan.steps[0].id]);
+    assert_eq!(plan.steps[0].action, legacy.steps[0].action);
+    assert_eq!(plan.steps[1].action, legacy.steps[1].action);
+    assert!(ObservedInventoryObjective::from_plan(&plan).is_none());
+    assert!(ObservedInventoryObjective::from_selected_plan(&plan, plan.steps[0].id).is_none());
+    let selected = ObservedInventoryObjective::from_selected_plan(&plan, plan.steps[1].id)
+        .ok_or_else(|| invalid("selected inventory objective missing"))?;
+    assert_eq!(selected.item_type, "BED");
+    assert_eq!(selected.min_stack_units, 3);
+    let obligation = plan.steps[1]
+        .obligation
+        .as_ref()
+        .ok_or_else(|| invalid("obligation missing"))?;
+    assert_eq!(obligation.deadline_tick, GameTick(requested.deadline_tick));
+    assert_eq!(
+        obligation.poll_interval_ticks,
+        requested.poll_interval_ticks
+    );
+    assert_eq!(obligation.stable_for_observations, requested.stable_samples);
+    assert_eq!(plan.steps[1].postconditions, [obligation.terminal.clone()]);
+    assert_eq!(
+        plan.terminal_condition,
+        dfmcp_world::Predicate::All(vec![
+            Predicate::All(plan.steps[0].postconditions.clone()).normalized(),
+            obligation.terminal.clone(),
+        ])
+        .normalized()
+    );
+    let limits = dfmcp_adapter::live_production::archive_limits();
+    let (archive, seal) = dfmcp_intent::plan_archive::encode(&plan, limits)?;
+    assert_eq!(
+        dfmcp_intent::plan_archive::decode(&archive, seal, limits)?,
+        plan
+    );
+    for step in &plan.steps {
+        assert_eq!(
+            step.idempotency_key,
+            derive_step_idempotency_key(plan.intent_id, context.anchor, step.id, &step.action)
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn inventory_choice_is_closed_recipe_matched_and_identity_bound() -> Result<()> {
+    let base = serde_json::json!({"expected_observation":"11".repeat(32),"units":["43"],
+        "labor":"CARPENTER","enabled":true,"recipe":"wooden_bed","amount":1,"deadline_tick":300});
+    let snapshot = snapshot();
+    let c = context(&snapshot);
+    let evidence = PredicateEvidence::laboratory(&snapshot)?;
+    let legacy = Request::parse(&base.to_string())?.compile(&evidence, &c)?;
+    let mut explicit_null = base.clone();
+    explicit_null["objective"] = serde_json::Value::Null;
+    assert_eq!(
+        legacy,
+        Request::parse(&explicit_null.to_string())?.compile(&evidence, &c)?
+    );
+    let mut selected = base.clone();
+    selected["objective"] = serde_json::json!({"kind":"observed_inventory_minimum",
+        "item_type":"BED","minimum_stack_units":1});
+    let one = Request::parse(&selected.to_string())?.compile(&evidence, &c)?;
+    selected["objective"]["minimum_stack_units"] = 2.into();
+    let two = Request::parse(&selected.to_string())?.compile(&evidence, &c)?;
+    assert_ne!(one.intent_id, two.intent_id);
+    assert_ne!(one.steps[1].idempotency_key, two.steps[1].idempotency_key);
+    for (field, value) in [
+        ("item_type", serde_json::json!("DOOR")),
+        ("item_type", serde_json::json!("bed")),
+        ("minimum_stack_units", serde_json::json!(0)),
+        ("minimum_stack_units", serde_json::json!(1_000_001)),
+        ("minimum_stack_units", serde_json::json!(-1)),
+        ("kind", serde_json::json!("infer_order_completion")),
+        ("material", serde_json::json!("WOOD")),
+    ] {
+        let mut bad = selected.clone();
+        bad["objective"][field] = value;
+        assert!(
+            Request::parse(&bad.to_string()).is_err(),
+            "accepted {field}"
+        );
+    }
+    for (recipe, item_type) in [
+        ("wooden_bed", "BED"),
+        ("wooden_door", "DOOR"),
+        ("wooden_table", "TABLE"),
+        ("wooden_chair", "CHAIR"),
+    ] {
+        let mut matched = selected.clone();
+        matched["recipe"] = recipe.into();
+        matched["objective"]["item_type"] = item_type.into();
+        assert!(
+            Request::parse(&matched.to_string())?
+                .compile(&evidence, &c)
+                .is_ok()
+        );
+    }
     Ok(())
 }

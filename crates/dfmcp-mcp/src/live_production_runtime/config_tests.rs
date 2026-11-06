@@ -33,6 +33,22 @@ fn closed_configuration_and_recovery_are_exact() -> Result<()> {
             .authority_tick_floor,
         4
     );
+    assert!(
+        !parse(&recovered.to_string())?
+            .2
+            .ok_or_else(|| invalid("recovery"))?
+            .goal_history_present
+    );
+    recovered["recovery"]["goal_history_present"] = json!(true);
+    assert!(
+        parse(&recovered.to_string())?
+            .2
+            .ok_or_else(|| invalid("recovery"))?
+            .goal_history_present
+    );
+    recovered["recovery"]["goal_history_present"] = json!("true");
+    assert!(parse(&recovered.to_string()).is_err());
+    recovered["recovery"]["goal_history_present"] = json!(true);
     recovered["recovery"]["anchor"]["fortress_id"] = json!("01");
     assert!(parse(&recovered.to_string()).is_err());
     Ok(())

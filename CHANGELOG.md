@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-11-05 — Combined labor/order inventory goals through MCP
+
+- Accept an explicit recipe-matched inventory minimum in the original combined
+  request while retaining the complete parent, original labor dependency and
+  native keys. Preserve legacy request identity when the objective is omitted.
+- Let foreground Wait sample the selected original inventory obligation after
+  both effects settle, with durable history, exact source policy, historical
+  achievement and additive external recovery custody. Separate selected proof
+  from current labor and whole-parent completion.
+- Withdraw stale success and unfinished stability on publication failures;
+  retain consumed replay floors and use the existing configured replay allowance
+  without spending response or custody reservations twice.
+- Expose bounded Agent Turn polling/recovery guidance and document proof limits.
+  Pass all36 combined cases within208 actual-source MCP component tests and
+  scoped warning-denied production Clippy. Native TCP lifecycle, full transport,
+  live-game and admission qualification remain separate.
+
 ## 2026-11-05 — Durable selected-step production goals
 
 - Add an exclusive selected work-order monitor to the real labor/order executor,

@@ -4,7 +4,7 @@ use crate::{semantic_work_order_runtime as orders, semantic_workforce_runtime as
 use dfmcp_adapter::LiveObservationCapsule;
 use dfmcp_adapter::build_placement::journal::BuildMode;
 use dfmcp_adapter::live_dispatch::durable::{self, Coordinator, Phase};
-use dfmcp_adapter::live_production::{self, Executor};
+use dfmcp_adapter::live_production::{self, Executor, SelectedWorkOrderGoalMonitor};
 use dfmcp_adapter::live_projection::{LiveWorldProjection, project_live_capsule};
 use dfmcp_adapter::plan_archive::{create_private_plan_archive, open_private_plan_archive};
 use dfmcp_adapter::semantic_work_orders::SemanticWorkOrderSession;
@@ -24,6 +24,7 @@ use std::time::{Duration, Instant};
 mod choices;
 mod config;
 mod custody;
+mod goals;
 mod request;
 mod review;
 pub(crate) use choices::ObserveRequest;
@@ -107,6 +108,15 @@ impl Work {
     fn rest(&mut self, ceiling: u64) -> Result<OperationContext> {
         self.take(self.bytes.min(ceiling))
     }
+    fn narrow(&self, reserved: &OperationContext) -> Result<OperationContext> {
+        let mut current = reserved.clone();
+        current.anchor = self.context.anchor;
+        current.budget.max_wall_millis = current
+            .budget
+            .max_wall_millis
+            .min(self.current()?.budget.max_wall_millis);
+        Ok(current)
+    }
 }
 
 struct Basis {
@@ -138,6 +148,8 @@ pub(crate) struct Runtime {
     order_journal: Digest32,
     initialization_failed: bool,
     fenced: bool,
+    goal_monitor: Option<SelectedWorkOrderGoalMonitor<File>>,
+    goal_history_present: bool,
 }
 
 pub(crate) struct View {
@@ -281,6 +293,8 @@ impl Runtime {
             order_journal: Digest32::ZERO,
             initialization_failed: false,
             fenced: false,
+            goal_monitor: None,
+            goal_history_present: false,
         };
         let c = out.context(false)?;
         let mut work = Work::new(&c)?;
@@ -346,6 +360,11 @@ impl Runtime {
                 false,
             )?);
             out.create_executor(&mut work)?;
+            if recovery.goal_history_present {
+                out.goal_history_present = true;
+                out.start_goal_monitor(false, &mut work)?;
+                out.raise_goal_floor();
+            }
         } else {
             let (labor, order) = out
                 .parts
@@ -549,6 +568,11 @@ impl Runtime {
         if let Some(frontier) = &mut self.frontier {
             frontier.abandon_review();
         }
+        if let Some(goal) = &mut self.goal_monitor
+            && goal.invalidate_current_sample().is_err()
+        {
+            self.fenced = true;
+        }
         if let Some(custody) = &self.custody
             && custody.disarm().is_err()
         {
@@ -564,9 +588,14 @@ impl Runtime {
         ) {
             (Some(p), Some(seal), Some(identity), Some(frontier)) => {
                 let r = frontier.recovery();
+                let floor = r
+                    .authority_tick_floor
+                    .max(self.observation_tick_floor.get())
+                    .max(self.execution.as_ref().map_or(0, Execution::high_tick));
                 json!({"plan_digest":seal.plan_digest.to_hex(),"object_digest":seal.object_digest.to_hex(),
                     "anchor":anchor_json(p.anchor),"identity_digest":identity.to_hex(),
-                    "frontier":{"journal_id":r.journal_id.to_hex(),"head":r.head.to_hex(),"authority_tick_floor":r.authority_tick_floor}})
+                    "goal_history_present":self.goal_history_present,
+                    "frontier":{"journal_id":r.journal_id.to_hex(),"head":r.head.to_hex(),"authority_tick_floor":floor}})
             }
             _ => Value::Null,
         }
@@ -575,6 +604,7 @@ impl Runtime {
         json!({"mode":self.mode.as_str(),"anchor":anchor_json(self.anchor),"recovery":self.recovery_json(),
             "observation_tick_floor":self.observation_tick_floor.get(),
             "original_plan":self.original.as_ref().map(plan_json),"runtime_admitted":false,
+            "selected_inventory_goal":self.selected_goal_json(),
             "current_state_proven":false,"original_goal_proven":false,"automatic_redispatch":false})
     }
     fn view(&mut self, work: &mut Work) -> Result<View> {
@@ -642,11 +672,12 @@ impl Runtime {
             "runtime_admitted":false,"observation":observation,"original_plan":self.original.as_ref().map(plan_json),
             "observation_tick_floor":self.observation_tick_floor.get(),
             "frontier":frontier,"review":review,
+            "selected_inventory_goal":self.selected_goal_json(),
             "recovery":self.recovery_json(),"labor_control_enabled":self.labor_enabled(),"production_control_enabled":self.orders_enabled(),
             "native_custody":{"workforce_journal_id":self.workforce_journal.to_hex(),"order_journal_id":self.order_journal.to_hex()},
             "current_state_proven":false,"original_goal_proven":false,"clock_advanced":false,
             "automatic_redispatch":false,"custody_initialization_may_be_partial":self.initialization_failed,
-            "coverage_omissions":["parent goal completion","produced goods","current labor after its receipt","workshop/material feasibility","game clock control"]});
+            "coverage_omissions":["parent goal completion","order-attributed output","current labor after its receipt","workshop/material feasibility","game clock control"]});
         if let Some(custody) = &self.custody {
             custody.disarm()?;
         }
@@ -846,19 +877,7 @@ impl Runtime {
         })
     }
     pub(crate) fn wait(&mut self, c: &OperationContext) -> Result<View> {
-        self.check(c, false)?;
-        if self.mode == Mode::Offline {
-            return self.inspect(c);
-        }
-        self.delegate(c, false, |frontier, execution, c| {
-            let view = frontier.inspect(c)?;
-            if let Some(entry) = view.entries.iter().find(|e| {
-                e.phase.uncertain() || (e.phase == Phase::Prepared && view.review.is_none())
-            }) {
-                frontier.reconcile(entry.step, execution, c)?;
-            }
-            Ok(())
-        })
+        self.wait_with_goal(c)
     }
     pub(crate) fn cancel(&mut self, c: &OperationContext) -> Result<View> {
         self.check(c, true)?;

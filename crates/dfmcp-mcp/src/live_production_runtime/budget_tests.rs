@@ -51,6 +51,30 @@ fn prepaid_work_cannot_be_reused_or_renew_the_operation_deadline() -> Result<()>
     let child = parent.rest(MAX_FRONTIER_BYTES)?;
     assert_eq!(child.budget.max_bytes, 2 * 1024 * MIB);
     assert_eq!(parent.bytes, MAX_BYTES - child.budget.max_bytes);
+    // A long retained history is not trapped behind the empty-history bound.
+    // The final publication/custody contexts remain prepaid and cannot be spent
+    // a second time by replay, even at the largest configured operation size.
+    let mut recovery = Work::new(&large)?;
+    let publication = recovery.take(256 * MIB)?;
+    let custody = recovery.take(512 * MIB)?;
+    let final_check = recovery.take(1)?;
+    let replay = goals::history_budget(&mut recovery, false)?;
+    assert!(replay.budget.max_bytes > 30 * 1024 * MIB);
+    assert_eq!(recovery.bytes, 0);
+    assert_eq!(
+        publication.budget.max_bytes
+            + custody.budget.max_bytes
+            + final_check.budget.max_bytes
+            + replay.budget.max_bytes,
+        large.budget.max_bytes
+    );
+    recovery.until = Instant::now();
+    assert!(recovery.narrow(&final_check).is_err());
+    let mut initial = Work::new(&large)?;
+    assert_eq!(
+        goals::history_budget(&mut initial, true)?.budget.max_bytes,
+        2 * 1024 * MIB
+    );
     Ok(())
 }
 

@@ -11,7 +11,9 @@ platforms refuse private-journal opening.
 
 Owner: `df-dfhack-bridge-plane-c-pic.4.1`. The broader dispatcher and recovery
 tasks `.4` and `.5` remain open. This host does not supply a complete fortress
-controller, game clock, material/workshop planning or a production-goal monitor.
+controller, game clock or material/workshop planning. An explicitly selected
+inventory objective can now be monitored for the original order step; this
+does not establish the complete parent goal.
 
 ## Operator configuration
 
@@ -25,7 +27,9 @@ Supply the existing `DFMCP_SEMANTIC_WORKFORCE_CONFIG` and
 `DFMCP_SEMANTIC_WORK_ORDER_CONFIG` described in
 [the workforce guide](SEMANTIC_WORKFORCE_MCP.md) and
 [the work-order guide](SEMANTIC_WORK_ORDER_MCP.md). Their optional standalone
-`clock` and original single-goal `recovery` objects are forbidden in this host.
+`clock`, `inventory_clock` and original single-goal `recovery` objects are
+forbidden in this host. Their standalone clock environment names are also
+forbidden; the combined host does not inherit either clock authority.
 Both must use the same numeric loopback endpoint, initialization mode and exact
 citizen world/site/DF/DFHack/bridge-version/generation pins. Native family
 generations remain independently pinned; they need not equal each other.
@@ -69,7 +73,8 @@ retain the frozen eleven-tool waist; this profile's wire names are underscores.
    selected workforce domain remains bounded at 32 citizens.
 3. Plan a closed JSON request containing `expected_observation`, `units`,
    `labor`, `enabled`, `recipe`, `amount` and `deadline_tick`. Optional
-   `poll_interval_ticks` and `stable_samples` default to 10 and 1. Select
+   `poll_interval_ticks` and `stable_samples` default to 10 and 1. An optional
+   explicit `objective` is described below. Select
    1–32 citizens, an existing single-labor detail supported by workforce/1.17,
    and 1–100 units of `wooden_bed`, `wooden_door`, `wooden_table` or
    `wooden_chair`. The future deadline is at most one game year away and must
@@ -84,8 +89,9 @@ retain the frozen eleven-tool waist; this profile's wire names are underscores.
    verified historical labor receipt. The actual original StepIds, keys, anchor,
    deadline and whole plan digest are retained throughout.
 
-Wait performs one original-key reconciliation. It never dispatches, sleeps,
-polls indefinitely or advances game time. An uncertain effect prohibits a
+Wait performs one original-key reconciliation. Once both original effects are
+settled, it can acquire one qualified sample for an explicitly selected inventory
+objective. It never dispatches, sleeps, polls indefinitely or advances game time. An uncertain effect prohibits a
 replacement key or a fresh original plan. Cancel with `scope="step"` retires
 a proven preparation; it does not undo an Applied effect. `scope="session"`
 releases local ownership while preserving custody and makes no native
@@ -178,13 +184,81 @@ A nondefault selection or page request is refused before native contact; the
 host cannot acquire a replacement canonical world or rebase the original
 anchor through these selectors.
 
+## Select and monitor an original inventory objective
+
+Include an `objective` in the first closed request to ask whether the original
+order step's requested inventory minimum is present. For example:
+
+```json
+{
+  "expected_observation": "<latest complete citizen observation seal>",
+  "units": ["<selected canonical citizen ID>"],
+  "labor": "CARPENTER",
+  "enabled": true,
+  "recipe": "wooden_bed",
+  "amount": 1,
+  "deadline_tick": 12000,
+  "poll_interval_ticks": 10,
+  "stable_samples": 2,
+  "objective": {
+    "kind": "observed_inventory_minimum",
+    "item_type": "BED",
+    "minimum_stack_units": 1
+  }
+}
+```
+
+Use the observed supported labor key, exact canonical IDs and a future deadline
+for the actual fortress. BED/DOOR/TABLE/CHAIR must match the chosen wooden
+furniture recipe, and `minimum_stack_units` must be 1–1,000,000. The minimum is
+independent of the finite order amount. Unknown fields and mismatched types
+refuse. This request has a distinct version-two identity; omitted or null
+objectives preserve the previous request identity and predicates. An existing
+plan cannot acquire or change an objective after preparation or retirement.
+
+Compilation retains both original steps, their exact keys and dependency. The
+order step's original postconditions and obligation use the inventory predicate.
+The whole parent's terminal still contains both labor and inventory requirements.
+Wait starts `goal.history` only after both original native effects are settled
+and the exact insertion is verified. It reads complete qualified operations
+inventory with the original progress source, using the original deadline,
+cadence and stable-sample requirement. It does not derive a replacement plan or
+an item subset from presentation examples.
+
+The response's `selected_inventory_goal` separates current and historical proof:
+
+| Field | Meaning |
+|---|---|
+| `scope`, `step_id` | The actual original order step within the complete parent. |
+| `current_truth`, `anchor` | The selected inventory predicate at a complete published sample. |
+| `proven_at_anchor` | That selected predicate satisfies its original temporal requirement at the sample. |
+| `parent_terminal_truth` | Separate evaluation of the complete parent terminal; historical labor receipts cannot supply current labor facts. |
+| `first_satisfied_anchor` | First qualified selected achievement, retained across later consumption, failure and recovery. |
+| `history` | Whether exact selected history exists, its retained size and whether it is fenced. |
+
+`original_goal_proven` remains false in this host. Qualified inventory can be
+true after the order retires even while receipt linkage or physical work is
+unknown. Preexisting and unrelated matching stock counts. Material, usability,
+new production and order attribution remain unproved. Inventory truth cannot
+reconcile uncertain insertion, release another mutation or authorize redispatch.
+
+Agent Turn recommends a bounded Wait while the selected temporal requirement is
+unfinished, and stops requesting it after selected proof. Additional stability
+samples need separately managed game-time progress and coherent paused reads;
+repeated reads at one tick cannot supply advancing samples. A failed call clears
+current proof and unfinished continuity without extra I/O. The next admitted
+sample persists that interruption; historical first achievement remains intact.
+
 ## Recovery and failure
 
 Retain all native journals and semantic associations in both child directories,
-plus parent `original.plan`, `original.citizens` and `execution.journal`.
+plus parent `original.plan`, `original.citizens`, `execution.journal` and
+`goal.history` if selected inventory monitoring has started.
 Persist the latest complete `recovery` object outside those files. It includes
 the original plan/object/citizen digests and anchor, and frontier journal/head/
-authority-tick-floor. On reopen set all three configurations to
+authority-tick-floor. The additive Boolean `goal_history_present` records
+selected history; older recovery objects default to false. Preserve its latest
+value even when opening or publication fails. On reopen set all three configurations to
 `initialize=false`, supply that parent object, and retain the original child
 native journal identities required by their existing configurations.
 
@@ -228,14 +302,24 @@ uncertain key requiring reconciliation. The caller can inspect and acquire its
 canonical observation before compiling the original plan.
 Query verifies the parent archive/identity and durable frontier. Native family
 custody and effects are rechecked through their owners at preparation, commit
-and reconciliation boundaries; Query is not a new native effect observation.
+and reconciliation boundaries; Query is not a new native effect observation. Selected history replays under
+newly reissued exact source policy and retained predecessor custody. Offline
+replay retains first achievement and terminal history but restores neither
+current proof nor unfinished stability. Recovery never renews the deadline or
+reconstructs a native commit permit.
 
 ## Bounds and evidence
 
 Each call admits at most 60 seconds, two actions, zero game ticks and 32 GiB of
 logical byte-work, defaulting to five seconds and 8 GiB. This accounts for
 repeated bounded custody validation; it is not an eager memory allocation or
-frame size. One shrinking deadline covers the nested work. The host reserves
+frame size. One shrinking deadline covers the nested work. Existing-history
+replay can use the remaining configured allowance up to the existing 32 GiB
+ceiling, so a larger caller allowance is not trapped behind the empty-history
+initialization bound. A retried history opening through Wait publishes recovered
+history first; the following Wait acquires a fresh sample under its own budget.
+History size/event and source limits still apply; a large allowance is not a
+promise that every possible sample history will fit. The host reserves
 128 KiB for response publication and an additional 512 MiB for opening
 inspection. Complete escaped response text is limited to 60,000 bytes; overflow
 withdraws the local review and returns bounded recovery/uncertainty instead of

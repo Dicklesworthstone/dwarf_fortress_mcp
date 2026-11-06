@@ -25,12 +25,30 @@ pub(super) fn compact(view: &Value) -> Value {
     json!({"observation_tick_floor":view["observation_tick_floor"].as_u64(),
         "recovery":{"plan_digest":bounded(&r["plan_digest"],64),
         "object_digest":bounded(&r["object_digest"],64), "identity_digest":bounded(&r["identity_digest"],64),
+        "goal_history_present":r["goal_history_present"].as_bool(),
         "anchor":compact_anchor(&r["anchor"]),
         "frontier":{"journal_id":bounded(&r["frontier"]["journal_id"],64),
             "head":bounded(&r["frontier"]["head"],64),"authority_tick_floor":r["frontier"]["authority_tick_floor"].as_u64()}},
         "frontier":{"entries":entries,"next_ready":view["frontier"]["next_ready"].as_u64(),"needs_reconciliation":view["frontier"]["needs_reconciliation"].as_bool(),
             "all_applied":view["frontier"]["all_applied"].as_bool(),"review":null},
+        "selected_inventory_goal":compact_goal(&view["selected_inventory_goal"]),
         "original_goal_proven":false,"current_state_proven":false,"details_omitted":true})
+}
+fn compact_goal(value: &Value) -> Value {
+    if !value.is_object() {
+        return Value::Null;
+    }
+    json!({"scope":"selected_original_order_step",
+        "step_id":value["step_id"].as_u64(),"kind":bounded(&value["kind"],64),
+        "item_type":bounded(&value["item_type"],16),
+        "minimum_stack_units":value["minimum_stack_units"].as_u64(),
+        "first_satisfied_anchor":if value["first_satisfied_anchor"].is_object() {
+            compact_anchor(&value["first_satisfied_anchor"])
+        } else {Value::Null},
+        "history":{"present":value["history"]["present"].as_bool(),
+            "fenced":value["history"]["fenced"].as_bool()},
+        "current_truth":null,"proven_at_anchor":false,"original_goal_proven":false,
+        "production_attribution":"unknown"})
 }
 fn bounded(value: &Value, max: usize) -> Option<&str> {
     value
@@ -79,6 +97,12 @@ fn encode(
     } else {
         Value::Null
     };
+    let selected_goal = if verified && !uncertain {
+        view["selected_inventory_goal"].clone()
+    } else {
+        Value::Null
+    };
+    let selected_proven = selected_goal["proven_at_anchor"] == true;
     let recommendation = if session.is_none() || result["closed"] == true {
         None
     } else if uncertain && mode == Some("offline") {
@@ -112,6 +136,19 @@ fn encode(
             "Prepare the next dependency-satisfied original step.",
             false,
             json!({"request":json!({"kind":"step", "original_plan_digest":view["original_plan"]["plan_digest"]}).to_string()}),
+        ))
+    } else if mode != Some("offline")
+        && view["frontier"]["all_applied"] == true
+        && selected_goal.is_object()
+        && !selected_proven
+        && selected_goal["terminal_failure"] != true
+        && selected_goal["history"]["fenced"] != true
+    {
+        Some((
+            "fortress_wait",
+            "Take one fresh sample of the selected original inventory goal; additional stability samples require separately managed game-time progress.",
+            false,
+            json!({}),
         ))
     } else if view["original_plan"].is_null()
         && (view["observation"].is_null() || view["observation"]["workforce_choices"].is_null())
@@ -168,8 +205,10 @@ fn encode(
     let mut turn = AgentTurnBuilder::new(operation, phase)
         .continuity(if uncertain { ContinuityStatus::Indeterminate } else if verified { ContinuityStatus::Partial } else if retained.is_some() { ContinuityStatus::Stale } else { ContinuityStatus::Bootstrap }, None, None, None)
         .briefing(json!({"runtime":"unadmitted_combined_production_development", "runtime_admitted":false,"mode":mode,
-            "retained_state_currently_verified":verified,"current_state_proven":false,"original_goal_proven":false}))
-        .active_work(json!({"pending_plans":[],"actions":entries,"obligations":[],"cancellation_drains":[],
+            "retained_state_currently_verified":verified,"current_state_proven":false,"original_goal_proven":false,
+            "selected_inventory_goal_proven_at_anchor":selected_proven}))
+        .active_work(json!({"pending_plans":[],"actions":entries,
+            "obligations":if selected_goal.is_null() {vec![]} else {vec![selected_goal]},"cancellation_drains":[],
             "indeterminate_effects":if uncertain {vec![json!({"state":"unknown","reconcile_original_key":true})]} else {vec![]},
             "publications":[],"confirmations":if review.is_null(){vec![]} else {vec![review]}}))
         .recommendations(recommendations)
@@ -256,6 +295,109 @@ pub(super) fn packet(
 mod tests {
     use super::*;
     #[test]
+    fn selected_inventory_proof_guides_polling_without_promoting_parent_success() {
+        let session = SessionId::new((1u128 << 127) | (24u128 << 57) | 1);
+        let mut view = json!({"original_plan":{"plan_digest":"a".repeat(64)},
+            "frontier":{"all_applied":true,"next_ready":null,"entries":[]},
+            "review":null,"selected_inventory_goal":{"scope":"selected_original_order_step",
+                "step_id":1,"kind":"observed_inventory_minimum","item_type":"BED",
+                "minimum_stack_units":1,"current_truth":"true","proven_at_anchor":false,
+                "history":{"present":true,"fenced":false},"terminal_failure":false}});
+        let call = |view: &Value, mode: &str, verified: bool| {
+            let (raw, overflow) = packet(
+                "fortress.wait",
+                Some(session),
+                None,
+                Some(mode),
+                None,
+                None,
+                json!({"ok":verified}),
+                Some(view),
+                verified,
+                false,
+            );
+            assert!(!overflow);
+            serde_json::from_str::<Value>(&raw).expect("valid packet")
+        };
+        let pending = call(&view, "control", true);
+        assert_eq!(
+            pending["agent_turn"]["recommendations"][0]["tool"],
+            "fortress_wait"
+        );
+        assert_eq!(
+            pending["agent_turn"]["active_work"]["obligations"][0]["step_id"],
+            1
+        );
+        view["selected_inventory_goal"]["proven_at_anchor"] = json!(true);
+        let proved = call(&view, "control", true);
+        assert_eq!(proved["agent_turn"]["recommendations"], json!([]));
+        assert_eq!(
+            proved["agent_turn"]["briefing"]["selected_inventory_goal_proven_at_anchor"],
+            true
+        );
+        assert_eq!(
+            proved["agent_turn"]["briefing"]["original_goal_proven"],
+            false
+        );
+        assert_eq!(
+            proved["agent_turn"]["briefing"]["current_state_proven"],
+            false
+        );
+        let failed = call(&view, "control", false);
+        assert_eq!(
+            failed["agent_turn"]["briefing"]["selected_inventory_goal_proven_at_anchor"],
+            false
+        );
+        assert_eq!(
+            failed["agent_turn"]["active_work"]["obligations"],
+            json!([])
+        );
+        view["selected_inventory_goal"]["proven_at_anchor"] = json!(false);
+        assert_eq!(
+            call(&view, "offline", true)["agent_turn"]["recommendations"],
+            json!([])
+        );
+        for field in ["terminal_failure", "fenced"] {
+            let mut stopped = view.clone();
+            if field == "fenced" {
+                stopped["selected_inventory_goal"]["history"][field] = json!(true);
+            } else {
+                stopped["selected_inventory_goal"][field] = json!(true);
+            }
+            assert_eq!(
+                call(&stopped, "control", true)["agent_turn"]["recommendations"],
+                json!([])
+            );
+        }
+    }
+
+    #[test]
+    fn compact_inventory_recovery_retains_custody_and_withdraws_current_proof() {
+        let view = json!({"recovery":{"goal_history_present":true},
+            "selected_inventory_goal":{"scope":"selected_original_order_step","step_id":1,
+                "kind":"observed_inventory_minimum","item_type":"BED","minimum_stack_units":1,
+                "current_truth":"true","proven_at_anchor":true,
+                "history":{"present":true,"fenced":false},
+                "first_satisfied_anchor":{"fortress_id":"7","epoch":1,"sequence":5,
+                    "tick":130,"state_hash":"f".repeat(64)}}});
+        let retained = compact(&view);
+        assert_eq!(retained["recovery"]["goal_history_present"], true);
+        assert_eq!(
+            retained["selected_inventory_goal"]["first_satisfied_anchor"]["tick"],
+            130
+        );
+        assert_eq!(
+            retained["selected_inventory_goal"]["current_truth"],
+            Value::Null
+        );
+        assert_eq!(
+            retained["selected_inventory_goal"]["proven_at_anchor"],
+            false
+        );
+        assert_eq!(retained["original_goal_proven"], false);
+    }
+
+    #[test]
     fn later_choice_pages_are_explicit_fresh_reads_and_withdrawn_on_error() {
         let session = SessionId::new((1u128 << 127) | (24u128 << 57) | 1);
         let next = json!({"units":["43"],"option_offset":8});
@@ -263,7 +405,9 @@ mod tests {
             "production_control_enabled":true,"observation":{"seal":"a".repeat(64),
                 "workforce_choices":{"options":[{"labor":"MINE"}],
                     "next_observation_request":next}}});
-        for (verified, uncertain, expected) in [(true, false, 1), (false, false, 0), (true, true, 0)] {
+        for (verified, uncertain, expected) in
+            [(true, false, 1), (false, false, 0), (true, true, 0)]
+        {
             let (raw, overflow) = packet(
                 "fortress.query",
                 Some(session),
@@ -291,7 +435,9 @@ mod tests {
                 let arguments = &pages[0]["arguments"];
                 assert_eq!(arguments["session_id"], session.to_string());
                 let request: Value = serde_json::from_str(
-                    arguments["request"].as_str().expect("closed observation request"),
+                    arguments["request"]
+                        .as_str()
+                        .expect("closed observation request"),
                 )
                 .expect("observation request JSON");
                 assert_eq!(request, next);
