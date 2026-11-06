@@ -672,10 +672,12 @@ impl Runtime {
         }
     }
     pub(crate) fn opening_recovery_reference(&self) -> Value {
+        let selected_goal = self.selected_goal_json();
         json!({"mode":self.mode.as_str(),"anchor":anchor_json(self.anchor),"recovery":self.recovery_json(),
             "observation_tick_floor":self.observation_tick_floor.get(),
             "original_plan":self.original.as_ref().map(plan_json),"runtime_admitted":false,
-            "selected_inventory_goal":self.selected_goal_json(),
+            "selected_inventory_goal":if selected_goal["kind"] == "observed_inventory_minimum" {Some(&selected_goal)}else{None},
+            "selected_order_goal":if selected_goal["kind"] == "retained_order_completion" {Some(&selected_goal)}else{None},
             "clock":self.clock_json(),"clock_control_enabled":self.clock_control_enabled(),
             "clock_invalidates_goal":self.clock_invalidates_goal,
             "inventory_clock":self.inventory_clock_json(),
@@ -764,11 +766,13 @@ impl Runtime {
             .map(|b|json!({"seal":b.seal.to_hex(),"source_digest":b.capsule.content_digest.to_hex(),
             "paused":true,"citizens":b.projection.snapshot.graph.entities.iter().filter(|(_,r)|r.kind==dfmcp_world::EntityKind::Unit).map(|(id,_)|json!({"entity_id":id.get().to_string()})).collect::<Vec<_>>(),
             "workforce_choices":if self.original.is_none(){b.choices.as_ref()}else{None} }));
+        let selected_goal = self.selected_goal_json();
         let value = json!({"ok":true,"mode":self.mode.as_str(),"anchor":anchor_json(self.anchor),
             "runtime_admitted":false,"observation":observation,"original_plan":self.original.as_ref().map(plan_json),
             "observation_tick_floor":self.observation_tick_floor.get(),
             "frontier":frontier,"review":review,
-            "selected_inventory_goal":self.selected_goal_json(),
+            "selected_inventory_goal":if selected_goal["kind"] == "observed_inventory_minimum" {Some(&selected_goal)}else{None},
+            "selected_order_goal":if selected_goal["kind"] == "retained_order_completion" {Some(&selected_goal)}else{None},
             "clock":self.clock_json(),"clock_control_enabled":self.clock_control_enabled(),
             "clock_invalidates_goal":self.clock_invalidates_goal,
             "inventory_clock":self.inventory_clock_json(),

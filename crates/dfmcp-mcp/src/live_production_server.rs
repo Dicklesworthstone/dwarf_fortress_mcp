@@ -56,6 +56,7 @@ fn merge_recovery(old: &mut Option<Value>, latest: &Value) {
     }
     retained["review"] = Value::Null;
     retained["selected_inventory_goal"] = latest["selected_inventory_goal"].clone();
+    retained["selected_order_goal"] = latest["selected_order_goal"].clone();
     if latest.get("clock").is_some() {
         retained["clock"] = latest["clock"].clone();
     }

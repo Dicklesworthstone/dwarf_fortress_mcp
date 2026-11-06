@@ -119,12 +119,13 @@ def order_queue(created=False, *, tick=TICK, sequence=None, retired=False):
             + (struct.pack('>I', 100) if present else b''))
 
 
-def progress_capture(tick, sequence, present=True, amount=1):
+def progress_capture(tick, sequence, present=True, amount=1, remaining=None, status=3):
     """Independent progress/1.12 bytes; absent orders retain their allocation horizon."""
     raw = (b'DFMWP012' + struct.pack('>QQQIIIB', PGEN, sequence, tick, SITE, 101, int(present), 1)
            + text(b'region1') + struct.pack('>IIB', 1, 100, int(present)))
     if present:
-        raw += (struct.pack('>iBiiIiiiiiII', 69, 1, amount, amount, 3, 0, -1, 1, -1, -1, 0, 0)
+        raw += (struct.pack('>iBiiIiiiiiII', 69, 1, amount if remaining is None else remaining,
+                            amount, status, 0, -1, 1, -1, -1, 0, 0)
                 + text(b'ConstructBed') + text(b''))
     return raw
 
@@ -241,6 +242,8 @@ class Peer:
         self.after_workforce_read = None
         self.order_created = False
         self.order_retired = False
+        self.order_remaining = None
+        self.order_status = 3
         self.order_tick = TICK
         self.order_sequence = 11
         self.progress_sequence = 0
@@ -458,7 +461,8 @@ class Peer:
                 assert req[5] == 100 and self.order_created
                 self.progress_sequence += 1
                 response += blob(9, progress_capture(self.order_tick, self.progress_sequence,
-                                                    not self.order_retired, self.order_plan['amount']))
+                    not self.order_retired, self.order_plan['amount'],
+                    self.order_remaining, self.order_status))
             return response
         if plugin == 'dfmcp_operations_v1_3':
             assert req[3] == 1 and req[4] == 3
@@ -621,6 +625,12 @@ class CombinedProduction(unittest.TestCase):
         self.client = stdio.Client(self.directory, {}, suffix='inventory-clock', env=self.env)
 
     def inventory_plan(self, stable_samples=1, max_game_ticks=0):
+        return self.production_plan(stable_samples, max_game_ticks, inventory=True)
+
+    def order_plan(self, stable_samples=1):
+        return self.production_plan(stable_samples, inventory=False)
+
+    def production_plan(self, stable_samples=1, max_game_ticks=0, *, inventory):
         options = {'max_wall_millis': 60000}
         if max_game_ticks:
             options['max_game_ticks'] = max_game_ticks
@@ -631,9 +641,10 @@ class CombinedProduction(unittest.TestCase):
         self.assertTrue(observed['ok'], observed)
         request = {'expected_observation': observed['observation']['seal'], 'units': ['43'],
                    'labor': 'MINE', 'enabled': True, 'recipe': 'wooden_bed', 'amount': 1,
-                   'deadline_tick': 300, 'poll_interval_ticks': 5, 'stable_samples': stable_samples,
-                   'objective': {'kind': 'observed_inventory_minimum', 'item_type': 'BED',
-                                 'minimum_stack_units': 1}}
+                   'deadline_tick': 300, 'poll_interval_ticks': 5, 'stable_samples': stable_samples}
+        if inventory:
+            request['objective'] = {'kind': 'observed_inventory_minimum', 'item_type': 'BED',
+                                    'minimum_stack_units': 1}
         current = self.client.tool('plan', session_id=sid, request=json.dumps(request))
         self.assertTrue(current['ok'], current)
         original = current['original_plan']
@@ -649,10 +660,12 @@ class CombinedProduction(unittest.TestCase):
         self.assertTrue(current['frontier']['all_applied'])
         self.assertFalse(current['original_goal_proven'])
         self.assertIsNone(current['current_parent_goal'])
-        self.assertFalse(current['selected_inventory_goal']['proven_at_anchor'])
+        selected = 'selected_inventory_goal' if inventory else 'selected_order_goal'
+        self.assertFalse(current[selected]['proven_at_anchor'])
+        self.assertIsNone(current['selected_order_goal' if inventory else 'selected_inventory_goal'])
         return sid, original, current
 
-    def goal_sample(self, sid, tick):
+    def goal_sample(self, sid, tick, *, inventory=True):
         self.peer.goal_tick(tick)
         result = self.client.tool('wait', session_id=sid)
         self.assertTrue(result['ok'], result)
@@ -661,13 +674,15 @@ class CombinedProduction(unittest.TestCase):
         self.assertFalse(result['automatic_redispatch'])
         self.assertFalse(result['runtime_admitted'])
         parent = result['current_parent_goal']
-        self.assertEqual(parent['scope'], 'complete_original_labor_and_inventory_goal')
+        selected = 'selected_inventory_goal' if inventory else 'selected_order_goal'
+        scope = 'complete_original_labor_and_inventory_goal' if inventory else 'complete_original_labor_and_order_goal'
+        self.assertEqual(parent['scope'], scope)
         self.assertEqual(parent['anchor'], result['anchor'])
-        self.assertEqual(parent['selected_anchor'], result['selected_inventory_goal']['anchor'])
+        self.assertEqual(parent['selected_anchor'], result[selected]['anchor'])
         for field in ('fortress_id', 'epoch', 'sequence', 'tick'):
             self.assertEqual(parent['anchor'][field], parent['selected_anchor'][field])
         self.assertNotEqual(parent['anchor']['state_hash'], parent['selected_anchor']['state_hash'])
-        self.assertNotEqual(parent['source_digest'], result['selected_inventory_goal']['source_digest'])
+        self.assertNotEqual(parent['source_digest'], result[selected]['source_digest'])
         self.assertEqual(len(parent['workforce_source_digest']), 64)
         self.assertEqual(parent['original_goal_proven'], result['original_goal_proven'])
         self.assertFalse(parent['historical_labor_receipt_is_current_evidence'])
@@ -679,6 +694,109 @@ class CombinedProduction(unittest.TestCase):
             'current_truth': 'true' if labor else 'false'}])
         self.assert_single_dispatch()
         return result
+
+    def test_default_order_goal_tracks_outstanding_completion_stability_and_current_labor(self):
+        sid, original, created = self.order_plan(stable_samples=2)
+        goal = created['selected_order_goal']
+        self.assertEqual(goal['kind'], 'retained_order_completion')
+        self.assertEqual(goal['step_id'], 1)
+        self.assertEqual(goal['required_order_state'], {'amount_total': 1, 'amount_remaining': 0,
+                                                       'validated': True, 'active': False})
+        self.assertFalse(goal['disappearance_proves_completion'])
+        self.assertEqual(goal['deadline_tick'], 300)
+        outstanding = self.goal_sample(sid, 125, inventory=False)
+        self.assertEqual(outstanding['selected_order_goal']['current_truth'], 'false')
+        self.assertEqual(outstanding['current_parent_goal']['current_truth'], 'false')
+        self.assertFalse(outstanding['original_goal_proven'])
+        self.assertEqual(outstanding['agent_turn']['recommendations'][0]['tool'], 'fortress_wait')
+        self.peer.order_remaining = 0
+        self.peer.order_status = 1  # validated, inactive
+        for tick in (130, 130):
+            pending = self.goal_sample(sid, tick, inventory=False)
+            self.assertEqual(pending['selected_order_goal']['current_truth'], 'true')
+            self.assertEqual(pending['current_parent_goal']['current_truth'], 'true')
+            self.assertFalse(pending['original_goal_proven'])
+        achieved = self.goal_sample(sid, 135, inventory=False)
+        self.assertTrue(achieved['selected_order_goal']['proven_at_anchor'])
+        self.assertTrue(achieved['original_goal_proven'])
+        self.assertTrue(achieved['agent_turn']['briefing']['selected_order_goal_proven_at_anchor'])
+        self.assertFalse(achieved['agent_turn']['briefing']['selected_inventory_goal_proven_at_anchor'])
+        self.assertEqual(achieved['agent_turn']['recommendations'], [])
+        self.assertEqual(achieved['selected_order_goal']['order_entity_id'], goal['order_entity_id'])
+        self.assert_single_original_effects(achieved, original)
+        self.peer.workforce_labor = False
+        self.peer.workforce_sequence = 5
+        reversed_labor = self.goal_sample(sid, 140, inventory=False)
+        self.assertTrue(reversed_labor['selected_order_goal']['proven_at_anchor'])
+        self.assertEqual(reversed_labor['current_parent_goal']['current_truth'], 'false')
+        self.assertFalse(reversed_labor['original_goal_proven'])
+        self.assert_single_original_effects(reversed_labor, original)
+
+    def test_default_order_retirement_and_preexisting_stock_cannot_prove_completion(self):
+        sid, original, _ = self.order_plan()
+        self.peer.order_retired = True
+        self.peer.inventory_stack = 999
+        current = self.goal_sample(sid, 125, inventory=False)
+        selected = current['selected_order_goal']
+        self.assertEqual(selected['current_truth'], 'unknown')
+        self.assertEqual(current['current_parent_goal']['current_truth'], 'unknown')
+        self.assertFalse(selected['receipt_linked'])
+        self.assertFalse(selected['proven_at_anchor'])
+        self.assertIsNone(selected['first_satisfied_anchor'])
+        self.assertFalse(current['original_goal_proven'])
+        self.assertEqual(selected['parent_terminal_evidence_scope'], 'selected_order_projection_only')
+        self.assertNotIn('preexisting_items_included', selected)
+        self.assert_single_original_effects(current, original)
+
+    def test_default_order_history_reopens_without_restoring_current_completion(self):
+        sid, original, _ = self.order_plan()
+        self.peer.order_remaining = 0
+        self.peer.order_status = 1
+        achieved = self.goal_sample(sid, 125, inventory=False)
+        self.assertTrue(achieved['original_goal_proven'])
+        first = achieved['selected_order_goal']['first_satisfied_anchor']
+        self.assertIsNotNone(first)
+        closed = self.client.tool('cancel', session_id=sid, scope='session')
+        self.assertTrue(closed['ok'], closed)
+        self.assertFalse(closed['retained_reference']['selected_order_goal']['proven_at_anchor'])
+        self.client.close()
+        before = custody_files(self.directory)
+        calls = list(self.peer.calls)
+        env = reopen_environment(self.env, achieved['recovery'], achieved['native_custody']['workforce_journal_id'])
+        del env['DFMCP_SEMANTIC_WORKFORCE_ALLOW_LABOR']
+        del env['DFMCP_SEMANTIC_WORK_ORDER_ALLOW_PRODUCTION']
+        self.client = stdio.Client(self.directory, {}, suffix='order-goal-offline', env=env)
+        offline = self.client.open(mode='offline', max_wall_millis=60000)
+        self.assertTrue(offline['ok'], offline)
+        self.assertFalse(offline['original_goal_proven'])
+        self.assertIsNone(offline['current_parent_goal'])
+        self.assertIsNone(offline['selected_order_goal']['current_truth'])
+        self.assertFalse(offline['selected_order_goal']['proven_at_anchor'])
+        self.assertEqual(offline['selected_order_goal']['first_satisfied_anchor'], first)
+        self.assertEqual(offline['selected_order_goal']['required_order_state'],
+                         achieved['selected_order_goal']['required_order_state'])
+        self.assertEqual(before, custody_files(self.directory))
+        self.assertEqual(calls, self.peer.calls)
+        self.assertEqual(offline['original_plan'], original)
+        self.client.close()
+        # A finite order cannot regain remaining work after completion; that
+        # would correctly trip the retained source/configuration fence. Its
+        # legitimate retirement must instead withdraw current completion while
+        # preserving the historical qualified achievement.
+        self.peer.order_retired = True
+        env = reopen_environment(self.env, offline['recovery'], achieved['native_custody']['workforce_journal_id'])
+        self.client = stdio.Client(self.directory, {}, suffix='order-goal-reopened', env=env)
+        reopened = self.client.open(mode='reconcile', max_wall_millis=60000)
+        self.assertTrue(reopened['ok'], reopened)
+        self.assertFalse(reopened['original_goal_proven'])
+        current = self.goal_sample(reopened['agent_turn']['session_id'], 130, inventory=False)
+        self.assertEqual(current['selected_order_goal']['current_truth'], 'unknown')
+        self.assertEqual(current['current_parent_goal']['current_truth'], 'unknown')
+        self.assertFalse(current['selected_order_goal']['receipt_linked'])
+        self.assertFalse(current['selected_order_goal']['proven_at_anchor'])
+        self.assertFalse(current['original_goal_proven'])
+        self.assertEqual(current['selected_order_goal']['first_satisfied_anchor'], first)
+        self.assert_single_original_effects(current, original)
 
     def assert_single_dispatch(self):
         self.assertEqual(sum(op == 'CommitAssignment' for _, op in self.peer.calls), 1)
@@ -2002,7 +2120,7 @@ def main():
     print(json.dumps({'schema': 'dfmcp.combined-production-stdio/1', 'tests': result.testsRun,
         'failed': len(result.failures), 'errors': len(result.errors), 'skipped': len(result.skipped),
         'actual_modern_stdio': True, 'loopback_peers_are_doubles': True, 'live_game': False}))
-    raise SystemExit(0 if result.wasSuccessful() and result.testsRun == 37 and not result.skipped else 1)
+    raise SystemExit(0 if result.wasSuccessful() and result.testsRun == 40 and not result.skipped else 1)
 
 
 if __name__ == '__main__': main()

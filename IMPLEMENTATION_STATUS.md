@@ -1,5 +1,51 @@
 # Implementation Status
 
+## Unreleased — Complete default retained-order goal monitoring
+
+The combined live labor/order owner now monitors the original default finite-order
+goal when a request omits an inventory objective. It recognizes only the exact
+receipt-derived total/remaining/validated/inactive conjunction retained in both
+postconditions and the selected obligation. The selected original step/key,
+Created receipt, original request bytes, deadline, cadence and stability remain
+unchanged. The existing counter/status source policy adds no Item authority.
+Fresh workforce observations still bracket the selected sample before the whole
+original labor/order goal can be proved.
+
+Default progress is exposed separately as `selected_order_goal`; explicit inventory
+requests retain their existing `selected_inventory_goal` semantics. Agent Turn
+presentation, recovery merge and the machine host contract recognize the new
+selection. Order disappearance and pre-existing stock cannot prove this goal.
+Same-tick samples earn no stability, current labor loss withdraws complete proof,
+and recovered achievement is historical until fresh qualified evidence exists.
+The finite-order counter monotonicity fence remains intact: restoring remaining
+work after observed completion is rejected. Default order monitoring follows time
+advanced externally; both reviewed clock owners remain restricted to explicit
+inventory objectives.
+
+All 60 actual-source combined runtime/presentation/request/clock/custody unit tests
+pass with zero failures or ignored tests. Five actual Runtime/NativeShell TCP-peer
+scenarios pass: default outstanding-to-stable completion and labor loss; missing
+order with pre-existing inventory; offline original-history recovery followed by
+legitimate order retirement; and two existing inventory compatibility cases. Four
+passed in the initial run and the corrected recovery fixture passed its focused
+rerun. The fixture correction preserved the production counter-regression fence.
+The tracked actual-CLI suite now contains 40 scenarios, but that full CLI suite
+was not executed here.
+
+The component driver compiles real runtime and family-owner source with exact
+locked pure crates and serde dependencies. It supplies an explicit component
+operation-context callback and excludes the FastMCP/asupersync transport and public
+authority gate. TCP peers are synthetic; no actual DFHack/game or native admission
+is claimed. Component execution used rustc 1.100.0-nightly (908501772). All 24 changed
+Rust files pass scoped formatting on the installed latest nightly (249c1e4e3).
+The complete intent/semantic suites also passed 212/212 and 220/220 respectively.
+
+`verify.sh` passed its preceding integrity, source, repository, agent, bridge,
+admission and dependency checks, then stopped because `br` is unavailable to the
+bead-coverage gate. The full MCP dependency build and clean-source qualification
+are not claimed. Bead `df-dfhack-bridge-plane-c-pic.4.1` remains in progress for the
+broader actual-CLI, qualification and native scope.
+
 ## Unreleased — Complete project workforce in production and room plans
 
 Laboratory production, provisioned-room and connected-room sources now accept

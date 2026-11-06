@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased — Monitor default combined order completion
+
+- Monitor the original retained-order counter/status goal when a combined
+  production request omits an inventory objective, preserving original request,
+  step, receipt and stability identities.
+- Add separately labeled order progress to runtime, Agent Turn and recovery
+  responses. Require fresh current labor for complete parent proof; preserve
+  unknown disappearance, strict counter monotonicity and historical-only recovery.
+- Keep inventory objectives and both inventory-specific reviewed clocks unchanged.
+  Default retained-order sampling uses externally advanced game time.
+- Pass all 60 combined component unit tests and five actual-runtime/TCP-peer
+  scenarios. Add three tracked CLI scenarios (40 total); full CLI/native
+  qualification remains separate.
+
 ## Unreleased — Staff complete production and room workflows
 
 - Add explicit `prerequisites.workforce: "complete_project_v1"` to laboratory

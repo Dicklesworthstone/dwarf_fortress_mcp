@@ -152,6 +152,14 @@ fn machine_host_contract_preserves_bounded_development_scope() -> Result<()> {
     let parent = &host["current_parent_goal"];
     assert_eq!(parent["response_field"], "current_parent_goal");
     assert_eq!(
+        parent["scope"],
+        "complete_original_labor_and_inventory_goal"
+    );
+    assert_eq!(
+        parent["retained_order_scope"],
+        "complete_original_labor_and_order_goal"
+    );
+    assert_eq!(
         parent["adapter_entry"],
         "Executor::poll_selected_parent_goal"
     );
@@ -166,7 +174,6 @@ fn machine_host_contract_preserves_bounded_development_scope() -> Result<()> {
     );
     assert!(parent["labor_findings"]["unqualified_observed_enabled"].is_null());
     for field in [
-        "requires_explicit_original_inventory_objective",
         "requires_settled_original_effects",
         "child_source_policies_independently_checked",
         "same_original_identity_epoch_fortress_and_paused_tick",
@@ -178,15 +185,39 @@ fn machine_host_contract_preserves_bounded_development_scope() -> Result<()> {
         assert_eq!(parent[field], true, "{field}");
     }
     for field in [
+        "requires_explicit_original_inventory_objective",
         "current_state_proven_for_whole_world",
         "historical_labor_receipt_supplies_current_facts",
         "query_and_explain_acquire_new_sample",
         "restored_from_inventory_history",
+        "restored_from_order_history",
         "new_deadline_or_obligation",
         "production_attribution_proven",
     ] {
         assert_eq!(parent[field], false, "{field}");
     }
+    let selected = &host["selected_order_goal"];
+    assert_eq!(selected["kind"], "retained_order_completion");
+    assert_eq!(selected["scope"], "selected_original_order_step");
+    assert_eq!(
+        selected["required_order_state"],
+        json!({"amount_total":"exact original requested finite amount",
+            "amount_remaining":0,"validated":true,"active":false})
+    );
+    for field in [
+        "request_plan_step_key_and_predicate_bytes_changed",
+        "inventory_source_authority_added",
+        "offline_replay_restores_current_proof",
+        "disappearance_proves_completion",
+        "preexisting_inventory_proves_completion",
+        "game_time_control",
+    ] {
+        assert_eq!(selected[field], false, "{field}");
+    }
+    assert_eq!(
+        host["optional_inventory_clock"]["requires_explicit_original_inventory_objective"],
+        true
+    );
     let clock = &host["optional_order_clock"];
     assert_eq!(clock["protocol"], "order-run/1.14");
     assert_eq!(clock["parent_recovery_field"], "clock_journal_id");

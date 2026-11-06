@@ -35,6 +35,7 @@ pub(super) fn compact(view: &Value) -> Value {
         "frontier":{"entries":entries,"next_ready":view["frontier"]["next_ready"].as_u64(),"needs_reconciliation":view["frontier"]["needs_reconciliation"].as_bool(),
             "all_applied":view["frontier"]["all_applied"].as_bool(),"review":null},
         "selected_inventory_goal":compact_goal(&view["selected_inventory_goal"]),
+        "selected_order_goal":compact_goal(&view["selected_order_goal"]),
         "current_parent_goal":null,
         "parent_goal_observation_fenced":view["parent_goal_observation_fenced"] == true,
         "clock":clock_summary(&view["clock"],false,ORDER_CLOCK),"clock_control_enabled":false,
@@ -48,7 +49,7 @@ fn compact_goal(value: &Value) -> Value {
     if !value.is_object() {
         return Value::Null;
     }
-    json!({"scope":"selected_original_order_step",
+    let mut result = json!({"scope":"selected_original_order_step",
         "step_id":value["step_id"].as_u64(),"kind":bounded(&value["kind"],64),
         "item_type":bounded(&value["item_type"],16),
         "minimum_stack_units":value["minimum_stack_units"].as_u64(),
@@ -61,7 +62,20 @@ fn compact_goal(value: &Value) -> Value {
         "history":{"present":value["history"]["present"].as_bool(),
             "fenced":value["history"]["fenced"].as_bool()},
         "current_truth":null,"proven_at_anchor":false,"original_goal_proven":false,
-        "production_attribution":"unknown"})
+        "production_attribution":"unknown"});
+    if value["kind"] == "retained_order_completion" {
+        result["order_entity_id"] = json!(bounded(&value["order_entity_id"], 20));
+        result["required_order_state"] = json!({
+            "amount_total":value["required_order_state"]["amount_total"].as_u64(),
+            "amount_remaining":0,"validated":true,"active":false
+        });
+        result["disappearance_proves_completion"] = json!(false);
+        if let Some(object) = result.as_object_mut() {
+            object.remove("item_type");
+            object.remove("minimum_stack_units");
+        }
+    }
+    result
 }
 fn bounded(value: &Value, max: usize) -> Option<&str> {
     value
@@ -322,18 +336,37 @@ fn encode(
     } else {
         Value::Null
     };
+    // The original has exactly one selected objective. Conflicting projections
+    // cannot choose whichever one happens to advertise success.
+    let inventory_goal = &view["selected_inventory_goal"];
+    let order_goal = &view["selected_order_goal"];
+    let retained_order = inventory_goal.is_null()
+        && order_goal["kind"] == "retained_order_completion"
+        && order_goal["scope"] == "selected_original_order_step";
+    let raw_selected_goal = if retained_order {
+        order_goal
+    } else if order_goal.is_null() && inventory_goal["kind"] == "observed_inventory_minimum" {
+        inventory_goal
+    } else {
+        &Value::Null
+    };
+    let parent_scope = if retained_order {
+        "complete_original_labor_and_order_goal"
+    } else {
+        "complete_original_labor_and_inventory_goal"
+    };
     let selected_goal = if verified && !uncertain {
         if clock_invalidates_goal {
-            compact_goal(&view["selected_inventory_goal"])
+            compact_goal(raw_selected_goal)
         } else {
-            view["selected_inventory_goal"].clone()
+            raw_selected_goal.clone()
         }
     } else {
         Value::Null
     };
     let selected_proven = selected_goal["proven_at_anchor"] == true;
     let parent_fenced = view["parent_goal_observation_fenced"] == true;
-    // The joined sample has a different state hash from its inventory child.
+    // The joined sample has a different state hash from its selected child.
     // Present it only at the exact composite anchor, linked to that child; a
     // retained receipt, inventory achievement or top-level flag cannot fill it.
     let candidate = &view["current_parent_goal"];
@@ -342,7 +375,7 @@ fn encode(
         && !clock_invalidates_goal
         && !parent_fenced
         && mode != Some("offline")
-        && candidate["scope"] == "complete_original_labor_and_inventory_goal"
+        && candidate["scope"] == parent_scope
         && matches!(
             candidate["current_truth"].as_str(),
             Some("true" | "false" | "unknown")
@@ -625,7 +658,9 @@ fn encode(
     {
         Some((
             "fortress_wait",
-            if CLOCK_OWNERS
+            if retained_order {
+                "Take one coherent sample of the original labor and retained-order completion goal; disappearance is unknown and additional stability samples require separately managed game-time progress."
+            } else if CLOCK_OWNERS
                 .iter()
                 .any(|owner| owner.view(view).is_object())
             {
@@ -706,7 +741,11 @@ fn encode(
     }
     let mut partial_domains = vec!["retained_original_plan"];
     if selected_goal.is_object() {
-        partial_domains.push("selected_original_inventory_goal");
+        partial_domains.push(if retained_order {
+            "selected_original_order_completion_goal"
+        } else {
+            "selected_original_inventory_goal"
+        });
     }
     let mut omitted_domains = vec![
         "physical_output",
@@ -731,7 +770,7 @@ fn encode(
     }
     let mut uncertainty = if parent_fenced {
         vec![json!({
-            "scope":"complete_original_labor_and_inventory_goal",
+            "scope":parent_scope,
             "epistemic_status":"unknown", "state":"observation_fenced",
             "retryable_in_session":false,
             "finding":"Current parent observation is fenced after a source-lineage failure.",
@@ -740,24 +779,26 @@ fn encode(
     } else {
         match parent_truth {
             Some("false") => vec![json!({
-                "scope":"complete_original_labor_and_inventory_goal",
+                "scope":parent_scope,
                 "epistemic_status":"contradicted", "anchor":parent_goal["anchor"],
                 "finding":"The complete original terminal predicate is false at this sample anchor.",
-                "resolution":"Review the current parent predicate and original plan before choosing any corrective action; inventory polling alone does not establish labor truth.",
-                "selected_inventory_goal_proven_at_anchor":selected_proven
+                "resolution":"Review the current parent predicate and original plan before choosing any corrective action; selected-goal polling alone does not establish labor truth.",
+                "selected_inventory_goal_proven_at_anchor":selected_proven && !retained_order,
+                "selected_order_goal_proven_at_anchor":selected_proven && retained_order
             })],
             Some("unknown") => vec![json!({
-                "scope":"complete_original_labor_and_inventory_goal",
+                "scope":parent_scope,
                 "epistemic_status":"unknown", "anchor":parent_goal["anchor"],
                 "finding":"Current evidence does not establish the complete original terminal predicate.",
                 "resolution":"Review source coverage and current authority before another bounded sample.",
-                "selected_inventory_goal_proven_at_anchor":selected_proven
+                "selected_inventory_goal_proven_at_anchor":selected_proven && !retained_order,
+                "selected_order_goal_proven_at_anchor":selected_proven && retained_order
             })],
             None if selected_goal.is_object() => vec![json!({
-                "scope":"complete_original_labor_and_inventory_goal",
+                "scope":parent_scope,
                 "epistemic_status":"unknown",
-                "finding":"No current joined labor and inventory sample is published.",
-                "resolution":"A fresh coherent parent sample is required; selected inventory history and historical labor receipts are insufficient."
+                "finding":"No current joined labor and production-goal sample is published.",
+                "resolution":"A fresh coherent parent sample is required; selected-goal history and historical labor receipts are insufficient."
             })],
             _ => Vec::new(),
         }
@@ -845,6 +886,9 @@ fn encode(
         if result.get("selected_inventory_goal").is_some() {
             result["selected_inventory_goal"] = compact_goal(&result["selected_inventory_goal"]);
         }
+        if result.get("selected_order_goal").is_some() {
+            result["selected_order_goal"] = compact_goal(&result["selected_order_goal"]);
+        }
     }
     if let Some(labor) = &labor
         && let Some(finding) = uncertainty.first_mut()
@@ -871,7 +915,8 @@ fn encode(
             "clock_invalidates_goal":ORDER_CLOCK.invalidates_goal(view),
             "inventory_clock_invalidates_goal":INVENTORY_CLOCK.invalidates_goal(view),"current_pause_proven":false,
             "clock_receipt_is_goal_proof":false,
-            "selected_inventory_goal_proven_at_anchor":selected_proven}))
+            "selected_inventory_goal_proven_at_anchor":selected_proven && !retained_order,
+            "selected_order_goal_proven_at_anchor":selected_proven && retained_order}))
         .active_work(json!({"pending_plans":pending_plans,"actions":actions,"clock":clock_views[0],
             "inventory_clock":clock_views[1],
             "obligations":if selected_goal.is_null() {vec![]} else {vec![selected_goal]},
@@ -1020,6 +1065,149 @@ mod tests {
                     "current_truth":truth}],
                 "source_digest":"b".repeat(64),"workforce_source_digest":"c".repeat(64)}});
         (anchor, view)
+    }
+
+    fn joined_order_goal_view(truth: &str, stable: bool) -> (StateAnchor, Value) {
+        let (anchor, mut view) = joined_goal_view(truth, stable);
+        let mut goal = view["selected_inventory_goal"].take();
+        goal["kind"] = json!("retained_order_completion");
+        goal["order_entity_id"] = json!("12345");
+        goal["required_order_state"] = json!({"amount_total":4,"amount_remaining":0,
+            "validated":true,"active":false});
+        goal["deadline_tick"] = json!(300);
+        goal["poll_interval_ticks"] = json!(5);
+        goal["stable_samples"] = json!(2);
+        goal["disappearance_proves_completion"] = json!(false);
+        if let Some(object) = goal.as_object_mut() {
+            object.remove("item_type");
+            object.remove("minimum_stack_units");
+        }
+        view["selected_order_goal"] = goal;
+        view["current_parent_goal"]["scope"] = json!("complete_original_labor_and_order_goal");
+        (anchor, view)
+    }
+
+    #[test]
+    fn retained_order_goal_guides_wait_and_reports_its_own_parent_proof() {
+        for stable in [false, true] {
+            let (anchor, view) = joined_order_goal_view("true", stable);
+            let value = joined_packet(anchor, &view, "control", true, false);
+            let turn = &value["agent_turn"];
+            assert_eq!(turn["briefing"]["original_goal_proven"], stable);
+            assert_eq!(
+                turn["briefing"]["selected_order_goal_proven_at_anchor"],
+                stable
+            );
+            assert_eq!(
+                turn["briefing"]["selected_inventory_goal_proven_at_anchor"],
+                false
+            );
+            assert_eq!(
+                turn["active_work"]["obligations"][0],
+                view["selected_order_goal"]
+            );
+            assert_eq!(
+                turn["active_work"]["current_parent_goal"],
+                view["current_parent_goal"]
+            );
+            let coverage = turn["coverage"]["partial_domains"]
+                .as_array()
+                .expect("coverage");
+            assert!(coverage.contains(&json!("selected_original_order_completion_goal")));
+            assert!(!coverage.contains(&json!("selected_original_inventory_goal")));
+            let next = turn["recommendations"].as_array().expect("recommendations");
+            if stable {
+                assert!(next.is_empty());
+            } else {
+                assert_eq!(next.len(), 1);
+                assert_eq!(next[0]["tool"], "fortress_wait");
+                assert!(
+                    next[0]["reason"]
+                        .as_str()
+                        .expect("reason")
+                        .contains("retained-order")
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn retained_order_success_cannot_replace_current_labor_or_another_objective() {
+        for truth in ["false", "unknown"] {
+            let (anchor, view) = joined_order_goal_view(truth, true);
+            let value = joined_packet(anchor, &view, "control", true, false);
+            assert_eq!(
+                value["agent_turn"]["briefing"]["original_goal_proven"],
+                false
+            );
+            assert_eq!(
+                value["agent_turn"]["briefing"]["selected_order_goal_proven_at_anchor"],
+                true
+            );
+            assert_eq!(
+                value["agent_turn"]["uncertainty"][0]["scope"],
+                "complete_original_labor_and_order_goal"
+            );
+        }
+        let (anchor, original) = joined_order_goal_view("true", true);
+        for mismatch in 0..4 {
+            let mut view = original.clone();
+            match mismatch {
+                0 => {
+                    view["current_parent_goal"]["scope"] =
+                        json!("complete_original_labor_and_inventory_goal")
+                }
+                1 => {
+                    view["selected_inventory_goal"] =
+                        joined_goal_view("true", true).1["selected_inventory_goal"].clone()
+                }
+                2 => view["selected_order_goal"]["kind"] = json!("observed_inventory_minimum"),
+                _ => view["current_parent_goal"]["selected_anchor"]["tick"] = json!(131),
+            }
+            let value = joined_packet(anchor, &view, "control", true, false);
+            assert_eq!(
+                value["agent_turn"]["briefing"]["original_goal_proven"],
+                false
+            );
+            assert!(value["agent_turn"]["active_work"]["current_parent_goal"].is_null());
+        }
+    }
+
+    #[test]
+    fn retained_order_recovery_withdraws_current_proof_and_preserves_exact_goal_identity() {
+        let (anchor, view) = joined_order_goal_view("true", true);
+        let retained = compact(&view);
+        let goal = &retained["selected_order_goal"];
+        assert_eq!(goal["order_entity_id"], "12345");
+        assert_eq!(
+            goal["required_order_state"],
+            view["selected_order_goal"]["required_order_state"]
+        );
+        assert_eq!(
+            goal["first_satisfied_anchor"],
+            view["selected_order_goal"]["first_satisfied_anchor"]
+        );
+        assert_eq!(goal["deadline_tick"], 300);
+        assert_eq!(goal["stable_samples"], 2);
+        assert_eq!(goal["proven_at_anchor"], false);
+        assert!(goal["current_truth"].is_null());
+        assert!(retained["current_parent_goal"].is_null());
+        assert!(goal.get("item_type").is_none());
+        for (mode, verified, uncertain) in [
+            ("offline", true, false),
+            ("control", false, false),
+            ("control", true, true),
+        ] {
+            let value = joined_packet(anchor, &retained, mode, verified, uncertain);
+            assert_eq!(
+                value["agent_turn"]["briefing"]["original_goal_proven"],
+                false
+            );
+            assert_eq!(
+                value["agent_turn"]["briefing"]["selected_order_goal_proven_at_anchor"],
+                false
+            );
+        }
     }
 
     fn joined_packet(

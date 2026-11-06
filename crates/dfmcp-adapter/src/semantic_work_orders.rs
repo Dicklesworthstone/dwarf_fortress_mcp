@@ -36,7 +36,7 @@ pub use goal_monitor::{
     OperationsGoalSource, WorkOrderGoalMonitor, WorkOrderGoalProgress, WorkOrderGoalResult,
 };
 pub use goal_projection::{WorkOrderGoalProjection, WorkOrderPhysicalState};
-pub use inventory_objective::ObservedInventoryObjective;
+pub use inventory_objective::{ObservedInventoryObjective, RetainedOrderObjective};
 use store::{Association, MAX_ASSOCIATIONS, MAX_STORE_BYTES};
 pub use store::{AssociationStore, PrivateAssociationStore, open_private_association_store};
 

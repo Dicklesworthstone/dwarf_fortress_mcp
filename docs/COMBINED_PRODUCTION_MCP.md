@@ -13,10 +13,10 @@ Owner: `df-dfhack-bridge-plane-c-pic.4.1`. The broader dispatcher and recovery
 tasks `.4` and `.5` remain open. This host does not supply a complete fortress
 controller or material/workshop planning. Separately configured bounded clock
 runs can advance an original receipt-linked production order or finish an already
-observed inventory stability interval after the order retires. An explicitly selected
-inventory objective can be monitored for the original order step. A separate
-fresh labor-and-inventory observation can establish the complete original
-parent goal at its exact reported anchor.
+observed inventory stability interval after the order retires. Wait monitors the
+original order's completion by default, or an explicitly selected inventory
+objective. A separate fresh observation of that goal and current labor can
+establish the complete original parent goal at its exact reported anchor.
 
 ## Operator configuration
 
@@ -103,8 +103,8 @@ retain the frozen eleven-tool waist; this profile's wire names are underscores.
    deadline and whole plan digest are retained throughout.
 
 Wait performs one original-key reconciliation. Once both original effects are
-settled, it can acquire one qualified sample for an explicitly selected inventory
-objective, bracketed by matching current selected-labor captures. It never
+settled, it can acquire one qualified sample for the original order-completion or
+explicit inventory objective, bracketed by matching current selected-labor captures. It never
 dispatches, sleeps, polls indefinitely or advances game time. An uncertain effect prohibits a
 replacement key or a fresh original plan. Cancel with `scope="step"` retires
 a proven preparation; it does not undo an Applied effect. `scope="session"`
@@ -343,6 +343,46 @@ A nondefault selection or page request is refused before native contact; the
 host cannot acquire a replacement canonical world or rebase the original
 anchor through these selectors.
 
+## Monitor the original finite order's completion
+
+When `objective` is omitted or null, Wait now monitors the completion predicate
+already sealed into the original plan. The request identity, original steps,
+idempotency keys and terminal predicate remain unchanged. After both native
+effects settle, Wait starts the same durable `goal.history` machinery used by
+explicit inventory objectives and samples the exact receipt-linked manager
+order with the existing qualified progress and operations sources.
+
+The `selected_order_goal` object has `kind="retained_order_completion"` and the
+original `step_id`. Its canonical `order_entity_id` is derived from the original
+order key; `required_order_state` exposes the exact required fields:
+
+- `amount_total` equals the original requested finite amount.
+- `amount_remaining` equals zero.
+- `validated` is true and `active` is false.
+
+All four fields must be qualified at the same sample. A still-outstanding order
+makes the selected goal false. A missing or retired order leaves completion
+unknown: disappearance, a Created receipt, and existing inventory cannot prove
+this predicate. `disappearance_proves_completion` is always false. This goal
+proves the observed retained order state, without attributing produced goods.
+
+`current_truth`, `anchor`, `proven_at_anchor`, `first_satisfied_anchor` and
+`history` have the same current-versus-historical meaning described below for
+inventory goals. The original deadline, cadence and sampled stability apply;
+repeated reads at one tick cannot complete advancing stability. Agent Turn
+recommends bounded Wait calls while this requirement remains unfinished.
+Current game-time progression must be managed separately for this default
+objective; the optional reviewed clocks retain their explicit inventory-objective
+requirement.
+
+The selected object alone keeps `original_goal_proven=false`. A fresh current
+labor bracket can establish the whole parent under
+`current_parent_goal.scope="complete_original_labor_and_order_goal"`, provided
+the selected temporal requirement is also fulfilled. The other selected-goal
+field is null: explicit inventory requests use `selected_inventory_goal`, while
+default requests use `selected_order_goal`. Query, Explain, failure withdrawal
+and offline recovery retain this distinction.
+
 ## Select and monitor an original inventory objective
 
 Include an `objective` in the first closed request to ask whether the original
@@ -408,23 +448,23 @@ repeated reads at one tick cannot supply advancing samples. A failed call clears
 current proof and unfinished continuity without extra I/O. The next admitted
 sample persists that interruption; historical first achievement remains intact.
 
-### Prove the complete original parent
+## Prove the complete original parent
 
 Each fresh goal Wait reads the selected citizens' current workforce state,
-publishes the original selected inventory sample, and reads the same workforce
+publishes the original selected order-completion or inventory sample, and reads the same workforce
 state again. The workforce captures must agree exactly, including their source
 incarnation, sequence, original citizen identities, labor schema and paused tick.
-The inventory and labor observations must also share the same fortress, restore
+The selected goal and labor observations must also share the same fortress, restore
 epoch and tick. Each source receives its own independently checked operator
 policy. Historical Applied receipts establish custody and identity only.
 
 `current_parent_goal` is a separate object containing `current_truth`,
 `original_goal_proven`, a combined `anchor`, the original `selected_anchor`, and
 the composite and workforce source digests. Its truth evaluates the unchanged
-complete parent terminal. Its proof additionally requires the selected inventory
+complete parent terminal. Its proof additionally requires the selected goal
 obligation's original cadence and stability. The top-level `original_goal_proven`
 and Agent Turn briefing reflect that same scoped result. The combined anchor has
-its own state hash; the selected inventory anchor remains distinct and visible.
+its own state hash; the selected goal anchor remains distinct and visible.
 
 The object's bounded `labor` array identifies the original selected citizens in
 canonical ID order. Each row names `unit_id`, `labor`, `requested_enabled`,
@@ -436,21 +476,21 @@ citizens. Agent Turn summarizes comparison counts and at most eight false or
 unknown labor blockers, with an explicit omitted count and the full bounded
 array available in `active_work.current_parent_goal`.
 
-Current labor reversal makes the parent false even when inventory remains proved.
+Current labor reversal makes the parent false even when the selected goal remains proved.
 Missing qualified labor leaves it unknown. A changed capture during the bracket,
 lost custody, revoked source policy or failed response publication withdraws both
 current parent proof and the selected current sample. A proved parent stops
-completion polling. If inventory is proved but current labor contradicts the
+completion polling. If the selected goal is proved but current labor contradicts the
 original goal, guidance exposes the contradiction without proposing another
 dispatch under the already-used original keys.
 
 Parent evidence is process-local and valid at its reported anchor. Query and
 Explain inspect that retained sample without new native reads. Reopening starts
 with `current_parent_goal=null` and `original_goal_proven=false`, even when durable
-inventory history records a first achievement. A fresh coherent Wait is required
+selected goal history records a first achievement. A fresh coherent Wait is required
 to obtain parent proof again. No parent achievement is reconstructed from the
-inventory-only history. Completion still makes no causal claim that this order
-produced the counted items, and no claim about material, usability or workshop
+selected history. Completion still makes no causal claim that this order
+produced any counted items, and no claim about material, usability or workshop
 feasibility.
 
 `parent_goal_observation_fenced=true` means a source/identity regression prevents
@@ -463,7 +503,7 @@ the fence.
 
 Retain all native journals and semantic associations in both child directories,
 plus parent `original.plan`, `original.citizens`, `execution.journal` and
-`goal.history` if selected inventory monitoring has started.
+`goal.history` if selected goal monitoring has started.
 Persist the latest complete `recovery` object outside those files. It includes
 the original plan/object/citizen digests and anchor, and frontier journal/head/
 authority-tick-floor. The additive Boolean `goal_history_present` records

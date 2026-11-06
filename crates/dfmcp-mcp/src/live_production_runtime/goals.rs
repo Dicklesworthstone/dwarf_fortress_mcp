@@ -1,19 +1,40 @@
-//! Foreground proof of the complete original labor/inventory goal. Current
-//! labor brackets the selected inventory sample; historical receipts only
+//! Foreground proof of the complete original labor/production goal. Current
+//! labor brackets the selected order or inventory sample; historical receipts only
 //! establish custody and never become current labor facts.
 use super::*;
 use dfmcp_adapter::live_routing::LiveRoutingEvidence;
-use dfmcp_adapter::semantic_work_orders::{ObservedInventoryObjective, WorkOrderGoalProgress};
+use dfmcp_adapter::semantic_work_orders::{
+    ObservedInventoryObjective, RetainedOrderObjective, WorkOrderGoalProgress,
+};
 use dfmcp_core::StepId;
 use dfmcp_intent::ObligationStatus;
 use dfmcp_world::PredicateTruth;
 
-fn selected(plan: &PreparedPlan) -> Option<(StepId, ObservedInventoryObjective)> {
+enum SelectedObjective {
+    Inventory(ObservedInventoryObjective),
+    RetainedOrder(RetainedOrderObjective),
+}
+impl SelectedObjective {
+    fn parent_scope(&self) -> &'static str {
+        match self {
+            Self::Inventory(_) => "complete_original_labor_and_inventory_goal",
+            Self::RetainedOrder(_) => "complete_original_labor_and_order_goal",
+        }
+    }
+}
+
+fn selected(plan: &PreparedPlan) -> Option<(StepId, SelectedObjective)> {
     let step = plan
         .steps
         .iter()
         .find(|step| matches!(step.action, Action::CreateWorkOrder { .. }))?;
-    ObservedInventoryObjective::from_selected_plan(plan, step.id).map(|goal| (step.id, goal))
+    let objective = ObservedInventoryObjective::from_selected_plan(plan, step.id)
+        .map(SelectedObjective::Inventory)
+        .or_else(|| {
+            RetainedOrderObjective::from_selected_plan(plan, step.id)
+                .map(SelectedObjective::RetainedOrder)
+        })?;
+    Some((step.id, objective))
 }
 
 /// Empty initialization has a fixed bound; a retained history may use the
@@ -70,9 +91,12 @@ impl Runtime {
     }
 
     pub(super) fn parent_goal_json(&self) -> Value {
+        let Some((_, objective)) = self.original.as_ref().and_then(selected) else {
+            return Value::Null;
+        };
         self.current_parent_goal().map_or(Value::Null, |parent| {
             json!({
-                "scope":"complete_original_labor_and_inventory_goal",
+                "scope":objective.parent_scope(),
                 "current_truth":truth(parent.current_truth),
                 "original_goal_proven":self.parent_goal_proven(),
                 "anchor":anchor_json(parent.anchor),
@@ -127,11 +151,8 @@ impl Runtime {
                 ObligationStatus::Failed { .. } | ObligationStatus::Cancelled { .. }
             )
         });
-        json!({
+        let mut value = json!({
             "scope":"selected_original_order_step", "step_id":step.get(),
-            "kind":"observed_inventory_minimum", "item_type":objective.item_type,
-            "minimum_stack_units":objective.min_stack_units,
-            "quantity_semantics":"sum_of_observed_stack_size",
             "deadline_tick":obligation.map(|spec| spec.deadline_tick.get()),
             "poll_interval_ticks":obligation.map(|spec| spec.poll_interval_ticks),
             "stable_samples":obligation.map(|spec| spec.stable_for_observations),
@@ -140,7 +161,6 @@ impl Runtime {
             "anchor":current.map(|sample| anchor_json(sample.anchor)),
             "source_digest":current.map(|sample| sample.source_digest.to_hex()),
             "parent_terminal_truth":current.map(|sample| truth(sample.plan_terminal)),
-            "parent_terminal_evidence_scope":"selected_inventory_projection_only",
             "original_goal_proven":false,
             "receipt_linked":current.map(|sample| sample.receipt_linked),
             "physical_work":current.map(|sample| format!("{:?}",sample.physical_work)),
@@ -153,9 +173,32 @@ impl Runtime {
                 "events":monitor.map_or(0, |monitor| monitor.history_event_count()),
                 "bytes":monitor.map_or(0, |monitor| monitor.history_byte_len()),
                 "fenced":monitor.is_some_and(|monitor| monitor.is_fenced())},
-            "preexisting_items_included":true, "production_attribution":"unknown",
-            "material_classification":"unknown", "eligibility":"not_assessed"
-        })
+            "production_attribution":"unknown"
+        });
+        match objective {
+            SelectedObjective::Inventory(objective) => {
+                value["kind"] = json!("observed_inventory_minimum");
+                value["item_type"] = json!(objective.item_type);
+                value["minimum_stack_units"] = json!(objective.min_stack_units);
+                value["quantity_semantics"] = json!("sum_of_observed_stack_size");
+                value["parent_terminal_evidence_scope"] =
+                    json!("selected_inventory_projection_only");
+                value["preexisting_items_included"] = json!(true);
+                value["material_classification"] = json!("unknown");
+                value["eligibility"] = json!("not_assessed");
+            }
+            SelectedObjective::RetainedOrder(objective) => {
+                value["kind"] = json!("retained_order_completion");
+                value["order_entity_id"] = json!(objective.order_entity_id.get().to_string());
+                value["required_order_state"] = json!({
+                    "amount_total":objective.amount_total,"amount_remaining":0,
+                    "validated":true,"active":false
+                });
+                value["parent_terminal_evidence_scope"] = json!("selected_order_projection_only");
+                value["disappearance_proves_completion"] = json!(false);
+            }
+        }
+        value
     }
 
     pub(super) fn raise_goal_floor(&mut self) {
@@ -188,8 +231,9 @@ impl Runtime {
             .as_ref()
             .ok_or_else(|| invalid("original combined plan absent"))?
             .clone();
-        let (step, _) = selected(&original)
-            .ok_or_else(|| denied("original plan has no selected inventory objective"))?;
+        let (step, _) = selected(&original).ok_or_else(|| {
+            denied("original plan has no supported selected production objective")
+        })?;
         let frontier = self
             .frontier
             .as_mut()
@@ -197,7 +241,7 @@ impl Runtime {
             .inspect(&work.take(8 * MIB)?)?;
         if !frontier.all_applied() || frontier.needs_reconciliation() {
             return Err(denied(
-                "inventory monitoring requires both original native effects to be settled",
+                "goal monitoring requires both original native effects to be settled",
             ));
         }
         self.arm(work)?;
@@ -395,7 +439,7 @@ impl Runtime {
                             custody.verify(current)?;
                             if projection.anchor().tick.get() < clock_floor {
                                 return Err(denied(
-                                    "inventory evidence predates consumed clock time",
+                                    "production evidence predates consumed clock time",
                                 ));
                             }
                             config
@@ -420,7 +464,7 @@ impl Runtime {
             let result = result?;
             verified?;
             disarmed?;
-            // The joined snapshot has its own digest; the selected inventory
+            // The joined snapshot has its own digest; the selected production
             // anchor remains separately visible and is never relabelled.
             self.anchor = result.parent_progress().anchor;
             self.parent_goal = Some(result.parent_progress().clone());

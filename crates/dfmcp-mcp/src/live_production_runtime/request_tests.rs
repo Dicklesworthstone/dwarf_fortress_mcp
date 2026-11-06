@@ -251,3 +251,124 @@ fn inventory_choice_is_closed_recipe_matched_and_identity_bound() -> Result<()> 
     }
     Ok(())
 }
+
+#[test]
+fn retained_order_objective_binds_the_original_step_and_exact_completion_predicates() -> Result<()>
+{
+    use dfmcp_adapter::semantic_work_orders::{ObservedInventoryObjective, RetainedOrderObjective};
+    let snapshot = snapshot();
+    let c = context(&snapshot);
+    let evidence = PredicateEvidence::laboratory(&snapshot)?;
+    for recipe in ["wooden_bed", "wooden_door", "wooden_table", "wooden_chair"] {
+        let mut request = request();
+        request.recipe = recipe.into();
+        request.amount = 7;
+        let plan = request.compile(&evidence, &c)?;
+        let unchanged = plan.clone();
+        let step = &plan.steps[1];
+        let goal = RetainedOrderObjective::from_selected_plan(&plan, step.id)
+            .ok_or_else(|| invalid("default retained-order objective absent"))?;
+        assert_eq!(
+            goal.order_entity_id,
+            created_entity_id(&step.idempotency_key, 0)
+        );
+        assert_eq!(goal.amount_total, 7);
+        assert!(ObservedInventoryObjective::from_selected_plan(&plan, step.id).is_none());
+        assert!(RetainedOrderObjective::from_selected_plan(&plan, StepId::ZERO).is_none());
+        assert!(RetainedOrderObjective::from_selected_plan(&plan, StepId::new(2)).is_none());
+        assert_eq!(plan, unchanged);
+    }
+    Ok(())
+}
+
+#[test]
+fn retained_order_recognition_refuses_weakened_substituted_and_inventory_goals() -> Result<()> {
+    use dfmcp_adapter::semantic_work_orders::RetainedOrderObjective;
+    let snapshot = snapshot();
+    let c = context(&snapshot);
+    let evidence = PredicateEvidence::laboratory(&snapshot)?;
+    let original = request().compile(&evidence, &c)?;
+    for changed_field in [
+        "amount_total",
+        "amount_remaining",
+        "validated",
+        "active",
+        "entity",
+    ] {
+        let mut changed = original.clone();
+        let step = &mut changed.steps[1];
+        let spec = step
+            .obligation
+            .as_mut()
+            .ok_or_else(|| invalid("original obligation absent"))?;
+        let Predicate::All(clauses) = &mut spec.terminal else {
+            return Err(invalid("default goal must be a conjunction"));
+        };
+        for clause in clauses {
+            if let Predicate::FieldCompare {
+                entity_id,
+                field,
+                value,
+                ..
+            } = clause
+            {
+                if changed_field == "entity" {
+                    *entity_id = EntityId::new(42);
+                } else if field == changed_field {
+                    *value = match changed_field {
+                        "amount_total" => Value::U64(2),
+                        "amount_remaining" => Value::U64(1),
+                        "validated" => Value::Bool(false),
+                        _ => Value::Bool(true),
+                    };
+                }
+            }
+        }
+        step.postconditions = vec![spec.terminal.clone()];
+        changed.digest = changed.compute_digest();
+        changed.id = changed.expected_id();
+        changed.validate_structure()?;
+        assert!(RetainedOrderObjective::from_selected_plan(&changed, StepId::new(1)).is_none());
+    }
+    for mode in 0..3 {
+        let mut changed = original.clone();
+        match mode {
+            0 => {
+                // A valid but weaker predicate isolates objective recognition
+                // from the plan validator's independent trivial-goal refusal.
+                changed.steps[1].postconditions = vec![Predicate::FieldCompare {
+                    entity_id: created_entity_id(&changed.steps[1].idempotency_key, 0),
+                    field: "amount_remaining".into(),
+                    op: CompareOp::Eq,
+                    value: Value::U64(0),
+                }]
+            }
+            1 => changed.steps[1].obligation = None,
+            _ => {
+                changed.steps[1]
+                    .obligation
+                    .as_mut()
+                    .ok_or_else(|| invalid("obligation absent"))?
+                    .failure = Some(Predicate::Paused(false))
+            }
+        }
+        changed.digest = changed.compute_digest();
+        changed.id = changed.expected_id();
+        if mode == 1 {
+            // Temporal work orders already require a bounded obligation at
+            // the structural boundary; recognition must reject them too.
+            assert!(changed.validate_structure().is_err());
+        } else {
+            changed.validate_structure()?;
+        }
+        assert!(RetainedOrderObjective::from_selected_plan(&changed, StepId::new(1)).is_none());
+    }
+    let mut inventory = request();
+    inventory.objective = Some(Objective::ObservedInventoryMinimum {
+        item_type: "BED".into(),
+        minimum_stack_units: 1,
+    });
+    let inventory = inventory.compile(&evidence, &c)?;
+    assert!(RetainedOrderObjective::from_selected_plan(&inventory, StepId::new(1)).is_none());
+    Ok(())
+}

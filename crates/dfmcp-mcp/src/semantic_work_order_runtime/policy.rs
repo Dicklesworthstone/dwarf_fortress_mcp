@@ -5,7 +5,9 @@ use dfmcp_adapter::live_projection::LiveWorldProjection;
 use dfmcp_adapter::semantic_work_orders::goal_projection::{
     ORDER_COUNTER_SOURCE, ORDER_STATUS_SOURCE,
 };
-use dfmcp_adapter::semantic_work_orders::{ObservedInventoryObjective, WorkOrderGoalProjection};
+use dfmcp_adapter::semantic_work_orders::{
+    ObservedInventoryObjective, RetainedOrderObjective, WorkOrderGoalProjection,
+};
 use dfmcp_adapter::work_orders::rpc::WorkOrderManifest;
 use dfmcp_adapter::{BridgeManifest, LiveObservationCapsule};
 use dfmcp_core::{Capability, FortressId, OperationContext, Result, RiskTier, StepId};
@@ -282,8 +284,10 @@ impl SourceAcceptance {
         )
     }
 
-    /// The combined host proves one explicitly selected original inventory
-    /// objective. Selection never slices or reseals the retained parent plan.
+    /// Qualify only the exact selected original objective. Default retained
+    /// order goals keep the existing counter/status policy; only an explicit
+    /// inventory objective can add Item authority. Selection never slices or
+    /// reseals the retained parent plan.
     pub(crate) fn goal_for_selected(
         &self,
         original: &PreparedPlan,
@@ -291,12 +295,13 @@ impl SourceAcceptance {
         projection: &WorkOrderGoalProjection,
         context: &OperationContext,
     ) -> Result<EvidencePolicy> {
-        if ObservedInventoryObjective::from_selected_plan(original, step).is_none() {
+        let inventory = ObservedInventoryObjective::from_selected_plan(original, step).is_some();
+        if !inventory && RetainedOrderObjective::from_selected_plan(original, step).is_none() {
             return Err(denied(
-                "selected original step has no supported inventory objective",
+                "selected original step has no supported order-completion or inventory objective",
             ));
         }
-        self.goal_with_inventory(true, projection, context)
+        self.goal_with_inventory(inventory, projection, context)
     }
 
     fn goal_with_inventory(
