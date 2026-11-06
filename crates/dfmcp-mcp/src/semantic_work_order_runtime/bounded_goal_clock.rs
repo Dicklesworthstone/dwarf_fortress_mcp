@@ -418,13 +418,13 @@ impl<J: EffectJournalStorage, T: GoalClockTarget> Clock<J, T> {
             return Err(uncertain());
         }
         let capture = self.journal.observe(
-            source,
+            &mut ObservedSource {
+                inner: source,
+                tick_floor: &mut self.observed_tick_floor,
+                sequence_floor: &mut self.observed_sequence_floor,
+            },
             &native_context(n, &work.reserve(ACTION_BYTES)?, None)?,
         )?;
-        if let Some(tick) = capture.tick() {
-            self.observed_tick_floor = self.observed_tick_floor.max(tick);
-        }
-        self.observed_sequence_floor = self.observed_sequence_floor.max(capture.sequence());
         let tick = target.capture(&capture)?;
         if tick != c.anchor.tick.get()
             || tick < n.anchor.tick.get()
@@ -450,8 +450,13 @@ impl<J: EffectJournalStorage, T: GoalClockTarget> Clock<J, T> {
         }
         let canonical = work.reserve(ACTION_BYTES)?;
         let native = native_context(n, &canonical, Some(plan.before()))?;
-        let mut checked = GuardedSource {
+        let mut observed = ObservedSource {
             inner: source,
+            tick_floor: &mut self.observed_tick_floor,
+            sequence_floor: &mut self.observed_sequence_floor,
+        };
+        let mut checked = GuardedSource {
+            inner: &mut observed,
             guard: &mut guard,
             canonical,
             started: Instant::now(),
@@ -508,8 +513,13 @@ impl<J: EffectJournalStorage, T: GoalClockTarget> Clock<J, T> {
         Self::authorize_plan(target, p, c, n)?;
         let canonical = work.reserve(ACTION_BYTES)?;
         let native = native_context(n, &canonical, Some(p.before()))?;
-        let mut checked = GuardedSource {
+        let mut observed = ObservedSource {
             inner: source,
+            tick_floor: &mut self.observed_tick_floor,
+            sequence_floor: &mut self.observed_sequence_floor,
+        };
+        let mut checked = GuardedSource {
+            inner: &mut observed,
             guard: &mut guard,
             canonical,
             started: Instant::now(),
@@ -533,7 +543,11 @@ impl<J: EffectJournalStorage, T: GoalClockTarget> Clock<J, T> {
         if view.needs_reconciliation() {
             let run = view.active().ok_or_else(uncertain)?;
             self.journal.reconcile(
-                source,
+                &mut ObservedSource {
+                    inner: source,
+                    tick_floor: &mut self.observed_tick_floor,
+                    sequence_floor: &mut self.observed_sequence_floor,
+                },
                 run.entry.plan().key(),
                 run.entry.plan().digest(),
                 &native_context(n, &work.reserve(ACTION_BYTES)?, None)?,
@@ -560,14 +574,83 @@ impl<J: EffectJournalStorage, T: GoalClockTarget> Clock<J, T> {
         let view = self.view(Some(target), &work.reserve(VIEW_BYTES)?, n)?;
         Self::authorize_floor(&view, c, n, true)?;
         if let Some(run) = view.active() {
+            let mut observed = source.map(|inner| ObservedSource {
+                inner,
+                tick_floor: &mut self.observed_tick_floor,
+                sequence_floor: &mut self.observed_sequence_floor,
+            });
             self.journal.cancel(
-                source,
+                observed.as_mut().map(|source| source as &mut dyn RunSource),
                 run.entry.plan().key(),
                 run.entry.plan().digest(),
                 &native_context(n, &work.reserve(ACTION_BYTES)?, None)?,
             )?;
         }
         self.inspect(Some(target), &work.narrow(&output)?, n)
+    }
+}
+
+/// Consume complete native evidence before the journal's subsequent witness,
+/// identity, authority or storage checks can reject it. A refused preflight may
+/// observe a later tick without creating any durable run record; it must still
+/// prevent a later rollback from reviving old goal evidence in this owner.
+/// These floors grant no eligibility, current pause proof or dispatch permit.
+struct ObservedSource<'a, N: ?Sized> {
+    inner: &'a mut N,
+    tick_floor: &'a mut u64,
+    sequence_floor: &'a mut u64,
+}
+impl<N: ?Sized> ObservedSource<'_, N> {
+    fn observation(&mut self, observation: &RunObservation) {
+        if let Some(tick) = observation.tick() {
+            *self.tick_floor = (*self.tick_floor).max(tick);
+        }
+        *self.sequence_floor = (*self.sequence_floor).max(observation.sequence());
+    }
+    fn record(&mut self, record: &RunRecord) {
+        self.observation(record.plan().before());
+        if let Some(tick) = record.observed_tick() {
+            *self.tick_floor = (*self.tick_floor).max(tick);
+        }
+        if record.unpause_attempted() {
+            *self.sequence_floor =
+                (*self.sequence_floor).max(record.plan().before().sequence().saturating_add(1));
+        }
+    }
+}
+impl<N: RunSource + ?Sized> RunSource for ObservedSource<'_, N> {
+    fn manifest(&self) -> &RunManifest {
+        self.inner.manifest()
+    }
+    fn endpoint(&self) -> Option<SocketAddr> {
+        self.inner.endpoint()
+    }
+    fn observe(&mut self, c: &OperationContext) -> Result<RunObservation> {
+        let observation = self.inner.observe(c)?;
+        self.observation(&observation);
+        Ok(observation)
+    }
+    fn prepare(&mut self, p: &RunPlan, c: &OperationContext) -> Result<RunRecord> {
+        let record = self.inner.prepare(p, c)?;
+        self.record(&record);
+        Ok(record)
+    }
+    fn commit(&mut self, p: &RunPlan, c: &OperationContext) -> Result<RunRecord> {
+        let record = self.inner.commit(p, c)?;
+        self.record(&record);
+        Ok(record)
+    }
+    fn query(&mut self, p: &RunPlan, c: &OperationContext) -> Result<Option<RunRecord>> {
+        let record = self.inner.query(p, c)?;
+        if let Some(record) = &record {
+            self.record(record);
+        }
+        Ok(record)
+    }
+    fn cancel(&mut self, p: &RunPlan, c: &OperationContext) -> Result<RunRecord> {
+        let record = self.inner.cancel(p, c)?;
+        self.record(&record);
+        Ok(record)
     }
 }
 

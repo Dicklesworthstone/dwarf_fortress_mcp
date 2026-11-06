@@ -80,6 +80,13 @@ impl ProductionClock {
     pub(super) fn may_be_running(&self) -> bool {
         self.inspection_required || self.latest.as_ref().is_some_and(ClockView::may_be_running)
     }
+    pub(super) fn pending(&self) -> bool {
+        self.inspection_required
+            || self
+                .latest
+                .as_ref()
+                .is_some_and(|view| view.pending || view.unresolved)
+    }
     pub(super) fn has_runs(&self) -> bool {
         self.latest.as_ref().is_some_and(ClockView::has_runs)
     }
@@ -168,12 +175,28 @@ impl Runtime {
         })
     }
     pub(super) fn clock_advancement_json(&self) -> Value {
-        self.clock
+        let order = self
+            .clock
             .as_ref()
-            .map_or(json!(false), ProductionClock::historical_advancement)
+            .map_or(json!(false), ProductionClock::historical_advancement);
+        let inventory = self.inventory_clock.as_ref().map_or(
+            json!(false),
+            ProductionInventoryClock::historical_advancement,
+        );
+        if order == true || inventory == true {
+            json!(true)
+        } else if order.is_null() || inventory.is_null() {
+            Value::Null
+        } else {
+            json!(false)
+        }
     }
     pub(super) fn raise_clock_floor(&mut self) {
         if let Some(clock) = &self.clock {
+            self.observation_tick_floor =
+                self.observation_tick_floor.max(GameTick(clock.high_tick()));
+        }
+        if let Some(clock) = &self.inventory_clock {
             self.observation_tick_floor =
                 self.observation_tick_floor.max(GameTick(clock.high_tick()));
         }
@@ -185,10 +208,15 @@ impl Runtime {
     }
     pub(super) fn clock_withholds_goal(&self) -> bool {
         self.clock_invalidates_goal
+            || self.inventory_clock_invalidates_goal
             || self
                 .clock
                 .as_ref()
                 .is_some_and(ProductionClock::may_be_running)
+            || self
+                .inventory_clock
+                .as_ref()
+                .is_some_and(ProductionInventoryClock::may_be_running)
     }
     /// A newly settled executor result has already passed complete predecessor
     /// and final custody checks. Retain only its immutable clock identity here;
@@ -275,6 +303,20 @@ impl Runtime {
         Ok(())
     }
     fn inspect_original_clock_target(&mut self, c: &OperationContext) -> Result<ClockTarget> {
+        self.inspect_original_goal_clock_target(c, ClockTarget::for_selected_original)
+    }
+    /// Both clock families retain the complete original archive and predecessor
+    /// custody. The target builder only chooses the domain-separated clock key.
+    pub(super) fn inspect_original_goal_clock_target<T>(
+        &mut self,
+        c: &OperationContext,
+        build: impl FnOnce(
+            &PreparedPlan,
+            PlanArchiveSeal,
+            Digest32,
+            &SemanticWorkOrderResult,
+        ) -> Result<T>,
+    ) -> Result<T> {
         self.config.current()?;
         let mut work = Work::new(c)?;
         self.arm(&mut work)?;
@@ -312,7 +354,7 @@ impl Runtime {
                 .as_mut()
                 .ok_or_else(|| denied("original executor absent"))?
                 .inspect_selected_order_custody(step, &work.take(TARGET_BYTES)?)?;
-            let target = ClockTarget::for_selected_original(
+            let target = build(
                 original,
                 self.seal.ok_or_else(|| denied("original archive absent"))?,
                 self.order_journal,
@@ -390,6 +432,15 @@ impl Runtime {
     }
     fn sample_clock_target(&mut self, c: &OperationContext) -> Result<ClockTarget> {
         self.wait_with_goal(c)?;
+        if self
+            .inventory_clock
+            .as_ref()
+            .is_some_and(ProductionInventoryClock::pending)
+        {
+            return Err(denied(
+                "settle or cancel the retained inventory clock before an order run",
+            ));
+        }
         let clock = self
             .clock
             .as_ref()
@@ -445,7 +496,20 @@ impl Runtime {
             return Err(denied("independent operator clock authority was revoked"));
         }
         c.authorize(Capability::ControlClock, RiskTier::Guarded, &[], None)?;
-        let current = self.inspect_original_clock_target(c)?;
+        let mut work = Work::new(c)?;
+        if self.inventory_clock.is_some() {
+            self.refresh_inventory_clock_view(&work.take(CLOCK_VIEW_BYTES)?)?;
+        }
+        if self
+            .inventory_clock
+            .as_ref()
+            .is_some_and(ProductionInventoryClock::pending)
+        {
+            return Err(denied(
+                "settle or cancel the retained inventory clock before an order run",
+            ));
+        }
+        let current = self.inspect_original_clock_target(&work.rest(GUARDED_TARGET_BYTES)?)?;
         if current.digest() != target.digest() {
             return Err(denied(
                 "selected original clock custody changed before its native effect",

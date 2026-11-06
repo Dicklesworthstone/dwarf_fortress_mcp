@@ -2,6 +2,7 @@
 //! Unadmitted combined labor and finite-order MCP host.
 use crate::live_production_runtime::{Config, Mode, ObserveRequest, Request, Runtime, View};
 use crate::semantic_work_order_runtime::clock::RunRequest;
+use crate::semantic_work_order_runtime::inventory_clock::RunRequest as InventoryRunRequest;
 use crate::semantic_workforce_runtime::digest;
 use dfmcp_core::{
     DfmcpError, Digest32, ErrorCode, OperationContext, RequestId, Result, SessionId, WorkBudget,
@@ -61,6 +62,13 @@ fn merge_recovery(old: &mut Option<Value>, latest: &Value) {
     retained["clock_invalidates_goal"] = json!(
         retained["clock_invalidates_goal"] == true || latest["clock_invalidates_goal"] == true
     );
+    if latest.get("inventory_clock").is_some() {
+        retained["inventory_clock"] = latest["inventory_clock"].clone();
+    }
+    retained["inventory_clock_invalidates_goal"] = json!(
+        retained["inventory_clock_invalidates_goal"] == true
+            || latest["inventory_clock_invalidates_goal"] == true
+    );
     retained["current_parent_goal"] = Value::Null;
     // A negative source fence survives an incomplete later recovery reference;
     // retaining it grants no current truth or native-effect authority.
@@ -79,19 +87,26 @@ enum Action {
     Inspect,
     Plan(Request),
     PlanRun(RunRequest),
+    PlanInventoryRun(InventoryRunRequest),
     Prepare(Digest32),
     Commit(Digest32, bool),
     CommitRun(Digest32, bool),
+    CommitInventoryRun(Digest32, bool),
     Wait,
     Cancel,
     CancelRun,
+    CancelInventoryRun,
     Unavailable,
 }
 impl Action {
     fn may_dispatch(&self) -> bool {
         matches!(
             self,
-            Self::Commit(..) | Self::CommitRun(..) | Self::CancelRun
+            Self::Commit(..)
+                | Self::CommitRun(..)
+                | Self::CommitInventoryRun(..)
+                | Self::CancelRun
+                | Self::CancelInventoryRun
         )
     }
     fn may_need_reconciliation(&self) -> bool {
@@ -99,11 +114,14 @@ impl Action {
             self,
             Self::Prepare(_)
                 | Self::PlanRun(_)
+                | Self::PlanInventoryRun(_)
                 | Self::Commit(..)
                 | Self::CommitRun(..)
+                | Self::CommitInventoryRun(..)
                 | Self::Wait
                 | Self::Cancel
                 | Self::CancelRun
+                | Self::CancelInventoryRun
         )
     }
     fn perform(self, runtime: &mut Runtime, c: &OperationContext) -> Result<View> {
@@ -112,12 +130,17 @@ impl Action {
             Self::Inspect => runtime.inspect(c),
             Self::Plan(request) => runtime.plan(request, c),
             Self::PlanRun(request) => runtime.plan_run(request, c),
+            Self::PlanInventoryRun(request) => runtime.plan_inventory_run(request, c),
             Self::Prepare(id) => runtime.prepare_next(id, c),
             Self::Commit(seal, confirmed) => runtime.commit(seal, confirmed, c),
             Self::CommitRun(seal, confirmed) => runtime.commit_run(seal, confirmed, c),
+            Self::CommitInventoryRun(seal, confirmed) => {
+                runtime.commit_inventory_run(seal, confirmed, c)
+            }
             Self::Wait => runtime.wait(c),
             Self::Cancel => runtime.cancel(c),
             Self::CancelRun => runtime.cancel_run(c),
+            Self::CancelInventoryRun => runtime.cancel_inventory_run(c),
             Self::Unavailable => Err(error(
                 ErrorCode::CapabilityDenied,
                 "combined development runtime cannot checkpoint or restore",
@@ -434,6 +457,8 @@ fn plan_action(raw: &str) -> Result<Action> {
         .map_err(|_| error(ErrorCode::InvalidRequest, "invalid combined request"))?;
     if value.get("kind").and_then(Value::as_str) == Some("run") {
         RunRequest::parse(raw).map(Action::PlanRun)
+    } else if value.get("kind").and_then(Value::as_str) == Some("inventory_run") {
+        InventoryRunRequest::parse(raw).map(Action::PlanInventoryRun)
     } else if value.get("kind").and_then(Value::as_str) == Some("step") {
         let request: StepRequest = serde_json::from_str(raw)
             .map_err(|_| error(ErrorCode::InvalidRequest, "invalid closed step request"))?;
@@ -451,9 +476,10 @@ fn commit_action(scope: Option<&str>, seal: &str, confirmed: bool) -> Result<Act
     match scope {
         None | Some("step") => Ok(Action::Commit(seal, confirmed)),
         Some("run") => Ok(Action::CommitRun(seal, confirmed)),
+        Some("inventory_run") => Ok(Action::CommitInventoryRun(seal, confirmed)),
         _ => Err(error(
             ErrorCode::InvalidRequest,
-            "commit scope must be step or run",
+            "commit scope must be step, run or inventory_run",
         )),
     }
 }
@@ -462,9 +488,10 @@ fn cancel_action(scope: Option<&str>) -> Result<Action> {
     match scope {
         None | Some("step") => Ok(Action::Cancel),
         Some("run") => Ok(Action::CancelRun),
+        Some("inventory_run") => Ok(Action::CancelInventoryRun),
         _ => Err(error(
             ErrorCode::InvalidRequest,
-            "cancel scope must be step, run or session",
+            "cancel scope must be step, run, inventory_run or session",
         )),
     }
 }
@@ -570,13 +597,13 @@ pub fn fortress_query(session_id: String) -> String {
     with_session(session_id, "fortress.query", None, || Ok(Action::Inspect))
 }
 #[tool(
-    description = "Compile one original labor and finite-order plan, optionally with an explicit observed_inventory_minimum objective; kind=step with original_plan_digest prepares the next eligible original step. After both effects settle, separately configured kind=run with original_paired_seal, game_ticks and wall_millis prepares a bounded clock review for that original inventory plan. Planning never unpauses."
+    description = "Compile one original labor and finite-order plan, optionally with an explicit observed_inventory_minimum objective; kind=step with original_plan_digest prepares the next eligible original step. After both effects settle, kind=run prepares an independently authorized order clock. After Wait observes True original labor and inventory, kind=inventory_run prepares an independent stability clock even after order retirement. Both name original_paired_seal, game_ticks and wall_millis. Planning never unpauses."
 )]
 pub fn fortress_plan(session_id: String, request: String) -> String {
     with_session(session_id, "fortress.plan", None, || plan_action(&request))
 }
 #[tool(
-    description = "scope=step (default) confirms one current paired step review. scope=run confirms a separate bounded clock review in paired_seal under independent clock authority. Both require confirmed=true; lost replies require reconciliation of the original key without repeated insertion or unpause."
+    description = "scope=step (default) confirms one current paired step review. scope=run or scope=inventory_run confirms that separate clock owner's review in paired_seal under its independent authority. All require confirmed=true; lost replies require reconciliation of the original key without repeated insertion or unpause."
 )]
 pub fn fortress_commit(
     session_id: String,
@@ -597,7 +624,7 @@ pub fn fortress_wait(session_id: String, max_wall_millis: Option<u64>) -> String
     })
 }
 #[tool(
-    description = "scope=step (default) cancels a prepared step. scope=run retires a prepared clock or requests its retained native safety pause under independent clock authority. scope=session releases local resources without erasing custody or claiming effects were cancelled."
+    description = "scope=step (default) cancels a prepared step. scope=run or scope=inventory_run retires the selected prepared clock or requests its retained native safety pause under its independent authority. scope=session releases local resources without erasing custody or claiming effects were cancelled."
 )]
 pub fn fortress_cancel(session_id: String, scope: Option<String>) -> String {
     if scope.as_deref() == Some("session") {
@@ -647,7 +674,7 @@ pub fn run_stdio() {
     let server = ServerBuilder::new("dfmcp-live-combined-production-dev", env!("CARGO_PKG_VERSION"))
         .tool(FortressOpenSession).tool(FortressObserve).tool(FortressQuery).tool(FortressPlan).tool(FortressCommit)
         .tool(FortressWait).tool(FortressCancel).tool(FortressCheckpoint).tool(FortressRestore).tool(FortressExplain).tool(FortressDoctor)
-        .instructions("Unadmitted development only. Observe, compile one original labor and finite-order plan, prepare and confirm each dependency-satisfied step, and reconcile uncertainty under its original key. All-applied does not prove the original goal or physical goods. With an explicit inventory objective, Wait joins current labor and inventory under the original stability requirement. Separately configured clock control can prepare kind=run and confirm scope=run within the same original deadline; no automatic advancement or repeated unpause is permitted. Unresolved runs must reconcile before paused sampling. Inventory presence does not prove order-attributed production. Parent proof is process-local and withdrawn on failure or reopening.")
+        .instructions("Unadmitted development only. Observe, compile one original labor and finite-order plan, prepare and confirm each dependency-satisfied step, and reconcile uncertainty under its original key. All-applied does not prove the original goal or physical goods. With an explicit inventory objective, Wait joins current labor and inventory under the original stability requirement. Separately configured clock control can prepare kind=run and confirm scope=run; after a True original labor/inventory sample, kind/scope=inventory_run can finish original stability after native order retirement. Both preserve the original deadline and exclude competing pending clocks; no automatic advancement or repeated unpause is permitted. Unresolved runs must reconcile before paused sampling. Inventory presence does not prove order-attributed production. Parent proof is process-local and withdrawn on failure or reopening.")
         .build();
     crate::run_modern_stdio(server);
 }
@@ -739,7 +766,7 @@ mod tests {
             Action::CommitRun(..)
         ));
         assert!(matches!(cancel_action(Some("run"))?, Action::CancelRun));
-        for scope in ["goal", "inventory_run", "all", "session"] {
+        for scope in ["goal", "all", "session"] {
             assert!(commit_action(Some(scope), &seal, true).is_err());
             assert!(cancel_action(Some(scope)).is_err());
         }
@@ -747,6 +774,23 @@ mod tests {
         assert!(Action::CommitRun(digest(&seal)?, true).may_dispatch());
         assert!(Action::CancelRun.may_dispatch());
         assert!(Action::CancelRun.may_need_reconciliation());
+        let mut inventory = request;
+        inventory["kind"] = json!("inventory_run");
+        assert!(matches!(
+            plan_action(&inventory.to_string())?,
+            Action::PlanInventoryRun(_)
+        ));
+        assert!(matches!(
+            commit_action(Some("inventory_run"), &seal, true)?,
+            Action::CommitInventoryRun(..)
+        ));
+        assert!(matches!(
+            cancel_action(Some("inventory_run"))?,
+            Action::CancelInventoryRun
+        ));
+        assert!(Action::CommitInventoryRun(digest(&seal)?, true).may_dispatch());
+        assert!(Action::CancelInventoryRun.may_dispatch());
+        assert!(Action::CancelInventoryRun.may_need_reconciliation());
         Ok(())
     }
 

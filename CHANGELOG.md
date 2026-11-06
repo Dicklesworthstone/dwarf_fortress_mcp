@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased — Complete combined inventory stability after order retirement
+
+- Wire the independent Run/1.13 inventory clock into the combined labor/order
+  owner. After an explicit Wait observes True original labor and inventory,
+  `kind=inventory_run` and `scope=inventory_run` prepare, confirm and cancel
+  bounded stability slices even after the native manager order retires.
+- Preserve the complete original plan, selected key, Created receipt,
+  predecessor custody, absolute deadline and sampled stability. Recheck exact
+  custody and a fresh complete parent sample after every durable native marker.
+  Neither clock can start while the other has pending or unresolved work.
+- Retain independent configuration, authority and exact inventory journal
+  recovery; withdraw confirmation and current proof after advancement, failure
+  or reopening. Safety cancellation still works after the original deadline.
+- Retain complete native observations and reply floors before later journal or
+  authority refusals, and carry the maximum consumed tick through original
+  recovery. A rejected newer clock read cannot revive older goal evidence.
+- Add nine real-binary stdio/TCP regressions, bringing the tracked suite to 37.
+  Focused actual-source runtime/native-TCP execution, presentation, configuration,
+  parser and clock validation are recorded in `IMPLEMENTATION_STATUS.md`;
+  full MCP transport and native-game qualification remain separate.
+
 ## Unreleased — Preserve complete original custody across production clocks
 
 - Centralize selected original plan, step/key, Created receipt and deadline

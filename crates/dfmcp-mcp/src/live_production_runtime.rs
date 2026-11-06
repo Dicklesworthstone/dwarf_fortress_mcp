@@ -28,12 +28,14 @@ mod clock;
 mod config;
 mod custody;
 mod goals;
+mod inventory_clock;
 mod request;
 mod review;
 pub(crate) use choices::ObserveRequest;
 use clock::ProductionClock;
 pub(crate) use config::Config;
 use custody::{GuardedEvidence, SharedCustody};
+use inventory_clock::ProductionInventoryClock;
 use orders::Shell as OrderShell;
 pub(crate) use request::Request;
 pub(crate) use workforce::Mode;
@@ -144,6 +146,10 @@ pub(crate) struct Runtime {
     clock: Option<ProductionClock>,
     clock_invalidates_goal: bool,
     clock_review: Option<Digest32>,
+    opening_inventory_clock: bool,
+    inventory_clock: Option<ProductionInventoryClock>,
+    inventory_clock_invalidates_goal: bool,
+    inventory_clock_review: Option<Digest32>,
     parts: Option<(Labor, Order)>,
     execution: Option<Execution>,
     frontier: Option<Coordinator<File>>,
@@ -259,7 +265,9 @@ impl Runtime {
             || budget.max_entities < 4096
             || budget.max_output_tokens > MAX_OUTPUT_TOKENS
             || budget.max_game_ticks > 1200
-            || (config.clock.is_none() && budget.max_game_ticks != 0)
+            || (config.clock.is_none()
+                && config.inventory_clock.is_none()
+                && budget.max_game_ticks != 0)
         {
             return Err(exhausted(
                 "combined runtime requires two actions, 4096 entities and at most 1200 independently configured clock ticks",
@@ -268,6 +276,8 @@ impl Runtime {
         let opening_labor = mode == Mode::Control && config.workforce.labor_enabled();
         let opening_orders = mode == Mode::Control && config.orders.production_enabled();
         let opening_clock = mode == Mode::Control && config.orders.clock_enabled();
+        let opening_inventory_clock =
+            mode == Mode::Control && config.orders.inventory_clock_enabled();
         if config.initialize && (!opening_labor || !opening_orders) {
             return Err(denied(
                 "initializing both native custodians requires both explicit family authorities",
@@ -296,6 +306,10 @@ impl Runtime {
             clock: None,
             clock_invalidates_goal: false,
             clock_review: None,
+            opening_inventory_clock,
+            inventory_clock: None,
+            inventory_clock_invalidates_goal: false,
+            inventory_clock_review: None,
             parts: None,
             execution: None,
             frontier: None,
@@ -315,6 +329,7 @@ impl Runtime {
         let c = out.context(false)?;
         let mut work = Work::new(&c)?;
         let clock_output = work.take(8 * MIB)?;
+        let inventory_clock_output = work.take(8 * MIB)?;
         let (w, wa, wid) = out
             .config
             .workforce
@@ -335,6 +350,11 @@ impl Runtime {
             .orders
             .open_clock(order_mode(mode), &work.take(128 * MIB)?)?
             .map(ProductionClock::new);
+        out.inventory_clock = out
+            .config
+            .orders
+            .open_inventory_clock(order_mode(mode), &work.take(128 * MIB)?)?
+            .map(ProductionInventoryClock::new);
         if let Some(recovery) = out.config.recovery {
             let mut archive = open_private_plan_archive(
                 &out.config.path("original.plan"),
@@ -385,6 +405,7 @@ impl Runtime {
             )?);
             out.create_executor(&mut work)?;
             out.restore_clock_target(&mut work)?;
+            out.restore_inventory_clock_target(&mut work)?;
             if recovery.goal_history_present {
                 out.goal_history_present = true;
                 out.start_goal_monitor(false, &mut work)?;
@@ -404,7 +425,12 @@ impl Runtime {
             }
         }
         out.refresh_clock_view(&work.narrow(&clock_output)?)?;
+        out.refresh_inventory_clock_view(&work.narrow(&inventory_clock_output)?)?;
         out.clock_invalidates_goal = out.clock.as_ref().is_some_and(ProductionClock::has_runs);
+        out.inventory_clock_invalidates_goal = out
+            .inventory_clock
+            .as_ref()
+            .is_some_and(ProductionInventoryClock::has_runs);
         out.config.current()?;
         work.current()?;
         Ok(out)
@@ -437,6 +463,7 @@ impl Runtime {
         if self.labor_enabled()
             || self.orders_enabled()
             || (self.opening_clock && self.config.orders.clock_enabled())
+            || (self.opening_inventory_clock && self.config.orders.inventory_clock_enabled())
         {
             capabilities.push(Capability::Plan);
         }
@@ -446,7 +473,9 @@ impl Runtime {
         if self.orders_enabled() {
             capabilities.push(Capability::ConfigureProduction);
         }
-        if self.opening_clock && self.config.orders.clock_enabled() {
+        if (self.opening_clock && self.config.orders.clock_enabled())
+            || (self.opening_inventory_clock && self.config.orders.inventory_clock_enabled())
+        {
             capabilities.push(Capability::ControlClock);
         }
         capabilities
@@ -597,6 +626,7 @@ impl Runtime {
     }
     pub(crate) fn abandon_preparation(&mut self) {
         self.clock_review = None;
+        self.inventory_clock_review = None;
         self.parent_goal = None;
         if let Some(basis) = &mut self.basis {
             basis.choices = None;
@@ -635,6 +665,7 @@ impl Runtime {
                     "anchor":anchor_json(p.anchor),"identity_digest":identity.to_hex(),
                     "goal_history_present":self.goal_history_present,
                     "clock_journal_id":self.clock.as_ref().and_then(ProductionClock::journal_id).map(|id|id.to_hex()),
+                    "inventory_clock_journal_id":self.inventory_clock.as_ref().and_then(ProductionInventoryClock::journal_id).map(|id|id.to_hex()),
                     "frontier":{"journal_id":r.journal_id.to_hex(),"head":r.head.to_hex(),"authority_tick_floor":floor}})
             }
             _ => Value::Null,
@@ -647,6 +678,9 @@ impl Runtime {
             "selected_inventory_goal":self.selected_goal_json(),
             "clock":self.clock_json(),"clock_control_enabled":self.clock_control_enabled(),
             "clock_invalidates_goal":self.clock_invalidates_goal,
+            "inventory_clock":self.inventory_clock_json(),
+            "inventory_clock_control_enabled":self.inventory_clock_control_enabled(),
+            "inventory_clock_invalidates_goal":self.inventory_clock_invalidates_goal,
             "current_parent_goal":null,
             "parent_goal_observation_fenced":self.parent_goal_observation_fenced(),
             "current_state_proven":false,"original_goal_proven":false,"automatic_redispatch":false})
@@ -682,8 +716,16 @@ impl Runtime {
                 .as_ref()
                 .is_some_and(|frontier| frontier.all_applied() && !frontier.needs_reconciliation()),
         )?;
+        self.bind_created_inventory_clock_target(
+            frontier
+                .as_ref()
+                .is_some_and(|frontier| frontier.all_applied() && !frontier.needs_reconciliation()),
+        )?;
         if self.clock.is_some() {
             self.refresh_clock_view(&work.take(8 * MIB)?)?;
+        }
+        if self.inventory_clock.is_some() {
+            self.refresh_inventory_clock_view(&work.take(8 * MIB)?)?;
         }
         self.config.current()?;
         work.current()?;
@@ -729,6 +771,9 @@ impl Runtime {
             "selected_inventory_goal":self.selected_goal_json(),
             "clock":self.clock_json(),"clock_control_enabled":self.clock_control_enabled(),
             "clock_invalidates_goal":self.clock_invalidates_goal,
+            "inventory_clock":self.inventory_clock_json(),
+            "inventory_clock_control_enabled":self.inventory_clock_control_enabled(),
+            "inventory_clock_invalidates_goal":self.inventory_clock_invalidates_goal,
             "current_parent_goal":self.parent_goal_json(),
             "parent_goal_observation_fenced":self.parent_goal_observation_fenced(),
             "recovery":self.recovery_json(),"labor_control_enabled":self.labor_enabled(),"production_control_enabled":self.orders_enabled(),

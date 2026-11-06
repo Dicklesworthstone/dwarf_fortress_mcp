@@ -4,10 +4,11 @@ use serde_json::{Value, json};
 #[test]
 fn closed_configuration_and_recovery_are_exact() -> Result<()> {
     let raw = json!({"schema":"dfmcp.combined-production-development/1", "directory":"/tmp/combined", "initialize":true});
-    let (directory, initialize, recovery, clock) = parse(&raw.to_string())?;
+    let (directory, initialize, recovery, clock, inventory_clock) = parse(&raw.to_string())?;
     assert_eq!(directory, Path::new("/tmp/combined"));
     assert!(initialize && recovery.is_none());
     assert!(clock.is_none());
+    assert!(inventory_clock.is_none());
     let mut bad = raw.clone();
     bad["extra"] = json!(true);
     assert!(parse(&bad.to_string()).is_err());
@@ -26,7 +27,7 @@ fn closed_configuration_and_recovery_are_exact() -> Result<()> {
         "anchor":{"fortress_id":"1", "epoch":0, "sequence":2, "tick":3, "state_hash":hash},
         "frontier":{"journal_id":hash, "head":hash, "authority_tick_floor":4}
     });
-    let (_, _, value, _) = parse(&recovered.to_string())?;
+    let (_, _, value, _, _) = parse(&recovered.to_string())?;
     assert_eq!(
         value
             .ok_or_else(|| invalid("missing test recovery"))?
@@ -72,17 +73,43 @@ fn custody_and_environment_scope_refuse_substitution() {
         Path::new("/tmp/b"),
         Path::new("/tmp/a")
     ]));
-    assert!(allowed_key("DFMCP_SEMANTIC_WORKFORCE_ALLOW_LABOR"));
-    assert!(allowed_key("DFMCP_SEMANTIC_WORK_ORDER_ALLOW_PRODUCTION"));
-    assert!(allowed_key("DFMCP_SEMANTIC_WORK_ORDER_ALLOW_CLOCK"));
-    assert!(allowed_key("DFMCP_SEMANTIC_WORK_ORDER_CLOCK_TOKEN"));
-    assert!(!allowed_key(
-        "DFMCP_SEMANTIC_WORK_ORDER_ALLOW_INVENTORY_CLOCK"
+    assert!(allowed_key(
+        "DFMCP_SEMANTIC_WORKFORCE_ALLOW_LABOR",
+        false,
+        false
     ));
-    assert!(!allowed_key(
-        "DFMCP_SEMANTIC_WORK_ORDER_INVENTORY_CLOCK_TOKEN"
+    assert!(allowed_key(
+        "DFMCP_SEMANTIC_WORK_ORDER_ALLOW_PRODUCTION",
+        false,
+        false
     ));
-    assert!(!allowed_key("DFMCP_ADMITTED_BRIDGE_PROTOCOL"));
+    for clock in [false, true] {
+        for inventory_clock in [false, true] {
+            for key in [
+                "DFMCP_SEMANTIC_WORK_ORDER_ALLOW_CLOCK",
+                "DFMCP_SEMANTIC_WORK_ORDER_CLOCK_TOKEN",
+            ] {
+                assert_eq!(allowed_key(key, clock, inventory_clock), clock, "{key}");
+            }
+            for key in [
+                "DFMCP_SEMANTIC_WORK_ORDER_ALLOW_INVENTORY_CLOCK",
+                "DFMCP_SEMANTIC_WORK_ORDER_INVENTORY_CLOCK_TOKEN",
+            ] {
+                assert_eq!(
+                    allowed_key(key, clock, inventory_clock),
+                    inventory_clock,
+                    "{key}"
+                );
+            }
+            for key in [
+                "DFMCP_ADMITTED_BRIDGE_PROTOCOL",
+                "DFMCP_RUN_TOKEN",
+                "DFMCP_UNKNOWN",
+            ] {
+                assert!(!allowed_key(key, clock, inventory_clock), "{key}");
+            }
+        }
+    }
     let original = [
         "parent".to_string(),
         "workforce".to_string(),
@@ -162,6 +189,106 @@ fn optional_clock_pins_and_parent_recovery_cannot_be_omitted_or_replaced() -> Re
         parse(&raw.to_string()).is_err(),
         "reopening requires external clock identity"
     );
+    Ok(())
+}
+
+#[test]
+fn independent_inventory_clock_and_both_recovery_journals_remain_exact() -> Result<()> {
+    let mut raw = json!({"schema":"dfmcp.combined-production-development/1",
+        "directory":"/tmp/combined-inventory-clock", "initialize":true,
+        "inventory_clock":{"generation":60}});
+    let (_, _, _, order_clock, inventory_clock) = parse(&raw.to_string())?;
+    assert!(order_clock.is_none());
+    let configured = inventory_clock.ok_or_else(|| invalid("inventory clock"))?;
+    assert_eq!(configured.generation, 60);
+    assert_eq!(configured.journal_id, None);
+    for invalid_clock in [
+        json!({"generation":0}),
+        json!({"generation":u64::MAX}),
+        json!({"generation":60,"order_id":100}),
+        json!({"generation":60,"journal_id":null}),
+        json!({"generation":60,"journal_id":"ab".repeat(32)}),
+    ] {
+        let mut bad = raw.clone();
+        bad["inventory_clock"] = invalid_clock;
+        assert!(parse(&bad.to_string()).is_err());
+    }
+    let inventory_id = Digest32::of_bytes(b"independent inventory clock");
+    let order_id = Digest32::of_bytes(b"independent order clock");
+    raw["initialize"] = json!(false);
+    assert!(
+        parse(&raw.to_string()).is_err(),
+        "reopening requires inventory identity"
+    );
+    raw["inventory_clock"]["journal_id"] = json!(inventory_id.to_hex());
+    assert_eq!(
+        parse(&raw.to_string())?
+            .4
+            .ok_or_else(|| invalid("inventory clock"))?
+            .journal_id,
+        Some(inventory_id)
+    );
+    let hash = Digest32::of_bytes(b"retained combined original").to_hex();
+    raw["recovery"] = json!({
+        "plan_digest":hash, "object_digest":hash, "identity_digest":hash,
+        "anchor":{"fortress_id":"1", "epoch":0, "sequence":2, "tick":3, "state_hash":hash},
+        "frontier":{"journal_id":hash, "head":hash, "authority_tick_floor":4}
+    });
+    assert!(
+        parse(&raw.to_string()).is_err(),
+        "inventory recovery cannot be omitted"
+    );
+    raw["recovery"]["inventory_clock_journal_id"] = json!(inventory_id.to_hex());
+    let recovered = parse(&raw.to_string())?
+        .2
+        .ok_or_else(|| invalid("recovery"))?;
+    assert_eq!(recovered.inventory_clock_journal_id, Some(inventory_id));
+    assert_eq!(recovered.clock_journal_id, None);
+
+    raw["clock"] = json!({"generation":50,"journal_id":order_id.to_hex()});
+    assert!(
+        parse(&raw.to_string()).is_err(),
+        "order recovery remains independent"
+    );
+    raw["recovery"]["clock_journal_id"] = json!(order_id.to_hex());
+    let (_, _, recovery, clock, inventory_clock) = parse(&raw.to_string())?;
+    let recovered = recovery.ok_or_else(|| invalid("recovery"))?;
+    assert_eq!(recovered.clock_journal_id, Some(order_id));
+    assert_eq!(recovered.inventory_clock_journal_id, Some(inventory_id));
+    assert_eq!(clock.ok_or_else(|| invalid("clock"))?.generation, 50);
+    assert_eq!(
+        inventory_clock
+            .ok_or_else(|| invalid("inventory clock"))?
+            .generation,
+        60
+    );
+    for (configuration, recovery_field, other_id) in [
+        ("clock", "clock_journal_id", inventory_id),
+        ("inventory_clock", "inventory_clock_journal_id", order_id),
+    ] {
+        let mut bad = raw.clone();
+        bad[configuration] = Value::Null;
+        assert!(parse(&bad.to_string()).is_err(), "omitted {configuration}");
+        for identity in [
+            Value::Null,
+            json!(other_id.to_hex()),
+            json!("0".repeat(64)),
+            json!(5),
+        ] {
+            let mut bad = raw.clone();
+            bad["recovery"][recovery_field] = identity;
+            assert!(
+                parse(&bad.to_string()).is_err(),
+                "substituted {recovery_field}"
+            );
+        }
+        let mut bad = raw.clone();
+        bad[configuration] = json!({"generation":60});
+        assert!(
+            parse(&bad.to_string()).is_err(),
+            "missing journal for {configuration}"
+        );
+    }
     Ok(())
 }
 

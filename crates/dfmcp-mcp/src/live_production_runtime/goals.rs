@@ -101,7 +101,7 @@ impl Runtime {
             omissions.push("parent goal completion");
         }
         omissions.extend(["order-attributed output", "workshop/material feasibility"]);
-        if !self.clock_control_enabled() {
+        if !self.clock_control_enabled() && !self.inventory_clock_control_enabled() {
             omissions.push("game clock control");
         }
         omissions
@@ -291,12 +291,17 @@ impl Runtime {
         custody.verify(&work.current()?)?;
         custody.disarm()?;
         self.reconcile_clock(&mut work)?;
+        self.reconcile_inventory_clock(&mut work)?;
         let should_sample = settled.all_applied()
             && !settled.needs_reconciliation()
             && !self
                 .clock
                 .as_ref()
                 .is_some_and(ProductionClock::may_be_running)
+            && !self
+                .inventory_clock
+                .as_ref()
+                .is_some_and(ProductionInventoryClock::may_be_running)
             && self.original.as_ref().and_then(selected).is_some();
         if should_sample {
             c.authorize(Capability::Observe, RiskTier::ReadOnly, &[], None)?;
@@ -351,7 +356,18 @@ impl Runtime {
                     .ok_or_else(|| exhausted("selected goal cursor exhausted"))?,
             };
             let config = &self.config;
-            let clock_floor = self.clock.as_ref().map_or(0, ProductionClock::high_tick);
+            let clock_floor = self
+                .clock
+                .as_ref()
+                .map_or(0, ProductionClock::high_tick)
+                .max(
+                    self.inventory_clock
+                        .as_ref()
+                        .map_or(0, ProductionInventoryClock::high_tick),
+                )
+                // The external recovery reference also retains reads rejected
+                // before a clock journal event could publish their newer tick.
+                .max(self.observation_tick_floor.get());
             let result = self
                 .execution
                 .as_mut()
@@ -409,6 +425,7 @@ impl Runtime {
             self.anchor = result.parent_progress().anchor;
             self.parent_goal = Some(result.parent_progress().clone());
             self.clock_invalidates_goal = false;
+            self.inventory_clock_invalidates_goal = false;
         }
         self.config.current()?;
         work.context.anchor = self.anchor;

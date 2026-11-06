@@ -218,6 +218,11 @@ The `labor-order` profile owns one original labor step and a dependent finite
 furniture-order insertion in a single session. Its per-step confirmations,
 strict historical labor receipt and retained original custody control advancement;
 insertion does not prove produced goods or original-goal completion.
+With an explicit inventory minimum, Wait joins current labor and inventory under
+the original deadline and sampled stability. Independently authorized, separately
+confirmed clocks can advance the original order or finish inventory stability
+after that order retires. Lost replies reconcile their original run keys without
+repeating unpause; fresh joined evidence is still required for goal completion.
 Each process selects one runtime. A complete Tree-to-workshop-to-bed controller
 remains unfinished. Changing profile requires a
 separate configured process and preserves the previous original custody.

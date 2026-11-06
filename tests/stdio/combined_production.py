@@ -18,6 +18,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'scripts'))
 import workforce_wire as wf
 import order_run_wire as run_wire
+import bounded_run_client as inventory_run_wire
 spec = importlib.util.spec_from_file_location('workshop_stdio', ROOT / 'tests/stdio/workshop.py')
 stdio = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(stdio)
@@ -29,6 +30,7 @@ GEN = 701
 WGEN = 7
 OGEN = 53
 CLOCK_GENERATION = 77
+INVENTORY_CLOCK_GENERATION = 78
 PGEN = 70
 IGEN = 71
 TICK = 120
@@ -147,6 +149,21 @@ def clock_record(encoded_plan, key, phase=0, reason=0, observed=None):
     return result
 
 
+def inventory_clock_capture(sequence, tick, paused=True):
+    return b'DFMRO013' + struct.pack('>QQQBBB', INVENTORY_CLOCK_GENERATION, sequence, tick,
+                                    1, 1, int(paused))
+
+
+def inventory_clock_record(plan, phase=0, reason=0, observed=None):
+    payload = (b'DFMRE013' + text(plan['key']) + struct.pack('>II', plan['ticks'], plan['wall'])
+               + plan['before'] + plan['digest'] + plan['token']
+               + bytes([phase, reason, int(phase in (1, 2, 3, 5)), int(phase == 3),
+                        int(observed is not None)]) + struct.pack('>Q', observed or 0))
+    result = payload + hashlib.sha256(b'dfmcp-bounded-run-receipt/1\0' + payload).digest()
+    inventory_run_wire.decode_record(result)
+    return result
+
+
 def operations_capture(tick, stack=1):
     """One complete operations/1.3 inventory, with no job/output attribution."""
     year, annual = divmod(tick, 403200)
@@ -236,6 +253,13 @@ class Peer:
         self.clock_commits = []
         self.hold_clock = False
         self.drop_clock_reply = False
+        self.inventory_clock_sequence = 0
+        self.inventory_clock_plans = {}
+        self.inventory_clock_records = {}
+        self.inventory_clock_commits = []
+        self.hold_inventory_clock = False
+        self.drop_inventory_clock_reply = False
+        self.after_inventory_clock_observe = None
         self.acceptor = threading.Thread(target=self.accept, name='combined-peer')
         self.acceptor.start()
 
@@ -286,6 +310,54 @@ class Peer:
     def reply(self, plugin, op, req):
         if plugin == 'dfmcp_bridge': return citizen_reply(op, req, self.citizen_ids)
         assert req[1] == TOKEN
+        if plugin == 'dfmcp_run_v1_13':
+            assert req[3] == 1 and req[4] == 13
+            response = (number(1, 1) + number(2, 0) + blob(3, req[2]) + number(4, 1) + number(5, 13)
+                        + number(6, INVENTORY_CLOCK_GENERATION) + blob(7, DF) + blob(8, DFH))
+            if op == 'ObserveRun':
+                response += blob(9, inventory_clock_capture(self.inventory_clock_sequence, self.order_tick,
+                                                            not self.inventory_clock_active()))
+                if self.after_inventory_clock_observe is not None:
+                    hook, self.after_inventory_clock_observe = self.after_inventory_clock_observe, None
+                    hook()
+            elif op == 'PrepareRun':
+                assert req[8] == inventory_clock_capture(self.inventory_clock_sequence, self.order_tick)
+                digest = inventory_run_wire.plan_for(req[6], req[7], req[8])
+                assert req[9] == digest
+                assert req[5] not in self.inventory_clock_plans
+                plan = {'key': req[5], 'ticks': req[6], 'wall': req[7], 'before': req[8],
+                        'digest': digest, 'token': inventory_run_wire.token_for(req[5].decode(), digest)}
+                self.inventory_clock_plans[req[5]] = plan
+                self.inventory_clock_records[req[5]] = inventory_clock_record(plan)
+                response += blob(10, self.inventory_clock_records[req[5]])
+            elif op != 'Handshake':
+                assert op in ('CommitRun', 'QueryRun', 'CancelRun')
+                key = req[5]
+                if key in self.inventory_clock_plans:
+                    plan = self.inventory_clock_plans[key]
+                    assert req[9] == plan['digest']
+                    if op != 'QueryRun':
+                        assert req[10] == plan['token']
+                    if op == 'CommitRun':
+                        assert key not in self.inventory_clock_commits, 'native unpause must never be retried'
+                        self.inventory_clock_commits.append(key)
+                        if self.hold_inventory_clock:
+                            self.inventory_clock_records[key] = inventory_clock_record(plan, phase=1,
+                                                                                       observed=self.order_tick)
+                        else:
+                            self.finish_inventory_clock(key)
+                        if self.drop_inventory_clock_reply:
+                            self.drop_inventory_clock_reply = False
+                            raise ConnectionResetError('lost inventory clock reply after retained unpause')
+                    elif op == 'CancelRun':
+                        if key in self.inventory_clock_commits:
+                            self.inventory_clock_records[key] = inventory_clock_record(plan, phase=3, reason=3,
+                                                                                       observed=self.order_tick)
+                        else:
+                            self.inventory_clock_records[key] = inventory_clock_record(plan, phase=4, reason=3)
+                    response += blob(10, self.inventory_clock_records[key])
+            return (response + number(11, int(self.inventory_clock_active()))
+                    + number(12, len(self.inventory_clock_records)))
         if plugin == 'dfmcp_order_run_v1_14':
             assert req[3] == 1 and req[4] == 14
             response = (number(1, 1) + number(2, 0) + blob(3, req[2]) + number(4, 1) + number(5, 14)
@@ -432,6 +504,18 @@ class Peer:
         self.inventory_stack = 1
         self.clock_records[key] = clock_record(plan, key, phase=3, reason=1, observed=self.order_tick)
 
+    def inventory_clock_active(self):
+        return any(inventory_run_wire.decode_record(raw)['phase'] in ('running', 'stopping')
+                   for raw in self.inventory_clock_records.values())
+
+    def finish_inventory_clock(self, key):
+        plan = self.inventory_clock_plans[key]
+        before = inventory_run_wire.snapshot(plan['before'])
+        self.goal_tick(before['tick'] + plan['ticks'])
+        self.inventory_clock_sequence += 1
+        self.inventory_clock_records[key] = inventory_clock_record(plan, phase=3, reason=1,
+                                                                   observed=self.order_tick)
+
     def goal_tick(self, tick):
         """Advance the double explicitly; no native clock or real game is executed."""
         assert self.order_created and self.workforce_applied and tick >= self.order_tick
@@ -462,12 +546,16 @@ def reopen_environment(env, recovery, workforce_id):
     parent.update(initialize=False, recovery=recovery)
     if parent.get('clock') is not None:
         parent['clock']['journal_id'] = recovery['clock_journal_id']
+    if parent.get('inventory_clock') is not None:
+        parent['inventory_clock']['journal_id'] = recovery['inventory_clock_journal_id']
     env['DFMCP_COMBINED_PRODUCTION_CONFIG'] = json.dumps(parent)
     for name in ('DFMCP_SEMANTIC_WORKFORCE_CONFIG', 'DFMCP_SEMANTIC_WORK_ORDER_CONFIG'):
         config = json.loads(env[name]); config['initialize'] = False
         if name == 'DFMCP_SEMANTIC_WORKFORCE_CONFIG': config['journal_id'] = workforce_id
         if name == 'DFMCP_SEMANTIC_WORK_ORDER_CONFIG' and config.get('clock') is not None:
             config['clock']['journal_id'] = recovery['clock_journal_id']
+        if name == 'DFMCP_SEMANTIC_WORK_ORDER_CONFIG' and config.get('inventory_clock') is not None:
+            config['inventory_clock']['journal_id'] = recovery['inventory_clock_journal_id']
         env[name] = json.dumps(config)
     return env
 
@@ -521,6 +609,16 @@ class CombinedProduction(unittest.TestCase):
         self.env['DFMCP_SEMANTIC_WORK_ORDER_ALLOW_CLOCK'] = '1'
         self.env['DFMCP_SEMANTIC_WORK_ORDER_CLOCK_TOKEN'] = TOKEN.decode()
         self.client = stdio.Client(self.directory, {}, suffix='clock', env=self.env)
+
+    def enable_inventory_clock(self):
+        self.client.close()
+        for name in ('DFMCP_COMBINED_PRODUCTION_CONFIG', 'DFMCP_SEMANTIC_WORK_ORDER_CONFIG'):
+            config = json.loads(self.env[name])
+            config['inventory_clock'] = {'generation': INVENTORY_CLOCK_GENERATION}
+            self.env[name] = json.dumps(config)
+        self.env['DFMCP_SEMANTIC_WORK_ORDER_ALLOW_INVENTORY_CLOCK'] = '1'
+        self.env['DFMCP_SEMANTIC_WORK_ORDER_INVENTORY_CLOCK_TOKEN'] = TOKEN.decode()
+        self.client = stdio.Client(self.directory, {}, suffix='inventory-clock', env=self.env)
 
     def inventory_plan(self, stable_samples=1, max_game_ticks=0):
         options = {'max_wall_millis': 60000}
@@ -598,6 +696,350 @@ class CombinedProduction(unittest.TestCase):
         request = {'kind': 'run', 'original_paired_seal': view['clock']['original_paired_seal'],
                    'game_ticks': ticks, 'wall_millis': 1000}
         return self.client.tool('plan', session_id=sid, request=json.dumps(request))
+
+    def prepare_inventory_clock(self, sid, view, ticks=5):
+        request = {'kind': 'inventory_run',
+                   'original_paired_seal': view['inventory_clock']['original_paired_seal'],
+                   'game_ticks': ticks, 'wall_millis': 1000}
+        return self.client.tool('plan', session_id=sid, request=json.dumps(request))
+
+    def inventory_clock_sample(self, sid):
+        current = self.client.tool('wait', session_id=sid, max_wall_millis=60000)
+        self.assertTrue(current['ok'], current)
+        self.assertEqual(current['current_parent_goal']['current_truth'], 'true')
+        self.assertEqual(current['selected_inventory_goal']['current_truth'], 'true')
+        self.assertFalse(current['original_goal_proven'])
+        self.assertEqual(current['selected_inventory_goal']['deadline_tick'], 300)
+        return current
+
+    def test_retired_order_inventory_run_finishes_the_original_parent_stability(self):
+        self.enable_inventory_clock()
+        sid, original, created = self.inventory_plan(stable_samples=2, max_game_ticks=5)
+        self.assertTrue(created['inventory_clock_control_enabled'])
+        self.peer.order_retired = True
+        refused = self.prepare_inventory_clock(sid, created)
+        self.assertFalse(refused['ok'], refused)
+        self.assertEqual(self.peer.inventory_clock_plans, {})
+        current = self.inventory_clock_sample(sid)
+        self.assertFalse(current['selected_inventory_goal']['receipt_linked'])
+        recommendation = current['agent_turn']['recommendations'][0]
+        self.assertEqual(recommendation['tool'], 'fortress_plan')
+        self.assertEqual(json.loads(recommendation['arguments']['request'])['kind'], 'inventory_run')
+        # The original tick is the obligation baseline. The two qualified
+        # advancing samples, at125 and130, require two distinct reviewed slices.
+        for expected_tick in (TICK + 5, TICK + 10):
+            before_tick = self.peer.order_tick
+            prepared = self.prepare_inventory_clock(sid, current)
+            self.assertTrue(prepared['ok'], prepared)
+            self.assertTrue(prepared['inventory_clock']['review_available'])
+            self.assertEqual(self.peer.order_tick, before_tick)
+            run = prepared['inventory_clock']['active_run']
+            self.assertEqual(run['purpose'], 'advance_original_inventory_stability')
+            self.assertFalse(prepared['inventory_clock']['original_deadline_renewed'])
+            recommendation = prepared['agent_turn']['recommendations'][0]
+            self.assertEqual(recommendation['arguments']['scope'], 'inventory_run')
+            self.assertEqual(recommendation['arguments']['paired_seal'], run['review_seal'])
+            committed = self.client.tool('commit', session_id=sid, scope='inventory_run',
+                                         paired_seal=run['review_seal'], confirmed=True)
+            self.assertTrue(committed['ok'], committed)
+            self.assertEqual(self.peer.order_tick, expected_tick)
+            self.assertFalse(committed['original_goal_proven'])
+            self.assertIsNone(committed['current_parent_goal'])
+            self.assertTrue(committed['inventory_clock_invalidates_goal'])
+            self.assertFalse(committed['selected_inventory_goal']['proven_at_anchor'])
+            current = self.client.tool('wait', session_id=sid, max_wall_millis=60000)
+            self.assertTrue(current['ok'], current)
+            self.assertEqual(current['original_goal_proven'], expected_tick == TICK + 10)
+        achieved = current
+        self.assertTrue(achieved['original_goal_proven'])
+        self.assertFalse(achieved['current_state_proven'])
+        self.assertFalse(achieved['inventory_clock_invalidates_goal'])
+        self.assertFalse(achieved['selected_inventory_goal']['receipt_linked'])
+        self.assertEqual(achieved['selected_inventory_goal']['deadline_tick'], 300)
+        self.assertEqual(achieved['current_parent_goal']['production_attribution'], 'unknown')
+        self.assertTrue(achieved['agent_turn']['briefing']['original_goal_proven'])
+        self.assert_single_original_effects(achieved, original)
+        self.assertEqual(len(self.peer.inventory_clock_commits), 2)
+        self.assertEqual(len(set(self.peer.inventory_clock_commits)), 2)
+        self.assertEqual(self.peer.clock_commits, [])
+        refused = self.prepare_inventory_clock(sid, achieved)
+        self.assertFalse(refused['ok'], refused)
+        self.assertEqual(len(self.peer.inventory_clock_commits), 2)
+
+    def assert_inventory_clock_late_change_refuses_unpause(self, change):
+        self.enable_inventory_clock()
+        sid, original, _ = self.inventory_plan(stable_samples=3, max_game_ticks=5)
+        self.peer.order_retired = True
+        current = self.inventory_clock_sample(sid)
+        prepared = self.prepare_inventory_clock(sid, current)
+        self.assertTrue(prepared['ok'], prepared)
+        seal = prepared['inventory_clock']['active_run']['review_seal']
+        # The native journal's commit preflight has already followed a successful
+        # foreground parent sample. Its next edge persists DispatchStarted and
+        # invokes the fresh full-parent guard before native CommitRun.
+        self.peer.after_inventory_clock_observe = change
+        refused = self.client.tool('commit', session_id=sid, scope='inventory_run',
+                                   paired_seal=seal, confirmed=True)
+        self.assertFalse(refused['ok'], refused)
+        self.assertIsNone(self.peer.after_inventory_clock_observe)
+        retained = refused['retained_reference']
+        self.assertIsNone(retained['current_parent_goal'])
+        self.assertFalse(retained['selected_inventory_goal']['proven_at_anchor'])
+        self.assertTrue(retained['inventory_clock']['unresolved'])
+        self.assertEqual(retained['inventory_clock']['active_run']['state'], 'dispatch_started')
+        self.assertEqual(self.peer.inventory_clock_commits, [])
+        self.assertEqual(len(self.peer.inventory_clock_plans), 1)
+        self.assertEqual(self.peer.order_tick, TICK)
+        retried = self.client.tool('commit', session_id=sid, scope='inventory_run',
+                                   paired_seal=seal, confirmed=True)
+        self.assertFalse(retried['ok'], retried)
+        self.assertEqual(self.peer.inventory_clock_commits, [])
+        inspected = self.client.tool('query', session_id=sid)
+        self.assertTrue(inspected['ok'], inspected)
+        self.assert_single_original_effects(inspected, original)
+
+    def test_inventory_clock_rechecks_stock_after_the_dispatch_marker(self):
+        self.assert_inventory_clock_late_change_refuses_unpause(
+            lambda: setattr(self.peer, 'inventory_stack', 0))
+
+    def test_inventory_clock_rechecks_current_labor_after_the_dispatch_marker(self):
+        def reverse_labor():
+            self.peer.workforce_labor = False
+            self.peer.workforce_sequence = 5
+        self.assert_inventory_clock_late_change_refuses_unpause(reverse_labor)
+
+    def test_lost_inventory_clock_reply_reconciles_original_key_without_unpause_replay(self):
+        self.enable_inventory_clock()
+        sid, original, created = self.inventory_plan(stable_samples=2, max_game_ticks=5)
+        self.peer.order_retired = True
+        current = self.inventory_clock_sample(sid)
+        prepared = self.prepare_inventory_clock(sid, current)
+        self.assertTrue(prepared['ok'], prepared)
+        seal = prepared['inventory_clock']['active_run']['review_seal']
+        self.peer.hold_inventory_clock = True
+        self.peer.drop_inventory_clock_reply = True
+        lost = self.client.tool('commit', session_id=sid, scope='inventory_run',
+                                paired_seal=seal, confirmed=True)
+        self.assertFalse(lost['ok'], lost)
+        self.assertIsNone(lost['retained_reference']['current_parent_goal'])
+        self.assertEqual(len(self.peer.inventory_clock_commits), 1)
+        original_key = self.peer.inventory_clock_commits[0]
+        self.client.close(crash=True)
+        env = reopen_environment(self.env, lost['retained_reference']['recovery'],
+                                 created['native_custody']['workforce_journal_id'])
+        self.client = stdio.Client(self.directory, {}, suffix='inventory-reconcile', env=env)
+        reopened = self.client.open(mode='reconcile', max_wall_millis=60000, max_game_ticks=5)
+        self.assertTrue(reopened['ok'], reopened)
+        self.assertFalse(reopened['inventory_clock']['review_available'])
+        self.assertFalse(reopened['inventory_clock_control_enabled'])
+        self.assertIsNone(reopened['current_parent_goal'])
+        sid = reopened['agent_turn']['session_id']
+        reads = sum(plugin in ('dfmcp_work_order_progress_v1_12', 'dfmcp_operations_v1_3')
+                    and op == 'ReadObservation' for plugin, op in self.peer.calls)
+        pending = self.client.tool('wait', session_id=sid, max_wall_millis=60000)
+        self.assertTrue(pending['ok'], pending)
+        self.assertTrue(pending['inventory_clock']['unresolved'])
+        self.assertEqual(reads, sum(plugin in ('dfmcp_work_order_progress_v1_12', 'dfmcp_operations_v1_3')
+                                   and op == 'ReadObservation' for plugin, op in self.peer.calls))
+        self.peer.finish_inventory_clock(original_key)
+        settled = self.client.tool('wait', session_id=sid, max_wall_millis=60000)
+        self.assertTrue(settled['ok'], settled)
+        self.assertFalse(settled['inventory_clock']['unresolved'])
+        self.assertEqual(settled['current_parent_goal']['current_truth'], 'true')
+        self.assertFalse(settled['original_goal_proven'])
+        self.assert_single_original_effects(settled, original)
+        denied = self.client.tool('commit', session_id=sid, scope='inventory_run',
+                                  paired_seal=seal, confirmed=True)
+        self.assertFalse(denied['ok'], denied)
+        self.assertEqual(self.peer.inventory_clock_commits, [original_key])
+        self.assertEqual(len(self.peer.inventory_clock_plans), 1)
+
+    def test_prepared_and_running_order_clock_block_inventory_run(self):
+        self.enable_clock()
+        self.enable_inventory_clock()
+        sid, _, _ = self.inventory_plan(stable_samples=3, max_game_ticks=10)
+        current = self.inventory_clock_sample(sid)
+        prepared = self.prepare_clock(sid, current)
+        self.assertTrue(prepared['ok'], prepared)
+        refused = self.prepare_inventory_clock(sid, prepared)
+        self.assertFalse(refused['ok'], refused)
+        self.assertEqual(self.peer.inventory_clock_plans, {})
+        current = self.inventory_clock_sample(sid)
+        prepared = self.prepare_clock(sid, current)
+        self.assertTrue(prepared['ok'], prepared)
+        self.peer.hold_clock = True
+        running = self.client.tool('commit', session_id=sid, scope='run',
+                                   paired_seal=prepared['clock']['active_run']['review_seal'], confirmed=True)
+        self.assertTrue(running['ok'], running)
+        self.assertTrue(running['clock']['unresolved'])
+        refused = self.prepare_inventory_clock(sid, running)
+        self.assertFalse(refused['ok'], refused)
+        self.assertEqual(self.peer.inventory_clock_plans, {})
+        self.assertEqual(self.peer.inventory_clock_commits, [])
+        cancelled = self.client.tool('cancel', session_id=sid, scope='run')
+        self.assertTrue(cancelled['ok'], cancelled)
+        self.assertFalse(cancelled['clock']['pending'])
+        self.assertEqual(len(self.peer.clock_commits), 1)
+
+    def test_prepared_and_running_inventory_clock_block_order_run(self):
+        self.enable_clock()
+        self.enable_inventory_clock()
+        sid, _, _ = self.inventory_plan(stable_samples=3, max_game_ticks=10)
+        current = self.inventory_clock_sample(sid)
+        prepared = self.prepare_inventory_clock(sid, current)
+        self.assertTrue(prepared['ok'], prepared)
+        refused = self.prepare_clock(sid, prepared)
+        self.assertFalse(refused['ok'], refused)
+        self.assertEqual(self.peer.clock_plans, {})
+        current = self.inventory_clock_sample(sid)
+        prepared = self.prepare_inventory_clock(sid, current)
+        self.assertTrue(prepared['ok'], prepared)
+        self.peer.hold_inventory_clock = True
+        running = self.client.tool('commit', session_id=sid, scope='inventory_run',
+                                   paired_seal=prepared['inventory_clock']['active_run']['review_seal'],
+                                   confirmed=True)
+        self.assertTrue(running['ok'], running)
+        self.assertTrue(running['inventory_clock']['unresolved'])
+        refused = self.prepare_clock(sid, running)
+        self.assertFalse(refused['ok'], refused)
+        self.assertEqual(self.peer.clock_plans, {})
+        self.assertEqual(self.peer.clock_commits, [])
+        cancelled = self.client.tool('cancel', session_id=sid, scope='inventory_run')
+        self.assertTrue(cancelled['ok'], cancelled)
+        self.assertFalse(cancelled['inventory_clock']['pending'])
+        self.assertEqual(len(self.peer.inventory_clock_commits), 1)
+
+    def test_retained_inventory_clock_reopens_offline_without_review_or_native_contact(self):
+        self.enable_inventory_clock()
+        sid, original, created = self.inventory_plan(stable_samples=2, max_game_ticks=5)
+        self.peer.order_retired = True
+        current = self.inventory_clock_sample(sid)
+        prepared = self.prepare_inventory_clock(sid, current)
+        self.assertTrue(prepared['ok'], prepared)
+        seal = prepared['inventory_clock']['active_run']['review_seal']
+        self.client.close(crash=True)
+        env = reopen_environment(self.env, prepared['recovery'],
+                                 created['native_custody']['workforce_journal_id'])
+        for gate in ('DFMCP_SEMANTIC_WORK_ORDER_ALLOW_INVENTORY_CLOCK',
+                     'DFMCP_SEMANTIC_WORKFORCE_ALLOW_LABOR', 'DFMCP_SEMANTIC_WORK_ORDER_ALLOW_PRODUCTION'):
+            del env[gate]
+        before, calls = custody_files(self.directory), list(self.peer.calls)
+        self.client = stdio.Client(self.directory, {}, suffix='inventory-offline', env=env)
+        offline = self.client.open(mode='offline', max_wall_millis=60000)
+        self.assertTrue(offline['ok'], offline)
+        self.assertFalse(offline['inventory_clock']['review_available'])
+        self.assertFalse(offline['inventory_clock_control_enabled'])
+        self.assertFalse(offline['original_goal_proven'])
+        self.assertIsNone(offline['current_parent_goal'])
+        self.assertEqual(offline['original_plan'], original)
+        self.assertEqual(offline['inventory_clock']['run_count'], 1)
+        denied = self.client.tool('commit', session_id=offline['agent_turn']['session_id'],
+                                  scope='inventory_run', paired_seal=seal, confirmed=True)
+        self.assertFalse(denied['ok'], denied)
+        self.assertEqual(before, custody_files(self.directory))
+        self.assertEqual(calls, self.peer.calls)
+        self.assertEqual(self.peer.inventory_clock_commits, [])
+        self.client.close()
+        path = self.directory / 'orders' / 'inventory-clock.journal'
+        self.assertTrue(path.exists())
+        path.rename(path.with_name('inventory-clock.journal.retained-test-copy'))
+        self.client = stdio.Client(self.directory, {}, suffix='inventory-missing', env=env)
+        rejected = self.client.open(mode='offline', max_wall_millis=60000)
+        self.assertFalse(rejected['ok'], rejected)
+        self.assertEqual(calls, self.peer.calls)
+
+    def test_inventory_clock_safety_cancel_survives_original_deadline_and_lost_stock(self):
+        self.enable_inventory_clock()
+        sid, original, _ = self.inventory_plan(stable_samples=2, max_game_ticks=5)
+        self.peer.order_retired = True
+        prepared = self.prepare_inventory_clock(sid, self.inventory_clock_sample(sid))
+        self.assertTrue(prepared['ok'], prepared)
+        self.peer.hold_inventory_clock = True
+        running = self.client.tool('commit', session_id=sid, scope='inventory_run',
+                                   paired_seal=prepared['inventory_clock']['active_run']['review_seal'],
+                                   confirmed=True)
+        self.assertTrue(running['ok'], running)
+        self.assertTrue(running['inventory_clock']['unresolved'])
+        self.peer.goal_tick(301)
+        self.peer.inventory_stack = 0
+        reads = [call for call in self.peer.calls if call[0] in
+                 ('dfmcp_operations_v1_3', 'dfmcp_work_order_progress_v1_12')]
+        cancelled = self.client.tool('cancel', session_id=sid, scope='inventory_run')
+        self.assertTrue(cancelled['ok'], cancelled)
+        self.assertFalse(cancelled['inventory_clock']['pending'])
+        self.assertFalse(cancelled['inventory_clock']['unresolved'])
+        self.assertFalse(cancelled['original_goal_proven'])
+        self.assertIsNone(cancelled['current_parent_goal'])
+        self.assertEqual(cancelled['inventory_clock']['runs'][0]['native']['reason'], 'cancelled')
+        self.assertEqual(cancelled['inventory_clock']['runs'][0]['native']['observed_tick'], 301)
+        self.assertEqual(reads, [call for call in self.peer.calls if call[0] in
+            ('dfmcp_operations_v1_3', 'dfmcp_work_order_progress_v1_12')])
+        current = self.client.tool('wait', session_id=sid, max_wall_millis=60000)
+        self.assertTrue(current['ok'], current)
+        self.assertFalse(current['original_goal_proven'])
+        self.assertEqual(current['selected_inventory_goal']['deadline_tick'], 300)
+        self.assertTrue(current['selected_inventory_goal']['terminal_failure'])
+        self.assert_single_original_effects(current, original)
+        self.assertEqual(len(self.peer.inventory_clock_commits), 1)
+        refused = self.prepare_inventory_clock(sid, current)
+        self.assertFalse(refused['ok'], refused)
+        self.assertEqual(len(self.peer.inventory_clock_plans), 1)
+
+    def test_rejected_inventory_commit_capture_retains_consumed_tick_floor(self):
+        self.enable_inventory_clock()
+        sid, original, created = self.inventory_plan(stable_samples=2, max_game_ticks=5)
+        self.peer.order_retired = True
+        prepared = self.prepare_inventory_clock(sid, self.inventory_clock_sample(sid))
+        self.assertTrue(prepared['ok'], prepared)
+        # Only the native clock preflight is consulted before this mismatch
+        # refuses dispatch. Its complete tick125 observation must still survive.
+        self.peer.order_tick = 125
+        refused = self.client.tool('commit', session_id=sid, scope='inventory_run',
+                                   paired_seal=prepared['inventory_clock']['active_run']['review_seal'],
+                                   confirmed=True)
+        self.assertFalse(refused['ok'], refused)
+        self.assertEqual(self.peer.inventory_clock_commits, [])
+        consumed_floor = refused['retained_reference']['observation_tick_floor']
+        self.peer.order_tick = TICK
+        rolled_back = self.client.tool('wait', session_id=sid, max_wall_millis=60000)
+        self.assertGreaterEqual(consumed_floor, 125,
+                                'a rejected complete native capture must raise the original owner floor')
+        self.assertFalse(rolled_back['ok'], rolled_back)
+        self.assertIsNone(rolled_back['retained_reference']['current_parent_goal'])
+        self.assertGreaterEqual(rolled_back['retained_reference']['observation_tick_floor'], 125)
+        inspected = self.client.tool('query', session_id=sid)
+        self.assertTrue(inspected['ok'], inspected)
+        self.assert_single_original_effects(inspected, original)
+        self.assertEqual(self.peer.inventory_clock_commits, [])
+        self.assertGreaterEqual(inspected['recovery']['frontier']['authority_tick_floor'], 125)
+        self.client.close(crash=True)
+        env = reopen_environment(self.env, inspected['recovery'],
+                                 created['native_custody']['workforce_journal_id'])
+        before, calls = custody_files(self.directory), list(self.peer.calls)
+        self.client = stdio.Client(self.directory, {}, suffix='floor-offline', env=env)
+        offline = self.client.open(mode='offline', max_wall_millis=60000)
+        self.assertTrue(offline['ok'], offline)
+        self.assertGreaterEqual(offline['observation_tick_floor'], 125)
+        self.assertEqual(offline['inventory_clock']['high_tick'], TICK)
+        self.assertFalse(offline['original_goal_proven'])
+        self.assertIsNone(offline['current_parent_goal'])
+        self.assertEqual(before, custody_files(self.directory))
+        self.assertEqual(calls, self.peer.calls)
+        self.client.close()
+        env = reopen_environment(self.env, offline['recovery'],
+                                 created['native_custody']['workforce_journal_id'])
+        self.client = stdio.Client(self.directory, {}, suffix='floor-reconcile', env=env)
+        reopened = self.client.open(mode='reconcile', max_wall_millis=60000)
+        self.assertTrue(reopened['ok'], reopened)
+        self.assertFalse(reopened['inventory_clock']['review_available'])
+        self.assertGreaterEqual(reopened['observation_tick_floor'], 125)
+        rolled_back = self.client.tool('wait', session_id=reopened['agent_turn']['session_id'],
+                                       max_wall_millis=60000)
+        self.assertFalse(rolled_back['ok'], rolled_back)
+        self.assertIsNone(rolled_back['retained_reference']['current_parent_goal'])
+        self.assertFalse(rolled_back['retained_reference']['selected_inventory_goal']['proven_at_anchor'])
+        self.assertGreaterEqual(rolled_back['retained_reference']['observation_tick_floor'], 125)
+        self.assertEqual(self.peer.inventory_clock_commits, [])
 
     def test_reviewed_clock_advances_original_inventory_to_complete_parent_proof(self):
         self.enable_clock()
@@ -1560,7 +2002,7 @@ def main():
     print(json.dumps({'schema': 'dfmcp.combined-production-stdio/1', 'tests': result.testsRun,
         'failed': len(result.failures), 'errors': len(result.errors), 'skipped': len(result.skipped),
         'actual_modern_stdio': True, 'loopback_peers_are_doubles': True, 'live_game': False}))
-    raise SystemExit(0 if result.wasSuccessful() and result.testsRun == 28 and not result.skipped else 1)
+    raise SystemExit(0 if result.wasSuccessful() and result.testsRun == 37 and not result.skipped else 1)
 
 
 if __name__ == '__main__': main()

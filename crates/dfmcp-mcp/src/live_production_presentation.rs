@@ -28,6 +28,7 @@ pub(super) fn compact(view: &Value) -> Value {
         "object_digest":bounded(&r["object_digest"],64), "identity_digest":bounded(&r["identity_digest"],64),
         "goal_history_present":r["goal_history_present"].as_bool(),
         "clock_journal_id":digest(&r["clock_journal_id"]),
+        "inventory_clock_journal_id":digest(&r["inventory_clock_journal_id"]),
         "anchor":compact_anchor(&r["anchor"]),
         "frontier":{"journal_id":bounded(&r["frontier"]["journal_id"],64),
             "head":bounded(&r["frontier"]["head"],64),"authority_tick_floor":r["frontier"]["authority_tick_floor"].as_u64()}},
@@ -36,8 +37,11 @@ pub(super) fn compact(view: &Value) -> Value {
         "selected_inventory_goal":compact_goal(&view["selected_inventory_goal"]),
         "current_parent_goal":null,
         "parent_goal_observation_fenced":view["parent_goal_observation_fenced"] == true,
-        "clock":clock_summary(&view["clock"],false),"clock_control_enabled":false,
-        "clock_invalidates_goal":view["clock_invalidates_goal"] == true || clock_unresolved(&view["clock"]),
+        "clock":clock_summary(&view["clock"],false,ORDER_CLOCK),"clock_control_enabled":false,
+        "inventory_clock":clock_summary(&view["inventory_clock"],false,INVENTORY_CLOCK),
+        "inventory_clock_control_enabled":false,
+        "clock_invalidates_goal":ORDER_CLOCK.invalidates_goal(view),
+        "inventory_clock_invalidates_goal":INVENTORY_CLOCK.invalidates_goal(view),
         "original_goal_proven":false,"current_state_proven":false,"details_omitted":true})
 }
 fn compact_goal(value: &Value) -> Value {
@@ -72,6 +76,68 @@ fn digest(value: &Value) -> Option<&str> {
             && s.bytes().any(|b| b != b'0')
     })
 }
+
+/// One presentation path serves both separately authorized clock owners. Their
+/// identities, confirmation scopes and retention limits never substitute.
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct ClockOwner {
+    field: &'static str,
+    scope: &'static str,
+    source: &'static str,
+    target_scope: &'static str,
+    authority_field: &'static str,
+    invalidates_field: &'static str,
+    recovery_field: &'static str,
+    coverage_domain: &'static str,
+    max_runs: u64,
+}
+const ORDER_CLOCK: ClockOwner = ClockOwner {
+    field: "clock",
+    scope: "run",
+    source: "order-run/1.14",
+    target_scope: "selected_original_order_step",
+    authority_field: "clock_control_enabled",
+    invalidates_field: "clock_invalidates_goal",
+    recovery_field: "clock_journal_id",
+    coverage_domain: "original_order_clock_custody",
+    max_runs: 32,
+};
+const INVENTORY_CLOCK: ClockOwner = ClockOwner {
+    field: "inventory_clock",
+    scope: "inventory_run",
+    source: "run/1.13",
+    target_scope: "selected_original_inventory_goal",
+    authority_field: "inventory_clock_control_enabled",
+    invalidates_field: "inventory_clock_invalidates_goal",
+    recovery_field: "inventory_clock_journal_id",
+    coverage_domain: "original_inventory_clock_custody",
+    max_runs: 64,
+};
+const CLOCK_OWNERS: [ClockOwner; 2] = [ORDER_CLOCK, INVENTORY_CLOCK];
+impl ClockOwner {
+    fn view(self, view: &Value) -> &Value {
+        &view[self.field]
+    }
+    fn linked(self, view: &Value) -> bool {
+        let clock = self.view(view);
+        clock["source"] == self.source
+            && clock["target_scope"] == self.target_scope
+            && digest(&clock["journal_id"]).is_some()
+            && clock["journal_id"] == view["recovery"][self.recovery_field]
+            && digest(&clock["target_digest"]).is_some()
+            && digest(&clock["original_paired_seal"]).is_some()
+    }
+    fn invalidates_goal(self, view: &Value) -> bool {
+        view[self.invalidates_field] == true || clock_unresolved(self.view(view))
+    }
+    fn other(self) -> Self {
+        if self == ORDER_CLOCK {
+            INVENTORY_CLOCK
+        } else {
+            ORDER_CLOCK
+        }
+    }
+}
 fn clock_unresolved(clock: &Value) -> bool {
     clock["inspection_required"] == true
         || clock["unresolved"] == true
@@ -86,36 +152,60 @@ fn clock_unresolved(clock: &Value) -> bool {
             Some("running" | "stopping" | "source_lost")
         )
 }
+fn clock_reconciliation(clock: &Value) -> bool {
+    clock_unresolved(clock)
+        || (clock["needs_reconciliation"] == true && clock["active_run"]["state"] != "prepared")
+}
+fn clock_settled(clock: &Value) -> bool {
+    clock.is_null()
+        || (clock.is_object()
+            && clock["pending"] == false
+            && clock["unresolved"] == false
+            && clock["may_be_running"] == false
+            && clock["needs_reconciliation"] != true
+            && !clock_unresolved(clock)
+            && clock["active_run"].is_null())
+}
 /// Preserve bounded recovery identity without carrying an old confirmation.
-fn clock_summary(clock: &Value, reviewed: bool) -> Value {
+fn clock_summary(clock: &Value, reviewed: bool, owner: ClockOwner) -> Value {
     if !clock.is_object() {
         return Value::Null;
     }
     let active = &clock["active_run"];
     let native = &active["native"];
-    json!({"journal_id":digest(&clock["journal_id"]),"head":digest(&clock["head"]),
-        "mode":bounded(&clock["mode"],16),"source":bounded(&clock["source"],32),
-        "target_scope":bounded(&clock["target_scope"],64),
-        "target_digest":digest(&clock["target_digest"]),"original_paired_seal":digest(&clock["original_paired_seal"]),
-        "pending":clock["pending"].as_bool(),"unresolved":clock_unresolved(clock),
-        "may_be_running":clock_unresolved(clock),"needs_reconciliation":clock["needs_reconciliation"].as_bool(),
-        "inspection_required":clock["inspection_required"] == true,
-        "run_count":clock["run_count"].as_u64().filter(|n|*n<=32),"high_tick":clock["high_tick"].as_u64(),
-        "review_available":reviewed,"current_pause_proven":false,"original_goal_proven":false,
-        "active_run":if active.is_object() {json!({
-            "review_seal":if reviewed {digest(&active["review_seal"])}else{None},
+    let native_summary = if native.is_object() {
+        json!({"phase":bounded(&native["phase"],32),
+            "reason":bounded(&native["reason"],64),"trigger":bounded(&native["trigger"],64),
+            "receipt":digest(&native["receipt"]),"observed_tick":native["observed_tick"].as_u64(),
+            "unpause_attempted":native["unpause_attempted"].as_bool(),
+            "historical_pause_verified":native["historical_pause_verified"].as_bool(),
+            "current_pause_proven":false,"original_goal_proven":false})
+    } else {
+        Value::Null
+    };
+    let active_summary = if active.is_object() {
+        json!({"review_seal":if reviewed {digest(&active["review_seal"])}else{None},
             "key":bounded(&active["key"],128),"plan_digest":digest(&active["plan_digest"]),
             "state":bounded(&active["state"],32),"pending":active["pending"].as_bool(),
             "unresolved":active["unresolved"].as_bool(),"native_order_id":active["native_order_id"].as_u64(),
             "before_tick":active["before_tick"].as_u64(),"game_ticks":active["game_ticks"].as_u64(),
             "wall_millis":active["wall_millis"].as_u64(),"purpose":bounded(&active["purpose"],64),
-            "native":if native.is_object(){json!({"phase":bounded(&native["phase"],32),
-                "reason":bounded(&native["reason"],64),"trigger":bounded(&native["trigger"],64),
-                "receipt":digest(&native["receipt"]),"observed_tick":native["observed_tick"].as_u64(),
-                "unpause_attempted":native["unpause_attempted"].as_bool(),
-                "historical_pause_verified":native["historical_pause_verified"].as_bool(),
-                "current_pause_proven":false,"original_goal_proven":false})}else{Value::Null}
-        })}else{Value::Null}})
+            "native":native_summary})
+    } else {
+        Value::Null
+    };
+    json!({"journal_id":digest(&clock["journal_id"]),"head":digest(&clock["head"]),
+        "mode":bounded(&clock["mode"],16),"source":bounded(&clock["source"],32),
+        "target_scope":bounded(&clock["target_scope"],64),
+        "independent_authority":clock["independent_authority"].as_bool(),
+        "source_identity_semantics":bounded(&clock["source_identity_semantics"],96),
+        "target_digest":digest(&clock["target_digest"]),"original_paired_seal":digest(&clock["original_paired_seal"]),
+        "pending":clock["pending"].as_bool(),"unresolved":clock_unresolved(clock),
+        "may_be_running":clock_unresolved(clock),"needs_reconciliation":clock["needs_reconciliation"].as_bool(),
+        "inspection_required":clock["inspection_required"] == true,
+        "run_count":clock["run_count"].as_u64().filter(|n|*n<=owner.max_runs),"high_tick":clock["high_tick"].as_u64(),
+        "review_available":reviewed,"current_pause_proven":false,"original_goal_proven":false,
+        "active_run":active_summary})
 }
 fn compact_anchor(value: &Value) -> Value {
     json!({"fortress_id":bounded(&value["fortress_id"],20),"epoch":value["epoch"].as_u64(),
@@ -216,13 +306,13 @@ fn encode(
         _ => AgentPhase::Inspect,
     };
     let view = retained.unwrap_or(&Value::Null);
-    let clock = &view["clock"];
-    let clock_active = &clock["active_run"];
-    let clock_uncertain = clock_unresolved(clock);
-    let clock_reconciliation = clock_uncertain
-        || (clock["needs_reconciliation"] == true && clock_active["state"] != "prepared");
-    let uncertain = uncertain || clock_reconciliation;
-    let clock_invalidates_goal = view["clock_invalidates_goal"] == true || clock_uncertain;
+    let clock_reconciliation_needed = CLOCK_OWNERS
+        .iter()
+        .any(|owner| clock_reconciliation(owner.view(view)));
+    let uncertain = uncertain || clock_reconciliation_needed;
+    let clock_invalidates_goal = CLOCK_OWNERS
+        .iter()
+        .any(|owner| owner.invalidates_goal(view));
     let entries = view["frontier"]["entries"]
         .as_array()
         .cloned()
@@ -273,18 +363,13 @@ fn encode(
     };
     let parent_proven = parent_goal["original_goal_proven"] == true;
     let parent_truth = parent_goal["current_truth"].as_str();
-    let clock_authority = verified
-        && session.is_some()
-        && result["closed"] != true
-        && mode == Some("control")
-        && view["clock_control_enabled"] == true
-        && clock["mode"] == "control";
-    let clock_linked = clock["source"] == "order-run/1.14"
-        && clock["target_scope"] == "selected_original_order_step"
-        && digest(&clock["journal_id"]).is_some()
-        && clock["journal_id"] == view["recovery"]["clock_journal_id"]
-        && digest(&clock["target_digest"]).is_some()
-        && digest(&clock["original_paired_seal"]).is_some();
+    let control_available =
+        verified && session.is_some() && result["closed"] != true && mode == Some("control");
+    let clock_authority = |owner: ClockOwner| {
+        control_available
+            && view[owner.authority_field] == true
+            && owner.view(view)["mode"] == "control"
+    };
     let selected_step = view["original_plan"]["steps"].as_array().and_then(|steps| {
         steps.iter().find(|step| {
             step["step_id"] == selected_goal["step_id"]
@@ -307,11 +392,12 @@ fn encode(
         a.tick
             .get()
             .max(view["observation_tick_floor"].as_u64().unwrap_or(0))
-            .max(clock["high_tick"].as_u64().unwrap_or(0))
+            .max(view["clock"]["high_tick"].as_u64().unwrap_or(0))
+            .max(view["inventory_clock"]["high_tick"].as_u64().unwrap_or(0))
     });
     let current_tick = anchor
         .is_some_and(|a| view["anchor"] == anchor_value(a) && known_tick == Some(a.tick.get()));
-    let clock_goal_ready = !uncertain
+    let current_goal_ready = !uncertain
         && !clock_invalidates_goal
         && !parent_fenced
         && parent_goal.is_object()
@@ -320,13 +406,22 @@ fn encode(
         && view["frontier"]["needs_reconciliation"] != true
         && selected_goal["scope"] == "selected_original_order_step"
         && selected_goal["kind"] == "observed_inventory_minimum"
-        && selected_goal["receipt_linked"] == true
         && !selected_proven
         && selected_goal["terminal_failure"] != true
         && selected_goal["history"]["fenced"] != true
-        && current_tick
-        && ((selected_goal["current_truth"] == "false" && parent_truth == Some("false"))
-            || (selected_goal["current_truth"] == "true" && parent_truth == Some("true")));
+        && current_tick;
+    let clock_goal_ready = |owner: ClockOwner| {
+        current_goal_ready
+            && if owner == INVENTORY_CLOCK {
+                selected_goal["current_truth"] == "true" && parent_truth == Some("true")
+            } else {
+                selected_goal["receipt_linked"] == true
+                    && ((selected_goal["current_truth"] == "false"
+                        && parent_truth == Some("false"))
+                        || (selected_goal["current_truth"] == "true"
+                            && parent_truth == Some("true")))
+            }
+    };
     let allowed_ticks = deadline
         .zip(known_tick)
         .and_then(|(deadline, tick)| deadline.checked_sub(tick))
@@ -344,23 +439,51 @@ fn encode(
     let proposed_wall = budget
         .map(|b| b.max_wall_millis.min(5000))
         .filter(|wall| *wall > 0);
-    let new_run_proposal = (clock_authority
-        && clock_linked
-        && clock_goal_ready
-        && clock["pending"] == false
-        && clock["unresolved"] == false
-        && clock["may_be_running"] == false
-        && clock_active.is_null()
-        && clock["run_count"].as_u64().is_some_and(|count| count < 32))
-    .then_some(proposed_ticks.zip(proposed_wall))
-    .flatten()
-    .map(|(ticks, wall)| {
-        json!({"kind":"run","original_paired_seal":clock["original_paired_seal"],
-            "game_ticks":ticks,"wall_millis":wall})
-    });
-    let clock_prepared = clock_authority
-        && clock_linked
-        && clock_goal_ready
+    let new_run_proposal = |owner: ClockOwner| {
+        let clock = owner.view(view);
+        (clock_authority(owner)
+            && owner.linked(view)
+            && clock_goal_ready(owner)
+            && clock_settled(clock)
+            && clock_settled(owner.other().view(view))
+            && clock["run_count"]
+                .as_u64()
+                .is_some_and(|count| count < owner.max_runs))
+        .then_some(proposed_ticks.zip(proposed_wall))
+        .flatten()
+        .map(|(ticks, wall)| {
+            json!({"kind":owner.scope,"original_paired_seal":clock["original_paired_seal"],
+                "game_ticks":ticks,"wall_millis":wall})
+        })
+    };
+    let order_proposal = new_run_proposal(ORDER_CLOCK);
+    let inventory_proposal = new_run_proposal(INVENTORY_CLOCK);
+    // Retained work takes precedence over a new run in either owner. Once both
+    // settle, prefer the independent inventory path for already true stock;
+    // it remains available after the original manager order has retired.
+    let clock_owner = CLOCK_OWNERS
+        .into_iter()
+        .find(|owner| clock_reconciliation(owner.view(view)))
+        .or_else(|| {
+            CLOCK_OWNERS.into_iter().find(|owner| {
+                let clock = owner.view(view);
+                clock["pending"] == true || clock["active_run"].is_object()
+            })
+        })
+        .unwrap_or_else(|| {
+            if inventory_proposal.is_some() || !view["clock"].is_object() {
+                INVENTORY_CLOCK
+            } else {
+                ORDER_CLOCK
+            }
+        });
+    let clock = clock_owner.view(view);
+    let clock_active = &clock["active_run"];
+    let clock_uncertain = clock_unresolved(clock);
+    let clock_prepared = clock_authority(clock_owner)
+        && clock_owner.linked(view)
+        && clock_goal_ready(clock_owner)
+        && clock_settled(clock_owner.other().view(view))
         && clock["pending"] == true
         && !clock_uncertain
         && clock_active["state"] == "prepared"
@@ -382,17 +505,22 @@ fn encode(
     let clock_rereview = clock_prepared && clock["review_available"] == false;
     let clock_proposal = if clock_rereview {
         Some(
-            json!({"kind":"run","original_paired_seal":clock["original_paired_seal"],
+            json!({"kind":clock_owner.scope,"original_paired_seal":clock["original_paired_seal"],
             "game_ticks":clock_active["game_ticks"],"wall_millis":clock_active["wall_millis"]}),
         )
+    } else if clock_owner == INVENTORY_CLOCK {
+        inventory_proposal.clone()
     } else {
-        new_run_proposal
+        order_proposal.clone()
     };
     // Stopping an existing run does not require an unexpired or unsatisfied goal.
-    let clock_cancel = clock_authority
-        && clock_linked
-        && clock_active.is_object()
-        && (clock["pending"] == true || clock_uncertain);
+    let clock_cancel = |owner: ClockOwner| {
+        let clock = owner.view(view);
+        clock_authority(owner)
+            && owner.linked(view)
+            && clock["active_run"].is_object()
+            && (clock["pending"] == true || clock_unresolved(clock))
+    };
     let clock_source_lost =
         clock_active["native"]["phase"] == "source_lost" && clock["needs_reconciliation"] == false;
     let labor = parent_labor_diagnostics(&parent_goal);
@@ -418,7 +546,7 @@ fn encode(
         ))
     } else if uncertain
         && parent_fenced
-        && !clock_reconciliation
+        && !clock_reconciliation_needed
         && view["frontier"]["all_applied"] == true
         && view["frontier"]["needs_reconciliation"] != true
     {
@@ -428,7 +556,7 @@ fn encode(
     } else if uncertain {
         Some((
             "fortress_wait",
-            if clock_reconciliation {
+            if clock_reconciliation_needed {
                 "Reconcile the retained clock run before another dispatch or fresh goal sample; wait does not start another run."
             } else {
                 "Reconcile the original uncertain key before any new dispatch."
@@ -443,7 +571,7 @@ fn encode(
             "fortress_commit",
             "Confirm this separate clock review to attempt one bounded unpause after fresh original-custody checks.",
             true,
-            json!({"paired_seal":clock_active["review_seal"],"confirmed":true,"scope":"run"}),
+            json!({"paired_seal":clock_active["review_seal"],"confirmed":true,"scope":clock_owner.scope}),
         ))
     } else if clock_rereview {
         Some((
@@ -452,12 +580,12 @@ fn encode(
             false,
             json!({"request":clock_proposal.as_ref().map(Value::to_string)}),
         ))
-    } else if clock_cancel && clock_active["state"] == "prepared" {
+    } else if clock_cancel(clock_owner) && clock_active["state"] == "prepared" {
         Some((
             "fortress_cancel",
             "Cancel the retained run preparation before choosing a new bounded clock slice.",
             false,
-            json!({"scope":"run"}),
+            json!({"scope":clock_owner.scope}),
         ))
     } else if parent_proven || parent_fenced {
         None
@@ -497,7 +625,10 @@ fn encode(
     {
         Some((
             "fortress_wait",
-            if clock.is_object() {
+            if CLOCK_OWNERS
+                .iter()
+                .any(|owner| owner.view(view).is_object())
+            {
                 "Take one fresh coherent sample of the original labor and inventory goal; wait does not start a clock run."
             } else {
                 "Take one coherent sample of the original labor and inventory goal; additional stability samples require separately managed game-time progress."
@@ -540,19 +671,21 @@ fn encode(
             recommendation_fn(tool, reason, confirm, arguments)
         })
         .collect::<Vec<_>>();
-    if clock_cancel
-        && result["closed"] != true
-        && let Some(id) = session
-        && !recommendations
-            .iter()
-            .any(|item| item["tool"] == "fortress_cancel" && item["arguments"]["scope"] == "run")
-    {
-        recommendations.push(recommendation_fn(
-            "fortress_cancel",
-            "Cancel the retained clock run; an active run requests a stop and keeps its original recovery custody.",
-            false,
-            json!({"session_id":id.to_string(),"scope":"run"}),
-        ));
+    for owner in CLOCK_OWNERS {
+        if clock_cancel(owner)
+            && result["closed"] != true
+            && let Some(id) = session
+            && !recommendations.iter().any(|item| {
+                item["tool"] == "fortress_cancel" && item["arguments"]["scope"] == owner.scope
+            })
+        {
+            recommendations.push(recommendation_fn(
+                "fortress_cancel",
+                "Cancel the retained clock run; an active run requests a stop and keeps its original recovery custody.",
+                false,
+                json!({"session_id":id.to_string(),"scope":owner.scope}),
+            ));
+        }
     }
     // This suggestion requests a new capture; it never joins pages into a
     // canonical snapshot or carries mutation/preparation authority.
@@ -585,8 +718,15 @@ fn encode(
     } else {
         omitted_domains.insert(0, "current_parent_goal");
     }
-    if clock.is_object() {
-        partial_domains.push("original_order_clock_custody");
+    for owner in CLOCK_OWNERS {
+        if owner.view(view).is_object() {
+            partial_domains.push(owner.coverage_domain);
+        }
+    }
+    if CLOCK_OWNERS
+        .iter()
+        .any(|owner| owner.view(view).is_object())
+    {
         omitted_domains.push("current_pause");
     }
     let mut uncertainty = if parent_fenced {
@@ -622,23 +762,64 @@ fn encode(
             _ => Vec::new(),
         }
     };
-    if clock_reconciliation || clock_invalidates_goal {
-        uncertainty.push(json!({"scope":"run","epistemic_status":"unknown",
-            "clock_may_be_running":clock_uncertain,"current_pause_proven":false,
-            "finding":"Native clock custody cannot establish current pause or completion of the original goal.",
-            "resolution":if clock_source_lost {
-                "Inspect custody and resolve the original clock source; repeated polling cannot prove pause after source loss."
-            } else if clock_reconciliation {
-                "Reconcile or cancel the original run before a fresh joined labor and inventory sample."
-            } else {
-                "Take a fresh joined labor and inventory sample after the run has settled."
-            }}));
+    for owner in CLOCK_OWNERS {
+        let clock = owner.view(view);
+        let reconciliation = clock_reconciliation(clock);
+        if reconciliation || owner.invalidates_goal(view) {
+            uncertainty.push(json!({"scope":owner.scope,"epistemic_status":"unknown",
+                "clock_may_be_running":clock_unresolved(clock),"current_pause_proven":false,
+                "finding":"Native clock custody cannot establish current pause or completion of the original goal.",
+                "resolution":if clock["active_run"]["native"]["phase"] == "source_lost"
+                    && clock["needs_reconciliation"] == false {
+                    "Inspect custody and resolve the original clock source; repeated polling cannot prove pause after source loss."
+                } else if reconciliation {
+                    "Reconcile or cancel the original run before a fresh joined labor and inventory sample."
+                } else {
+                    "Take a fresh joined labor and inventory sample after the run has settled."
+                }}));
+        }
     }
-    let clock_view = clock_summary(clock, clock_commit);
+    let clock_views = CLOCK_OWNERS.map(|owner| {
+        clock_summary(
+            owner.view(view),
+            clock_commit && owner == clock_owner,
+            owner,
+        )
+    });
     let mut actions = entries;
-    if clock_active.is_object() {
-        actions.push(json!({"scope":"run","clock_run":clock_view["active_run"],
-            "currently_verified":verified,"clock_receipt_is_goal_proof":false}));
+    let mut cancellation_drains = Vec::new();
+    let mut affordances = Vec::new();
+    for (owner, summary) in CLOCK_OWNERS.into_iter().zip(&clock_views) {
+        let clock = owner.view(view);
+        let active = &clock["active_run"];
+        if active.is_object() {
+            actions.push(
+                json!({"scope":owner.scope,"clock_run":summary["active_run"],
+                "currently_verified":verified,"clock_receipt_is_goal_proof":false}),
+            );
+        }
+        if active["state"] == "cancel_requested" {
+            cancellation_drains.push(json!({"scope":owner.scope,
+                "key":bounded(&active["key"],128),"currently_verified":verified}));
+        }
+        if clock.is_object() {
+            let proposal = if owner == clock_owner {
+                clock_proposal.is_some()
+            } else if owner == ORDER_CLOCK {
+                order_proposal.is_some()
+            } else {
+                inventory_proposal.is_some()
+            };
+            affordances.extend([
+                json!({"action":"fortress_plan","scope":owner.scope,"enabled":proposal,
+                    "request_kind":owner.scope,"grants_authority":false}),
+                json!({"action":"fortress_commit","scope":owner.scope,
+                    "enabled":clock_commit && owner == clock_owner,
+                    "requires_confirmation":true,"grants_authority":false}),
+                json!({"action":"fortress_cancel","scope":owner.scope,"enabled":clock_cancel(owner),
+                    "grants_authority":false}),
+            ]);
+        }
     }
     let mut confirmations = if review.is_null() {
         vec![]
@@ -646,7 +827,7 @@ fn encode(
         vec![review]
     };
     let pending_plans = if clock_commit {
-        let confirmation = json!({"scope":"run","paired_seal":clock_active["review_seal"],
+        let confirmation = json!({"scope":clock_owner.scope,"paired_seal":clock_active["review_seal"],
             "game_ticks":clock_active["game_ticks"],"wall_millis":clock_active["wall_millis"],
             "requires_confirmation":true,"commit_available":true,
             "purpose":"bounded game-time progress for the original inventory goal"});
@@ -683,26 +864,23 @@ fn encode(
             "current_parent_goal_truth":parent_truth,
             "current_parent_labor":labor.as_ref().map(|labor| &labor.summary),
             "parent_goal_observation_fenced":parent_fenced,
-            "clock_control_enabled":clock_authority,"clock_may_be_running":clock_uncertain,
-            "clock_invalidates_goal":clock_invalidates_goal,"current_pause_proven":false,
+            "clock_control_enabled":clock_authority(ORDER_CLOCK),
+            "inventory_clock_control_enabled":clock_authority(INVENTORY_CLOCK),
+            "clock_may_be_running":clock_unresolved(&view["clock"]),
+            "inventory_clock_may_be_running":clock_unresolved(&view["inventory_clock"]),
+            "clock_invalidates_goal":ORDER_CLOCK.invalidates_goal(view),
+            "inventory_clock_invalidates_goal":INVENTORY_CLOCK.invalidates_goal(view),"current_pause_proven":false,
             "clock_receipt_is_goal_proof":false,
             "selected_inventory_goal_proven_at_anchor":selected_proven}))
-        .active_work(json!({"pending_plans":pending_plans,"actions":actions,"clock":clock_view,
+        .active_work(json!({"pending_plans":pending_plans,"actions":actions,"clock":clock_views[0],
+            "inventory_clock":clock_views[1],
             "obligations":if selected_goal.is_null() {vec![]} else {vec![selected_goal]},
-            "current_parent_goal":parent_goal,"cancellation_drains":if clock_active["state"] == "cancel_requested" {
-                vec![json!({"scope":"run","key":bounded(&clock_active["key"],128),"currently_verified":verified})]
-            }else{vec![]},
+            "current_parent_goal":parent_goal,"cancellation_drains":cancellation_drains,
             "indeterminate_effects":if uncertain {vec![json!({"state":"unknown","reconcile_original_key":true,
-                "clock_may_be_running":clock_uncertain})]} else {vec![]},
+                "clock_may_be_running":clock_unresolved(&view["clock"]),
+                "inventory_clock_may_be_running":clock_unresolved(&view["inventory_clock"])})]} else {vec![]},
             "publications":[],"confirmations":confirmations}))
-        .affordances(if clock.is_object() {vec![
-            json!({"action":"fortress_plan","scope":"run","enabled":clock_proposal.is_some(),
-                "request_kind":"run","grants_authority":false}),
-            json!({"action":"fortress_commit","scope":"run","enabled":clock_commit,
-                "requires_confirmation":true,"grants_authority":false}),
-            json!({"action":"fortress_cancel","scope":"run","enabled":clock_cancel,
-                "grants_authority":false})
-        ]}else{vec![]})
+        .affordances(affordances)
         .recommendations(recommendations)
         .uncertainty(uncertainty)
         .coverage(json!({"status":"partial","complete_domains":[],"partial_domains":partial_domains,
@@ -731,9 +909,11 @@ fn encode(
     result.to_string()
 }
 fn recommendation_fn(tool: &str, reason: &str, confirm: bool, arguments: Value) -> Value {
-    let clock_control = arguments["scope"] == "run"
+    let clock_control = matches!(arguments["scope"].as_str(), Some("run" | "inventory_run"))
         || arguments["request"].as_str().is_some_and(|raw| {
-            serde_json::from_str::<Value>(raw).is_ok_and(|request| request["kind"] == "run")
+            serde_json::from_str::<Value>(raw).is_ok_and(|request| {
+                matches!(request["kind"].as_str(), Some("run" | "inventory_run"))
+            })
         });
     recommendation(
         tool,
@@ -796,6 +976,10 @@ pub(super) fn packet(
 #[cfg(test)]
 #[path = "live_production_presentation_clock_tests.rs"]
 mod clock_tests;
+
+#[cfg(test)]
+#[path = "live_production_presentation_inventory_clock_tests.rs"]
+mod inventory_clock_tests;
 
 #[cfg(test)]
 mod tests {

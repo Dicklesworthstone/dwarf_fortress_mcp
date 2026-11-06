@@ -1,5 +1,90 @@
 # Implementation Status
 
+## Unreleased — Combined inventory clock and consumed source floors
+
+The combined labor/order owner now supports its own independently configured
+Run/1.13 inventory clock. After Wait obtains qualified True inventory and current
+labor for an unfinished original stability obligation, Plan with
+`kind=inventory_run` prepares a separately confirmed `scope=inventory_run` slice.
+The original manager order may have retired: its Created receipt remains exact
+historical custody, while fresh inventory and labor supply current goal evidence.
+The full original plan, actual selected StepId/key, archive, predecessor receipts,
+absolute deadline, cadence and required stable samples are unchanged. Every
+native prepare and commit rechecks that custody and obtains a complete fresh
+parent sample after the durable clock marker. Already prepared re-review also
+refreshes evidence. A same-tick sample never advances the stability count.
+
+The two optional clocks retain separate parent/child source pins, private files,
+external journal identities, credentials, authority gates and review seals.
+Either pending owner blocks new work in the other; either unresolved owner
+blocks paused goal sampling. Wait reconciles retained keys without another
+unpause. Advance, error and reopening withdraw local confirmation/current proof;
+fresh joined evidence is required after settled time advancement. Cancellation
+needs Query and that owner's independent clock authority even after the original
+deadline or loss of stock. Offline recovery performs no native contact and never
+creates a replacement missing journal. Run/1.13 native authority remains source
+incarnation scoped; canonical fortress grants are not converted.
+
+Actual execution exposed a consumed-floor defect: a native commit preflight
+could read tick 125 after a preparation at 120, reject the stale witness, and
+then permit a later tick-120 sample because no run event recorded the rejected
+read. The shared bounded-goal clock now retains complete observations and native
+replies returned by its source interface before subsequent journal, authority or publication
+checks. Parent sampling also honors the maximum tick in its external original
+recovery reference. These floors constrain later work; they establish no current
+pause, goal truth or effect permission. Keys, seals and native wire formats are
+unchanged.
+
+The tracked actual-binary modern-stdio/TCP suite contains 37 scenarios, nine new
+for retired-order completion, late stock/labor drift after the durable marker,
+lost replies, both directions of clock exclusion, offline/missing custody,
+cancellation after deadline, and rejected-read rollback across recovery. The
+ninth regression first reproduced the old defect, including a subsequent live
+rollback publishing tick-120 parent evidence. After the fix, all nine actual
+Runtime/native-TCP scenarios pass (zero failures, errors or skips) with the
+default 8 GiB public byte budget and exact public response/opening reservations.
+The retirement case advances two separately confirmed five-tick slices from
+120 through 125 to 130, preserving deadline 300 and cadence 5. The rejected-read
+case also passes crash/offline/reconcile recovery with external floor 125 while
+the historical native journal still reports 120, without unpause or offline
+native contact/file changes.
+
+Executed focused unit checks total 78 passes with zero failed or ignored tests:
+19 clock tests (including the three target tests), 34 complete presentation/Agent
+Turn tests, and 25 configuration/native-authority/private-custody/pure-server
+helper tests. Clock and configuration/helper checks were rerun after the floor
+fix. These component crates compile actual production source with exact locked
+core/world/intent/adapter dependencies and no production stubs; only the stated
+test modules and pure facade helpers are selected. All 13 changed Rust files
+pass scoped formatting, and the tracked diff passes whitespace checks.
+The tested rebuild and nine-case run retained identical hashes for 339 compiled
+inputs, 360 broader runtime/native/test/presentation inputs, and three Python
+runner/fixture inputs. Tested component driver SHA-256:
+`1c94f80ad3a5fe527bb05d430074ca9c9f31b992ba9ad1a3d32e63933ad4134f`.
+Production component Clippy could not complete: Cargo failed to write its
+invocation timestamp after the shared filesystem filled (ENOSPC). No Clippy
+pass or source finding is claimed.
+
+The final integration also preserves concurrent main checkpoint `35a5ccea`,
+which extracts the selected custody validator into an adapter descriptor and
+adds independent clock-pin regressions. Independent source comparison confirms
+all previous validation predicates, original deadline and eight framed identity
+fields are preserved; standalone and selected target bytes are unchanged. The
+upstream native configuration implementation and its two new tests are retained,
+with the distinct inventory-only recovery test added. Both upstream and merged
+native modules pass rustfmt parsing through stdin. These concurrent descriptor
+and extra-test bytes were source-reviewed after the successful execution above;
+the exact final merged tree was not rebuilt after disk exhaustion. Prior-source
+execution is not claimed as a full final-tree qualification.
+
+Runtime component execution excludes FastMCP transport, production Cx, Agent Turn
+and admission, and uses an identified bounded test checkpoint through the
+existing callback API. Presentation and pure server helpers are tested separately.
+The complete public CLI/stdio suite and native DFHack/game qualification are not
+claimed; the full MCP dependency build remains subject to the previously recorded
+Asupersync memory blocker. The frozen eleven-tool surface and development-only
+admission boundary remain unchanged. Owning beads stay in progress.
+
 ## Unreleased — Shared original production clock custody
 
 Selected production clocks now have one authority-free custody descriptor for

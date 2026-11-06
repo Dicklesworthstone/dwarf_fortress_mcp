@@ -242,7 +242,11 @@
       "crates/dfmcp-adapter/src/live_production/goal_monitor.rs",
       "crates/dfmcp-adapter/src/live_production/clock_custody_tests.rs",
       "crates/dfmcp-mcp/src/live_production_presentation_clock_tests.rs",
-      "crates/dfmcp-adapter/src/live_production/selected_clock_custody.rs"
+      "crates/dfmcp-adapter/src/live_production/selected_clock_custody.rs",
+      "crates/dfmcp-mcp/src/live_production_runtime/inventory_clock.rs",
+      "crates/dfmcp-mcp/src/semantic_work_order_runtime/inventory_clock.rs",
+      "crates/dfmcp-mcp/src/semantic_work_order_runtime/bounded_goal_clock.rs",
+      "crates/dfmcp-mcp/src/live_production_presentation_inventory_clock_tests.rs"
     ],
     "private_custody_platforms": [
       "linux-x86_64",
@@ -370,6 +374,48 @@
       "supports_retired_original_order": false,
       "supports_standalone_inventory_clock": false,
       "legacy_single_step_clock_target_bytes_changed": false
+    },
+    "optional_inventory_clock": {
+      "status": "implemented_unadmitted_development_only",
+      "protocol": "run/1.13",
+      "request_kind": "inventory_run",
+      "commit_scope": "inventory_run",
+      "cancel_scope": "inventory_run",
+      "parent_child_configuration_must_match": true,
+      "operator_authority_flag": "DFMCP_SEMANTIC_WORK_ORDER_ALLOW_INVENTORY_CLOCK",
+      "operator_credential": "DFMCP_SEMANTIC_WORK_ORDER_INVENTORY_CLOCK_TOKEN",
+      "journal_file": "inventory-clock.journal",
+      "journal_directory": "order_child_custody",
+      "parent_recovery_field": "inventory_clock_journal_id",
+      "max_retained_runs": 64,
+      "target_digest_domain": "dfmcp-combined-inventory-clock-target/1",
+      "requires_explicit_original_inventory_objective": true,
+      "requires_settled_original_effects": true,
+      "requires_prior_current_wait_sample": true,
+      "requires_fresh_true_original_labor_and_inventory": true,
+      "requires_unfinished_original_stability": true,
+      "supports_retired_original_order": true,
+      "requires_present_native_order_row": false,
+      "full_original_archive_and_selected_step_key_retained": true,
+      "original_deadline_cadence_stability_unchanged": true,
+      "original_custody_and_complete_parent_rechecked_after_durable_marker": true,
+      "rejected_native_read_floors_retained_before_journal_validation": true,
+      "consumed_tick_retained_in_original_external_recovery": true,
+      "parent_samples_below_retained_consumed_tick_refused": true,
+      "independent_operator_clock_authority": true,
+      "native_authority_scope": "source_incarnation_only_not_named_fortress_lineage",
+      "canonical_fortress_grants_converted_to_native_scope": false,
+      "pending_sibling_clock_blocks_new_run": true,
+      "fresh_confirmation_required": true,
+      "local_review_restored_after_restart_or_failed_publication": false,
+      "new_unpause_attempts_per_run": 1,
+      "unresolved_run_blocks_goal_sampling": true,
+      "wait_reconciles_original_run_without_unpause": true,
+      "cancel_after_goal_deadline_requires_query_and_clock": true,
+      "missing_replaced_or_omitted_journal_refused": true,
+      "run_withdraws_current_parent_and_selected_proof": true,
+      "native_clock_receipt_proves_current_pause_or_goal": false,
+      "legacy_standalone_inventory_clock_target_bytes_changed": false
     }
   },
   "selected_work_order_goal_monitor": {
@@ -419,7 +465,7 @@
     "current_goal_evidence": false,
     "selected_order_target_digest_changed": false,
     "legacy_single_step_target_changed": false,
-    "combined_inventory_run_consumer_enabled": false,
+    "combined_inventory_run_consumer_enabled": true,
     "test_path": "crates/dfmcp-adapter/src/live_production/clock_custody_tests.rs"
   }
 }

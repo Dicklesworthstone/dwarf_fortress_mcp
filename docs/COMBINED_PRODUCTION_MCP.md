@@ -12,7 +12,8 @@ platforms refuse private-journal opening.
 Owner: `df-dfhack-bridge-plane-c-pic.4.1`. The broader dispatcher and recovery
 tasks `.4` and `.5` remain open. This host does not supply a complete fortress
 controller or material/workshop planning. Separately configured bounded clock
-runs can advance an original receipt-linked production order. An explicitly selected
+runs can advance an original receipt-linked production order or finish an already
+observed inventory stability interval after the order retires. An explicitly selected
 inventory objective can be monitored for the original order step. A separate
 fresh labor-and-inventory observation can establish the complete original
 parent goal at its exact reported anchor.
@@ -29,17 +30,18 @@ Supply the existing `DFMCP_SEMANTIC_WORKFORCE_CONFIG` and
 `DFMCP_SEMANTIC_WORK_ORDER_CONFIG` described in
 [the workforce guide](SEMANTIC_WORKFORCE_MCP.md) and
 [the work-order guide](SEMANTIC_WORK_ORDER_MCP.md). Their original single-goal
-`recovery` objects, workforce `clock`, and order `inventory_clock` remain forbidden
-in this host. The order `clock` is optional and must exactly match the combined
-parent's explicit clock configuration described below. Its independent authority
-is never inferred from permission to assign labor or insert orders.
+`recovery` objects and workforce `clock` remain forbidden in this host. The order
+`clock` and `inventory_clock` are optional; each must exactly match its separate
+combined-parent configuration described below. Each clock's independent authority
+is never inferred from permission to assign labor, insert orders or control the
+other clock.
 Both must use the same numeric loopback endpoint, initialization mode and exact
 citizen world/site/DF/DFHack/bridge-version/generation pins. Native family
 generations remain independently pinned; they need not equal each other.
 
 `DFMCP_COMBINED_PRODUCTION_CONFIG` is a closed JSON object with schema
 `dfmcp.combined-production-development/1`, an absolute normalized `directory`,
-Boolean `initialize`, and optional `recovery` and `clock`. All three custody directories
+Boolean `initialize`, and optional `recovery`, `clock` and `inventory_clock`. All three custody directories
 must be separate and nonnested. Existing private-file owners require real
 owner-private directories and regular no-follow files with canonical modes;
 the host neither repairs nor silently replaces custody.
@@ -56,6 +58,12 @@ Only the following additional family environment names are accepted:
 - `DFMCP_SEMANTIC_WORK_ORDER_OPERATIONS_TOKEN`
 - `DFMCP_SEMANTIC_WORK_ORDER_ALLOW_CLOCK`
 - `DFMCP_SEMANTIC_WORK_ORDER_CLOCK_TOKEN`
+- `DFMCP_SEMANTIC_WORK_ORDER_ALLOW_INVENTORY_CLOCK`
+- `DFMCP_SEMANTIC_WORK_ORDER_INVENTORY_CLOCK_TOKEN`
+
+Each pair of clock environment names is accepted only when that clock is
+explicitly configured in the parent and child. Dropping configuration cannot
+hide an existing private clock journal.
 
 Authority flags are absent or exactly `1`. Initializing in Control requires
 both write flags. Opening authority can later be reduced; it cannot be
@@ -103,9 +111,10 @@ a proven preparation; it does not undo an Applied effect. `scope="session"`
 releases local ownership while preserving custody and makes no native
 cancellation claim. Checkpoint and Restore return explicit capability refusals.
 
-If a clock is configured, Wait first reconciles its retained original run key.
-An unresolved run blocks paused goal acquisition. Explicit `scope="run"`
-cancellation retires a prepared run or requests the native owner's safety pause;
+If clocks are configured, Wait first reconciles their retained original run keys.
+Either unresolved run blocks paused goal acquisition. Explicit `scope="run"` or
+`scope="inventory_run"` cancellation retires that owner's prepared run or requests
+its native safety pause;
 it does not change the labor assignment or remove the manager order.
 
 ## Advance the original production order with a reviewed clock
@@ -174,11 +183,76 @@ recovery reference. Missing, omitted or replaced clock custody refuses; recovery
 never creates a replacement journal. Offline opening and inspection perform no
 native contact and restore no current goal proof or local clock review.
 
-This host's clock requires the original native order to remain eligible. When
-the engine retires the order, inventory monitoring still works, but further
-stability samples need separately managed game-time progress. The standalone
-work-order profile's inventory clock is a distinct owner and is not imported by
-this combined configuration.
+The order clock requires the original native order to remain eligible. The
+independent inventory clock below handles unfinished sampled stability after
+normal engine retirement.
+
+## Finish original inventory stability after order retirement
+
+The separate `run/1.13` owner can advance an already True original inventory goal
+through its remaining stability interval. It retains the complete combined plan,
+selected StepId/key, verified Created receipt and predecessor custody. It does
+not require a present manager-order row or reinterpret inventory as output
+attributed to that order. Both original effects must be settled, and fresh
+qualified evidence must show the requested labor settings and inventory minimum
+are True. Fulfilled, failed, cancelled or expired original obligations refuse
+new runs; the original deadline and cadence are never renewed.
+
+Configure the same independent source incarnation in the parent and order child:
+
+```json
+{"inventory_clock":{"generation":78}}
+```
+
+Use the actual operator-pinned generation, set
+`DFMCP_SEMANTIC_WORK_ORDER_ALLOW_INVENTORY_CLOCK=1`, and provide
+`DFMCP_SEMANTIC_WORK_ORDER_INVENTORY_CLOCK_TOKEN`. Open Control with an explicit
+`max_game_ticks` between 1 and 1200. The native Run/1.13 protocol identifies a
+source incarnation, not a named fortress lineage. Its native authority is issued
+independently; canonical fortress grants are never converted into native scope.
+
+First call Wait to acquire the current original labor-and-inventory sample.
+When both are True and the selected stability requirement is unfinished, Plan:
+
+```json
+{
+  "kind": "inventory_run",
+  "original_paired_seal": "<inventory_clock.original_paired_seal>",
+  "game_ticks": 5,
+  "wall_millis": 1000
+}
+```
+
+The native observation must match that sample's tick. Before each native prepare
+or commit, the host rechecks exact original custody and obtains a complete fresh
+joined labor/inventory sample **after** the durable clock marker. Changed labor,
+insufficient or unqualified inventory, a changed tick, revoked authority or
+failed publication prevents the native effect. Re-reviewing an existing prepared
+run also refreshes evidence; reading its journal alone never restores a review.
+
+Review `inventory_clock.active_run`. Commit with `scope="inventory_run"`, that
+run's `review_seal` in `paired_seal`, and `confirmed=true`. Each bounded run retains
+the original deadline and has one unpause attempt. At most 64 runs are retained
+by this owner. Commit immediately withdraws current selected and parent proof;
+Wait must obtain fresh evidence after the run has settled before reporting
+stability or complete-parent success. A same-tick sample does not advance the
+stability count.
+
+Both clock owners remain visible. A pending or unresolved run in either prevents
+starting the other, and either unresolved owner blocks paused goal sampling.
+Lost replies retain the original key for Wait reconciliation without another
+unpause. Cancel with `scope="inventory_run"` requests that owner's safety pause
+or retires its preparation; it needs Query and its independent clock authority,
+including after the original goal deadline. It does not require current goal
+truth or permission to plan another effect.
+
+Retain `recovery.inventory_clock_journal_id` along with the complete original
+recovery reference. On reopening, copy that exact ID into
+`inventory_clock.journal_id` in both parent and child configurations and set all
+`initialize` values to false. The existing order-child `inventory-clock.journal`
+must be present and match. Offline opening reads retained custody without native
+contact, current proof or restored confirmation. Missing, replaced or omitted
+inventory clock custody refuses instead of creating a replacement.
 
 The newer `.4.2` source exposes pre-plan advisory workforce choices; its current
 test and live evidence remains explicit in `IMPLEMENTATION_STATUS.md`. BB's

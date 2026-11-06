@@ -1005,6 +1005,89 @@ mod runtime_checkpoint_tests {
     }
 
     #[test]
+    fn combined_inventory_clock_admits_only_exact_independent_parent_custody() -> Result<()> {
+        let mut raw = json!({
+            "schema":"dfmcp.semantic-work-order-development/1",
+            "directory":"/tmp/dfmcp-combined-inventory-clock-config-test",
+            "endpoint":"127.0.0.1:5000", "initialize":true,
+            "clock":{"generation":50}, "inventory_clock":{"generation":60},
+            "sources":{
+                "kind":"operator-development-source-acceptance/1",
+                "world_folder":"region1","site_id":7,
+                "df_version":"df","dfhack_version":"dfhack",
+                "citizen_bridge_version":"citizens","citizen_generation":10,
+                "work_order_generation":20,"progress_generation":30,"operations_generation":40
+            }
+        });
+        let initialized = Config::parse(&raw.to_string())?;
+        initialized.validate_combined_clocks_custody(Some((50, None)), Some((60, None)))?;
+        assert!(initialized.validate_combined_custody().is_err());
+        assert!(
+            initialized
+                .validate_combined_clock_custody((50, None))
+                .is_err()
+        );
+        for inventory in [None, Some((50, None)), Some((61, None))] {
+            assert!(
+                initialized
+                    .validate_combined_clocks_custody(Some((50, None)), inventory)
+                    .is_err()
+            );
+        }
+        for order in [None, Some((60, None)), Some((51, None))] {
+            assert!(
+                initialized
+                    .validate_combined_clocks_custody(order, Some((60, None)))
+                    .is_err()
+            );
+        }
+        let order_id = Digest32::of_bytes(b"combined original-order clock");
+        let inventory_id = Digest32::of_bytes(b"combined inventory-stability clock");
+        raw["initialize"] = json!(false);
+        raw["clock"]["journal_id"] = json!(order_id.to_hex());
+        assert!(Config::parse(&raw.to_string()).is_err());
+        raw["inventory_clock"]["journal_id"] = json!(inventory_id.to_hex());
+        let recovered = Config::parse(&raw.to_string())?;
+        recovered.validate_combined_clocks_custody(
+            Some((50, Some(order_id))),
+            Some((60, Some(inventory_id))),
+        )?;
+        for inventory in [None, Some((60, None)), Some((60, Some(order_id)))] {
+            assert!(
+                recovered
+                    .validate_combined_clocks_custody(Some((50, Some(order_id))), inventory)
+                    .is_err()
+            );
+        }
+        for order in [None, Some((50, None)), Some((50, Some(inventory_id)))] {
+            assert!(
+                recovered
+                    .validate_combined_clocks_custody(order, Some((60, Some(inventory_id))))
+                    .is_err()
+            );
+        }
+        let mut inventory_only = raw.clone();
+        inventory_only["clock"] = Value::Null;
+        Config::parse(&inventory_only.to_string())?
+            .validate_combined_clocks_custody(None, Some((60, Some(inventory_id))))?;
+        let hash = Digest32::of_bytes(b"standalone original").to_hex();
+        raw["recovery"] = json!({"plan_digest":hash,"object_digest":hash,
+            "anchor":{"fortress_id":recovered.sources.fortress().get().to_string(),
+                "epoch":0,"sequence":1,"tick":100,"state_hash":hash},
+            "clock_journal_id":order_id.to_hex(), "inventory_clock_journal_id":inventory_id.to_hex()});
+        assert!(
+            Config::parse(&raw.to_string())?
+                .validate_combined_clocks_custody(
+                    Some((50, Some(order_id))),
+                    Some((60, Some(inventory_id))),
+                )
+                .is_err(),
+            "a combined parent cannot import standalone goal recovery"
+        );
+        Ok(())
+    }
+
+    #[test]
     fn installed_runtime_checkpoint_precedes_environment_credentials_and_native_io() -> Result<()> {
         CHECKS.store(0, Ordering::SeqCst);
         let listener = TcpListener::bind("127.0.0.1:0").expect("fixture listener");
