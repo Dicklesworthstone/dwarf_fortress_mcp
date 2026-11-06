@@ -5,10 +5,10 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use dfmcp_core::{DfmcpError, ErrorCode, Result};
+use dfmcp_core::{DfmcpError, Digest32, ErrorCode, Result};
 
 use super::{InventoryStockpile, ProductionLogisticsCompiler, ProductionRecipe};
-use crate::{Action, BuildingKind, WorkOrderCondition};
+use crate::{Action, BuildingKind, RequestedAction, WorkOrderCondition, effects};
 
 const MAX_QUOTAS: usize = 64;
 const MAX_INPUTS: usize = 64;
@@ -117,9 +117,95 @@ impl ProductionPlan {
         self.expansion_rounds
     }
 
-    /// Convert only a feasible model into action *proposals*. Ordinary plan
-    /// sealing, authority, witness and effect validation still apply to them.
-    pub fn into_work_orders(self) -> Result<Vec<Action>> {
+    /// Lower a feasible model without discarding its dependency graph or input
+    /// gates. The caller supplies a nonzero, source-bound pursuit namespace and
+    /// an explicit model-resource -> material-token mapping. Input resources
+    /// are not implicitly treated as materials: the reference condition reads
+    /// `stock.material.<token>`, which is distinct from an item stock field.
+    /// Every used input must have a binding, and used bindings must be disjoint.
+    ///
+    /// Names bind the namespace and the normalized complete model, so repeated
+    /// job tokens cannot alias a predecessor. Reuse the namespace only when
+    /// replaying the same frozen attempt; a new pursuit needs a new source-bound
+    /// namespace. Unused bindings and diagnostic work counters do not change
+    /// the resulting action bytes. Availability gates require one batch's input
+    /// at a time, not the original order's total after some batches consumed it.
+    ///
+    /// These remain proposals. The binding is a declared model assumption, not
+    /// evidence that a game field has that meaning. Ordinary source validation,
+    /// authority, sealed postconditions/obligations and recipe execution still
+    /// apply. Conditions do not consume or reserve materials. Dependency indices
+    /// are relative to this returned vector; a shell inserting setup must remap
+    /// them before preparing an intent. An unrepresentable condition set refuses
+    /// as a whole instead of silently dropping dependencies or inputs.
+    pub fn into_requested_actions(
+        self,
+        namespace: Digest32,
+        material_bindings: &BTreeMap<String, String>,
+    ) -> Result<Vec<RequestedAction>> {
+        self.require_feasible()?;
+        if namespace == Digest32::ZERO {
+            return Err(invalid(
+                "production proposal requires a nonzero source namespace",
+            ));
+        }
+        if material_bindings.len() > 4_096 {
+            return Err(DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                "production material bindings exceed the 4096-resource bound",
+            ));
+        }
+        for (resource, material) in material_bindings {
+            validate_condition_token(resource)?;
+            validate_condition_token(material)?;
+        }
+        let digest = self.proposal_digest(namespace, material_bindings)?;
+        let names: Vec<_> = (0..self.steps.len())
+            .map(|index| format!("Auto-JIT/1:{digest}:{index}"))
+            .collect();
+        let mut actions = Vec::with_capacity(self.steps.len());
+        for (index, step) in self.steps.into_iter().enumerate() {
+            let mut conditions = vec![WorkOrderCondition::ItemCountBelow {
+                item_token: step.output_token,
+                threshold: step.inventory_threshold,
+            }];
+            for (input, units) in step.input_units {
+                let material = material_bindings
+                    .get(&input)
+                    .ok_or_else(proposal_invariant)?;
+                conditions.push(WorkOrderCondition::MaterialAvailable {
+                    material_token: material.clone(),
+                    minimum: units / step.batches,
+                });
+            }
+            let mut depends_on = Vec::with_capacity(step.depends_on.len());
+            for dependency in step.depends_on {
+                let name = names.get(dependency).ok_or_else(proposal_invariant)?;
+                conditions.push(WorkOrderCondition::CompletedOrder {
+                    order_name: name.clone(),
+                });
+                depends_on.push(u32::try_from(dependency).map_err(|_| proposal_invariant())?);
+            }
+            let action = Action::CreateWorkOrder {
+                name: names.get(index).ok_or_else(proposal_invariant)?.clone(),
+                job_token: step.job_token,
+                amount: step.batches,
+                conditions,
+            }
+            .normalized();
+            actions.push(RequestedAction {
+                action,
+                preconditions: Vec::new(),
+                postconditions: Vec::new(),
+                compensation: None,
+                obligation: None,
+                depends_on,
+            });
+        }
+        Ok(actions)
+    }
+
+    fn require_feasible(&self) -> Result<()> {
         if let Some(shortage) = self.shortages.first() {
             return Err(DfmcpError::new(
                 ErrorCode::PreconditionsFailed,
@@ -131,6 +217,87 @@ impl ProductionPlan {
                 ),
             ));
         }
+        Ok(())
+    }
+
+    /// Validate the bounded proposal domain before allocating any order names.
+    /// This is an explicit semantic encoding, excluding accounting diagnostics.
+    fn proposal_digest(
+        &self,
+        namespace: Digest32,
+        bindings: &BTreeMap<String, String>,
+    ) -> Result<Digest32> {
+        let mut bytes = b"dfmcp-production-order-proposals/1\0".to_vec();
+        bytes.extend_from_slice(namespace.as_bytes());
+        bytes.extend_from_slice(&(self.requirements.len() as u64).to_be_bytes());
+        for resource in &self.requirements {
+            put_proposal_text(&mut bytes, &resource.item_token);
+            for quantity in [
+                resource.minimum_stock,
+                resource.consumed_units,
+                resource.stock_units,
+                resource.planned_units,
+                resource.missing_units,
+            ] {
+                bytes.extend_from_slice(&quantity.to_be_bytes());
+            }
+            bytes.extend_from_slice(&resource.surplus_units.to_be_bytes());
+        }
+        bytes.extend_from_slice(&(self.steps.len() as u64).to_be_bytes());
+        let mut material_owners = BTreeMap::<&str, &str>::new();
+        for (index, step) in self.steps.iter().enumerate() {
+            if 1 + step.input_units.len() + step.depends_on.len()
+                > effects::MAX_WORK_ORDER_CONDITIONS
+            {
+                return Err(DfmcpError::new(
+                    ErrorCode::BudgetExceeded,
+                    "production proposal exceeds the 64-condition bound; no input or dependency may be omitted",
+                ));
+            }
+            validate_condition_token(&step.output_token)?;
+            if step.batches == 0 {
+                return Err(proposal_invariant());
+            }
+            put_proposal_text(&mut bytes, &step.output_token);
+            put_proposal_text(&mut bytes, &step.job_token);
+            put_proposal_workshop(&mut bytes, &step.workshop);
+            bytes.extend_from_slice(&step.batches.to_be_bytes());
+            bytes.extend_from_slice(&step.output_units.to_be_bytes());
+            bytes.extend_from_slice(&step.inventory_threshold.to_be_bytes());
+            bytes.extend_from_slice(&(step.input_units.len() as u64).to_be_bytes());
+            for (resource, units) in &step.input_units {
+                if *units == 0 || units % step.batches != 0 {
+                    return Err(proposal_invariant());
+                }
+                let material = bindings.get(resource).ok_or_else(|| {
+                    invalid("production input requires an explicit material-token binding")
+                })?;
+                if let Some(prior) = material_owners.insert(material, resource)
+                    && prior != resource
+                {
+                    return Err(invalid(
+                        "distinct production resources cannot share one material-token binding",
+                    ));
+                }
+                put_proposal_text(&mut bytes, resource);
+                put_proposal_text(&mut bytes, material);
+                bytes.extend_from_slice(&units.to_be_bytes());
+            }
+            bytes.extend_from_slice(&(step.depends_on.len() as u64).to_be_bytes());
+            for dependency in &step.depends_on {
+                if *dependency >= index {
+                    return Err(proposal_invariant());
+                }
+                bytes.extend_from_slice(&(*dependency as u64).to_be_bytes());
+            }
+        }
+        Ok(Digest32::of_bytes(&bytes))
+    }
+
+    /// Convert only a feasible model into action *proposals*. Ordinary plan
+    /// sealing, authority, witness and effect validation still apply to them.
+    pub fn into_work_orders(self) -> Result<Vec<Action>> {
+        self.require_feasible()?;
         Ok(self
             .steps
             .into_iter()
@@ -144,6 +311,46 @@ impl ProductionPlan {
                 }],
             })
             .collect())
+    }
+}
+
+fn proposal_invariant() -> DfmcpError {
+    DfmcpError::new(
+        ErrorCode::InternalInvariantViolation,
+        "production proposal no longer matches its validated normalized model",
+    )
+}
+
+fn validate_condition_token(token: &str) -> Result<()> {
+    validate_token(token)?;
+    if token.chars().any(char::is_control) {
+        return Err(invalid(
+            "production condition tokens cannot contain control characters",
+        ));
+    }
+    Ok(())
+}
+
+fn put_proposal_text(bytes: &mut Vec<u8>, text: &str) {
+    bytes.extend_from_slice(&(text.len() as u64).to_be_bytes());
+    bytes.extend_from_slice(text.as_bytes());
+}
+
+fn put_proposal_workshop(bytes: &mut Vec<u8>, workshop: &BuildingKind) {
+    let (tag, name) = match workshop {
+        BuildingKind::Workshop(name) => (0, Some(name)),
+        BuildingKind::Furnace(name) => (1, Some(name)),
+        BuildingKind::Furniture(name) => (2, Some(name)),
+        BuildingKind::Construction(name) => (3, Some(name)),
+        BuildingKind::Trap(name) => (4, Some(name)),
+        BuildingKind::FarmPlot => (5, None),
+        BuildingKind::Bridge => (6, None),
+        BuildingKind::Well => (7, None),
+        BuildingKind::Custom(name) => (8, Some(name)),
+    };
+    bytes.push(tag);
+    if let Some(name) = name {
+        put_proposal_text(bytes, name);
     }
 }
 

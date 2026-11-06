@@ -10,8 +10,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use dfmcp_core::{
-    DfmcpError, EntityId, ErrorCode, FortressId, GameTick, MapCoord, MapCuboid, ObservationCursor,
-    Result,
+    DfmcpError, Digest32, EntityId, ErrorCode, FortressId, GameTick, MapCoord, MapCuboid,
+    ObservationCursor, Result,
 };
 use dfmcp_intent::effects;
 use dfmcp_intent::{
@@ -1045,7 +1045,18 @@ pub(crate) struct ProductionRequest {
     prerequisites: Option<ProductionPrerequisites>,
     planner: Option<ProductionPlanner>,
     reserve_until_tick: Option<u64>,
+    orders: Option<ProductionOrders>,
 }
+
+/// Independent opt-in lowering generation. Unmarked original sources retain
+/// their established names, conditions and action bytes on exact replay.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum ProductionOrders {
+    DependencyPreservingV1,
+}
+
+const PRODUCTION_ORDER_POLICY: &str = "dependency_preserving_v1";
 
 /// A fixed compiler generation retained in the original request. Missing
 /// generation means the historical stock-only compiler, including on replay.
@@ -1131,6 +1142,7 @@ impl ProductionRequest {
             prerequisites: Option<Prerequisites>,
             planner: Option<ProductionPlanner>,
             reserve_until_tick: Option<u64>,
+            orders: Option<ProductionOrders>,
         }
         if raw.len() > MAX_ACTIONS_JSON_BYTES {
             return Err(invalid("production objective exceeds its byte bound"));
@@ -1255,11 +1267,17 @@ impl ProductionRequest {
                 "complete_project_v1 staffing requires a retained production compiler generation",
             ));
         }
+        if objective.orders.is_some() && planner.is_none() {
+            return Err(invalid(
+                "dependency_preserving_v1 orders require a retained production compiler generation",
+            ));
+        }
         Ok(Self {
             quotas,
             prerequisites,
             planner,
             reserve_until_tick: objective.reserve_until_tick,
+            orders: objective.orders,
         })
     }
 
@@ -1315,6 +1333,9 @@ impl ProductionRequest {
         }
         if let Some(tick) = self.reserve_until_tick {
             request["reserve_until_tick"] = json!(tick);
+        }
+        if self.orders.is_some() {
+            request["orders"] = json!(PRODUCTION_ORDER_POLICY);
         }
         request.to_string()
     }
@@ -1632,20 +1653,59 @@ impl ProductionRequest {
         let setup_count = setup.actions.len();
         let offset = u32::try_from(setup_count)
             .map_err(|_| invalid("production setup step index overflow"))?;
+        let typed_orders = if self.orders.is_some() {
+            let namespace = production_order_namespace(self, snapshot);
+            // This is the complete closed laboratory input catalog. Generic
+            // model inputs never silently acquire a material-field meaning.
+            let bindings = BTreeMap::from([
+                ("WOOD".to_owned(), "WOOD".to_owned()),
+                ("PLANT".to_owned(), "PLANT".to_owned()),
+            ]);
+            let orders = plan.clone().into_requested_actions(namespace, &bindings)?;
+            analysis["order_compiler"] = json!({
+                "policy": PRODUCTION_ORDER_POLICY,
+                "source_namespace": namespace.to_hex(),
+                "source_anchor": {
+                    "fortress_id": snapshot.fortress_id.get().to_string(),
+                    "epoch": snapshot.cursor.epoch,
+                    "sequence": snapshot.cursor.sequence,
+                    "tick": snapshot.tick.0,
+                    "state_hash": snapshot.state_hash.to_hex(),
+                },
+                "input_binding": "closed laboratory WOOD and PLANT material fields",
+                "material_threshold": "per completed recipe batch",
+                "dependencies": "verified action predecessors and exact named-order completion gates",
+                "reserves_materials": false,
+                "native_authority": false,
+            });
+            Some(orders)
+        } else {
+            None
+        };
         let mut steps = setup.actions;
         let mut order_indices = BTreeMap::<String, u32>::new();
-        for step in plan.steps() {
+        let mut order_names = BTreeMap::<String, String>::new();
+        for (index, step) in plan.steps().iter().enumerate() {
             let mut dependencies = setup
                 .dependencies
                 .get(&step.job_token)
                 .cloned()
                 .unwrap_or_default();
+            let mut predecessor_names = Vec::new();
             if let Some(previous_jobs) = setup.serial_after.get(&step.job_token) {
                 for previous_job in previous_jobs {
                     let previous = order_indices.get(previous_job).ok_or_else(|| {
                         invalid("production resource dependency does not precede its consumer")
                     })?;
                     dependencies.insert(*previous);
+                    if typed_orders.is_some() {
+                        predecessor_names.push(
+                            order_names
+                                .get(previous_job)
+                                .ok_or_else(|| invalid("production predecessor name is missing"))?
+                                .clone(),
+                        );
+                    }
                 }
             }
             for dependency in &step.depends_on {
@@ -1662,24 +1722,85 @@ impl ProductionRequest {
                 u32::try_from(steps.len())
                     .map_err(|_| invalid("production order step index overflow"))?,
             );
-            let mut conditions = vec![json!({
-                "kind": "item_count_below",
-                "item_token": step.output_token,
-                "threshold": step.inventory_threshold,
-            })];
-            if is_carpentry_output(&step.output_token) {
-                conditions.push(json!({
-                    "kind": "material_available", "material_token": "WOOD", "minimum": 1,
-                }));
-            } else if provisions.is_some() {
-                conditions.push(json!({
-                    "kind": "material_available", "material_token": "PLANT", "minimum": 1,
-                }));
-            }
+            let (order_name, conditions) = match &typed_orders {
+                Some(orders) => {
+                    let requested = orders
+                        .get(index)
+                        .ok_or_else(|| invalid("production order proposal is missing"))?;
+                    let Action::CreateWorkOrder {
+                        name,
+                        job_token,
+                        amount,
+                        conditions,
+                    } = &requested.action
+                    else {
+                        return Err(invalid("production proposal is not a work order"));
+                    };
+                    if job_token != &step.job_token
+                        || *amount != step.batches
+                        || requested
+                            .depends_on
+                            .iter()
+                            .map(|n| *n as usize)
+                            .collect::<Vec<_>>()
+                            != step.depends_on
+                    {
+                        return Err(invalid(
+                            "production proposal diverged from its analyzed model",
+                        ));
+                    }
+                    let mut conditions = conditions.clone();
+                    conditions.extend(
+                        predecessor_names
+                            .into_iter()
+                            .map(|order_name| WorkOrderCondition::CompletedOrder { order_name }),
+                    );
+                    let Action::CreateWorkOrder { conditions, .. } = (Action::CreateWorkOrder {
+                        name: name.clone(),
+                        job_token: job_token.clone(),
+                        amount: *amount,
+                        conditions,
+                    })
+                    .normalized() else {
+                        return Err(invalid(
+                            "production condition normalization changed the action",
+                        ));
+                    };
+                    effects::work_order_conditions_value(&conditions)?;
+                    (
+                        name.clone(),
+                        conditions
+                            .iter()
+                            .map(work_order_condition_json)
+                            .collect::<Vec<_>>(),
+                    )
+                }
+                None => {
+                    let mut conditions = vec![json!({
+                        "kind": "item_count_below",
+                        "item_token": step.output_token,
+                        "threshold": step.inventory_threshold,
+                    })];
+                    if is_carpentry_output(&step.output_token) {
+                        conditions.push(json!({
+                            "kind": "material_available", "material_token": "WOOD", "minimum": 1,
+                        }));
+                    } else if provisions.is_some() {
+                        conditions.push(json!({
+                            "kind": "material_available", "material_token": "PLANT", "minimum": 1,
+                        }));
+                    }
+                    (
+                        format!("{} for quota", step.output_token.to_lowercase()),
+                        conditions,
+                    )
+                }
+            };
+            order_names.insert(step.job_token.clone(), order_name.clone());
             steps.push(json!({
                 "action": {
                     "kind": "create_work_order",
-                    "name": format!("{} for quota", step.output_token.to_lowercase()),
+                    "name": order_name,
                     "job_token": step.job_token,
                     "amount": step.batches,
                     "conditions": conditions,
@@ -1729,6 +1850,26 @@ impl ProductionRequest {
             setup_workforce: setup.setup_workforce,
         })
     }
+}
+
+/// Bind names to one exact canonical request and immutable source frontier.
+/// Reconstructing an archived attempt uses the original source; continuation or
+/// reviewed replan at another frontier gets new names without rewriting history.
+fn production_order_namespace(request: &ProductionRequest, snapshot: &WorldSnapshot) -> Digest32 {
+    let canonical = request.canonical_json();
+    let mut bytes = b"dfmcp-laboratory-production-orders/1\0".to_vec();
+    for value in [
+        snapshot.fortress_id.get(),
+        snapshot.cursor.epoch,
+        snapshot.cursor.sequence,
+        snapshot.tick.0,
+    ] {
+        bytes.extend_from_slice(&value.to_be_bytes());
+    }
+    bytes.extend_from_slice(snapshot.state_hash.as_bytes());
+    bytes.extend_from_slice(&(canonical.len() as u64).to_be_bytes());
+    bytes.extend_from_slice(canonical.as_bytes());
+    Digest32::of_bytes(&bytes)
 }
 
 fn annotate_production_provisions(

@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased — Retain production dependencies in executable orders
+
+- Add opt-in `orders: "dependency_preserving_v1"` to laboratory production with
+  source-bound unique order names, per-batch material gates and exact predecessor
+  completion conditions alongside the action dependency graph.
+- Preserve dependency indices across setup and shared workforce scheduling;
+  retain original goals and policy through source replay and recovery continuation.
+- Require explicit, nonaliased material bindings in the pure lowering API and
+  refuse unrepresentable condition sets. Keep unmarked historical requests stable.
+- Pass eight new actual-source production component tests on current nightly;
+  track seven pure lowering regressions. Full facade/native qualification is separate.
+
 ## Unreleased — Filter structured aggregate queries
 
 - Support typed Boolean row filters in canonical aggregate queries, reusing

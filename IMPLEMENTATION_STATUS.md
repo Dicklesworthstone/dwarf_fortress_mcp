@@ -1,5 +1,36 @@
 # Implementation Status
 
+## Unreleased — Preserve production dependencies through executable orders
+
+Laboratory production requests now support explicit
+`orders: "dependency_preserving_v1"`. The pure compiler lowers every feasible
+step into a requested action with its dependency indices, exact named-predecessor
+completion conditions and per-batch input gates. Explicit resource-to-material
+bindings refuse missing or aliased inputs; an oversized condition set refuses
+instead of dropping protection. Source-bound names distinguish repeated job
+labels and later pursuits without changing an archived attempt's identity.
+
+The default laboratory production compiler consumes that lowering, remaps its
+dependencies around workshop/labor setup, and carries completion gates for
+shared-worker or shared-workshop serialization. The closed WOOD/PLANT recipe
+bindings retain actual finite consumption; gates themselves reserve nothing.
+The complete original quotas, capability checks, sealed effects, deadlines and
+quiescence requirements still determine success. The optional policy survives
+canonical source storage, replay and reviewed continuation, while unmarked
+requests retain their existing names, action bytes and compiler behavior.
+
+All eight new actual-source production component tests pass on rustc
+1.101.0-nightly (249c1e4e3, 2026-11-05). They exercise six-output finite-material
+execution, workshop/labor setup remapping, per-batch gates, legacy behavior,
+exact source/seal replay, new names after real consumption and continuation after
+verified recovery. The component driver uses the actual MCP semantic modules,
+StaticPlanner and MemoryAdapter with exact locked dependency identities; it
+excludes FastMCP transport and the public facade. Seven additional pure lowering
+regressions are tracked. Scoped formatting and whitespace checks pass. Full MCP,
+workspace and native-game qualification remain separate; the broader bead
+`df-lab-conditional-production-c4p` stays in progress. Usage and model limits are
+in `docs/LAB_PRODUCTION_DEPENDENCIES.md`.
+
 ## Unreleased — Filtered canonical aggregate queries
 
 Structured `dfmcp.query/1` aggregates now accept the same closed typed `where`

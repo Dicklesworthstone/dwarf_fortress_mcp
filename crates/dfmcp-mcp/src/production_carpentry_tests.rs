@@ -17,6 +17,9 @@ mod materials;
 #[path = "production_setup_workforce_tests.rs"]
 mod setup_workforce;
 
+#[path = "production_order_dependency_tests.rs"]
+mod order_dependencies;
+
 fn context(snapshot: &WorldSnapshot) -> OperationContext {
     OperationContext {
         session_id: SessionId::new(1),
