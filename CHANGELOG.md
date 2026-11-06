@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-11-05 — Independently reviewed inventory stability clock
+
+- Add explicit inventory_run planning/confirmation/cancellation over existing
+  run/1.13 so an already true original inventory objective can finish its
+  stability requirement after the native order retires. Bind exact original
+  plan/archive/review/Created receipt and retain its deadline and cadence.
+- Recheck complete qualified inventory and custody after each durable clock
+  marker before native effect. Keep source-scoped native authority independent
+  of named-fortress authority and preserve existing order-run/1.14 guards/bytes.
+- Retain a separate private inventory-clock journal and exact external identity;
+  fence the two owners against each other's pending work, reconcile both before
+  sampling, preserve no-retry lost-reply recovery and deadline-independent safety
+  cancellation. Expose actionable Agent Turn reviews and bounded recovery.
+- Pass 296 distinct focused cases, including 12 inventory-clock cases inside 208
+  MCP components, plus warning-denied production Clippy and formatting. Native
+  game/stdio/full-workspace qualification and compatibility admission remain
+  separate. The 64-run ceiling does not extend existing history or work budgets.
+
 ## 2026-11-05 — Combined labor/order inventory goals through MCP
 
 - Accept an explicit recipe-matched inventory minimum in the original combined
@@ -13,7 +31,7 @@
   retain consumed replay floors and use the existing configured replay allowance
   without spending response or custody reservations twice.
 - Expose bounded Agent Turn polling/recovery guidance and document proof limits.
-  Pass all36 combined cases within208 actual-source MCP component tests and
+  Pass all 36 combined cases within 208 actual-source MCP component tests and
   scoped warning-denied production Clippy. Native TCP lifecycle, full transport,
   live-game and admission qualification remain separate.
 

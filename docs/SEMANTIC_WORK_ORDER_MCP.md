@@ -7,7 +7,9 @@ durable recovery. It composes the existing canonical citizen, work-orders/1.10,
 selected-order progress/1.12 and
 operations/1.3 clients with `SemanticWorkOrderSession` and its original-goal
 history. Optional order-run/1.14 control advances that same receipt-linked
-order through the frozen eleven MCP tools.
+order through the frozen eleven MCP tools. Independently configured run/1.13
+control can finish an already true inventory objective's remaining stability
+after the native order has retired.
 
 This is an **explicitly unadmitted development runtime**. The operator accepts
 an exact, narrow source contract for this process. That acceptance does not
@@ -57,7 +59,9 @@ The response separates these questions:
 | `inventory_objective.proven_at_anchor` | The explicitly selected inventory minimum satisfies its original temporal requirement at the named sample. |
 | `inventory_objective.first_satisfied_anchor` | First qualified inventory achievement, preserved independently of later consumption or restart. |
 | `clock.active_run` | The separate reviewed native run, if one remains unsettled. |
-| `clock.may_be_running` | Retained clock uncertainty still prevents a fresh paused original-goal sample. |
+| `clock.may_be_running` | Retained order-clock uncertainty still prevents a fresh paused original-goal sample. |
+| `inventory_clock.active_run` | The independently reviewed run for unfinished original inventory stability. |
+| `inventory_clock.may_be_running` | Retained inventory-clock uncertainty; it also blocks a fresh goal sample and another clock run. |
 | `clock.runs[].native.historical_pause_verified` | That native receipt verified a pause at its recorded tick; it does not establish the game's current pause state. |
 
 The default goal proves finite native order completion. The optional inventory
@@ -82,6 +86,7 @@ The game process must receive the following configuration before it starts:
 | Selected-order progress 1.12 | `DFMCP_WORK_ORDER_PROGRESS_TOKEN` | `DFMCP_ALLOW_UNADMITTED_WORK_ORDER_PROGRESS_V1_12=1` |
 | Operations 1.3 | `DFMCP_OPERATIONS_TOKEN` | None |
 | Optional order-run 1.14 | `DFMCP_ORDER_RUN_TOKEN` | `DFMCP_ALLOW_UNADMITTED_ORDER_RUN_V1_14=1` |
+| Optional inventory clock, run 1.13 | `DFMCP_RUN_TOKEN` | `DFMCP_ALLOW_UNADMITTED_RUN_V1_13=1` |
 
 The native production gate is checked for both preparation and commit; a passing
 handshake alone does not establish permission to insert an order. Order-run also
@@ -120,6 +125,8 @@ The process environment has exactly these permitted `DFMCP_` names:
 | `DFMCP_SEMANTIC_WORK_ORDER_PROGRESS_TOKEN` | Credential for progress/1.12. |
 | `DFMCP_SEMANTIC_WORK_ORDER_OPERATIONS_TOKEN` | Credential for operations/1.3. |
 | `DFMCP_SEMANTIC_WORK_ORDER_CLOCK_TOKEN` | Separate credential for optional order-run/1.14 acquisition and control. |
+| `DFMCP_SEMANTIC_WORK_ORDER_ALLOW_INVENTORY_CLOCK` | Absent, or exactly `1` to permit independently reviewed inventory stability advancement. |
+| `DFMCP_SEMANTIC_WORK_ORDER_INVENTORY_CLOCK_TOKEN` | Separate credential matching the optional native run/1.13 source. |
 
 Credentials are separate operator secrets, each bounded to 32–256 bytes. MCP
 clients cannot supply credentials, file paths, endpoints, raw plans, source
@@ -160,7 +167,8 @@ checks and bounded verification. Symlinks, replaced files, corrupt histories
 and ambiguous persistence are refused. The four original-goal filenames are
 `creation.journal`, `semantic.associations`, `original.plan` and `goal.history`.
 Optional clock custody adds the fixed filename `clock.journal` in the same
-directory.
+directory. Optional independent inventory-clock custody adds
+`inventory-clock.journal`; it never replaces the original order-clock file.
 The endpoint must be a numeric loopback address with a nonzero port.
 
 Each plugin has its **own** incarnation namespace. Canonical, creation,
@@ -221,6 +229,46 @@ journal opened without clock authority likewise remains reconciliation-only
 for that session. Reenabling an environment gate cannot promote either journal
 in place. Offline opening reads local custody without native credentials or
 connections.
+
+### Optional independent inventory clock
+
+To finish the original inventory stability requirement after the selected order
+retires, explicitly configure the independent run/1.13 owner:
+
+```json
+{
+  "inventory_clock": {
+    "generation": 1101
+  }
+}
+```
+
+Replace the example with that native source's exact incarnation. Set
+`DFMCP_SEMANTIC_WORK_ORDER_ALLOW_INVENTORY_CLOCK=1` and supply its separate
+`DFMCP_SEMANTIC_WORK_ORDER_INVENTORY_CLOCK_TOKEN`. The game-side run/1.13 plugin
+uses its own gate and `DFMCP_RUN_TOKEN` above. Existing order-clock configuration
+and credentials confer no inventory-clock authority.
+
+This native profile identifies a source incarnation, rather than a named
+fortress lineage. The operator explicitly accepts that narrower identity under
+the pinned endpoint and DF/DFHack versions. The host separately requires the
+original named-fortress Query/Observe/Plan/ControlClock authority and qualified
+inventory evidence at the same paused tick. It never rewrites a fortress grant
+into a source-scoped clock grant. Other controllers are not globally fenced.
+
+Initialization creates `inventory-clock.journal` and returns
+`inventory_clock.journal_id`. On every reopen, set `initialize=false`, put that
+exact ID in `inventory_clock.journal_id`, and, once the original plan exists,
+retain the same value as `recovery.inventory_clock_journal_id`. Omit the ID
+entirely for initialization. Missing custody, wrong identity or omission of
+configuration while the file exists refuses; the host does not replace it.
+Offline inspection needs no native token or connection. A journal opened with
+only reconciliation authority cannot later be promoted within that session.
+
+Both clocks may be configured. Each keeps its independent journal, exact target
+and authority. Prepared or unresolved work in either prevents starting work in
+the other; Wait consults both before a fresh goal sample. The combined labor/order
+profile rejects this standalone configuration and its environment names.
 
 ## MCP workflow
 
@@ -352,10 +400,12 @@ that objective. Original insertion uncertainty still requires reconciliation;
 inventory truth cannot resolve it or authorize another insertion. The original
 order and any other game work may still be active.
 
-Clock control remains tied to the exact receipt-linked order. If that order has
-already disappeared and more stable samples are needed, game time must progress
-through a separately managed control path before another coherent paused sample.
-The one-sample default can finish at the first qualified post-retirement sample.
+The existing `kind="run"` clock remains tied to the exact receipt-linked order.
+After retirement, the separately configured `kind="inventory_run"` path below
+can advance unfinished stability only when qualified inventory is already true.
+Without that explicit configuration, game time must progress through a separately
+managed control path. The one-sample default can finish at the first qualified
+post-retirement sample.
 This mode makes no delta-inventory, newly-produced, wood-classification,
 available-for-use or causal-output claim.
 
@@ -424,6 +474,57 @@ completion and physical quiescence are both proved, further runs for that goal
 are refused. A selected inventory objective also refuses further runs once its
 original temporal proof is satisfied, independently of remaining order work.
 
+### Advance already true inventory through its original stability window
+
+This path is available only for an explicit original inventory objective with a
+verified historical Created receipt, qualified current inventory truth and an
+unfinished original temporal requirement. It refuses False, Unknown, failed,
+already satisfied or legacy order-completion goals. It may be used when the
+original order has retired; it does not reconstruct that order or relax its
+existing clock guards.
+
+Call `fortress.plan` with a request string containing:
+
+```json
+{
+  "kind": "inventory_run",
+  "original_paired_seal": "<result.review.paired_seal for the original goal>",
+  "game_ticks": 10,
+  "wall_millis": 1000
+}
+```
+
+Review `result.inventory_clock.active_run` and confirm its distinct
+`review_seal` with `fortress.commit`, `scope="inventory_run"` and
+`confirmed=true`. Preparation and commit independently reacquire qualified
+inventory and verify the complete original archive, exact review, insertion
+receipt and clock custody. A further durable inventory sample follows the
+clock's durable marker and precedes its native prepare or sole unpause attempt.
+Changed source, custody, inventory truth, original timing or either clock's
+settlement refuses the effect. Every requested tick must fit the original
+absolute deadline and the session's allowance; neither is extended.
+
+After commit, Wait reconciles the original run and then obtains one fresh
+qualified sample when both clock owners permit it. A clock receipt is historical
+coordination evidence, not proof of present pause or inventory. Each additional
+slice requires a new explicit review and confirmation. There is no background
+loop, automatic unpause retry or silent switch from the original order clock.
+Agent Turn exposes the separate inventory-clock action only when its precise
+conditions and authority are available, and stops proposing it after original
+inventory proof.
+
+`fortress.cancel` with `scope="inventory_run"` retires a prepared inventory run
+or requests its native safety pause after dispatch. Current Query and clock
+authority suffice for that safety path even after the goal deadline or loss of
+Plan/Observe authority. Cancellation retains the original goal, insertion and
+both clock histories; elapsed game time is not reversed.
+
+The inventory owner retains at most 64 runs. This is a retention ceiling rather
+than a guarantee that every 64-sample objective fits: the existing 16 MiB,
+2,048-event goal history and 2 GiB per-call work allowance still apply. Repeated
+complete preflight and final-edge samples consume history. No history is pruned
+and no proof or budget is relaxed to force a longer sequence through.
+
 ## Lost replies and restart
 
 A failed commit can leave an insertion outcome indeterminate. Its error packet
@@ -435,7 +536,7 @@ historical reference; no cached prepared state authorizes another commit.
 
 A lost clock commit reply similarly retains the exact native run and its
 durable dispatch intent. `fortress.wait` queries that run; it never dispatches
-another unpause. A running, indeterminate or source-lost clock blocks new runs
+another unpause. A running, indeterminate or source-lost clock in either owner blocks new runs
 and paused goal sampling until the retained state permits them. Source-loss
 evidence remains unresolved and does not prove that a replacement source is
 paused. Preserve clock
@@ -457,14 +558,18 @@ the exact saved `recovery` object to operator configuration:
     "state_hash": "<original anchor hash>"
   },
   "history_present": true,
-  "clock_journal_id": "<exact clock journal identity when configured>"
+  "clock_journal_id": "<exact order clock journal identity when configured>",
+  "inventory_clock_journal_id": "<exact inventory clock journal identity when configured>"
 }
 ```
 
 All fields come from the exact prior response; the example numbers are not
 replacement values. When clock custody is configured, `clock_journal_id` is
 required in this recovery object and must equal `clock.journal_id` in the
-operator configuration. Without clock custody, omit it as in prior handoffs;
+operator configuration. Independently configured inventory-clock custody
+requires `inventory_clock_journal_id` to equal `inventory_clock.journal_id`.
+Both identities survive bounded overflow and error projections. Without the
+corresponding clock custody, omit its field as in prior handoffs;
 an explicit null is also accepted. The archive cannot authorize itself by
 presenting its own digest. A lost handoff, partial initialization or corrupt custody requires
 operator investigation; the server does not repair, prune, replace or adopt it
@@ -548,6 +653,9 @@ including prepared-runtime reconstruction over memory-backed codecs and fresh
 forward observations. Its newer-nightly qualifier subsequently fails Clippy
 before full Rust tests or a server build. The next repaired source still needs
 its own full qualification; the R26 evidence below does not cover it.
+
+The independent inventory-clock contract is recorded in
+[`inventory_goal_clock_v1.json`](../architecture/inventory_goal_clock_v1.json).
 
 The component tests execute the real original-plan compiler, semantic/native
 and clock coordinators, durable goal monitor and private-file open modes with

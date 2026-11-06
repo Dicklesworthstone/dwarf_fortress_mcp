@@ -1,0 +1,121 @@
+{
+  "schema": "dfmcp.inventory-goal-clock.v1",
+  "owner_bead": "dfmcp-reality-wiring-proof-4bf.14.5",
+  "runtime": "dfmcp-live-semantic-work-orders-dev-server",
+  "status": "implemented_unadmitted_development_only",
+  "native_profile": "run/1.13",
+  "existing_order_clock_profile": "order-run/1.14",
+  "new_native_wire_or_dependency": false,
+  "legacy_order_clock_bytes_and_predicate_guards_preserved": true,
+  "source_identity": "source incarnation only; no named-fortress lineage",
+  "authorization": {
+    "operator_flag": "DFMCP_SEMANTIC_WORK_ORDER_ALLOW_INVENTORY_CLOCK",
+    "flag_value": "1",
+    "credential": "DFMCP_SEMANTIC_WORK_ORDER_INVENTORY_CLOCK_TOKEN",
+    "operator_configuration": "inventory_clock",
+    "configuration_fields": [
+      "generation",
+      "journal_id"
+    ],
+    "exact_endpoint_versions_generation_credential_rechecked": true,
+    "canonical_prepare_commit": [
+      "Query",
+      "Observe",
+      "Plan",
+      "ControlClock"
+    ],
+    "independent_native_scope": "FortressId::NIL",
+    "native_grants_derived_from_canonical_grants": false,
+    "opening_reconciliation_owner_can_promote": false,
+    "combined_labor_order_host_accepts_this_configuration": false
+  },
+  "target": {
+    "objective": "exact original observed_inventory_minimum",
+    "bound_fields": [
+      "whole_plan_digest",
+      "archive_object_digest",
+      "creation_journal",
+      "original_paired_review",
+      "Created_receipt",
+      "original_native_order_id"
+    ],
+    "current_truth_required": "True",
+    "temporal_requirement": "original stability unfinished",
+    "original_receipt_may_be_retired_from_current_queue": true,
+    "uncertain_insertion_accepted": false,
+    "false_unknown_or_already_proved_goal_accepted": false,
+    "deadline_cadence_stability_or_original_key_rewritten": false,
+    "fresh_qualified_inventory_and_custody_after_durable_marker": true,
+    "same_paused_tick_required_before_native_effect": true,
+    "order_attribution_or_new_production_proven": false
+  },
+  "mcp": {
+    "tool_count": 11,
+    "plan_kind": "inventory_run",
+    "plan_fields": [
+      "kind",
+      "original_paired_seal",
+      "game_ticks",
+      "wall_millis"
+    ],
+    "closed_request_bytes_max": 2048,
+    "commit_scope": "inventory_run",
+    "commit_requires_separate_review_and_confirmation": true,
+    "cancel_scope": "inventory_run",
+    "wait": "reconcile both configured clocks before one qualified original-goal sample",
+    "automatic_advance_retry_or_silent_owner_switch": false,
+    "prepared_or_unresolved_other_clock_blocks_new_run": true,
+    "cancel_after_deadline_requires": [
+      "Query",
+      "ControlClock"
+    ],
+    "cancel_after_deadline_requires_plan_or_observe": false
+  },
+  "recovery": {
+    "private_file": "inventory-clock.journal",
+    "external_identity": "inventory_clock_journal_id",
+    "configuration_identity_must_match_recovery": true,
+    "omission_can_hide_existing_file": false,
+    "offline_open_needs_native_credential_or_connection": false,
+    "missing_corrupt_replaced_or_wrong_identity": "refuse without repair",
+    "clock_receipt_proves_current_pause_or_inventory": false,
+    "native_unpause_attempts_per_review": 1,
+    "both_clock_identities_preserved_in_overflow_or_failure": true
+  },
+  "limits": {
+    "retained_inventory_runs": 64,
+    "game_ticks_per_review": [
+      1,
+      1200
+    ],
+    "native_wall_millis_per_review": [
+      1,
+      60000
+    ],
+    "whole_requested_interval_within_original_deadline": true,
+    "byte_work_per_call_max": 2147483648,
+    "goal_history_bytes_max": 16777216,
+    "goal_history_events_max": 2048,
+    "retention_limit_guarantees_every_history_fits": false,
+    "history_pruning_or_budget_extension": false
+  },
+  "proof_and_qualification": {
+    "current_goal_requires_independent_sample": true,
+    "global_clock_lease": false,
+    "full_workspace_or_stdio_qualification": false,
+    "native_dfhack_or_live_game_qualification": false,
+    "production_admission": false
+  },
+  "source_paths": [
+    "crates/dfmcp-mcp/src/semantic_work_order_runtime/bounded_goal_clock.rs",
+    "crates/dfmcp-mcp/src/semantic_work_order_runtime/inventory_clock.rs",
+    "crates/dfmcp-mcp/src/semantic_work_order_runtime/inventory_advancement.rs",
+    "crates/dfmcp-mcp/src/semantic_work_order_runtime/native_inventory_clock.rs",
+    "crates/dfmcp-mcp/src/semantic_work_order_runtime/inventory_clock_runtime_tests.rs",
+    "crates/dfmcp-mcp/src/semantic_work_order_runtime.rs",
+    "crates/dfmcp-mcp/src/semantic_work_order_runtime/native.rs",
+    "crates/dfmcp-mcp/src/live_semantic_work_orders_server.rs",
+    "crates/dfmcp-mcp/src/semantic_work_order_presentation.rs",
+    "docs/SEMANTIC_WORK_ORDER_MCP.md"
+  ]
+}

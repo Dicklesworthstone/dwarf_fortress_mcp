@@ -1,5 +1,71 @@
 # Implementation Status
 
+## 2026-11-05 — Finish original inventory stability after native order retirement
+
+The standalone semantic work-order MCP runtime now has an optional, separately
+configured inventory clock over existing run/1.13. Explicit
+kind=inventory_run planning and scope=inventory_run commit/cancel preserve the
+original inventory objective and independently review bounded game-time exposure.
+The target binds the exact parent archive, paired review, creation journal,
+verified Created receipt and native allocation identity. It is available only
+while qualified inventory is already True and original stability remains
+unfinished. False, Unknown, satisfied, failed, expired and legacy order goals
+refuse; native order disappearance never becomes a completion witness.
+
+A modular bounded-goal supervisor owns one-attempt native clock dispatch and
+recovery; the immutable inventory target supplies original-goal association.
+Every prepare and commit verifies fresh complete inventory and exact archive
+custody after the durable marker, at the same paused tick, before native effect.
+The operator explicitly issues source-incarnation-only NIL-scoped native clock
+authority independently of original named-fortress authority. Existing order-run
+1.14 source files, stop guards, protocol bytes and journal formats are unchanged.
+
+The independent flag/token and optional inventory_clock configuration open only
+inventory-clock.journal. Both clock owners and both externally retained journal
+identities remain visible through errors, overflow and restart. Either pending
+owner fences the other; Wait reconciles both before sampling. Lost replies never
+retry unpause. Query plus clock authority can request the retained native safety
+pause after the original deadline without Plan/Observe. Missing/omitted/replaced
+custody refuses, and opening reconciliation authority cannot later promote.
+The combined labor/order host rejects these standalone clock settings.
+
+The inventory owner retains at most 64 reviewed slices. Existing 16 MiB / 2,048-event
+goal history and 2 GiB per-call logical byte-work limits still apply; 64 is not a
+guarantee every possible sample sequence fits. No history pruning, deadline
+renewal, automatic advancement, causal-production claim or admission is added.
+See docs/SEMANTIC_WORK_ORDER_MCP.md and architecture/inventory_goal_clock_v1.json.
+
+Final nightly checks pass 296 distinct cases: 23 selected-production adapter,
+65 standalone work-order integration and 208 actual-source MCP components. The 12
+inventory-clock cases are included in 208, not counted again. They exercise the
+real runtime/monitor/durable coordinators with injected sources, plus actual
+private files and child-process environment checks. Coverage includes retirement
+and temporal success, both-owner fences, exact handoff, lost reply/no replay,
+post-marker archive/source refusal and cancellation after deadline. The first
+six clock failures exposed a fixture incrementing its source sequence on paused
+Observe; correcting it to increment on unpause made all cases pass without
+changing production guards.
+
+Production Clippy with warnings denied passes actual adapter, MCP component and
+separate actual workforce/native runtime libraries. Rustfmt checks all 23 changed
+MCP Rust files, and git diff --check passes. The final MCP test-to-Clippy inventory
+of 1,092 files is unchanged at SHA-256
+3fda52b9201c26bbb47f29fcbca0a44d15a12e32c952d82f2f946dc9bdd7bb1b.
+Adapter Rust bytes also match their 23 + 65 passing runs; the updated shared
+architecture contract passed the final combined contract test. Retained failed
+attempts include shared-memory SIGKILLs; after reclaiming task-owned reproducible
+link outputs, final scoped tests and Clippy succeeded.
+
+Evidence remains scoped: 147 unrelated adapter test-module gates in 134 harness
+mirror files, one FastMCP-dependent workforce envelope-decoder test and its
+unused presentation are excluded; production and selected test bodies and pure
+facade slices are tracked exactly. Repository manifests and pins are unchanged.
+This does not qualify full FastMCP/Asupersync transport, modern stdio, native
+DFHack, a real game, the complete workspace or compatibility admission. Required
+clean-revision repository gates and their receipts remain separate from these
+component passes. Bead dfmcp-reality-wiring-proof-4bf.14.5 stays in progress for
+its real MCP/game acceptance.
+
 ## 2026-11-05 — Observe original inventory goals in the combined production host
 
 The existing combined labor/order MCP host now accepts an optional explicit
@@ -23,16 +89,16 @@ exact source-policy replay and original predecessor custody preserve recovery.
 Offline reopening clears current proof and unfinished stability. Failed outer
 publication also withdraws them and preserves consumed authority floors even
 if replay fails before returning a monitor. Longer retained histories can use
-the existing configured allowance up to32GiB instead of a fixed2GiB replay cap;
+the existing configured allowance up to 32 GiB instead of a fixed 2 GiB replay cap;
 final verification and response work remain separately prepaid. Retrying an
 existing-history open returns historical recovery before a later fresh Wait.
 No clock, new tool, native protocol or admission boundary is added.
 
-All36 combined tests pass (24 runtime/compiler/config/custody/budget/discovery,
+All 36 combined tests pass (24 runtime/compiler/config/custody/budget/discovery,
 six presentation and six exact pure public-facade helpers) within the shared208
 MCP component suite. Production adapter, actual native Rust shells and MCP
 component Clippy pass with warnings denied. The MCP test-to-Clippy input
-inventory is unchanged across1092 files, aggregate SHA-256
+inventory is unchanged across 1,092 files, aggregate SHA-256
 3fda52b9201c26bbb47f29fcbca0a44d15a12e32c952d82f2f946dc9bdd7bb1b.
 The harness excludes FastMCP/Asupersync transport, one unchanged workforce
 envelope-decoder test and its unused presentation; copied pure facade slices

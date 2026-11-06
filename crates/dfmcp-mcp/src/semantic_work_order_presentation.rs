@@ -40,6 +40,9 @@ fn recovery(view: &Value) -> Option<Value> {
     if let Some(id) = digest(&r["clock_journal_id"]) {
         result["clock_journal_id"] = json!(id);
     }
+    if let Some(id) = digest(&r["inventory_clock_journal_id"]) {
+        result["inventory_clock_journal_id"] = json!(id);
+    }
     Some(result)
 }
 fn review(view: &Value) -> Option<Value> {
@@ -138,6 +141,30 @@ fn clock_identity(view: &Value) -> Option<Value> {
         "current_pause_proven":false,"original_goal_proven":false}),
     )
 }
+fn inventory_clock_identity(view: &Value) -> Option<Value> {
+    let clock = &view["inventory_clock"];
+    let active = clock_run(&clock["active_run"]).map(|mut run| {
+        run["purpose"] = json!(
+            clock["active_run"]["purpose"]
+                .as_str()
+                .filter(|purpose| *purpose == "advance_original_inventory_stability")
+        );
+        run["source_generation"] = json!(clock["active_run"]["source_generation"].as_u64());
+        run["source_sequence"] = json!(clock["active_run"]["source_sequence"].as_u64());
+        run
+    });
+    Some(
+        json!({"journal_id":digest(&clock["journal_id"])?,"head":digest(&clock["head"])?,
+        "mode":clock["mode"].as_str().filter(|mode| matches!(*mode,"control"|"reconcile"|"offline")),
+        "target_digest":digest(&clock["target_digest"]),"original_paired_seal":digest(&clock["original_paired_seal"]),
+        "run_count":clock["run_count"].as_u64().filter(|count| *count <= 64),
+        "pending":clock["pending"].as_bool(),"unresolved":clock["unresolved"].as_bool(),
+        "may_be_running":clock["may_be_running"].as_bool(),"needs_reconciliation":clock["needs_reconciliation"].as_bool(),
+        "high_tick":clock["high_tick"].as_u64(),"active_run":active,
+        "source_identity_semantics":"source_incarnation_only_not_named_fortress_lineage",
+        "current_pause_proven":false,"original_goal_proven":false}),
+    )
+}
 /// Only fixed-shape identities survive overflow. Unknown fields, free text and
 /// current goal claims cannot inflate or acquire authority through the fallback.
 fn compact(view: &Value) -> Value {
@@ -154,6 +181,9 @@ fn compact(view: &Value) -> Value {
         "current_goal":null,"current_goal_available":false,"details_omitted":true});
     if let Some(clock) = clock_identity(view) {
         result["clock"] = clock;
+    }
+    if let Some(clock) = inventory_clock_identity(view) {
+        result["inventory_clock"] = clock;
     }
     result
 }
@@ -188,7 +218,7 @@ fn next_clock(tool: &str, reason: &str, arguments: Value, confirm: bool) -> Valu
         tool,
         tool,
         reason,
-        "advance only the retained original order within its deadline",
+        "advance only the explicitly selected original goal clock within its deadline",
         "review finite time exposure separately from insertion and original-goal proof",
         "guarded",
         "elapsed game time is not reversed by cancellation",
@@ -234,12 +264,30 @@ fn render(
         && result["retained_state_currently_verified"] != false;
     let state = native_state(view);
     let clock = clock_identity(view);
+    let inventory_clock = inventory_clock_identity(view);
+    let inventory_active = inventory_clock.as_ref().and_then(|value| {
+        value["active_run"]
+            .as_object()
+            .map(|_| &value["active_run"])
+    });
+    let inventory_pending = inventory_clock
+        .as_ref()
+        .is_some_and(|value| value["pending"] == true);
     let clock_active = clock
         .as_ref()
         .and_then(|v| v["active_run"].as_object().map(|_| &v["active_run"]));
-    let clock_uncertain = clock
+    let clock_uncertain = inventory_clock
         .as_ref()
-        .is_some_and(|v| v["unresolved"] == true || v["may_be_running"] == true)
+        .is_some_and(|value| value["unresolved"] == true || value["may_be_running"] == true)
+        || inventory_active.is_some_and(|value| {
+            matches!(
+                run_state(&value["state"]),
+                Some("dispatch_started" | "tracking" | "cancel_requested")
+            )
+        })
+        || clock
+            .as_ref()
+            .is_some_and(|v| v["unresolved"] == true || v["may_be_running"] == true)
         || clock_active.is_some_and(|v| {
             matches!(
                 run_state(&v["state"]),
@@ -276,6 +324,12 @@ fn render(
         && c.mode == Some("control")
         && result["development_clock_enabled"] == true
         && clock.as_ref().is_some_and(|v| v["mode"] == "control");
+    let inventory_clock_authority = verified
+        && c.mode == Some("control")
+        && result["development_inventory_clock_enabled"] == true
+        && inventory_clock
+            .as_ref()
+            .is_some_and(|value| value["mode"] == "control");
     let deadline = obligation(view).and_then(|o| o["deadline_tick"].as_u64());
     let anchor_tick = view["anchor"]["tick"].as_u64();
     let known_tick = anchor_tick.map(|tick| {
@@ -283,7 +337,13 @@ fn render(
             clock
                 .as_ref()
                 .and_then(|v| v["high_tick"].as_u64())
-                .unwrap_or(tick),
+                .unwrap_or(tick)
+                .max(
+                    inventory_clock
+                        .as_ref()
+                        .and_then(|value| value["high_tick"].as_u64())
+                        .unwrap_or(tick),
+                ),
         )
     });
     let allowed_ticks = deadline
@@ -310,6 +370,7 @@ fn render(
             && v["journal_id"] == view["recovery"]["clock_journal_id"]
     });
     let clock_commit = clock_authority
+        && !inventory_pending
         && clock_linked
         && !uncertain
         && !objective_proven
@@ -331,6 +392,7 @@ fn render(
                     .is_some_and(|(end, deadline)| end <= deadline)
         });
     let run_proposal = clock_authority
+        && !inventory_pending
         && clock_linked
         && !uncertain
         && !objective_proven
@@ -344,8 +406,55 @@ fn render(
             g["receipt_linked"] == true
                 && matches!(g["current_truth"].as_str(), Some("true" | "false"))
         });
+    let inventory_linked = inventory_clock.as_ref().is_some_and(|value| {
+        digest(&value["target_digest"]).is_some()
+            && digest(&value["original_paired_seal"]).is_some()
+            && value["original_paired_seal"] == view["review"]["paired_seal"]
+            && value["journal_id"] == view["recovery"]["inventory_clock_journal_id"]
+    });
+    let inventory_viable = inventory.is_some()
+        && !objective_proven
+        && goal.is_some_and(|value| {
+            value["current_truth"] == "true"
+                && value["failure_predicate"] != "true"
+                && value["temporal_status"]
+                    .as_str()
+                    .is_some_and(|status| status == "Pending" || status.starts_with("Active {"))
+        });
+    let order_settled = clock
+        .as_ref()
+        .is_none_or(|value| value["pending"] == false && value["unresolved"] == false);
+    let inventory_ready = inventory_clock_authority
+        && inventory_linked
+        && !uncertain
+        && inventory_viable
+        && order_settled
+        && state == Some("created")
+        && view["insertion"]["verified"] == true;
+    let inventory_commit = inventory_ready
+        && inventory_active.is_some_and(|run| {
+            run["state"] == "prepared"
+                && run["purpose"] == "advance_original_inventory_stability"
+                && run["before_tick"].as_u64() == anchor_tick
+                && run["before_tick"].as_u64() == known_tick
+                && run["game_ticks"]
+                    .as_u64()
+                    .zip(c.budget)
+                    .is_some_and(|(ticks, budget)| ticks <= budget.max_game_ticks)
+                && run["before_tick"]
+                    .as_u64()
+                    .zip(run["game_ticks"].as_u64())
+                    .and_then(|(tick, ticks)| tick.checked_add(ticks))
+                    .zip(deadline)
+                    .is_some_and(|(end, deadline)| end <= deadline)
+        });
+    let inventory_proposal = inventory_ready
+        && proposed_ticks.is_some()
+        && inventory_clock.as_ref().is_some_and(|value| {
+            value["pending"] == false && value["run_count"].as_u64().is_some_and(|count| count < 64)
+        });
     let identity = json!({"review":paired,"recovery":recovery(view),
-        "clock":clock,
+        "clock":clock,"inventory_clock":inventory_clock,
         "last_known_native_state":state,"currently_verified":verified,
         "as_of_anchor":anchor(&view["anchor"])});
     let mut work = crate::agent_turn::empty_active_work();
@@ -376,6 +485,22 @@ fn render(
         if let Some(actions) = work["actions"].as_array_mut() {
             actions.push(json!({"scope":"run","clock_run":run,
                     "meaning":"historical native clock coordination; original goal and current pause require separate observations"}));
+        }
+    }
+    if verified && let Some(run) = inventory_active {
+        if run["state"] == "prepared" {
+            if let Some(plans) = work["pending_plans"].as_array_mut() {
+                plans.push(json!({"scope":"inventory_run","inventory_clock":inventory_clock,"original_review":review(view),"recovery":recovery(view)}));
+            }
+            if let Some(confirmations) = work["confirmations"].as_array_mut() {
+                confirmations.push(json!({"scope":"inventory_run","paired_seal":run["review_seal"],
+                    "requires_confirmation":true,"commit_available":inventory_commit,
+                    "purpose":"explicit bounded game-time exposure for original inventory stability"}));
+            }
+        }
+        if let Some(actions) = work["actions"].as_array_mut() {
+            actions.push(json!({"scope":"inventory_run","clock_run":run,
+                "meaning":"independent source clock custody; inventory and current pause require fresh qualified observations"}));
         }
     }
 
@@ -411,6 +536,9 @@ fn render(
             if c.mode != Some("offline") {
                 recommendations.push(next("fortress.wait", "reconcile retained insertion and clock effects; fresh goal sampling waits until the clock owner is settled", args, false));
             }
+        } else if inventory_commit {
+            recommendations.push(next_clock("fortress.commit","confirm the separate inventory clock review; qualified inventory and original custody are checked again before one unpause",
+                json!({"session_id":session.to_string(),"paired_seal":inventory_active.map(|run|&run["review_seal"]),"confirmed":true,"scope":"inventory_run"}),true));
         } else if clock_commit {
             recommendations.push(next_clock("fortress.commit","confirm the separate clock review; unpause is attempted once after original-custody revalidation",
                 json!({"session_id":session.to_string(),"paired_seal":clock_active.map(|r|&r["review_seal"]),"confirmed":true,"scope":"run"}),true));
@@ -421,6 +549,11 @@ fn render(
             let request = json!({"kind":"run","original_paired_seal":digest(&view["review"]["paired_seal"]),
                 "game_ticks":proposed_ticks,"wall_millis":c.budget.map(|b|b.max_wall_millis.min(5000)).unwrap_or(0)});
             recommendations.push(next_clock("fortress.plan","prepare a finite clock slice for the retained goal, then review its separate seal before unpausing",
+                json!({"session_id":session.to_string(),"request":request.to_string()}),false));
+        } else if inventory_proposal {
+            let request = json!({"kind":"inventory_run","original_paired_seal":digest(&view["review"]["paired_seal"]),
+                "game_ticks":proposed_ticks,"wall_millis":c.budget.map(|budget|budget.max_wall_millis.min(5000)).unwrap_or(0)});
+            recommendations.push(next_clock("fortress.plan","explicitly review independent time advancement for the already true inventory objective's remaining stability samples",
                 json!({"session_id":session.to_string(),"request":request.to_string()}),false));
         } else if state == Some("created") && !objective_proven && c.mode != Some("offline") {
             recommendations.push(next("fortress.wait","reconcile retained effects and obtain one fresh original-goal sample; wait does not start or extend a clock run",args,false));
@@ -463,6 +596,20 @@ fn render(
                 "current_pause_proven":false,"grants_authority":false}),
         ]);
     }
+    if inventory_clock.is_some() {
+        affordances.extend([
+            json!({"action":"fortress.plan","scope":"inventory_run","enabled":inventory_proposal,"request_kind":"inventory_run",
+                "game_ticks_max":allowed_ticks,"game_ticks_min":1,"wall_millis_max":60000,
+                "requires":["independent inventory clock authority","qualified true original inventory","unfinished stability before original deadline","both clock owners settled"],
+                "native_preparation_is_unpause":false,"grants_authority":false}),
+            json!({"action":"fortress.commit","scope":"inventory_run","enabled":inventory_commit,"requires_confirmation":true,
+                "paired_seal":inventory_active.map(|run|&run["review_seal"]),
+                "requires":["exact separate inventory clock review","fresh inventory and custody after durable marker"],"grants_authority":false}),
+            json!({"action":"fortress.cancel","scope":"inventory_run","enabled":inventory_clock_authority && inventory_linked && inventory_active.is_some(),
+                "purpose":"retire undispatched inventory clock or request its native safety pause","original_goal_abandoned":false,
+                "current_pause_proven":false,"grants_authority":false}),
+        ]);
+    }
     let phase = match c.operation {
         "fortress.open_session" => AgentPhase::Bootstrap,
         "fortress.observe" => AgentPhase::Orient,
@@ -477,7 +624,8 @@ fn render(
             else if retained.is_some() {ContinuityStatus::Stale} else {ContinuityStatus::Bootstrap}, None, None, None)
         .briefing(json!({"runtime":"unadmitted_semantic_work_order_development","runtime_admitted":false,
             "source_acceptance_is_compatibility_admission":false,"mode":c.mode,"session_closed":closed,
-            "development_production_enabled":production,"development_clock_enabled":clock_authority,"mutation_admissible":false,
+            "development_production_enabled":production,"development_clock_enabled":clock_authority,
+            "development_inventory_clock_enabled":inventory_clock_authority,"mutation_admissible":false,
             "retained_state_currently_verified":verified,"current_freshness_proven":false,
             "evidence_scope":"as_of_anchor","as_of_anchor":anchor(&view["anchor"]),
             "insertion_verified_at_anchor":verified.then(||view["insertion"]["verified"].as_bool()).flatten(),
@@ -487,7 +635,8 @@ fn render(
             "inventory_objective":inventory,
             "inventory_objective_proven_at_anchor":inventory_proven,
             "historical_first_satisfied_anchor":anchor(&view["first_satisfied_anchor"]),
-            "clock_advanced":if clock.as_ref().is_some_and(|v|v["run_count"].as_u64().is_some_and(|n|n>0)) || clock_uncertain {Value::Null} else {json!(false)},
+            "clock_advanced":if clock.as_ref().is_some_and(|v|v["run_count"].as_u64().is_some_and(|n|n>0))
+                || inventory_clock.as_ref().is_some_and(|v|v["run_count"].as_u64().is_some_and(|n|n>0)) || clock_uncertain {Value::Null} else {json!(false)},
             "clock_may_be_running":clock_uncertain,"clock_receipt_is_goal_proof":false,"current_pause_proven":false,
             "automatic_redispatch":false}))
         .active_work(work).recommendations(recommendations)
@@ -514,7 +663,7 @@ fn render(
             "omitted_domains":["order-attributed output quantities","material and workshop feasibility","automatic chaining of clock runs","other controllers","continuous goal truth"],
             "continuation":null}))
         .references(vec![json!({"kind":"original_goal_custody","review":review(view),"recovery":recovery(view),
-            "clock":clock,"currently_verified":verified})]);
+            "clock":clock,"inventory_clock":inventory_clock,"currently_verified":verified})]);
     if let Some(s) = c.session {
         turn = turn.session_id(s.to_string());
     }

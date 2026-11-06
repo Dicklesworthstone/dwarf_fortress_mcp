@@ -26,13 +26,20 @@ use dfmcp_world::{PredicateEvidence, PredicateTruth};
 use serde_json::{Value, json};
 use std::time::{Duration, Instant};
 
+pub mod bounded_goal_clock;
 pub mod clock;
+mod inventory_advancement;
+pub mod inventory_clock;
 pub mod native;
 pub mod policy;
 pub mod request;
 use clock::{Clock, ClockTarget, ClockView, RunRequest};
 use dfmcp_adapter::order_run::journal::OrderRunJournal;
 use dfmcp_adapter::order_run::rpc::OrderRunSource;
+use inventory_clock::{
+    Clock as InventoryClock, ClockTarget as InventoryClockTarget, ClockView as InventoryClockView,
+    RunRequest as InventoryRunRequest,
+};
 pub use native::{Config, NativeRuntime};
 pub use request::Request;
 
@@ -128,6 +135,34 @@ pub trait Shell {
     type Operations: OperationsGoalSource;
     type ClockJournal: EffectJournalStorage;
     type ClockSource: OrderRunSource;
+    type InventoryClockJournal: EffectJournalStorage;
+    type InventoryClockSource: dfmcp_adapter::bounded_run::rpc::RunSource;
+    fn inventory_clock_configured(&self) -> bool {
+        false
+    }
+    fn inventory_clock_enabled(&self) -> bool {
+        false
+    }
+    fn open_inventory_clock(
+        &self,
+        _mode: Mode,
+        _c: &OperationContext,
+    ) -> Result<Option<dfmcp_adapter::bounded_run::journal::RunJournal<Self::InventoryClockJournal>>>
+    {
+        Ok(None)
+    }
+    fn inventory_clock_context(
+        &self,
+        _c: &OperationContext,
+        _control: bool,
+    ) -> Result<OperationContext> {
+        Err(denied(
+            "independent inventory clock authority is not configured",
+        ))
+    }
+    fn inventory_clock_source(&self, _c: &OperationContext) -> Result<Self::InventoryClockSource> {
+        Err(denied("inventory clock source is not configured"))
+    }
     fn clock_enabled(&self) -> bool;
     fn open_clock(
         &self,
@@ -203,8 +238,11 @@ pub struct Runtime<S: Shell> {
     item_observations: Option<Value>,
     history_initialized: bool,
     clock: Option<Clock<S::ClockJournal>>,
+    inventory_clock: Option<InventoryClock<S::InventoryClockJournal>>,
+    inventory_clock_invalidates_goal: bool,
     production_at_open: bool,
     opening_clock: Option<ClockView>,
+    opening_inventory_clock: Option<InventoryClockView>,
 }
 
 /// Compact complete view of this one retained goal. Historical proof and current
@@ -229,6 +267,8 @@ pub struct View {
     pub history_fenced: bool,
     pub clock: Option<ClockView>,
     pub clock_control_enabled: bool,
+    pub inventory_clock: Option<InventoryClockView>,
+    pub inventory_clock_control_enabled: bool,
 }
 
 pub(crate) fn unavailable_item_observations() -> Value {
@@ -304,14 +344,19 @@ impl View {
             if let Some(clock) = &self.clock {
                 value["clock_journal_id"] = json!(clock.journal_id.to_hex());
             }
+            if let Some(clock) = &self.inventory_clock {
+                value["inventory_clock_journal_id"] = json!(clock.journal_id.to_hex());
+            }
             value
         });
         json!({"ok":true,"mode":self.mode.as_str(),"anchor":anchor_json(self.anchor),
             "runtime_admitted":false,"source_acceptance":policy::ACCEPTANCE_KIND,
             "source_acceptance_is_compatibility_admission":false,
-            "clock_advanced":if self.clock.as_ref().is_some_and(|v|v.has_runs()) { Value::Null } else {json!(false)},
+            "clock_advanced":if self.clock.as_ref().is_some_and(|v|v.has_runs()) || self.inventory_clock.as_ref().is_some_and(|v|v.has_runs()) { Value::Null } else {json!(false)},
             "clock":self.clock.as_ref().map(ClockView::to_json),
+            "inventory_clock":self.inventory_clock.as_ref().map(InventoryClockView::to_json),
             "development_clock_enabled":self.clock_control_enabled,
+            "development_inventory_clock_enabled":self.inventory_clock_control_enabled,
             "observation":self.observation.map(|(seal,source,count)|json!({"seal":seal.to_hex(),
                 "source_digest":source.to_hex(),"citizens":count,"paused":true})),
             "original_plan":original,"review":self.review.as_ref().map(|r|json!({
@@ -432,7 +477,11 @@ impl<S: Shell> Runtime<S> {
                 "runtime requires at most 1200 game ticks, 4096 entities and one action",
             ));
         }
-        if mode == Mode::Control && !shell.production_enabled() && !shell.clock_enabled() {
+        if mode == Mode::Control
+            && !shell.production_enabled()
+            && !shell.clock_enabled()
+            && !shell.inventory_clock_enabled()
+        {
             return Err(denied(
                 "operator production and clock authority are disabled",
             ));
@@ -458,12 +507,16 @@ impl<S: Shell> Runtime<S> {
                 mode,
                 anchor.fortress_id,
                 shell.production_enabled(),
-                shell.clock_enabled(),
+                shell.clock_enabled() || shell.inventory_clock_enabled(),
             ),
             cancellation_requested: false,
         };
         let mut work = Work::new(&context)?;
         let clock_validation = work.reserve(32 * MIB)?;
+        let inventory_configured = shell.inventory_clock_configured();
+        let inventory_validation = inventory_configured
+            .then(|| work.reserve(32 * MIB))
+            .transpose()?;
         let (native, associations, journal) = shell.open_control(mode, &work.reserve(80 * MIB)?)?;
         let production_at_open = mode == Mode::Control
             && native.summary(&work.reserve(MIB)?)?.mode == JournalMode::Control;
@@ -472,6 +525,17 @@ impl<S: Shell> Runtime<S> {
         let clock = shell
             .open_clock(mode, &work.reserve(32 * MIB)?)?
             .map(Clock::new);
+        let inventory_clock = shell
+            .open_inventory_clock(
+                mode,
+                &work.reserve(if inventory_configured { 32 * MIB } else { 4096 })?,
+            )?
+            .map(InventoryClock::new);
+        if inventory_clock.is_some() && !inventory_configured {
+            return Err(denied(
+                "inventory clock custody was not declared before opening",
+            ));
+        }
         let mut result = Self {
             shell,
             mode,
@@ -490,8 +554,11 @@ impl<S: Shell> Runtime<S> {
             item_observations: None,
             history_initialized: recovery.is_some_and(|r| r.history_present),
             clock,
+            inventory_clock,
+            inventory_clock_invalidates_goal: false,
             production_at_open,
             opening_clock: None,
+            opening_inventory_clock: None,
         };
         let records = result.semantic.inventory(&work.reserve(VIEW_BYTES)?)?;
         for record in &records {
@@ -535,6 +602,11 @@ impl<S: Shell> Runtime<S> {
         let mut validation = work.narrow(&clock_validation)?;
         validation.anchor = result.anchor;
         result.opening_clock = result.inspect_clock(&validation)?;
+        if let Some(reserved) = inventory_validation {
+            let mut validation = work.narrow(&reserved)?;
+            validation.anchor = result.anchor;
+            result.opening_inventory_clock = result.inspect_inventory_clock(&validation)?;
+        }
         Ok(result)
     }
     /// Recovery identities validated during open, retained without further I/O.
@@ -552,11 +624,15 @@ impl<S: Shell> Runtime<S> {
                 if let Some(clock) = &self.opening_clock {
                     value["clock_journal_id"] = json!(clock.journal_id.to_hex());
                 }
+                if let Some(clock) = &self.opening_inventory_clock {
+                    value["inventory_clock_journal_id"] = json!(clock.journal_id.to_hex());
+                }
                 value
             });
         json!({"ok":false,"retained_state_currently_verified":false,
             "mode":self.mode.as_str(),"anchor":anchor_json(self.anchor),
             "clock":self.opening_clock.as_ref().map(ClockView::to_json),
+            "inventory_clock":self.opening_inventory_clock.as_ref().map(InventoryClockView::to_json),
             "review":self.review.as_ref().map(|review|json!({
                 "paired_seal":review.seal().to_hex(),
                 "native_plan_digest":review.native_plan().digest().to_hex(),
@@ -594,7 +670,7 @@ impl<S: Shell> Runtime<S> {
                 self.mode,
                 self.anchor.fortress_id,
                 self.production_control_enabled(),
-                self.clock_control_enabled(),
+                self.clock_control_enabled() || self.inventory_clock_control_enabled(),
             ),
             cancellation_requested: cancelled,
         })
@@ -727,6 +803,11 @@ impl<S: Shell> Runtime<S> {
             .as_ref()
             .map(|_| work.reserve(8 * MIB))
             .transpose()?;
+        let inventory_clock_budget = self
+            .inventory_clock
+            .as_ref()
+            .map(|_| work.reserve(8 * MIB))
+            .transpose()?;
         let inventory = self.semantic.inventory(&work.reserve(4 * MIB)?)?;
         if inventory.len() > 1 {
             return Err(denied(
@@ -757,6 +838,20 @@ impl<S: Shell> Runtime<S> {
         } else {
             None
         };
+        let inventory_clock = if let Some(reserved) = inventory_clock_budget {
+            let target =
+                self.inventory_clock_target(result.as_ref().map(|r| r.creation_result()))?;
+            let canonical = work.narrow(&reserved)?;
+            let native = self.shell.inventory_clock_context(&canonical, false)?;
+            Some(
+                self.inventory_clock
+                    .as_mut()
+                    .ok_or_else(|| denied("inventory clock owner absent"))?
+                    .inspect(target.as_ref(), &canonical, &native)?,
+            )
+        } else {
+            None
+        };
         self.shell.check_environment()?;
         // Custody inspection performs I/O. Optional presentation authority must
         // still hold at publication, not only before that work started.
@@ -773,7 +868,17 @@ impl<S: Shell> Runtime<S> {
             archive: self.archive.as_ref().map(|a| a.seal()),
             native: result.as_ref().map(|r| r.native_record().clone()),
             creation: result.as_ref().map(|r| r.creation_result().clone()),
-            goal: self.monitor.as_ref().and_then(|m| m.latest()).cloned(),
+            goal: self
+                .monitor
+                .as_ref()
+                .and_then(|m| m.latest())
+                .filter(|goal| {
+                    !self.inventory_clock_invalidates_goal
+                        && inventory_clock.as_ref().is_none_or(|clock| {
+                            clock.can_sample_goal() && goal.anchor.tick.get() >= clock.high_tick
+                        })
+                })
+                .cloned(),
             item_observations: self
                 .item_observations
                 .as_ref()
@@ -785,6 +890,10 @@ impl<S: Shell> Runtime<S> {
                             .and_then(|m| m.latest())
                             .is_some_and(|latest| latest.anchor == self.anchor)
                         && clock.as_ref().is_none_or(ClockView::can_sample_goal)
+                        && inventory_clock
+                            .as_ref()
+                            .is_none_or(InventoryClockView::can_sample_goal)
+                        && !self.inventory_clock_invalidates_goal
                 })
                 .cloned(),
             first_satisfied_anchor: self
@@ -802,6 +911,8 @@ impl<S: Shell> Runtime<S> {
             history_fenced: self.monitor.as_ref().is_some_and(|m| m.is_fenced()),
             clock,
             clock_control_enabled: self.clock_control_enabled(),
+            inventory_clock,
+            inventory_clock_control_enabled: self.inventory_clock_control_enabled(),
         })
     }
     pub fn inspect(&mut self, c: &OperationContext) -> Result<View> {
@@ -1032,6 +1143,7 @@ impl<S: Shell> Runtime<S> {
         ) {
             return self.view(&work.narrow(&output)?);
         }
+        let mut order_clock_settled = true;
         if self.clock.is_some() {
             let target = self.clock_target(Some(current.creation_result()))?;
             let clock = self
@@ -1045,12 +1157,15 @@ impl<S: Shell> Runtime<S> {
                     .ok_or_else(|| denied("clock history lacks verified original insertion"))?;
                 let mut source = self.shell.clock_source(&work.reserve(4 * MIB)?)?;
                 let view = clock.reconcile(target, &mut source, &work.reserve(96 * MIB)?)?;
-                if !view.can_sample_goal() {
-                    return self.view(&work.narrow(&output)?);
-                }
-            } else if !view.can_sample_goal() {
-                return self.view(&work.narrow(&output)?);
+                order_clock_settled = view.can_sample_goal();
+            } else {
+                order_clock_settled = view.can_sample_goal();
             }
+        }
+        let inventory_clock_settled =
+            self.reconcile_inventory_clock(current.creation_result(), &mut work)?;
+        if !order_clock_settled || !inventory_clock_settled {
+            return self.view(&work.narrow(&output)?);
         }
         c.authorize(Capability::Observe, RiskTier::ReadOnly, &[], None)?;
         if self.monitor.is_none() {
@@ -1076,6 +1191,10 @@ impl<S: Shell> Runtime<S> {
         };
         let shell = &self.shell;
         let acceptance = shell.acceptance().clone();
+        let inventory_clock_floor = self
+            .inventory_clock
+            .as_ref()
+            .map_or(0, InventoryClock::high_tick);
         let mut presentation: Option<Option<Value>> = None;
         let result = self.semantic.poll_original_goal_durable(
             monitor,
@@ -1085,6 +1204,11 @@ impl<S: Shell> Runtime<S> {
             |c| shell.operations(c),
             |p, c| {
                 shell.check_environment()?;
+                if p.anchor().tick.get() < inventory_clock_floor {
+                    return Err(denied(
+                        "goal evidence predates consumed inventory-clock time",
+                    ));
+                }
                 let goal_policy = acceptance.goal_for(review.original_plan(), p, c)?;
                 // A missing or changed presentation grant withholds the item
                 // view; it must not change the original goal's proof policy.
@@ -1106,6 +1230,7 @@ impl<S: Shell> Runtime<S> {
         }
         work.context.anchor = self.anchor;
         result?;
+        self.inventory_clock_invalidates_goal = false;
         self.item_observations = presentation.flatten();
         self.view(&work.narrow(&output)?)
     }
@@ -1168,6 +1293,15 @@ impl<S: Shell> Runtime<S> {
         // renew the deadline or spend the same native/read budget twice.
         let sample = self.wait(&work.reserve(1024 * MIB)?)?;
         work.context.anchor = self.anchor;
+        if sample
+            .inventory_clock
+            .as_ref()
+            .is_some_and(|clock| clock.pending || clock.unresolved)
+        {
+            return Err(denied(
+                "settle or cancel the independent inventory clock before an order run",
+            ));
+        }
         if sample.clock.as_ref().is_some_and(|v| !v.can_sample_goal()) {
             return Err(denied("reconcile the retained clock before another run"));
         }

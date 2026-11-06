@@ -656,6 +656,10 @@ impl Resources {
     }
 }
 impl Shell for Resources {
+    type InventoryClockJournal = Memory;
+    type InventoryClockSource = dfmcp_adapter::bounded_run::rpc::RunRpcClient<
+        dfmcp_adapter::bounded_run::rpc::RunTcpStream,
+    >;
     type ClockJournal = Memory;
     type ClockSource =
         dfmcp_adapter::order_run::rpc::OrderRunRpc<dfmcp_adapter::order_run::rpc::OrderRunTcp>;

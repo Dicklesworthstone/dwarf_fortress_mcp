@@ -1,6 +1,8 @@
 //! The actual Runtime composes original insertion, native clock coordination,
 //! current goal proof and recovery. Only native responses/storage are injected.
 use super::*;
+#[path = "inventory_clock_runtime_tests.rs"]
+mod inventory_clock_tests;
 use dfmcp_adapter::bounded_run::RunPhase;
 use dfmcp_adapter::order_run::journal::{OrderRunBinding, OrderRunMode, OrderRunState};
 use dfmcp_adapter::order_run::rpc::{OrderRunManifest, OrderRunSource, authorize, authorize_plan};
@@ -320,6 +322,10 @@ impl Shell for ClockResources {
     type Operations = OperationsFixture;
     type ClockJournal = ClockMemory;
     type ClockSource = ClockNative;
+    type InventoryClockJournal = Memory;
+    type InventoryClockSource = dfmcp_adapter::bounded_run::rpc::RunRpcClient<
+        dfmcp_adapter::bounded_run::rpc::RunTcpStream,
+    >;
     fn acceptance(&self) -> &policy::SourceAcceptance {
         self.base.acceptance()
     }

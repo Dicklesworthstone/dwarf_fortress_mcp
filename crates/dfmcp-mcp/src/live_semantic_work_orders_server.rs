@@ -3,6 +3,7 @@
 //! All planning, effect custody and completion decisions remain in the runtime
 //! and adapter. MCP arguments cannot choose sources, credentials or paths.
 use crate::semantic_work_order_runtime::clock::RunRequest;
+use crate::semantic_work_order_runtime::inventory_clock::RunRequest as InventoryRunRequest;
 use crate::semantic_work_order_runtime::{
     Config, MAX_BYTES, MAX_GAME_TICKS, MAX_OUTPUT_TOKENS, MAX_WALL_MILLIS, Mode, NativeRuntime,
     Request, Runtime, Shell, View, digest,
@@ -61,11 +62,14 @@ enum Action {
     Inspect,
     Plan(Request),
     PlanRun(RunRequest),
+    PlanInventoryRun(InventoryRunRequest),
     Commit { seal: Digest32, confirmed: bool },
     CommitRun { seal: Digest32, confirmed: bool },
+    CommitInventoryRun { seal: Digest32, confirmed: bool },
     Wait,
     Cancel,
     CancelRun,
+    CancelInventoryRun,
     Unavailable,
 }
 impl Action {
@@ -73,7 +77,13 @@ impl Action {
         matches!(self, Self::Commit { .. })
     }
     fn may_control_clock(&self) -> bool {
-        matches!(self, Self::CommitRun { .. } | Self::CancelRun)
+        matches!(
+            self,
+            Self::CommitRun { .. }
+                | Self::CancelRun
+                | Self::CommitInventoryRun { .. }
+                | Self::CancelInventoryRun
+        )
     }
     fn perform<S: Shell>(self, runtime: &mut Runtime<S>, c: &OperationContext) -> Result<View> {
         match self {
@@ -81,11 +91,16 @@ impl Action {
             Self::Inspect => runtime.inspect(c),
             Self::Plan(request) => runtime.plan(request, c),
             Self::PlanRun(request) => runtime.plan_run(request, c),
+            Self::PlanInventoryRun(request) => runtime.plan_inventory_run(request, c),
             Self::Commit { seal, confirmed } => runtime.commit(seal, confirmed, c),
             Self::CommitRun { seal, confirmed } => runtime.commit_run(seal, confirmed, c),
+            Self::CommitInventoryRun { seal, confirmed } => {
+                runtime.commit_inventory_run(seal, confirmed, c)
+            }
             Self::Wait => runtime.wait(c),
             Self::Cancel => runtime.cancel(c),
             Self::CancelRun => runtime.cancel_run(c),
+            Self::CancelInventoryRun => runtime.cancel_inventory_run(c),
             Self::Unavailable => Err(error(
                 ErrorCode::CapabilityDenied,
                 "this semantic work-order runtime does not implement checkpoint or restore",
@@ -275,12 +290,15 @@ fn render(
                 value["native_state"].as_str(),
                 Some("dispatch_started" | "indeterminate")
             );
-            state.clock_uncertain = value["clock"]["unresolved"] == true;
+            state.clock_uncertain = value["clock"]["unresolved"] == true
+                || value["inventory_clock"]["unresolved"] == true;
             value["session_id"] = json!(state.runtime.session_id().to_string());
             value["retained_state_currently_verified"] = json!(true);
             value["development_production_enabled"] =
                 json!(state.runtime.production_control_enabled());
             value["development_clock_enabled"] = json!(state.runtime.clock_control_enabled());
+            value["development_inventory_clock_enabled"] =
+                json!(state.runtime.inventory_clock_control_enabled());
             state.last_view = Some(value.clone());
             value
         }
@@ -571,6 +589,8 @@ fn plan_action(raw: &str) -> Result<Action> {
     // fields as well as unknown values. This discriminator does not authorize.
     if value.get("kind").and_then(Value::as_str) == Some("run") {
         RunRequest::parse(raw).map(Action::PlanRun)
+    } else if value.get("kind").and_then(Value::as_str) == Some("inventory_run") {
+        InventoryRunRequest::parse(raw).map(Action::PlanInventoryRun)
     } else {
         Request::parse(raw).map(Action::Plan)
     }
@@ -580,9 +600,10 @@ fn commit_action(scope: Option<&str>, paired_seal: &str, confirmed: bool) -> Res
     match scope {
         None | Some("goal") => Ok(Action::Commit { seal, confirmed }),
         Some("run") => Ok(Action::CommitRun { seal, confirmed }),
+        Some("inventory_run") => Ok(Action::CommitInventoryRun { seal, confirmed }),
         _ => Err(error(
             ErrorCode::InvalidRequest,
-            "commit scope must be goal or run",
+            "commit scope must be goal, run or inventory_run",
         )),
     }
 }
@@ -590,22 +611,23 @@ fn cancel_action(scope: Option<&str>) -> Result<Action> {
     match scope {
         None | Some("goal") => Ok(Action::Cancel),
         Some("run") => Ok(Action::CancelRun),
+        Some("inventory_run") => Ok(Action::CancelInventoryRun),
         _ => Err(error(
             ErrorCode::InvalidRequest,
-            "cancel scope must be goal, run or session",
+            "cancel scope must be goal, run, inventory_run or session",
         )),
     }
 }
 
 #[tool(
-    description = "Compile and durably prepare one finite original furniture-order goal. Request is closed JSON: expected_observation, recipe (wooden_bed, wooden_door, wooden_table or wooden_chair), amount 1..100, absolute deadline_tick, optional poll_interval_ticks and stable_samples. Optional objective={kind:observed_inventory_minimum,item_type:BED|DOOR|TABLE|CHAIR,minimum_stack_units:1..1000000} must match the recipe and proves observed stock including preexisting items, not order completion or output attribution. Returns the paired review seal; does not insert. Repeating the same request cannot renew its deadline or replace the goal. After insertion, kind=run with original_paired_seal, game_ticks and wall_millis separately prepares a finite receipt-linked clock run within that deadline; this never unpauses."
+    description = "Compile and durably prepare one finite original furniture-order goal. Request is closed JSON: expected_observation, recipe (wooden_bed, wooden_door, wooden_table or wooden_chair), amount 1..100, absolute deadline_tick, optional poll_interval_ticks and stable_samples. Optional objective={kind:observed_inventory_minimum,item_type:BED|DOOR|TABLE|CHAIR,minimum_stack_units:1..1000000} must match the recipe and proves observed stock including preexisting items, not order completion or output attribution. Returns the paired review seal; does not insert. Repeating the same request cannot renew its deadline or replace the goal. After insertion, kind=run with original_paired_seal, game_ticks and wall_millis separately prepares a finite receipt-linked clock run within that deadline. Separately configured kind=inventory_run uses the same three fields to advance an already true original inventory objective through unfinished stability, including after order retirement. Both return independent reviews and never unpause."
 )]
 pub fn fortress_plan(session_id: String, request: String) -> String {
     with_session(session_id, "fortress.plan", None, || plan_action(&request))
 }
 
 #[tool(
-    description = "scope=goal (default) confirms the original paired review and inserts once under production authority. scope=run confirms a separate clock review in paired_seal and starts its bounded native run once under independent clock authority. Both require confirmed=true. Insertion, historical clock stopping and original goal completion are separate. Lost replies require exact reconciliation, never repeated insertion or unpause."
+    description = "scope=goal (default) confirms the original paired review and inserts once under production authority. scope=run confirms a separate clock review in paired_seal and starts its bounded native run once under independent clock authority. scope=inventory_run confirms the separate inventory stability clock under its own operator authority. All commits require confirmed=true. Insertion, historical clock stopping and original goal completion are separate. Lost replies require exact reconciliation, never repeated insertion or unpause."
 )]
 pub fn fortress_commit(
     session_id: String,
@@ -662,7 +684,7 @@ fn close(raw: String) -> String {
 }
 
 #[tool(
-    description = "scope=goal (default) retires a still-prepared original insertion under current production authority; it never deletes a manager order or erases history. scope=run retires a prepared clock run or requests the native owner safety pause for its dispatched run, under current clock authority. scope=session releases resources even after cancellation or fencing without cancelling game effects. Preserve the complete original and clock recovery handoff before closing."
+    description = "scope=goal (default) retires a still-prepared original insertion under current production authority; it never deletes a manager order or erases history. scope=run retires a prepared clock run or requests the native owner safety pause for its dispatched run, under current clock authority. scope=inventory_run retires or safety-pauses the independently configured inventory clock, including after the original deadline without Observe or Plan. scope=session releases resources even after cancellation or fencing without cancelling game effects. Preserve the complete original and clock recovery handoff before closing."
 )]
 pub fn fortress_cancel(session_id: String, scope: Option<String>) -> String {
     if scope.as_deref() == Some("session") {
@@ -715,7 +737,7 @@ pub fn run_stdio() {
         .tool(FortressPlan).tool(FortressCommit).tool(FortressWait)
         .tool(FortressCancel).tool(FortressCheckpoint).tool(FortressRestore)
         .tool(FortressExplain).tool(FortressDoctor)
-        .instructions("Explicitly unadmitted native semantic furniture-order development runtime. Open, observe, plan, review the paired seal, commit once, then wait for original-goal evidence. One retained goal. Optional separate clock authority permits explicitly reviewed bounded runs through plan(kind=run), commit(scope=run), wait and cancel(scope=run); no automatic chaining or redispatch. Keep original and clock recovery seals outside private custody. Insertion is not goal completion and operator source acceptance is not compatibility admission.")
+        .instructions("Explicitly unadmitted native semantic furniture-order development runtime. Open, observe, plan, review the paired seal, commit once, then wait for original-goal evidence. One retained goal. Optional separate clock authority permits explicitly reviewed bounded runs through plan(kind=run), commit(scope=run), wait and cancel(scope=run); a separately configured inventory clock uses kind=inventory_run and scope=inventory_run only for qualified true inventory with unfinished original stability. Both owners fence unsettled work in the other; no automatic switching, chaining or redispatch. Keep original and both clock recovery seals outside private custody. Insertion is not goal completion and operator source acceptance is not compatibility admission.")
         .build();
     crate::run_modern_stdio(server);
 }
@@ -834,6 +856,52 @@ mod tests {
             assert!(cancel_action(Some(unknown)).is_err());
         }
         assert!(commit_action(Some("run"), "bad", true).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn inventory_clock_routes_are_explicit_closed_and_separate_from_order_runs() -> Result<()> {
+        let seal = "b".repeat(64);
+        let request = json!({"kind":"inventory_run","original_paired_seal":seal,"game_ticks":10,"wall_millis":1000});
+        assert!(matches!(
+            plan_action(&request.to_string())?,
+            Action::PlanInventoryRun(_)
+        ));
+        for field in [
+            "native_order_id",
+            "predicate",
+            "source_generation",
+            "endpoint",
+            "deadline_tick",
+            "objective",
+        ] {
+            let mut changed = request.clone();
+            changed[field] = json!(1);
+            assert!(plan_action(&changed.to_string()).is_err(), "{field}");
+        }
+        for ticks in [0, 1201] {
+            let mut changed = request.clone();
+            changed["game_ticks"] = json!(ticks);
+            assert!(plan_action(&changed.to_string()).is_err());
+        }
+        let duplicate = format!(
+            "{{\"kind\":\"inventory_run\",\"kind\":\"inventory_run\",\"original_paired_seal\":\"{seal}\",\"game_ticks\":10,\"wall_millis\":1000}}"
+        );
+        assert!(plan_action(&duplicate).is_err());
+        let commit = commit_action(Some("inventory_run"), &seal, true)?;
+        assert!(!commit.may_insert());
+        assert!(commit.may_control_clock());
+        assert!(matches!(
+            commit,
+            Action::CommitInventoryRun {
+                confirmed: true,
+                ..
+            }
+        ));
+        assert!(matches!(
+            cancel_action(Some("inventory_run"))?,
+            Action::CancelInventoryRun
+        ));
         Ok(())
     }
 

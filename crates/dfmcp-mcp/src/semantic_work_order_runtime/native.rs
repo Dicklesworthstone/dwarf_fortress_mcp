@@ -36,17 +36,23 @@ use std::sync::Arc;
 mod clock;
 pub use clock::PinnedClock;
 use clock::{ClockConfig, ClockInput};
+#[path = "native_inventory_clock.rs"]
+mod inventory_clock;
+pub use inventory_clock::PinnedInventoryClock;
+use inventory_clock::{InventoryClockConfig, InventoryClockInput};
 
 const OPT_IN: &str = "DFMCP_ALLOW_UNADMITTED_SEMANTIC_WORK_ORDERS";
 const CONFIG: &str = "DFMCP_SEMANTIC_WORK_ORDER_CONFIG";
 const PRODUCTION: &str = "DFMCP_SEMANTIC_WORK_ORDER_ALLOW_PRODUCTION";
 const CLOCK_AUTHORITY: &str = "DFMCP_SEMANTIC_WORK_ORDER_ALLOW_CLOCK";
 const CLOCK_TOKEN: &str = "DFMCP_SEMANTIC_WORK_ORDER_CLOCK_TOKEN";
+const INVENTORY_CLOCK_AUTHORITY: &str = "DFMCP_SEMANTIC_WORK_ORDER_ALLOW_INVENTORY_CLOCK";
+const INVENTORY_CLOCK_TOKEN: &str = "DFMCP_SEMANTIC_WORK_ORDER_INVENTORY_CLOCK_TOKEN";
 const CITIZEN_TOKEN: &str = "DFMCP_SEMANTIC_WORK_ORDER_CITIZEN_TOKEN";
 const ORDER_TOKEN: &str = "DFMCP_SEMANTIC_WORK_ORDER_ORDER_TOKEN";
 const PROGRESS_TOKEN: &str = "DFMCP_SEMANTIC_WORK_ORDER_PROGRESS_TOKEN";
 const OPERATIONS_TOKEN: &str = "DFMCP_SEMANTIC_WORK_ORDER_OPERATIONS_TOKEN";
-const ALLOWED: [&str; 9] = [
+const ALLOWED: [&str; 11] = [
     OPT_IN,
     CONFIG,
     PRODUCTION,
@@ -56,6 +62,8 @@ const ALLOWED: [&str; 9] = [
     OPERATIONS_TOKEN,
     CLOCK_AUTHORITY,
     CLOCK_TOKEN,
+    INVENTORY_CLOCK_AUTHORITY,
+    INVENTORY_CLOCK_TOKEN,
 ];
 const MAX_CONFIG_BYTES: usize = 16 * 1024;
 
@@ -97,6 +105,7 @@ struct RecoveryInput {
     #[serde(default)]
     history_present: bool,
     clock_journal_id: Option<String>,
+    inventory_clock_journal_id: Option<String>,
 }
 #[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -108,6 +117,7 @@ struct ConfigInput {
     sources: SourceAcceptance,
     recovery: Option<RecoveryInput>,
     clock: Option<ClockInput>,
+    inventory_clock: Option<InventoryClockInput>,
 }
 #[derive(Clone)]
 pub struct Config {
@@ -117,6 +127,7 @@ pub struct Config {
     sources: SourceAcceptance,
     recovery: Option<Recovery>,
     clock: Option<ClockConfig>,
+    inventory_clock: Option<InventoryClockConfig>,
     environment_digest: Digest32,
     runtime_check: Option<fn() -> Result<()>>,
     combined_check: Option<Arc<dyn Fn() -> Result<()> + Send + Sync>>,
@@ -160,6 +171,12 @@ impl Config {
             .and_then(|recovery| recovery.clock_journal_id.as_deref())
             .map(digest)
             .transpose()?;
+        let recovery_inventory_clock = input
+            .recovery
+            .as_ref()
+            .and_then(|recovery| recovery.inventory_clock_journal_id.as_deref())
+            .map(digest)
+            .transpose()?;
         let has_recovery = input.recovery.is_some();
         let recovery = input
             .recovery
@@ -183,6 +200,10 @@ impl Config {
             .clock
             .map(|clock| clock.validate(input.initialize))
             .transpose()?;
+        let inventory_clock = input
+            .inventory_clock
+            .map(|clock| clock.validate(input.initialize))
+            .transpose()?;
         if has_recovery {
             match (&clock, recovery_clock) {
                 (Some(clock), Some(identity)) if clock.journal_id() == Some(identity) => {}
@@ -190,6 +211,15 @@ impl Config {
                 _ => {
                     return Err(denied(
                         "original-goal handoff and configured clock journal identity must agree exactly",
+                    ));
+                }
+            }
+            match (&inventory_clock, recovery_inventory_clock) {
+                (Some(clock), Some(identity)) if clock.journal_id() == Some(identity) => {}
+                (None, None) => {}
+                _ => {
+                    return Err(denied(
+                        "original-goal handoff and configured inventory clock identity must agree exactly",
                     ));
                 }
             }
@@ -201,6 +231,7 @@ impl Config {
             sources: input.sources,
             recovery,
             clock,
+            inventory_clock,
             environment_digest: Digest32::of_bytes(raw.as_bytes()),
             runtime_check: None,
             combined_check: None,
@@ -239,6 +270,13 @@ impl Config {
                 "operator clock enablement must be absent or exactly 1",
             ));
         }
+        if let Some(value) = std::env::var_os(INVENTORY_CLOCK_AUTHORITY)
+            && value.to_str() != Some("1")
+        {
+            return Err(denied(
+                "operator inventory clock enablement must be absent or exactly 1",
+            ));
+        }
 
         Ok(())
     }
@@ -259,7 +297,12 @@ impl Config {
         Ok(config)
     }
     fn validate_combined_custody(&self) -> Result<()> {
-        if self.clock.is_some() || self.recovery.is_some() {
+        if self.clock.is_some()
+            || self.inventory_clock.is_some()
+            || self.recovery.is_some()
+            || std::env::var_os(INVENTORY_CLOCK_AUTHORITY).is_some()
+            || std::env::var_os(INVENTORY_CLOCK_TOKEN).is_some()
+        {
             return Err(denied(
                 "combined work orders exclude standalone clock and recovery",
             ));
@@ -280,6 +323,9 @@ impl Config {
     }
     pub fn clock_enabled() -> bool {
         std::env::var(CLOCK_AUTHORITY).ok().as_deref() == Some("1")
+    }
+    pub fn inventory_clock_enabled() -> bool {
+        std::env::var(INVENTORY_CLOCK_AUTHORITY).ok().as_deref() == Some("1")
     }
     fn current(&self) -> Result<()> {
         if let Some(check) = self.runtime_check {
@@ -479,6 +525,32 @@ impl Shell for NativeShell {
     type Operations = OperationsRpcClient<DeadlineStream>;
     type ClockJournal = PrivateOrderRunFile;
     type ClockSource = PinnedClock;
+    type InventoryClockJournal = dfmcp_adapter::bounded_run::private_file::PrivateRunFile;
+    type InventoryClockSource = PinnedInventoryClock;
+    fn inventory_clock_configured(&self) -> bool {
+        self.config.inventory_clock.is_some()
+    }
+    fn inventory_clock_enabled(&self) -> bool {
+        self.config.inventory_clock.is_some() && Config::inventory_clock_enabled()
+    }
+    fn open_inventory_clock(
+        &self,
+        mode: Mode,
+        c: &OperationContext,
+    ) -> Result<Option<dfmcp_adapter::bounded_run::journal::RunJournal<Self::InventoryClockJournal>>>
+    {
+        inventory_clock::open(&self.config, mode, c)
+    }
+    fn inventory_clock_context(
+        &self,
+        c: &OperationContext,
+        control: bool,
+    ) -> Result<OperationContext> {
+        inventory_clock::context(&self.config, c, control)
+    }
+    fn inventory_clock_source(&self, c: &OperationContext) -> Result<Self::InventoryClockSource> {
+        inventory_clock::connect(&self.config, c)
+    }
     fn acceptance(&self) -> &SourceAcceptance {
         &self.config.sources
     }
@@ -526,6 +598,14 @@ impl Shell for NativeShell {
         if self.config.initialize && self.config.clock.is_some() && !Config::clock_enabled() {
             return Err(denied(
                 "initializing clock custody requires separate operator clock authority",
+            ));
+        }
+        if self.config.initialize
+            && self.config.inventory_clock.is_some()
+            && !Config::inventory_clock_enabled()
+        {
+            return Err(denied(
+                "initializing inventory clock custody requires independent operator inventory clock authority",
             ));
         }
         let mut work = Work::new(c)?;
@@ -778,10 +858,13 @@ mod runtime_checkpoint_tests {
         rejected(shell.open_control(Mode::Control, &c));
         rejected(shell.open_clock(Mode::Control, &c));
         rejected(shell.clock_source(&c));
+        rejected(shell.open_inventory_clock(Mode::Control, &c));
+        rejected(shell.inventory_clock_context(&c, true));
+        rejected(shell.inventory_clock_source(&c));
         rejected(shell.acquire(&c));
         rejected(shell.progress(&c));
         rejected(shell.operations(&c));
-        assert_eq!(CHECKS.load(Ordering::SeqCst), 9);
+        assert_eq!(CHECKS.load(Ordering::SeqCst), 12);
         assert!(!directory.exists(), "no private custody was created");
         assert!(
             matches!(listener.accept(), Err(cause) if cause.kind() == std::io::ErrorKind::WouldBlock)
