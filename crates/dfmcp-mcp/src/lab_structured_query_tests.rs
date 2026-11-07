@@ -758,7 +758,7 @@ fn lab_structured_source_and_final_byte_limits_and_deadlines_are_independent() -
     }
     let result = query(&session_id, request)?;
     assert_eq!(result["ok"], true, "{result}");
-    let late = parsed(&structured_query::finish_response(
+    let late = parsed(&query_budget::finish_response(
         result.to_string(),
         std::time::Duration::from_millis(60_000),
     ))?;

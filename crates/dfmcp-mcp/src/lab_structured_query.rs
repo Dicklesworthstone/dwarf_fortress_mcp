@@ -15,7 +15,7 @@ mod operational_query;
 
 use std::time::{Duration, Instant};
 
-use dfmcp_core::{Capability, DfmcpError, ErrorCode, OperationContext, Result, RiskTier};
+use dfmcp_core::{DfmcpError, ErrorCode, OperationContext, Result};
 use dfmcp_world::WorldSnapshot;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -119,30 +119,7 @@ pub(super) fn execute(
     request: &Request,
 ) -> Result<Value> {
     let started = Instant::now();
-    current.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
-    if snapshot.fortress_id != current.anchor.fortress_id {
-        return Err(invalid("retained query source belongs to another fortress"));
-    }
-    // All executors verify the entire canonical source. A small page must not
-    // bypass the work needed to verify chunks, events, or graph relationships.
-    let records = snapshot
-        .graph
-        .entities
-        .len()
-        .saturating_add(snapshot.graph.edges.len())
-        .saturating_add(snapshot.graph.chunks.len())
-        .saturating_add(snapshot.graph.events.len());
-    if records as u64 > u64::from(current.budget.max_entities) {
-        return Err(exhausted(
-            "structured query exceeds its source record budget",
-        ));
-    }
-    let source_bytes = snapshot.canonical_bytes().len();
-    if source_bytes as u64 > current.budget.max_bytes {
-        return Err(exhausted(
-            "structured query exceeds its canonical source byte budget",
-        ));
-    }
+    let source_work = super::query_budget::admit_sources(&[snapshot], current)?;
     let mut source_context = current.clone();
     source_context.anchor = snapshot.anchor();
     let mut result = match request.request["query"]["kind"].as_str() {
@@ -162,7 +139,7 @@ pub(super) fn execute(
     result["game_tick"] = json!(snapshot.tick.0);
     result["current_anchor"] = core_query::anchor_json(current.anchor);
     result["historical"] = json!(historical);
-    result["source_work"] = json!({"records": records, "canonical_bytes": source_bytes});
+    result["source_work"] = source_work;
     result["evidence_scope"] = json!("laboratory_reference_world");
     result["observation_coverage"] = json!({
         "status": "partial",
@@ -177,83 +154,4 @@ pub(super) fn execute(
         "eligible_as_mutation_evidence": false,
     });
     Ok(result)
-}
-
-/// Carry the authority-bearing budget to final presentation. In particular, the
-/// facade must not use its cached opening budget after an authorized narrowing.
-pub(super) fn response(result: Result<Value>, context: &OperationContext) -> String {
-    let mut payload = match result {
-        Ok(payload) => payload,
-        Err(error) => json!({"ok": false, "error": {
-            "operation": "fortress.query", "code": error.code.as_str(),
-            "message": error.message, "retryable": error.retryable,
-            "details": error.details, "effect_may_have_occurred": false,
-        }}),
-    };
-    payload["mode"] = json!("structured");
-    payload["query_budget"] = json!({
-        "maximum_response_bytes": context.budget.max_bytes.min(
-            u64::from(context.budget.max_output_tokens).saturating_mul(4)),
-        "max_output_tokens": context.budget.max_output_tokens,
-        "max_wall_millis": context.budget.max_wall_millis,
-    });
-    payload.to_string()
-}
-
-/// A source-bound cursor describes exactly the rows produced by the executor.
-/// Generic presentation clipping cannot remove rows and keep that cursor. Keep
-/// only lossless full/compact-turn results, or publish a typed refusal instead.
-pub(crate) fn finish_response(response: String, elapsed: Duration) -> String {
-    let finishing = Instant::now();
-    let Ok(payload) = serde_json::from_str::<Value>(&response) else {
-        return response;
-    };
-    if payload["mode"] != "structured" || !payload["query_budget"].is_object() {
-        return response;
-    }
-    let maximum_bytes = payload["query_budget"]["maximum_response_bytes"]
-        .as_u64()
-        .map_or(0, |value| value);
-    let maximum_tokens = payload["query_budget"]["max_output_tokens"]
-        .as_u64()
-        .map_or(0, |value| value)
-        .min(maximum_bytes / 4);
-    let fitted = crate::output_budget::fit(&response, maximum_tokens);
-    if payload["ok"] != true {
-        return fitted;
-    }
-    let complete = serde_json::from_str::<Value>(&fitted).is_ok_and(|value| {
-        matches!(
-            value["output_budget"]["tier"].as_str(),
-            Some("full" | "compact_turn")
-        )
-    });
-    let wall_expired = elapsed.saturating_add(finishing.elapsed())
-        >= Duration::from_millis(
-            payload["query_budget"]["max_wall_millis"]
-                .as_u64()
-                .map_or(0, |value| value),
-        );
-    if !wall_expired && fitted.len() as u64 <= maximum_bytes && complete {
-        return fitted;
-    }
-    let mut turn = payload["agent_turn"].clone();
-    turn["coverage"] = json!({"status": "partial", "complete_domains": [],
-        "partial_domains": [], "absence_proof_scope": [], "continuation": null,
-        "reason": "structured query result was not published"});
-    turn["continuity"]["status"] = json!("stale");
-    let message = if wall_expired {
-        "structured query and its Agent Turn exceeded the negotiated wall-time budget"
-    } else {
-        "the complete structured query and Agent Turn exceed the response budget; reduce limit, fields, metrics, or graph scope"
-    };
-    let refusal = json!({"ok": false, "mode": "structured",
-        "session_id": payload["session_id"], "query_budget": payload["query_budget"],
-        "error": {"operation": "fortress.query", "code": "budget_exceeded",
-            "message": message, "retryable": false, "details": [],
-            "effect_may_have_occurred": false,
-            "recovery": {"class": "never_unchanged", "next_tool": "fortress.query",
-                "reason": "narrow the original structured request or negotiate a larger budget"}},
-        "agent_turn": turn});
-    crate::output_budget::fit(&refusal.to_string(), maximum_tokens)
 }

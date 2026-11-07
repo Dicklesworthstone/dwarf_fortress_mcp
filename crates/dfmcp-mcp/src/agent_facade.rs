@@ -1651,13 +1651,13 @@ fn project_response(
         .get("max_output_tokens")
         .and_then(Value::as_u64)
         .unwrap_or(crate::output_budget::DEFAULT_MAX_OUTPUT_TOKENS);
-    // Structured pages already bind their returned rows to an exact cursor.
-    // Their final publication guard permits lossless compaction or refusal,
-    // never generic row clipping after the executor has advanced the cursor.
-    let structured = payload["mode"] == "structured" && payload["query_budget"].is_object();
+    // Query publication uses the current authority-bearing budget, not this
+    // orientation's opening budget. Its final guard preserves whole legacy
+    // pages/cursors and permits only lossless structured-page compaction.
+    let budgeted_query = operation == "fortress.query" && payload["query_budget"].is_object();
     let shaped =
         crate::output_budget::shape_for_profile(&builder.attach(payload), profile.as_str());
-    let output = if structured {
+    let output = if budgeted_query {
         shaped
     } else {
         crate::output_budget::fit(&shaped, max_output_tokens)
@@ -1743,7 +1743,7 @@ pub fn fortress_query(session_id: Option<String>, mode: Option<String>) -> Strin
         ObservationProfile::Tactical,
         session_id.as_deref(),
     );
-    let response = crate::server::structured_query::finish_response(response, started.elapsed());
+    let response = crate::server::query_budget::finish_response(response, started.elapsed());
     crate::replay::record("fortress.query", session_id.as_deref(), recorded, &response);
     response
 }

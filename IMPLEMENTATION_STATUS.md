@@ -1,5 +1,31 @@
 # Implementation Status
 
+## Unreleased — Close legacy query budget bypasses
+
+The default laboratory query handler now admits the complete canonical source
+before every query mode. Its record charge includes entities, edges, map chunks
+and events, even when a selector or small page hides them. Historical reads use
+current authority and charge the selected retained source. Changes queries share
+one allowance across both distinct endpoints; identical endpoints charge once.
+
+The public facade now fits query results against the authority-bearing current
+session budget rather than a cached opening allowance. Byte, token and elapsed
+wall limits cover the complete Agent Turn. Legacy entity/observation pages keep
+complete rows and repair their source-bound offset continuations. Structured
+pages allow only lossless full/compact publication. A successful result whose
+meaningful page would be omitted becomes an explicit budget refusal.
+
+Six new helper tests and three actual public-facade regression groups cover all
+legacy routes, source records and canonical bytes, historical authority, summed
+change endpoints, narrowed output budgets, page-by-page completeness and deadline
+refusals. They were source-reviewed but have not compiled or executed. The shared
+executor went offline during implementation; the earlier full MCP
+cargo check --offline --locked -j1 -p dfmcp-mcp --tests failed before repository
+compilation because exact FastMCP revision 13461caf1f23bef675e0588b5e0c5ba8cf81b9f8
+was unavailable locally. Existing workflows require manual controlled runners,
+so no automatic CI run validates this commit. Full verify/qualification and live
+gameplay remain unperformed; no dependency pin or admission boundary changed.
+
 ## Unreleased — Original-goal operations available for diagnosis
 
 A selected original production-goal result now exposes its existing immutable

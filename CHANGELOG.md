@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased — Enforce budgets across every laboratory query mode
+
+- Apply complete canonical source record and byte admission to summary, entities,
+  search, observation, terrain, path, civilian recovery, historical reads and
+  changes queries, using the same admission path as structured queries.
+- Charge both distinct endpoints of a changes query together and check current
+  Query authority before selecting historical sources.
+- Carry the current session budget through success and refusal publication;
+  bound the entire Agent Turn by bytes, tokens and elapsed wall time. Preserve
+  whole-row legacy cursor repair and refuse lossy structured pages.
+- Add six budget-helper tests and three public-facade regression groups. These
+  tests have not executed: the shared executor became unavailable, and the full
+  offline MCP check was already blocked by the missing exact FastMCP revision.
+
 ## Unreleased — Inspect the operations behind original production goals
 
 - Make the exact immutable operations projection of a selected original production

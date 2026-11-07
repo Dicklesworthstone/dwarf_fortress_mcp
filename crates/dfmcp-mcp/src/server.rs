@@ -59,9 +59,16 @@ pub(crate) mod production_source;
 #[path = "lab_structured_query.rs"]
 pub(crate) mod structured_query;
 
+#[path = "lab_query_budget.rs"]
+pub(crate) mod query_budget;
+
 #[cfg(test)]
 #[path = "lab_structured_query_tests.rs"]
 mod structured_query_tests;
+
+#[cfg(test)]
+#[path = "lab_query_budget_mcp_tests.rs"]
+mod query_budget_mcp_tests;
 
 #[path = "room_provisioning.rs"]
 mod room_provisioning;
@@ -2972,17 +2979,8 @@ pub fn fortress_observe(session_id: Option<String>) -> String {
 )]
 pub fn fortress_query(session_id: Option<String>, mode: Option<String>) -> String {
     let mode = mode.map_or_else(|| "summary".to_owned(), |value| value);
-    let structured = match structured_query::parse(&mode) {
-        Ok(request) => request,
-        Err(error) => return dfmcp_error_payload("fortress.query", &error),
-    };
-    if structured.is_none() && mode.len() > MAX_MODE_BYTES {
-        return coded_error_payload(
-            "fortress.query",
-            ErrorCode::BudgetExceeded,
-            "query mode exceeds its explicit byte bound",
-        );
-    }
+    let structured = structured_query::parse(&mode);
+    let is_structured = matches!(&structured, Ok(Some(_)));
     let session = match resolve_session(session_id) {
         Ok(value) => value,
         Err(error) => return dfmcp_error_payload("fortress.query", &error),
@@ -2995,101 +2993,106 @@ pub fn fortress_query(session_id: Option<String>, mode: Option<String>) -> Strin
                 Ok(value) => value,
                 Err(error) => return dfmcp_error_payload("fortress.query", &error),
             };
-            if let Err(error) = authorize_entry(&ctx, Capability::Query, RiskTier::ReadOnly) {
-                return dfmcp_error_payload("fortress.query", &error);
-            }
-            match civilian_recovery::is_recovery_query(&mode) {
-                Ok(true) => {
-                    let mut payload = guard.civilian_recovery.projection();
-                    payload["ok"] = json!(true);
-                    payload["session_id"] = json!(guard.session_id.to_string());
-                    payload["mode"] = json!("civilian_recovery");
-                    let encoded = payload.to_string();
-                    if guard.adapter.snapshot().graph.entities.len()
-                        > ctx.budget.max_entities as usize
-                        || encoded.len() as u64 > ctx.budget.max_bytes
-                        || encoded.len() as u64
-                            > u64::from(ctx.budget.max_output_tokens).saturating_mul(4)
-                    {
-                        return coded_error_payload(
-                            "fortress.query",
+            let result = authorize_entry(&ctx, Capability::Query, RiskTier::ReadOnly)
+                .and_then(|()| {
+                    let structured = structured?;
+                    if structured.is_none() && mode.len() > MAX_MODE_BYTES {
+                        return Err(DfmcpError::new(
                             ErrorCode::BudgetExceeded,
-                            "complete civilian recovery census exceeds the negotiated query allowance",
-                        );
+                            "query mode exceeds its explicit byte bound",
+                        ));
                     }
-                    return encoded;
-                }
-                Ok(false) => {}
-                Err(error) => return dfmcp_error_payload("fortress.query", &error),
-            }
-            if let Some(request) = &structured {
-                // Select historical state only after authorizing at the current
-                // game tick. Neither an old source nor its cursor renews a grant.
-                let result = retained_resource_snapshot(guard, request.at.as_deref())
-                    .and_then(|source| structured_query::execute(source, &ctx, request));
-                return structured_query::response(result, &ctx);
-            }
-            if mode.trim_start().starts_with('{') {
-                match historical_query(guard, &mode) {
-                    Ok(Some(payload)) => return payload,
-                    Ok(None) => {}
-                    Err(error) => return dfmcp_error_payload("fortress.query", &error),
-                }
-            }
-            if mode != "summary" {
-                let snapshot = guard.adapter.snapshot();
-                return match crate::lab_world::query(snapshot, &mode) {
-                    Ok(mut payload) => {
-                        if let Err(error) = crate::resources::link_entity_resources(
-                            &mut payload,
-                            guard.session_id,
-                            snapshot.anchor(),
-                        ) {
-                            return dfmcp_error_payload("fortress.query", &error);
-                        }
-                        payload["ok"] = json!(true);
-                        payload["session_id"] = json!(format!("{}", guard.session_id));
-                        payload["anchor"] = anchor_json(&snapshot.anchor());
-                        payload["game_tick"] = json!(snapshot.tick.0);
-                        payload.to_string()
+                    // Select historical state only after authorizing at the current
+                    // game tick. Neither an old source nor its cursor renews a grant.
+                    if let Some(request) = &structured {
+                        return retained_resource_snapshot(guard, request.at.as_deref())
+                            .and_then(|source| structured_query::execute(source, &ctx, request));
                     }
-                    Err(error) => dfmcp_error_payload("fortress.query", &error),
-                };
-            }
-            let request = QueryRequest {
-                anchor: ctx.anchor,
-                query: WorldQuery {
-                    kinds: Vec::new(),
-                    predicate: None,
-                    order: QueryOrder::EntityIdAscending,
-                    limit: guard.budget.max_entities,
-                    continuation: None,
-                },
-                max_output_tokens: guard.budget.max_output_tokens,
-                continuation: None,
-            };
-            match guard.adapter.query(&request, &ctx) {
-                Ok(response) => {
-                    let snapshot = guard.adapter.snapshot();
-                    let mut payload = snapshot_json(snapshot);
-                    payload["matched"] = json!(response.matched);
-                    payload["returned"] = json!(response.rows.len());
-                    payload["truncated"] = json!(response.truncated);
-                    payload["continuation"] = json!(response.continuation);
-                    payload["session_id"] = json!(format!("{}", guard.session_id));
-                    payload.to_string()
-                }
-                Err(error) => dfmcp_error_payload("fortress.query", &error),
-            }
+                    legacy_query(guard, &ctx, &mode)
+                });
+            query_budget::response(result, &ctx, is_structured)
         },
     )
+}
+
+/// Legacy query grammar shares source admission and complete-packet publication
+/// with structured queries. Limits and profile omissions cannot hide scan work.
+fn legacy_query(
+    guard: &mut LabSession,
+    context: &OperationContext,
+    mode: &str,
+) -> Result<serde_json::Value> {
+    if civilian_recovery::is_recovery_query(mode)? {
+        let source_work = query_budget::admit_sources(&[guard.adapter.snapshot()], context)?;
+        let mut payload = guard.civilian_recovery.projection();
+        payload["ok"] = json!(true);
+        payload["session_id"] = json!(guard.session_id.to_string());
+        payload["mode"] = json!("civilian_recovery");
+        payload["source_work"] = source_work;
+        let bytes = payload.to_string().len() as u64;
+        if bytes > context.budget.max_bytes
+            || bytes > u64::from(context.budget.max_output_tokens).saturating_mul(4)
+        {
+            return Err(DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                "complete civilian recovery census exceeds the negotiated query allowance",
+            ));
+        }
+        return Ok(payload);
+    }
+    if mode.trim_start().starts_with('{')
+        && let Some(payload) = historical_query(guard, context, mode)?
+    {
+        return Ok(payload);
+    }
+    let snapshot = guard.adapter.snapshot();
+    let source_work = query_budget::admit_sources(&[snapshot], context)?;
+    if mode != "summary" {
+        let mut payload = crate::lab_world::query(snapshot, mode)?;
+        crate::resources::link_entity_resources(
+            &mut payload,
+            guard.session_id,
+            snapshot.anchor(),
+        )?;
+        payload["ok"] = json!(true);
+        payload["session_id"] = json!(guard.session_id.to_string());
+        payload["anchor"] = anchor_json(&snapshot.anchor());
+        payload["game_tick"] = json!(snapshot.tick.0);
+        payload["source_work"] = source_work;
+        return Ok(payload);
+    }
+    let request = QueryRequest {
+        anchor: context.anchor,
+        query: WorldQuery {
+            kinds: Vec::new(),
+            predicate: None,
+            order: QueryOrder::EntityIdAscending,
+            limit: context.budget.max_entities,
+            continuation: None,
+        },
+        max_output_tokens: context.budget.max_output_tokens,
+        continuation: None,
+    };
+    let response = guard.adapter.query(&request, context)?;
+    let mut payload = snapshot_json(guard.adapter.snapshot());
+    payload["matched"] = json!(response.matched);
+    payload["returned"] = json!(response.rows.len());
+    payload["truncated"] = json!(response.truncated);
+    payload["continuation"] = json!(response.continuation);
+    payload["session_id"] = json!(guard.session_id.to_string());
+    payload["source_work"] = source_work;
+    Ok(payload)
 }
 
 /// Queries over retained world versions: `{"mode":"changes","since":H}`
 /// reports observed changes from version `H` to now, and any entities or
 /// terrain query with `"at":H` reads version `H` exactly. `Ok(None)` means the
 /// request is an ordinary current-state query.
-fn historical_query(guard: &LabSession, raw: &str) -> Result<Option<String>> {
+fn historical_query(
+    guard: &LabSession,
+    context: &OperationContext,
+    raw: &str,
+) -> Result<Option<serde_json::Value>> {
     let mut spec: serde_json::Value = serde_json::from_str(raw).map_err(|error| {
         DfmcpError::new(
             ErrorCode::InvalidRequest,
@@ -3114,19 +3117,22 @@ fn historical_query(guard: &LabSession, raw: &str) -> Result<Option<String>> {
             )
         })?;
         let base = retained(since)?;
+        let source_work = if base.anchor() == current.anchor() {
+            query_budget::admit_sources(&[current], context)?
+        } else {
+            query_budget::admit_sources(&[base, current], context)?
+        };
         let changes = crate::world_changes::describe(base, current);
-        return Ok(Some(
-            json!({
-                "ok": true,
-                "session_id": format!("{}", guard.session_id),
-                "mode": "changes",
-                "since_anchor": anchor_json(&base.anchor()),
-                "anchor": anchor_json(&current.anchor()),
-                "changes": changes,
-                "epistemic_state": "observed",
-            })
-            .to_string(),
-        ));
+        return Ok(Some(json!({
+            "ok": true,
+            "session_id": format!("{}", guard.session_id),
+            "mode": "changes",
+            "since_anchor": anchor_json(&base.anchor()),
+            "anchor": anchor_json(&current.anchor()),
+            "changes": changes,
+            "source_work": source_work,
+            "epistemic_state": "observed",
+        })));
     }
     let Some(at) = spec
         .get("at")
@@ -3143,6 +3149,7 @@ fn historical_query(guard: &LabSession, raw: &str) -> Result<Option<String>> {
     } else {
         retained(&at)?
     };
+    let source_work = query_budget::admit_sources(&[version], context)?;
     let mut payload = crate::lab_world::query(version, &spec.to_string())?;
     payload["ok"] = json!(true);
     payload["session_id"] = json!(format!("{}", guard.session_id));
@@ -3150,8 +3157,9 @@ fn historical_query(guard: &LabSession, raw: &str) -> Result<Option<String>> {
     payload["game_tick"] = json!(version.tick.0);
     payload["historical"] = json!(version.state_hash != current.state_hash);
     payload["current_anchor"] = anchor_json(&current.anchor());
+    payload["source_work"] = source_work;
     payload["epistemic_state"] = json!("observed");
-    Ok(Some(payload.to_string()))
+    Ok(Some(payload))
 }
 
 // ============================================================================
