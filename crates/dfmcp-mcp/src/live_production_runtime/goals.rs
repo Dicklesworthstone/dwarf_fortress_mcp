@@ -283,12 +283,13 @@ impl Runtime {
         let final_check = work.take(1)?;
         let budget = history_budget(work, initialize)?;
         custody.verify(&budget)?;
+        let slot = self.order_slot(step)?;
         let path = self
             .config
-            .path(&if self.portfolio.is_none() || step.get() == 1 {
+            .path(&if slot == 1 {
                 "goal.history".into()
             } else {
-                format!("goal-{}.history", step.get())
+                format!("goal-{slot}.history")
             });
         let config = &self.config;
         // A failed private-file create/replay may have published custody. Retain

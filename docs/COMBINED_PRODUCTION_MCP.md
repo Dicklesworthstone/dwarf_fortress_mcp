@@ -7,6 +7,8 @@ for selected citizens, then insert one dependent finite furniture order or an
 explicit portfolio of up to four distinct furniture recipes.
 An explicit `kind="existing_labor"` request instead inserts one finite order
 using already enabled workers, with no labor assignment step.
+`kind="existing_labor_portfolio"` retains up to four distinct orders under the
+same observed worker prerequisite, also without assigning labor.
 The source is explicitly unadmitted development work. Current executed checks,
 qualification and real-game evidence belong in `IMPLEMENTATION_STATUS.md`.
 The private custody implementation supports Linux x86_64/aarch64; unsupported
@@ -194,7 +196,9 @@ single order uses `goal.history` and the existing single-order clock paths;
 the workforce journal remains an empty read custodian. Recovery verifies the
 sealed parent and exact source identities, restores no assignment receipt or
 current parent proof, and requires a fresh Wait for current evidence. Existing
-assignment and portfolio request identities remain unchanged.
+assignment, single existing-labor and assignment-portfolio request identities
+remain unchanged. For several goals using the same existing workers, use the
+explicit existing-labor portfolio described below.
 
 ## Inspect observed production conditions and declared inventory
 
@@ -283,11 +287,12 @@ run. A diagnostic summary is never goal-completion evidence.
 ## One original production portfolio
 
 Use `kind="portfolio"` to configure the shared labor once and retain several
-independent furniture goals in the same original plan. The existing single-order
-request remains unchanged. A portfolio accepts one to four distinct recipes,
-normalizes them by recipe name, and assigns original StepIds 1 through N after
-labor StepId 0. Every order depends on that exact original labor receipt. It does
-not add native order conditions, workshop construction or material procurement.
+independent furniture goals in the same original plan. Use
+`kind="existing_labor_portfolio"` when the selected citizens already have the
+labor enabled. Both accept one to four distinct recipes and normalize them by
+recipe name. The existing single-order requests retain their original identities.
+Neither portfolio adds native order conditions, workshop construction or
+material procurement.
 
 ```json
 {
@@ -323,6 +328,58 @@ orders, objectives, citizens, labor and timing fields bind it; reordering the
 input cannot create another original key. The whole parent terminal retains the
 labor requirements and every requested production goal.
 
+### Use existing workers for the entire portfolio
+
+An existing-labor portfolio takes the same `orders` array, original timing and
+observed citizen selection, with `kind="existing_labor_portfolio"` and no
+`enabled` field:
+
+```json
+{
+  "kind": "existing_labor_portfolio",
+  "expected_observation": "<latest observation.seal>",
+  "units": ["<eligible_enabled_ids from the observed labor option>"],
+  "labor": "CARPENTER",
+  "orders": [
+    {"recipe": "wooden_bed", "amount": 4},
+    {"recipe": "wooden_door", "amount": 2},
+    {
+      "recipe": "wooden_table",
+      "amount": 2,
+      "objective": {
+        "kind": "observed_inventory_minimum",
+        "item_type": "TABLE",
+        "minimum_stack_units": 2
+      }
+    }
+  ],
+  "deadline_tick": 12000,
+  "poll_interval_ticks": 10,
+  "stable_samples": 2
+}
+```
+
+The compiler qualifies the selected subset from the latest retained native
+workforce capture. One complete positive requirement seals their canonical IDs,
+historical figure IDs, eligibility and enabled labor into the parent. Every
+order rechecks that requirement before native preparation and after its durable
+dispatch marker. A fulfilled earlier order or another order's review cannot
+replace those current checks. No labor assignment, assignment receipt or order
+dependency is created. The request's separate identity domain binds every
+normalized leaf and the complete prerequisite; a one-order portfolio remains
+distinct from the existing single `existing_labor` request.
+
+| Original request | Assignment | Actual original order StepIds | First private storage slot |
+| --- | --- | --- | --- |
+| `portfolio` | StepId 0, with a real verified receipt | 1 through N; each depends on StepId 0 | First order, StepId 1 |
+| `existing_labor_portfolio` | None; current observed prerequisite | 0 through N−1; no dependencies | First order, StepId 0 |
+
+The adapter and MCP host share one validated production layout. Original StepIds
+remain the selectors and idempotency identities; a separate zero-based order
+ordinal chooses the fixed custody slots. The maximum remains four order leaves
+and 32 selected citizens. The same coherent cohort, independent clock authority,
+original stability and exact recovery rules below apply to both layouts.
+
 Plan `kind="step"` and confirm each returned original review in sequence, as for
 the single-order request. An uncertain insertion blocks subsequent work until
 Wait reconciles that original key. It never recreates already inserted leaves
@@ -355,8 +412,9 @@ reads cannot supply another temporal sample.
 Use Query with `order_step_id` to select an original leaf and inspect its exact
 retained clock seals. For portfolios, every Plan `kind="run"` or
 `kind="inventory_run"` request and every Commit/Cancel with either clock scope
-must include that original `order_step_id`. The first order is StepId 1; a native
-manager-order ID is not a selector. Single-order sessions reject selectors.
+must include that original `order_step_id`. The first order is StepId 1 for
+`portfolio` and StepId 0 for `existing_labor_portfolio`; a native manager-order
+ID is not a selector. Non-portfolio single-order sessions reject selectors.
 For example, a reviewed order-clock request adds `"order_step_id":2` to the run
 request below, and its confirmation adds `order_step_id=2` beside `scope="run"`.
 The separate run and inventory authority requirements remain unchanged. Any
@@ -369,13 +427,20 @@ suggesting a new run. Clock advancement reports all retained portfolio clocks.
 The response adds ordered `recovery.portfolio` entries for every original
 StepId, each containing `goal_history_present`, `clock_journal_id` and
 `inventory_clock_journal_id`. Preserve the complete array. The legacy top-level
-history/clock fields always mirror StepId 1, regardless of current selection.
+history/clock fields always mirror the first order's storage slot, regardless of
+its actual StepId or the current selection.
 The first leaf keeps the existing filenames. Further histories are
 `goal-2.history` through `goal-4.history` in the parent directory. Additional
 clock files are `portfolio-2-clock.journal` and
-`portfolio-2-inventory-clock.journal` through the corresponding StepId 4 files
+`portfolio-2-inventory-clock.journal` through the corresponding fourth-slot files
 in the order directory. Each initialized slot has its own journal identity.
 These are fixed host paths, never tool arguments.
+Recovery retains every actual original order StepId in canonical order. The
+host compares the full array with the sealed original layout before opening
+additional child slots; shifting zero-based IDs into the legacy range refuses.
+The old assignment layout keeps every existing private filename and journal
+identity. Existing-labor portfolios keep the workforce owner as the same empty
+read custodian, including after uncertain order insertion and reopening.
 
 Reopening verifies every original selected association and configured clock
 journal under the complete parent custody. Both clock families reuse only the
@@ -391,7 +456,7 @@ unpause. A partial cohort is process-local and never restored from history.
 
 Clock control uses the existing `order-run/1.14` native owner and a separate
 private `clock.journal` under the order custody directory. It applies after
-both original effects settle, for either the default retained-order completion
+all original effects settle, for either the default retained-order completion
 goal or an explicitly selected inventory objective. The complete parent archive, selected StepId and native
 key, paired review, Created receipt, allocation identity and predecessor custody
 remain bound to every run. The original deadline, cadence and sampled stability

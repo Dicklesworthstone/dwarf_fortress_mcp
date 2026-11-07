@@ -48,6 +48,7 @@ pub(crate) struct Recovery {
 
 #[derive(Clone, Copy)]
 pub(crate) struct PortfolioRecovery {
+    pub(crate) step_id: u32,
     pub(crate) goal_history_present: bool,
     pub(crate) clock_journal_id: Option<Digest32>,
     pub(crate) inventory_clock_journal_id: Option<Digest32>,
@@ -262,11 +263,15 @@ fn parse(
                     return Err(invalid("portfolio recovery requires one to four complete original order slots"));
                 }
                 let mut result = [None; 4];
+                let first = entries[0].step_id;
+                if first > 1 {
+                    return Err(invalid("portfolio recovery must start with its original order step zero or one"));
+                }
                 for (index, entry) in entries.into_iter().enumerate() {
-                    if entry.step_id as usize != index + 1 {
+                    if entry.step_id != first + index as u32 {
                         return Err(invalid("portfolio recovery slots must name each original order in order"));
                     }
-                    let value = PortfolioRecovery { goal_history_present: entry.goal_history_present,
+                    let value = PortfolioRecovery { step_id: entry.step_id, goal_history_present: entry.goal_history_present,
                         clock_journal_id: entry.clock_journal_id.as_deref().map(digest).transpose()?,
                         inventory_clock_journal_id: entry.inventory_clock_journal_id.as_deref().map(digest).transpose()? };
                     if value.clock_journal_id.is_some() != clock.is_some()

@@ -38,6 +38,46 @@ labor column. A broader native assignment result cannot release a successor.
 Leaf postconditions, the complete plan terminal predicate and leaf obligations
 remain in the original plan. Executing this subset does not discharge them.
 
+`ProductionLayout::from_plan` derives the bounded consumer layout from that
+complete validated original. It exposes the optional assignment StepId, the
+actual ordered production StepIds and each order's zero-based storage ordinal.
+An ordinal chooses a private history or clock slot; it never changes a semantic
+StepId or idempotency key. The executor retains the layout and its existing-worker
+requirement so native evidence reads do not repeatedly parse the complete archive.
+The generic executor still accepts its broader historical sequencing subset;
+only a recognized closed layout may enter the complete-parent monitor.
+
+## Produce with existing workers
+
+An original may instead contain one to four independent finite furniture orders
+and no assignment action. Each recipe is distinct. The original order StepIds
+start at zero; none has a fabricated workforce dependency. The complete parent
+retains every selected production objective and one shared
+`ExistingLaborRequirement`: each selected citizen's canonical identity, exact
+native historical-figure identity, positive requested labor and positive current
+workforce eligibility. Missing, negative, duplicated, unrelated or weakened
+requirements refuse this closed shape. Every order retains its original
+recipe-matched inventory minimum or exact native counter/status objective,
+deadline, cadence and stability requirement.
+
+`ExistingLaborProjection` qualifies the selected workers independently of an
+assignment review or receipt. The embedding issues the pinned source policy via
+`WorkforceFactory::existing_labor_policy`; a capture or layout cannot grant that
+authority. Preparation and the post-dispatch-marker commit boundary each obtain
+matching current workforce captures around the final canonical identity refresh,
+then recheck original private custody and current authority before insertion.
+Every order repeats these checks, including later leaves after prior insertions.
+The original empty workforce journal remains a read custodian. No work detail is
+changed, and no `ConfigureLabor` grant or `SingleLaborResult::Verified` receipt is
+created by this path.
+
+The MCP consumer distinguishes its existing single-order `existing_labor`
+request from the new `existing_labor_portfolio` request. Both compile one complete
+original; the latter uses the established portfolio histories, per-leaf clocks
+and whole-cohort observation policy. Their request identities remain separate.
+Existing single-order, assignment-pair and assignment-portfolio bytes are not
+rewritten by this extension.
+
 ## Selection preserves the parent
 
 The private selected-step value retains the whole `PreparedPlan` and its actual
@@ -141,7 +181,9 @@ MCP host consumes this path through its existing foreground Wait operation.
 ## Bounded portfolio source and proof ownership
 
 The combined consumer also compiles one original labor action and one to four
-finite furniture leaves. `open_private_portfolio_order_goal_monitor` explicitly
+finite furniture leaves, or one shared existing-worker prerequisite and one to
+four independent furniture leaves. `open_private_portfolio_order_goal_monitor`
+and `begin_portfolio_order_goal_monitor` explicitly
 opens a separate strict source-cursor lane for each selected review. Its strong
 owner is retained by exact review seal, bounded to four; reopening that same
 review invalidates its prior owner. Each lane retains its own canonical floor.
@@ -158,6 +200,23 @@ capture, selected receipt/native identity, paused tick and complete original
 terminal predicate. The new composite digest binds all original samples and
 outer captures. A subset, caller truth flag or historical receipt cannot
 substitute for any member.
+
+`compose_existing_labor_portfolio_goal` applies that complete-cohort contract to
+the dependency-free layout and reissues each existing-worker source policy.
+Every leaf retains the same complete prerequisite and exact workforce capture.
+Its selected parent sample proves only that leaf together with current workers;
+even a one-order portfolio waits for the explicit whole-cohort composition.
+Different stock captures, changed worker identities, withheld policy or an
+incomplete set of original leaves refuse the join. Later labor loss can make
+the current whole parent False while each order's historical achievement remains
+immutable. Inventory objectives can still be sampled after normal order
+retirement without attributing those items to the original orders.
+
+Clock custody accepts a dependency-free order only through the recognized
+existing-worker layout. Its identity still binds the complete parent archive,
+the actual selected StepId and key, exact native Created receipt and original
+deadline. StepId zero is a real order here. Storage-slot numbering is separate,
+and neither clock authority nor a preparation is reconstructed from this mapping.
 
 The host samples one leaf per shrinking-budget Wait. A successful owned clock
 withdraws current certificates without fabricating a source gap in an inactive

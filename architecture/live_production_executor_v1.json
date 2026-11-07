@@ -89,17 +89,19 @@
       "labor-order"
     ],
     "configuration_schema": "dfmcp.combined-production-development/1",
-    "request_schema": "closed legacy labor/citizens/finite furniture request, kind=existing_labor with one finite order and independently observed current workers, or kind=portfolio with one to four distinct recipes and per-leaf optional inventory minimum",
+    "request_schema": "closed legacy labor/citizens/finite furniture request; kind=existing_labor for one independently qualified current-worker order; kind=portfolio to assign labor before one to four distinct recipes; kind=existing_labor_portfolio for one to four distinct recipes using the same current workers; each leaf may select an inventory minimum",
     "original_steps": [
       "SetLabor",
       "CreateWorkOrder"
     ],
-    "order_depends_on_original_labor_step": "legacy and portfolio only; existing_labor has one original dependency-free order",
+    "order_depends_on_original_labor_step": "legacy and portfolio only; existing_labor and existing_labor_portfolio retain exact observed worker prerequisites with dependency-free original orders",
     "steps": {
       "legacy": 2,
       "portfolio_min": 2,
       "portfolio_max": 5,
-      "existing_labor": 1
+      "existing_labor": 1,
+      "existing_labor_portfolio_min": 1,
+      "existing_labor_portfolio_max": 4
     },
     "selected_citizens_max": 32,
     "workforce_choices": {
@@ -284,7 +286,13 @@
       "crates/dfmcp-mcp/src/live_production_runtime/existing_labor_request_tests.rs",
       "crates/dfmcp-adapter/src/live_production/existing_labor.rs",
       "crates/dfmcp-adapter/src/live_production/existing_labor_goal.rs",
-      "tests/stdio/combined_existing_labor.py"
+      "tests/stdio/combined_existing_labor.py",
+      "crates/dfmcp-adapter/src/live_production/layout.rs",
+      "crates/dfmcp-adapter/src/live_production/existing_labor_portfolio_tests.rs",
+      "crates/dfmcp-mcp/src/live_production_runtime/existing_labor_portfolio_request.rs",
+      "crates/dfmcp-mcp/src/live_production_runtime/existing_labor_portfolio_request_tests.rs",
+      "crates/dfmcp-mcp/src/live_production_presentation_portfolio_tests.rs",
+      "tests/stdio/combined_existing_labor_portfolio.py"
     ],
     "private_custody_platforms": [
       "linux-x86_64",
@@ -513,10 +521,11 @@
       "query_selector": "optional original order_step_id",
       "legacy_selectors_accepted": false,
       "one_pending_clock_across_all_leaves": true,
-      "recovery": "complete ordered per-leaf history/order-clock/inventory-clock identities; legacy fields always mirror leaf 1",
+      "recovery": "complete ordered per-leaf history/order-clock/inventory-clock identities; legacy fields always mirror the first order ordinal slot",
       "extra_history_paths": "goal-{2,3,4}.history",
       "extra_clock_paths": "portfolio-{2,3,4}-{clock,inventory-clock}.journal",
-      "new_protocol_or_admission": false
+      "new_protocol_or_admission": false,
+      "shared_layout": "ProductionLayout retains actual original StepIds and chooses fixed private custody slots by order ordinal"
     },
     "production_inspection": {
       "optional_query_request_schema": "dfmcp.query/1",
@@ -588,6 +597,35 @@
       "clock_paths": "existing single-order paths",
       "new_protocol_or_admission": false,
       "legacy_request_identities_changed": false
+    },
+    "existing_labor_portfolio": {
+      "request_kind": "existing_labor_portfolio",
+      "request_identity_domain": "dfmcp-native-existing-labor-portfolio-request/1",
+      "orders_min": 1,
+      "orders_max": 4,
+      "distinct_recipes": true,
+      "normalization": "recipe_ascending",
+      "order_step_ids": "0..N-1",
+      "assignment_step": null,
+      "order_dependencies": [],
+      "parent_requirement": "the exact existing_labor positive labor/eligibility/historical-identity prerequisite plus every original leaf objective",
+      "preplan_source": "same independently qualified retained selected workforce capture as existing_labor",
+      "native_assignment_effect": false,
+      "assignment_receipt_fabricated": false,
+      "each_order_guards": [
+        "before native preparation",
+        "after durable dispatch marker before insertion"
+      ],
+      "cohort_composer": "compose_existing_labor_portfolio_goal",
+      "complete_cohort_and_temporal_requirement": "same unchanged complete original portfolio rules",
+      "both_independent_clock_families": true,
+      "clock_selector": "actual original order_step_id, including zero",
+      "private_custody_mapping": "one-based fixed storage slot equals zero-based order ordinal plus one; actual StepIds remain unchanged",
+      "recovery_ids_checked_against_sealed_layout": true,
+      "workforce_journal": "empty original read custodian, including uncertain insertion recovery",
+      "legacy_request_and_clock_identity_bytes_changed": false,
+      "new_protocol_or_admission": false,
+      "test_campaign": "tests/stdio/combined_existing_labor_portfolio.py"
     }
   },
   "selected_work_order_goal_monitor": {

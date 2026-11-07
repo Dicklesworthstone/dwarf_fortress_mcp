@@ -52,7 +52,7 @@ fn standard_cli_combined_portfolio_actual_modern_stdio_original_leaves()
             .last()
             .ok_or("missing actual test counters")?,
     )?;
-    assert_eq!(report["tests"], 9);
+    assert_eq!(report["tests"], 15);
     assert_eq!(report["failed"], 0);
     assert_eq!(report["errors"], 0);
     assert_eq!(report["skipped"], 0);

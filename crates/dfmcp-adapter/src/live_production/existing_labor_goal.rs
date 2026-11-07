@@ -16,10 +16,13 @@ fn stale(message: &str) -> DfmcpError {
 
 fn compose(
     original: &PreparedPlan,
+    layout: &ProductionLayout,
+    step: StepId,
     selected: &SelectedWorkOrderGoalResult,
     workforce: &ExistingLaborProjection,
     workforce_policy: &EvidencePolicy,
     context: &OperationContext,
+    parent_cursor: Option<ObservationCursor>,
 ) -> Result<SelectedParentGoalProgress> {
     let order = selected.inner.projection();
     let selected_anchor = order.anchor();
@@ -33,7 +36,8 @@ fn compose(
         || order.original_anchor() != original.anchor
         || workforce.original_anchor() != original.anchor
         || selected.progress().plan_digest != original.digest
-        || ExistingLaborRequirement::from_plan(original)?.as_ref() != Some(workforce.requirement())
+        || layout.existing_labor() != Some(workforce.requirement())
+        || layout.order_ordinal(step).is_none()
     {
         return Err(stale(
             "existing workers and original order do not share one paused frontier",
@@ -90,10 +94,23 @@ fn compose(
             return Err(custody());
         }
     }
+    let publication_cursor = parent_cursor.unwrap_or(selected_anchor.cursor);
+    if publication_cursor.epoch != selected_anchor.cursor.epoch
+        || publication_cursor.sequence < selected_anchor.cursor.sequence
+    {
+        return Err(stale(
+            "existing-worker parent publication cursor precedes its selected source",
+        ));
+    }
+    if parent_cursor.is_some() {
+        for entity in graph.entities.values_mut() {
+            entity.revision = publication_cursor.sequence;
+        }
+    }
     let snapshot = WorldSnapshot::new(
         selected_anchor.fortress_id,
         selected_anchor.tick,
-        selected_anchor.cursor,
+        publication_cursor,
         true,
         graph,
     );
@@ -113,9 +130,25 @@ fn compose(
         .sources
         .extend(workforce_policy.sources.iter().cloned());
     policy.paused &= workforce_policy.paused;
-    let current_truth = dfmcp_world::PredicateEvidence::scoped(&snapshot, policy)?
-        .evaluate(&original.terminal_condition)?;
-    let mut identity = b"dfmcp-existing-labor-parent-goal/1\0".to_vec();
+    let evidence = dfmcp_world::PredicateEvidence::scoped(&snapshot, policy)?;
+    let current_truth = if parent_cursor.is_none() {
+        evidence.evaluate(&original.terminal_condition)?
+    } else {
+        let selected_step = policy::selected(original, step)?;
+        if dfmcp_intent::effects::created_entity_id(&selected_step.idempotency_key, 0)
+            != order.original_order_entity()
+        {
+            return Err(custody());
+        }
+        let mut predicates = selected_step.postconditions.clone();
+        predicates.push(workforce.requirement().predicate());
+        evidence.evaluate(&Predicate::All(predicates))?
+    };
+    let mut identity = if parent_cursor.is_some() {
+        b"dfmcp-existing-labor-parent-goal/2\0".to_vec()
+    } else {
+        b"dfmcp-existing-labor-parent-goal/1\0".to_vec()
+    };
     for digest in [
         original.digest,
         order.review_seal(),
@@ -130,7 +163,9 @@ fn compose(
         anchor: snapshot.anchor(),
         selected_anchor,
         current_truth,
-        original_goal_proven: current_truth == PredicateTruth::True
+        original_goal_proven: parent_cursor.is_none()
+            && layout.order_steps().len() == 1
+            && current_truth == PredicateTruth::True
             && selected.selected_goal_proven(),
         source_digest: Digest32::of_bytes(&identity),
         workforce_source_digest: workforce.source_digest(),
@@ -156,6 +191,7 @@ where
         context: &OperationContext,
         sources: (PF, OF),
         mut order_policy: A,
+        parent_cursor: Option<ObservationCursor>,
     ) -> Result<SelectedParentGoalResult>
     where
         H: EffectJournalStorage,
@@ -166,6 +202,8 @@ where
         A: FnMut(&WorkOrderGoalProjection, &OperationContext) -> Result<EvidencePolicy>,
     {
         let result = (|| {
+            let layout = self.layout.as_ref().ok_or_else(custody)?.clone();
+            let requirement = layout.existing_labor().ok_or_else(custody)?;
             let mut call = self.call(context)?;
             call.floor(monitor.high_tick().get());
             let outcome = (|| {
@@ -173,9 +211,9 @@ where
                     .authorize(Capability::Observe, RiskTier::ReadOnly, &[], None)?;
                 if monitor.original_plan() != &self.original
                     || monitor.archive != self.archive
-                    || monitor.step != StepId::ZERO
-                    || monitor.portfolio
-                    || ExistingLaborRequirement::from_plan(&self.original)?.is_none()
+                    || layout.order_ordinal(monitor.step).is_none()
+                    || monitor.portfolio != parent_cursor.is_some()
+                    || (parent_cursor.is_none() && layout.order_steps().len() != 1)
                 {
                     return Err(custody());
                 }
@@ -225,6 +263,7 @@ where
                 let remaining = call.take(call.bytes.checked_sub(1).ok_or_else(exhausted)?)?;
                 let before = existing_labor::observe(
                     &self.original,
+                    requirement,
                     original_identity,
                     &mut self.workforce,
                     &mut self.factory,
@@ -262,6 +301,7 @@ where
                 }
                 let after = existing_labor::observe(
                     &self.original,
+                    requirement,
                     original_identity,
                     &mut self.workforce,
                     &mut self.factory,
@@ -289,7 +329,16 @@ where
                         "existing labor policy changed during goal acquisition",
                     ));
                 }
-                let parent = compose(&self.original, &selected, &after, &granted, context)?;
+                let parent = compose(
+                    &self.original,
+                    &layout,
+                    monitor.step,
+                    &selected,
+                    &after,
+                    &granted,
+                    context,
+                    parent_cursor,
+                )?;
                 self.final_check(&publication, &mut call)?;
                 dependencies.verify(
                     &mut self.workforce,

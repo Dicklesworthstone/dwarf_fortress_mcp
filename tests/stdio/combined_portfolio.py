@@ -12,6 +12,10 @@ import unittest
 spec = importlib.util.spec_from_file_location('combined', Path(__file__).with_name('combined_production.py'))
 b = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(b)
+existing_spec = importlib.util.spec_from_file_location('combined_existing_labor_portfolio',
+    Path(__file__).with_name('combined_existing_labor_portfolio.py'))
+existing = importlib.util.module_from_spec(existing_spec)
+existing_spec.loader.exec_module(existing)
 
 
 class PortfolioPeer(b.Peer):
@@ -119,7 +123,11 @@ class PortfolioPeer(b.Peer):
                     hook()
             return response
         if minor == 10:
-            if op == 'ReadOrders': response += b.blob(9, self.queue())
+            if op == 'ReadOrders':
+                response += b.blob(9, self.queue())
+                if self.after_order_read is not None:
+                    hook, self.after_order_read = self.after_order_read, None
+                    hook()
             elif op == 'PrepareOrder':
                 assert req[5] not in self.plans
                 plan = {'key': req[5], 'recipe': req[6], 'amount': req[7], 'digest': req[9],
@@ -177,7 +185,12 @@ class PortfolioPeer(b.Peer):
         self.clock_records[key] = b.clock_record(plan, key, phase=3, reason=1, observed=self.order_tick)
 
 
-class PortfolioProduction(unittest.TestCase):
+class PortfolioProduction(existing.ExistingLaborPortfolioTests, unittest.TestCase):
+    base = b
+    existing_labor_fixture = b.existing_labor.ExistingLaborTests.existing_labor_fixture
+    existing_labor_observe = b.existing_labor.ExistingLaborTests.existing_labor_observe
+    assert_no_labor_assignment = b.existing_labor.ExistingLaborTests.assert_no_labor_assignment
+    inspection_custody = b.CombinedProduction.inspection_custody
     enable_clock = b.CombinedProduction.enable_clock
     enable_inventory_clock = b.CombinedProduction.enable_inventory_clock
     tearDown = b.CombinedProduction.tearDown
@@ -404,6 +417,6 @@ def main():
     result = unittest.TextTestRunner(verbosity=2).run(unittest.defaultTestLoader.loadTestsFromTestCase(PortfolioProduction))
     print(json.dumps({'schema':'dfmcp.combined-portfolio-stdio/1','tests':result.testsRun,'failed':len(result.failures),
         'errors':len(result.errors),'skipped':len(result.skipped),'actual_modern_stdio':True,'loopback_peers_are_doubles':True,'live_game':False}))
-    raise SystemExit(0 if result.wasSuccessful() and result.testsRun == 9 and not result.skipped else 1)
+    raise SystemExit(0 if result.wasSuccessful() and result.testsRun == 15 and not result.skipped else 1)
 
 if __name__ == '__main__': main()

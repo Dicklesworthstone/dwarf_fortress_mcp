@@ -2,6 +2,37 @@ use super::*;
 use serde_json::{Value, json};
 
 #[test]
+fn portfolio_recovery_retains_actual_zero_or_one_based_order_ids() -> Result<()> {
+    let hash = Digest32::of_bytes(b"retained portfolio").to_hex();
+    let raw = json!({"schema":"dfmcp.combined-production-development/1", "directory":"/tmp/combined-portfolio",
+        "initialize":false,"recovery":{"plan_digest":hash,"object_digest":hash,"identity_digest":hash,
+        "anchor":{"fortress_id":"1","epoch":0,"sequence":2,"tick":3,"state_hash":hash},
+        "frontier":{"journal_id":hash,"head":hash,"authority_tick_floor":4},
+        "goal_history_present":true}});
+    for first in [0,1] {
+        let mut valid = raw.clone();
+        valid["recovery"]["portfolio"] = Value::Array((first..first+4).map(|step|
+            json!({"step_id":step,"goal_history_present":step==first,"clock_journal_id":null,"inventory_clock_journal_id":null})).collect());
+        let entries = parse(&valid.to_string())?.2.ok_or_else(|| invalid("recovery"))?
+            .portfolio.ok_or_else(|| invalid("portfolio"))?;
+        for (ordinal, entry) in entries.into_iter().enumerate() {
+            assert_eq!(entry.ok_or_else(|| invalid("entry"))?.step_id, first + ordinal as u32);
+        }
+        for ids in [[first,first,first+2,first+3],[first,first+2,first+1,first+3],[first,first+1,first+2,first+4]] {
+            let mut bad = valid.clone();
+            for (index,id) in ids.into_iter().enumerate() { bad["recovery"]["portfolio"][index]["step_id"] = id.into(); }
+            assert!(parse(&bad.to_string()).is_err());
+        }
+        let mut bad = valid.clone(); bad["recovery"]["portfolio"][0]["goal_history_present"] = false.into();
+        assert!(parse(&bad.to_string()).is_err(),"first ordinal slot must mirror the legacy history path");
+    }
+    let mut bad = raw;
+    bad["recovery"]["portfolio"] = json!([{"step_id":2,"goal_history_present":true}]);
+    assert!(parse(&bad.to_string()).is_err());
+    Ok(())
+}
+
+#[test]
 fn closed_configuration_and_recovery_are_exact() -> Result<()> {
     let raw = json!({"schema":"dfmcp.combined-production-development/1", "directory":"/tmp/combined", "initialize":true});
     let (directory, initialize, recovery, clock, inventory_clock) = parse(&raw.to_string())?;

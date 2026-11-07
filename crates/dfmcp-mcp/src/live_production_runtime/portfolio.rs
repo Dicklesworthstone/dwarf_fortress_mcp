@@ -36,19 +36,19 @@ pub(super) struct PortfolioState {
 }
 impl Runtime {
     pub(super) fn selected_order_step(&self) -> Option<StepId> {
-        self.portfolio.as_ref().map(|p| p.active).or_else(|| {
-            self.original.as_ref().and_then(|p| {
-                p.steps
-                    .iter()
-                    .find(|s| matches!(s.action, Action::CreateWorkOrder { .. }))
-                    .map(|s| s.id)
-            })
-        })
+        self.portfolio.as_ref().map(|p| p.active).or_else(||
+            self.layout.as_ref().and_then(|layout| layout.order_steps().first().copied()))
     }
     fn portfolio_ids(&self) -> Vec<StepId> {
-        self.original.as_ref().map_or_else(Vec::new, |plan| {
-            plan.steps.iter().skip(1).map(|s| s.id).collect()
-        })
+        self.layout.as_ref().map_or_else(Vec::new, |layout| layout.order_steps().to_vec())
+    }
+    /// Private filenames use fixed one-based slots, not original StepIds.
+    /// Both the old labor predecessor layout and the dependency-free layout
+    /// retain their actual original StepIds everywhere else.
+    pub(super) fn order_slot(&self, step: StepId) -> Result<u32> {
+        self.layout.as_ref().and_then(|layout| layout.order_ordinal(step))
+            .and_then(|ordinal| u32::try_from(ordinal + 1).ok())
+            .ok_or_else(|| denied("selected step is not in the original production layout"))
     }
     pub(super) fn initialize_portfolio(
         &mut self,
@@ -60,6 +60,8 @@ impl Runtime {
             || ids.len() > 4
             || self.portfolio.is_some()
             || recovery.is_some_and(|r| r.iter().filter(|r| r.is_some()).count() != ids.len())
+            || recovery.is_some_and(|r| ids.iter().enumerate().any(|(index, step)|
+                r[index].is_none_or(|entry| entry.step_id != step.get())))
         {
             return Err(denied(
                 "portfolio custody does not match every original order leaf",
@@ -69,7 +71,7 @@ impl Runtime {
             .orders
             .require_absent_portfolio_clocks(ids.len() as u32 + 1)?;
         self.portfolio = Some(PortfolioState {
-            active: StepId::new(1),
+            active: ids[0],
             leaves: BTreeMap::new(),
             cohort: None,
             current: None,
@@ -77,13 +79,14 @@ impl Runtime {
         if let Some(first) = recovery.and_then(|r| r[0]) {
             self.goal_history_present = first.goal_history_present;
         }
-        for step in ids.into_iter().skip(1) {
-            let retained = recovery.and_then(|r| r[step.get() as usize - 1]);
+        for (ordinal, step) in ids.iter().copied().enumerate().skip(1) {
+            let retained = recovery.and_then(|r| r[ordinal]);
+            let slot = self.order_slot(step)?;
             let clock = self
                 .config
                 .orders
                 .open_portfolio_clock(
-                    step.get(),
+                    slot,
                     order_mode(self.mode),
                     recovery.is_none(),
                     retained.and_then(|r| r.clock_journal_id),
@@ -94,7 +97,7 @@ impl Runtime {
                 .config
                 .orders
                 .open_portfolio_inventory_clock(
-                    step.get(),
+                    slot,
                     order_mode(self.mode),
                     recovery.is_none(),
                     retained.and_then(|r| r.inventory_clock_journal_id),
@@ -120,7 +123,7 @@ impl Runtime {
                 self.refresh_inventory_clock_view(&work.take(8 * MIB)?)?;
             }
         }
-        self.activate_leaf(StepId::new(1))?;
+        self.activate_leaf(ids[0])?;
         if recovery.is_some() {
             self.restore_portfolio_targets(work)?;
         }
@@ -683,7 +686,19 @@ impl Runtime {
                 .ok_or_else(|| denied("original portfolio absent"))?;
             let current = work.narrow(&final_proof)?;
             self.config.current()?;
-            let result = live_production::compose_production_portfolio_goal(
+            let result = if self.layout.as_ref().is_some_and(|layout| layout.existing_labor().is_some()) {
+                live_production::compose_existing_labor_portfolio_goal(
+                    original, &samples, &before, &after, &current,
+                    |step, projection, context| {
+                        self.config.current()?;
+                        self.config.orders.acceptance().goal_for_selected(original, step, projection, context)
+                    },
+                    |projection, context| {
+                        self.config.current()?;
+                        self.config.workforce.acceptance().existing_labor(projection, context)
+                    },
+                )?
+            } else { live_production::compose_production_portfolio_goal(
                 original,
                 &samples,
                 &before,
@@ -700,7 +715,7 @@ impl Runtime {
                     self.config.current()?;
                     self.config.workforce.acceptance().goal(projection, context)
                 },
-            )?;
+            )? };
             self.anchor = result.anchor;
             self.portfolio
                 .as_mut()

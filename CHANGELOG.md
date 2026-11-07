@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased — Existing-worker finite production portfolios
+
+- Add `existing_labor_portfolio` planning for one to four normalized, distinct
+  finite furniture orders with already enabled workers and actual order StepIds
+  starting at zero.
+- Share one validated production layout across execution, selected and complete
+  goal monitoring, both clock families, private storage and restart recovery.
+- Preserve each original key, deadline and stability policy; revalidate current
+  workforce eligibility/labor and custody for every native order.
+- Compose complete-parent proof only from the full original goal cohort and
+  coherent current workforce evidence; preserve negative prerequisite results
+  without weakening positive proof or erasing historical achievement.
+- Add eight adapter and nine MCP Rust regressions and six actual-stdio cases.
+  Initial static/contract and Python discovery checks passed. Rust and actual
+  stdio execution remain pending after resource-limited builds and executor loss;
+  recovered final sources and the final presentation fix were source-reviewed.
+
 ## Unreleased — Bounded exact numeric ranking
 
 - Add shared `ranked_entities` queries with up to three exact i64, u64 or

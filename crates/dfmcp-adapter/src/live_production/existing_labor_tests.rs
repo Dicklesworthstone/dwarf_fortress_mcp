@@ -3,6 +3,10 @@ use crate::live_production::{
     ExistingLaborProjection, ExistingLaborRequirement, SelectedParentGoalResult,
 };
 
+mod portfolio_tests {
+    include!("existing_labor_portfolio_tests.rs");
+}
+
 fn existing_fixture() -> Result<ProductionFixture> {
     let mut f = inventory_fixture(1)?;
     f.c.budget.max_bytes = 8 * 1024 * 1024 * 1024;

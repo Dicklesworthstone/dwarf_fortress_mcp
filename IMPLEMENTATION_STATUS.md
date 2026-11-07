@@ -1,5 +1,50 @@
 # Implementation Status
 
+## Unreleased — Run a finite portfolio with existing enabled workers
+
+The combined development host now accepts the closed
+`kind=existing_labor_portfolio` request for one to four distinct finite furniture
+recipes. It qualifies the selected workers from the retained native workforce
+capture and seals their canonical/historical identities, eligibility and positive
+labor requirement with every original order. The normalized request has its own
+identity domain. No labor assignment, workforce receipt or artificial dependency
+is created; original order StepIds are 0 through N-1.
+
+A shared validated `ProductionLayout` retains the original archive, optional
+assignment, actual order IDs and private-storage ordinals. Execution, goal
+monitoring, recovery and both clock families consume this layout. Existing
+single-order and assignment-portfolio identities and storage mappings retain
+their previous meaning. Recovery compares the complete ordered original-ID
+vector before opening child slots; every finite goal retains its original key,
+deadline, cadence and stability requirement.
+
+Each order requalifies current workforce evidence before preparation and after
+the durable dispatch marker. Complete-parent monitoring requires the full
+original cohort, coherent paused source captures, every original goal and the
+shared current workforce prerequisite. A selected leaf does not prove the
+portfolio. Labor or eligibility reversal withdraws current proof while retaining
+historical achievement. Agent Turn presentation supports zero-based order
+layouts and preserves valid negative/Unknown prerequisite results even when the
+displayed labor bits still match; positive proof remains strict.
+
+Eight adapter and nine MCP Rust regressions plus six actual-stdio scenarios are
+authored. Before the executor outage, the initial implementation passed scoped
+formatting/diff checks, Python syntax/import/discovery of 15 portfolio scenarios,
+source-path checks, 4,631 repository checks, and Agent/live-MCP contract checks.
+The actual adapter metadata check was SIGKILLed before a source diagnostic.
+The selected 60-case adapter component was still compiling at the last poll;
+the new native-host run had not started. No new portfolio Rust test pass or
+actual-stdio execution is established.
+
+The functional patches were recovered against exact baseline 6fd61c65 and
+preserved through GitHub; final formatter whitespace identity is unavailable.
+Independent adapter/MCP interface and proof-path review found no blocker.
+The final presentation correction and recovered final sources remain
+unexecuted. The machine contract parses and all 75 referenced source paths
+resolve in the resulting tree. No full-head, native-game, live campaign or
+admission qualification is claimed. The broader procurement/workshop/Manager
+composition and native recipe/material/workshop feasibility work remain open.
+
 ## Unreleased — Rank canonical entities by exact numeric facts
 
 The shared structured-query layer now accepts `kind=ranked_entities` in the

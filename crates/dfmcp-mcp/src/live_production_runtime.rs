@@ -5,8 +5,8 @@ use dfmcp_adapter::LiveObservationCapsule;
 use dfmcp_adapter::build_placement::journal::BuildMode;
 use dfmcp_adapter::live_dispatch::durable::{self, Coordinator, Phase};
 use dfmcp_adapter::live_production::{
-    self, Executor, ExistingLaborProjection, ExistingLaborRequirement, SelectedParentGoalProgress,
-    SelectedWorkOrderGoalMonitor, WorkforceFactory,
+    self, Executor, ExistingLaborProjection, ExistingLaborRequirement, ProductionLayout,
+    SelectedParentGoalProgress, SelectedWorkOrderGoalMonitor, WorkforceFactory,
 };
 use dfmcp_adapter::live_projection::{LiveWorldProjection, project_live_capsule};
 use dfmcp_adapter::live_routing::LiveRoutingEvidence;
@@ -30,6 +30,7 @@ mod choices;
 mod clock;
 mod config;
 mod custody;
+mod existing_labor_portfolio_request;
 mod existing_labor_request;
 mod goals;
 mod inspection;
@@ -42,6 +43,7 @@ pub(crate) use choices::ObserveRequest;
 use clock::ProductionClock;
 pub(crate) use config::Config;
 use custody::{GuardedEvidence, SharedCustody};
+pub(crate) use existing_labor_portfolio_request::ExistingLaborPortfolioRequest;
 pub(crate) use existing_labor_request::ExistingLaborRequest;
 pub(crate) use inspection::InspectionRequest;
 use inspection::InspectionSource;
@@ -204,6 +206,7 @@ pub(crate) struct Runtime {
     frontier: Option<Coordinator<File>>,
     custody: Option<SharedCustody>,
     original: Option<PreparedPlan>,
+    layout: Option<ProductionLayout>,
     seal: Option<PlanArchiveSeal>,
     identity_digest: Option<Digest32>,
     basis: Option<Basis>,
@@ -243,29 +246,8 @@ fn order_mode(mode: Mode) -> orders::Mode {
         Mode::Offline => orders::Mode::Offline,
     }
 }
-fn host_plan(plan: &PreparedPlan) -> Result<PlanArchiveSeal> {
-    let seal = live_production::validate_plan(plan)?;
-    if plan.steps.len() == 1 && ExistingLaborRequirement::from_plan(plan)?.is_some() {
-        return Ok(seal);
-    }
-    if !(2..=5).contains(&plan.steps.len())
-        || !matches!(plan.steps[0].action, Action::SetLabor { .. })
-        || !plan.steps[0].depends_on.is_empty()
-        || plan
-            .steps
-            .iter()
-            .enumerate()
-            .any(|(index, step)| step.id.get() as usize != index)
-        || plan.steps.iter().skip(1).any(|step| {
-            !matches!(step.action, Action::CreateWorkOrder { .. })
-                || step.depends_on != [plan.steps[0].id]
-        })
-    {
-        return Err(invalid(
-            "combined host requires original labor with dependent orders or one order with an exact existing-labor prerequisite",
-        ));
-    }
-    Ok(seal)
+fn host_plan(plan: &PreparedPlan) -> Result<ProductionLayout> {
+    ProductionLayout::from_plan(plan)
 }
 fn observation_seal(
     capsule: &LiveObservationCapsule,
@@ -378,6 +360,7 @@ impl Runtime {
             frontier: None,
             custody: None,
             original: None,
+            layout: None,
             seal: None,
             identity_digest: None,
             basis: None,
@@ -430,7 +413,7 @@ impl Runtime {
                 &work.take(4 * MIB)?,
             )?;
             let original = archive.recover(&work.take(4 * MIB)?)?;
-            host_plan(&original)?;
+            let layout = host_plan(&original)?;
             if original.anchor != recovery.anchor {
                 return Err(denied(
                     "combined original anchor differs from external recovery",
@@ -463,6 +446,7 @@ impl Runtime {
             out.identity_digest = Some(recovery.identity_digest);
             out.custody = Some(SharedCustody::new(archive, identity, original.clone()));
             out.original = Some(original.clone());
+            out.layout = Some(layout);
             out.frontier = Some(durable::open_private_coordinator(
                 &out.config.path("execution.journal"),
                 &work.take(16 * MIB)?,
@@ -476,9 +460,9 @@ impl Runtime {
                 out.initialize_portfolio(Some(entries), &mut work)?;
             } else {
                 if out
-                    .original
+                    .layout
                     .as_ref()
-                    .is_some_and(|plan| plan.steps.len() > 2)
+                    .is_some_and(|layout| layout.order_steps().len() > 1)
                 {
                     return Err(denied(
                         "portfolio recovery must retain every original goal and clock slot",
@@ -1028,6 +1012,30 @@ impl Runtime {
         request: ExistingLaborRequest,
         c: &OperationContext,
     ) -> Result<View> {
+        self.plan_existing_workers(
+            request.observation()?, request.unit_ids()?, request.labor.clone(), false, c,
+            |evidence, requirement, current| request.compile(evidence, requirement, current),
+        )
+    }
+    pub(crate) fn plan_existing_labor_portfolio(
+        &mut self,
+        request: ExistingLaborPortfolioRequest,
+        c: &OperationContext,
+    ) -> Result<View> {
+        self.plan_existing_workers(
+            request.observation()?, request.unit_ids()?, request.labor.clone(), true, c,
+            |evidence, requirement, current| request.compile(evidence, requirement, current),
+        )
+    }
+    fn plan_existing_workers(
+        &mut self,
+        observation: Digest32,
+        selected: Vec<dfmcp_core::EntityId>,
+        labor: String,
+        portfolio: bool,
+        c: &OperationContext,
+        compile: impl FnOnce(&PredicateEvidence<'_>, &ExistingLaborRequirement, &OperationContext) -> Result<PreparedPlan>,
+    ) -> Result<View> {
         let basis = self
             .basis
             .as_ref()
@@ -1038,10 +1046,10 @@ impl Runtime {
             denied("existing-labor planning requires a fresh selected workforce capture")
         })?;
         let scope = self.config.workforce.acceptance().clone();
-        self.plan_compiled(request.observation()?, false, c, |evidence, current| {
+        self.plan_compiled(observation, portfolio, c, |evidence, current| {
             let identity =
                 LiveRoutingEvidence::citizens_v1(evidence.clone(), &projection, &capsule)?;
-            let units = identity.resolve_units(&request.unit_ids()?)?;
+            let units = identity.resolve_units(&selected)?;
             let historical = units
                 .iter()
                 .map(|unit| {
@@ -1055,8 +1063,8 @@ impl Runtime {
                     Ok((unit.canonical_id, native.historical_id()))
                 })
                 .collect::<Result<Vec<_>>>()?;
-            let requirement = ExistingLaborRequirement::new(request.labor.clone(), historical)?;
-            let plan = request.compile(evidence, &requirement, current)?;
+            let requirement = ExistingLaborRequirement::new(labor, historical)?;
+            let plan = compile(evidence, &requirement, current)?;
             let observed =
                 ExistingLaborProjection::new(&plan, &identity, capture, current.anchor.cursor)?;
             if observed.anchor().tick != current.anchor.tick {
@@ -1104,7 +1112,8 @@ impl Runtime {
         )?;
         let evidence = PredicateEvidence::scoped(&basis.projection.snapshot, policy)?;
         let plan = compile(&evidence, &work.take(8 * MIB)?)?;
-        let expected = host_plan(&plan)?;
+        let layout = host_plan(&plan)?;
+        let expected = layout.archive_seal();
         // From this point failures preserve partial publication and forbid another
         // plan in this owner. No native prepare/commit has been reached.
         self.initialization_failed = true;
@@ -1127,6 +1136,7 @@ impl Runtime {
         self.seal = Some(expected);
         self.identity_digest = Some(identity_digest);
         self.original = Some(plan.clone());
+        self.layout = Some(layout);
         self.custody = Some(SharedCustody::new(archive, identity, plan.clone()));
         self.frontier = Some(durable::open_private_coordinator(
             &self.config.path("execution.journal"),

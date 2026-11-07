@@ -5,7 +5,7 @@
 use std::path::Path;
 
 use dfmcp_core::{ObservationCursor, StateAnchor};
-use dfmcp_intent::{Action, ObligationStatus};
+use dfmcp_intent::ObligationStatus;
 use dfmcp_world::{EvidencePolicy, PredicateTruth};
 
 use crate::build_placement::journal::private_file::PrivateBuildFile;
@@ -335,19 +335,7 @@ where
     where
         A: FnMut(&WorkOrderGoalProjection, &OperationContext) -> Result<EvidencePolicy>,
     {
-        let first = self.original.steps.first().ok_or_else(custody)?;
-        if !(2..=5).contains(&self.original.steps.len())
-            || !matches!(first.action, Action::SetLabor { .. })
-            || self.original.steps.iter().skip(1).any(|leaf| {
-                !matches!(leaf.action, Action::CreateWorkOrder { .. })
-                    || leaf.depends_on != [first.id]
-            })
-        {
-            return Err(error(
-                ErrorCode::AdapterRejected,
-                "portfolio histories require one labor and at most four original order leaves",
-            ));
-        }
+        self.portfolio_step(step)?;
         self.begin_selected_order_goal_with(
             step,
             context,
@@ -359,6 +347,47 @@ where
             authorize_history,
             true,
         )
+    }
+
+    /// The same exclusive portfolio source lane over caller-owned storage.
+    /// Reopening retains history but never restores current proof or a permit.
+    pub fn begin_portfolio_order_goal_monitor<H, A>(
+        &mut self,
+        step: StepId,
+        storage: H,
+        initialize: bool,
+        read_only: bool,
+        context: &OperationContext,
+        authorize_history: A,
+    ) -> Result<SelectedWorkOrderGoalMonitor<H>>
+    where
+        H: EffectJournalStorage,
+        A: FnMut(&WorkOrderGoalProjection, &OperationContext) -> Result<EvidencePolicy>,
+    {
+        self.portfolio_step(step)?;
+        self.begin_selected_order_goal_with(
+            step,
+            context,
+            |journal, review, c| {
+                GoalHistoryStore::open_selected(storage, journal, review, initialize, read_only, c)
+            },
+            authorize_history,
+            true,
+        )
+    }
+
+    fn portfolio_step(&self, step: StepId) -> Result<()> {
+        if self
+            .layout
+            .as_ref()
+            .is_none_or(|layout| layout.order_ordinal(step).is_none())
+        {
+            return Err(error(
+                ErrorCode::AdapterRejected,
+                "portfolio history requires an exact original order in a bounded production layout",
+            ));
+        }
+        Ok(())
     }
 
     fn begin_selected_order_goal_with<H, O, A>(

@@ -65,7 +65,7 @@ impl ExistingLaborRequest {
     pub(crate) fn unit_ids(&self) -> Result<Vec<dfmcp_core::EntityId>> {
         self.common().unit_ids()
     }
-    fn validate(&self) -> Result<()> {
+    pub(super) fn validate(&self) -> Result<()> {
         if self.kind != "existing_labor" {
             return Err(invalid(
                 "existing-labor request requires kind=existing_labor",

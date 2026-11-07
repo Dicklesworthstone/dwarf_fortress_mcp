@@ -74,10 +74,15 @@ fn portfolio_parent_valid(view: &Value, parent: &Value, anchor: Option<StateAnch
     let Some(anchors) = parent["selected_anchors"].as_array() else {
         return false;
     };
+    let offset = match steps.first().and_then(|step| step["action"]["kind"].as_str()) {
+        Some("set_labor") if steps[0]["step_id"] == 0 && steps[0]["depends_on"] == json!([]) => 1,
+        Some("create_work_order") => 0,
+        _ => return false,
+    };
     if view["portfolio"]["schema"] != "dfmcp.production-portfolio/1"
         || orders.is_empty()
         || orders.len() > 4
-        || steps.len() != orders.len() + 1
+        || steps.len() != orders.len() + offset
         || anchors.len() != orders.len()
         || parent["scope"] != "complete_original_production_portfolio"
         || !anchor.is_some_and(|a| parent["anchor"] == anchor_value(a))
@@ -93,15 +98,16 @@ fn portfolio_parent_valid(view: &Value, parent: &Value, anchor: Option<StateAnch
     for (index, ((order, selected), step)) in orders
         .iter()
         .zip(anchors)
-        .zip(steps.iter().skip(1))
+        .zip(steps.iter().skip(offset))
         .enumerate()
     {
         let goal = &order["goal"];
-        if order["step_id"] != (index + 1)
+        if order["step_id"] != (index + offset)
             || selected["step_id"] != order["step_id"]
             || step["step_id"] != order["step_id"]
             || goal["step_id"] != order["step_id"]
             || step["action"]["kind"] != "create_work_order"
+            || step["depends_on"] != if offset == 0 { json!([]) } else { json!([0]) }
             || goal["scope"] != "selected_original_order_step"
             || goal["anchor"] != selected["anchor"]
             || !["fortress_id", "epoch", "tick"]
@@ -145,9 +151,23 @@ fn portfolio_parent_valid(view: &Value, parent: &Value, anchor: Option<StateAnch
     } else {
         "true"
     };
-    parent["current_truth"] == truth
-        && parent["original_goal_proven"] == (truth == "true" && all_proven)
+    let reported_truth = parent["current_truth"].as_str();
+    // Existing workers also retain eligibility and historical-identity facts.
+    // Negative knowledge from that sealed prerequisite can strengthen the
+    // complete parent's failure even when every displayed labor bit matches.
+    // Positive parent proof still requires every displayed leaf to be True.
+    let consistent = match (offset, truth, reported_truth) {
+        (0, "true", Some("false" | "unknown")) | (0, "unknown", Some("false")) => true,
+        (_, expected, Some(actual)) => expected == actual,
+        _ => false,
+    };
+    consistent
+        && parent["original_goal_proven"] == (reported_truth == Some("true") && all_proven)
 }
+
+#[cfg(test)]
+#[path = "live_production_presentation_portfolio_tests.rs"]
+mod portfolio_tests;
 fn compact_goal(value: &Value) -> Value {
     if !value.is_object() {
         return Value::Null;
@@ -940,7 +960,7 @@ fn encode(
     {
         Some((
             "fortress_plan",
-            "Compile kind=existing_labor with observed eligible workers whose selected labor is already enabled, a finite recipe and amount, and an original deadline. The order rechecks current labor without assigning it.",
+            "Compile kind=existing_labor for one finite order or kind=existing_labor_portfolio for up to four distinct recipes using observed eligible workers whose selected labor is already enabled. Each order retains the original deadline and rechecks current labor without assigning it.",
             false,
             json!({}),
         ))

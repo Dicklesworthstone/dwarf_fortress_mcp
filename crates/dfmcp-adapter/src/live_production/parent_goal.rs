@@ -197,6 +197,7 @@ fn retain_workforce_floor<H: EffectJournalStorage>(
 
 fn compose(
     original: &PreparedPlan,
+    layout: &ProductionLayout,
     selected: &SelectedWorkOrderGoalResult,
     workforce: &WorkforceGoalProjection,
     workforce_policy: &EvidencePolicy,
@@ -225,10 +226,8 @@ fn compose(
     // grants are combined. Unit observation never expands inventory coverage.
     order.evidence(selected.inner.policy().clone())?;
     let workforce_evidence = workforce.evidence(workforce_policy.clone())?;
-    let labor = labor_findings(
-        &original.steps.first().ok_or_else(custody)?.action,
-        &workforce_evidence,
-    )?;
+    let assignment = policy::selected(original, layout.assignment_step().ok_or_else(custody)?)?;
+    let labor = labor_findings(&assignment.action, &workforce_evidence)?;
     let total = order
         .snapshot()
         .graph
@@ -287,20 +286,19 @@ fn compose(
         .extend(workforce_policy.sources.iter().cloned());
     policy.paused &= workforce_policy.paused;
     let evidence = PredicateEvidence::scoped(&snapshot, policy)?;
-    let current_truth = if original.steps.len() == 2 {
+    let current_truth = if layout.order_steps().len() == 1 {
         evidence.evaluate(&original.terminal_condition)?
     } else {
         let order_step = original
             .steps
             .iter()
             .find(|step| {
-                step.id != original.steps[0].id
-                    && matches!(step.action, Action::CreateWorkOrder { .. })
+                layout.order_ordinal(step.id).is_some()
                     && dfmcp_intent::effects::created_entity_id(&step.idempotency_key, 0)
                         == order.original_order_entity()
             })
             .ok_or_else(custody)?;
-        let mut predicates = original.steps[0].postconditions.clone();
+        let mut predicates = assignment.postconditions.clone();
         predicates.extend(order_step.postconditions.clone());
         evidence.evaluate(&Predicate::All(predicates))?
     };
@@ -327,7 +325,7 @@ fn compose(
         selected_anchor,
         current_truth,
         original_goal_proven: parent_cursor.is_none()
-            && original.steps.len() == 2
+            && layout.order_steps().len() == 1
             && current_truth == PredicateTruth::True
             && selected.selected_goal_proven(),
         source_digest: Digest32::of_bytes(&identity),
@@ -368,7 +366,12 @@ where
         A: FnMut(&WorkOrderGoalProjection, &OperationContext) -> Result<EvidencePolicy>,
         W: FnMut(&WorkforceGoalProjection, &OperationContext) -> Result<EvidencePolicy>,
     {
-        if ExistingLaborRequirement::from_plan(&self.original)?.is_some() {
+        if self
+            .layout
+            .as_ref()
+            .and_then(ProductionLayout::existing_labor)
+            .is_some()
+        {
             return self.poll_existing_labor_parent_goal(
                 monitor,
                 original_identity,
@@ -376,6 +379,7 @@ where
                 context,
                 sources,
                 policies.0,
+                None,
             );
         }
         self.poll_selected_parent_goal_inner(
@@ -412,6 +416,22 @@ where
         A: FnMut(&WorkOrderGoalProjection, &OperationContext) -> Result<EvidencePolicy>,
         W: FnMut(&WorkforceGoalProjection, &OperationContext) -> Result<EvidencePolicy>,
     {
+        if self
+            .layout
+            .as_ref()
+            .and_then(ProductionLayout::existing_labor)
+            .is_some()
+        {
+            return self.poll_existing_labor_parent_goal(
+                monitor,
+                original_identity,
+                cursor,
+                context,
+                sources,
+                policies.0,
+                Some(parent_cursor),
+            );
+        }
         self.poll_selected_parent_goal_inner(
             monitor,
             original_identity,
@@ -473,23 +493,18 @@ where
                         "parent observation cursor was reused, regressed or crossed a restore",
                     ));
                 }
-                let selected = policy::selected(&self.original, monitor.step)?.clone();
-                let labor = self.original.steps.first().ok_or_else(custody)?.clone();
-                if !(2..=5).contains(&self.original.steps.len())
-                    || monitor.step == labor.id
-                    || selected.depends_on != [labor.id]
-                    || labor.obligation.is_some()
-                    || !matches!(labor.action, Action::SetLabor { .. })
-                    || self.original.steps.iter().skip(1).any(|step| {
-                        !matches!(step.action, Action::CreateWorkOrder { .. })
-                            || step.depends_on != [labor.id]
-                    })
-                {
+                let layout = self.layout.as_ref().ok_or_else(custody)?;
+                if layout.order_ordinal(monitor.step).is_none() {
                     return Err(error(
                         ErrorCode::AdapterRejected,
                         "current labor/order proof requires original labor and one to four dependent order leaves",
                     ));
                 }
+                let labor = policy::selected(
+                    &self.original,
+                    layout.assignment_step().ok_or_else(custody)?,
+                )?
+                .clone();
                 let (review, dependencies) = self.selected_goal_review(monitor.step, &mut call)?;
                 if review.seal() != monitor.review_seal()
                     || dependencies.journal != monitor.dependencies.journal
@@ -592,6 +607,7 @@ where
                 }
                 let parent = compose(
                     &self.original,
+                    self.layout.as_ref().ok_or_else(custody)?,
                     &sampled,
                     &after,
                     &granted_workforce,

@@ -109,7 +109,7 @@ impl ExistingLaborRequirement {
     }
 
     /// Recognize the complete sealed shape, never a caller-supplied flag. A
-    /// partial or malformed labor-bearing single-order plan refuses instead of
+    /// partial or malformed labor-bearing order-only plan refuses instead of
     /// silently becoming an ordinary unguarded order.
     pub fn from_plan(plan: &PreparedPlan) -> Result<Option<Self>> {
         // Public callers need the same bounded visitor before normalization,
@@ -117,7 +117,11 @@ impl ExistingLaborRequirement {
         // Archive encoding does not call the production policy, avoiding a
         // cycle when that policy asks us to recognize this closed shape.
         dfmcp_intent::plan_archive::encode(plan, archive_limits())?;
-        if plan.steps.len() != 1 || !matches!(plan.steps[0].action, Action::CreateWorkOrder { .. })
+        if plan.steps.is_empty()
+            || plan
+                .steps
+                .iter()
+                .any(|step| !matches!(step.action, Action::CreateWorkOrder { .. }))
         {
             return Ok(None);
         }
@@ -126,25 +130,44 @@ impl ExistingLaborRequirement {
         if !has_labor_requirement(&plan.terminal_condition) {
             return Ok(None);
         }
-        let step = &plan.steps[0];
-        if step.id != StepId::ZERO
-            || !step.depends_on.is_empty()
-            || (ObservedInventoryObjective::from_selected_plan(plan, step.id).is_none()
-                && RetainedOrderObjective::from_selected_plan(plan, step.id).is_none())
-        {
+        if plan.steps.len() > ProductionLayout::MAX_ORDERS {
             return Err(refused(
-                "existing labor requires one original closed finite-order objective",
+                "existing labor requires one to four original finite-order objectives",
             ));
         }
-        let terminal = &step.obligation.as_ref().ok_or_else(custody)?.terminal;
-        let mut order = Vec::new();
-        atoms(terminal, &mut order);
-        for predicate in order {
-            let at = parent
-                .iter()
-                .position(|value| *value == predicate)
-                .ok_or_else(|| refused("parent omits an original order requirement"))?;
-            parent.remove(at);
+        let mut recipes = Vec::with_capacity(plan.steps.len());
+        let mut terminals = Vec::with_capacity(plan.steps.len() + 1);
+        for (index, step) in plan.steps.iter().enumerate() {
+            if step.id.get() as usize != index
+                || !step.depends_on.is_empty()
+                || (ObservedInventoryObjective::from_selected_plan(plan, step.id).is_none()
+                    && RetainedOrderObjective::from_selected_plan(plan, step.id).is_none())
+            {
+                return Err(refused(
+                    "existing labor requires independent original closed finite-order objectives",
+                ));
+            }
+            let crate::live_routing::LiveRequest::WorkOrder { spec } = policy::route(step)?.request
+            else {
+                return Err(custody());
+            };
+            if recipes.contains(&spec.recipe()) {
+                return Err(refused(
+                    "existing labor orders require distinct furniture recipes",
+                ));
+            }
+            recipes.push(spec.recipe());
+            let terminal = &step.obligation.as_ref().ok_or_else(custody)?.terminal;
+            terminals.push(terminal.clone());
+            let mut order = Vec::new();
+            atoms(terminal, &mut order);
+            for predicate in order {
+                let at = parent
+                    .iter()
+                    .position(|value| *value == predicate)
+                    .ok_or_else(|| refused("parent omits an original order requirement"))?;
+                parent.remove(at);
+            }
         }
         let mut labor = None;
         let mut selected = BTreeMap::<EntityId, (bool, bool, Option<u32>)>::new();
@@ -201,9 +224,8 @@ impl ExistingLaborRequirement {
             labor.ok_or_else(|| refused("existing labor key is absent"))?,
             units,
         )?;
-        if plan.terminal_condition
-            != Predicate::All(vec![requirement.predicate(), terminal.clone()]).normalized()
-        {
+        terminals.push(requirement.predicate());
+        if plan.terminal_condition != Predicate::All(terminals).normalized() {
             return Err(refused(
                 "existing labor parent differs from its complete declared requirement",
             ));
@@ -262,6 +284,18 @@ impl ExistingLaborProjection {
     ) -> Result<Self> {
         let requirement = ExistingLaborRequirement::from_plan(original)?
             .ok_or_else(|| refused("original plan has no closed existing-labor requirement"))?;
+        Self::from_requirement(original, &requirement, identity, capture, cursor)
+    }
+
+    /// The immutable executor owns this requirement after complete validation.
+    /// Public callers must use `new`; a capture never chooses the prerequisite.
+    fn from_requirement(
+        original: &PreparedPlan,
+        requirement: &ExistingLaborRequirement,
+        identity: &LiveRoutingEvidence<'_>,
+        capture: WorkforceCapture,
+        cursor: ObservationCursor,
+    ) -> Result<Self> {
         let units = identity.resolve_units(&requirement.units())?;
         if identity.anchor() != original.anchor
             || capture.fortress_id() != original.anchor.fortress_id
@@ -370,7 +404,7 @@ impl ExistingLaborProjection {
             capture,
             original_anchor: original.anchor,
             selection_seal: Digest32::of_bytes(&identity_bytes),
-            requirement,
+            requirement: requirement.clone(),
         })
     }
 
@@ -461,6 +495,7 @@ pub(super) fn require_true(
 
 pub(super) fn observe<WJ, WA, F>(
     original: &PreparedPlan,
+    requirement: &ExistingLaborRequirement,
     identity: &LiveRoutingEvidence<'_>,
     workforce: &mut SemanticWorkforceSession<WJ, WA>,
     factory: &mut F,
@@ -475,7 +510,6 @@ where
     WA: EffectJournalStorage,
     F: WorkforceFactory,
 {
-    let requirement = ExistingLaborRequirement::from_plan(original)?.ok_or_else(custody)?;
     let units = requirement.units();
     let ids = identity
         .resolve_units(&units)?
@@ -490,7 +524,7 @@ where
         context,
         (floor, fenced, high_tick),
     )?;
-    ExistingLaborProjection::new(original, identity, capture, cursor)
+    ExistingLaborProjection::from_requirement(original, requirement, identity, capture, cursor)
 }
 
 /// Close the prerequisite bracket without borrowing another canonical routing

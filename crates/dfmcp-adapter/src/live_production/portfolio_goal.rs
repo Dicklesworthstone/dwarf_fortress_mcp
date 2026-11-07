@@ -3,6 +3,7 @@
 use super::parent_goal::SelectedParentGoalResult;
 use super::*;
 use crate::work_order_progress::ProgressObservation;
+use crate::workforce_control::WorkforceCapture;
 use dfmcp_core::StateAnchor;
 use dfmcp_world::{Predicate, PredicateTruth, WorldSnapshot};
 
@@ -27,7 +28,7 @@ pub fn compose_production_portfolio_goal<O, W>(
     before: &ProgressObservation,
     after: &ProgressObservation,
     c: &OperationContext,
-    mut order_policy: O,
+    order_policy: O,
     mut workforce_policy: W,
 ) -> Result<ProductionPortfolioGoalProgress>
 where
@@ -41,21 +42,97 @@ where
         &OperationContext,
     ) -> Result<dfmcp_world::EvidencePolicy>,
 {
-    c.authorize(Capability::Observe, RiskTier::ReadOnly, &[], None)?;
-    policy::validate(original)?;
-    if samples.is_empty() || samples.len() > 4 || original.steps.len() != samples.len() + 1 {
-        return Err(custody());
+    compose(
+        original, samples, before, after, c, order_policy,
+        |sample, context| workforce_policy(sample.workforce.as_ref().ok_or_else(custody)?, context),
+        false,
+    )
+}
+
+/// Join every dependency-free original order with the same positively observed
+/// existing workers. This accepts no assignment receipt and publishes no whole
+/// result until every exact leaf shares one paused source bracket.
+pub fn compose_existing_labor_portfolio_goal<O, W>(
+    original: &PreparedPlan,
+    samples: &[SelectedParentGoalResult],
+    before: &ProgressObservation,
+    after: &ProgressObservation,
+    c: &OperationContext,
+    order_policy: O,
+    mut workforce_policy: W,
+) -> Result<ProductionPortfolioGoalProgress>
+where
+    O: FnMut(
+        StepId,
+        &crate::semantic_work_orders::WorkOrderGoalProjection,
+        &OperationContext,
+    ) -> Result<dfmcp_world::EvidencePolicy>,
+    W: FnMut(
+        &ExistingLaborProjection,
+        &OperationContext,
+    ) -> Result<dfmcp_world::EvidencePolicy>,
+{
+    compose(
+        original, samples, before, after, c, order_policy,
+        |sample, context| workforce_policy(sample.existing_labor.as_ref().ok_or_else(custody)?, context),
+        true,
+    )
+}
+
+fn workforce(
+    sample: &SelectedParentGoalResult,
+    existing: bool,
+) -> Result<(&WorldSnapshot, &WorkforceCapture, StateAnchor)> {
+    match (&sample.workforce, &sample.existing_labor, existing) {
+        (Some(projection), None, false) => Ok((
+            projection.snapshot(), projection.capture(), projection.original_anchor(),
+        )),
+        (None, Some(projection), true) => Ok((
+            projection.snapshot(), projection.capture(), projection.original_anchor(),
+        )),
+        _ => Err(custody()),
     }
-    let first = samples.first().ok_or_else(custody)?;
-    let first_workforce = first.workforce.as_ref().ok_or_else(custody)?;
-    let first_order = first.selected.inner.projection();
-    let labor = original.steps.first().ok_or_else(custody)?;
-    if !matches!(labor.action, dfmcp_intent::Action::SetLabor { .. })
-        || !labor.depends_on.is_empty()
+}
+
+fn compose<O, W>(
+    original: &PreparedPlan,
+    samples: &[SelectedParentGoalResult],
+    before: &ProgressObservation,
+    after: &ProgressObservation,
+    c: &OperationContext,
+    mut order_policy: O,
+    mut workforce_policy: W,
+    existing: bool,
+) -> Result<ProductionPortfolioGoalProgress>
+where
+    O: FnMut(
+        StepId,
+        &crate::semantic_work_orders::WorkOrderGoalProjection,
+        &OperationContext,
+    ) -> Result<dfmcp_world::EvidencePolicy>,
+    W: FnMut(
+        &SelectedParentGoalResult,
+        &OperationContext,
+    ) -> Result<dfmcp_world::EvidencePolicy>,
+{
+    c.authorize(Capability::Observe, RiskTier::ReadOnly, &[], None)?;
+    let layout = ProductionLayout::from_plan(original)?;
+    if samples.is_empty()
+        || samples.len() > 4
+        || samples.len() != layout.order_steps().len()
+        || existing != layout.existing_labor().is_some()
     {
         return Err(custody());
     }
-    let mut terminal = labor.postconditions.clone();
+    let first = samples.first().ok_or_else(custody)?;
+    let (first_workforce, first_capture, _) = workforce(first, existing)?;
+    let first_order = first.selected.inner.projection();
+    let mut terminal = if let Some(requirement) = layout.existing_labor() {
+        vec![requirement.predicate()]
+    } else {
+        policy::selected(original, layout.assignment_step().ok_or_else(custody)?)?
+            .postconditions.clone()
+    };
     let mut ids = Vec::with_capacity(samples.len());
     let mut graph = first_order.snapshot().graph.clone();
     let mut cursor = c.anchor.cursor;
@@ -63,13 +140,18 @@ where
     let mut current_truth = PredicateTruth::True;
     let mut proved = true;
     let mut selected_anchors = Vec::with_capacity(samples.len());
-    let mut identity = b"dfmcp-production-portfolio-goal/1\0".to_vec();
+    let mut identity = if existing {
+        b"dfmcp-existing-labor-production-portfolio-goal/1\0".to_vec()
+    } else {
+        b"dfmcp-production-portfolio-goal/1\0".to_vec()
+    };
     identity.extend_from_slice(original.digest.as_bytes());
     identity.extend_from_slice(before.witness().as_bytes());
     identity.extend_from_slice(after.witness().as_bytes());
-    for (step, sample) in original.steps.iter().skip(1).zip(samples) {
+    for (step_id, sample) in layout.order_steps().iter().zip(samples) {
+        let step = policy::selected(original, *step_id)?;
         let order = sample.selected.inner.projection();
-        let workforce = sample.workforce.as_ref().ok_or_else(custody)?;
+        let (workforce_snapshot, workforce_capture, workforce_original) = workforce(sample, existing)?;
         let mut authorization = c.clone();
         authorization.budget.max_bytes = c.budget.max_bytes / 16;
         authorization.anchor = order.anchor();
@@ -79,8 +161,8 @@ where
                 "portfolio order source policy changed before whole-plan publication",
             ));
         }
-        authorization.anchor = workforce.anchor();
-        if workforce_policy(workforce, &authorization)? != sample.workforce_policy {
+        authorization.anchor = workforce_snapshot.anchor();
+        if workforce_policy(sample, &authorization)? != sample.workforce_policy {
             return Err(error(
                 ErrorCode::CapabilityDenied,
                 "portfolio workforce source policy changed before whole-plan publication",
@@ -88,11 +170,15 @@ where
         }
         let native = order.progress_capture();
         if step.id != sample.step
-            || step.depends_on != [labor.id]
+            || step.depends_on != layout.assignment_step().into_iter().collect::<Vec<_>>()
             || !matches!(step.action, dfmcp_intent::Action::CreateWorkOrder { .. })
             || sample.progress().plan_digest != original.digest
             || order.original_anchor() != original.anchor
-            || workforce.capture() != first_workforce.capture()
+            || workforce_original != original.anchor
+            || workforce_capture != first_capture
+            || (existing
+                && sample.existing_labor.as_ref().map(ExistingLaborProjection::requirement)
+                    != layout.existing_labor())
             || sample.parent.labor != first.parent.labor
             || order.operations() != first_order.operations()
             || order.queue_capture() != first_order.queue_capture()
@@ -180,7 +266,7 @@ where
             "portfolio whole-plan predicate or complete observation bracket changed",
         ));
     }
-    for (id, entity) in &first_workforce.snapshot().graph.entities {
+    for (id, entity) in &first_workforce.graph.entities {
         if graph.entities.insert(*id, entity.clone()).is_some() {
             return Err(custody());
         }

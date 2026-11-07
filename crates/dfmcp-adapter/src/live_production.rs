@@ -41,6 +41,8 @@ pub use policy::{MAX_PLAN_BYTES, MAX_STEPS, archive_limits, validate as validate
 mod existing_labor;
 pub use existing_labor::{ExistingLaborProjection, ExistingLaborRequirement};
 mod existing_labor_goal;
+mod layout;
+pub use layout::ProductionLayout;
 mod goal_monitor;
 pub use goal_monitor::{SelectedWorkOrderGoalMonitor, SelectedWorkOrderGoalResult};
 mod parent_goal;
@@ -48,7 +50,10 @@ pub use parent_goal::{
     SelectedParentGoalProgress, SelectedParentGoalResult, SelectedParentLaborFinding,
 };
 mod portfolio_goal;
-pub use portfolio_goal::{ProductionPortfolioGoalProgress, compose_production_portfolio_goal};
+pub use portfolio_goal::{
+    ProductionPortfolioGoalProgress, compose_existing_labor_portfolio_goal,
+    compose_production_portfolio_goal,
+};
 mod selected_clock_custody;
 pub use selected_clock_custody::SelectedOrderClockCustody;
 
@@ -204,6 +209,7 @@ impl StepEvidence {
 pub struct Executor<WJ, WA, OJ, OA, ON, E, F> {
     original: PreparedPlan,
     archive: PlanArchiveSeal,
+    layout: Option<ProductionLayout>,
     session: SessionId,
     grants: Vec<CapabilityGrant>,
     workforce: SemanticWorkforceSession<WJ, WA>,
@@ -343,12 +349,17 @@ where
             return Err(exhausted());
         }
         let archive = validate_plan(&original)?;
+        // The generic executor also admits broader historical sequencing
+        // shapes. Only a validated closed layout can enter parent/portfolio
+        // proof. Cache it once; native reads never reconstruct the original.
+        let layout = ProductionLayout::from_validated_plan(&original, archive).ok();
         if c.anchor.fortress_id != original.anchor.fortress_id {
             return Err(custody());
         }
         let mut out = Self {
             original,
             archive,
+            layout,
             session: c.session_id,
             grants: c.grants.clone(),
             workforce,
@@ -643,6 +654,7 @@ struct OrderEvidence<'a, WJ, WA, E, F> {
     checks: Vec<OperationContext>,
     prerequisite_checks: Vec<OperationContext>,
     original: &'a PreparedPlan,
+    requirement: Option<&'a ExistingLaborRequirement>,
     factory: &'a mut F,
     prerequisite_floor: &'a mut Option<crate::workforce_control::WorkforceCapture>,
     prerequisite_fenced: &'a mut bool,
@@ -692,7 +704,7 @@ impl<
             .min(c.budget.max_wall_millis)
             .min(u64::try_from(millis).map_err(|_| exhausted())?);
         self.dependencies.verify(self.workforce, &check)?;
-        if ExistingLaborRequirement::from_plan(self.original)?.is_some() {
+        if let Some(requirement) = self.requirement {
             let mut current = self.prerequisite_checks.pop().ok_or_else(exhausted)?;
             current.grants = c.grants.clone();
             current.cancellation_requested |= c.cancellation_requested;
@@ -713,6 +725,7 @@ impl<
             let identity = self.source.routing_evidence()?;
             let projection = existing_labor::observe(
                 self.original,
+                requirement,
                 &identity,
                 self.workforce,
                 self.factory,
@@ -909,7 +922,11 @@ where
         let checks = (0..2)
             .map(|_| call.take(dependencies.check_bytes))
             .collect::<Result<Vec<_>>>()?;
-        let prerequisite_checks = if ExistingLaborRequirement::from_plan(&self.original)?.is_some()
+        let prerequisite_checks = if self
+            .layout
+            .as_ref()
+            .and_then(ProductionLayout::existing_labor)
+            .is_some()
         {
             (0..2)
                 .map(|_| {
@@ -960,6 +977,7 @@ where
                     checks,
                     prerequisite_checks,
                     original: &self.original,
+                    requirement: self.layout.as_ref().and_then(ProductionLayout::existing_labor),
                     factory: &mut self.factory,
                     prerequisite_floor: &mut self.existing_labor_floor,
                     prerequisite_fenced: &mut self.existing_labor_fenced,
@@ -1027,7 +1045,11 @@ where
         let dependencies = self.dependencies(step, &inventory, call)?;
         let native = call.take(native_bytes)?;
         let checks = vec![call.take(dependencies.check_bytes)?];
-        let prerequisite_checks = if ExistingLaborRequirement::from_plan(&self.original)?.is_some()
+        let prerequisite_checks = if self
+            .layout
+            .as_ref()
+            .and_then(ProductionLayout::existing_labor)
+            .is_some()
         {
             vec![
                 call.take(
@@ -1090,6 +1112,7 @@ where
                     checks,
                     prerequisite_checks,
                     original: &self.original,
+                    requirement: self.layout.as_ref().and_then(ProductionLayout::existing_labor),
                     factory: &mut self.factory,
                     prerequisite_floor: &mut self.existing_labor_floor,
                     prerequisite_fenced: &mut self.existing_labor_fenced,

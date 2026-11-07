@@ -74,7 +74,7 @@ fn original_existing_labor_plan_has_only_the_exact_finite_order() -> Result<()> 
         dfmcp_intent::plan_archive::decode(&bytes, seal, limits)?,
         plan
     );
-    assert_eq!(super::super::host_plan(&plan)?, seal);
+    assert_eq!(super::super::host_plan(&plan)?.archive_seal(), seal);
     Ok(())
 }
 

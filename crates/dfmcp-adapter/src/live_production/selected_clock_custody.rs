@@ -11,7 +11,7 @@ use crate::semantic_work_orders::{NativeOrderCreation, SemanticWorkOrderResult};
 use crate::work_order_control::CreationState;
 use crate::work_orders::WorkOrderPlan;
 
-use super::validate_plan;
+use super::{ProductionLayout, validate_plan};
 
 fn corrupt(message: &str) -> DfmcpError {
     DfmcpError::new(ErrorCode::CorruptLedger, message)
@@ -42,21 +42,28 @@ impl SelectedOrderClockCustody {
     ) -> Result<Self> {
         let review = result.review();
         let selected = review.selected_step();
-        if plan.steps.len() < 2
-            || validate_plan(plan)? != archive
+        let independent_order = selected.depends_on.is_empty();
+        if validate_plan(plan)? != archive
             || plan != review.original_plan()
             || creation_journal == Digest32::ZERO
             || review.seal() == Digest32::ZERO
             || plan.steps.iter().find(|step| step.id == review.step_id()) != Some(selected)
-            || selected.depends_on.is_empty()
-            || result.native_record().state()
-                != CreationState::Created
+            || (plan.steps.len() < 2 && !independent_order)
+            || result.native_record().state() != CreationState::Created
             || result.native_record().plan() != review.native_plan()
             || selected.idempotency_key != review.native_plan().key()
         {
             return Err(corrupt(
                 "selected clock target differs from its complete original parent or verified custody",
             ));
+        }
+        if independent_order {
+            let layout = ProductionLayout::from_plan(plan)?;
+            if layout.existing_labor().is_none() || layout.order_ordinal(selected.id).is_none() {
+                return Err(corrupt(
+                    "dependency-free selected clock requires the exact existing-worker production layout",
+                ));
+            }
         }
         let NativeOrderCreation::Inserted {
             native_order_id,

@@ -96,6 +96,7 @@ enum Action {
     InspectProduction(InspectionRequest, Option<u32>),
     Plan(Request),
     PlanExistingLabor(ExistingLaborRequest),
+    PlanExistingLaborPortfolio(crate::live_production_runtime::ExistingLaborPortfolioRequest),
     PlanPortfolio(crate::live_production_runtime::PortfolioRequest),
     PlanRun(RunRequest, Option<u32>),
     PlanInventoryRun(InventoryRunRequest, Option<u32>),
@@ -143,6 +144,7 @@ impl Action {
             Self::InspectProduction(request, step) => runtime.inspect_production(request, step, c),
             Self::Plan(request) => runtime.plan(request, c),
             Self::PlanExistingLabor(request) => runtime.plan_existing_labor(request, c),
+            Self::PlanExistingLaborPortfolio(request) => runtime.plan_existing_labor_portfolio(request, c),
             Self::PlanPortfolio(request) => runtime.plan_portfolio(request, c),
             Self::PlanRun(request, step) => {
                 runtime.select_order(step, c)?;
@@ -496,6 +498,9 @@ fn plan_action(raw: &str) -> Result<Action> {
         crate::live_production_runtime::PortfolioRequest::parse(raw).map(Action::PlanPortfolio)
     } else if value.get("kind").and_then(Value::as_str) == Some("existing_labor") {
         ExistingLaborRequest::parse(raw).map(Action::PlanExistingLabor)
+    } else if value.get("kind").and_then(Value::as_str) == Some("existing_labor_portfolio") {
+        crate::live_production_runtime::ExistingLaborPortfolioRequest::parse(raw)
+            .map(Action::PlanExistingLaborPortfolio)
     } else if value.get("kind").and_then(Value::as_str) == Some("step") {
         let request: StepRequest = serde_json::from_str(raw)
             .map_err(|_| error(ErrorCode::InvalidRequest, "invalid closed step request"))?;
@@ -532,11 +537,11 @@ fn scoped_run(raw: &str) -> Result<(String, Option<u32>)> {
     })?;
     if value
         .order_step_id
-        .is_some_and(|step| !(1..=4).contains(&step))
+        .is_some_and(|step| step > 4)
     {
         return Err(error(
             ErrorCode::InvalidRequest,
-            "order_step_id must name an original order from one through four",
+            "order_step_id must name an original order from zero through four",
         ));
     }
     Ok((
@@ -690,7 +695,7 @@ pub fn fortress_query(
     })
 }
 #[tool(
-    description = "Compile one original labor and finite-order plan, kind=existing_labor for one finite order using observed already-enabled eligible workers without a labor assignment, or kind=portfolio with one to four distinct furniture orders and per-order optional observed_inventory_minimum objectives; kind=step with original_plan_digest prepares the next eligible original step. After all original effects settle, kind=run prepares an independently authorized clock for the original retained-order or inventory goal. After Wait observes True original labor and explicitly selected inventory, kind=inventory_run prepares an independent stability clock even after order retirement. Both name original_paired_seal, game_ticks and wall_millis; portfolio clock requests also require the exact original order_step_id. Planning never unpauses."
+    description = "Compile one original labor and finite-order plan, kind=existing_labor for one finite order using observed already-enabled eligible workers without a labor assignment, kind=existing_labor_portfolio for one to four orders using the same qualified current workers, or kind=portfolio to assign labor before one to four distinct furniture orders; every order may select an observed_inventory_minimum objective; kind=step with original_plan_digest prepares the next eligible original step. After all original effects settle, kind=run prepares an independently authorized clock for the original retained-order or inventory goal. After Wait observes True original labor and explicitly selected inventory, kind=inventory_run prepares an independent stability clock even after order retirement. Both name original_paired_seal, game_ticks and wall_millis; portfolio clock requests also require the exact original order_step_id. Planning never unpauses."
 )]
 pub fn fortress_plan(session_id: String, request: String) -> String {
     with_session(session_id, "fortress.plan", None, || plan_action(&request))
@@ -772,13 +777,29 @@ pub fn run_stdio() {
     let server = ServerBuilder::new("dfmcp-live-combined-production-dev", env!("CARGO_PKG_VERSION"))
         .tool(FortressOpenSession).tool(FortressObserve).tool(FortressQuery).tool(FortressPlan).tool(FortressCommit)
         .tool(FortressWait).tool(FortressCancel).tool(FortressCheckpoint).tool(FortressRestore).tool(FortressExplain).tool(FortressDoctor)
-        .instructions("Unadmitted development only. Observe, compile one original labor and finite-order plan, kind=existing_labor for one order using current qualified labor without assigning it, or an explicit portfolio of up to four furniture orders, prepare and confirm each dependency-satisfied step, and reconcile uncertainty under its original key. All-applied does not prove the original goal or physical goods. Wait joins current labor with the original retained-order completion or explicitly selected inventory goal under the original stability requirement. Separately configured clock control can prepare kind=run and confirm scope=run for either objective while the exact original order remains eligible; after a True original labor/inventory sample, kind/scope=inventory_run can finish explicitly selected inventory stability after native order retirement. Portfolio clock Plan/Commit/Cancel calls require the original order_step_id; Query can select that leaf. Portfolio Wait samples one original leaf per call and proves the parent only after a coherent complete cohort. Both clock owners preserve every original deadline and exclude competing pending clocks across all leaves; no automatic advancement or repeated unpause is permitted. Unresolved runs must reconcile before paused sampling. A disappeared order leaves default completion unknown. Inventory presence does not prove order-attributed production. Parent proof is process-local and withdrawn on failure or reopening.")
+        .instructions("Unadmitted development only. Observe, compile one original labor and finite-order plan, kind=existing_labor for one order using current qualified labor without assigning it, kind=existing_labor_portfolio for up to four orders using the same workers, or kind=portfolio to assign labor before up to four furniture orders, prepare and confirm each dependency-satisfied step, and reconcile uncertainty under its original key. All-applied does not prove the original goal or physical goods. Wait joins current labor with the original retained-order completion or explicitly selected inventory goal under the original stability requirement. Separately configured clock control can prepare kind=run and confirm scope=run for either objective while the exact original order remains eligible; after a True original labor/inventory sample, kind/scope=inventory_run can finish explicitly selected inventory stability after native order retirement. Portfolio clock Plan/Commit/Cancel calls require the original order_step_id; Query can select that leaf. Portfolio Wait samples one original leaf per call and proves the parent only after a coherent complete cohort. Both clock owners preserve every original deadline and exclude competing pending clocks across all leaves; no automatic advancement or repeated unpause is permitted. Unresolved runs must reconcile before paused sampling. A disappeared order leaves default completion unknown. Inventory presence does not prove order-attributed production. Parent proof is process-local and withdrawn on failure or reopening.")
         .build();
     crate::run_modern_stdio(server);
 }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn existing_labor_portfolio_is_closed_and_zero_order_clock_selectors_remain_explicit() {
+        let mut raw = serde_json::json!({"kind":"existing_labor_portfolio","expected_observation":"11".repeat(32),
+            "units":["43"],"labor":"MINE","orders":[{"recipe":"wooden_bed","amount":1},{"recipe":"wooden_door","amount":2}],
+            "deadline_tick":300});
+        assert!(matches!(super::plan_action(&raw.to_string()),Ok(super::Action::PlanExistingLaborPortfolio(_))));
+        raw["enabled"] = true.into();
+        assert!(super::plan_action(&raw.to_string()).is_err());
+        let mut run = serde_json::json!({"kind":"run","original_paired_seal":"11".repeat(32),
+            "game_ticks":5,"wall_millis":1000,"order_step_id":0});
+        assert_eq!(super::scoped_run(&run.to_string()).expect("zero original order").1,Some(0));
+        for invalid in [serde_json::Value::Null,serde_json::json!(5),serde_json::json!(-1)] {
+            run["order_step_id"] = invalid;
+            assert!(super::scoped_run(&run.to_string()).is_err());
+        }
+    }
     use super::*;
     #[test]
     fn step_requests_are_closed_and_session_namespace_is_distinct() -> Result<()> {
