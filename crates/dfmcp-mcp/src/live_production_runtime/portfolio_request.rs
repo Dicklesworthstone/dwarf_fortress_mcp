@@ -8,6 +8,7 @@ use dfmcp_intent::{
 };
 use dfmcp_world::{CompareOp, Predicate, Value as FactValue};
 use orders::request::Objective;
+use orders::inventory_baseline::InventoryBaselines;
 use serde::Deserialize;
 
 pub(super) const MAX_ORDERS: usize = 4;
@@ -71,7 +72,7 @@ impl PortfolioRequest {
             objective: order.objective.clone(),
         }
     }
-    fn validate(&self) -> Result<()> {
+    pub(super) fn validate(&self) -> Result<()> {
         if self.kind != "portfolio"
             || self.orders.is_empty()
             || self.orders.len() > MAX_ORDERS
@@ -92,6 +93,14 @@ impl PortfolioRequest {
     pub(crate) fn compile(
         &self,
         evidence: &PredicateEvidence<'_>,
+        c: &OperationContext,
+    ) -> Result<PreparedPlan> {
+        self.compile_with_inventory(evidence, &InventoryBaselines::default(), c)
+    }
+    pub(crate) fn compile_with_inventory(
+        &self,
+        evidence: &PredicateEvidence<'_>,
+        baselines: &InventoryBaselines,
         c: &OperationContext,
     ) -> Result<PreparedPlan> {
         self.validate()?;
@@ -131,7 +140,7 @@ impl PortfolioRequest {
             bytes.extend_from_slice(&order.amount.to_be_bytes());
             bytes.push(u8::from(order.objective.is_some()));
             if let Some(objective) = &order.objective {
-                objective.append_identity(&mut bytes);
+                objective.append_identity(&mut bytes, baselines, c.anchor)?;
             }
         }
         let digest = Digest32::of_bytes(&bytes);
@@ -169,8 +178,8 @@ impl PortfolioRequest {
                 op: CompareOp::Eq,
                 value,
             };
-            let goal = requested.objective.as_ref().map_or_else(
-                || {
+            let goal = match &requested.objective {
+                None => {
                     Predicate::All(vec![
                         equal("amount_total", FactValue::U64(u64::from(requested.amount))),
                         equal("amount_remaining", FactValue::U64(0)),
@@ -178,8 +187,8 @@ impl PortfolioRequest {
                         equal("active", FactValue::Bool(false)),
                     ])
                 },
-                Objective::predicate,
-            );
+                Some(objective) => objective.predicate(baselines, c.anchor)?,
+            };
             terminal.push(goal.clone());
             actions.push(RequestedAction {
                 action,

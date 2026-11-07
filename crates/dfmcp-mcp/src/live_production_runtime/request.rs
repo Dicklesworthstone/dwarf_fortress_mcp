@@ -1,5 +1,6 @@
 //! Closed combined labor and finite furniture-order request compiler.
 use crate::semantic_work_order_runtime::request::Objective;
+use crate::semantic_work_order_runtime::inventory_baseline::InventoryBaselines;
 use crate::semantic_workforce_runtime::{digest, exhausted, invalid};
 use dfmcp_adapter::work_orders::WorkOrderRecipe;
 use dfmcp_core::{
@@ -78,6 +79,14 @@ impl Request {
     pub fn compile(
         &self,
         evidence: &PredicateEvidence<'_>,
+        context: &OperationContext,
+    ) -> Result<PreparedPlan> {
+        self.compile_with_inventory(evidence, &InventoryBaselines::default(), context)
+    }
+    pub(crate) fn compile_with_inventory(
+        &self,
+        evidence: &PredicateEvidence<'_>,
+        baselines: &InventoryBaselines,
         context: &OperationContext,
     ) -> Result<PreparedPlan> {
         self.validate()?;
@@ -163,7 +172,7 @@ impl Request {
         bytes.extend_from_slice(&self.poll_interval_ticks.to_be_bytes());
         bytes.extend_from_slice(&self.stable_samples.to_be_bytes());
         if let Some(objective) = &self.objective {
-            objective.append_identity(&mut bytes);
+            objective.append_identity(&mut bytes, baselines, context.anchor)?;
         }
         let hash = Digest32::of_bytes(&bytes);
         let id = IntentId::new(u128::from_be_bytes(
@@ -188,10 +197,10 @@ impl Request {
             equal("validated", Value::Bool(true)),
             equal("active", Value::Bool(false)),
         ]);
-        let order_goal = self
-            .objective
-            .as_ref()
-            .map_or(order_completion, Objective::predicate);
+        let order_goal = match &self.objective {
+            Some(objective) => objective.predicate(baselines, context.anchor)?,
+            None => order_completion,
+        };
         let labor_goal = Predicate::All(labor_goals);
         let summary = match &self.objective {
             Some(Objective::ObservedInventoryMinimum {
@@ -203,6 +212,10 @@ impl Request {
                 units.len(),
                 self.amount,
                 native.as_str()
+            ),
+            Some(Objective::ObservedInventoryIncrease { item_type, increase_stack_units }) => format!(
+                "Configure {} for {} citizens, insert {} finite {} order units and observe an increase of at least {increase_stack_units} {item_type} stack units from the sealed original census; production attribution unknown",
+                self.labor, units.len(), self.amount, native.as_str()
             ),
             None => format!(
                 "Configure {} for {} citizens and complete {} finite {} order units",

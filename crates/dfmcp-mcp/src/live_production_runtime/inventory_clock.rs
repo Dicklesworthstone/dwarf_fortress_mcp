@@ -7,7 +7,7 @@ use dfmcp_adapter::bounded_run::journal::{RunJournal, RunState};
 use dfmcp_adapter::bounded_run::private_file::PrivateRunFile;
 use dfmcp_adapter::bounded_run::rpc::RunSource;
 use dfmcp_adapter::live_production::StepEvidence;
-use dfmcp_adapter::semantic_work_orders::ObservedInventoryObjective;
+use dfmcp_adapter::semantic_work_orders::ObservedInventoryGoal;
 use dfmcp_adapter::work_order_control::CreationState;
 use dfmcp_intent::ObligationStatus;
 use dfmcp_world::PredicateTruth;
@@ -186,7 +186,7 @@ impl Runtime {
             .as_ref()
             .ok_or_else(|| invalid("original plan absent"))?;
         if Some(result.review().step_id()) != self.selected_order_step()
-            || ObservedInventoryObjective::from_selected_plan(original, result.review().step_id())
+            || ObservedInventoryGoal::from_selected_plan(original, result.review().step_id())
                 .is_none()
         {
             return Ok(());
@@ -215,7 +215,7 @@ impl Runtime {
             return Ok(());
         };
         if !self.selected_order_step().is_some_and(|step| {
-            ObservedInventoryObjective::from_selected_plan(original, step).is_some()
+            ObservedInventoryGoal::from_selected_plan(original, step).is_some()
         }) {
             return Ok(());
         }

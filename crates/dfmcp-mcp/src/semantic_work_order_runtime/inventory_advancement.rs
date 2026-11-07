@@ -43,7 +43,7 @@ impl<S: Shell> Runtime<S> {
             .ok_or_else(|| denied("original inventory goal absent"))?;
         // An empty optional owner may coexist with a legacy order objective.
         // Existing run history without this exact objective is rejected by inspect.
-        if ObservedInventoryObjective::from_plan(original).is_none() {
+        if ObservedInventoryGoal::from_plan(original).is_none() {
             return Ok(None);
         }
         InventoryClockTarget::new(

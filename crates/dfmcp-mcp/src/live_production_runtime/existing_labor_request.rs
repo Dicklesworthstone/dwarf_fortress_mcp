@@ -9,6 +9,7 @@ use dfmcp_intent::{
 };
 use dfmcp_world::{CompareOp, EntityKind, Predicate, Value as FactValue};
 use orders::request::Objective;
+use orders::inventory_baseline::InventoryBaselines;
 use serde::Deserialize;
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
@@ -82,6 +83,15 @@ impl ExistingLaborRequest {
         requirement: &ExistingLaborRequirement,
         c: &OperationContext,
     ) -> Result<PreparedPlan> {
+        self.compile_with_inventory(evidence, requirement, &InventoryBaselines::default(), c)
+    }
+    pub(crate) fn compile_with_inventory(
+        &self,
+        evidence: &PredicateEvidence<'_>,
+        requirement: &ExistingLaborRequirement,
+        baselines: &InventoryBaselines,
+        c: &OperationContext,
+    ) -> Result<PreparedPlan> {
         self.validate()?;
         let units = self.unit_ids()?;
         if evidence.snapshot().anchor() != c.anchor
@@ -132,7 +142,7 @@ impl ExistingLaborRequest {
         bytes.extend_from_slice(&self.stable_samples.to_be_bytes());
         bytes.push(u8::from(self.objective.is_some()));
         if let Some(objective) = &self.objective {
-            objective.append_identity(&mut bytes);
+            objective.append_identity(&mut bytes, baselines, c.anchor)?;
         }
         let digest = Digest32::of_bytes(&bytes);
         let id = IntentId::new(u128::from_be_bytes(
@@ -157,8 +167,8 @@ impl ExistingLaborRequest {
             op: CompareOp::Eq,
             value,
         };
-        let goal = self.objective.as_ref().map_or_else(
-            || {
+        let goal = match &self.objective {
+            None => {
                 Predicate::All(vec![
                     equal("amount_total", FactValue::U64(u64::from(self.amount))),
                     equal("amount_remaining", FactValue::U64(0)),
@@ -166,8 +176,8 @@ impl ExistingLaborRequest {
                     equal("active", FactValue::Bool(false)),
                 ])
             },
-            Objective::predicate,
-        );
+            Some(objective) => objective.predicate(baselines, c.anchor)?,
+        };
         let intent = Intent {
             id,
             anchor: c.anchor,

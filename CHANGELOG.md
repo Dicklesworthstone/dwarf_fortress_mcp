@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased — Request net inventory growth through production MCP
+
+- Add server-derived complete inventory baselines at the exact original paused
+  citizen/workforce tick, with independently pinned source qualification and
+  explicit zero-versus-unknown handling.
+- Accept the closed `observed_inventory_increase` objective in all five finite
+  production compilers. Portfolios share one census and seal distinct per-recipe
+  targets; client JSON cannot provide or replace the baseline.
+- Retain baseline provenance and native allocator floors through original
+  archives, repeated planning, first goal sampling and durable-history replay.
+- Carry the new goal through selected/whole-parent monitoring, Agent Turn
+  presentation and both original clock flows, including inventory stability
+  after order retirement, without renewing deadlines or asserting causality.
+- Preserve consumed preplanning time after rejection. Refuse selectively expired
+  Observe authorization before reacquisition and block objective changes from
+  bypassing the canonical time floor.
+- Add twelve adapter and eight MCP regressions and update the operator/embedding
+  contracts. Independent source reviews completed; these and the nine core
+  growth regressions remain unexecuted while the executor is unavailable.
+  Preserve the existing native protocols, eleven-tool surface and unadmitted
+  development status.
+
 ## Unreleased — Preserve original inventory-growth baselines
 
 - Add the typed `EntityQuantityIncrease` predicate and additive canonical/archive

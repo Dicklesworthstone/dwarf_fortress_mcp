@@ -10,7 +10,7 @@ use dfmcp_adapter::live_production::StepEvidence;
 use dfmcp_adapter::order_run::journal::{OrderRunJournal, OrderRunState};
 use dfmcp_adapter::order_run::private_file::PrivateOrderRunFile;
 use dfmcp_adapter::semantic_work_orders::{
-    ObservedInventoryObjective, RetainedOrderObjective, SemanticWorkOrderResult,
+    ObservedInventoryGoal, RetainedOrderObjective, SemanticWorkOrderResult,
 };
 use dfmcp_adapter::work_order_control::CreationState;
 use dfmcp_intent::ObligationStatus;
@@ -20,7 +20,7 @@ use orders::clock::{Clock, ClockTarget, ClockView, RunRequest};
 /// original goal. This does not broaden the independent inventory clock, whose
 /// target constructor still requires an explicit original inventory objective.
 fn recognized_objective(original: &PreparedPlan, step: dfmcp_core::StepId) -> bool {
-    ObservedInventoryObjective::from_selected_plan(original, step).is_some()
+    ObservedInventoryGoal::from_selected_plan(original, step).is_some()
         || RetainedOrderObjective::from_selected_plan(original, step).is_some()
 }
 

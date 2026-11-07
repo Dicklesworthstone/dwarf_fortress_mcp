@@ -49,6 +49,7 @@ pub(crate) use inspection::InspectionRequest;
 use inspection::InspectionSource;
 use inventory_clock::ProductionInventoryClock;
 use orders::Shell as OrderShell;
+use orders::inventory_baseline::{self, InventoryBaselines};
 use portfolio::PortfolioState;
 pub(crate) use portfolio_request::PortfolioRequest;
 pub(crate) use request::Request;
@@ -590,14 +591,16 @@ impl Runtime {
                 "combined operation differs from retained scope or widens its budget",
             ));
         }
-        c.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
+        let mut authority = c.clone();
+        authority.anchor.tick = authority.anchor.tick.max(self.observation_tick_floor);
+        authority.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
         if control {
             if self.mode != Mode::Control || self.initialization_failed || self.fenced {
                 return Err(denied(
                     "combined control is unavailable; retain exact recovery custody",
                 ));
             }
-            c.authorize(Capability::Plan, RiskTier::Guarded, &[], None)?;
+            authority.authorize(Capability::Plan, RiskTier::Guarded, &[], None)?;
         }
         Ok(())
     }
@@ -759,7 +762,7 @@ impl Runtime {
             "production_inspection_source":null,"production_inspection":null,
             "observation_tick_floor":self.observation_tick_floor.get(),
             "original_plan":self.original.as_ref().map(plan_json),"runtime_admitted":false,
-            "selected_inventory_goal":if selected_goal["kind"] == "observed_inventory_minimum" {Some(&selected_goal)}else{None},
+            "selected_inventory_goal":if matches!(selected_goal["kind"].as_str(), Some("observed_inventory_minimum" | "observed_inventory_increase")) {Some(&selected_goal)}else{None},
             "selected_order_goal":if selected_goal["kind"] == "retained_order_completion" {Some(&selected_goal)}else{None},
             "clock":self.clock_json(),"clock_control_enabled":self.clock_control_enabled(),
             "clock_invalidates_goal":self.clock_invalidates_goal,
@@ -856,7 +859,7 @@ impl Runtime {
             "runtime_admitted":false,"observation":observation,"original_plan":self.original.as_ref().map(plan_json),
             "observation_tick_floor":self.observation_tick_floor.get(),
             "frontier":frontier,"review":review,
-            "selected_inventory_goal":if selected_goal["kind"] == "observed_inventory_minimum" {Some(&selected_goal)}else{None},
+            "selected_inventory_goal":if matches!(selected_goal["kind"].as_str(), Some("observed_inventory_minimum" | "observed_inventory_increase")) {Some(&selected_goal)}else{None},
             "selected_order_goal":if selected_goal["kind"] == "retained_order_completion" {Some(&selected_goal)}else{None},
             "clock":self.clock_json(),"clock_control_enabled":self.clock_control_enabled(),
             "clock_invalidates_goal":self.clock_invalidates_goal,
@@ -906,7 +909,7 @@ impl Runtime {
         }
         self.basis = None;
         let mut work = Work::new(c)?;
-        c.authorize(Capability::Observe, RiskTier::ReadOnly, &[], None)?;
+        inventory_baseline::authorize_observe(c, self.observation_tick_floor)?;
         let capsule = self.config.workforce.acquire(&work.take(16 * MIB)?)?;
         let cursor = ObservationCursor {
             epoch: self.anchor.cursor.epoch,
@@ -994,8 +997,10 @@ impl Runtime {
         self.view(&mut work)
     }
     pub(crate) fn plan(&mut self, request: Request, c: &OperationContext) -> Result<View> {
-        self.plan_compiled(request.observation()?, false, c, |evidence, current| {
-            request.compile(evidence, current)
+        request.validate()?;
+        let objectives: Vec<_> = request.objective.iter().collect();
+        self.plan_compiled(request.observation()?, false, &objectives, c, |evidence, baselines, current| {
+            request.compile_with_inventory(evidence, baselines, current)
         })
     }
     pub(crate) fn plan_portfolio(
@@ -1003,8 +1008,10 @@ impl Runtime {
         request: PortfolioRequest,
         c: &OperationContext,
     ) -> Result<View> {
-        self.plan_compiled(request.observation()?, true, c, |evidence, current| {
-            request.compile(evidence, current)
+        request.validate()?;
+        let objectives: Vec<_> = request.orders.iter().filter_map(|order| order.objective.as_ref()).collect();
+        self.plan_compiled(request.observation()?, true, &objectives, c, |evidence, baselines, current| {
+            request.compile_with_inventory(evidence, baselines, current)
         })
     }
     pub(crate) fn plan_existing_labor(
@@ -1012,9 +1019,11 @@ impl Runtime {
         request: ExistingLaborRequest,
         c: &OperationContext,
     ) -> Result<View> {
+        request.validate()?;
+        let objectives: Vec<_> = request.objective.iter().collect();
         self.plan_existing_workers(
-            request.observation()?, request.unit_ids()?, request.labor.clone(), false, c,
-            |evidence, requirement, current| request.compile(evidence, requirement, current),
+            request.observation()?, (request.unit_ids()?, request.labor.clone()), false, &objectives, c,
+            |evidence, requirement, baselines, current| request.compile_with_inventory(evidence, requirement, baselines, current),
         )
     }
     pub(crate) fn plan_existing_labor_portfolio(
@@ -1022,20 +1031,23 @@ impl Runtime {
         request: ExistingLaborPortfolioRequest,
         c: &OperationContext,
     ) -> Result<View> {
+        request.validate()?;
+        let objectives: Vec<_> = request.orders.iter().filter_map(|order| order.objective.as_ref()).collect();
         self.plan_existing_workers(
-            request.observation()?, request.unit_ids()?, request.labor.clone(), true, c,
-            |evidence, requirement, current| request.compile(evidence, requirement, current),
+            request.observation()?, (request.unit_ids()?, request.labor.clone()), true, &objectives, c,
+            |evidence, requirement, baselines, current| request.compile_with_inventory(evidence, requirement, baselines, current),
         )
     }
     fn plan_existing_workers(
         &mut self,
         observation: Digest32,
-        selected: Vec<dfmcp_core::EntityId>,
-        labor: String,
+        selection: (Vec<dfmcp_core::EntityId>, String),
         portfolio: bool,
+        objectives: &[&orders::request::Objective],
         c: &OperationContext,
-        compile: impl FnOnce(&PredicateEvidence<'_>, &ExistingLaborRequirement, &OperationContext) -> Result<PreparedPlan>,
+        compile: impl FnOnce(&PredicateEvidence<'_>, &ExistingLaborRequirement, &InventoryBaselines, &OperationContext) -> Result<PreparedPlan>,
     ) -> Result<View> {
+        let (selected, labor) = selection;
         let basis = self
             .basis
             .as_ref()
@@ -1046,7 +1058,7 @@ impl Runtime {
             denied("existing-labor planning requires a fresh selected workforce capture")
         })?;
         let scope = self.config.workforce.acceptance().clone();
-        self.plan_compiled(observation, portfolio, c, |evidence, current| {
+        self.plan_compiled(observation, portfolio, objectives, c, |evidence, baselines, current| {
             let identity =
                 LiveRoutingEvidence::citizens_v1(evidence.clone(), &projection, &capsule)?;
             let units = identity.resolve_units(&selected)?;
@@ -1064,7 +1076,7 @@ impl Runtime {
                 })
                 .collect::<Result<Vec<_>>>()?;
             let requirement = ExistingLaborRequirement::new(labor, historical)?;
-            let plan = compile(evidence, &requirement, current)?;
+            let plan = compile(evidence, &requirement, baselines, current)?;
             let observed =
                 ExistingLaborProjection::new(&plan, &identity, capture, current.anchor.cursor)?;
             if observed.anchor().tick != current.anchor.tick {
@@ -1088,14 +1100,18 @@ impl Runtime {
         &mut self,
         observation: Digest32,
         portfolio: bool,
+        objectives: &[&orders::request::Objective],
         c: &OperationContext,
-        compile: impl FnOnce(&PredicateEvidence<'_>, &OperationContext) -> Result<PreparedPlan>,
+        compile: impl FnOnce(&PredicateEvidence<'_>, &InventoryBaselines, &OperationContext) -> Result<PreparedPlan>,
     ) -> Result<View> {
         self.check(c, true)?;
         if self.original.is_some() {
             return Err(invalid(
                 "retain original combined plan; prepare its next step without recompiling",
             ));
+        }
+        if c.anchor.tick < self.observation_tick_floor {
+            return Err(denied("reobserve the canonical source before any original planning"));
         }
         let basis = self
             .basis
@@ -1111,7 +1127,17 @@ impl Runtime {
             &work.take(MIB)?,
         )?;
         let evidence = PredicateEvidence::scoped(&basis.projection.snapshot, policy)?;
-        let plan = compile(&evidence, &work.take(8 * MIB)?)?;
+        let baselines = if inventory_baseline::needed(objectives) {
+            inventory_baseline::acquire(
+                &self.config.orders,
+                objectives,
+                &mut self.observation_tick_floor,
+                &work.take(inventory_baseline::BASELINE_BYTES)?,
+            )?
+        } else {
+            InventoryBaselines::default()
+        };
+        let plan = compile(&evidence, &baselines, &work.take(8 * MIB)?)?;
         let layout = host_plan(&plan)?;
         let expected = layout.archive_seal();
         // From this point failures preserve partial publication and forbid another

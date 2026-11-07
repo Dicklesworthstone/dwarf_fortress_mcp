@@ -89,7 +89,7 @@
       "labor-order"
     ],
     "configuration_schema": "dfmcp.combined-production-development/1",
-    "request_schema": "closed legacy labor/citizens/finite furniture request; kind=existing_labor for one independently qualified current-worker order; kind=portfolio to assign labor before one to four distinct recipes; kind=existing_labor_portfolio for one to four distinct recipes using the same current workers; each leaf may select an inventory minimum",
+    "request_schema": "closed legacy labor/citizens/finite furniture request; kind=existing_labor for one independently qualified current-worker order; kind=portfolio to assign labor before one to four distinct recipes; kind=existing_labor_portfolio for one to four distinct recipes using the same current workers; each leaf may select an inventory minimum or an independently qualified original inventory increase",
     "original_steps": [
       "SetLabor",
       "CreateWorkOrder"
@@ -292,7 +292,10 @@
       "crates/dfmcp-mcp/src/live_production_runtime/existing_labor_portfolio_request.rs",
       "crates/dfmcp-mcp/src/live_production_runtime/existing_labor_portfolio_request_tests.rs",
       "crates/dfmcp-mcp/src/live_production_presentation_portfolio_tests.rs",
-      "tests/stdio/combined_existing_labor_portfolio.py"
+      "tests/stdio/combined_existing_labor_portfolio.py",
+      "crates/dfmcp-mcp/src/semantic_work_order_runtime/inventory_baseline.rs",
+      "crates/dfmcp-mcp/src/semantic_work_order_runtime/inventory_increase_tests.rs",
+      "crates/dfmcp-mcp/src/semantic_work_order_runtime/inventory_clock_runtime_tests.rs"
     ],
     "private_custody_platforms": [
       "linux-x86_64",
@@ -436,7 +439,8 @@
       "requires_explicit_original_inventory_objective": false,
       "supported_original_objectives": [
         "retained_order_completion",
-        "observed_inventory_minimum"
+        "observed_inventory_minimum",
+        "observed_inventory_increase"
       ],
       "requires_settled_original_effects": true,
       "requires_fresh_joined_parent_and_receipt_linked_order": true,
@@ -499,7 +503,11 @@
       "missing_replaced_or_omitted_journal_refused": true,
       "run_withdraws_current_parent_and_selected_proof": true,
       "native_clock_receipt_proves_current_pause_or_goal": false,
-      "legacy_standalone_inventory_clock_target_bytes_changed": false
+      "legacy_standalone_inventory_clock_target_bytes_changed": false,
+      "supported_original_objectives": [
+        "observed_inventory_minimum",
+        "observed_inventory_increase"
+      ]
     },
     "portfolio": {
       "request_kind": "portfolio",
@@ -525,7 +533,8 @@
       "extra_history_paths": "goal-{2,3,4}.history",
       "extra_clock_paths": "portfolio-{2,3,4}-{clock,inventory-clock}.journal",
       "new_protocol_or_admission": false,
-      "shared_layout": "ProductionLayout retains actual original StepIds and chooses fixed private custody slots by order ordinal"
+      "shared_layout": "ProductionLayout retains actual original StepIds and chooses fixed private custody slots by order ordinal",
+      "inventory_increase_baseline": "one shared pre-insertion complete operations census; distinct original per-recipe targets"
     },
     "production_inspection": {
       "optional_query_request_schema": "dfmcp.query/1",
@@ -596,7 +605,8 @@
       "goal_history": "goal.history",
       "clock_paths": "existing single-order paths",
       "new_protocol_or_admission": false,
-      "legacy_request_identities_changed": false
+      "legacy_request_identities_changed": false,
+      "inventory_increase_baseline": "same original paused citizen/workforce tick; no assignment effect added"
     },
     "existing_labor_portfolio": {
       "request_kind": "existing_labor_portfolio",
@@ -625,7 +635,70 @@
       "workforce_journal": "empty original read custodian, including uncertain insertion recovery",
       "legacy_request_and_clock_identity_bytes_changed": false,
       "new_protocol_or_admission": false,
-      "test_campaign": "tests/stdio/combined_existing_labor_portfolio.py"
+      "test_campaign": "tests/stdio/combined_existing_labor_portfolio.py",
+      "inventory_increase_baseline": "one shared pre-insertion census; original StepIds and worker prerequisite preserved"
+    },
+    "selected_inventory_increase": {
+      "request_field": "objective",
+      "kind": "observed_inventory_increase",
+      "fields": [
+        "kind",
+        "item_type",
+        "increase_stack_units"
+      ],
+      "item_types": [
+        "BED",
+        "DOOR",
+        "TABLE",
+        "CHAIR"
+      ],
+      "recipe_matched": true,
+      "increase_stack_units": [
+        1,
+        1000000
+      ],
+      "caller_supplied_baseline": false,
+      "acquisition": "one complete independently pinned Operations/1.3 census at the exact original paused citizen/workforce tick",
+      "reads_per_original_plan": 1,
+      "shared_across_portfolio_leaves": true,
+      "maximum_objectives": 4,
+      "baseline_issuer": "InventoryBaselineProjection with independently issued complete Item/type/stack-size evidence",
+      "predicate": "EntityQuantityIncrease",
+      "canonical_and_archive_tag": 15,
+      "sealed_fields": [
+        "item_type",
+        "baseline_stack_units",
+        "increase_stack_units",
+        "target_stack_units",
+        "baseline_anchor",
+        "baseline_source_digest",
+        "source_generation",
+        "baseline_source_counters"
+      ],
+      "source_counter_order": [
+        "next_job_id",
+        "next_building_id",
+        "next_item_id"
+      ],
+      "request_identity_extension": "reserved impossible legacy type length followed by dfmcp-observed-inventory-increase/1 and complete canonical predicate bytes",
+      "legacy_minimum_and_default_request_bytes_preserved": true,
+      "current_goal": "complete current stack units >= checked original baseline + requested increase",
+      "same_fortress_epoch_and_forward_canonical_frontier_required": true,
+      "native_baseline_frontier_checked_before_first_sample_and_history_replay": true,
+      "consumed_preplan_tick_retained_on_rejection": true,
+      "selectively_expired_observe_refused_before_reacquisition": true,
+      "objective_switch_cannot_bypass_consumed_tick_floor": true,
+      "immutable_original_archive_and_external_seal": true,
+      "separately_archived_raw_baseline_census": false,
+      "offline_baseline_recount_claimed": false,
+      "repeated_plan_or_recovery_recaptures_baseline": false,
+      "original_deadline_cadence_stability_and_keys_preserved": true,
+      "retired_order_can_be_sampled": true,
+      "insertion_uncertainty_resolved_by_inventory": false,
+      "preexisting_stock_alone_satisfies_increase": false,
+      "new_item_identity_required": false,
+      "causal_production_material_or_usability_proven": false,
+      "runtime_admission": false
     }
   },
   "selected_work_order_goal_monitor": {
@@ -659,8 +732,12 @@
       "crates/dfmcp-adapter/src/semantic_work_orders/goal_history.rs",
       "crates/dfmcp-adapter/src/semantic_work_orders/goal_history/store.rs",
       "crates/dfmcp-adapter/src/semantic_work_orders/goal_projection.rs",
-      "crates/dfmcp-adapter/src/semantic_work_orders/inventory_objective.rs"
-    ]
+      "crates/dfmcp-adapter/src/semantic_work_orders/inventory_objective.rs",
+      "crates/dfmcp-adapter/src/semantic_work_orders/inventory_baseline.rs",
+      "crates/dfmcp-adapter/src/semantic_work_orders/inventory_baseline_tests.rs",
+      "crates/dfmcp-adapter/src/live_production/inventory_increase_tests.rs"
+    ],
+    "inventory_increase": "exact original recipe-matched EntityQuantityIncrease with baseline source/generation/allocator fences during live polling and replay"
   },
   "selected_clock_custody": {
     "adapter_type": "dfmcp_adapter::live_production::SelectedOrderClockCustody",

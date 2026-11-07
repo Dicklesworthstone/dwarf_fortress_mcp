@@ -30,7 +30,7 @@
     "combined_labor_order_host_accepts_this_configuration": false
   },
   "target": {
-    "objective": "exact original observed_inventory_minimum",
+    "objective": "exact original observed_inventory_minimum or observed_inventory_increase",
     "bound_fields": [
       "whole_plan_digest",
       "archive_object_digest",
@@ -47,7 +47,14 @@
     "deadline_cadence_stability_or_original_key_rewritten": false,
     "fresh_qualified_inventory_and_custody_after_durable_marker": true,
     "same_paused_tick_required_before_native_effect": true,
-    "order_attribution_or_new_production_proven": false
+    "order_attribution_or_new_production_proven": false,
+    "inventory_increase": {
+      "baseline_retained_from_original_plan": true,
+      "baseline_source_frontier_rechecked_by_current_goal_monitor": true,
+      "current_truth_requires_complete_qualified_original_target": true,
+      "baseline_recapture_or_deadline_renewal": false,
+      "causal_order_attribution": false
+    }
   },
   "mcp": {
     "tool_count": 11,
@@ -116,6 +123,8 @@
     "crates/dfmcp-mcp/src/semantic_work_order_runtime/native.rs",
     "crates/dfmcp-mcp/src/live_semantic_work_orders_server.rs",
     "crates/dfmcp-mcp/src/semantic_work_order_presentation.rs",
-    "docs/SEMANTIC_WORK_ORDER_MCP.md"
+    "docs/SEMANTIC_WORK_ORDER_MCP.md",
+    "crates/dfmcp-mcp/src/semantic_work_order_runtime/inventory_baseline.rs",
+    "crates/dfmcp-mcp/src/semantic_work_order_runtime/inventory_increase_tests.rs"
   ]
 }

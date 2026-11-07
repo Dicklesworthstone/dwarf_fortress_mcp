@@ -698,3 +698,80 @@ fn inventory_handoff_requires_both_exact_journal_identities() -> Result<()> {
     assert!(start_inventory(&handoff, Mode::Offline, 313).is_err());
     Ok(())
 }
+
+
+#[test]
+fn inventory_increase_uses_both_original_clocks_and_keeps_sealed_baseline_after_retirement() -> Result<()> {
+    let resources = InventoryResources::new()?;
+    resources.order.base.item_count.set(2);
+    let mut runtime = start_inventory(&resources, Mode::Control, 390)?;
+    let c = runtime.context(false)?;
+    let observed = runtime.observe(&c)?;
+    let request = Request::parse(&json!({
+        "expected_observation":observed.observation.expect("observation").0.to_hex(),
+        "recipe":"wooden_bed","amount":5,
+        "deadline_tick":runtime.anchor().tick.get()+100,
+        "poll_interval_ticks":10,"stable_samples":2,
+        "objective":{"kind":"observed_inventory_increase","item_type":"BED","increase_stack_units":1}
+    }).to_string())?;
+    let c = runtime.context(false)?;
+    let prepared = runtime.plan(request, &c)?;
+    assert_eq!(resources.order.base.operations_acquisitions.get(), 1);
+    let c = runtime.context(false)?;
+    let inserted = runtime.commit(prepared.review.as_ref().expect("review").seal(), true, &c)?;
+    let original = inserted.original.as_ref().expect("original").clone();
+    assert_eq!(inserted.to_json()["inventory_objective"]["baseline_stack_units"], 2);
+
+    // Stock is unchanged: the independent inventory clock may not advance a
+    // False increase, while the exact still-active original order can run.
+    let c = runtime.context(false)?;
+    assert!(runtime.plan_inventory_run(inventory_request(&inserted, 10)?, &c).is_err());
+    assert_eq!(resources.state.borrow().prepares, 0);
+    let c = runtime.context(false)?;
+    let order_run = runtime.plan_run(run_request(&inserted, 10), &c)?;
+    let seal = order_run.clock.as_ref().and_then(ClockView::active)
+        .expect("order clock").review_seal;
+    let c = runtime.context(false)?;
+    runtime.commit_run(seal, true, &c)?;
+    resources.order.stop(10, 0)?;
+    resources.order.base.item_count.set(3);
+    retire(&resources)?;
+    let c = runtime.context(false)?;
+    let first = runtime.wait(&c)?;
+    assert_eq!(first.goal.as_ref().expect("goal").current_goal, PredicateTruth::True);
+    assert!(!first.goal.as_ref().expect("goal").current_goal_proven());
+    assert!(!first.goal.as_ref().expect("goal").receipt_linked);
+    let packet = crate::live_semantic_work_orders_server::test_packet_for_view(
+        &first, runtime.session_id(), clock_budget(),
+    );
+    let packet: Value = serde_json::from_str(&packet).expect("packet");
+    let request: Value = serde_json::from_str(packet["agent_turn"]["recommendations"][0]
+        ["arguments"]["request"].as_str().expect("inventory clock request")).expect("request");
+    assert_eq!(request["kind"], "inventory_run");
+
+    let (_, seal) = inventory_plan(&mut runtime, &first, 10)?;
+    let c = runtime.context(false)?;
+    runtime.commit_inventory_run(seal, true, &c)?;
+    resources.stop(10)?;
+    let c = runtime.context(false)?;
+    let complete = runtime.wait(&c)?;
+    assert!(complete.goal.as_ref().expect("goal").current_goal_proven());
+    assert!(!complete.goal.as_ref().expect("goal").receipt_linked);
+    assert_eq!(complete.original, Some(original.clone()));
+    assert_eq!(complete.to_json()["inventory_objective"]["baseline_stack_units"], 2);
+    assert_eq!(complete.to_json()["inventory_objective"]["target_stack_units"], 3);
+    assert_eq!(resources.order.state.borrow().commits, 1);
+    assert_eq!(resources.state.borrow().commits, 1);
+    assert_eq!(resources.order.base.native.borrow().commits, 1);
+    let acquired = resources.order.base.operations_acquisitions.get();
+    let recovered = resources.recover(&complete);
+    drop(runtime);
+    let mut offline = start_inventory(&recovered, Mode::Offline, 391)?;
+    let c = offline.context(false)?;
+    let historical = offline.view(&c)?;
+    assert_eq!(historical.original, Some(original));
+    assert!(historical.goal.is_none());
+    assert_eq!(historical.to_json()["inventory_objective"]["baseline_stack_units"], 2);
+    assert_eq!(resources.order.base.operations_acquisitions.get(), acquired);
+    Ok(())
+}

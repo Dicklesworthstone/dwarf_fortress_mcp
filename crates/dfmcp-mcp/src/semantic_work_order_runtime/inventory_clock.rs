@@ -4,7 +4,7 @@ use super::bounded_goal_clock::{self, GoalClockTarget};
 use super::{denied, invalid};
 use dfmcp_adapter::bounded_run::{RunObservation, RunPlan};
 use dfmcp_adapter::semantic_work_orders::{
-    NativeOrderCreation, ObservedInventoryObjective, SemanticWorkOrderResult,
+    NativeOrderCreation, ObservedInventoryGoal, SemanticWorkOrderResult,
     SemanticWorkOrderReview,
 };
 use dfmcp_core::{Capability, Digest32, ErrorCode, FortressId, OperationContext, Result, RiskTier};
@@ -58,7 +58,7 @@ impl ClockTarget {
         review: &SemanticWorkOrderReview,
         creation: &NativeOrderCreation,
     ) -> Result<Self> {
-        if ObservedInventoryObjective::from_plan(plan).is_none() {
+        if ObservedInventoryGoal::from_plan(plan).is_none() {
             return Err(denied(
                 "inventory clock requires the exact original inventory objective",
             ));
@@ -151,7 +151,7 @@ impl ClockTarget {
             result,
         )?;
         let review = result.review();
-        if ObservedInventoryObjective::from_selected_plan(plan, review.step_id()).is_none() {
+        if ObservedInventoryGoal::from_selected_plan(plan, review.step_id()).is_none() {
             return Err(denied(
                 "selected inventory clock requires the exact original inventory objective",
             ));

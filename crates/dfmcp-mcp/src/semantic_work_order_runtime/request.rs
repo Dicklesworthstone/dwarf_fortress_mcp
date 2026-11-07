@@ -1,7 +1,8 @@
 //! Closed native-observable finite furniture-order goal compiler.
 use super::{exhausted, invalid};
+use super::inventory_baseline::InventoryBaselines;
 use dfmcp_adapter::work_orders::WorkOrderRecipe;
-use dfmcp_core::{Digest32, GameTick, IntentId, OperationContext, Result, RiskTier, StepId};
+use dfmcp_core::{Digest32, GameTick, IntentId, OperationContext, Result, RiskTier, StateAnchor, StepId};
 use dfmcp_intent::effects::{MAX_DEFAULT_OBLIGATION_TICKS, created_entity_id};
 use dfmcp_intent::{
     Action, Constraint, Intent, ObligationSpec, PreparedPlan, RequestedAction, StaticPlanner,
@@ -19,15 +20,19 @@ pub enum Objective {
         item_type: String,
         minimum_stack_units: u64,
     },
+    ObservedInventoryIncrease {
+        item_type: String,
+        increase_stack_units: u64,
+    },
 }
 
 impl Objective {
     pub(crate) fn validate_for(&self, recipe: WorkOrderRecipe) -> Result<()> {
-        let Self::ObservedInventoryMinimum {
-            item_type,
-            minimum_stack_units,
-        } = self;
-        if item_type != output_type(recipe) || !(1..=1_000_000).contains(minimum_stack_units) {
+        let (item_type, units) = match self {
+            Self::ObservedInventoryMinimum { item_type, minimum_stack_units } => (item_type, minimum_stack_units),
+            Self::ObservedInventoryIncrease { item_type, increase_stack_units } => (item_type, increase_stack_units),
+        };
+        if item_type != output_type(recipe) || !(1..=1_000_000).contains(units) {
             return Err(invalid(
                 "inventory objective requires the recipe's exact item type and 1..1000000 stack units",
             ));
@@ -35,29 +40,41 @@ impl Objective {
         Ok(())
     }
 
-    pub(crate) fn predicate(&self) -> Predicate {
-        let Self::ObservedInventoryMinimum {
-            item_type,
-            minimum_stack_units,
-        } = self;
-        Predicate::EntityQuantity {
-            kind: EntityKind::Item,
-            filter_field: "type_key".into(),
-            filter_value: Value::Text(item_type.clone()),
-            quantity_field: Some("stack_size".into()),
-            op: CompareOp::Ge,
-            value: *minimum_stack_units,
-        }
+    pub(crate) fn predicate(&self, baselines: &InventoryBaselines, anchor: StateAnchor) -> Result<Predicate> {
+        Ok(match self {
+            Self::ObservedInventoryMinimum { item_type, minimum_stack_units } => Predicate::EntityQuantity {
+                kind: EntityKind::Item,
+                filter_field: "type_key".into(),
+                filter_value: Value::Text(item_type.clone()),
+                quantity_field: Some("stack_size".into()),
+                op: CompareOp::Ge,
+                value: *minimum_stack_units,
+            },
+            Self::ObservedInventoryIncrease { item_type, increase_stack_units } =>
+                baselines.get(item_type, *increase_stack_units, anchor)?.predicate(),
+        })
     }
 
-    pub(crate) fn append_identity(&self, bytes: &mut Vec<u8>) {
-        let Self::ObservedInventoryMinimum {
-            item_type,
-            minimum_stack_units,
-        } = self;
-        bytes.extend_from_slice(&(item_type.len() as u64).to_be_bytes());
-        bytes.extend_from_slice(item_type.as_bytes());
-        bytes.extend_from_slice(&minimum_stack_units.to_be_bytes());
+    pub(crate) fn append_identity(&self, bytes: &mut Vec<u8>, baselines: &InventoryBaselines, anchor: StateAnchor) -> Result<()> {
+        match self {
+            Self::ObservedInventoryMinimum { item_type, minimum_stack_units } => {
+                // Preserve every original minimum request and step key byte.
+                bytes.extend_from_slice(&(item_type.len() as u64).to_be_bytes());
+                bytes.extend_from_slice(item_type.as_bytes());
+                bytes.extend_from_slice(&minimum_stack_units.to_be_bytes());
+            }
+            Self::ObservedInventoryIncrease { .. } => {
+                // A reserved impossible legacy type length separates the new
+                // mode. The complete predicate binds the independently derived
+                // baseline, native source lineage and original anchor to keys.
+                bytes.extend_from_slice(&u64::MAX.to_be_bytes());
+                bytes.extend_from_slice(b"dfmcp-observed-inventory-increase/1\0");
+                let predicate = self.predicate(baselines, anchor)?.canonical_bytes();
+                bytes.extend_from_slice(&(predicate.len() as u32).to_be_bytes());
+                bytes.extend_from_slice(&predicate);
+            }
+        }
+        Ok(())
     }
 }
 
@@ -116,6 +133,14 @@ impl Request {
         evidence: &PredicateEvidence<'_>,
         context: &OperationContext,
     ) -> Result<PreparedPlan> {
+        self.compile_with_inventory(evidence, &InventoryBaselines::default(), context)
+    }
+    pub(crate) fn compile_with_inventory(
+        &self,
+        evidence: &PredicateEvidence<'_>,
+        baselines: &InventoryBaselines,
+        context: &OperationContext,
+    ) -> Result<PreparedPlan> {
         self.validate()?;
         let span = self
             .deadline_tick
@@ -155,7 +180,7 @@ impl Request {
         identity.extend_from_slice(&self.poll_interval_ticks.to_be_bytes());
         identity.extend_from_slice(&self.stable_samples.to_be_bytes());
         if let Some(objective) = &self.objective {
-            objective.append_identity(&mut identity);
+            objective.append_identity(&mut identity, baselines, context.anchor)?;
         }
         let hash = Digest32::of_bytes(&identity);
         let id = IntentId::new(u128::from_be_bytes(
@@ -187,11 +212,18 @@ impl Request {
                     minimum_stack_units,
                 },
             ) => (
-                objective.predicate(),
+                objective.predicate(baselines, context.anchor)?,
                 format!(
                     "Observe at least {minimum_stack_units} {item_type} stack units after inserting {} finite {} order units; production attribution unknown",
                     self.amount,
                     native.as_str()
+                ),
+            ),
+            Some(objective @ Objective::ObservedInventoryIncrease { item_type, increase_stack_units }) => (
+                objective.predicate(baselines, context.anchor)?,
+                format!(
+                    "Observe an increase of at least {increase_stack_units} {item_type} stack units from the sealed original census after inserting {} finite {} order units; production attribution unknown",
+                    self.amount, native.as_str()
                 ),
             ),
             None => (

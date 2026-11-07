@@ -489,6 +489,12 @@ pub(super) fn operations_identity(
             "operations capture changed original source identity or software",
         ));
     }
+    if let Some(increase) = super::ObservedInventoryIncreaseObjective::from_selected_plan(
+        &review.original,
+        review.step,
+    ) {
+        increase.validate_operations(capture)?;
+    }
     Ok(())
 }
 

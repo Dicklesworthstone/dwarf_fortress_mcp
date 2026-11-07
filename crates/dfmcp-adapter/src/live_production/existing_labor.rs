@@ -14,7 +14,7 @@ use dfmcp_world::{
 };
 
 use crate::live_routing::LiveIdentitySchema;
-use crate::semantic_work_orders::{ObservedInventoryObjective, RetainedOrderObjective};
+use crate::semantic_work_orders::{ObservedInventoryGoal, RetainedOrderObjective};
 use crate::semantic_workforce::projection::{
     ELIGIBILITY_SOURCE, HISTORICAL_ID_SOURCE, LABOR_SOURCE, UNIT_ID_SOURCE,
 };
@@ -140,7 +140,7 @@ impl ExistingLaborRequirement {
         for (index, step) in plan.steps.iter().enumerate() {
             if step.id.get() as usize != index
                 || !step.depends_on.is_empty()
-                || (ObservedInventoryObjective::from_selected_plan(plan, step.id).is_none()
+                || (ObservedInventoryGoal::from_selected_plan(plan, step.id).is_none()
                     && RetainedOrderObjective::from_selected_plan(plan, step.id).is_none())
             {
                 return Err(refused(
@@ -242,6 +242,11 @@ fn has_labor_requirement(predicate: &Predicate) -> bool {
     match predicate {
         Predicate::FieldCompare { field, .. } => labor_field(field),
         Predicate::EntityQuantity {
+            filter_field,
+            quantity_field,
+            ..
+        }
+        | Predicate::EntityQuantityIncrease {
             filter_field,
             quantity_field,
             ..

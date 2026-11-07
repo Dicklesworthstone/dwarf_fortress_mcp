@@ -4,14 +4,14 @@
 use super::*;
 use dfmcp_adapter::live_routing::LiveRoutingEvidence;
 use dfmcp_adapter::semantic_work_orders::{
-    ObservedInventoryObjective, RetainedOrderObjective, WorkOrderGoalProgress,
+    ObservedInventoryGoal, RetainedOrderObjective, WorkOrderGoalProgress,
 };
 use dfmcp_core::StepId;
 use dfmcp_intent::ObligationStatus;
 use dfmcp_world::PredicateTruth;
 
 enum SelectedObjective {
-    Inventory(ObservedInventoryObjective),
+    Inventory(ObservedInventoryGoal),
     RetainedOrder(RetainedOrderObjective),
 }
 impl SelectedObjective {
@@ -27,7 +27,7 @@ fn selected(plan: &PreparedPlan, selected_id: StepId) -> Option<(StepId, Selecte
     let step = plan.steps.iter().find(|step| {
         step.id == selected_id && matches!(step.action, Action::CreateWorkOrder { .. })
     })?;
-    let objective = ObservedInventoryObjective::from_selected_plan(plan, step.id)
+    let objective = ObservedInventoryGoal::from_selected_plan(plan, step.id)
         .map(SelectedObjective::Inventory)
         .or_else(|| {
             RetainedOrderObjective::from_selected_plan(plan, step.id)
@@ -201,9 +201,12 @@ impl Runtime {
         });
         match objective {
             SelectedObjective::Inventory(objective) => {
-                value["kind"] = json!("observed_inventory_minimum");
-                value["item_type"] = json!(objective.item_type);
-                value["minimum_stack_units"] = json!(objective.min_stack_units);
+                if let (Some(value), Some(objective)) = (
+                    value.as_object_mut(),
+                    orders::inventory_objective_json(&objective).as_object(),
+                ) {
+                    value.extend(objective.clone());
+                }
                 value["quantity_semantics"] = json!("sum_of_observed_stack_size");
                 value["parent_terminal_evidence_scope"] =
                     json!("selected_inventory_projection_only");

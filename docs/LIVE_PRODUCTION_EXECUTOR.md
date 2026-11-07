@@ -57,8 +57,8 @@ retains every selected production objective and one shared
 native historical-figure identity, positive requested labor and positive current
 workforce eligibility. Missing, negative, duplicated, unrelated or weakened
 requirements refuse this closed shape. Every order retains its original
-recipe-matched inventory minimum or exact native counter/status objective,
-deadline, cadence and stability requirement.
+recipe-matched inventory minimum, sealed inventory increase or exact native
+counter/status objective, deadline, cadence and stability requirement.
 
 `ExistingLaborProjection` qualifies the selected workers independently of an
 assignment review or receipt. The embedding issues the pinned source policy via
@@ -129,6 +129,37 @@ produced items, physical quiescence or the complete original goal. The combined
 owner never reports original-goal completion from all native receipts being
 present.
 
+## Seal an observed inventory increase before insertion
+
+`InventoryBaselineProjection::new` accepts one complete Operations/1.3 capture
+at the original paused citizen-plan tick, before a Created receipt exists.
+It builds a local source projection without replacing the canonical citizen
+anchor. The embedding independently verifies its world, software and operations
+generation, issues complete Item coverage and exact type/stack-size source
+grants, and calls `increase` to derive the count. An incomplete census refuses;
+it cannot become a zero baseline.
+
+The resulting `ObservedInventoryIncreaseObjective` retains the original count,
+a positive requested increase, checked absolute target, original anchor,
+complete operations digest, native generation and the next-job, next-building
+and next-item counters. These are typed predicate fields covered by the existing
+immutable plan archive and independently expected archive identities. No raw
+baseline census is separately archived, and offline recovery makes no claim
+that it recounted that census.
+
+`ObservedInventoryGoal` recognizes either the unchanged minimum or the exact
+new increase shape. Growth cannot be substituted for a legacy objective.
+Current goal polling and durable-history replay both reject a native generation,
+tick or allocator frontier older than the sealed baseline, including before the
+first goal sample. They independently qualify each current complete inventory.
+
+An increase measures net matching stack units relative to that original
+census. Replacing item IDs without growing stock does not satisfy it; increases
+in existing stacks can. Consumed or removed goods reduce the current total.
+Neither type proves that the original order produced the items, that they have
+the requested material, or that they are usable. Original keys, deadlines,
+cadence and stability remain unchanged through retirement and recovery.
+
 ## Selected original production goals
 
 After the exact original work-order insertion is verified, the executor can
@@ -146,6 +177,9 @@ readback for current labor evidence or establish the whole parent's goal. An
 explicit recipe-matched `observed_inventory_minimum` can remain true after the
 finite native order retires; existing and unrelated matching items count. This
 proves neither material, eligibility nor causal production by that order.
+An explicit `observed_inventory_increase` uses the same complete current census
+but requires the sealed baseline plus the requested increase; preexisting stock
+alone cannot satisfy it.
 
 The existing bounded durable history stores raw source captures and publication
 boundaries under the exact selected identity. Replay reissues independently

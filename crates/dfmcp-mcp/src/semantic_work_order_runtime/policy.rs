@@ -6,7 +6,7 @@ use dfmcp_adapter::semantic_work_orders::goal_projection::{
     ORDER_COUNTER_SOURCE, ORDER_STATUS_SOURCE,
 };
 use dfmcp_adapter::semantic_work_orders::{
-    ObservedInventoryObjective, RetainedOrderObjective, WorkOrderGoalProjection,
+    InventoryBaselineProjection, ObservedInventoryGoal, RetainedOrderObjective, WorkOrderGoalProjection,
 };
 use dfmcp_adapter::work_orders::rpc::WorkOrderManifest;
 use dfmcp_adapter::{BridgeManifest, LiveObservationCapsule};
@@ -201,6 +201,47 @@ impl SourceAcceptance {
         });
         Ok(policy)
     }
+    /// Independent source qualification for the complete pre-insertion census.
+    /// The citizen anchor selects this original plan; the operations incarnation
+    /// and native digest retain their own source identity.
+    pub(crate) fn baseline(
+        &self,
+        projection: &InventoryBaselineProjection,
+        context: &OperationContext,
+    ) -> Result<EvidencePolicy> {
+        self.context(context)?;
+        let operations = projection.operations();
+        operations.validate()?;
+        if projection.original_anchor() != context.anchor
+            || operations.jobs.world_folder != self.world_folder
+            || operations.jobs.site_id != self.site_id as i32
+            || operations.jobs.df_version != self.df_version
+            || operations.jobs.dfhack_version != self.dfhack_version
+            || operations.jobs.bridge_generation != self.operations_generation
+            || operations.jobs.tick() != context.anchor.tick
+            || !operations.jobs.paused
+        {
+            return Err(denied("inventory baseline differs from exact original source pins or paused tick"));
+        }
+        let mut policy = EvidencePolicy::at(projection.snapshot().anchor());
+        policy.paused = true;
+        policy.entity_kinds.insert(EntityKind::Item, EvidenceCoverage::Complete);
+        let available = projection.observed_sources();
+        for field in ["operations/1.3.item.type_key", "operations/1.3.item.getStackSize"] {
+            let source = EvidenceSource::Observed {
+                field: field.into(),
+                source_digest: projection.source_digest(),
+            };
+            if !operations.items.is_empty() && !available.contains(&source) {
+                return Err(denied("inventory baseline source field is unavailable"));
+            }
+            if available.contains(&source) {
+                policy.sources.insert(source);
+            }
+        }
+        projection.evidence(policy.clone())?;
+        Ok(policy)
+    }
     pub fn goal(
         &self,
         projection: &WorkOrderGoalProjection,
@@ -277,8 +318,12 @@ impl SourceAcceptance {
         projection: &WorkOrderGoalProjection,
         context: &OperationContext,
     ) -> Result<EvidencePolicy> {
+        let inventory = ObservedInventoryGoal::from_plan(original);
+        if let Some(ObservedInventoryGoal::Increase(objective)) = &inventory {
+            objective.validate_operations(projection.operations())?;
+        }
         self.goal_with_inventory(
-            ObservedInventoryObjective::from_plan(original).is_some(),
+            inventory.is_some(),
             projection,
             context,
         )
@@ -295,13 +340,16 @@ impl SourceAcceptance {
         projection: &WorkOrderGoalProjection,
         context: &OperationContext,
     ) -> Result<EvidencePolicy> {
-        let inventory = ObservedInventoryObjective::from_selected_plan(original, step).is_some();
-        if !inventory && RetainedOrderObjective::from_selected_plan(original, step).is_none() {
+        let inventory = ObservedInventoryGoal::from_selected_plan(original, step);
+        if let Some(ObservedInventoryGoal::Increase(objective)) = &inventory {
+            objective.validate_operations(projection.operations())?;
+        }
+        if inventory.is_none() && RetainedOrderObjective::from_selected_plan(original, step).is_none() {
             return Err(denied(
                 "selected original step has no supported order-completion or inventory objective",
             ));
         }
-        self.goal_with_inventory(inventory, projection, context)
+        self.goal_with_inventory(inventory.is_some(), projection, context)
     }
 
     fn goal_with_inventory(

@@ -44,6 +44,13 @@ It proves neither new production nor which order caused an item. A missing
 original order still has unknown physical work, `receipt_linked: false` and
 `semantic_completion_proven: false`, even when the inventory objective is true.
 
+A separately selected `observed_inventory_increase` objective requires a net
+increase above the complete, independently qualified inventory census captured
+at the original paused planning tick. The server seals the baseline quantity,
+source witness and allocation frontier before native preparation. Preexisting
+stock alone cannot satisfy the requested increase; newly produced output and
+order attribution still remain unproved.
+
 The response separates these questions:
 
 | Response field | Meaning |
@@ -55,8 +62,8 @@ The response separates these questions:
 | `current_goal.physical_quiescence_proven` | The qualified complete global job domain is quiet. |
 | `current_goal.semantic_completion_proven` | Original goal proof, receipt linkage and physical quiescence hold together. |
 | `current_goal_available` | A current-process goal sample exists; exact restart does not fabricate one. |
-| `original_plan.objective` | The immutable selected objective: original order completion or observed inventory minimum. |
-| `inventory_objective.proven_at_anchor` | The explicitly selected inventory minimum satisfies its original temporal requirement at the named sample. |
+| `original_plan.objective` | The immutable selected objective: original order completion, observed inventory minimum, or observed inventory increase. |
+| `inventory_objective.proven_at_anchor` | The explicitly selected inventory predicate satisfies its original temporal requirement at the named sample. |
 | `inventory_objective.first_satisfied_anchor` | First qualified inventory achievement, preserved independently of later consumption or restart. |
 | `clock.active_run` | The separate reviewed native run, if one remains unsettled. |
 | `clock.may_be_running` | Retained order-clock uncertainty still prevents a fresh paused original-goal sample. |
@@ -65,7 +72,7 @@ The response separates these questions:
 | `clock.runs[].native.historical_pause_verified` | That native receipt verified a pause at its recorded tick; it does not establish the game's current pause state. |
 
 The default goal proves finite native order completion. The optional inventory
-goal proves only the declared observed stack minimum; neither mode proves
+goal proves only its declared observed stock minimum or net increase; no mode proves
 order-attributed output quantities, material availability or workshop feasibility. Brewing,
 cooking, order conditions, multiple goals and automatic chaining of runs are
 outside this runtime. Clock receipts retain their own source anchors and never
@@ -406,8 +413,83 @@ can advance unfinished stability only when qualified inventory is already true.
 Without that explicit configuration, game time must progress through a separately
 managed control path. The one-sample default can finish at the first qualified
 post-retirement sample.
-This mode makes no delta-inventory, newly-produced, wood-classification,
+The minimum mode makes no delta-inventory, newly-produced, wood-classification,
 available-for-use or causal-output claim.
+
+### Require a net inventory increase from the original census
+
+Use this objective in the first request when existing stock should not satisfy
+the goal:
+
+```json
+{
+  "expected_observation": "<latest complete citizen observation seal>",
+  "recipe": "wooden_bed",
+  "amount": 4,
+  "deadline_tick": 12000,
+  "poll_interval_ticks": 10,
+  "stable_samples": 2,
+  "objective": {
+    "kind": "observed_inventory_increase",
+    "item_type": "BED",
+    "increase_stack_units": 4
+  }
+}
+```
+
+The item type must match the finite furniture recipe. `increase_stack_units`
+is an integer from 1 through 1,000,000 and is independent of the order amount.
+The closed request accepts no baseline quantity, target, source digest,
+generation or allocation frontier from the caller.
+
+Before publishing an original archive or preparing an order, Plan acquires one
+complete operations/1.3 census at the exact paused canonical observation tick.
+The independently pinned operations source must match the accepted world,
+site, DF/DFHack versions and its own incarnation. Every Item and its type/stack
+facts must qualify; a partial roster or an unknown count cannot become a zero
+baseline. Existing acquisition, entity, byte and deadline bounds apply. A newer
+consumed native tick requires a fresh canonical Observe before any new original
+plan, including a later request that switches to minimum or order completion.
+Query and Observe authority are checked at that consumed time without changing
+the original canonical anchor.
+
+The immutable typed predicate contains the starting stack quantity, requested
+increase, original canonical anchor, exact operations digest, source generation
+and native allocation floors. Its target is the checked sum of baseline plus
+increase. For example, a baseline of three beds and an increase of two requires
+at least five observed bed stack units. All complete later samples must retain
+the original fortress/restore epoch, native source incarnation and nonregressing
+job, building and item allocation frontiers. First sampling and durable replay
+both enforce those original floors.
+
+`original_plan.objective` and `inventory_objective` expose
+`baseline_stack_units`, `increase_stack_units`, `target_stack_units`,
+`baseline_anchor`, `baseline_source_digest`,
+`baseline_source_generation` and `baseline_source_counters`.
+The three counters are ordered as next job ID, next building ID and next item ID.
+They preserve source continuity; they do not claim that counted items have new IDs.
+
+The original plan archive and its external object seal bind the full baseline.
+Repeating the same request uses that retained value without a new baseline
+read. Changing its objective cannot replace the original. Offline recovery
+restores the sealed baseline and historical achievement, with no source contact,
+current inventory proof or unfinished stability. No separate raw baseline
+census is retained for offline recounting. Existing minimum/default request
+identities, native wires and custody filenames remain unchanged.
+
+Wait evaluates current complete stock against the sealed target under the
+original deadline, cadence and stable-sample requirement. An unchanged baseline
+is False. Subsequent consumption can make a previously achieved increase False;
+historical first achievement remains separately recorded. The receipt-linked
+order clock can advance a pending increase while its original order is eligible.
+Once inventory is True, the independent inventory clock can finish the original
+stability interval after order retirement. Neither clock renews the baseline,
+deadline or insertion key.
+
+This is observed net inventory growth, not an item-production receipt. Matching
+items of any material or usability count, and unrelated acquisitions can increase
+the stock. Consumption can offset new production. A disappeared manager order
+still has Unknown original-order completion and unproved causal attribution.
 
 ### Advance the retained goal with a reviewed bounded run
 

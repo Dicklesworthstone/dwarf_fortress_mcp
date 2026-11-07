@@ -159,7 +159,7 @@ impl Runtime {
                     .is_some_and(ProductionClock::needs_target);
                 let inventory = self.inventory_clock.as_ref().is_some_and(ProductionInventoryClock::needs_target)
                     && self.original.as_ref().is_some_and(|p|
-                        dfmcp_adapter::semantic_work_orders::ObservedInventoryObjective::from_selected_plan(p, step).is_some());
+                        dfmcp_adapter::semantic_work_orders::ObservedInventoryGoal::from_selected_plan(p, step).is_some());
                 if ready.all_applied() && !ready.needs_reconciliation() && (order || inventory) {
                     // Existing single-target custody admission is 1024 MiB.
                     // Four exact leaves cost 4*1024 MiB, not one replenished

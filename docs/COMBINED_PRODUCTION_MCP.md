@@ -146,8 +146,8 @@ details or manual labor settings. Use `kind="existing_labor"` for that case:
 
 The labor key and citizen IDs must come from the actual observation. The
 request accepts the same finite recipes, amounts, original deadline, cadence,
-stability and optional `observed_inventory_minimum` objective as the existing
-single-order request. It has no `enabled` flag: every selected citizen must be
+stability and optional `observed_inventory_minimum` or
+`observed_inventory_increase` objective as the existing single-order request. It has no `enabled` flag: every selected citizen must be
 currently eligible with that labor positively observed as enabled. Callers
 cannot supply historical identities or assert eligibility.
 
@@ -534,8 +534,8 @@ through its remaining stability interval. It retains the complete combined plan,
 selected StepId/key, verified Created receipt and predecessor custody. It does
 not require a present manager-order row or reinterpret inventory as output
 attributed to that order. Both original effects must be settled, and fresh
-qualified evidence must show the requested labor settings and inventory minimum
-are True. Fulfilled, failed, cancelled or expired original obligations refuse
+qualified evidence must show the requested labor settings and selected inventory
+predicate are True. Fulfilled, failed, cancelled or expired original obligations refuse
 new runs; the original deadline and cadence are never renewed.
 
 Configure the same independent source incarnation in the parent and order child:
@@ -729,7 +729,9 @@ and offline recovery retain this distinction.
 ## Select and monitor an original inventory objective
 
 Include an `objective` in the first closed request to ask whether the original
-order step's requested inventory minimum is present. For example:
+order step's requested inventory minimum is present. This minimum can already be
+satisfied by preexisting stock. To require growth from a qualified original
+census, select `observed_inventory_increase` as described below. For example:
 
 ```json
 {
@@ -790,6 +792,74 @@ samples need separately managed game-time progress and coherent paused reads;
 repeated reads at one tick cannot supply advancing samples. A failed call clears
 current proof and unfinished continuity without extra I/O. The next admitted
 sample persists that interruption; historical first achievement remains intact.
+
+### Require growth above the original inventory
+
+Every original request shape supports a separate
+`observed_inventory_increase` objective: the ordinary assignment/order request,
+`existing_labor`, and each leaf of `portfolio` or
+`existing_labor_portfolio`. For a bed order, replace its objective with:
+
+```json
+{
+  "kind": "observed_inventory_increase",
+  "item_type": "BED",
+  "increase_stack_units": 4
+}
+```
+
+The increase is 1–1,000,000 observed stack units, independent of the requested
+finite order amount. The type must match that leaf's furniture recipe. Baseline
+quantities, targets, source witnesses, generations and counters are server-owned
+and are rejected as request fields.
+
+Before any original parent custody is published, the host acquires one complete
+operations/1.3 census at the same paused tick as the retained canonical citizens.
+The order family's independent source acceptance checks the exact world/site,
+software and operations incarnation, complete Item coverage, and every required
+type/stack source field. It qualifies the whole count, including a complete
+empty roster; missing evidence cannot become zero. A portfolio resolves all
+growth leaves against this single census. Default and minimum leaves retain
+their existing predicates, and an original with no growth objective performs
+no new baseline acquisition.
+
+The resulting typed predicates seal each starting quantity and requested
+increase together with the exact original canonical anchor, operations digest,
+source generation and three allocation floors. A baseline of three beds plus
+four requested stack units requires at least seven observed bed stack units.
+A source, tick or allocation regression refuses both initial monitoring and
+durable replay. The entire original parent still includes every requested
+current labor prerequisite and every original production goal.
+
+`selected_inventory_goal.kind` identifies the increase. The selected object
+and portfolio leaf retain `baseline_stack_units`, `increase_stack_units`,
+`target_stack_units`, `baseline_anchor`,
+`baseline_source_digest`, `baseline_source_generation` and
+`baseline_source_counters` (next job, building and item IDs, in that order).
+The selected source anchor and complete-parent anchor keep their separate
+identities. The normal current-truth, temporal proof, first-achievement and
+labor-bracket rules apply without changing the original deadline or cadence.
+
+Prepared plan IDs and step keys bind the full baseline; a later request cannot
+change it or reinterpret the original as a minimum. Recovery loads its exact
+typed predicate from `original.plan` and restores no current inventory or
+parent certificate. It does not acquire a replacement baseline, introduce a new
+custody file, or independently recount a retained raw baseline census. Existing
+request modes keep their original identity bytes.
+
+Both clocks recognize the increase. The order clock can advance its unfinished
+goal while the exact original manager order remains eligible. The independent
+inventory clock requires current qualified stock at or above the sealed target
+and current labor to be True; it can then finish the original stability interval
+after retirement. A clock receipt still supplies no inventory or parent proof,
+and no run changes the baseline or permits another insertion.
+
+Unchanged preexisting stock cannot satisfy a positive increase. The result
+nevertheless measures net stock, including unrelated matching acquisitions and
+items of any material or usability. It neither identifies newly created items
+nor attributes output to the original order. Consumption can offset production
+or reverse current truth after historical achievement. Retired order completion
+remains Unknown.
 
 ## Prove the complete original parent
 

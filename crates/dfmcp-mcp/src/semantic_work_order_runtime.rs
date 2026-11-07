@@ -7,7 +7,7 @@ use dfmcp_adapter::live_projection::{LiveWorldProjection, project_live_capsule};
 use dfmcp_adapter::plan_archive::PlanArchiveStore;
 use dfmcp_adapter::semantic_work_orders::{
     AssociationStore, DurableWorkOrderGoalMonitor, GoalHistoryStore, NativeOrderCreation,
-    ObservedInventoryObjective, OperationsGoalSource, SemanticWorkOrderReview,
+    ObservedInventoryGoal, OperationsGoalSource, SemanticWorkOrderReview,
     SemanticWorkOrderSession, WorkOrderEvidenceOwner, WorkOrderGoalProgress,
 };
 use dfmcp_adapter::work_order_control::session::WorkOrderSession;
@@ -25,10 +25,13 @@ use dfmcp_intent::{ObligationStatus, PreparedPlan};
 use dfmcp_world::{PredicateEvidence, PredicateTruth};
 use serde_json::{Value, json};
 use std::time::{Duration, Instant};
+#[cfg(test)]
+use dfmcp_adapter::semantic_work_orders::ObservedInventoryObjective;
 
 pub mod bounded_goal_clock;
 pub mod clock;
 mod inventory_advancement;
+pub(crate) mod inventory_baseline;
 pub mod inventory_clock;
 pub mod native;
 pub mod policy;
@@ -227,6 +230,7 @@ pub struct Runtime<S: Shell> {
     request: u128,
     budget: WorkBudget,
     anchor: StateAnchor,
+    inventory_baseline_tick_floor: GameTick,
     semantic: Semantic<S>,
     journal: Digest32,
     basis: Option<Basis>,
@@ -287,18 +291,37 @@ fn truth(t: PredicateTruth) -> &'static str {
         PredicateTruth::Unknown => "unknown",
     }
 }
+pub(crate) fn inventory_objective_json(objective: &ObservedInventoryGoal) -> Value {
+    match objective {
+        ObservedInventoryGoal::Minimum(objective) => json!({
+            "kind":"observed_inventory_minimum", "item_type":objective.item_type,
+            "minimum_stack_units":objective.min_stack_units,
+        }),
+        ObservedInventoryGoal::Increase(objective) => json!({
+            "kind":"observed_inventory_increase", "item_type":objective.item_type(),
+            "baseline_stack_units":objective.baseline_stack_units(),
+            "increase_stack_units":objective.increase_stack_units(),
+            "target_stack_units":objective.target_stack_units(),
+            "baseline_anchor":anchor_json(objective.baseline_anchor()),
+            "baseline_source_digest":objective.baseline_source_digest().to_hex(),
+            "baseline_source_protocol":"operations/1.3",
+            "baseline_source_generation":objective.source_generation(),
+            "baseline_source_counters":objective.baseline_source_counters(),
+            "preexisting_stock_alone_satisfies_goal":false,
+            "new_item_identity_required":false,
+            "new_production":"unknown",
+        }),
+    }
+}
 impl View {
     pub fn to_json(&self) -> Value {
         let inventory = self
             .original
             .as_ref()
-            .and_then(ObservedInventoryObjective::from_plan);
+            .and_then(ObservedInventoryGoal::from_plan);
         let objective = inventory.as_ref().map_or_else(
             || json!({"kind":"original_order_completion"}),
-            |objective| {
-                json!({"kind":"observed_inventory_minimum", "item_type":objective.item_type,
-                "minimum_stack_units":objective.min_stack_units})
-            },
+            inventory_objective_json,
         );
         let insertion = self.creation.as_ref().map(|creation| match creation {
             NativeOrderCreation::Unverified => json!({"verified":false,"native_order_id":null,"receipt":null}),
@@ -326,9 +349,9 @@ impl View {
             "continuous":p.continuous,
             "semantic_completion_proven":p.current_goal_proven() && p.receipt_linked && p.physical_work.is_quiescent()
         }));
-        let inventory_goal = inventory.as_ref().map(|inventory| json!({
-            "kind":"observed_inventory_minimum", "item_type":inventory.item_type,
-            "minimum_stack_units":inventory.min_stack_units,
+        let inventory_goal = inventory.as_ref().map(|inventory| {
+            let mut value = inventory_objective_json(inventory);
+            let proof = json!({
             "quantity_semantics":"sum_of_observed_stack_size",
             "current_truth":self.goal.as_ref().map(|p| truth(p.current_goal)),
             "proven_at_anchor":self.goal.as_ref().is_some_and(WorkOrderGoalProgress::current_goal_proven),
@@ -336,7 +359,12 @@ impl View {
             "first_satisfied_anchor":self.first_satisfied_anchor.map(anchor_json),
             "preexisting_items_included":true, "production_attribution":"unknown",
             "material_classification":"unknown", "eligibility":"not_assessed"
-        }));
+            });
+            if let (Some(value), Some(proof)) = (value.as_object_mut(), proof.as_object()) {
+                value.extend(proof.clone());
+            }
+            value
+        });
         let recovery = self.archive.zip(self.original.as_ref()).map(|(seal, p)| {
             let mut value = json!({"plan_digest":seal.plan_digest.to_hex(),
                 "object_digest":seal.object_digest.to_hex(),"anchor":anchor_json(p.anchor),
@@ -543,6 +571,7 @@ impl<S: Shell> Runtime<S> {
             request: 1,
             budget,
             anchor,
+            inventory_baseline_tick_floor: anchor.tick,
             semantic,
             journal,
             basis: None,
@@ -690,15 +719,17 @@ impl<S: Shell> Runtime<S> {
                 "runtime context differs from retained session or widens its allowance",
             ));
         }
-        c.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
+        let mut authority = c.clone();
+        authority.anchor.tick = authority.anchor.tick.max(self.inventory_baseline_tick_floor);
+        authority.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
         if control {
             if !self.production_control_enabled() {
                 return Err(denied(
                     "runtime is not currently operator-authorized for production",
                 ));
             }
-            c.authorize(Capability::Plan, RiskTier::Guarded, &[], None)?;
-            c.authorize(
+            authority.authorize(Capability::Plan, RiskTier::Guarded, &[], None)?;
+            authority.authorize(
                 Capability::ConfigureProduction,
                 RiskTier::Guarded,
                 &[],
@@ -933,7 +964,7 @@ impl<S: Shell> Runtime<S> {
                 "offline runtime cannot acquire current observations",
             ));
         }
-        c.authorize(Capability::Observe, RiskTier::ReadOnly, &[], None)?;
+        inventory_baseline::authorize_observe(c, self.inventory_baseline_tick_floor)?;
         self.basis = None;
         self.evidence = None;
         let mut work = Work::new(c)?;
@@ -975,6 +1006,7 @@ impl<S: Shell> Runtime<S> {
         if observed.cursor.epoch != self.anchor.cursor.epoch
             || observed.cursor.sequence < self.anchor.cursor.sequence
             || observed.tick < self.anchor.tick
+            || observed.tick < self.inventory_baseline_tick_floor
             || observed.tick.get() < self.semantic.high_tick()
             || (observed.cursor == self.anchor.cursor && observed != self.anchor)
             || below_monitor_floor
@@ -1027,6 +1059,10 @@ impl<S: Shell> Runtime<S> {
     }
     pub fn plan(&mut self, request: Request, c: &OperationContext) -> Result<View> {
         self.check(c, true)?;
+        if c.anchor.tick < self.inventory_baseline_tick_floor {
+            return Err(denied("reobserve the canonical source before any original planning"));
+        }
+        request.validate()?;
         let mut work = Work::new(c)?;
         let output = work.reserve(VIEW_BYTES)?;
         self.verify_archive(&mut work)?;
@@ -1045,8 +1081,22 @@ impl<S: Shell> Runtime<S> {
             &basis.projection,
             &work.reserve(MIB)?,
         )?;
-        let plan = request.compile(
+        let objectives: Vec<_> = request.objective.iter().collect();
+        let baselines = if let Some(original) = &self.original {
+            inventory_baseline::InventoryBaselines::from_original(original)?
+        } else if inventory_baseline::needed(&objectives) {
+            inventory_baseline::acquire(
+                &self.shell,
+                &objectives,
+                &mut self.inventory_baseline_tick_floor,
+                &work.reserve(inventory_baseline::BASELINE_BYTES)?,
+            )?
+        } else {
+            inventory_baseline::InventoryBaselines::default()
+        };
+        let plan = request.compile_with_inventory(
             &PredicateEvidence::scoped(&basis.projection.snapshot, policy)?,
+            &baselines,
             &work.reserve(MIB)?,
         )?;
         if let Some(original) = &self.original {
@@ -1320,7 +1370,7 @@ impl<S: Shell> Runtime<S> {
         let inventory_goal = sample
             .original
             .as_ref()
-            .and_then(ObservedInventoryObjective::from_plan);
+            .and_then(ObservedInventoryGoal::from_plan);
         if goal.current_goal_proven()
             && (inventory_goal.is_some() || goal.physical_work.is_quiescent())
         {

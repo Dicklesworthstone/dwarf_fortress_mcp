@@ -238,7 +238,7 @@ fn machine_host_contract_preserves_bounded_development_scope() -> Result<()> {
     assert_eq!(clock["new_unpause_attempts_per_run"], 1);
     assert_eq!(
         clock["supported_original_objectives"],
-        json!(["retained_order_completion", "observed_inventory_minimum"])
+        json!(["retained_order_completion", "observed_inventory_minimum", "observed_inventory_increase"])
     );
     for field in [
         "requires_settled_original_effects",

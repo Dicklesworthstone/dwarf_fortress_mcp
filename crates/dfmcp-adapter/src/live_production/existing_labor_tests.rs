@@ -508,3 +508,45 @@ fn existing_labor_projection_accepts_a_bounded_superset_but_never_grants_missing
     assert!(projection.evidence(too_wide).is_err());
     Ok(())
 }
+
+
+#[test]
+fn existing_labor_joins_a_sealed_inventory_increase_without_an_assignment_receipt() -> Result<()> {
+    use crate::semantic_work_orders::{InventoryBaselineProjection, ObservedInventoryGoal};
+    let mut f = existing_fixture()?;
+    let raw = operations(&f.orders.borrow().queue, 0);
+    let projection = InventoryBaselineProjection::new(f.plan.anchor, raw, &f.c)?;
+    let mut accepted = EvidencePolicy::at(projection.snapshot().anchor());
+    accepted.paused = true;
+    accepted.entity_kinds.insert(EntityKind::Item, EvidenceCoverage::Complete);
+    accepted.sources = projection.observed_sources();
+    let objective = projection.increase("BED", 2, accepted, &f.c)?;
+    let prerequisite = ExistingLaborRequirement::from_plan(&f.plan)?
+        .ok_or_else(|| invalid("existing-worker fixture lost prerequisite"))?;
+    let goal = objective.predicate();
+    f.plan.steps[0].postconditions = vec![goal.clone()];
+    f.plan.steps[0].obligation.as_mut()
+        .ok_or_else(|| invalid("missing existing-worker increase obligation"))?.terminal = goal.clone();
+    f.plan.terminal_condition = Predicate::All(vec![prerequisite.predicate(), goal]).normalized();
+    reseal(&mut f.plan);
+    let layout = crate::live_production::ProductionLayout::from_plan(&f.plan)?;
+    assert_eq!(layout.assignment_step(), None);
+    assert_eq!(layout.order_steps(), &[StepId::ZERO]);
+    assert_eq!(
+        ObservedInventoryGoal::from_selected_plan(&f.plan, StepId::ZERO),
+        Some(ObservedInventoryGoal::Increase(objective)),
+    );
+    let Executor { workforce, orders, evidence, factory, .. } = f.executor;
+    f.executor = Executor::new(f.plan.clone(), workforce, orders, evidence, factory, &f.c)?;
+    f.applied(0)?;
+    retire(&f, 100)?;
+    let mut monitor = open(&mut f, 0, Storage::default(), true)?;
+    let first = sample_existing(&mut f, &mut monitor, 1, 125, true, false, |p, _| Ok(grant(p)))?;
+    assert!(!first.original_goal_proven());
+    let final_sample = sample_existing(&mut f, &mut monitor, 2, 130, true, false, |p, _| Ok(grant(p)))?;
+    assert!(final_sample.original_goal_proven());
+    assert!(!final_sample.progress().receipt_linked);
+    assert_eq!(f.orders.borrow().commits, 1);
+    assert_eq!(&f.workforce.data.borrow().calls[1..], &[0; 4]);
+    Ok(())
+}

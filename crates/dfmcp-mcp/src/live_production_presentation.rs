@@ -122,7 +122,7 @@ fn portfolio_parent_valid(view: &Value, parent: &Value, anchor: Option<StateAnch
             || goal["stable_samples"] != step["obligation"]["stable_samples"]
             || !matches!(
                 goal["kind"].as_str(),
-                Some("retained_order_completion" | "observed_inventory_minimum")
+                Some("retained_order_completion" | "observed_inventory_minimum" | "observed_inventory_increase")
             )
             || !matches!(
                 goal["current_truth"].as_str(),
@@ -195,6 +195,19 @@ fn compact_goal(value: &Value) -> Value {
         result["disappearance_proves_completion"] = json!(false);
         if let Some(object) = result.as_object_mut() {
             object.remove("item_type");
+            object.remove("minimum_stack_units");
+        }
+    } else if value["kind"] == "observed_inventory_increase" {
+        for field in ["baseline_stack_units", "increase_stack_units", "target_stack_units", "baseline_source_generation"] {
+            result[field] = json!(value[field].as_u64());
+        }
+        result["baseline_anchor"] = compact_anchor(&value["baseline_anchor"]);
+        result["baseline_source_digest"] = json!(digest(&value["baseline_source_digest"]));
+        result["baseline_source_protocol"] = json!("operations/1.3");
+        result["baseline_source_counters"] = json!(value["baseline_source_counters"].as_array().map(|rows| rows.iter().take(3).map(Value::as_u64).collect::<Vec<_>>()));
+        result["preexisting_stock_alone_satisfies_goal"] = json!(false);
+        result["new_production"] = json!("unknown");
+        if let Some(object) = result.as_object_mut() {
             object.remove("minimum_stack_units");
         }
     }
@@ -489,7 +502,7 @@ fn encode(
         && order_goal["scope"] == "selected_original_order_step";
     let raw_selected_goal = if retained_order {
         order_goal
-    } else if order_goal.is_null() && inventory_goal["kind"] == "observed_inventory_minimum" {
+    } else if order_goal.is_null() && matches!(inventory_goal["kind"].as_str(), Some("observed_inventory_minimum" | "observed_inventory_increase")) {
         inventory_goal
     } else {
         &Value::Null
@@ -613,7 +626,7 @@ fn encode(
         && selected_goal["scope"] == "selected_original_order_step"
         && matches!(
             selected_goal["kind"].as_str(),
-            Some("observed_inventory_minimum" | "retained_order_completion")
+            Some("observed_inventory_minimum" | "observed_inventory_increase" | "retained_order_completion")
         )
         && !selected_proven
         && selected_goal["terminal_failure"] != true
@@ -622,7 +635,7 @@ fn encode(
     let clock_goal_ready = |owner: ClockOwner| {
         current_goal_ready
             && if owner == INVENTORY_CLOCK {
-                selected_goal["kind"] == "observed_inventory_minimum"
+                matches!(selected_goal["kind"].as_str(), Some("observed_inventory_minimum" | "observed_inventory_increase"))
                     && selected_goal["current_truth"] == "true"
                     && joined_goal["current_truth"] == "true"
             } else {

@@ -17,6 +17,9 @@ mod parent_goal_tests {
 mod existing_labor_tests {
     include!("existing_labor_tests.rs");
 }
+mod inventory_increase_tests {
+    include!("inventory_increase_tests.rs");
+}
 
 fn inventory_fixture(count: usize) -> Result<ProductionFixture> {
     let mut f = ProductionFixture::new(count)?;

@@ -1,5 +1,60 @@
 # Implementation Status
 
+## Unreleased — Plan and recover explicit inventory increases
+
+Both semantic production hosts now accept the closed objective
+`{"kind":"observed_inventory_increase","item_type":"BED","increase_stack_units":3}`.
+The item type must match the finite furniture recipe. The host obtains one
+complete Operations/1.3 inventory census at the exact original paused citizen
+tick, independently checks the configured source pins, and derives the starting
+count. Combined plans retain the same current workforce prerequisite; one to
+four portfolio leaves share that one census. No caller-supplied baseline is
+accepted and no new native wire generation or top-level MCP tool is introduced.
+
+The new adapter projection seals the starting stack units, positive increase,
+checked target, original citizen/plan anchor, operations digest, generation and
+next-job/building/item floors in the typed original predicate. The complete
+original archive and externally expected digests preserve these values.
+Standalone repeated planning and both recovery flows retain that baseline;
+they do not recapture it or infer a historical count from current stock. The
+raw baseline census is not separately persisted, so offline reopening does not
+claim an independent raw-census recount.
+
+The new objective is supported by standalone, assigned-labor, assigned-labor
+portfolio, existing-labor and existing-labor portfolio compilers. Current Wait
+and durable goal-history replay requalify complete inventory and refuse source
+generation or allocator regression below the original baseline, including the
+first goal sample. The selected and whole-parent monitors retain their original
+receipt, worker, deadline, cadence and stability requirements. Both original
+clock flows recognize the objective; the separate inventory clock can finish
+an already True goal's original stability interval after order retirement.
+
+Failed baseline reads retain consumed native time without changing the displayed
+canonical anchor. Query/Observe authorization is checked at that floor before
+reacquisition, and every new-plan path refuses an older canonical basis, even
+when a caller switches to a minimum or default order objective. An expired
+Observe grant cannot be revived by an unexpired Query grant. The normal
+source, archive, native-preparation and confirmed-commit guards remain in force.
+
+Legacy minimum/default request identities remain unchanged. Presentation exposes
+the original baseline, requested increase and target, and keeps order attribution
+Unknown. This proves net observed stock growth only; existing item stacks can
+grow and consumed stock can reduce the result. It does not prove new item IDs,
+material/usability, that the particular order made the goods, or timely
+completion of a retired order.
+
+Twelve adapter and eight MCP regressions are authored, in addition to the
+preceding six world, two archive and one witness case. The new cases cover
+qualified zero versus unknown baselines, source/budget refusal, all five
+compilers and one-census portfolios, original-key/archive recovery, first-sample
+and replay floors, Agent Turn proof and both clocks after retirement. Independent
+source/API reviews found no remaining concrete blocker. All 29 new growth tests
+remain uncompiled and unexecuted after executor loss; source and contract
+reconciliation does not change that evidence level. The earlier handoff's
+15 component passes remain separately scoped. No full-head, modern-stdio,
+native DFHack, live-game or production-admission qualification is claimed.
+Bead `dfmcp-reality-wiring-proof-4bf.14.5` remains in progress.
+
 ## Unreleased — Seal inventory-growth goals in the core plan
 
 The core now represents net observed quantity growth as

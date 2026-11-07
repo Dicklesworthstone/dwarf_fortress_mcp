@@ -72,21 +72,49 @@ fn obligation(view: &Value) -> Option<Value> {
 }
 fn inventory_objective(view: &Value) -> Option<Value> {
     let objective = &view["original_plan"]["objective"];
-    if objective["kind"] != "observed_inventory_minimum" {
-        return None;
-    }
+
     let item_type = objective["item_type"]
         .as_str()
         .filter(|kind| matches!(*kind, "BED" | "DOOR" | "TABLE" | "CHAIR"))?;
-    let minimum = objective["minimum_stack_units"]
-        .as_u64()
-        .filter(|n| (1..=1_000_000).contains(n))?;
-    Some(
-        json!({"kind":"observed_inventory_minimum", "item_type":item_type,
-        "minimum_stack_units":minimum, "preexisting_items_included":true,
-        "production_attribution":"unknown", "material_classification":"unknown",
-        "eligibility":"not_assessed"}),
-    )
+    let mut value = match objective["kind"].as_str()? {
+        "observed_inventory_minimum" => {
+            let minimum = objective["minimum_stack_units"].as_u64()
+                .filter(|n| (1..=1_000_000).contains(n))?;
+            json!({"kind":"observed_inventory_minimum", "item_type":item_type,
+                "minimum_stack_units":minimum})
+        }
+        "observed_inventory_increase" => {
+            let baseline = objective["baseline_stack_units"].as_u64()?;
+            let increase = objective["increase_stack_units"].as_u64()
+                .filter(|n| (1..=1_000_000).contains(n))?;
+            let target = baseline.checked_add(increase)?;
+            let original_anchor = anchor(&objective["baseline_anchor"])?;
+            let counters = objective["baseline_source_counters"].as_array()?;
+            if objective["target_stack_units"].as_u64()? != target
+                || original_anchor != anchor(&view["original_plan"]["anchor"])?
+                || counters.len() != 3
+                || counters.iter().any(|n| n.as_u64().is_none_or(|n| n > i32::MAX as u64))
+            {
+                return None;
+            }
+            json!({"kind":"observed_inventory_increase", "item_type":item_type,
+                "baseline_stack_units":baseline, "increase_stack_units":increase,
+                "target_stack_units":target, "baseline_anchor":original_anchor,
+                "baseline_source_digest":digest(&objective["baseline_source_digest"])?,
+                "baseline_source_protocol":"operations/1.3",
+                "baseline_source_generation":objective["baseline_source_generation"].as_u64()
+                    .filter(|n| *n > 0 && *n < u64::MAX)?,
+                "baseline_source_counters":counters,
+                "preexisting_stock_alone_satisfies_goal":false,
+                "new_item_identity_required":false, "new_production":"unknown"})
+        }
+        _ => return None,
+    };
+    value["preexisting_items_included"] = json!(true);
+    value["production_attribution"] = json!("unknown");
+    value["material_classification"] = json!("unknown");
+    value["eligibility"] = json!("not_assessed");
+    Some(value)
 }
 fn run_state(value: &Value) -> Option<&str> {
     value.as_str().filter(|s| {
@@ -314,8 +342,8 @@ fn render(
             && g["physical_quiescence_proven"] == true
     });
     let inventory = inventory_objective(view);
-    let inventory_proven = inventory.as_ref().and(goal).map(|g| {
-        g["objective_kind"] == "observed_inventory_minimum"
+    let inventory_proven = inventory.as_ref().zip(goal).map(|(inventory, g)| {
+        g["objective_kind"] == inventory["kind"]
             && g["original_goal_proven"] == true
             && g["current_truth"] == "true"
     });
@@ -582,6 +610,10 @@ fn render(
             "optional_objective":{"kind":"observed_inventory_minimum", "item_type":"exact recipe output type",
                 "minimum_stack_units_min":1, "minimum_stack_units_max":1000000,
                 "preexisting_items_included":true, "production_attribution":"unknown"},
+            "optional_increase_objective":{"kind":"observed_inventory_increase", "item_type":"exact recipe output type",
+                "increase_stack_units_min":1, "increase_stack_units_max":1000000,
+                "baseline":"server-qualified complete census at original paused anchor",
+                "preexisting_stock_alone_satisfies_goal":false, "production_attribution":"unknown"},
             "requires":["operator production authority","exact observation seal","unchanged original request and deadline when recovering"],"grants_authority":false}),
         json!({"action":"fortress.commit","enabled":commit,"requires_confirmation":true,
             "requires":["exact paired seal","current authority and evidence revalidation"],"grants_authority":false}),

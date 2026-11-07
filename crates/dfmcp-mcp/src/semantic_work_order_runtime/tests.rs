@@ -4,6 +4,8 @@
 mod clock_runtime_tests;
 #[path = "inventory_tests.rs"]
 mod inventory_tests;
+#[path = "inventory_increase_tests.rs"]
+mod inventory_increase_tests;
 use super::*;
 use dfmcp_adapter::live_jobs::{LiveJob, LiveJobObservation};
 use dfmcp_adapter::live_operations::{LiveItem, LiveOperationsObservation};
@@ -579,6 +581,9 @@ struct Resources {
     remaining: Rc<Cell<i32>>,
     jobs: Rc<Cell<bool>>,
     item_count: Rc<Cell<usize>>,
+    operations_acquisitions: Rc<Cell<usize>>,
+    citizen_acquisitions: Rc<Cell<usize>>,
+    operations_override: Rc<RefCell<Option<LiveOperationsObservation>>>,
     items_override: Rc<RefCell<Option<Vec<LiveItem>>>>,
     item_denied: Rc<Cell<bool>>,
     item_authorizations: Rc<Cell<usize>>,
@@ -627,6 +632,9 @@ impl Resources {
             remaining: Rc::new(Cell::new(5)),
             jobs: Rc::new(Cell::new(false)),
             item_count: Rc::new(Cell::new(0)),
+            operations_acquisitions: Rc::new(Cell::new(0)),
+            citizen_acquisitions: Rc::new(Cell::new(0)),
+            operations_override: Rc::new(RefCell::new(None)),
             items_override: Rc::new(RefCell::new(None)),
             item_denied: Rc::new(Cell::new(false)),
             item_authorizations: Rc::new(Cell::new(0)),
@@ -734,6 +742,7 @@ impl Shell for Resources {
         ))
     }
     fn acquire(&self, _: &OperationContext) -> Result<LiveObservationCapsule> {
+        self.citizen_acquisitions.set(self.citizen_acquisitions.get() + 1);
         Ok(capsule(&self.native.borrow().queue)?.0)
     }
     fn evidence(&self, original: LiveObservationCapsule, c: &OperationContext) -> Result<Evidence> {
@@ -825,6 +834,7 @@ impl Shell for Resources {
         ))
     }
     fn operations(&self, _: &OperationContext) -> Result<OperationsFixture> {
+        self.operations_acquisitions.set(self.operations_acquisitions.get() + 1);
         let count = self.item_count.get();
         let mut raw = operations(&self.native.borrow().queue, count > 0, self.jobs.get());
         if self.changed_operations_generation.get() {
@@ -839,6 +849,9 @@ impl Shell for Resources {
         }
         if let Some(items) = self.items_override.borrow().as_ref() {
             raw.items = items.clone();
+        }
+        if let Some(value) = self.operations_override.borrow().as_ref() {
+            raw = value.clone();
         }
         Ok(OperationsFixture {
             raw,
