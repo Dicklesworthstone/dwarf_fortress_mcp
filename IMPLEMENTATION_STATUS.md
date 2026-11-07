@@ -1,5 +1,47 @@
 # Implementation Status
 
+## Unreleased — Bounded spatial entity selection in the shared query loop
+
+The shared dfmcp.query/1 executor accepts spatial_entities through the existing
+laboratory structured wrapper and structured live-read consumers. Callers name
+one typed coordinate field for a point or two distinct coordinate fields for a
+cuboid. Signed x/y/z bounds are inclusive, with intersects, within and contains
+relations. Typed where filters, projected fields, ascending/descending entity IDs
+and bounded pages use the existing query vocabulary and eleven-tool surface.
+
+Continuation identity commits to the exact source anchor, session, region,
+geometry fields, relation, kind/field selection, predicate and order, plus the
+last delivered entity ID/generation. Page width can change without skipping
+records. Canonically equivalent kind encodings return identical answers.
+Whole-row fitting retains the last delivered cursor and refuses an oversized
+next row instead of silently skipping it.
+
+Unknown, unavailable, stale, contradictory, future, mistyped or inverted geometry
+is counted separately from entities outside the region. Geometry facts retain
+their source, observation tick and epistemic class. Selection completeness is
+distinct from page truncation; results prove neither complete occupancy nor safe
+placement, accessibility, terrain clearance or mutation authority.
+
+Complete-source preflight covers entities, edges, chunks, events, provenance and
+nested values before hashing, including data excluded by the region or selectors.
+It honors the negotiated byte/record/wall allowance and fixed depth/work/size
+ceilings. A conservative source estimate includes structural overhead. Output
+bytes/tokens are bounded separately, and the existing final Agent Turn publication
+guard remains in force. The concurrent laboratory query-budget refactor is
+preserved. See docs/QUERY_EXECUTION.md and docs/LAB_STRUCTURED_QUERY.md.
+
+An earlier standalone component cargo check compiled the spatial executor,
+source helper and unchanged shared core before executor loss. That temporary
+harness used exact direct serde versions but initially selected newer syn and
+unicode-ident transitives; the repository-lockfile rerun did not complete.
+Thirteen component tests and one real laboratory facade/history/authority test
+are included but remain unexecuted. Independent source review corrected canonical
+kind aliases, selection-versus-page coverage and negotiated source-byte admission.
+The schema parses and all local references resolve. Final preserved source has
+not received a compiler/formatter or full verify.sh/qualify_local.sh run after
+those refinements. No dependency, Tasks, native protocol or admission changes
+are claimed; df-lab-structured-query-f7q remains in_progress.
+
 ## Unreleased — Observe relation, retained-event and metadata changes
 
 The shared world-change comparison now covers every canonical graph record

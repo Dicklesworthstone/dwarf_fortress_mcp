@@ -2,7 +2,7 @@
 
 The default `serve` runtime accepts stateless `dfmcp.query/1` requests through
 the existing `fortress_query` tool. This exposes the same typed entity,
-aggregate, lexical and graph executors used by the read-only development
+aggregate, lexical, spatial and graph executors used by the read-only development
 surfaces, over the laboratory world in which plans actually execute.
 
 Pass a JSON string as the existing `mode` argument:
@@ -26,7 +26,7 @@ Pass a JSON string as the existing `mode` argument:
 The closed outer wrapper accepts only `mode`, `request` and optional `at`.
 `at` is the exact lowercase state hash of a current or retained world. The
 inner envelope accepts the existing schema, `query`, and optional complete
-`expected_anchor`. These seven query kinds are available:
+`expected_anchor`. These eight query kinds are available:
 
 | Kind | Purpose |
 | --- | --- |
@@ -37,6 +37,7 @@ inner envelope accepts the existing schema, `query`, and optional complete
 | `traverse` | Bounded observed graph traversal and a witnessed path to an optional target |
 | `dependencies` | Prerequisite order, cycle components, cycle blockers and an unweighted critical chain |
 | `events` | Inclusive retained-event windows, kind/subject selection, typed fields and chronological pages |
+| `spatial_entities` | Inclusive intersection or containment of explicitly named point/cuboid entity geometry |
 
 There is no watch, baseline, native capture, plan or effect dispatch through
 this wrapper. Existing `summary`, `entities`, `terrain`, `path`, `search`,
@@ -93,6 +94,44 @@ Results separate excluded/unavailable inputs from actual samples. Sums,
 minima and maxima use decimal integer strings; a mean is an exact rational.
 These are advisory statistics over the selected projection, not a complete
 stock or mutation-precondition certificate.
+
+## Spatial selection
+
+Spatial queries find entities whose named location or footprint intersects a
+region, lies within it, or contains it:
+
+~~~json
+{
+  "kind": "spatial_entities",
+  "kinds": ["unit"],
+  "region": {"min": [10, 20, 5], "max": [30, 40, 5]},
+  "geometry": {"kind": "point", "field": "position"},
+  "relation": "within",
+  "fields": ["profession", "alive"],
+  "limit": 4
+}
+~~~
+
+Use this object as `request.query` in the same structured wrapper. For a recorded
+footprint, `geometry` can instead be
+`{"kind":"cuboid","min_field":"min","max_field":"max"}`, using the actual named
+coordinate facts in the source. Bounds are inclusive in x, y and z; an inverted
+query region is rejected. `intersects` is the default relation. `within` means
+the entity geometry lies inside the region; `contains` means it contains the
+entire region. The optional typed `where` filter runs on geometric hits.
+
+Rows retain ID, generation, selected field provenance and the geometry facts
+used to decide the match. Missing, unavailable, stale, contradictory, mistyped,
+future or inverted entity geometry is reported as Unknown and never classified
+as outside. `selection_complete_within_projection` describes whether selection
+was decidable. `truncated` and the continuation describe page delivery separately.
+An empty region result cannot prove complete-world absence, clear terrain,
+accessibility or safe placement.
+
+Order is `id_ascending` or `id_descending`, with four rows by default and at most
+128. Continuations bind the complete source, session and every selector.
+Current and exact retained worlds follow the same authority and publication
+rules below. See `QUERY_EXECUTION.md` for geometry, provenance and budget details.
 
 ## Relationships and dependencies
 
@@ -163,12 +202,13 @@ continuity in the Agent Turn. It cannot supply fresh mutation evidence.
 An unknown or collected hash returns `stale_anchor`; there is no substitution
 of a newer world or another session's retained source.
 
-For entity, search or event pages, copy the returned `continuation` string into
+For entity, search, event or spatial pages, copy the returned `continuation` string into
 `request.query.continuation`. Keep the query selection unchanged. Entity
 continuations also bind selected fields, ordering, source anchor and session.
 Event continuations bind the time window, kind and subject sets, selected
-fields, order, complete source anchor and session. The requested page width may
-change. After the current world advances, resume
+fields, order, complete source anchor and session. Spatial continuations also bind
+the region, geometry field names, relation and typed filter. The requested page
+width may change. After the current world advances, resume
 by explicitly adding the original `at` hash while that source is retained,
 or restart from the new world. Historical reads do not pin retention.
 
@@ -193,7 +233,7 @@ budget-error envelope.
 ## Verification scope
 
 `lab_structured_query_tests.rs` drives the actual public laboratory façade for
-the seven kinds, exact historical/current anchors, capability refusal, unavailable
+the eight kinds, exact historical/current anchors, capability refusal, unavailable
 facts, continuation integrity, legacy grammar, source work and complete-packet
 budgets. These source regressions do not establish live DFHack compatibility,
 game effects, production admission or full workspace qualification.

@@ -7,6 +7,8 @@ mod core_query;
 mod dominance_query;
 #[path = "event_query.rs"]
 mod event_query;
+#[path = "spatial_entity_query.rs"]
+mod spatial_entity_query;
 #[cfg(test)]
 #[path = "query_history_tests.rs"]
 mod history_tests;
@@ -148,6 +150,7 @@ pub fn execute(
     {
         Some("aggregate" | "search") => operational_query::execute(snapshot, context, input),
         Some("events") => event_query::execute(snapshot, context, input),
+        Some("spatial_entities") => spatial_entity_query::execute(snapshot, context, input),
         Some("item_quantity") => query_watch::quantity_query(snapshot, context, input),
         Some("condition_evaluation") => query_watch::condition_query(snapshot, context, input),
         Some("dominators") => dominance_query::execute(snapshot, context, input),

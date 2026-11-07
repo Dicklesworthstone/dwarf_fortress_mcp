@@ -139,7 +139,7 @@ fn budget(message: &str) -> DfmcpError {
 }
 
 /// Validate before recursive deserialization, cloning, or serialization.
-fn validate_input(input: &Value) -> Result<()> {
+pub(super) fn validate_input(input: &Value) -> Result<()> {
     let mut pending = vec![(input, 0usize)];
     let mut nodes = 0usize;
     let mut bytes = 0usize;
@@ -188,7 +188,7 @@ fn validate_input(input: &Value) -> Result<()> {
     Ok(())
 }
 
-fn bounded_names(mut names: Vec<String>, maximum: usize) -> Result<Vec<String>> {
+pub(super) fn bounded_names(mut names: Vec<String>, maximum: usize) -> Result<Vec<String>> {
     if names.len() > maximum
         || names
             .iter()
@@ -218,7 +218,7 @@ fn entity_id(raw: &str) -> Result<EntityId> {
         .map_err(|_| invalid("entity ID exceeds u64"))
 }
 
-fn entity_kind(raw: &str) -> Result<EntityKind> {
+pub(super) fn entity_kind(raw: &str) -> Result<EntityKind> {
     Ok(match raw {
         "fortress" => EntityKind::Fortress,
         "unit" => EntityKind::Unit,
@@ -389,7 +389,7 @@ fn fact_json(fact: &Fact) -> Value {
         "source_digest":fact.source_digest.to_string()})
 }
 
-fn entity_json(entity: &EntityRecord, fields: &[String]) -> Value {
+pub(super) fn entity_json(entity: &EntityRecord, fields: &[String]) -> Value {
     let fields: BTreeMap<_, _> = fields
         .iter()
         .map(|field| {

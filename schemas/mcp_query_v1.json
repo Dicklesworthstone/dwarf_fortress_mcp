@@ -12,6 +12,16 @@
   "$defs": {
     "entity_id": {"type": "string", "pattern": "^[1-9][0-9]{0,19}$", "description": "Canonical positive decimal u64; the runtime also checks numeric overflow."},
     "name": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[^\u0000]+$"},
+    "spatial_coordinate": {"type":"array", "minItems":3, "maxItems":3, "items":{"type":"integer", "minimum":-2147483648, "maximum":2147483647}},
+    "spatial_region": {
+      "type":"object", "additionalProperties":false, "required":["min","max"],
+      "properties":{"min":{"$ref":"#/$defs/spatial_coordinate"}, "max":{"$ref":"#/$defs/spatial_coordinate"}},
+      "description":"Inclusive signed map coordinates. Runtime rejects any minimum greater than its corresponding maximum."
+    },
+    "spatial_geometry": {"oneOf":[
+      {"type":"object", "additionalProperties":false, "required":["kind","field"], "properties":{"kind":{"const":"point"}, "field":{"$ref":"#/$defs/name"}}},
+      {"type":"object", "additionalProperties":false, "required":["kind","min_field","max_field"], "properties":{"kind":{"const":"cuboid"}, "min_field":{"$ref":"#/$defs/name"}, "max_field":{"$ref":"#/$defs/name"}}}
+    ]},
     "entity_kind": {"oneOf": [
       {"enum": ["fortress", "unit", "item", "building", "job", "work_order", "stockpile", "zone", "burrow", "squad", "military_order", "tile_feature", "plant", "creature", "historical_figure", "civilization", "announcement", "syndrome"]},
       {"type": "string", "pattern": "^other:.+$", "maxLength": 128}
@@ -78,6 +88,20 @@
           "order": {"anyOf": [{"enum": ["id_ascending", "id_descending", "label_ascending", "revision_descending"]}, {"type": "null"}]},
           "limit": {"anyOf": [{"type": "integer", "minimum": 1, "maximum": 512}, {"type": "null"}]}, "continuation": {"anyOf": [{"type": "string", "maxLength": 256}, {"type": "null"}]}
         }
+      },
+      {
+        "type":"object", "additionalProperties":false, "required":["kind","region","geometry"],
+        "properties":{
+          "kind":{"const":"spatial_entities"}, "region":{"$ref":"#/$defs/spatial_region"}, "geometry":{"$ref":"#/$defs/spatial_geometry"},
+          "relation":{"anyOf":[{"enum":["intersects","within","contains"]},{"type":"null"}]},
+          "kinds":{"type":"array", "items":{"$ref":"#/$defs/entity_kind"}, "maxItems":32},
+          "fields":{"type":"array", "items":{"$ref":"#/$defs/name"}, "maxItems":32},
+          "where":{"anyOf":[{"$ref":"#/$defs/filter"},{"type":"null"}]},
+          "order":{"anyOf":[{"enum":["id_ascending","id_descending"]},{"type":"null"}]},
+          "limit":{"anyOf":[{"type":"integer", "minimum":1, "maximum":128},{"type":"null"}]},
+          "continuation":{"anyOf":[{"type":"string", "maxLength":256},{"type":"null"}]}
+        },
+        "description":"Bounded inclusive point/cuboid selection from explicitly named Known coordinate facts. Intersects is the default; within means the entity geometry is contained by the region, contains means it contains the region. Distinct cuboid fields are required. Unavailable, contradictory, mistyped, future or inverted geometry is counted as unknown, never outside. Facts retain provenance. Continuations bind the complete source, session and selection; page width may change. No terrain, path, occupancy completeness or effect authority is inferred."
       },
       {
         "type": "object", "additionalProperties": false, "required": ["kind", "entity_id", "generation"],

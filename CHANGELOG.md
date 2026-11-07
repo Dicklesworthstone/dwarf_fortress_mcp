@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased — Query entities by three-dimensional location and footprint
+
+- Add shared spatial_entities queries to structured laboratory and live-read
+  dispatch, using explicit typed point or cuboid fields and inclusive
+  intersects/within/contains relations.
+- Support typed filters, projected provenance, both ID orders and complete
+  source/session/selection-bound continuation pages.
+- Keep missing, unavailable, contradictory, future and invalid geometry Unknown;
+  distinguish selection completeness, page truncation and world absence.
+- Bound the complete source before hashing, including unselected records and
+  nested values, under negotiated byte/record/time limits and fixed ceilings.
+- Add thirteen component regressions and one public laboratory/history regression,
+  plus the closed schema and usage documentation. An earlier component version
+  compiled; final refinements/tests remain unexecuted after executor loss.
+
 ## Unreleased — Report complete bounded world-change domains
 
 - Add relation creation, modification and removal to Agent Turn and historical

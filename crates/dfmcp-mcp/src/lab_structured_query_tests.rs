@@ -771,3 +771,73 @@ fn lab_structured_source_and_final_byte_limits_and_deadlines_are_independent() -
     assert_eq!(late["error"]["effect_may_have_occurred"], false);
     Ok(())
 }
+
+#[test]
+fn lab_spatial_entities_resume_the_exact_source_and_recheck_current_authority() -> TestResult {
+    let _serial = crate::test_serial();
+    let (session_id, _) = open_fixture()?;
+    let session = resolve_session(Some(session_id.clone()))?;
+    let source = {
+        let mut guard = session.lock().map_err(|_| "session poisoned")?;
+        let mut source = guard.adapter.snapshot().clone();
+        for entity in source.graph.entities.values_mut() {
+            let coordinate = entity.id.get() as i32;
+            let mut position = Fact::known(
+                WorldValue::Coord(dfmcp_core::MapCoord::new(coordinate, coordinate, 0)),
+                source.tick,
+                FactSource::Derived("dfmcp.lab-scenario/1".to_owned()),
+                Digest32::of_bytes(b"spatial-lab-fixture"),
+            );
+            if entity.id == EntityId::new(4) {
+                position.presence = Some(FactPresence::Redacted("test policy".to_owned()));
+            }
+            entity.fields.insert("position".to_owned(), position);
+        }
+        source.refresh_hash();
+        guard.adapter.inject_snapshot(source.clone())?;
+        source
+    };
+    let mut request = wrapper(
+        json!({
+            "kind":"spatial_entities",
+            "region":{"min":[1,1,0],"max":[3,3,0]},
+            "geometry":{"kind":"point","field":"position"},
+            "relation":"within", "kinds":["unit"], "fields":["concealed"], "limit":1
+        }),
+        None,
+    );
+    let first = query(&session_id, request.clone())?;
+    assert_eq!(first["ok"], true, "{first}");
+    assert_eq!(first["matched"], 3);
+    assert_eq!(first["selection"]["unknown_geometry"], 1);
+    assert_eq!(first["rows"][0]["entity_id"], "1");
+    assert_eq!(first["rows"][0]["geometry"]["facts"]["position"]["epistemic_state"], "inferred");
+    assert_eq!(first["rows"][0]["fields"]["concealed"]["presence"], "redacted");
+    assert!(!first["rows"].to_string().contains("concealedpayload"));
+    assert_eq!(first["coverage"]["absence_proven"], false);
+    assert_eq!(first["agent_turn"]["anchor"], anchor_json(&source.anchor()));
+
+    request["request"]["query"]["continuation"] = first["continuation"].clone();
+    let current = advance(&session_id)?;
+    expect_refusal(&query(&session_id, request.clone())?, "stale_anchor");
+    request["at"] = json!(source.state_hash.to_string());
+    let historical = query(&session_id, request.clone())?;
+    assert_eq!(historical["ok"], true, "{historical}");
+    assert_eq!(historical["historical"], true);
+    assert_eq!(historical["anchor"], anchor_json(&source.anchor()));
+    assert_eq!(historical["current_anchor"], anchor_json(&current.anchor()));
+    assert_eq!(historical["agent_turn"]["anchor"], anchor_json(&current.anchor()));
+    assert_eq!(historical["rows"][0]["entity_id"], "2");
+    assert_eq!(historical["rows"][0]["generation"], 1);
+    assert_eq!(historical["coverage"]["eligible_as_mutation_evidence"], false);
+    {
+        let mut guard = session.lock().map_err(|_| "session poisoned")?;
+        guard.grants.iter_mut()
+            .find(|grant| grant.capability == Capability::Query)
+            .ok_or("Query grant missing")?
+            .expires_at_tick = Some(source.tick);
+    }
+    expect_refusal(&query(&session_id, request)?, "capability_denied");
+    assert_eq!(session.lock().map_err(|_| "session poisoned")?.adapter.snapshot(), &current);
+    Ok(())
+}

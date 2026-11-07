@@ -12,6 +12,9 @@ mod event_query;
 #[path = "operational_query.rs"]
 #[allow(clippy::duplicate_mod)]
 mod operational_query;
+#[path = "spatial_entity_query.rs"]
+#[allow(clippy::duplicate_mod)]
+mod spatial_entity_query;
 
 use std::time::{Duration, Instant};
 
@@ -102,10 +105,11 @@ pub(super) fn parse(raw: &str) -> Result<Option<Request>> {
                 | "aggregate"
                 | "search"
                 | "events"
+                | "spatial_entities"
         )
     ) {
         return Err(invalid(
-            "structured laboratory queries support only entities, inspect, traverse, dependencies, aggregate, search, and events",
+            "structured laboratory queries support only entities, inspect, traverse, dependencies, aggregate, search, events, and spatial_entities",
         ));
     }
     Ok(Some(request))
@@ -127,6 +131,10 @@ pub(super) fn execute(
             operational_query::execute(snapshot, &source_context, &request.request)?
         }
         Some("events") => event_query::execute(snapshot, &source_context, &request.request)?,
+        Some("spatial_entities") => {
+            spatial_entity_query::execute(snapshot, &source_context, &request.request)?
+        }
+
         _ => core_query::execute(snapshot, &source_context, &request.request)?,
     };
     if started.elapsed() >= Duration::from_millis(current.budget.max_wall_millis) {
