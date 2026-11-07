@@ -1,5 +1,31 @@
 # Implementation Status
 
+## Unreleased — Concurrent independent unit edits through the real commit loop
+
+The shared laboratory commit path now refines a whole-entity witness conflict
+for immediate raw `set_labor` and `set_burrow_membership` requests. Independent
+fields on the same dwarf can commit after current-source intent replay when the
+complete reviewed contract is unchanged. Exact prior write facts, every explicit
+predicate branch, compensation reads, entity generation/kind and same-tick source
+lineage remain bound. A complete bounded census excludes optional workforce,
+construction and provisions models whose implicit reads need broader evidence.
+
+The deterministic `dfmcp.field-witness-rebase/1` certificate binds old/new plans,
+source hashes, the original coarse conflict and exact read/write facts. It grants
+no authority: current grants, leases, preparation and commit checks still apply.
+Unknown, changed, unsupported or over-budget reads retain explicit source replay
+and review. No synthetic merged world is introduced. The broader structural
+fallback bead `dfmcp-reality-wiring-proof-4bf.10` remains in progress.
+
+Executed on 2026-11-07: all 15 actual-source witness tests passed (nine new and
+six existing), with the repository's exact external lockfile identities and
+unchanged source inputs. The component harness compiled real core/world/intent
+dependencies and exercised their planner and effects. Three public shared-session
+regressions and the updated same-field conflict case are included but have not
+yet run through the full MCP build. Scoped formatting and diff checks passed;
+full workspace verification, native qualification and admission are not claimed.
+See docs/LAB_FIELD_REBASE.md.
+
 ## Unreleased — Bounded spatial entity selection in the shared query loop
 
 The shared dfmcp.query/1 executor accepts spatial_entities through the existing

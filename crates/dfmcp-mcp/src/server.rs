@@ -4071,11 +4071,24 @@ fn rebase_by_witness(
         )?;
     let witness = crate::witness::ReadWitness::of(&stale.plan);
     let now = session.adapter.snapshot().clone();
-    if let Some(change) = witness.first_change(&base, &now) {
-        return Err(
-            json!({"accepted": false, "reason": "a read of the plan changed", "change": change}),
-        );
-    }
+    let refinement = if let Some(change) = witness.first_change(&base, &now) {
+        // Only raw semantic actions have a closed source interpretation here.
+        // Blueprint/objective lowering can read more than its sealed steps.
+        if !matches!(stale.source, PlanSource::Actions { .. }) {
+            return Err(
+                json!({"accepted":false, "reason":"a read of the plan changed", "change":change}),
+            );
+        }
+        match crate::witness::FieldWitness::prove(&stale.plan, &base, &now, session.budget) {
+            Ok(proof) => Some((proof, change)),
+            Err(reason) => {
+                return Err(json!({"accepted":false, "reason":"a read of the plan changed",
+                    "change":change, "refinement_refusal":reason}));
+            }
+        }
+    } else {
+        None
+    };
     let refused = |error: DfmcpError| json!({"accepted": false, "reason": error.message});
     let rid = next_request_id(session).map_err(refused)?;
     let (_, ctx) = next_context(session).map_err(refused)?;
@@ -4089,7 +4102,10 @@ fn rebase_by_witness(
             json!({"accepted": false, "reason": "the replayed intent changed the reviewed execution contract"}),
         );
     }
-    let certificate = crate::witness::certificate(&stale.plan, &plan, &base, &now, &witness);
+    let certificate = refinement.map_or_else(
+        || crate::witness::certificate(&stale.plan, &plan, &base, &now, &witness),
+        |(proof, change)| proof.certificate(&stale.plan, &plan, &change),
+    );
     Ok((plan, certificate))
 }
 

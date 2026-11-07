@@ -226,12 +226,18 @@ scenario is refused) and the response reports `shared_world.members`.
   scopes name, plus every terrain region they touch widened by a one-tile
   hazard halo. If the anchor moved but nothing in the witness changed between
   the version the plan was sealed on and now, the intent is replayed at the
-  current anchor and, when the replay performs the very same actions, committed
+  current anchor and, when the replay preserves the entire reviewed execution contract, committed
   directly; the receipt carries `witness_rebase` (a certificate naming both
   digests, both state hashes and the witness) and a retry with the original
   digest returns the same receipt. Anything unbounded or outside the retained
   history falls back to the explicit replay below, with `witness_check`
   naming the first read that changed.
+- **Independent unit fields can survive a coarse conflict.** Same-tick raw
+  labor and burrow setters can use a bounded field witness in model-free
+  laboratory worlds. It preserves target identities and generations, every
+  explicit field read and prior write fact, compensation and implicit model
+  absence. Current-source replay, the complete reviewed contract and current
+  authority remain required. See [the closed field-rebase contract](LAB_FIELD_REBASE.md).
 - **Stale plans are replayed, never committed blind.** If another member's
   action or the shared clock moved the anchor after a plan was sealed, the
   commit returns `stale_anchor` with a `rebased_plan` (the original request

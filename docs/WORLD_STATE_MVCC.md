@@ -235,8 +235,19 @@ even when all entity and spatial reads remain unchanged. Such a replay returns
 `stale_anchor` with a newly sealed `rebased_plan` for explicit review and commit.
 It does not extend the original deadline or revive an expired preparation under
 the old approval. Same-tick independent work can still use automatic replay when
-the full contract remains identical. Structural merge fallback and its runtime
-certificate admission remain separate unfinished work.
+the full contract remains identical.
+
+If that coarse witness conflicts on an entity, a bounded registered refinement
+can now compare exact fields for immediate `SetLabor` and
+`SetBurrowMembership` actions in model-free laboratory worlds. It includes
+explicit predicate reads, action and compensation prior writes, entity
+identity/generation/kind and the complete absence domain of optional model
+declarations and stamps. Unknown or unsupported reads and exhausted budgets
+require explicit review. The original Actions source is replayed at the actual
+current anchor; an identical reviewed contract and normal current authority
+and lease gates remain mandatory. See [laboratory field rebase](LAB_FIELD_REBASE.md)
+for the closed scope and certificate. Structural world merge fallback and its
+runtime certificate admission remain separate unfinished work.
 
 ## 14. External effect journal
 

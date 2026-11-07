@@ -22,6 +22,10 @@ use dfmcp_intent::PreparedPlan;
 use dfmcp_world::{Predicate, WorldSnapshot};
 use serde_json::{Value, json};
 
+#[path = "field_witness.rs"]
+mod field_witness;
+pub(crate) use field_witness::FieldWitness;
+
 /// Largest region (after the halo) a witness compares tile by tile.
 const MAX_WITNESS_REGION_TILES: u64 = 65_536;
 

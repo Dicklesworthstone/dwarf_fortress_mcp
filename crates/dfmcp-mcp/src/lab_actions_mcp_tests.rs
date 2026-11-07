@@ -838,10 +838,11 @@ fn a_plan_made_stale_by_another_agent_is_replayed_not_committed_blind() -> TestR
         None,
     ))?;
     let stale_digest = planned["plan_digest"].as_str().ok_or("digest")?.to_owned();
-    // B acts first on the very dwarf A's plan reads, moving the anchor.
+    // B changes A's exact prior write field. Independent fields on this dwarf
+    // are eligible for the separately tested bounded field refinement.
     let b_labor = plan_and_commit(
         &b,
-        r#"[{"action":{"kind":"set_labor","units":["1001"],"labor":"MASON","enabled":true}}]"#,
+        r#"[{"action":{"kind":"set_labor","units":["1001"],"labor":"MINE","enabled":false}}]"#,
     )?;
     assert_eq!(b_labor["ok"], true, "{b_labor}");
 
@@ -876,6 +877,9 @@ fn a_plan_made_stale_by_another_agent_is_replayed_not_committed_blind() -> TestR
     assert_eq!(again["ok"], false, "{again}");
     Ok(())
 }
+
+#[path = "field_witness_mcp_tests.rs"]
+mod field_witness_mcp_tests;
 
 #[test]
 fn plan_forecasts_predict_completion_blocking_and_doomed_steps() -> TestResult {

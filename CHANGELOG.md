@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased — Rebase independent edits to the same laboratory dwarf
+
+- Add a bounded field witness to the real shared-session commit path for
+  immediate labor and burrow setters after a whole-record conflict.
+- Preserve exact predicate and prior-write facts, compensation, identity,
+  generation, source lineage and the complete absence of implicit model reads.
+- Replay the original request at the actual current source and require the full
+  reviewed contract and current authorization before committing.
+- Return deterministic certificates and retain original-digest idempotent retry;
+  conflicting, unknown or unsupported reads still require explicit review.
+- Pass 15 exact-lock actual-source component tests; add three public facade
+  regressions, whose full MCP execution remains pending.
+
 ## Unreleased — Query entities by three-dimensional location and footprint
 
 - Add shared spatial_entities queries to structured laboratory and live-read
