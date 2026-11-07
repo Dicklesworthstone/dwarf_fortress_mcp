@@ -26,6 +26,10 @@ inspection_spec = importlib.util.spec_from_file_location(
     'combined_production_inspection', ROOT / 'tests/stdio/combined_production_inspection.py')
 inspection = importlib.util.module_from_spec(inspection_spec)
 inspection_spec.loader.exec_module(inspection)
+existing_labor_spec = importlib.util.spec_from_file_location(
+    'combined_existing_labor', ROOT / 'tests/stdio/combined_existing_labor.py')
+existing_labor = importlib.util.module_from_spec(existing_labor_spec)
+existing_labor_spec.loader.exec_module(existing_labor)
 number, blob, fields, receive = stdio.number, stdio.blob, stdio.fields, stdio.receive
 
 DF = b'0.51.11'
@@ -244,6 +248,8 @@ class Peer:
         self.workforce_sequence = None
         self.workforce_tick = TICK
         self.workforce_labor = None
+        self.workforce_capture_hook = None
+        self.existing_labor_ready = False
         self.after_workforce_read = None
         self.order_created = False
         self.order_retired = False
@@ -251,6 +257,7 @@ class Peer:
         self.order_status = 3
         self.order_tick = TICK
         self.order_sequence = 11
+        self.after_order_read = None
         self.progress_sequence = 0
         self.inventory_stack = 1
         self.operations_capture = operations_capture
@@ -442,6 +449,8 @@ class Peer:
                 if self.workforce_sequence is not None:
                     capture['sequence'] = self.workforce_sequence
                 capture['tick'] = self.workforce_tick
+                if self.workforce_capture_hook is not None:
+                    self.workforce_capture_hook(capture)
                 response += blob(9, wf.encode_capture(capture))
                 if self.after_workforce_read is not None:
                     self.after_workforce_read()
@@ -494,6 +503,9 @@ class Peer:
         if op == 'ReadOrders':
             response += blob(9, order_queue(self.order_created, tick=self.order_tick,
                                            sequence=self.order_sequence, retired=self.order_retired))
+            if self.after_order_read is not None:
+                hook, self.after_order_read = self.after_order_read, None
+                hook()
         if op == 'PrepareOrder':
             self.order_plan = {'key': req[5], 'recipe': req[6], 'amount': req[7], 'digest': req[9]}
             assert req[8] == hashlib.sha256(order_queue(False)).digest()
@@ -535,7 +547,8 @@ class Peer:
 
     def goal_tick(self, tick):
         """Advance the double explicitly; no native clock or real game is executed."""
-        assert self.order_created and self.workforce_applied and tick >= self.order_tick
+        assert self.order_created and (self.workforce_applied or self.existing_labor_ready)
+        assert tick >= self.order_tick
         if tick > self.order_tick:
             self.order_sequence += 1
         self.order_tick = self.workforce_tick = tick
@@ -605,7 +618,7 @@ def environment(directory, endpoint):
     return env
 
 
-class CombinedProduction(inspection.InspectionTests, unittest.TestCase):
+class CombinedProduction(inspection.InspectionTests, existing_labor.ExistingLaborTests, unittest.TestCase):
     def setUp(self):
         self.directory = LOGS / self._testMethodName
         self.directory.mkdir(mode=0o700)
@@ -628,6 +641,16 @@ class CombinedProduction(inspection.InspectionTests, unittest.TestCase):
         del env['DFMCP_SEMANTIC_WORK_ORDER_ALLOW_PRODUCTION']
         self.client = stdio.Client(self.directory, {}, suffix='inspection-offline', env=env)
         return self.client.open(mode='offline', max_wall_millis=60000)
+
+    def existing_labor_reopen(self, previous, mode):
+        self.client.close()
+        env = reopen_environment(self.env, previous['recovery'],
+                                 previous['native_custody']['workforce_journal_id'])
+        if mode == 'offline':
+            env.pop('DFMCP_SEMANTIC_WORKFORCE_ALLOW_LABOR', None)
+            env.pop('DFMCP_SEMANTIC_WORK_ORDER_ALLOW_PRODUCTION', None)
+        self.client = stdio.Client(self.directory, {}, suffix='existing-labor-' + mode, env=env)
+        return self.client.open(mode=mode, max_wall_millis=60000)
 
     def enable_clock(self):
         self.client.close()
@@ -2274,7 +2297,7 @@ def main():
     print(json.dumps({'schema': 'dfmcp.combined-production-stdio/1', 'tests': result.testsRun,
         'failed': len(result.failures), 'errors': len(result.errors), 'skipped': len(result.skipped),
         'actual_modern_stdio': True, 'loopback_peers_are_doubles': True, 'live_game': False}))
-    raise SystemExit(0 if result.wasSuccessful() and result.testsRun == 49 and not result.skipped else 1)
+    raise SystemExit(0 if result.wasSuccessful() and result.testsRun == 56 and not result.skipped else 1)
 
 
 if __name__ == '__main__': main()

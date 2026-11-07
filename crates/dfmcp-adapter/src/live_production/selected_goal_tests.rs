@@ -14,6 +14,9 @@ use dfmcp_world::PredicateTruth;
 mod parent_goal_tests {
     include!("parent_goal_tests.rs");
 }
+mod existing_labor_tests {
+    include!("existing_labor_tests.rs");
+}
 
 fn inventory_fixture(count: usize) -> Result<ProductionFixture> {
     let mut f = ProductionFixture::new(count)?;
@@ -467,6 +470,7 @@ fn selected_history_cannot_move_to_another_key_review_or_whole_parent() -> Resul
             GoalHistoryStore::open_selected(Storage::default(), native, review, true, false, c)
         },
         |p, _| Ok(grant(p)),
+        false,
     )?;
     let events = selected_monitor.history_event_count();
     let reads = f.orders.borrow().reads;

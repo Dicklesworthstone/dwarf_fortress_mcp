@@ -144,7 +144,7 @@ impl Runtime {
     pub(super) fn goal_coverage_omissions(&self) -> Vec<&'static str> {
         let mut omissions = Vec::new();
         if self.current_parent_goal().is_none() {
-            omissions.extend(["parent goal completion", "current labor after its receipt"]);
+            omissions.extend(["parent goal completion", "current selected labor"]);
         } else if !self.parent_goal_proven() {
             omissions.push("parent goal completion");
         }
@@ -269,7 +269,7 @@ impl Runtime {
             .inspect(&work.take(8 * MIB)?)?;
         if !frontier.all_applied() || frontier.needs_reconciliation() {
             return Err(denied(
-                "goal monitoring requires both original native effects to be settled",
+                "goal monitoring requires every original native effect to be settled",
             ));
         }
         self.arm(work)?;
@@ -283,11 +283,13 @@ impl Runtime {
         let final_check = work.take(1)?;
         let budget = history_budget(work, initialize)?;
         custody.verify(&budget)?;
-        let path = self.config.path(&if step.get() == 1 {
-            "goal.history".into()
-        } else {
-            format!("goal-{}.history", step.get())
-        });
+        let path = self
+            .config
+            .path(&if self.portfolio.is_none() || step.get() == 1 {
+                "goal.history".into()
+            } else {
+                format!("goal-{}.history", step.get())
+            });
         let config = &self.config;
         // A failed private-file create/replay may have published custody. Retain
         // that fact and never replace a possibly existing history on retry.

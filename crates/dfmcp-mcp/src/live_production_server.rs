@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 //! Unadmitted combined labor and finite-order MCP host.
 use crate::live_production_runtime::{
-    Config, InspectionRequest, Mode, ObserveRequest, Request, Runtime, View,
+    Config, ExistingLaborRequest, InspectionRequest, Mode, ObserveRequest, Request, Runtime, View,
 };
 use crate::semantic_work_order_runtime::clock::RunRequest;
 use crate::semantic_work_order_runtime::inventory_clock::RunRequest as InventoryRunRequest;
@@ -95,6 +95,7 @@ enum Action {
     InspectOrder(u32),
     InspectProduction(InspectionRequest, Option<u32>),
     Plan(Request),
+    PlanExistingLabor(ExistingLaborRequest),
     PlanPortfolio(crate::live_production_runtime::PortfolioRequest),
     PlanRun(RunRequest, Option<u32>),
     PlanInventoryRun(InventoryRunRequest, Option<u32>),
@@ -141,6 +142,7 @@ impl Action {
             Self::InspectOrder(step) => runtime.inspect_order(Some(step), c),
             Self::InspectProduction(request, step) => runtime.inspect_production(request, step, c),
             Self::Plan(request) => runtime.plan(request, c),
+            Self::PlanExistingLabor(request) => runtime.plan_existing_labor(request, c),
             Self::PlanPortfolio(request) => runtime.plan_portfolio(request, c),
             Self::PlanRun(request, step) => {
                 runtime.select_order(step, c)?;
@@ -492,6 +494,8 @@ fn plan_action(raw: &str) -> Result<Action> {
         InventoryRunRequest::parse(&raw).map(|request| Action::PlanInventoryRun(request, step))
     } else if value.get("kind").and_then(Value::as_str) == Some("portfolio") {
         crate::live_production_runtime::PortfolioRequest::parse(raw).map(Action::PlanPortfolio)
+    } else if value.get("kind").and_then(Value::as_str) == Some("existing_labor") {
+        ExistingLaborRequest::parse(raw).map(Action::PlanExistingLabor)
     } else if value.get("kind").and_then(Value::as_str) == Some("step") {
         let request: StepRequest = serde_json::from_str(raw)
             .map_err(|_| error(ErrorCode::InvalidRequest, "invalid closed step request"))?;
@@ -686,7 +690,7 @@ pub fn fortress_query(
     })
 }
 #[tool(
-    description = "Compile one original labor and finite-order plan, or kind=portfolio with one to four distinct furniture orders and per-order optional observed_inventory_minimum objectives; kind=step with original_plan_digest prepares the next eligible original step. After all original effects settle, kind=run prepares an independently authorized clock for the original retained-order or inventory goal. After Wait observes True original labor and explicitly selected inventory, kind=inventory_run prepares an independent stability clock even after order retirement. Both name original_paired_seal, game_ticks and wall_millis; portfolio clock requests also require the exact original order_step_id. Planning never unpauses."
+    description = "Compile one original labor and finite-order plan, kind=existing_labor for one finite order using observed already-enabled eligible workers without a labor assignment, or kind=portfolio with one to four distinct furniture orders and per-order optional observed_inventory_minimum objectives; kind=step with original_plan_digest prepares the next eligible original step. After all original effects settle, kind=run prepares an independently authorized clock for the original retained-order or inventory goal. After Wait observes True original labor and explicitly selected inventory, kind=inventory_run prepares an independent stability clock even after order retirement. Both name original_paired_seal, game_ticks and wall_millis; portfolio clock requests also require the exact original order_step_id. Planning never unpauses."
 )]
 pub fn fortress_plan(session_id: String, request: String) -> String {
     with_session(session_id, "fortress.plan", None, || plan_action(&request))
@@ -768,7 +772,7 @@ pub fn run_stdio() {
     let server = ServerBuilder::new("dfmcp-live-combined-production-dev", env!("CARGO_PKG_VERSION"))
         .tool(FortressOpenSession).tool(FortressObserve).tool(FortressQuery).tool(FortressPlan).tool(FortressCommit)
         .tool(FortressWait).tool(FortressCancel).tool(FortressCheckpoint).tool(FortressRestore).tool(FortressExplain).tool(FortressDoctor)
-        .instructions("Unadmitted development only. Observe, compile one original labor and finite-order plan or an explicit portfolio of up to four furniture orders, prepare and confirm each dependency-satisfied step, and reconcile uncertainty under its original key. All-applied does not prove the original goal or physical goods. Wait joins current labor with the original retained-order completion or explicitly selected inventory goal under the original stability requirement. Separately configured clock control can prepare kind=run and confirm scope=run for either objective while the exact original order remains eligible; after a True original labor/inventory sample, kind/scope=inventory_run can finish explicitly selected inventory stability after native order retirement. Portfolio clock Plan/Commit/Cancel calls require the original order_step_id; Query can select that leaf. Portfolio Wait samples one original leaf per call and proves the parent only after a coherent complete cohort. Both clock owners preserve every original deadline and exclude competing pending clocks across all leaves; no automatic advancement or repeated unpause is permitted. Unresolved runs must reconcile before paused sampling. A disappeared order leaves default completion unknown. Inventory presence does not prove order-attributed production. Parent proof is process-local and withdrawn on failure or reopening.")
+        .instructions("Unadmitted development only. Observe, compile one original labor and finite-order plan, kind=existing_labor for one order using current qualified labor without assigning it, or an explicit portfolio of up to four furniture orders, prepare and confirm each dependency-satisfied step, and reconcile uncertainty under its original key. All-applied does not prove the original goal or physical goods. Wait joins current labor with the original retained-order completion or explicitly selected inventory goal under the original stability requirement. Separately configured clock control can prepare kind=run and confirm scope=run for either objective while the exact original order remains eligible; after a True original labor/inventory sample, kind/scope=inventory_run can finish explicitly selected inventory stability after native order retirement. Portfolio clock Plan/Commit/Cancel calls require the original order_step_id; Query can select that leaf. Portfolio Wait samples one original leaf per call and proves the parent only after a coherent complete cohort. Both clock owners preserve every original deadline and exclude competing pending clocks across all leaves; no automatic advancement or repeated unpause is permitted. Unresolved runs must reconcile before paused sampling. A disappeared order leaves default completion unknown. Inventory presence does not prove order-attributed production. Parent proof is process-local and withdrawn on failure or reopening.")
         .build();
     crate::run_modern_stdio(server);
 }

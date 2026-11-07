@@ -225,6 +225,7 @@ mod actual {
         orders: usize,
         deny_at: Option<usize>,
         corrupt_at: Option<(usize, Storage)>,
+        labor_at: Option<(usize, Native)>,
     }
     struct CombinedEvidence {
         inner: Observer,
@@ -265,17 +266,53 @@ mod actual {
             {
                 *byte ^= 1;
             }
+            if let Some((at, workforce)) = &hooks.labor_at
+                && *at == hooks.orders
+            {
+                workforce.data.borrow_mut().fixture.citizens[0].labors[1] = 0;
+            }
             Ok(())
         }
         fn routing_evidence(&self) -> Result<LiveRoutingEvidence<'_>> {
             self.inner.routing_evidence()
         }
     }
-    struct Factory(Native);
+    #[derive(Default)]
+    struct ExistingPolicyHooks {
+        calls: usize,
+        deny: bool,
+        withhold: bool,
+        withdraw_at: Option<usize>,
+        corrupt_at: Option<(usize, Storage)>,
+    }
+    struct Factory(Native, ExistingPolicyHooks);
     impl WorkforceFactory for Factory {
         type Source = Native;
         fn connect(&mut self, binding: &WorkforceBinding, c: &OperationContext) -> Result<Native> {
             self.0.connect(binding, c)
+        }
+        fn existing_labor_policy(
+            &mut self,
+            projection: &crate::live_production::ExistingLaborProjection,
+            context: &OperationContext,
+        ) -> Result<EvidencePolicy> {
+            context.authorize(Capability::Observe, RiskTier::ReadOnly, &[], None)?;
+            self.1.calls += 1;
+            if self.1.deny {
+                return Err(invalid("existing labor source authority withdrawn"));
+            }
+            let mut granted = policy(projection.snapshot());
+            if self.1.withhold || self.1.withdraw_at == Some(self.1.calls) {
+                granted.sources.retain(|source| !matches!(source,
+                    EvidenceSource::Observed { field, .. } if field == crate::semantic_workforce::projection::LABOR_SOURCE));
+            }
+            if let Some((at, storage)) = &self.1.corrupt_at
+                && *at == self.1.calls
+                && let Some(byte) = storage.0.borrow_mut().file.get_mut().last_mut()
+            {
+                *byte ^= 1;
+            }
+            Ok(granted)
         }
     }
     type Combined =
@@ -445,7 +482,7 @@ mod actual {
                 owner,
                 order_owner,
                 Some(evidence),
-                Factory(native.clone()),
+                Factory(native.clone(), ExistingPolicyHooks::default()),
                 &context,
             )?;
             Ok(Self {
@@ -569,7 +606,7 @@ mod actual {
                 labor_owner,
                 order_owner,
                 if query_only { None } else { evidence },
-                Factory(workforce.clone()),
+                Factory(workforce.clone(), ExistingPolicyHooks::default()),
                 &c,
             )?;
             Ok(Self {

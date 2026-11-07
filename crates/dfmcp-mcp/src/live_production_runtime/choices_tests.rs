@@ -10,7 +10,11 @@ fn empty_canonical_roster_does_not_invent_a_native_detail_observation() -> Resul
     let (capsule, projection) = observation(&[])?;
     let c = permitted(&projection.snapshot);
     let request = ObserveRequest::default();
-    assert!(select(&capsule, &projection, &scope(), &request, &c)?.0.is_empty());
+    assert!(
+        select(&capsule, &projection, &scope(), &request, &c)?
+            .0
+            .is_empty()
+    );
     let seal = super::observation_seal(&capsule, &projection);
     let value = super::empty(projection.snapshot.anchor(), seal, &request)?;
     assert_eq!(value["native_observed"], false);
@@ -50,7 +54,10 @@ fn choices_are_deterministic_scoped_and_advisory() -> Result<()> {
     let request = ObserveRequest::default();
     let capture = WorkforceFixture::default().capture()?;
     let v = project(&capsule, &projection, &scope(), &capture, &request, &c)?;
-    assert_eq!(v, project(&capsule, &projection, &scope(), &capture, &request, &c)?);
+    assert_eq!(
+        v,
+        project(&capsule, &projection, &scope(), &capture, &request, &c)?
+    );
     assert_eq!(v["selected_citizens"][0]["entity_id"], "43");
     assert_eq!(v["selected_citizens"][0]["historical_id"], 142);
     assert_eq!(v["options"][0]["labor"], "MINE");
@@ -62,6 +69,101 @@ fn choices_are_deterministic_scoped_and_advisory() -> Result<()> {
         let mut denied = c.clone();
         denied.grants.retain(|grant| grant.capability != missing);
         assert!(project(&capsule, &projection, &scope(), &capture, &request, &denied).is_err());
+    }
+    Ok(())
+}
+
+#[test]
+fn already_enabled_labor_is_discoverable_without_an_assignable_work_detail() -> Result<()> {
+    let (capsule, projection) = observation(&[42])?;
+    let c = permitted(&projection.snapshot);
+    let mut fixture = WorkforceFixture::default();
+    fixture.automatic = false;
+    fixture.details[0].selected_only = false;
+    fixture.details[0].labors = vec![1, 1];
+    fixture.citizens[0].labors = vec![1, 1];
+    let v = project(
+        &capsule,
+        &projection,
+        &scope(),
+        &fixture.capture()?,
+        &ObserveRequest::default(),
+        &c,
+    )?;
+    assert_eq!(v["options"], json!([]));
+    assert_eq!(
+        v["existing_labor_options"].as_array().map(Vec::len),
+        Some(2)
+    );
+    assert_eq!(v["existing_labor_options"][0]["labor"], "CARPENTRY");
+    assert_eq!(
+        v["existing_labor_options"][0]["eligible_enabled_ids"],
+        json!(["43"])
+    );
+    assert_eq!(
+        v["existing_labor_options"][0]["request_kind"],
+        "existing_labor"
+    );
+    assert_eq!(v["existing_labor_options"][0]["assignment_required"], false);
+    assert_eq!(v["mutation_authority"], false);
+    fixture.citizens[0].eligible = false;
+    let ineligible = project(
+        &capsule,
+        &projection,
+        &scope(),
+        &fixture.capture()?,
+        &ObserveRequest::default(),
+        &c,
+    )?;
+    assert_eq!(ineligible["existing_labor_options"], json!([]));
+    Ok(())
+}
+
+#[test]
+fn existing_labor_options_have_independent_bounded_fresh_observation_pages() -> Result<()> {
+    let (capsule, projection) = observation(&[42])?;
+    let c = permitted(&projection.snapshot);
+    let original = ten_option_capture()?;
+    let mut raw = original.canonical_bytes().to_vec();
+    let last = raw.len() - 10;
+    raw[last..].fill(1);
+    let capture = WorkforceCapture::decode(&raw)?;
+    let first = project(
+        &capsule,
+        &projection,
+        &scope(),
+        &capture,
+        &ObserveRequest::default(),
+        &c,
+    )?;
+    assert_eq!(
+        first["existing_labor_options"].as_array().map(Vec::len),
+        Some(8)
+    );
+    assert_eq!(first["coverage"]["existing_labor"]["omitted_after"], 2);
+    assert_eq!(
+        first["next_existing_labor_observation_request"],
+        json!({"units":["43"],"option_offset":0,"existing_labor_offset":8})
+    );
+    let request =
+        ObserveRequest::parse(&first["next_existing_labor_observation_request"].to_string())?;
+    let later = project(&capsule, &projection, &scope(), &capture, &request, &c)?;
+    assert_eq!(later["witness_version"], 3);
+    assert_ne!(first["witness"], later["witness"]);
+    assert_eq!(
+        later["existing_labor_options"].as_array().map(Vec::len),
+        Some(2)
+    );
+    assert_eq!(later["existing_labor_options"][0]["labor"], "LABOR_8");
+    assert!(later["next_existing_labor_observation_request"].is_null());
+    let beyond = ObserveRequest::parse(r#"{"existing_labor_offset":11}"#)?;
+    assert!(project(&capsule, &projection, &scope(), &capture, &beyond, &c).is_err());
+    for raw in [
+        r#"{"existing_labor_offset":129}"#,
+        r#"{"existing_labor_offset":-1}"#,
+        r#"{"existing_labor_offset":null}"#,
+    ] {
+        assert!(ObserveRequest::parse(raw).is_err());
     }
     Ok(())
 }
@@ -103,7 +205,15 @@ fn source_and_identity_drift_refuse_instead_of_offering() -> Result<()> {
         },
     ] {
         assert!(
-            project(&capsule, &projection, &scope(), &fixture.capture()?, &request, &c).is_err()
+            project(
+                &capsule,
+                &projection,
+                &scope(),
+                &fixture.capture()?,
+                &request,
+                &c
+            )
+            .is_err()
         );
     }
     let mut wrong = scope();
@@ -127,7 +237,14 @@ fn unsafe_or_ambiguous_details_never_offer_candidates() -> Result<()> {
     let mut manual = base.clone();
     manual.automatic = false;
     for fixture in [ambiguous, mixed, ineligible, manual] {
-        let v = project(&capsule, &projection, &scope(), &fixture.capture()?, &request, &c)?;
+        let v = project(
+            &capsule,
+            &projection,
+            &scope(),
+            &fixture.capture()?,
+            &request,
+            &c,
+        )?;
         assert_eq!(v["options"], json!([]));
     }
     let mut overlapping = base.clone();
@@ -139,7 +256,14 @@ fn unsafe_or_ambiguous_details_never_offer_candidates() -> Result<()> {
         labors: vec![1, 0],
         members: vec![],
     });
-    let v = project(&capsule, &projection, &scope(), &overlapping.capture()?, &request, &c)?;
+    let v = project(
+        &capsule,
+        &projection,
+        &scope(),
+        &overlapping.capture()?,
+        &request,
+        &c,
+    )?;
     assert_eq!(v["options"], json!([]));
     Ok(())
 }
@@ -162,7 +286,14 @@ fn selected_roster_is_bounded_and_omissions_are_explicit() -> Result<()> {
         citizens: selected,
         ..WorkforceFixture::default()
     };
-    let v = project(&capsule, &projection, &scope(), &fixture.capture()?, &request, &c)?;
+    let v = project(
+        &capsule,
+        &projection,
+        &scope(),
+        &fixture.capture()?,
+        &request,
+        &c,
+    )?;
     assert_eq!(v["coverage"]["canonical_citizens"], 33);
     assert_eq!(v["coverage"]["selected_citizens"], 32);
     assert_eq!(v["coverage"]["omitted_citizens"], 1);
@@ -230,8 +361,7 @@ fn options_are_sorted_and_bounded_with_explicit_omissions() -> Result<()> {
             .map(|v| v["labor"].as_str())
             .collect::<Vec<_>>(),
         [
-            "LABOR_0", "LABOR_1", "LABOR_2", "LABOR_3", "LABOR_4", "LABOR_5", "LABOR_6",
-            "LABOR_7",
+            "LABOR_0", "LABOR_1", "LABOR_2", "LABOR_3", "LABOR_4", "LABOR_5", "LABOR_6", "LABOR_7",
         ]
         .into_iter()
         .map(Some)
@@ -311,20 +441,28 @@ fn explicit_selection_reaches_citizens_beyond_the_default_window() -> Result<()>
     assert_eq!(v["coverage"]["canonical_citizens"], 33);
     assert_eq!(v["coverage"]["selected_citizens"], 1);
     assert_eq!(v["coverage"]["omitted_citizens"], 32);
-    assert_eq!(v["coverage"]["selection"], "canonical_id_ascending_explicit");
-    assert_eq!(v["selection_request"], json!({"units":["33"],"option_offset":0}));
+    assert_eq!(
+        v["coverage"]["selection"],
+        "canonical_id_ascending_explicit"
+    );
+    assert_eq!(
+        v["selection_request"],
+        json!({"units":["33"],"option_offset":0})
+    );
     assert_eq!(v["witness_version"], 2);
     assert_eq!(v["mutation_authority"], false);
     assert_eq!(v["mutation_precondition_evidence"], false);
-    assert!(project(
-        &capsule,
-        &projection,
-        &scope(),
-        &capture,
-        &ObserveRequest::default(),
-        &c
-    )
-    .is_err());
+    assert!(
+        project(
+            &capsule,
+            &projection,
+            &scope(),
+            &capture,
+            &ObserveRequest::default(),
+            &c
+        )
+        .is_err()
+    );
     Ok(())
 }
 
@@ -386,7 +524,10 @@ fn option_pages_expose_remaining_choices_and_bind_the_exact_projection() -> Resu
     assert!(later["coverage"]["next_option_offset"].is_null());
     assert!(later["next_observation_request"].is_null());
     assert_eq!(later["fresh_observation_required"], true);
-    assert_eq!(later["coverage"]["paging"], "independent_fresh_observations");
+    assert_eq!(
+        later["coverage"]["paging"],
+        "independent_fresh_observations"
+    );
     assert_eq!(first["witness_version"], 1);
     assert_eq!(later["witness_version"], 2);
     assert_ne!(first["witness"], later["witness"]);
@@ -504,8 +645,13 @@ fn next_option_request_pins_resolved_citizens_when_default_roster_order_changes(
     let next = ObserveRequest::parse(&first["next_observation_request"].to_string())?;
     let (later_capsule, later_projection) = observation(&[1, 42])?;
     let later_context = permitted(&later_projection.snapshot);
-    let (selected, total) =
-        select(&later_capsule, &later_projection, &scope(), &next, &later_context)?;
+    let (selected, total) = select(
+        &later_capsule,
+        &later_projection,
+        &scope(),
+        &next,
+        &later_context,
+    )?;
     assert_eq!(total, 2);
     assert_eq!(selected.len(), 1);
     assert_eq!(selected[0].canonical_id.get(), 43);
@@ -528,13 +674,15 @@ fn next_option_request_pins_resolved_citizens_when_default_roster_order_changes(
 
     let (missing_capsule, missing_projection) = observation(&[1])?;
     let missing_context = permitted(&missing_projection.snapshot);
-    assert!(select(
-        &missing_capsule,
-        &missing_projection,
-        &scope(),
-        &next,
-        &missing_context,
-    )
-    .is_err());
+    assert!(
+        select(
+            &missing_capsule,
+            &missing_projection,
+            &scope(),
+            &next,
+            &missing_context,
+        )
+        .is_err()
+    );
     Ok(())
 }

@@ -168,6 +168,7 @@ pub fn validate(plan: &PreparedPlan) -> Result<PlanArchiveSeal> {
             ));
         }
     }
+    super::ExistingLaborRequirement::from_plan(plan)?;
     Ok(seal)
 }
 

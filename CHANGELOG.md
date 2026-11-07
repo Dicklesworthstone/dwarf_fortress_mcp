@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased — Create finite orders using already enabled labor
+
+- Add closed `kind=existing_labor` planning to the combined host: one original
+  finite order at StepId 0, exact selected citizen identities and positive current
+  labor requirements, without a redundant assignment or invented effect receipt.
+- Discover eligible enabled workers through independently paged public options,
+  including manual and broad work-detail configurations.
+- Recheck current workforce facts, original custody and canonical source identity
+  before preparation and insertion; preserve the actual key through restart.
+- Join current labor with order or inventory goals, preserve historical
+  achievement separately from current proof, and support both reviewed clocks.
+- Pass all 52 actual-source native-executor tests and all 37 combined-host
+  component tests. Fix nested read accounting within unchanged budgets and split
+  choices response construction to respect the existing macro recursion limit.
+- Add seven stdio scenarios (56 total); actual transport execution and full
+  qualification remain pending after resource-limited full builds. Preserve
+  legacy and portfolio semantics.
+
 ## Unreleased — Select entities through their relationships
 
 - Add shared `related_entities` selection with source/target typed filters,

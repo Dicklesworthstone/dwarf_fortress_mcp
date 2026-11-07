@@ -5,6 +5,8 @@
 MCP surface. One session owns one complete original plan: configure one labor
 for selected citizens, then insert one dependent finite furniture order or an
 explicit portfolio of up to four distinct furniture recipes.
+An explicit `kind="existing_labor"` request instead inserts one finite order
+using already enabled workers, with no labor assignment step.
 The source is explicitly unadmitted development work. Current executed checks,
 qualification and real-game evidence belong in `IMPLEMENTATION_STATUS.md`.
 The private custody implementation supports Linux x86_64/aarch64; unsupported
@@ -119,6 +121,80 @@ Either unresolved run blocks paused goal acquisition. Explicit `scope="run"` or
 `scope="inventory_run"` cancellation retires that owner's prepared run or requests
 its native safety pause;
 it does not change the labor assignment or remove the manager order.
+
+## Use workers whose labor is already enabled
+
+The assignment workflow requires a real supported change to a single-labor
+work detail. A fortress may already have suitable labor enabled through broad
+details or manual labor settings. Use `kind="existing_labor"` for that case:
+
+```json
+{
+  "kind": "existing_labor",
+  "expected_observation": "<latest observation.seal>",
+  "units": ["<observed canonical citizen ID>"],
+  "labor": "CARPENTER",
+  "recipe": "wooden_bed",
+  "amount": 4,
+  "deadline_tick": 12000,
+  "poll_interval_ticks": 10,
+  "stable_samples": 2
+}
+```
+
+The labor key and citizen IDs must come from the actual observation. The
+request accepts the same finite recipes, amounts, original deadline, cadence,
+stability and optional `observed_inventory_minimum` objective as the existing
+single-order request. It has no `enabled` flag: every selected citizen must be
+currently eligible with that labor positively observed as enabled. Callers
+cannot supply historical identities or assert eligibility.
+
+Observe exposes `workforce_choices.existing_labor_options` independently of
+assignment candidates. Each option names its labor and `eligible_enabled_ids`.
+These options require neither automatic professions nor a uniquely assignable
+single-labor detail. They are advisory and do not prove workshop access,
+productivity or recipe feasibility. At most eight options are returned in labor
+key order. The optional closed Observe selector `existing_labor_offset`, from
+zero through 128, pages this list independently of `option_offset`. Explicit
+coverage records returned and omitted options. Follow
+`next_existing_labor_observation_request` for a fresh observation of the same
+citizens and use that new observation seal when planning. A nonzero existing
+offset uses a version-three choices witness; the earlier default and assignment
+page witnesses retain their bytes.
+
+Compilation uses the retained raw capture and an independently issued workforce
+policy. It seals the selected citizens' historical identities, eligibility and
+positive labor requirements into the complete original parent terminal. The
+original has exactly one `CreateWorkOrder`, StepId 0, with no predecessor. Its
+idempotency key is in a separate request identity domain, and its order goal
+keeps the original temporal requirement. There is no assignment preparation,
+Applied workforce receipt or fabricated dependency.
+
+Plan `kind="step"` with the original digest, review the returned order, then
+Commit its paired seal. The executor obtains fresh source-qualified labor
+before native preparation and again after the durable dispatch marker before
+native insertion. Disabled labor, ineligibility, historical-identity replacement,
+source drift or unavailable qualification refuses the effect. The order uses
+production authority; checking current workers uses Query and Observe. The
+current development host still requires both family write opt-ins when creating
+its initial private custodians. That initialization requirement does not create
+a labor effect, and a retained owner can reopen without assignment authority.
+
+After the insertion settles, Wait brackets the original selected order or
+inventory sample with matching current workforce captures. The full parent
+requires both the original production goal and the sealed existing-worker
+prerequisite. Later labor loss or ineligibility prevents parent success even
+when the order's own goal is fulfilled. Source or identity replacement fences
+the original lineage. The optional order and inventory clocks use the same
+independent authority, original objective and fresh parent checks as other
+single-order plans.
+
+Retain the usual complete recovery reference and all private owners. The
+single order uses `goal.history` and the existing single-order clock paths;
+the workforce journal remains an empty read custodian. Recovery verifies the
+sealed parent and exact source identities, restores no assignment receipt or
+current parent proof, and requires a fresh Wait for current evidence. Existing
+assignment and portfolio request identities remain unchanged.
 
 ## Inspect observed production conditions and declared inventory
 

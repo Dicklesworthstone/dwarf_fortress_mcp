@@ -933,6 +933,19 @@ fn encode(
         ))
     } else if view["original_plan"].is_null()
         && mode == Some("control")
+        && view["production_control_enabled"] == true
+        && view["observation"]["workforce_choices"]["existing_labor_options"]
+            .as_array()
+            .is_some_and(|v| !v.is_empty())
+    {
+        Some((
+            "fortress_plan",
+            "Compile kind=existing_labor with observed eligible workers whose selected labor is already enabled, a finite recipe and amount, and an original deadline. The order rechecks current labor without assigning it.",
+            false,
+            json!({}),
+        ))
+    } else if view["original_plan"].is_null()
+        && mode == Some("control")
         && view["labor_control_enabled"] == true
         && view["production_control_enabled"] == true
         && view["observation"]["workforce_choices"]["options"]
@@ -995,6 +1008,22 @@ fn encode(
             false,
             json!({"session_id":id.to_string(),
                 "request":view["observation"]["workforce_choices"]["next_observation_request"].to_string()}),
+        ));
+    }
+    if verified
+        && !uncertain
+        && mode != Some("offline")
+        && view["original_plan"].is_null()
+        && let Some(id) = session
+        && view["observation"]["workforce_choices"]["next_existing_labor_observation_request"]
+            .is_object()
+    {
+        recommendations.push(recommendation_fn(
+            "fortress_observe",
+            "Inspect the next bounded existing-labor options for these same citizens with a fresh observation; use its new seal for planning.",
+            false,
+            json!({"session_id":id.to_string(),
+                "request":view["observation"]["workforce_choices"]["next_existing_labor_observation_request"].to_string()}),
         ));
     }
     let mut partial_domains = vec!["retained_original_plan"];
@@ -1370,13 +1399,24 @@ mod tests {
                 "expected_anchor":selected,"query":{"kind":"production_diagnosis","limit":4}}});
         view["production_inspection_source"] = source.clone();
         let turn = joined_packet(anchor, &view, "control", true, false);
-        assert_eq!(turn["agent_turn"]["briefing"]["production_inspection_available"], true);
-        assert_eq!(turn["agent_turn"]["briefing"]["original_goal_proven"], false);
-        assert_eq!(turn["agent_turn"]["recommendations"][0]["tool"], "fortress_query");
+        assert_eq!(
+            turn["agent_turn"]["briefing"]["production_inspection_available"],
+            true
+        );
+        assert_eq!(
+            turn["agent_turn"]["briefing"]["original_goal_proven"],
+            false
+        );
+        assert_eq!(
+            turn["agent_turn"]["recommendations"][0]["tool"],
+            "fortress_query"
+        );
         let request: Value = serde_json::from_str(
             turn["agent_turn"]["recommendations"][0]["arguments"]["request"]
-                .as_str().expect("query request"),
-        ).expect("query envelope");
+                .as_str()
+                .expect("query request"),
+        )
+        .expect("query envelope");
         assert_eq!(request["expected_anchor"], selected);
 
         view["production_inspection"] = json!({"kind":"production_diagnosis",
@@ -1386,14 +1426,23 @@ mod tests {
             diagnosed["agent_turn"]["briefing"]["observed_production_conditions"]["jobs_with_findings"],
             1
         );
-        assert_eq!(diagnosed["agent_turn"]["briefing"]["original_goal_proven"], false);
-        assert_ne!(diagnosed["agent_turn"]["recommendations"][0]["tool"], "fortress_query");
+        assert_eq!(
+            diagnosed["agent_turn"]["briefing"]["original_goal_proven"],
+            false
+        );
+        assert_ne!(
+            diagnosed["agent_turn"]["recommendations"][0]["tool"],
+            "fortress_query"
+        );
 
         for field in ["anchor", "parent_anchor", "order_step_id", "source_digest"] {
             view["production_inspection_source"] = source.clone();
             view["production_inspection_source"][field] = Value::Null;
             let stale = joined_packet(anchor, &view, "control", true, false);
-            assert_eq!(stale["agent_turn"]["briefing"]["production_inspection_available"], false);
+            assert_eq!(
+                stale["agent_turn"]["briefing"]["production_inspection_available"],
+                false
+            );
             assert!(stale["agent_turn"]["active_work"]["production_inspection_source"].is_null());
         }
         view["production_inspection_source"] = source;
@@ -1403,7 +1452,10 @@ mod tests {
             ("control", true, true),
         ] {
             let refused = joined_packet(anchor, &view, mode, verified, uncertain);
-            assert_eq!(refused["agent_turn"]["briefing"]["production_inspection_available"], false);
+            assert_eq!(
+                refused["agent_turn"]["briefing"]["production_inspection_available"],
+                false
+            );
             assert!(refused["agent_turn"]["briefing"]["observed_production_conditions"].is_null());
         }
     }
@@ -2157,6 +2209,63 @@ mod tests {
                 assert_eq!(request, next);
             }
         }
+    }
+
+    #[test]
+    fn existing_worker_guidance_needs_production_authority_and_retains_its_fresh_page() {
+        let session = SessionId::new((1u128 << 127) | (24u128 << 57) | 2);
+        let next = json!({"units":["43"],"option_offset":0,"existing_labor_offset":8});
+        let mut view = json!({"original_plan":null,"labor_control_enabled":false,
+            "production_control_enabled":true,"observation":{"seal":"a".repeat(64),
+                "workforce_choices":{"options":[],
+                    "existing_labor_options":[{"labor":"MINE","eligible_enabled_ids":["43"]}],
+                    "next_existing_labor_observation_request":next}}});
+        let call = |view: &Value, verified| {
+            let (raw, overflow) = packet(
+                "fortress.query",
+                Some(session),
+                None,
+                Some("control"),
+                None,
+                None,
+                json!({"ok":verified}),
+                Some(view),
+                verified,
+                false,
+            );
+            assert!(!overflow);
+            serde_json::from_str::<Value>(&raw).expect("packet JSON")
+        };
+        let response = call(&view, true);
+        let recommendations = response["agent_turn"]["recommendations"]
+            .as_array()
+            .expect("recommendations");
+        assert_eq!(recommendations[0]["tool"], "fortress_plan");
+        assert!(recommendations[0].to_string().contains("existing_labor"));
+        let page = recommendations
+            .iter()
+            .find(|r| r["tool"] == "fortress_observe")
+            .expect("fresh existing-labor page");
+        assert_eq!(
+            serde_json::from_str::<Value>(page["arguments"]["request"].as_str().expect("request"))
+                .expect("request JSON"),
+            next
+        );
+        view["production_control_enabled"] = json!(false);
+        assert!(
+            call(&view, true)["agent_turn"]["recommendations"]
+                .as_array()
+                .expect("recommendations")
+                .iter()
+                .all(|r| r["tool"] != "fortress_plan")
+        );
+        assert!(
+            call(&view, false)["agent_turn"]["recommendations"]
+                .as_array()
+                .expect("recommendations")
+                .iter()
+                .all(|r| r["tool"] != "fortress_plan" && r["tool"] != "fortress_observe")
+        );
     }
 
     #[test]

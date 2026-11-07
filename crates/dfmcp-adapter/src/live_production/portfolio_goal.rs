@@ -47,6 +47,7 @@ where
         return Err(custody());
     }
     let first = samples.first().ok_or_else(custody)?;
+    let first_workforce = first.workforce.as_ref().ok_or_else(custody)?;
     let first_order = first.selected.inner.projection();
     let labor = original.steps.first().ok_or_else(custody)?;
     if !matches!(labor.action, dfmcp_intent::Action::SetLabor { .. })
@@ -68,6 +69,7 @@ where
     identity.extend_from_slice(after.witness().as_bytes());
     for (step, sample) in original.steps.iter().skip(1).zip(samples) {
         let order = sample.selected.inner.projection();
+        let workforce = sample.workforce.as_ref().ok_or_else(custody)?;
         let mut authorization = c.clone();
         authorization.budget.max_bytes = c.budget.max_bytes / 16;
         authorization.anchor = order.anchor();
@@ -77,8 +79,8 @@ where
                 "portfolio order source policy changed before whole-plan publication",
             ));
         }
-        authorization.anchor = sample.workforce.anchor();
-        if workforce_policy(&sample.workforce, &authorization)? != sample.workforce_policy {
+        authorization.anchor = workforce.anchor();
+        if workforce_policy(workforce, &authorization)? != sample.workforce_policy {
             return Err(error(
                 ErrorCode::CapabilityDenied,
                 "portfolio workforce source policy changed before whole-plan publication",
@@ -90,7 +92,7 @@ where
             || !matches!(step.action, dfmcp_intent::Action::CreateWorkOrder { .. })
             || sample.progress().plan_digest != original.digest
             || order.original_anchor() != original.anchor
-            || sample.workforce.capture() != first.workforce.capture()
+            || workforce.capture() != first_workforce.capture()
             || sample.parent.labor != first.parent.labor
             || order.operations() != first_order.operations()
             || order.queue_capture() != first_order.queue_capture()
@@ -178,7 +180,7 @@ where
             "portfolio whole-plan predicate or complete observation bracket changed",
         ));
     }
-    for (id, entity) in &first.workforce.snapshot().graph.entities {
+    for (id, entity) in &first_workforce.snapshot().graph.entities {
         if graph.entities.insert(*id, entity.clone()).is_some() {
             return Err(custody());
         }

@@ -1,5 +1,64 @@
 # Implementation Status
 
+## Unreleased — Produce with current labor without an assignment effect
+
+The combined development host accepts the closed `kind=existing_labor` request
+for one finite furniture order using 1..32 observed eligible citizens whose
+requested labor is already enabled. It seals one original `CreateWorkOrder` at
+StepId 0, with no assignment action, dependency or fabricated workforce receipt.
+The parent goal retains exact canonical and historical citizen identities,
+positive labor and eligibility, plus the original order or inventory objective.
+Legacy two-step and portfolio identities remain unchanged.
+
+Fresh observation now offers independently paged `existing_labor_options`, even
+when automatic professions are disabled or no assignable single-labor work detail
+exists. Options remain advisory. Planning requires the retained exact native
+capture and independently pinned source policy; callers cannot supply native
+identities, captures or source grants. Default and existing assignment-page
+witnesses keep their prior identities; nonzero existing-labor offsets use a
+separate selector-bound generation.
+
+Prepare and commit bracket final canonical refresh with matching workforce
+captures and revalidate current authority, original private custody and source
+lineage before insertion. All nested reads and final checks are prepaid from the
+unchanged operation budget. Parent polling joins fresh current workforce facts
+with the selected original goal; labor reversal withdraws current parent proof
+without erasing historical achievement. Recovery retains the original key and
+single-order history path, restores no proof or confirmation, and writes no fake
+assignment. Both reviewed clock families retain the actual original StepId.
+
+Existing-labor execution needs Query/Observe and production control, not a labor
+mutation grant. Fresh combined-owner initialization still requires both existing
+family opt-ins; reopening retained custody can disable labor control. This
+initialization limitation is documented rather than silently broadening startup.
+
+Executed on 2026-11-07: all 52 actual-source production-executor tests pass,
+including 11 new existing-labor cases. A first 48/52 run exposed underestimated
+nested workforce-read accounting; the implementation was corrected without
+widening fixture budgets. The final component harness preserves all production
+bytes and excludes only enumerated unrelated test modules. The original full
+adapter suite compiled, but execution and a later rebuild were SIGKILLed under
+shared resource pressure.
+
+All 37 combined-host component tests also pass, including five new original-plan
+compiler/source-policy cases, all 15 choices cases and both real private-custody
+cases. This component compiles the complete actual host Runtime, both native
+shells, current policies and citizen acquisition; modern transport and server
+macros are excluded. It caught and corrected an oversized choices JSON macro at
+the real crate's unchanged default recursion limit. Source copies and exact
+external lock identities were independently checked. Full primary-binary and
+metadata-only MCP builds were SIGKILLed inside the unchanged pinned Asupersync
+dependency before reaching the MCP crate. Seven new authentic-wire stdio
+scenarios are included (56 total) but have not executed.
+
+Scoped Rust formatting, Python discovery/codec checks and diff checks pass.
+`verify.sh` passed its static gates through dependency policy, then stopped at
+the unavailable `br` executable; `qualify_local.sh` refused the still-dirty feature
+worktree. Full MCP/workspace, real-game and admission qualification remain
+unclaimed; both owning beads
+`df-dfhack-bridge-plane-c-pic.4.1` and `.4.2` stay in progress.
+See docs/COMBINED_PRODUCTION_MCP.md.
+
 ## Unreleased — Select entities by witnessed relationships
 
 The shared `related_entities` query selects source entities with a positive

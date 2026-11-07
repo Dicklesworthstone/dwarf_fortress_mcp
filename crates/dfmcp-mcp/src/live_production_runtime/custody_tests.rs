@@ -180,7 +180,12 @@ fn provisional_source_anchors_do_not_replace_canonical_custody_or_rewind_authori
 #[test]
 fn real_custody_and_owner_refuse_corruption_after_refresh()
 -> std::result::Result<(), Box<dyn std::error::Error>> {
-    for corrupted in ["plan", "identity"] {
+    for (corrupted, during_refresh) in [
+        ("plan", true),
+        ("identity", true),
+        ("plan", false),
+        ("identity", false),
+    ] {
         let (capsule, projection) = observation(&[42])?;
         let mut c = context(&projection.snapshot);
         c.budget.max_bytes = 512 * 1024 * 1024;
@@ -251,11 +256,17 @@ fn real_custody_and_owner_refuse_corruption_after_refresh()
         let mut native_context = c.clone();
         native_context.budget.max_bytes = 16 * 1024 * 1024;
         guarded.refresh_after_capture(&capture, &native_context)?;
+        dfmcp_adapter::semantic_work_orders::WorkOrderEvidenceOwner::revalidate_after_external_read(
+            &mut guarded, &native_context,
+        )?;
         assert_eq!(guarded.routing_evidence()?.anchor(), c.anchor);
         custody.disarm()?;
         assert!(guarded.routing_evidence().is_err());
         custody.arm(&c)?;
         assert!(guarded.routing_evidence().is_err());
+        assert!(dfmcp_adapter::semantic_work_orders::WorkOrderEvidenceOwner::revalidate_after_external_read(
+            &mut guarded, &native_context,
+        ).is_err());
         guarded.refresh_after_capture(&capture, &native_context)?;
         assert_eq!(guarded.routing_evidence()?.anchor(), c.anchor);
         custody.disarm()?;
@@ -269,16 +280,28 @@ fn real_custody_and_owner_refuse_corruption_after_refresh()
         custody.arm(&c)?;
         guarded.refresh_after_capture(&capture, &native_context)?;
         assert_eq!(guarded.routing_evidence()?.anchor(), c.anchor);
-        *hook.borrow_mut() = Some(if corrupted == "plan" {
+        let corrupt_path = if corrupted == "plan" {
             plan_path
         } else {
             identity_path
-        });
-        assert!(
-            guarded
-                .refresh_after_capture(&capture, &native_context)
-                .is_err()
-        );
+        };
+        if during_refresh {
+            *hook.borrow_mut() = Some(corrupt_path);
+            assert!(
+                guarded
+                    .refresh_after_capture(&capture, &native_context)
+                    .is_err()
+            );
+        } else {
+            // Model a private-file change during a separate workforce read,
+            // after the canonical source refresh has published its valid route.
+            let mut bytes = std::fs::read(&corrupt_path)?;
+            bytes[0] ^= 1;
+            std::fs::write(&corrupt_path, bytes)?;
+            assert!(dfmcp_adapter::semantic_work_orders::WorkOrderEvidenceOwner::revalidate_after_external_read(
+                &mut guarded, &native_context,
+            ).is_err());
+        }
         assert!(guarded.routing_evidence().is_err());
         assert!(custody.verify(&c).is_err());
         custody.disarm()?;

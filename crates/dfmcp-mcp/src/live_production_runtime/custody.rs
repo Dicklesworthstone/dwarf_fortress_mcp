@@ -312,6 +312,21 @@ impl<E: WorkOrderEvidenceOwner> WorkOrderEvidenceOwner for GuardedEvidence<E> {
         self.check_route()?;
         self.inner.routing_evidence()
     }
+    fn revalidate_after_external_read(&mut self, c: &OperationContext) -> Result<()> {
+        // Only a route published by the immediately preceding source refresh
+        // may survive this check. A failed or stale route cannot be revived.
+        let current_route = self.check_route();
+        self.valid = None;
+        current_route?;
+        let start = Instant::now();
+        let current = self.custody.narrow(c)?;
+        self.inner.revalidate_after_external_read(&current)?;
+        let generation = self
+            .custody
+            .verify_generation(&remaining_context(c, start)?)?;
+        self.valid = Some(generation);
+        Ok(())
+    }
 }
 fn remaining_context(c: &OperationContext, start: Instant) -> Result<OperationContext> {
     let elapsed = u64::try_from(start.elapsed().as_millis())

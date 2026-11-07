@@ -466,6 +466,78 @@ fn observation_only() -> dfmcp_core::DfmcpError {
 }
 
 impl<S: EffectJournalStorage, B: EffectJournalStorage> SemanticWorkforceSession<S, B> {
+    /// Observe selected current labor without inventing an assignment review or
+    /// effect. The caller binds canonical/HF identities and issues source policy;
+    /// this owner retains native custody and leaves no planning selection behind.
+    pub(crate) fn observe_existing_labor_capture<N, F, C>(
+        &mut self,
+        ids: &[u32],
+        context: &OperationContext,
+        callbacks: (F, C),
+    ) -> Result<WorkforceCapture>
+    where
+        N: WorkforceSource,
+        F: FnOnce(&WorkforceBinding, &OperationContext) -> Result<N>,
+        C: FnMut(&WorkforceCapture) -> Result<()>,
+    {
+        let (factory, retain_capture) = callbacks;
+        let result = (|| {
+            let mut call = Call::new(context)?;
+            call.reserve(PROJECTION_RESERVE)?;
+            call.context()?
+                .authorize(Capability::Observe, RiskTier::ReadOnly, &[], None)?;
+            let view = self.view(&mut call)?;
+            // An existing-worker production owner has no assignment steps. A
+            // retained intervention here belongs to another original scope.
+            if !view.records.is_empty() {
+                return Err(custody());
+            }
+            let native_context = read_reserve(&mut call, &view)?;
+            let store = &mut self.associations;
+            let guard_call = &mut call;
+            let guarded_factory = |binding: &WorkforceBinding, current: &OperationContext| {
+                store.verify(&guard_call.context()?)?;
+                let current = guard_call.edge(current)?;
+                current.authorize(Capability::Observe, RiskTier::ReadOnly, &[], None)?;
+                let source = factory(binding, &current)?;
+                store.verify(&guard_call.context()?)?;
+                guard_call.context()?.authorize(
+                    Capability::Observe,
+                    RiskTier::ReadOnly,
+                    &[],
+                    None,
+                )?;
+                Ok(SelectedObservationSource {
+                    source,
+                    retain_capture,
+                })
+            };
+            let acquired = self.native.observe(ids, &native_context, guarded_factory);
+            self.native.clear_selection();
+            call.context.anchor.tick = call
+                .context
+                .anchor
+                .tick
+                .max(GameTick(self.native.high_tick()));
+            let capture = acquired?;
+            if !capture.paused() || capture.tick() < call.context.anchor.tick.get() {
+                return Err(error(
+                    ErrorCode::StaleAnchor,
+                    "existing labor capture is unpaused or below the authority floor",
+                ));
+            }
+            let after = self.view(&mut call)?;
+            if after.binding != view.binding || !after.records.is_empty() {
+                return Err(custody());
+            }
+            call.context()?
+                .authorize(Capability::Observe, RiskTier::ReadOnly, &[], None)?;
+            Ok(capture)
+        })();
+        self.native.clear_selection();
+        result
+    }
+
     /// Read the actual selected citizens of an already verified original labor
     /// step. The combined parent owner brackets its other family captures with
     /// two such reads. This does not construct a one-step replacement plan or a

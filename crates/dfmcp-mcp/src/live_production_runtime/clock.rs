@@ -349,7 +349,7 @@ impl Runtime {
                 .ok_or_else(|| denied("original frontier absent"))?
                 .inspect(&work.take(CLOCK_VIEW_BYTES)?)?;
             if !frontier.all_applied() || frontier.needs_reconciliation() {
-                return Err(denied("clock requires both original effects to be settled"));
+                return Err(denied("clock requires every original effect to be settled"));
             }
             let original = self
                 .original

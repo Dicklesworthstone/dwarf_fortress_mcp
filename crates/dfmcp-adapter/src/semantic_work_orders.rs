@@ -50,6 +50,14 @@ pub trait WorkOrderEvidenceOwner {
         context: &OperationContext,
     ) -> Result<()>;
     fn routing_evidence(&self) -> Result<LiveRoutingEvidence<'_>>;
+
+    /// Revalidate an already refreshed route after another bounded source read.
+    /// Embedding owners with private original-plan custody must recheck it here
+    /// before restoring a route; this is not a replacement for source refresh.
+    fn revalidate_after_external_read(&mut self, context: &OperationContext) -> Result<()> {
+        context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
+        self.routing_evidence().map(|_| ())
+    }
 }
 
 // Reuse the concrete complete-roster acquisition owner and its independently

@@ -5,12 +5,15 @@ use dfmcp_adapter::LiveObservationCapsule;
 use dfmcp_adapter::build_placement::journal::BuildMode;
 use dfmcp_adapter::live_dispatch::durable::{self, Coordinator, Phase};
 use dfmcp_adapter::live_production::{
-    self, Executor, SelectedParentGoalProgress, SelectedWorkOrderGoalMonitor,
+    self, Executor, ExistingLaborProjection, ExistingLaborRequirement, SelectedParentGoalProgress,
+    SelectedWorkOrderGoalMonitor, WorkforceFactory,
 };
 use dfmcp_adapter::live_projection::{LiveWorldProjection, project_live_capsule};
+use dfmcp_adapter::live_routing::LiveRoutingEvidence;
 use dfmcp_adapter::plan_archive::{create_private_plan_archive, open_private_plan_archive};
 use dfmcp_adapter::semantic_work_orders::SemanticWorkOrderSession;
 use dfmcp_adapter::semantic_workforce::SemanticWorkforceSession;
+use dfmcp_adapter::workforce_control::WorkforceCapture;
 use dfmcp_adapter::workforce_control::journal::WorkforceBinding;
 use dfmcp_adapter::workforce_control::rpc::WorkforceSource;
 use dfmcp_core::{
@@ -19,7 +22,7 @@ use dfmcp_core::{
 };
 use dfmcp_intent::plan_archive::PlanArchiveSeal;
 use dfmcp_intent::{Action, PreparedPlan};
-use dfmcp_world::PredicateEvidence;
+use dfmcp_world::{EvidencePolicy, PredicateEvidence};
 use serde_json::{Value, json};
 use std::time::{Duration, Instant};
 
@@ -27,6 +30,7 @@ mod choices;
 mod clock;
 mod config;
 mod custody;
+mod existing_labor_request;
 mod goals;
 mod inspection;
 mod inventory_clock;
@@ -38,6 +42,7 @@ pub(crate) use choices::ObserveRequest;
 use clock::ProductionClock;
 pub(crate) use config::Config;
 use custody::{GuardedEvidence, SharedCustody};
+pub(crate) use existing_labor_request::ExistingLaborRequest;
 pub(crate) use inspection::InspectionRequest;
 use inspection::InspectionSource;
 use inventory_clock::ProductionInventoryClock;
@@ -64,9 +69,45 @@ type Order = SemanticWorkOrderSession<
     <O as OrderShell>::Association,
     <O as OrderShell>::Native,
 >;
-type Factory = Box<
-    dyn FnMut(&WorkforceBinding, &OperationContext) -> Result<<W as WorkforceShell>::Native> + Send,
->;
+struct Factory {
+    shell: W,
+    custody: SharedCustody,
+    original_anchor: StateAnchor,
+}
+impl WorkforceFactory for Factory {
+    type Source = <W as WorkforceShell>::Native;
+    fn connect(
+        &mut self,
+        binding: &WorkforceBinding,
+        c: &OperationContext,
+    ) -> Result<Self::Source> {
+        self.shell.check_environment()?;
+        self.shell.native(binding, c)
+    }
+    fn existing_labor_policy(
+        &mut self,
+        projection: &ExistingLaborProjection,
+        c: &OperationContext,
+    ) -> Result<EvidencePolicy> {
+        self.shell.check_environment()?;
+        if projection.original_anchor() != self.original_anchor {
+            return Err(denied(
+                "existing labor policy belongs to another original plan anchor",
+            ));
+        }
+        // At preparation the independent workforce projection has the original
+        // cursor and its own hash. It is not a replacement canonical world.
+        // Verify immutable private custody at its original anchor and current
+        // authority tick, while the policy remains scoped to the real projection.
+        let mut custody_context = c.clone();
+        if c.anchor.cursor == self.original_anchor.cursor {
+            custody_context.anchor = self.original_anchor;
+            custody_context.anchor.tick = c.anchor.tick.max(self.original_anchor.tick);
+        }
+        self.custody.verify(&custody_context)?;
+        self.shell.acceptance().existing_labor(projection, c)
+    }
+}
 type Execution = Executor<
     <W as WorkforceShell>::Journal,
     <W as WorkforceShell>::Association,
@@ -137,6 +178,7 @@ struct Basis {
     projection: LiveWorldProjection,
     seal: Digest32,
     choices: Option<Value>,
+    existing_labor_capture: Option<WorkforceCapture>,
 }
 
 pub(crate) struct Runtime {
@@ -203,6 +245,9 @@ fn order_mode(mode: Mode) -> orders::Mode {
 }
 fn host_plan(plan: &PreparedPlan) -> Result<PlanArchiveSeal> {
     let seal = live_production::validate_plan(plan)?;
+    if plan.steps.len() == 1 && ExistingLaborRequirement::from_plan(plan)?.is_some() {
+        return Ok(seal);
+    }
     if !(2..=5).contains(&plan.steps.len())
         || !matches!(plan.steps[0].action, Action::SetLabor { .. })
         || !plan.steps[0].depends_on.is_empty()
@@ -217,7 +262,7 @@ fn host_plan(plan: &PreparedPlan) -> Result<PlanArchiveSeal> {
         })
     {
         return Err(invalid(
-            "combined host requires original labor followed by one to four dependent finite order leaves",
+            "combined host requires original labor with dependent orders or one order with an exact existing-labor prerequisite",
         ));
     }
     Ok(seal)
@@ -279,7 +324,7 @@ impl Runtime {
         if session == SessionId::NIL
             || budget.max_bytes > MAX_BYTES
             || budget.max_wall_millis > MAX_WALL_MILLIS
-            || !(2..=5).contains(&budget.max_actions)
+            || !(1..=5).contains(&budget.max_actions)
             || budget.max_entities < 4096
             || budget.max_output_tokens > MAX_OUTPUT_TOKENS
             || budget.max_game_ticks > 1200
@@ -288,7 +333,7 @@ impl Runtime {
                 && budget.max_game_ticks != 0)
         {
             return Err(exhausted(
-                "combined runtime requires two to five actions, 4096 entities and at most 1200 independently configured clock ticks",
+                "combined runtime requires one to five actions, 4096 entities and at most 1200 independently configured clock ticks",
             ));
         }
         let opening_labor = mode == Mode::Control && config.workforce.labor_enabled();
@@ -412,6 +457,7 @@ impl Runtime {
                 capsule,
                 projection,
                 choices: None,
+                existing_labor_capture: None,
             });
             out.seal = Some(recovery.seal);
             out.identity_digest = Some(recovery.identity_digest);
@@ -432,7 +478,7 @@ impl Runtime {
                 if out
                     .original
                     .as_ref()
-                    .is_some_and(|plan| plan.steps.len() != 2)
+                    .is_some_and(|plan| plan.steps.len() > 2)
                 {
                     return Err(denied(
                         "portfolio recovery must retain every original goal and clock slot",
@@ -616,8 +662,11 @@ impl Runtime {
                 custody.clone(),
             ))
         };
-        let shell = self.config.workforce.clone();
-        let factory: Factory = Box::new(move |binding, c| shell.native(binding, c));
+        let factory = Factory {
+            shell: self.config.workforce.clone(),
+            custody: custody.clone(),
+            original_anchor: original.anchor,
+        };
         let (mut w, mut o) = self
             .parts
             .take()
@@ -668,6 +717,7 @@ impl Runtime {
         self.parent_goal = None;
         if let Some(basis) = &mut self.basis {
             basis.choices = None;
+            basis.existing_labor_capture = None;
         }
         if let Some(execution) = &mut self.execution {
             execution.abandon_preparation();
@@ -907,8 +957,11 @@ impl Runtime {
             &work.take(2 * MIB)?,
         )?;
         let seal = observation_seal(&capsule, &projection);
-        let choices = if selection.is_empty() {
-            choices::empty(projection.snapshot.anchor(), seal, &request)?
+        let (choices, existing_labor_capture) = if selection.is_empty() {
+            (
+                choices::empty(projection.snapshot.anchor(), seal, &request)?,
+                None,
+            )
         } else {
             let binding = self
                 .parts
@@ -934,14 +987,15 @@ impl Runtime {
                 self.observation_tick_floor =
                     self.observation_tick_floor.max(GameTick(capture.tick()));
             }
-            choices::project(
+            let choices = choices::project(
                 &capsule,
                 &projection,
                 scope,
                 &capture,
                 &request,
                 &work.take(4 * MIB)?,
-            )?
+            )?;
+            (choices, Some(capture))
         };
         self.config.current()?;
         work.current()?;
@@ -951,6 +1005,7 @@ impl Runtime {
             capsule,
             projection,
             choices: Some(choices),
+            existing_labor_capture,
         });
         self.view(&mut work)
     }
@@ -966,6 +1021,59 @@ impl Runtime {
     ) -> Result<View> {
         self.plan_compiled(request.observation()?, true, c, |evidence, current| {
             request.compile(evidence, current)
+        })
+    }
+    pub(crate) fn plan_existing_labor(
+        &mut self,
+        request: ExistingLaborRequest,
+        c: &OperationContext,
+    ) -> Result<View> {
+        let basis = self
+            .basis
+            .as_ref()
+            .ok_or_else(|| invalid("observe existing labor before production planning"))?;
+        let capsule = basis.capsule.clone();
+        let projection = basis.projection.clone();
+        let capture = basis.existing_labor_capture.clone().ok_or_else(|| {
+            denied("existing-labor planning requires a fresh selected workforce capture")
+        })?;
+        let scope = self.config.workforce.acceptance().clone();
+        self.plan_compiled(request.observation()?, false, c, |evidence, current| {
+            let identity =
+                LiveRoutingEvidence::citizens_v1(evidence.clone(), &projection, &capsule)?;
+            let units = identity.resolve_units(&request.unit_ids()?)?;
+            let historical = units
+                .iter()
+                .map(|unit| {
+                    let native = capture
+                        .citizens()
+                        .iter()
+                        .find(|native| native.id() == unit.native_id)
+                        .ok_or_else(|| {
+                            denied("selected citizen was not in the exact workforce observation")
+                        })?;
+                    Ok((unit.canonical_id, native.historical_id()))
+                })
+                .collect::<Result<Vec<_>>>()?;
+            let requirement = ExistingLaborRequirement::new(request.labor.clone(), historical)?;
+            let plan = request.compile(evidence, &requirement, current)?;
+            let observed =
+                ExistingLaborProjection::new(&plan, &identity, capture, current.anchor.cursor)?;
+            if observed.anchor().tick != current.anchor.tick {
+                return Err(denied(
+                    "existing labor does not share the original paused observation tick",
+                ));
+            }
+            let policy = scope.existing_labor(&observed, current)?;
+            if !observed
+                .evidence(policy)?
+                .establishes(&requirement.predicate())?
+            {
+                return Err(denied(
+                    "selected existing labor and citizen eligibility are not known true",
+                ));
+            }
+            Ok(plan)
         })
     }
     fn plan_compiled(
@@ -1029,6 +1137,10 @@ impl Runtime {
             true,
         )?);
         self.create_executor(&mut work)?;
+        if let Some(basis) = &mut self.basis {
+            basis.choices = None;
+            basis.existing_labor_capture = None;
+        }
         if portfolio {
             self.initialize_portfolio(None, &mut work)?;
         }
@@ -1117,6 +1229,11 @@ impl Runtime {
         // capture. Its current-operation route must therefore be primed through
         // a fresh authorized citizen read, never by reviving a prior generation.
         if prime_labor
+            && self
+                .original
+                .as_ref()
+                .and_then(|p| p.steps.first())
+                .is_some_and(|step| matches!(step.action, Action::SetLabor { .. }))
             && frontier.inspect(&work.take(8 * MIB)?)?.next_ready == Some(dfmcp_core::StepId::ZERO)
         {
             execution.refresh_original_evidence(&work.take(32 * MIB)?, |evidence, current| {

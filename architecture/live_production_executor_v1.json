@@ -89,16 +89,17 @@
       "labor-order"
     ],
     "configuration_schema": "dfmcp.combined-production-development/1",
-    "request_schema": "closed legacy labor/citizens/finite furniture request, or kind=portfolio with one to four distinct recipes and per-leaf optional inventory minimum",
+    "request_schema": "closed legacy labor/citizens/finite furniture request, kind=existing_labor with one finite order and independently observed current workers, or kind=portfolio with one to four distinct recipes and per-leaf optional inventory minimum",
     "original_steps": [
       "SetLabor",
       "CreateWorkOrder"
     ],
-    "order_depends_on_original_labor_step": true,
+    "order_depends_on_original_labor_step": "legacy and portfolio only; existing_labor has one original dependency-free order",
     "steps": {
       "legacy": 2,
       "portfolio_min": 2,
-      "portfolio_max": 5
+      "portfolio_max": 5,
+      "existing_labor": 1
     },
     "selected_citizens_max": 32,
     "workforce_choices": {
@@ -128,7 +129,8 @@
         "unknown_fields": "rejected",
         "unknown_selected_citizens": "rejected before native workforce contact",
         "default_request": "first 32 canonical citizens and first eight eligible options",
-        "nondefault_request_after_original_plan": "rejected before native contact"
+        "nondefault_request_after_original_plan": "rejected before native contact",
+        "optional_existing_labor_offset": "integer from zero through 128; default zero; independent existing-labor option page"
       },
       "explicit_selection": "canonical_id_ascending_explicit",
       "option_paging": {
@@ -166,7 +168,23 @@
           "fixed_limits_and_ordering",
           "canonical_observation_seal",
           "native_capture_witness"
-        ]
+        ],
+        "existing_labor_page": 3,
+        "existing_labor_page_domain": "dfmcp-combined-workforce-choices/3",
+        "existing_labor_page_binds": "all version-two inputs plus nonzero existing_labor_offset"
+      },
+      "existing_labor_options": {
+        "field": "existing_labor_options",
+        "maximum": 8,
+        "order": "labor_key_ascending",
+        "citizen_field": "eligible_enabled_ids",
+        "requires_selected_only_single_labor_detail": false,
+        "requires_automatic_professions": false,
+        "assignment_authority": false,
+        "productivity_proven": false,
+        "next_request_field": "next_existing_labor_observation_request",
+        "each_page": "independent fresh observation",
+        "positive_readonly_prerequisite_requalified_before_planning": true
       }
     },
     "finite_order_amount_max": 100,
@@ -261,7 +279,12 @@
       "crates/dfmcp-mcp/src/semantic_query_core.rs",
       "crates/dfmcp-adapter/src/operations_analysis_view.rs",
       "crates/dfmcp-adapter/tests/semantic_work_orders/production_analysis.rs",
-      "tests/stdio/combined_production_inspection.py"
+      "tests/stdio/combined_production_inspection.py",
+      "crates/dfmcp-mcp/src/live_production_runtime/existing_labor_request.rs",
+      "crates/dfmcp-mcp/src/live_production_runtime/existing_labor_request_tests.rs",
+      "crates/dfmcp-adapter/src/live_production/existing_labor.rs",
+      "crates/dfmcp-adapter/src/live_production/existing_labor_goal.rs",
+      "tests/stdio/combined_existing_labor.py"
     ],
     "private_custody_platforms": [
       "linux-x86_64",
@@ -534,6 +557,37 @@
       "diagnostic_guidance_for_pending_original_goal": true,
       "test_campaign": "tests/stdio/combined_production_inspection.py",
       "test_execution_status": "added_not_executed_executor_unavailable"
+    },
+    "existing_labor": {
+      "request_kind": "existing_labor",
+      "request_identity_domain": "dfmcp-native-existing-labor-production-request/1",
+      "order_step_id": 0,
+      "orders": 1,
+      "native_assignment_effect": false,
+      "assignment_receipt_or_dependency_fabricated": false,
+      "parent_requirement": [
+        "positive selected labor",
+        "current workforce eligibility",
+        "sealed native historical figure identity"
+      ],
+      "preplan_source": "exact retained raw selected workforce capture plus independently issued pinned source policy",
+      "preplan_capture_may_include_unselected_citizens": true,
+      "effect_guards": [
+        "before native order preparation",
+        "after durable dispatch marker before insertion"
+      ],
+      "read_authority": [
+        "Query",
+        "Observe"
+      ],
+      "effect_authority": "ConfigureProduction",
+      "initial_private_custodian_creation_still_requires_both_family_flags": true,
+      "fresh_parent_sample": "matching current selected workforce captures bracket original selected goal",
+      "workforce_journal": "empty original read custodian; retained records from another plan refuse",
+      "goal_history": "goal.history",
+      "clock_paths": "existing single-order paths",
+      "new_protocol_or_admission": false,
+      "legacy_request_identities_changed": false
     }
   },
   "selected_work_order_goal_monitor": {

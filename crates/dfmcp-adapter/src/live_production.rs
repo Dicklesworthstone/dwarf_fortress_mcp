@@ -38,6 +38,9 @@ use crate::workforce_control::rpc::WorkforceSource;
 
 pub mod policy;
 pub use policy::{MAX_PLAN_BYTES, MAX_STEPS, archive_limits, validate as validate_plan};
+mod existing_labor;
+pub use existing_labor::{ExistingLaborProjection, ExistingLaborRequirement};
+mod existing_labor_goal;
 mod goal_monitor;
 pub use goal_monitor::{SelectedWorkOrderGoalMonitor, SelectedWorkOrderGoalResult};
 mod parent_goal;
@@ -144,6 +147,19 @@ pub trait WorkforceFactory {
     type Source: WorkforceSource;
     fn connect(&mut self, binding: &WorkforceBinding, c: &OperationContext)
     -> Result<Self::Source>;
+
+    /// Independent source policy for current workers. Legacy factories grant
+    /// nothing here; a native capture or a plan cannot issue its own authority.
+    fn existing_labor_policy(
+        &mut self,
+        _: &ExistingLaborProjection,
+        _: &OperationContext,
+    ) -> Result<dfmcp_world::EvidencePolicy> {
+        Err(error(
+            ErrorCode::CapabilityDenied,
+            "existing labor source policy is unavailable",
+        ))
+    }
 }
 impl<F, N> WorkforceFactory for F
 where
@@ -197,6 +213,8 @@ pub struct Executor<WJ, WA, OJ, OA, ON, E, F> {
     prepared: Option<(StepId, FamilyPreparation)>,
     high_tick: u64,
     latest: Option<StepEvidence>,
+    existing_labor_floor: Option<crate::workforce_control::WorkforceCapture>,
+    existing_labor_fenced: bool,
 }
 
 struct Call {
@@ -340,6 +358,8 @@ where
             prepared: None,
             high_tick: c.anchor.tick.get(),
             latest: None,
+            existing_labor_floor: None,
+            existing_labor_fenced: false,
         };
         let mut call = out.call(c)?;
         let inventory = out.inventory(&mut call)?;
@@ -616,15 +636,25 @@ impl Dependencies {
 /// A work-order's own final semantic refresh occurs after its durable dispatch
 /// marker. Reverify every original labor predecessor at that exact boundary,
 /// using separately prepaid custody work from the same outer operation.
-struct OrderEvidence<'a, WJ, WA, E> {
+struct OrderEvidence<'a, WJ, WA, E, F> {
     source: &'a mut E,
     workforce: &'a mut SemanticWorkforceSession<WJ, WA>,
     dependencies: &'a Dependencies,
     checks: Vec<OperationContext>,
+    prerequisite_checks: Vec<OperationContext>,
+    original: &'a PreparedPlan,
+    factory: &'a mut F,
+    prerequisite_floor: &'a mut Option<crate::workforce_control::WorkforceCapture>,
+    prerequisite_fenced: &'a mut bool,
+    high_tick: &'a mut u64,
     until: Instant,
 }
-impl<WJ: EffectJournalStorage, WA: EffectJournalStorage, E: WorkOrderEvidenceOwner>
-    WorkOrderEvidenceOwner for OrderEvidence<'_, WJ, WA, E>
+impl<
+    WJ: EffectJournalStorage,
+    WA: EffectJournalStorage,
+    E: WorkOrderEvidenceOwner,
+    F: WorkforceFactory,
+> WorkOrderEvidenceOwner for OrderEvidence<'_, WJ, WA, E, F>
 {
     fn refresh_after_observation(
         &mut self,
@@ -661,7 +691,76 @@ impl<WJ: EffectJournalStorage, WA: EffectJournalStorage, E: WorkOrderEvidenceOwn
             .max_wall_millis
             .min(c.budget.max_wall_millis)
             .min(u64::try_from(millis).map_err(|_| exhausted())?);
-        self.dependencies.verify(self.workforce, &check)
+        self.dependencies.verify(self.workforce, &check)?;
+        if ExistingLaborRequirement::from_plan(self.original)?.is_some() {
+            let mut current = self.prerequisite_checks.pop().ok_or_else(exhausted)?;
+            current.grants = c.grants.clone();
+            current.cancellation_requested |= c.cancellation_requested;
+            current.anchor = c.anchor;
+            current.anchor.tick = current.anchor.tick.max(GameTick(*self.high_tick));
+            current.budget.max_wall_millis = current
+                .budget
+                .max_wall_millis
+                .min(check.budget.max_wall_millis);
+            let mut bounded = Call::new(&current, *self.high_tick)?;
+            let policy_context = bounded.take(MIB)?;
+            let final_check = bounded.take(self.dependencies.check_bytes)?;
+            let final_source = bounded.take(ORDER_OPERATION_BYTES)?;
+            let final_custody = bounded.take(ORDER_OPERATION_BYTES)?;
+            let read_bytes = bounded.bytes.checked_sub(1).ok_or_else(exhausted)? / 2;
+            let reading = bounded.take(read_bytes)?;
+            let final_reading = bounded.take(read_bytes)?;
+            let identity = self.source.routing_evidence()?;
+            let projection = existing_labor::observe(
+                self.original,
+                &identity,
+                self.workforce,
+                self.factory,
+                self.original.anchor.cursor,
+                &reading,
+                self.prerequisite_floor,
+                self.prerequisite_fenced,
+                self.high_tick,
+            )?;
+            if projection.capture().tick() != observation.tick() {
+                return Err(error(
+                    ErrorCode::StaleAnchor,
+                    "existing labor and original queue do not share a paused tick",
+                ));
+            }
+            let mut policy_context = bounded.edge(&policy_context, *self.high_tick)?;
+            policy_context.anchor = projection.anchor();
+            let granted = self
+                .factory
+                .existing_labor_policy(&projection, &policy_context)?;
+            existing_labor::require_true(&projection, granted)?;
+            // The independent source policy may recheck the original archive,
+            // withdrawing an older guarded route even when its custody is
+            // unchanged. Reacquire the same original citizen identity after
+            // those checks, with a distinct prepaid allowance, so the caller's
+            // final route cannot use evidence preceding the labor read.
+            self.source.refresh_after_observation(
+                observation,
+                &bounded.edge(&final_source, *self.high_tick)?,
+            )?;
+            existing_labor::observe_matching(
+                &projection,
+                self.workforce,
+                self.factory,
+                &bounded.edge(&final_reading, *self.high_tick)?,
+                self.prerequisite_floor,
+                self.prerequisite_fenced,
+                self.high_tick,
+            )?;
+            self.dependencies.verify(
+                self.workforce,
+                &bounded.edge(&final_check, *self.high_tick)?,
+            )?;
+            self.source
+                .revalidate_after_external_read(&bounded.edge(&final_custody, *self.high_tick)?)?;
+            bounded.current()?;
+        }
+        Ok(())
     }
     fn routing_evidence(&self) -> Result<LiveRoutingEvidence<'_>> {
         self.source.routing_evidence()
@@ -810,6 +909,29 @@ where
         let checks = (0..2)
             .map(|_| call.take(dependencies.check_bytes))
             .collect::<Result<Vec<_>>>()?;
+        let prerequisite_checks = if ExistingLaborRequirement::from_plan(&self.original)?.is_some()
+        {
+            (0..2)
+                .map(|_| {
+                    call.take(
+                        existing_labor::observation_bytes(inventory.labor_cost())?
+                            .checked_mul(2)
+                            .and_then(|bytes| {
+                                bytes.checked_add(
+                                    2 * ORDER_OPERATION_BYTES
+                                        + dependencies.check_bytes
+                                        + LOCAL_BYTES
+                                        + MIB
+                                        + 1,
+                                )
+                            })
+                            .ok_or_else(exhausted)?,
+                    )
+                })
+                .collect::<Result<Vec<_>>>()?
+        } else {
+            Vec::new()
+        };
         let until = call.until;
         let value = match route.family {
             LiveFamily::WorkforceV1_17 => {
@@ -836,6 +958,12 @@ where
                     workforce: &mut self.workforce,
                     dependencies: &dependencies,
                     checks,
+                    prerequisite_checks,
+                    original: &self.original,
+                    factory: &mut self.factory,
+                    prerequisite_floor: &mut self.existing_labor_floor,
+                    prerequisite_fenced: &mut self.existing_labor_fenced,
+                    high_tick: &mut self.high_tick,
                     until,
                 };
                 let observe = call.edge(
@@ -899,6 +1027,27 @@ where
         let dependencies = self.dependencies(step, &inventory, call)?;
         let native = call.take(native_bytes)?;
         let checks = vec![call.take(dependencies.check_bytes)?];
+        let prerequisite_checks = if ExistingLaborRequirement::from_plan(&self.original)?.is_some()
+        {
+            vec![
+                call.take(
+                    existing_labor::observation_bytes(inventory.labor_cost())?
+                        .checked_mul(2)
+                        .and_then(|bytes| {
+                            bytes.checked_add(
+                                2 * ORDER_OPERATION_BYTES
+                                    + dependencies.check_bytes
+                                    + LOCAL_BYTES
+                                    + MIB
+                                    + 1,
+                            )
+                        })
+                        .ok_or_else(exhausted)?,
+                )?,
+            ]
+        } else {
+            Vec::new()
+        };
         let value = match route.family {
             LiveFamily::WorkforceV1_17 => {
                 // Dependency inspection may have attached another labor step;
@@ -939,6 +1088,12 @@ where
                     workforce: &mut self.workforce,
                     dependencies: &dependencies,
                     checks,
+                    prerequisite_checks,
+                    original: &self.original,
+                    factory: &mut self.factory,
+                    prerequisite_floor: &mut self.existing_labor_floor,
+                    prerequisite_fenced: &mut self.existing_labor_fenced,
+                    high_tick: &mut self.high_tick,
                     until: call.until,
                 };
                 let native = call.edge(

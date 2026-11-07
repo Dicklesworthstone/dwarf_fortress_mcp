@@ -52,7 +52,8 @@ pub struct SelectedParentGoalResult {
     pub(super) step: StepId,
     pub(super) selected: SelectedWorkOrderGoalResult,
     pub(super) parent: SelectedParentGoalProgress,
-    pub(super) workforce: WorkforceGoalProjection,
+    pub(super) workforce: Option<WorkforceGoalProjection>,
+    pub(super) existing_labor: Option<ExistingLaborProjection>,
     pub(super) workforce_policy: EvidencePolicy,
 }
 impl SelectedParentGoalResult {
@@ -71,6 +72,11 @@ impl SelectedParentGoalResult {
     /// this sample proves neither current freshness nor order-attributed output.
     pub fn operations_projection(&self) -> &WorkOrderGoalProjection {
         self.selected.inner.projection()
+    }
+    /// Present only for the read-only existing-worker path; this source is not
+    /// backed by an assignment action or a historical workforce receipt.
+    pub fn existing_labor_projection(&self) -> Option<&ExistingLaborProjection> {
+        self.existing_labor.as_ref()
     }
     pub fn selected_goal_proven(&self) -> bool {
         self.selected.selected_goal_proven()
@@ -362,6 +368,16 @@ where
         A: FnMut(&WorkOrderGoalProjection, &OperationContext) -> Result<EvidencePolicy>,
         W: FnMut(&WorkforceGoalProjection, &OperationContext) -> Result<EvidencePolicy>,
     {
+        if ExistingLaborRequirement::from_plan(&self.original)?.is_some() {
+            return self.poll_existing_labor_parent_goal(
+                monitor,
+                original_identity,
+                cursor,
+                context,
+                sources,
+                policies.0,
+            );
+        }
         self.poll_selected_parent_goal_inner(
             monitor,
             original_identity,
@@ -618,7 +634,8 @@ where
                     step: monitor.step,
                     selected: sampled,
                     parent,
-                    workforce: after,
+                    workforce: Some(after),
+                    existing_labor: None,
                     workforce_policy: granted_workforce,
                 })
             })();

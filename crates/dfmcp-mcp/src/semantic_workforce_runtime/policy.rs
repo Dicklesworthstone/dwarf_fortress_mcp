@@ -1,6 +1,7 @@
 //! Exact operator acceptance for this isolated development runtime. These pins
 //! neither populate the compatibility registry nor authorize another profile.
 use super::{denied, invalid};
+use dfmcp_adapter::live_production::ExistingLaborProjection;
 use dfmcp_adapter::live_projection::LiveWorldProjection;
 use dfmcp_adapter::semantic_workforce::WorkforceGoalProjection;
 use dfmcp_adapter::semantic_workforce::projection::{
@@ -165,6 +166,46 @@ impl SourceAcceptance {
         policy.paused = true;
         // A selected capture grants positive facts only: it does not establish
         // complete-roster absence, job execution, productivity or path access.
+        policy
+            .entity_kinds
+            .insert(EntityKind::Unit, EvidenceCoverage::Observed);
+        for field in [
+            UNIT_ID_SOURCE,
+            HISTORICAL_ID_SOURCE,
+            ELIGIBILITY_SOURCE,
+            LABOR_SOURCE,
+        ] {
+            policy.sources.insert(EvidenceSource::Observed {
+                field: field.into(),
+                source_digest: projection.source_digest(),
+            });
+        }
+        projection.evidence(policy.clone())?;
+        Ok(policy)
+    }
+    /// Issue current positive workforce facts for an original read-only labor
+    /// prerequisite. No assignment receipt or ConfigureLabor grant is involved.
+    pub fn existing_labor(
+        &self,
+        projection: &ExistingLaborProjection,
+        context: &OperationContext,
+    ) -> Result<EvidencePolicy> {
+        self.context(context)?;
+        let capture = projection.capture();
+        if projection.anchor().fortress_id != self.fortress()
+            || context.anchor.cursor.epoch != projection.anchor().cursor.epoch
+            || context.anchor.tick < projection.anchor().tick
+            || capture.folder() != self.world_folder
+            || capture.site() != self.site_id
+            || capture.generation() != self.workforce_generation
+            || !capture.paused()
+        {
+            return Err(denied(
+                "existing labor differs from exact operator workforce pins",
+            ));
+        }
+        let mut policy = EvidencePolicy::at(projection.anchor());
+        policy.paused = true;
         policy
             .entity_kinds
             .insert(EntityKind::Unit, EvidenceCoverage::Observed);
