@@ -666,7 +666,7 @@ pub fn fortress_open_session(
     result.unwrap_or_else(|cause| unbound("fortress.open_session", &cause))
 }
 #[tool(
-    description = "Observe paused canonical citizens and advisory labor choices. Optional closed JSON request selects 1-32 canonical units, option_offset or existing_labor_offset; every page is a fresh observation. Before original planning, include_production=true additionally captures complete source-pinned jobs, buildings and inventory at the same paused tick for read-only Query inspection. No clock advance or production authority is granted."
+    description = "Observe paused canonical citizens and advisory labor choices. Optional closed JSON request selects 1-32 canonical units, option_offset or existing_labor_offset; every page is a fresh observation. Before original planning, include_production=true (alias include_operations=true) additionally captures complete source-pinned jobs, buildings and inventory at the same paused tick for read-only Query inspection. No clock advance or production authority is granted."
 )]
 pub fn fortress_observe(session_id: String, request: Option<String>) -> String {
     with_session(session_id, "fortress.observe", None, || {
@@ -678,7 +678,7 @@ pub fn fortress_observe(session_id: String, request: Option<String>) -> String {
     })
 }
 #[tool(
-    description = "Inspect retained state, original plan, frontier, review and recovery custody. Optional order_step_id selects an original portfolio order. After Observe(include_production=true) before planning, or after a successful original-goal Wait, optional closed dfmcp.query/1 JSON request supports production_diagnosis, inventory_plan, aggregate, entities, inspect, traverse and dependencies over that exact captured operations state. Aggregates report observed stock, including ineligible items; they do not establish usable supply. expected_anchor names production_inspection_source.anchor, not the citizen or parent anchor. Pre-plan inspection has no order selector and grants no mutation or goal authority. Diagnoses are observed conditions across captured jobs, not order-attributed causes; inventory plans allocate declared stack units without reserving items or proving native recipe feasibility. No native contact or clock advance."
+    description = "Inspect retained state, original plan, frontier, review and recovery custody. Optional order_step_id selects an original portfolio order. After Observe(include_production=true) before planning, or after a successful original-goal Wait, optional closed dfmcp.query/1 JSON request supports production_diagnosis, inventory_plan, aggregate, entities, inspect, traverse, dependencies, search, events, spatial_entities, related_entities and ranked_entities over that exact captured operations state. Aggregates report observed stock, including ineligible items; they do not establish usable supply. expected_anchor names production_inspection_source.anchor, not the citizen or parent anchor. Pre-plan inspection has no order selector and grants no mutation or goal authority. Diagnoses are observed conditions across captured jobs, not order-attributed causes; inventory plans allocate declared stack units without reserving items or proving native recipe feasibility. No native contact or clock advance."
 )]
 pub fn fortress_query(
     session_id: String,

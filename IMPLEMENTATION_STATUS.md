@@ -1,5 +1,80 @@
 # Implementation Status
 
+## Unreleased — Inspect retained production sources before choosing goals
+
+The combined development host now exposes twelve bounded inspection kinds
+before original planning and after an original-goal sample: production
+condition diagnosis, declared inventory allocation, entities, inspect, traverse,
+dependencies, aggregate, search, events, spatial entities, related entities and
+ranked entities. These are pure queries over one retained complete Operations
+capture. Query does not contact the native source or acquire mutation authority.
+Event queries retain the source's incomplete history coverage; an empty result
+cannot certify a complete fortress history. Captured stock summaries and their
+observed-versus-allocatable distinction remain intact.
+
+`include_production=true` remains the canonical optional Observe field;
+`include_operations=true` is an accepted alias. Supplying both is invalid.
+Fresh observation paging preserves the option without changing workforce
+selection identity, choice seals or the default observation reads. Descriptors
+and responses identify the pre-plan phase explicitly and share the exact public
+source anchor, source digest and twelve-kind query inventory.
+
+The host reserves the complete 160 MiB optional capture allowance before either
+native source is contacted. Projection admission shares the adapter's hard
+4096-entity and 8192-edge limits; the edge total includes item container and
+building-holder links. The native operations factory rejects entity budgets
+below its complete 4095-record factory limit before credentials or TCP contact.
+The host's retained source owner also keeps the accepted canonical parent and
+session across withdrawal or failure after capture, so a later Observe cannot
+reuse a provisional cursor for a different citizen source. Existing source pins,
+allocator/time floors, permanent regression fencing and shrinking deadlines
+remain in force. The immutable adapter OperationsInspectionProjection remains
+available to reusable diagnosis/allocation consumers; the combined host retains
+its own PlanningInspection owner and shares the adapter's bound constants.
+
+Two actual Runtime/native-factory tests use the existing authenticated TCP peer
+fixture. Inspection captures seven BED units; Query continues returning seven
+without another native read even after the peer changes to eleven. Original
+inventory-increase planning independently reads eleven and seals target thirteen
+for a +2 objective, with a distinct source digest. The other case proves source
+refresh, stale-anchor refusal/recovery and withdrawal on ordinary Observe.
+Neither test dispatches Prepare, Commit or Cancel. These are native-peer tests,
+not executions against DFHack or a live fortress.
+
+Validation supersedes the pending-test notes below for the exact matching source
+components only. The real workspace on rustc 1.101.0-nightly (c980177d8,
+2026-11-06), locked/offline, passed 58 focused tests: world quantities 17,
+original archives 4, immutable operations inspection 12 and adapter inventory
+25. The post-merge host component passed 125 distinct tests in 139 successful
+executions: planning owner/runtime 13, inventory 52, choices 16, public anchor
+routing 5, stock aggregation 6, closed envelope 1, presentation 45 and native
+factory budget guard 1; filters overlap. The unchanged query component passed
+55 tests: core 9, spatial 14, related 14, ranked 15 and semantic publisher 3.
+Together these runs execute all 29 previously authored inventory-growth
+regressions; they do not imply an end-to-end modern MCP campaign.
+
+Host and query components use rustc 1.100.0-nightly (908501772, 2026-08-30), real
+internal dependency crates and all eleven exact external Cargo.lock identities.
+The host excludes FastMCP/Asupersync transport, one workforce test registration
+and its nested tests, and uses three explicit harness glue files containing
+thirteen byte-identical helper selections; its admission transport seam is
+unreachable in these tests. Compiler-loaded host/resource inputs, native peer
+fixtures and real dependency source identities were checked after the final
+merged run. The query source remains unchanged from its executed 55-test run.
+See `docs/evidence/production-inspection-component-observation.json` for exact
+commands, file identities, scope exclusions and log hashes.
+
+Python syntax/import/discovery passes for all 75 authored modern stdio
+scenarios, including seven additional pre-plan scenarios. They have not run as
+a full CLI campaign: the latest-nightly single-job locked/offline CLI build was
+killed in unchanged asupersync 0.5.0 before compiling the MCP crate, coincident
+with a shared 8 GiB cgroup OOM kill. `verify.sh` passed its preceding static and
+dependency checks, then stopped because the required `br` executable is absent.
+The source is not fully Rust-qualified, native-game-qualified, live-qualified or
+admitted. Pre-plan inspection, production prerequisites and inventory-growth
+beads remain in progress for their broader acceptance, including actual native
+prerequisite repair and demonstrated end-to-end production.
+
 ## Unreleased — Summarize captured stock before choosing production targets
 
 Both combined production inspection paths now accept the existing typed

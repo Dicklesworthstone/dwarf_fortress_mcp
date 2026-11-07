@@ -140,6 +140,10 @@ operations/1.3 capture alongside the paused citizen and selected-workforce view:
 
 `include_production` is a Boolean and defaults to false. It can be combined with
 the existing `units`, `option_offset` and `existing_labor_offset` selectors.
+`include_operations` is an accepted alias for the same Boolean; supplying both
+names is rejected as a duplicate field. Fresh workforce page requests preserve
+an explicitly requested production capture using the canonical
+`include_production` spelling. Workforce selection witnesses remain unchanged.
 Explicit true acquires exactly one complete operations capture. It needs current
 Query and Observe authority and the configured operations read credential; it
 does not require Plan or grant any production authority. The host independently
@@ -153,7 +157,7 @@ belongs to the operations snapshot; `canonical_anchor` and `parent_anchor` name
 the citizen observation used for subsequent planning. These are distinct
 source identities, even at the same tick. The source descriptor includes its
 digest, ready `diagnosis_request`, `inventory_request` and
-`inventory_totals_request` handles, and the seven supported query kinds.
+`inventory_totals_request` handles, and the twelve supported query kinds.
 Use the descriptor's operations `anchor` for query
 `expected_anchor`, and the current citizen `observation.seal` for original Plan.
 Neither field substitutes for the other.
@@ -165,6 +169,12 @@ Call `fortress_query` with the same session ID and the JSON encoding of
 retained capture, rechecking current read authority and source pins without
 native contact. It supports the same `production_diagnosis`, `inventory_plan`,
 `entities`, `inspect`, `traverse`, `dependencies` and `aggregate` operations described below.
+`search` finds captured text; `spatial_entities`, `related_entities` and
+`ranked_entities` select bounded pages using observed positions, witnessed
+relationships or exact numeric fields. `events` reports the projection's
+available event coverage, which is not a complete native event history. Each
+route uses the same advertised operations anchor, current read authority and
+source-bound continuations. Watches and effect-bearing artifacts are excluded.
 The diagnosis can identify observed suspension, worker, holder and attachment
 conditions. The inventory query exposes individual item types and stack quantities,
 while the totals request groups complete observed stock by item type in one bounded
@@ -183,6 +193,10 @@ reservations or goal completion. The source remains
 
 Source state retains generation history across explicit refreshes, so a removed
 and reappearing native identity cannot reuse its previous canonical generation.
+The complete optional capture is reserved before any native source is contacted;
+projection admits at most 4096 current entities and 8192 total edges. Accepted
+canonical parent cursors remain a floor after failed publication, so a retry
+cannot reuse a provisional cursor with a different canonical state.
 Every new Observe withdraws the previously exposed inspection; omitting the
 flag does not preserve it. A failed call, consumed newer source tick, original
 plan creation, session close or restart also withdraws current inspection.

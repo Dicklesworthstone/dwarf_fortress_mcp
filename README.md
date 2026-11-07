@@ -216,7 +216,13 @@ configuration, credentials and custody when testing production control.
 
 The `labor-order` profile owns one original labor step and a dependent finite
 furniture order, or an explicit portfolio of up to four furniture recipes, in a
-single session. Its per-step confirmations,
+single session. Before planning, Observe with `include_production=true`
+(`include_operations=true` is an alias) captures
+source-pinned inventory and job conditions at the same paused citizen tick.
+Query can diagnose captured jobs, jointly allocate declared material needs, and
+filter, rank or traverse that snapshot without native calls or effects. This
+inspection is advisory; original growth baselines and native execution still
+revalidate independently. Its per-step confirmations,
 strict historical labor receipt and retained original custody control advancement;
 insertion does not prove produced goods or original-goal completion.
 With an explicit inventory minimum, Wait joins current labor and inventory under

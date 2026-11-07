@@ -30,6 +30,10 @@ preplan_spec = importlib.util.spec_from_file_location(
     'combined_production_preplan', ROOT / 'tests/stdio/combined_production_preplan.py')
 preplan = importlib.util.module_from_spec(preplan_spec)
 preplan_spec.loader.exec_module(preplan)
+preflight_spec = importlib.util.spec_from_file_location(
+    'combined_production_preflight', ROOT / 'tests/stdio/combined_production_preflight.py')
+preflight = importlib.util.module_from_spec(preflight_spec)
+preflight_spec.loader.exec_module(preflight)
 existing_labor_spec = importlib.util.spec_from_file_location(
     'combined_existing_labor', ROOT / 'tests/stdio/combined_existing_labor.py')
 existing_labor = importlib.util.module_from_spec(existing_labor_spec)
@@ -264,6 +268,7 @@ class Peer:
         self.after_order_read = None
         self.progress_sequence = 0
         self.inventory_stack = 1
+        self.operations_generation = IGEN
         self.operations_capture = operations_capture
         self.after_operations_read = None
         self.drop_workforce_reply = False
@@ -493,9 +498,8 @@ class Peer:
                 5: 1024, 6: 1024, 7: 2046, 8: 2 * 1024 * 1024}
             assert op in ('Handshake', 'ReadObservation')
             response = (number(1, 1) + number(2, 0) + blob(3, req[2]) + number(4, 1) + number(5, 3)
-                        + number(6, IGEN) + blob(7, DF) + blob(8, DFH))
+                        + number(6, self.operations_generation) + blob(7, DF) + blob(8, DFH))
             if op == 'ReadObservation':
-                assert self.order_created
                 response += blob(9, self.operations_capture(self.order_tick, self.inventory_stack))
                 if self.after_operations_read is not None:
                     hook, self.after_operations_read = self.after_operations_read, None
@@ -622,7 +626,7 @@ def environment(directory, endpoint):
     return env
 
 
-class CombinedProduction(preplan.PreplanInspectionTests, inspection.InspectionTests, existing_labor.ExistingLaborTests, unittest.TestCase):
+class CombinedProduction(preflight.PreflightTests, preplan.PreplanInspectionTests, inspection.InspectionTests, existing_labor.ExistingLaborTests, unittest.TestCase):
     def setUp(self):
         self.directory = LOGS / self._testMethodName
         self.directory.mkdir(mode=0o700)
@@ -2306,7 +2310,7 @@ def main():
     print(json.dumps({'schema': 'dfmcp.combined-production-stdio/1', 'tests': result.testsRun,
         'failed': len(result.failures), 'errors': len(result.errors), 'skipped': len(result.skipped),
         'actual_modern_stdio': True, 'loopback_peers_are_doubles': True, 'live_game': False}))
-    raise SystemExit(0 if result.wasSuccessful() and result.testsRun == 68 and not result.skipped else 1)
+    raise SystemExit(0 if result.wasSuccessful() and result.testsRun == 75 and not result.skipped else 1)
 
 
 if __name__ == '__main__': main()

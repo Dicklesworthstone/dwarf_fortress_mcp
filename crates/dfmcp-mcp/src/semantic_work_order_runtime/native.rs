@@ -890,17 +890,24 @@ impl Shell for NativeShell {
     }
     fn operations(&self, c: &OperationContext) -> Result<Self::Operations> {
         self.config.current()?;
+        let limits = OperationsLimits {
+            jobs: 1024,
+            buildings: 1024,
+            items: 2046,
+            payload_bytes: 2 * 1024 * 1024,
+        };
+        // Admit the complete source before credentials, transport or decoding.
+        if limits.entity_limit() > c.budget.max_entities {
+            return Err(exhausted(
+                "complete operations source exceeds the entity-work budget",
+            ));
+        }
         OperationsRpcClient::connect(
             self.config.endpoint,
             token(OPERATIONS_TOKEN)?,
             nonce(c, b"operations"),
             Config::timeout(c),
-            OperationsLimits {
-                jobs: 1024,
-                buildings: 1024,
-                items: 2046,
-                payload_bytes: 2 * 1024 * 1024,
-            },
+            limits,
         )
     }
 }
@@ -1172,6 +1179,93 @@ mod runtime_checkpoint_tests {
                 .is_err(),
             "a combined parent cannot import standalone goal recovery"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn operations_factory_refuses_insufficient_entities_before_native_contact() -> Result<()> {
+        const CHILD: &str = "SEMANTIC_OPERATIONS_ENTITY_BUDGET_TEST_CASE";
+        const CHECKED: &str = "operations-entity-budget-child-checked";
+        if let Ok(case) = std::env::var(CHILD) {
+            let config = Config::from_environment()?;
+            let mut context = OperationContext {
+                session_id: SessionId::new(903),
+                request_id: RequestId::new(904),
+                anchor: StateAnchor {
+                    fortress_id: config.sources.fortress(),
+                    cursor: ObservationCursor::ORIGIN,
+                    tick: GameTick(0),
+                    state_hash: Digest32::ZERO,
+                },
+                budget: WorkBudget {
+                    max_bytes: 16 * MIB,
+                    max_entities: 4095,
+                    max_wall_millis: 100,
+                    ..WorkBudget::default()
+                },
+                grants: vec![],
+                cancellation_requested: false,
+            };
+            let shell = NativeShell {
+                config: Arc::new(config),
+            };
+            if case == "below" {
+                // Valid source credentials ensure a missing guard would reach
+                // the listening socket, rather than fail on fixture setup.
+                for maximum in [0, 1, 4094] {
+                    context.budget.max_entities = maximum;
+                    assert!(matches!(shell.operations(&context),
+                        Err(cause) if cause.code == ErrorCode::BudgetExceeded
+                            && cause.message == "complete operations source exceeds the entity-work budget"));
+                }
+            } else {
+                assert_eq!(case, "exact");
+                // The exact 4095-record allowance passes source admission and
+                // reaches the deliberately missing credential check.
+                assert!(matches!(shell.operations(&context),
+                    Err(cause) if cause.code == ErrorCode::CapabilityDenied
+                        && cause.message == "required operator native credential is absent or not UTF-8"));
+            }
+            println!("{CHECKED}");
+            return Ok(());
+        }
+
+        let fixture_error = |_| invalid("operations entity-budget fixture failed");
+        let listener = TcpListener::bind("127.0.0.1:0").map_err(fixture_error)?;
+        listener.set_nonblocking(true).map_err(fixture_error)?;
+        let endpoint = listener.local_addr().map_err(fixture_error)?;
+        let mut raw = combined_clocks_config();
+        raw["endpoint"] = json!(endpoint.to_string());
+        let full_name = format!(
+            "{}::operations_factory_refuses_insufficient_entities_before_native_contact",
+            module_path!()
+        );
+        let (_, test_name) = full_name
+            .split_once("::")
+            .ok_or_else(|| invalid("operations entity-budget test name"))?;
+        for case in ["below", "exact"] {
+            let mut command =
+                std::process::Command::new(std::env::current_exe().map_err(fixture_error)?);
+            command
+                .args(["--exact", test_name, "--nocapture"])
+                .env_clear()
+                .env(OPT_IN, "1")
+                .env(CONFIG, raw.to_string())
+                .env(CHILD, case);
+            if case == "below" {
+                command.env(OPERATIONS_TOKEN, "operations-budget-fixture-token-0001");
+            }
+            let output = command.output().map_err(fixture_error)?;
+            assert!(
+                output.status.success(),
+                "operations budget case {case}: {}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(String::from_utf8_lossy(&output.stdout).contains(CHECKED));
+            assert!(matches!(listener.accept(),
+                Err(cause) if cause.kind() == std::io::ErrorKind::WouldBlock));
+        }
         Ok(())
     }
 

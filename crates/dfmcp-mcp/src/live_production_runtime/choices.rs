@@ -30,7 +30,7 @@ impl ObserveRequest {
             option_offset: usize,
             #[serde(default)]
             existing_labor_offset: usize,
-            #[serde(default)]
+            #[serde(default, alias = "include_operations")]
             include_production: bool,
         }
         if raw.len() > 4096 {
@@ -327,6 +327,9 @@ pub(super) fn project(
             "option_offset":offset});
         if existing_offset != 0 {
             value["existing_labor_offset"] = json!(existing_offset);
+        }
+        if request.include_production() {
+            value["include_production"] = json!(true);
         }
         value
     };

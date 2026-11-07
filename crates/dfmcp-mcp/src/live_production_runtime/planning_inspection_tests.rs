@@ -1,6 +1,6 @@
 use super::*;
-use dfmcp_adapter::live_jobs::LiveJobObservation;
-use dfmcp_adapter::live_operations::LiveItem;
+use dfmcp_adapter::live_jobs::{LiveJob, LiveJobObservation};
+use dfmcp_adapter::live_operations::{JobItemAttachment, LiveBuilding, LiveItem};
 use dfmcp_core::{EntityId, MapCoord};
 use dfmcp_world::{WorldGraph, WorldSnapshot};
 
@@ -155,11 +155,13 @@ fn planning_inspection_withdrawal_preserves_aba_generations_and_source_heartbeat
     absent.items.clear();
     absent.jobs.year_tick += 1;
     context.anchor.tick = absent.jobs.tick();
+    context.anchor.cursor.sequence += 1;
     publish(&mut owner, absent, &scope, &context)?;
     owner.withdraw();
     let mut reappeared = raw;
     reappeared.jobs.year_tick += 2;
     context.anchor.tick = reappeared.jobs.tick();
+    context.anchor.cursor.sequence += 1;
     publish(&mut owner, reappeared, &scope, &context)?;
     let item =
         &owner.state.snapshot().expect("reappeared").graph.entities[&EntityId::new((2 << 40) + 9)];
@@ -318,5 +320,144 @@ fn planning_inspection_selector_is_explicit_closed_and_preserves_workforce_ident
     ] {
         assert!(ObserveRequest::parse(raw).is_err(), "{raw}");
     }
+    Ok(())
+}
+
+#[test]
+fn planning_inspection_total_edge_cap_includes_item_holder_links() -> Result<()> {
+    let (mut raw, scope, context) = fixture()?;
+    raw.buildings.push(LiveBuilding {
+        native_id: 7,
+        building_type: 1,
+        type_key: "Workshop".into(),
+        x1: 0,
+        y1: 0,
+        x2: 2,
+        y2: 2,
+        z: 0,
+        build_stage: 3,
+        max_build_stage: 3,
+    });
+    raw.jobs.jobs.push(LiveJob {
+        native_id: 1,
+        job_type: 1,
+        type_key: "ConstructBed".into(),
+        reaction: String::new(),
+        suspended: false,
+        repeating: false,
+        position: MapCoord::new(1, 1, 0),
+        worker_native_id: None,
+        holder_native_id: None,
+        completion_timer: -1,
+        attached_item_count: OPERATIONS_INSPECTION_MAX_EDGES as u32,
+        required_item_filter_count: 1,
+    });
+    raw.attachments = (0..OPERATIONS_INSPECTION_MAX_EDGES)
+        .map(|role| JobItemAttachment {
+            job_native_id: 1,
+            item_native_id: 9,
+            role: role as i32,
+            filter_index: 0,
+        })
+        .collect();
+    raw.validate()?;
+    let mut owner = PlanningInspection::default();
+    publish(&mut owner, raw.clone(), &scope, &context)?;
+    let accepted = owner
+        .state
+        .snapshot()
+        .ok_or_else(|| invalid("edge fixture source"))?;
+    assert_eq!(accepted.graph.edges.len(), OPERATIONS_INSPECTION_MAX_EDGES);
+    let accepted_anchor = accepted.anchor();
+
+    // The attachment count alone still fits. One additional containment-style
+    // link must refuse the complete graph before changing its retained state.
+    raw.items[0].holder_building_native_id = Some(7);
+    raw.validate()?;
+    assert!(matches!(publish(&mut owner, raw, &scope, &context),
+        Err(cause) if cause.code == ErrorCode::BudgetExceeded));
+    assert_eq!(
+        owner
+            .state
+            .snapshot()
+            .ok_or_else(|| invalid("retained source"))?
+            .anchor(),
+        accepted_anchor
+    );
+    assert!(owner.current(context.anchor, context.anchor.tick).is_none());
+    Ok(())
+}
+
+#[test]
+fn planning_inspection_hard_entity_cap_cannot_be_widened_by_request_budget() -> Result<()> {
+    let (mut raw, scope, context) = fixture()?;
+    let item = raw.items[0].clone();
+    raw.items = (1..=OPERATIONS_INSPECTION_MAX_ENTITIES)
+        .map(|id| {
+            let mut entry = item.clone();
+            entry.native_id = id as u32;
+            entry
+        })
+        .collect();
+    raw.next_item_id = OPERATIONS_INSPECTION_MAX_ENTITIES as u32 + 1;
+    raw.validate()?;
+    assert!(context.budget.max_entities as usize > OPERATIONS_INSPECTION_MAX_ENTITIES);
+    let mut owner = PlanningInspection::default();
+    assert!(matches!(publish(&mut owner, raw, &scope, &context),
+        Err(cause) if cause.code == ErrorCode::BudgetExceeded));
+    assert!(owner.state.snapshot().is_none());
+    Ok(())
+}
+
+#[test]
+fn planning_inspection_withdrawn_parent_keeps_cursor_anchor_and_session_identity() -> Result<()> {
+    let (raw, scope, context) = fixture()?;
+    let mut owner = PlanningInspection::default();
+    publish(&mut owner, raw.clone(), &scope, &context)?;
+    owner.withdraw();
+    // Model a qualified capture whose enclosing Observe failed before its
+    // canonical anchor became visible. The runtime still has an older cursor.
+    let mut published = context.clone();
+    published.anchor.cursor.sequence -= 1;
+    let next = owner.next_cursor(&published)?;
+    assert_eq!(next.epoch, context.anchor.cursor.epoch);
+    assert_eq!(next.sequence, context.anchor.cursor.sequence + 1);
+
+    let mut replacement = context.clone();
+    replacement.anchor.state_hash = Digest32::of_bytes(b"another citizen projection");
+    assert!(
+        matches!(publish(&mut owner, raw.clone(), &scope, &replacement),
+        Err(cause) if cause.code == ErrorCode::StaleAnchor)
+    );
+    assert_eq!(
+        owner.accepted_parent,
+        Some((context.session_id, context.anchor))
+    );
+    assert!(owner.current(context.anchor, context.anchor.tick).is_none());
+
+    replacement.anchor.cursor = next;
+    publish(&mut owner, raw.clone(), &scope, &replacement)?;
+    assert!(
+        owner
+            .current(replacement.anchor, replacement.anchor.tick)
+            .is_some()
+    );
+    owner.withdraw();
+    let mut foreign = replacement.clone();
+    foreign.session_id = SessionId::new(context.session_id.get() + 1);
+    assert!(matches!(owner.next_cursor(&foreign),
+        Err(cause) if cause.code == ErrorCode::CapabilityDenied));
+    assert!(matches!(publish(&mut owner, raw.clone(), &scope, &foreign),
+        Err(cause) if cause.code == ErrorCode::CapabilityDenied));
+    foreign = replacement.clone();
+    foreign.anchor.cursor.epoch += 1;
+    assert!(matches!(owner.next_cursor(&foreign),
+        Err(cause) if cause.code == ErrorCode::StaleAnchor));
+    assert!(matches!(publish(&mut owner, raw, &scope, &foreign),
+        Err(cause) if cause.code == ErrorCode::StaleAnchor));
+    assert_eq!(
+        owner.accepted_parent,
+        Some((replacement.session_id, replacement.anchor))
+    );
     Ok(())
 }

@@ -915,17 +915,14 @@ impl Runtime {
         }
         self.basis = None;
         let mut work = Work::new(c)?;
+        // Reserve the complete optional capture before contacting either source.
+        let operations_budget = request
+            .include_production()
+            .then(|| work.take(planning_inspection::CAPTURE_BYTES))
+            .transpose()?;
+        let cursor = self.planning_inspection.next_cursor(c)?;
         inventory_baseline::authorize_observe(c, self.observation_tick_floor)?;
         let capsule = self.config.workforce.acquire(&work.take(16 * MIB)?)?;
-        let cursor = ObservationCursor {
-            epoch: self.anchor.cursor.epoch,
-            sequence: self
-                .anchor
-                .cursor
-                .sequence
-                .checked_add(1)
-                .ok_or_else(|| exhausted("combined observation cursor exhausted"))?,
-        };
         let projection = project_live_capsule(&capsule, self.anchor.fortress_id, cursor)?;
         if projection.snapshot.tick < self.anchor.tick.max(self.observation_tick_floor) {
             return Err(denied("combined observation regressed"));
@@ -990,8 +987,8 @@ impl Runtime {
             )?;
             (choices, Some(capture))
         };
-        if request.include_production() {
-            self.capture_planning_inspection(&mut work)?;
+        if let Some(reserved) = operations_budget.as_ref() {
+            self.capture_planning_inspection(&mut Work::new(&work.narrow(reserved)?)?)?;
         }
         self.config.current()?;
         work.current()?;

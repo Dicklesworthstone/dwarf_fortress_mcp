@@ -13,16 +13,41 @@ mod production;
 #[allow(clippy::duplicate_mod)]
 #[path = "../semantic_query_core.rs"]
 mod structured;
-// The shared aggregate engine uses the same typed filter decoder as entity
-// inspection. This alias preserves that private module contract without
-// admitting any of the shared engine's other query kinds at this boundary.
+// Shared pure query engines use the same typed filter decoder and exact source
+// anchor. Stateful watches and effect-bearing artifacts remain outside this API.
 use structured as core_query;
+#[allow(clippy::duplicate_mod)]
+#[path = "../event_query.rs"]
+mod event_query;
 #[allow(clippy::duplicate_mod)]
 #[path = "../operational_query.rs"]
 mod operational;
+#[allow(clippy::duplicate_mod)]
+#[path = "../ranked_entity_query.rs"]
+mod ranked_entity_query;
+#[allow(clippy::duplicate_mod)]
+#[path = "../related_entity_query.rs"]
+mod related_entity_query;
+#[allow(clippy::duplicate_mod)]
+#[path = "../spatial_entity_query.rs"]
+mod spatial_entity_query;
 
 const MAX_REQUEST: usize = 65_536;
 const MAX_QUERY_TOKENS: u32 = 4_096;
+pub(super) const QUERY_KINDS: &[&str] = &[
+    "production_diagnosis",
+    "inventory_plan",
+    "entities",
+    "inspect",
+    "traverse",
+    "dependencies",
+    "aggregate",
+    "search",
+    "events",
+    "spatial_entities",
+    "related_entities",
+    "ranked_entities",
+];
 pub(super) const INVENTORY_TOTALS_SEMANTICS: &str = "observed_stock_not_usable_supply";
 
 /// A bounded complete summary of the captured item records. This deliberately
@@ -55,18 +80,9 @@ impl InspectionRequest {
         let envelope: Envelope = serde_json::from_str(raw)
             .map_err(|_| invalid("invalid production inspection envelope"))?;
         if envelope.schema != "dfmcp.query/1"
-            || !matches!(
-                envelope.query["kind"].as_str(),
-                Some(
-                    "production_diagnosis"
-                        | "inventory_plan"
-                        | "entities"
-                        | "inspect"
-                        | "traverse"
-                        | "dependencies"
-                        | "aggregate"
-                )
-            )
+            || !envelope.query["kind"]
+                .as_str()
+                .is_some_and(|kind| QUERY_KINDS.contains(&kind))
         {
             return Err(invalid(
                 "unsupported production inspection schema or query kind",
@@ -103,7 +119,11 @@ fn execute_structured(
         translated["expected_anchor"] = engine_anchor.clone();
     }
     let mut payload = match translated["query"]["kind"].as_str() {
-        Some("aggregate") => operational::execute(snapshot, context, &translated)?,
+        Some("aggregate" | "search") => operational::execute(snapshot, context, &translated)?,
+        Some("events") => event_query::execute(snapshot, context, &translated)?,
+        Some("spatial_entities") => spatial_entity_query::execute(snapshot, context, &translated)?,
+        Some("related_entities") => related_entity_query::execute(snapshot, context, &translated)?,
+        Some("ranked_entities") => ranked_entity_query::execute(snapshot, context, &translated)?,
         _ => structured::execute(snapshot, context, &translated)?,
     };
     payload["anchor"] = public_anchor.clone();
@@ -233,7 +253,7 @@ impl Runtime {
                         "query":{"kind":"production_diagnosis","limit":4}},
                     "inventory_totals_request":inventory_totals_request(source.projection.anchor()),
                     "inventory_totals_semantics":INVENTORY_TOTALS_SEMANTICS,
-                    "query_kinds":["production_diagnosis","inventory_plan","entities","inspect","traverse","dependencies","aggregate"],
+                    "query_kinds":QUERY_KINDS,
                     "unknown":["job_to_original_order_attribution","full_native_job_requirements",
                         "path_access","labor_eligibility","successful_job_completion"]})
             })
@@ -395,6 +415,7 @@ impl Runtime {
             execute_structured(snapshot, &query_context, &request.0)?
         };
         payload["inspection_scope"] = json!("preplan_captured_operations");
+        payload["observation_phase"] = json!("before_plan");
         payload["attribution"] = json!("not_order_attributed");
         payload["source_digest"] = json!(source_digest.to_hex());
         payload["canonical_anchor"] = anchor_json(self.anchor);
@@ -420,22 +441,14 @@ mod tests {
 
     #[test]
     fn inspection_envelope_is_closed_and_cannot_select_effects() {
-        for kind in [
-            "production_diagnosis",
-            "inventory_plan",
-            "entities",
-            "inspect",
-            "traverse",
-            "dependencies",
-            "aggregate",
-        ] {
+        for kind in QUERY_KINDS {
             let request = json!({"schema":"dfmcp.query/1","query":{"kind":kind}});
             assert!(InspectionRequest::parse(&request.to_string()).is_ok());
         }
         for raw in [
             r#"{"schema":"dfmcp.query/1","query":{"kind":"furniture_allocation"}}"#,
-            r#"{"schema":"dfmcp.query/1","query":{"kind":"ranked_entities"}}"#,
-            r#"{"schema":"dfmcp.query/1","query":{"kind":"search"}}"#,
+            r#"{"schema":"dfmcp.query/1","query":{"kind":"watch"}}"#,
+            r#"{"schema":"dfmcp.query/1","query":{"kind":"capture"}}"#,
             r#"{"schema":"dfmcp.query/1","query":{"kind":"production_diagnosis"},"confirmed":true}"#,
             r#"{"schema":"dfmcp.query/1","schema":"dfmcp.query/1","query":{"kind":"production_diagnosis"}}"#,
             r#"{"schema":"dfmcp.query/2","query":{"kind":"production_diagnosis"}}"#,

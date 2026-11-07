@@ -6,6 +6,59 @@ use crate::semantic_workforce_runtime::policy::{ACCEPTANCE_KIND, SourceAcceptanc
 use serde_json::json;
 
 #[test]
+fn optional_operations_read_preserves_workforce_identity_and_fresh_page_selection() -> Result<()> {
+    assert_eq!(
+        ObserveRequest::parse(r#"{"include_operations":false}"#)?,
+        ObserveRequest::default()
+    );
+    let request = ObserveRequest::parse(r#"{"include_operations":true}"#)?;
+    assert!(request.include_production());
+    assert_eq!(
+        request,
+        ObserveRequest::parse(r#"{"include_production":true}"#)?
+    );
+    assert!(request.is_default());
+    assert_ne!(request, ObserveRequest::default());
+    let (capsule, projection) = observation(&[42])?;
+    let c = permitted(&projection.snapshot);
+    let capture = ten_option_capture()?;
+    let plain = project(
+        &capsule,
+        &projection,
+        &scope(),
+        &capture,
+        &ObserveRequest::default(),
+        &c,
+    )?;
+    let extended = project(&capsule, &projection, &scope(), &capture, &request, &c)?;
+    for field in [
+        "witness",
+        "witness_version",
+        "options",
+        "canonical_observation_seal",
+        "selected_citizens",
+    ] {
+        assert_eq!(plain[field], extended[field], "{field}");
+    }
+    assert_eq!(
+        extended["next_observation_request"],
+        json!({"units":["43"],"option_offset":8,"include_production":true})
+    );
+    let next = ObserveRequest::parse(&extended["next_observation_request"].to_string())?;
+    assert!(next.include_production());
+    for raw in [
+        r#"{"include_operations":null}"#,
+        r#"{"include_operations":"true"}"#,
+        r#"{"include_operations":1}"#,
+        r#"{"include_operations":false,"include_operations":true}"#,
+        r#"{"include_operations":true,"include_production":true}"#,
+    ] {
+        assert!(ObserveRequest::parse(raw).is_err(), "{raw}");
+    }
+    Ok(())
+}
+
+#[test]
 fn empty_canonical_roster_does_not_invent_a_native_detail_observation() -> Result<()> {
     let (capsule, projection) = observation(&[])?;
     let c = permitted(&projection.snapshot);

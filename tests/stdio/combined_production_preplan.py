@@ -98,7 +98,8 @@ class PreplanInspectionTests:
         self.assertFalse(source['restored_from_history'])
         self.assertEqual(set(source['query_kinds']), {
             'production_diagnosis', 'inventory_plan', 'entities', 'inspect',
-            'traverse', 'dependencies', 'aggregate'})
+            'traverse', 'dependencies', 'aggregate', 'search', 'events',
+            'spatial_entities', 'related_entities', 'ranked_entities'})
         self.assertEqual(source['inventory_totals_semantics'], 'observed_stock_not_usable_supply')
         self.assert_preplan_no_effect(result)
         return result

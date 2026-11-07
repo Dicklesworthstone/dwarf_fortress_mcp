@@ -133,7 +133,8 @@
         "default_request": "first 32 canonical citizens and first eight eligible options",
         "nondefault_request_after_original_plan": "rejected before native contact",
         "optional_existing_labor_offset": "integer from zero through 128; default zero; independent existing-labor option page",
-        "optional_include_production": "Boolean; default false; explicit pre-plan source-pinned operations inspection without changing workforce witness bytes"
+        "optional_include_production": "Boolean; default false; explicit pre-plan source-pinned operations inspection without changing workforce witness bytes",
+        "optional_include_operations": "alias for include_production; both spellings together are rejected as a duplicate field"
       },
       "explicit_selection": "canonical_id_ascending_explicit",
       "option_paging": {
@@ -304,7 +305,16 @@
       "tests/stdio/combined_production_preplan.py",
       "crates/dfmcp-mcp/src/live_production_runtime/inspection_anchor_tests.rs",
       "crates/dfmcp-mcp/src/operational_query.rs",
-      "crates/dfmcp-mcp/src/live_production_runtime/inspection_aggregate_tests.rs"
+      "crates/dfmcp-mcp/src/live_production_runtime/inspection_aggregate_tests.rs",
+      "crates/dfmcp-adapter/src/operations_inspection.rs",
+      "crates/dfmcp-adapter/src/operations_inspection_tests.rs",
+      "crates/dfmcp-mcp/src/live_production_runtime/preflight_tests.rs",
+      "crates/dfmcp-mcp/src/event_query.rs",
+      "crates/dfmcp-mcp/src/spatial_entity_query.rs",
+      "crates/dfmcp-mcp/src/related_entity_query.rs",
+      "crates/dfmcp-mcp/src/ranked_entity_query.rs",
+      "tests/stdio/combined_production_preflight.py",
+      "tests/stdio/combined_production_runtime_peer.py"
     ],
     "private_custody_platforms": [
       "linux-x86_64",
@@ -554,7 +564,12 @@
         "inspect",
         "traverse",
         "dependencies",
-        "aggregate"
+        "aggregate",
+        "search",
+        "events",
+        "spatial_entities",
+        "related_entities",
+        "ranked_entities"
       ],
       "source": "exact selected WorkOrderGoalProjection from successful joined original-goal sample",
       "selected_anchor_and_parent_anchor_distinct": true,
@@ -727,7 +742,12 @@
         "inspect",
         "traverse",
         "dependencies",
-        "aggregate"
+        "aggregate",
+        "search",
+        "events",
+        "spatial_entities",
+        "related_entities",
+        "ranked_entities"
       ],
       "source": "retained LiveOperationsState from one complete independently pinned paused capture",
       "scope": "preplan_captured_operations",
@@ -767,7 +787,20 @@
       "test_campaign": "tests/stdio/combined_production_preplan.py",
       "aggregate_inventory_semantics": "observed_stock_not_usable_supply",
       "aggregate_complete_groups_or_refusal": true,
-      "aggregate_native_contact": false
+      "aggregate_native_contact": false,
+      "observe_request_alias": "include_operations",
+      "duplicate_alias_fields_refused": true,
+      "observation_phase": "before_plan",
+      "complete_capture_reserved_before_any_native_contact": true,
+      "capture_byte_work": 167772160,
+      "maximum_current_entities": 4096,
+      "maximum_total_edges": 8192,
+      "accepted_parent_cursor_and_session_retained_after_withdrawal": true,
+      "provisional_canonical_cursor_reuse_refused": true,
+      "explicit_capture_preserved_in_workforce_page_requests": true,
+      "native_factory_narrowed_entity_budget_checked_before_connection": true,
+      "additional_test_campaign": "tests/stdio/combined_production_preflight.py",
+      "actual_runtime_tcp_regressions": "crates/dfmcp-mcp/src/live_production_runtime/preflight_tests.rs"
     }
   },
   "selected_work_order_goal_monitor": {

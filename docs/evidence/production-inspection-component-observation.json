@@ -1,0 +1,223 @@
+{
+  "schema": "dfmcp.local-component-observation/1",
+  "source_baseline": "2a00b7464360d1c966d31d8030d8a4fd4f72a63c",
+  "evidence_kind": "focused execution observation; not a qualification or admission receipt",
+  "overlay_source_sha256": {
+    "architecture/live_production_executor_v1.json": "5fb4acd70d26e0f6ab12e9f9ad72e408e5d1815d98ed31fd17e0f7ddb0209b59",
+    "crates/dfmcp-mcp/src/live_production_runtime.rs": "5b49dc2ffb57233f1bbdd978e2ae08477f0c6146a14efff4b99b2c5e1e80bb6f",
+    "crates/dfmcp-mcp/src/live_production_runtime/choices.rs": "286125c70483e106b7cb6b05f5462eb0c5d5172dc98512d78c47f3e095a9974a",
+    "crates/dfmcp-mcp/src/live_production_runtime/choices_tests.rs": "27d638a3ceedb89bf5ccde839bdd9f479ddc6f84c6c8172d28e4675b2c01baeb",
+    "crates/dfmcp-mcp/src/live_production_runtime/inspection.rs": "8ae7ecbb248eb634bb7ccea2aae52c0a7b76fdb4ce9e1f1d9de96b1fa1a0a506",
+    "crates/dfmcp-mcp/src/live_production_runtime/planning_inspection.rs": "3869cf4096cbdd83dd070bef5ff89693912859c7b9246c229e20ef05837b22d7",
+    "crates/dfmcp-mcp/src/live_production_runtime/planning_inspection_tests.rs": "2ad5d0ff384eaf600561d7fcb30032b21e980f449bea8e681ca2871e4ad33cba",
+    "crates/dfmcp-mcp/src/live_production_runtime/preflight_tests.rs": "c2830c822d96808240ac97f8a87ccc909565c62c48c754b0c0fb76d6ea40f69e",
+    "crates/dfmcp-mcp/src/live_production_server.rs": "0530553985c5c0b21594207cd26ccb36fd29299ad144136975a0d89c9214825a",
+    "crates/dfmcp-mcp/src/semantic_work_order_runtime/native.rs": "48166c3a746a4ed12b0f8a69762e98d74e4767a21db366ed8736e2689ab13cf1",
+    "crates/dwarf-fortress-mcp/tests/combined_production_cli.rs": "ab6a4a06c9239731c68205eb40af5d49c53630a5ebd68225dc40b665aedee5af",
+    "scripts/qualify_local.sh": "c335a824e5594785f6234d3468a7a20911319069c67f0eae609e2a50318c52d6",
+    "tests/stdio/combined_production.py": "8b2f1c50046f754ebb3bc0a38617dfb798f655b13db703fb8625c237d50a3bc6",
+    "tests/stdio/combined_production_preflight.py": "02ff9f9c63c0ebf4ea351cb132a4215e8c59e0b4df6ef759fd85d427821895e8",
+    "tests/stdio/combined_production_preplan.py": "f03ca54c540d72c035b6f6cb6b1801ed9d6e598c873d854a977937ddb507e589",
+    "tests/stdio/combined_production_runtime_peer.py": "80578b7d6139f36fd384c0b0caefeba0b88e4eb195f52da15599c58d485d9f95"
+  },
+  "latest_nightly_workspace": {
+    "rustc": "1.101.0-nightly (c980177d8 2026-11-06)",
+    "command_prefix": "cargo +nightly test --locked --offline --jobs 1",
+    "runs": [
+      {
+        "args": "-p dfmcp-world --test entity_quantity_tests",
+        "passed": 17,
+        "log_file": "dfmcp-world-quantity-tests.log",
+        "log_sha256": "83e3db2d80f7316a2150f42d594293ff0cd42d84096818b4bdd11fc7a00faacc"
+      },
+      {
+        "args": "-p dfmcp-intent --test plan_archive inventory_",
+        "passed": 4,
+        "log_file": "dfmcp-archive-growth-tests.log",
+        "log_sha256": "dc6e49c8267494f90fb7aed106d40b2358f46dd1b052e0df08ca58780b4c9247"
+      },
+      {
+        "args": "-p dfmcp-adapter --lib operations_inspection",
+        "passed": 12,
+        "log_file": "dfmcp-operations-inspection-tests.log",
+        "log_sha256": "447bdd66858fdd9f37da09b0e688f41cf40510fbc4bc383c6bd0859e3df817c9"
+      },
+      {
+        "args": "-p dfmcp-adapter --lib inventory_",
+        "passed": 25,
+        "log_file": "dfmcp-adapter-inventory-tests.log",
+        "log_sha256": "232b3a2b2c5fd3392867bc13341b351620204f8d52337b3620e8d911fe478e84"
+      }
+    ],
+    "passed": 58,
+    "failed": 0,
+    "ignored": 0,
+    "test_module_exclusions": 0
+  },
+  "postmerge_host_component": {
+    "rustc": "1.100.0-nightly (908501772 2026-08-30)",
+    "toolchain": "nightly-2026-08-31",
+    "command_prefix": "cargo +nightly-2026-08-31 test --locked --offline --jobs 1 --lib",
+    "profile_debug": 0,
+    "distinct_passed": 125,
+    "successful_executions": 139,
+    "failed": 0,
+    "ignored": 0,
+    "runs": [
+      {
+        "name": "choices",
+        "filter": "live_production_runtime::choices::tests::",
+        "passed": 16,
+        "failed": 0,
+        "ignored": 0,
+        "log_file": "dfmcp-host-postmerge-choices-tests.log",
+        "log_sha256": "13f901d810682b6dfea98752a942ca453e486a3852c43e069a13ebf6b1ab492a"
+      },
+      {
+        "name": "inspection-aggregate",
+        "filter": "live_production_runtime::inspection::aggregate_tests::",
+        "passed": 6,
+        "failed": 0,
+        "ignored": 0,
+        "log_file": "dfmcp-host-postmerge-inspection-aggregate-tests.log",
+        "log_sha256": "5bcdecf3e8c7b8c45b9eae4372eea1a1650d04b6eb2ac86ea516092112bdd675"
+      },
+      {
+        "name": "inspection-anchor",
+        "filter": "live_production_runtime::inspection::anchor_tests::",
+        "passed": 5,
+        "failed": 0,
+        "ignored": 0,
+        "log_file": "dfmcp-host-postmerge-inspection-anchor-tests.log",
+        "log_sha256": "1425764352aa83094385e3e7be661137b5cb8358e1df91c0840b1c97b7c51395"
+      },
+      {
+        "name": "inspection-envelope",
+        "filter": "live_production_runtime::inspection::tests::",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "log_file": "dfmcp-host-postmerge-inspection-envelope-tests.log",
+        "log_sha256": "1b7e5ce1833ce9759fbba92f16045f913a384b4c06127f26b7a67d111aeb1b48"
+      },
+      {
+        "name": "inventory",
+        "filter": "inventory_",
+        "passed": 52,
+        "failed": 0,
+        "ignored": 0,
+        "log_file": "dfmcp-host-postmerge-inventory-tests.log",
+        "log_sha256": "4d88f10cdb97683ecec5fc21ec001a513acdda455278f6c04cd69053afcfd951"
+      },
+      {
+        "name": "native-budget",
+        "filter": "operations_factory_refuses_insufficient_entities_before_native_contact",
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "log_file": "dfmcp-host-postmerge-native-budget-tests.log",
+        "log_sha256": "84bacb04967919f75b2d97fa030dc9070e99329ddbf55fb463ae295e481cb364"
+      },
+      {
+        "name": "planning",
+        "filter": "live_production_runtime::planning_inspection::",
+        "passed": 13,
+        "failed": 0,
+        "ignored": 0,
+        "log_file": "dfmcp-host-postmerge-planning-tests.log",
+        "log_sha256": "2a64a8266b93b5587632e34bca77af3276ecfbb552bc55a724db81e95048414a"
+      },
+      {
+        "name": "presentation",
+        "filter": "live_production_presentation::",
+        "passed": 45,
+        "failed": 0,
+        "ignored": 0,
+        "log_file": "dfmcp-host-postmerge-presentation-tests.log",
+        "log_sha256": "74b60c407d8cdb0ebf1addad8e58a0a333f00c81eea09e6997fca9f8595bda3e"
+      }
+    ],
+    "source_checks": {
+      "compiler_recorded_host_resource_files": 91,
+      "native_fixture_script_files": 458,
+      "real_internal_dependency_source_manifest_files": 463,
+      "byte_identical_selected_helpers": 13,
+      "exact_external_lock_identities": 11
+    },
+    "seams": [
+      "Component root excludes FastMCP/Asupersync transport and registration.",
+      "One semantic_workforce_runtime test-module registration (including nested runtime_clock_tests) is excluded.",
+      "Three harness glue files include thirteen byte-identical source helper selections.",
+      "Original admission module points to an unreachable panic transport entry point."
+    ],
+    "runtime_tcp_cases": [
+      "native_preflight_inspection_is_read_only_and_growth_plan_acquires_its_own_baseline",
+      "native_preflight_refresh_and_default_observe_withdraw_stale_sources"
+    ],
+    "runtime_tcp_scope": "Actual Runtime/native factories and existing authenticated Python TCP Peer; no MCP transport, DFHack process or live fortress.",
+    "prior_premerge_102_case_run_counted": false
+  },
+  "query_component": {
+    "rustc": "1.100.0-nightly (908501772 2026-08-30)",
+    "command": "cargo test --locked --offline --jobs 1 --test pure_queries --test publication",
+    "passed": 55,
+    "failed": 0,
+    "ignored": 0,
+    "filtered": 0,
+    "case_groups": {
+      "core": 9,
+      "spatial": 14,
+      "related": 14,
+      "ranked": 15,
+      "semantic_publisher": 3
+    },
+    "unchanged_compiler_loaded_source_files": 346,
+    "exact_external_lock_identities": 11,
+    "log_file": "query-component-tests.log",
+    "source_match_after_host_merge": true,
+    "log_sha256": "7b0cebbb9bc5ac16f2bff90110668853633183fee04858fce76144ab7f05bd97"
+  },
+  "prior_growth_regressions": {
+    "all_29_executed": true,
+    "world": 6,
+    "archive": 2,
+    "adapter": 12,
+    "mcp_component": 9,
+    "note": "These cases are subsets of the runs above, not additional test counts."
+  },
+  "public_stdio": {
+    "scenarios_discovered": 75,
+    "new_scenarios": 7,
+    "syntax_import_discovery_passed": true,
+    "executed": false
+  },
+  "full_cli_attempt": {
+    "command": "cargo +nightly build --locked --offline --jobs 1 --bin dwarf-fortress-mcp",
+    "rustc": "1.101.0-nightly (c980177d8 2026-11-06)",
+    "exit_code": 101,
+    "failure_crate": "asupersync 0.5.0 (unchanged)",
+    "failure_signal": "9 (SIGKILL)",
+    "shared_cgroup_memory_limit_bytes": 8589934592,
+    "observed_oom_kill_counter_before": 21,
+    "observed_oom_kill_counter_after": 22,
+    "project_mcp_compile_reached": false,
+    "log_file": "dfmcp-cli-single-job-build.log",
+    "log_sha256": "7df177c33c5ea83e734a16951f9c98874e8bfef193c35b4d4003527f3dd1c6cb"
+  },
+  "verify_sh": {
+    "executed": true,
+    "passed_through": "static contracts and dependency policy",
+    "stopped_at": "bead graph coverage: required br executable missing",
+    "exit_code": 1,
+    "log_file": "verify-session.log",
+    "log_sha256": "176e84fc4dd84be232ff75f28ba60049e65cbef573a9704b2a8a5c7a8e6ab5e3"
+  },
+  "excluded_claims": [
+    "Full latest-nightly workspace qualification",
+    "Modern MCP/FastMCP/Asupersync transport or full CLI execution",
+    "75-scenario public stdio campaign execution",
+    "Native DFHack or live-game execution",
+    "Registry, artifact, protocol-runner or runtime admission",
+    "Native prerequisite repair or end-to-end causal production completion"
+  ]
+}

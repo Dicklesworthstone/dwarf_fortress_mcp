@@ -1,5 +1,30 @@
 # Changelog
 
+## Unreleased — Complete bounded production inspection before planning
+
+- Expand both captured-production inspection paths to twelve pure query kinds,
+  adding search, retained events, spatial, related and ranked entity queries.
+  Keep exact public anchors, conservative coverage and source-bound pagination.
+- Accept `include_operations` as an alias for `include_production`; reject
+  duplicate aliases, preserve workforce choice identity and carry the capture
+  option through fresh observation pages.
+- Prepay the entire optional 160 MiB capture before native contact, bound the
+  complete projection to 4096 entities and 8192 edges, and reject insufficient
+  native entity budgets before credentials or network access. Retain accepted
+  canonical session/cursor identity across source withdrawal and failed Observe.
+- Prove retained inspection and independent growth planning with the actual
+  Runtime/native TCP peer: Query keeps stock 7 without another read; a later
+  plan independently captures 11 and seals a +2 target of 13. Exercise refresh,
+  stale-source refusal and ordinary Observe withdrawal without native effects.
+- Execute 125 distinct post-merge host component tests, 55 exact-source query
+  tests and 58 latest-nightly workspace tests. All 29 previously authored growth
+  regressions now execute within these explicitly scoped runs. The host/query
+  components use the cached older nightly and exclude modern MCP transport.
+- Discover 75 public stdio scenarios, with seven added here; they remain
+  unexecuted. The full CLI build was OOM-killed in unchanged Asupersync under
+  the shared 8 GiB limit. `verify.sh` reaches the missing `br` prerequisite;
+  no full-workspace, native-game, live or admission qualification is claimed.
+
 ## Unreleased — Complete captured inventory totals
 
 - Add typed `aggregate` queries to both combined production inspection paths,

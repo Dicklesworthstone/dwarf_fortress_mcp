@@ -3,9 +3,15 @@
 //! never substituted for the citizen anchor, goal evidence, or native custody.
 use super::*;
 use dfmcp_adapter::live_operations::{LiveOperationsObservation, LiveOperationsState};
+use dfmcp_adapter::operations_inspection::{
+    OPERATIONS_INSPECTION_MAX_EDGES, OPERATIONS_INSPECTION_MAX_ENTITIES,
+    OPERATIONS_INSPECTION_PROJECTION_BYTES,
+};
 use dfmcp_adapter::semantic_work_orders::OperationsGoalSource;
+use dfmcp_core::{DfmcpError, ErrorCode};
 
-pub(super) const PROJECTION_BYTES: u64 = 128 * MIB;
+pub(super) const PROJECTION_BYTES: u64 = OPERATIONS_INSPECTION_PROJECTION_BYTES;
+pub(super) const CAPTURE_BYTES: u64 = 32 * MIB + PROJECTION_BYTES;
 
 #[derive(Clone, Copy)]
 struct Frontier {
@@ -20,6 +26,8 @@ pub(super) struct PlanningInspection {
     state: LiveOperationsState,
     source_digest: Option<Digest32>,
     canonical_anchor: Option<StateAnchor>,
+    // This identity survives withdrawal and failures after source publication.
+    accepted_parent: Option<(SessionId, StateAnchor)>,
     frontier: Option<Frontier>,
     fenced: bool,
 }
@@ -27,6 +35,61 @@ pub(super) struct PlanningInspection {
 impl PlanningInspection {
     pub(super) fn withdraw(&mut self) {
         self.canonical_anchor = None;
+    }
+
+    fn check_parent_owner(&self, context: &OperationContext) -> Result<()> {
+        if let Some((session, parent)) = self.accepted_parent {
+            if context.session_id != session {
+                return Err(denied(
+                    "planning operations history belongs to another session",
+                ));
+            }
+            if context.anchor.fortress_id != parent.fortress_id
+                || context.anchor.cursor.epoch != parent.cursor.epoch
+            {
+                return Err(DfmcpError::new(
+                    ErrorCode::StaleAnchor,
+                    "planning operations cannot cross their canonical fortress or epoch",
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// A qualified capture may outlive a failed enclosing Observe. Do not reuse
+    /// its provisional parent cursor for a different canonical citizen source.
+    pub(super) fn next_cursor(&self, context: &OperationContext) -> Result<ObservationCursor> {
+        self.check_parent_owner(context)?;
+        let sequence = context
+            .anchor
+            .cursor
+            .sequence
+            .max(
+                self.accepted_parent
+                    .map_or(0, |(_, parent)| parent.cursor.sequence),
+            )
+            .checked_add(1)
+            .ok_or_else(|| exhausted("combined observation cursor exhausted"))?;
+        Ok(ObservationCursor {
+            epoch: context.anchor.cursor.epoch,
+            sequence,
+        })
+    }
+
+    fn admit_parent(&self, context: &OperationContext) -> Result<()> {
+        self.check_parent_owner(context)?;
+        if self.accepted_parent.is_some_and(|(_, parent)| {
+            context.anchor.cursor.sequence < parent.cursor.sequence
+                || context.anchor.tick < parent.tick
+                || (context.anchor.cursor.sequence == parent.cursor.sequence
+                    && context.anchor != parent)
+        }) {
+            return Err(DfmcpError::new(
+                ErrorCode::StaleAnchor,
+                "planning operations cannot replace or rewind their accepted canonical parent",
+            ));
+        }
+        Ok(())
     }
 
     fn admit_capture(&self) -> Result<()> {
@@ -93,6 +156,7 @@ impl PlanningInspection {
         self.admit_capture()?;
         scope.planning_operations(&observation, context)?;
         context.budget.validate()?;
+        self.admit_parent(context)?;
         // Admit the complete graph before projecting or hashing it. A smaller
         // request cannot silently acquire a truncated census or prove absence.
         let records = observation
@@ -103,13 +167,41 @@ impl PlanningInspection {
             .saturating_add(observation.items.len())
             .saturating_add(2);
         if context.budget.max_bytes < PROJECTION_BYTES
+            || records > OPERATIONS_INSPECTION_MAX_ENTITIES
             || records > context.budget.max_entities as usize
         {
             return Err(exhausted(
                 "complete planning operations exceed the source budget",
             ));
         }
+        let edges = observation
+            .attachments
+            .len()
+            .saturating_add(
+                observation
+                    .jobs
+                    .jobs
+                    .iter()
+                    .filter(|job| job.holder_native_id.is_some())
+                    .count(),
+            )
+            .saturating_add(
+                observation
+                    .items
+                    .iter()
+                    .map(|item| {
+                        usize::from(item.container_native_id.is_some())
+                            + usize::from(item.holder_building_native_id.is_some())
+                    })
+                    .sum::<usize>(),
+            );
+        if edges > OPERATIONS_INSPECTION_MAX_EDGES {
+            return Err(exhausted(
+                "complete planning operations exceed the projection edge bound",
+            ));
+        }
         self.state.publish(observation)?;
+        self.accepted_parent = Some((context.session_id, context.anchor));
         // Descriptor rendering must be constant work. Cache this identity
         // while the complete source projection allowance is still in scope.
         self.source_digest = Some(self.state.source_digest()?);
@@ -184,6 +276,7 @@ impl Runtime {
         };
         let anchor = anchor_json(snapshot.anchor());
         json!({"scope":"preplan_captured_operations","attribution":"not_order_attributed",
+            "observation_phase":"before_plan",
             "order_step_id":null,"anchor":anchor,"parent_anchor":anchor_json(self.anchor),
             "canonical_anchor":anchor_json(self.anchor),"source_digest":digest.to_hex(),
             "source_protocol":"operations/1.3","source_generation":observation.jobs.bridge_generation,
@@ -197,7 +290,7 @@ impl Runtime {
                     "fields":["type_key","stack_size","material_type","material_index"],"limit":16}},
             "inventory_totals_request":inspection::inventory_totals_request(snapshot.anchor()),
             "inventory_totals_semantics":inspection::INVENTORY_TOTALS_SEMANTICS,
-            "query_kinds":["production_diagnosis","inventory_plan","entities","inspect","traverse","dependencies","aggregate"],
+            "query_kinds":inspection::QUERY_KINDS,
             "unknown":["native_recipe_requirements","workshop_subtype","path_access",
                 "labor_eligibility","production_attribution","future_production_success"],
             "original_goal_evidence":false,"baseline_reused_for_planning":false})
@@ -207,3 +300,7 @@ impl Runtime {
 #[cfg(test)]
 #[path = "planning_inspection_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "preflight_tests.rs"]
+mod native_tests;
