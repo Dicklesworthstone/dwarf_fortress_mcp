@@ -49,7 +49,7 @@ impl<S: EffectJournalStorage> Journal<S> {
         acknowledgement: &mut WorkshopAcknowledgements<A>,
         context: &OperationContext,
     ) -> Result<TreeMaterialOrigin> {
-        let result = (|| {
+        let result: Result<TreeMaterialOrigin> = (|| {
             check(self.mode == Mode::Offline && !self.fenced && self.owner == context.session_id)?;
             let mut work = Work::new(context)?;
             Self::authorize(&work.current()?, &self.binding, false, false, context.anchor.tick.get())?;

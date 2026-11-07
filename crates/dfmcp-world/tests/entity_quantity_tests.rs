@@ -516,3 +516,224 @@ fn query_continuations_bind_every_aggregate_component() -> Result<()> {
     }
     Ok(())
 }
+
+fn increase(original: &WorldSnapshot, baseline: u64, units: u64) -> Predicate {
+    Predicate::EntityQuantityIncrease {
+        kind: EntityKind::Item,
+        filter_field: "type_key".into(),
+        filter_value: Value::Text("BED".into()),
+        quantity_field: Some("stack_size".into()),
+        baseline,
+        increase: units,
+        baseline_anchor: original.anchor(),
+        baseline_source_digest: digest(),
+        source_generation: 7,
+        baseline_source_counters: [11, 12, 13],
+    }
+}
+
+fn later(rows: &[(u64, &str, u64)]) -> WorldSnapshot {
+    let mut current = snapshot(rows);
+    current.tick = GameTick(11);
+    current.cursor.sequence += 1;
+    current.refresh_hash();
+    current
+}
+
+#[test]
+fn increase_uses_sealed_stack_total_and_measures_net_growth_not_item_creation() -> Result<()> {
+    let original = snapshot(&[(1, "BED", 2), (2, "DOOR", 99), (3, "BED", 3)]);
+    let evidence = PredicateEvidence::scoped(&original, policy(&original))?;
+    let baseline = evidence.entity_quantity_total(
+        &EntityKind::Item, "type_key", &Value::Text("BED".into()), Some("stack_size"),
+    )?;
+    assert_eq!(baseline, Some(5));
+    assert_eq!(evidence.entity_quantity_total(
+        &EntityKind::Item, "type_key", &Value::Text("BED".into()), None,
+    )?, Some(2));
+    let goal = increase(&original, 5, 3);
+    assert_eq!(evidence.evaluate(&goal)?, PredicateTruth::False);
+    // Replacing every ID without growing stock is not an increase. Increasing
+    // stack units on the same two IDs is enough; causal production is unknown.
+    for (rows, expected) in [
+        (vec![(4, "BED", 2), (5, "BED", 3)], PredicateTruth::False),
+        (vec![(1, "BED", 1), (3, "BED", 3)], PredicateTruth::False),
+        (vec![(1, "BED", 4), (3, "BED", 3)], PredicateTruth::False),
+        (vec![(1, "BED", 4), (3, "BED", 4)], PredicateTruth::True),
+    ] {
+        let current = later(&rows);
+        assert_eq!(PredicateEvidence::scoped(&current, policy(&current))?.evaluate(&goal)?, expected);
+        assert_eq!(evaluate(&current, &goal), expected == PredicateTruth::True);
+    }
+    Ok(())
+}
+
+#[test]
+fn qualified_baseline_measurement_distinguishes_zero_from_unknown() -> Result<()> {
+    let selector = Value::Text("BED".into());
+    let empty = snapshot(&[]);
+    let evidence = PredicateEvidence::scoped(&empty, policy(&empty))?;
+    assert_eq!(evidence.entity_quantity_total(
+        &EntityKind::Item, "type_key", &selector, Some("stack_size"),
+    )?, Some(0));
+    for coverage in [EvidenceCoverage::Unknown, EvidenceCoverage::Observed] {
+        let mut partial = policy(&empty);
+        partial.entity_kinds.insert(EntityKind::Item, coverage);
+        assert_eq!(PredicateEvidence::scoped(&empty, partial)?.entity_quantity_total(
+            &EntityKind::Item, "type_key", &selector, Some("stack_size"),
+        )?, None);
+    }
+    let base = snapshot(&[(1, "BED", 50), (2, "BED", 1)]);
+    for field in ["type_key", "stack_size"] {
+        let mut invalid = base.clone();
+        let mut bad = fact(
+            field,
+            if field == "type_key" { selector.clone() } else { Value::U64(1) },
+        );
+        bad.source = FactSource::AgentAssertion("untrusted".into());
+        change_fact(&mut invalid, 2, field, bad)?;
+        assert_eq!(PredicateEvidence::scoped(&invalid, policy(&invalid))?.entity_quantity_total(
+            &EntityKind::Item, "type_key", &selector, Some("stack_size"),
+        )?, None);
+    }
+    let overflow = snapshot(&[(1, "BED", u64::MAX), (2, "BED", 1)]);
+    assert_eq!(PredicateEvidence::scoped(&overflow, policy(&overflow))?.entity_quantity_total(
+        &EntityKind::Item, "type_key", &selector, Some("stack_size"),
+    )?, None);
+    assert!(evidence.entity_quantity_total(&EntityKind::Item, "", &selector, None).is_err());
+    Ok(())
+}
+
+#[test]
+fn increase_never_accepts_a_different_fortress_epoch_or_earlier_frontier() -> Result<()> {
+    let original = snapshot(&[(1, "BED", 5)]);
+    let goal = increase(&original, 5, 1);
+    let current = later(&[(1, "BED", 6)]);
+    assert!(PredicateEvidence::scoped(&current, policy(&current))?.establishes(&goal)?);
+    for which in 0..5 {
+        let mut invalid = current.clone();
+        match which {
+            0 => invalid.fortress_id = FortressId::new(2),
+            1 => invalid.cursor.epoch += 1,
+            2 => invalid.cursor.sequence = original.cursor.sequence - 1,
+            3 => invalid.tick = GameTick(original.tick.0 - 1),
+            _ => { invalid.cursor = original.cursor; invalid.tick = original.tick; }
+        }
+        invalid.refresh_hash();
+        unknown(&PredicateEvidence::scoped(&invalid, policy(&invalid))?, &goal)?;
+        assert_eq!(
+            evaluate_truth_for(&invalid, EntityId::new(1), &goal),
+            PredicateTruth::Unknown,
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn increase_still_needs_current_complete_qualified_inputs_after_reaching_target() -> Result<()> {
+    let original = snapshot(&[(1, "BED", 5)]);
+    let goal = increase(&original, 5, 1);
+    let mut current = later(&[(1, "BED", 50), (2, "BED", 1)]);
+    let mut partial = policy(&current);
+    partial.entity_kinds.insert(EntityKind::Item, EvidenceCoverage::Observed);
+    unknown(&PredicateEvidence::scoped(&current, partial)?, &goal)?;
+    let mut fact = fact("stack_size", Value::U64(1));
+    fact.source_digest = Digest32::of_bytes(b"not independently accepted");
+    change_fact(&mut current, 2, "stack_size", fact)?;
+    unknown(&PredicateEvidence::scoped(&current, policy(&current))?, &goal)?;
+    let overflow = later(&[(1, "BED", u64::MAX), (2, "BED", 1)]);
+    unknown(&PredicateEvidence::scoped(&overflow, policy(&overflow))?, &goal)?;
+    Ok(())
+}
+
+#[test]
+fn increase_rejects_invalid_baselines_and_bounds_work_before_boolean_shortcuts() -> Result<()> {
+    let original = snapshot(&[(1, "BED", 5)]);
+    let evidence = PredicateEvidence::scoped(&original, policy(&original))?;
+    for which in 0..6 {
+        let mut goal = increase(&original, 5, 1);
+        if let Predicate::EntityQuantityIncrease {
+            baseline, increase, baseline_anchor, baseline_source_digest, source_generation, ..
+        } = &mut goal {
+            match which {
+                0 => *increase = 0,
+                1 => *baseline = u64::MAX,
+                2 => baseline_anchor.fortress_id = FortressId::NIL,
+                3 => baseline_anchor.state_hash = Digest32::ZERO,
+                4 => *baseline_source_digest = Digest32::ZERO,
+                _ => *source_generation = 0,
+            }
+        }
+        assert!(matches!(
+            evidence.evaluate(&Predicate::Any(vec![Predicate::True, goal])),
+            Err(error) if error.code == ErrorCode::InvalidRequest
+        ));
+    }
+    let rows = (1..=1200).map(|id| (id, "BED", 1)).collect::<Vec<_>>();
+    let current = later(&rows);
+    let excessive = Predicate::Any(vec![
+        Predicate::True,
+        Predicate::All(vec![increase(&original, 5, 1); 1200]),
+    ]);
+    assert!(matches!(
+        PredicateEvidence::scoped(&current, policy(&current))?.evaluate(&excessive),
+        Err(error) if error.code == ErrorCode::BudgetExceeded
+    ));
+    Ok(())
+}
+
+#[test]
+fn increase_identity_and_query_continuations_seal_every_baseline_component() -> Result<()> {
+    let original = snapshot(&[(1, "BED", 2)]);
+    let current = later(&[(1, "BED", 3), (2, "BED", 1), (3, "DOOR", 1)]);
+    let goal = increase(&original, 2, 1);
+    assert_eq!(goal.canonical_bytes()[0], 15);
+    let mut query = WorldQuery {
+        kinds: vec![EntityKind::Item],
+        predicate: Some(goal.clone()),
+        order: QueryOrder::EntityIdAscending,
+        limit: 1,
+        continuation: None,
+    };
+    query.continuation = execute_query(&current, &query, 10)?.continuation;
+    assert!(query.continuation.is_some());
+    assert_eq!(execute_query(&current, &query, 10)?.entities[0].id, EntityId::new(2));
+    for which in 0..16 {
+        let mut changed = goal.clone();
+        if let Predicate::EntityQuantityIncrease {
+            kind, filter_field, filter_value, quantity_field, baseline, increase,
+            baseline_anchor, baseline_source_digest, source_generation, baseline_source_counters,
+        } = &mut changed {
+            match which {
+                0 => *kind = EntityKind::Building,
+                1 => *filter_field = "other".into(),
+                2 => *filter_value = Value::Text("DOOR".into()),
+                3 => *quantity_field = None,
+                4 => *baseline += 1,
+                5 => *increase += 1,
+                6 => baseline_anchor.fortress_id = FortressId::new(2),
+                7 => baseline_anchor.cursor.epoch += 1,
+                8 => baseline_anchor.cursor.sequence += 1,
+                9 => baseline_anchor.tick.0 += 1,
+                10 => baseline_anchor.state_hash = Digest32::of_bytes(b"different original"),
+                11 => *baseline_source_digest = Digest32::of_bytes(b"different source"),
+                12 => *source_generation += 1,
+                13 => baseline_source_counters[0] += 1,
+                14 => baseline_source_counters[1] += 1,
+                _ => baseline_source_counters[2] += 1,
+            }
+        }
+        assert_ne!(changed.canonical_bytes(), goal.canonical_bytes());
+        let mut changed_query = query.clone();
+        changed_query.predicate = Some(changed);
+        assert!(matches!(
+            execute_query(&current, &changed_query, 10),
+            Err(error) if error.code == ErrorCode::StaleAnchor
+        ));
+    }
+    assert_eq!(
+        Predicate::All(vec![goal.clone(), Predicate::Paused(true), goal.clone()]).canonical_bytes(),
+        Predicate::All(vec![Predicate::Paused(true), goal]).canonical_bytes(),
+    );
+    Ok(())
+}

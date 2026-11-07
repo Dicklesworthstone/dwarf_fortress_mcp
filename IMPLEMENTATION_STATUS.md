@@ -1,5 +1,46 @@
 # Implementation Status
 
+## Unreleased — Seal inventory-growth goals in the core plan
+
+The core now represents net observed quantity growth as
+`Predicate::EntityQuantityIncrease`, with additive canonical/archive tag 15.
+The immutable predicate retains the original baseline quantity, requested
+increase, original plan anchor, independently captured source digest, source
+generation and three source-counter floors. Its target uses checked unsigned
+addition; zero increases and unidentified baselines refuse. Existing predicate
+tags and legacy archive bytes remain unchanged.
+
+One bounded whole-domain scan serves both qualified baseline measurement and
+current evaluation. Complete kind coverage and independently qualified selector
+and matching quantity facts are required; unavailable facts and overflow remain
+Unknown. A complete empty domain is a known zero. Current growth evidence must
+stay on the same fortress and epoch, at a forward tick/cursor, without replacing
+an existing cursor's anchor. The issuing adapter owns historical source
+authenticity and native incarnation/counter checks; the generic world evaluator
+does not independently reconstruct that history. Growth means net stock change,
+not new item IDs, causal production, order completion or usable material.
+
+Plan archives and query continuations bind every baseline field. The coarse
+read witness retains the complete entity-kind domain and refuses implicit
+baseline rebasing. Six world regressions, two archive regressions and one MCP
+witness regression are authored. Local formatting and diff checks completed
+before the executor disconnected again; the recovered functional patches have
+independent source/type review, but final formatter-byte identity and new growth
+test execution are unavailable. Native baseline acquisition and the closed MCP
+consumer are the next checkpoint. Bead `dfmcp-reality-wiring-proof-4bf.14.5`
+remains in progress.
+
+The restored executor did complete the preceding tree-material component:
+15 passed, zero failed or ignored (ten adapter, three configuration and two
+Agent Turn cases). It found and fixed an unconstrained closure error type in
+`TreeMaterialOrigin`. The result applies to baseline `00bc977b` plus the
+annotated/formatted file hash recorded in
+[`workshop-tree-material-component-observation.json`](docs/evidence/workshop-tree-material-component-observation.json).
+The recovered commit preserves the exact one-line functional fix, without
+claiming the unavailable formatter bytes are identical. This was a bounded
+actual-source component with two declared host seams, excluded MCP transport
+and no full-workspace, stdio, SDK, live-game or admission qualification.
+
 ## Unreleased — Use newly harvested logs through workshop MCP
 
 The original `dfmcp-workshop-v1-20-dev-server` now has an opt-in closed

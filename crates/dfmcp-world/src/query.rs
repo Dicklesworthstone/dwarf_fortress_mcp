@@ -1,6 +1,9 @@
 #![forbid(unsafe_code)]
 
-use dfmcp_core::{DfmcpError, EdgeId, EntityId, ErrorCode, MapCoord, MapCuboid, Result};
+use dfmcp_core::{
+    DfmcpError, Digest32, EdgeId, EntityId, ErrorCode, FortressId, MapCoord, MapCuboid, Result,
+    StateAnchor,
+};
 
 use crate::{
     EdgeKind, EntityKind, EntityRecord, Fact, LaboratoryEntityIdentity, Value, WorldSnapshot,
@@ -95,6 +98,24 @@ pub enum Predicate {
         burrow: LaboratoryEntityIdentity,
         civilians: Vec<LaboratoryEntityIdentity>,
     },
+    /// Net whole-domain quantity growth from an independently qualified, sealed
+    /// baseline. This is not evidence of item creation or causal production.
+    /// The issuing adapter validates the baseline source and native incarnation;
+    /// its original anchor, digest, generation and allocator floors remain part
+    /// of the predicate identity. Current evaluation still requires complete
+    /// coverage and independently qualified facts, on the same canonical lineage.
+    EntityQuantityIncrease {
+        kind: EntityKind,
+        filter_field: String,
+        filter_value: Value,
+        quantity_field: Option<String>,
+        baseline: u64,
+        increase: u64,
+        baseline_anchor: StateAnchor,
+        baseline_source_digest: Digest32,
+        source_generation: u64,
+        baseline_source_counters: [u64; 3],
+    },
 }
 
 impl Predicate {
@@ -147,7 +168,7 @@ impl Predicate {
                         entities,
                     ));
                 }
-                Self::EntityQuantity { .. } => {
+                Self::EntityQuantity { .. } | Self::EntityQuantityIncrease { .. } => {
                     work = work.saturating_add((entities as u64).saturating_mul(3));
                 }
                 Self::LaboratoryCivilianReleaseSafety { .. } => {
@@ -168,7 +189,7 @@ impl Predicate {
             match predicate {
                 Self::All(children) | Self::Any(children) => pending.extend(children),
                 Self::Not(child) => pending.push(child),
-                Self::EntityQuantity { .. } => {
+                Self::EntityQuantity { .. } | Self::EntityQuantityIncrease { .. } => {
                     work = work.saturating_add((entities as u64).saturating_mul(3));
                     if work > MAX_PREDICATE_QUANTITY_WORK {
                         return Err(DfmcpError::new(
@@ -394,6 +415,38 @@ impl Predicate {
                     put_u32(output, civilian.generation);
                 }
             }
+            Self::EntityQuantityIncrease {
+                kind,
+                filter_field,
+                filter_value,
+                quantity_field,
+                baseline,
+                increase,
+                baseline_anchor,
+                baseline_source_digest,
+                source_generation,
+                baseline_source_counters,
+            } => {
+                output.push(15);
+                kind.encode(output);
+                put_str(output, filter_field);
+                filter_value.encode(output);
+                match quantity_field {
+                    Some(field) => {
+                        output.push(1);
+                        put_str(output, field);
+                    }
+                    None => output.push(0),
+                }
+                put_u64(output, *baseline);
+                put_u64(output, *increase);
+                crate::canonical::put_anchor(output, *baseline_anchor);
+                output.extend_from_slice(baseline_source_digest.as_bytes());
+                put_u64(output, *source_generation);
+                for counter in baseline_source_counters {
+                    put_u64(output, *counter);
+                }
+            }
         }
     }
 }
@@ -540,7 +593,7 @@ fn evaluate_truth(
             crate::laboratory_civilian_release_safety_truth(snapshot, *burrow, civilians)
                 .map_or(PredicateTruth::Unknown, |truth| truth)
         }
-        Predicate::EntityQuantity { .. } => {
+        Predicate::EntityQuantity { .. } | Predicate::EntityQuantityIncrease { .. } => {
             entity_quantity_truth(snapshot, predicate, Fact::known_value)
         }
         Predicate::All(predicates) => {
@@ -612,19 +665,81 @@ pub fn evaluate_truth_for(
 pub(crate) fn entity_quantity_truth<'a>(
     snapshot: &'a WorldSnapshot,
     predicate: &Predicate,
-    mut fact_value: impl FnMut(&'a Fact) -> Option<&'a Value>,
+    fact_value: impl FnMut(&'a Fact) -> Option<&'a Value>,
 ) -> PredicateTruth {
-    let Predicate::EntityQuantity {
+    let (kind, filter_field, filter_value, quantity_field, op, value) = match predicate {
+        Predicate::EntityQuantity {
+            kind,
+            filter_field,
+            filter_value,
+            quantity_field,
+            op,
+            value,
+        } => (
+            kind,
+            filter_field,
+            filter_value,
+            quantity_field,
+            *op,
+            *value,
+        ),
+        Predicate::EntityQuantityIncrease {
+            kind,
+            filter_field,
+            filter_value,
+            quantity_field,
+            baseline,
+            increase,
+            baseline_anchor,
+            ..
+        } => {
+            let current = snapshot.anchor();
+            if current.fortress_id != baseline_anchor.fortress_id
+                || current.cursor.epoch != baseline_anchor.cursor.epoch
+                || current.cursor.sequence < baseline_anchor.cursor.sequence
+                || current.tick < baseline_anchor.tick
+                || (current.cursor == baseline_anchor.cursor && current != *baseline_anchor)
+            {
+                return PredicateTruth::Unknown;
+            }
+            let Some(target) = baseline.checked_add(*increase) else {
+                return PredicateTruth::Unknown;
+            };
+            (
+                kind,
+                filter_field,
+                filter_value,
+                quantity_field,
+                CompareOp::Ge,
+                target,
+            )
+        }
+        _ => return PredicateTruth::Unknown,
+    };
+    entity_quantity_total(
+        snapshot,
         kind,
         filter_field,
         filter_value,
-        quantity_field,
-        op,
-        value,
-    } = predicate
-    else {
-        return PredicateTruth::Unknown;
-    };
+        quantity_field.as_deref(),
+        fact_value,
+    )
+    .map_or(PredicateTruth::Unknown, |total| {
+        compare(&Value::U64(total), op, &Value::U64(value))
+    })
+}
+
+/// One complete scan for both baseline acquisition and current evaluation.
+/// A missing selector anywhere in the domain makes the total unknown; only
+/// matching rows require a known, unsigned quantity. Never stop at a subtotal.
+pub(crate) fn entity_quantity_total<'a>(
+    snapshot: &'a WorldSnapshot,
+    kind: &EntityKind,
+    filter_field: &str,
+    filter_value: &Value,
+    quantity_field: Option<&str>,
+    mut fact_value: impl FnMut(&'a Fact) -> Option<&'a Value>,
+) -> Option<u64> {
     let mut total = 0u64;
     for entity in snapshot.graph.entities.values() {
         // Canonical snapshots encode kind names, including reserved-name
@@ -633,11 +748,9 @@ pub(crate) fn entity_quantity_truth<'a>(
             continue;
         }
         if entity.id == EntityId::NIL {
-            return PredicateTruth::Unknown;
+            return None;
         }
-        let Some(selector) = entity.fields.get(filter_field).and_then(&mut fact_value) else {
-            return PredicateTruth::Unknown;
-        };
+        let selector = entity.fields.get(filter_field).and_then(&mut fact_value)?;
         if selector != filter_value {
             continue;
         }
@@ -645,15 +758,12 @@ pub(crate) fn entity_quantity_truth<'a>(
             None => 1,
             Some(field) => match entity.fields.get(field).and_then(&mut fact_value) {
                 Some(Value::U64(quantity)) => *quantity,
-                _ => return PredicateTruth::Unknown,
+                _ => return None,
             },
         };
-        let Some(next) = total.checked_add(quantity) else {
-            return PredicateTruth::Unknown;
-        };
-        total = next;
+        total = total.checked_add(quantity)?;
     }
-    compare(&Value::U64(total), *op, &Value::U64(*value))
+    Some(total)
 }
 
 pub(crate) fn compare(left: &Value, op: CompareOp, right: &Value) -> PredicateTruth {
@@ -848,32 +958,37 @@ fn validate_predicate_shape(root: &Predicate) -> Result<()> {
                 filter_value,
                 quantity_field,
                 ..
+            }
+            | Predicate::EntityQuantityIncrease {
+                kind,
+                filter_field,
+                filter_value,
+                quantity_field,
+                ..
             } => {
-                for (name, bound) in std::iter::once((kind.as_str(), MAX_QUERY_KIND_BYTES))
-                    .chain(std::iter::once((
-                        filter_field.as_str(),
-                        MAX_QUERY_FIELD_BYTES,
-                    )))
-                    .chain(
-                        quantity_field
-                            .as_deref()
-                            .map(|field| (field, MAX_QUERY_FIELD_BYTES)),
-                    )
+                validate_entity_quantity_fields(
+                    kind, filter_field, filter_value, quantity_field.as_deref(),
+                )?;
+                if let Predicate::EntityQuantityIncrease {
+                    baseline,
+                    increase,
+                    baseline_anchor,
+                    baseline_source_digest,
+                    source_generation,
+                    ..
+                } = predicate
+                    && (*increase == 0
+                        || baseline.checked_add(*increase).is_none()
+                        || baseline_anchor.fortress_id == FortressId::NIL
+                        || baseline_anchor.state_hash == Digest32::ZERO
+                        || *baseline_source_digest == Digest32::ZERO
+                        || *source_generation == 0)
                 {
-                    if name.len() > bound {
-                        return Err(DfmcpError::new(
-                            ErrorCode::BudgetExceeded,
-                            "entity quantity kind or field exceeds its explicit byte bound",
-                        ));
-                    }
-                    if name.is_empty() || name.chars().any(char::is_control) {
-                        return Err(DfmcpError::new(
-                            ErrorCode::InvalidRequest,
-                            "entity quantity kind and fields require nonempty non-control names",
-                        ));
-                    }
+                    return Err(DfmcpError::new(
+                        ErrorCode::InvalidRequest,
+                        "entity quantity increase requires a positive bounded target and an identified original baseline",
+                    ));
                 }
-                validate_query_value(filter_value)?;
             }
             Predicate::RegionTerrain { area, .. } => {
                 let tiles = crate::terrain::validate_region(*area)?;
@@ -931,6 +1046,42 @@ fn validate_predicate_shape(root: &Predicate) -> Result<()> {
             }
             _ => {}
         }
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_entity_quantity_fields(
+    kind: &EntityKind,
+    filter_field: &str,
+    filter_value: &Value,
+    quantity_field: Option<&str>,
+) -> Result<()> {
+    for (name, bound) in std::iter::once((kind.as_str(), MAX_QUERY_KIND_BYTES))
+        .chain(std::iter::once((filter_field, MAX_QUERY_FIELD_BYTES)))
+        .chain(quantity_field.map(|field| (field, MAX_QUERY_FIELD_BYTES)))
+    {
+        if name.len() > bound {
+            return Err(DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                "entity quantity kind or field exceeds its explicit byte bound",
+            ));
+        }
+        if name.is_empty() || name.chars().any(char::is_control) {
+            return Err(DfmcpError::new(
+                ErrorCode::InvalidRequest,
+                "entity quantity kind and fields require nonempty non-control names",
+            ));
+        }
+    }
+    validate_query_value(filter_value)
+}
+
+pub(crate) fn validate_entity_quantity_scan(entities: usize) -> Result<()> {
+    if (entities as u64).saturating_mul(3) > MAX_PREDICATE_QUANTITY_WORK {
+        return Err(DfmcpError::new(
+            ErrorCode::BudgetExceeded,
+            "entity quantity measurement exceeds its scan work bound",
+        ));
     }
     Ok(())
 }

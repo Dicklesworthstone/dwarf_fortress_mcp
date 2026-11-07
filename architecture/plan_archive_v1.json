@@ -2,15 +2,46 @@
   "schema": "dfmcp.plan-archive-format/1",
   "magic": "DFMPAR01",
   "byte_order": "big_endian",
-  "framing": ["magic:8", "body_bytes:u32", "body", "sha256:32"],
+  "framing": [
+    "magic:8",
+    "body_bytes:u32",
+    "body",
+    "sha256:32"
+  ],
   "checksum_domain_utf8_then_nul": "dfmcp-exact-plan-archive/1",
   "checksum_input": "domain_and_nul_then_exact_magic_length_and_body",
-  "expected_identities": ["semantic_plan_digest", "archive_object_digest"],
+  "expected_identities": [
+    "semantic_plan_digest",
+    "archive_object_digest"
+  ],
   "canonical_plan_identity_changed": false,
   "kind_variants_tagged_losslessly": true,
   "unknown_variants": "refuse",
-  "body_order": ["plan_id", "intent_id", "original_anchor", "summary", "terminal_condition", "steps", "max_risk", "required_capabilities", "requires_checkpoint", "original_expiry", "semantic_digest"],
-  "step_order": ["step_id", "action", "preconditions", "postconditions", "compensation", "obligation", "dependencies", "risk", "capability", "original_idempotency_key"],
+  "body_order": [
+    "plan_id",
+    "intent_id",
+    "original_anchor",
+    "summary",
+    "terminal_condition",
+    "steps",
+    "max_risk",
+    "required_capabilities",
+    "requires_checkpoint",
+    "original_expiry",
+    "semantic_digest"
+  ],
+  "step_order": [
+    "step_id",
+    "action",
+    "preconditions",
+    "postconditions",
+    "compensation",
+    "obligation",
+    "dependencies",
+    "risk",
+    "capability",
+    "original_idempotency_key"
+  ],
   "max_bytes": 4194304,
   "max_steps": 256,
   "max_nodes": 65536,
@@ -21,5 +52,33 @@
   "restores_authority": false,
   "implies_dispatch_or_completion": false,
   "native_protocol_changes": false,
-  "beads": ["df-franken-storage-mvcc-54h.1", "df-dfhack-bridge-plane-c-pic.4"]
+  "beads": [
+    "df-franken-storage-mvcc-54h.1",
+    "df-dfhack-bridge-plane-c-pic.4"
+  ],
+  "predicate_extensions": {
+    "entity_quantity_increase": {
+      "archive_tag": 15,
+      "canonical_predicate_tag": 15,
+      "legacy_tags_unchanged": true,
+      "fields": [
+        "kind",
+        "filter_field",
+        "filter_value",
+        "quantity_field",
+        "baseline",
+        "increase",
+        "baseline_anchor",
+        "baseline_source_digest",
+        "source_generation",
+        "baseline_source_counters"
+      ],
+      "baseline_source_counters": "three ordered adapter-defined allocator floors; native source mapping belongs to the issuing adapter",
+      "positive_increase_and_checked_u64_target": true,
+      "historical_baseline_authority": "trusted issuing adapter and independently expected original archive; decoding does not grant authority",
+      "same_fortress_epoch_and_forward_frontier_required": true,
+      "implicit_baseline_rebase": false,
+      "causal_production_proven": false
+    }
+  }
 }

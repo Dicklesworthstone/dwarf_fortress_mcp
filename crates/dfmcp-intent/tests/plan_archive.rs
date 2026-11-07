@@ -896,3 +896,97 @@ fn independently_generated_pause_vector_matches_exact_archive_and_semantic_bytes
     );
     Ok(())
 }
+
+#[test]
+fn inventory_increase_archive_preserves_sealed_baseline_and_original_obligation() -> Result<()> {
+    let goal = Predicate::EntityQuantityIncrease {
+        kind: EntityKind::Item,
+        filter_field: "type_key".into(),
+        filter_value: Value::Text("BED".into()),
+        quantity_field: Some("stack_size".into()),
+        baseline: 42,
+        increase: 3,
+        baseline_anchor: anchor(),
+        baseline_source_digest: Digest32::of_bytes(b"original complete inventory"),
+        source_generation: 7,
+        baseline_source_counters: [11, 12, 600],
+    };
+    let mut plan = make(
+        vec![Action::CreateWorkOrder {
+            name: "three beds".into(),
+            job_token: "CONSTRUCT_BED".into(),
+            amount: 3,
+            conditions: vec![],
+        }],
+        goal.clone(),
+        false,
+    );
+    if let Some(obligation) = &mut plan.steps[0].obligation {
+        obligation.terminal = goal.clone();
+    }
+    plan.digest = plan.compute_digest();
+    plan.id = plan.expected_id();
+    let (bytes, seal) = roundtrip(&plan)?;
+    let offset = 12 + 16 + 16 + 64 + 4 + plan.summary.len();
+    assert_eq!(bytes[offset], 15);
+    let restored = archive::decode(&bytes, seal, ArchiveLimits::default())?;
+    assert_eq!(restored.anchor, anchor());
+    assert_eq!(restored.terminal_condition, goal);
+    assert_eq!(restored.steps[0].postconditions, vec![goal.clone()]);
+    assert_eq!(restored.steps[0].idempotency_key, plan.steps[0].idempotency_key);
+    let obligation = restored.steps[0].obligation.as_ref().ok_or_else(|| {
+        dfmcp_core::DfmcpError::new(
+            ErrorCode::InternalInvariantViolation, "missing fixture obligation",
+        )
+    })?;
+    assert_eq!(obligation.terminal, goal);
+    assert_eq!(
+        (obligation.deadline_tick, obligation.poll_interval_ticks, obligation.stable_for_observations),
+        (GameTick(180), 5, 2),
+    );
+    let mut unknown_tag = bytes;
+    unknown_tag[offset] = 16;
+    let (unknown_tag, expected) = resigned(&unknown_tag, seal.plan_digest);
+    assert!(archive::decode(&unknown_tag, expected, ArchiveLimits::default()).is_err());
+    Ok(())
+}
+
+#[test]
+fn inventory_baseline_tampering_cannot_reuse_an_original_archive_seal() -> Result<()> {
+    let goal = Predicate::EntityQuantityIncrease {
+        kind: EntityKind::Item,
+        filter_field: "type_key".into(),
+        filter_value: Value::Text("BED".into()),
+        quantity_field: None,
+        baseline: 42,
+        increase: 3,
+        baseline_anchor: anchor(),
+        baseline_source_digest: Digest32::of_bytes(b"original census"),
+        source_generation: 7,
+        baseline_source_counters: [11, 12, 600],
+    };
+    let original = make(vec![Action::Pause { paused: false }], goal.clone(), false);
+    let (_, original_seal) = roundtrip(&original)?;
+    for which in 0..6 {
+        let mut changed = goal.clone();
+        if let Predicate::EntityQuantityIncrease {
+            baseline, increase, baseline_anchor, baseline_source_digest, source_generation,
+            baseline_source_counters, ..
+        } = &mut changed {
+            match which {
+                0 => *baseline += 1,
+                1 => *increase += 1,
+                2 => baseline_anchor.tick.0 += 1,
+                3 => *baseline_source_digest = Digest32::of_bytes(b"replacement census"),
+                4 => *source_generation += 1,
+                _ => baseline_source_counters[2] += 1,
+            }
+        }
+        let changed = make(vec![Action::Pause { paused: false }], changed, false);
+        let (bytes, seal) = roundtrip(&changed)?;
+        assert_ne!(seal.plan_digest, original_seal.plan_digest);
+        assert_ne!(seal.object_digest, original_seal.object_digest);
+        assert!(archive::decode(&bytes, original_seal, ArchiveLimits::default()).is_err());
+    }
+    Ok(())
+}

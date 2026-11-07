@@ -350,6 +350,35 @@ impl<F: FnMut() -> Result<()>> Writer<'_, F> {
                     self.u32(civilian.generation)?;
                 }
             }
+            Predicate::EntityQuantityIncrease {
+                kind,
+                filter_field,
+                filter_value,
+                quantity_field,
+                baseline,
+                increase,
+                baseline_anchor,
+                baseline_source_digest,
+                source_generation,
+                baseline_source_counters,
+            } => {
+                self.byte(15)?;
+                self.entity_kind(kind)?;
+                self.text(filter_field, 256)?;
+                self.value(filter_value, depth + 1)?;
+                self.boolean(quantity_field.is_some())?;
+                if let Some(field) = quantity_field {
+                    self.text(field, 256)?;
+                }
+                self.u64(*baseline)?;
+                self.u64(*increase)?;
+                self.anchor(*baseline_anchor)?;
+                self.raw(baseline_source_digest.as_bytes())?;
+                self.u64(*source_generation)?;
+                for counter in baseline_source_counters {
+                    self.u64(*counter)?;
+                }
+            }
         }
         Ok(())
     }
@@ -714,6 +743,28 @@ impl<F: FnMut() -> Result<()>> Reader<'_, '_, F> {
                     });
                 }
                 Predicate::LaboratoryCivilianReleaseSafety { burrow, civilians }
+            }
+            15 => {
+                let kind = self.entity_kind()?;
+                let filter_field = self.text(256)?;
+                let filter_value = self.value(depth + 1)?;
+                let quantity_field = if self.boolean()? {
+                    Some(self.text(256)?)
+                } else {
+                    None
+                };
+                Predicate::EntityQuantityIncrease {
+                    kind,
+                    filter_field,
+                    filter_value,
+                    quantity_field,
+                    baseline: self.u64()?,
+                    increase: self.u64()?,
+                    baseline_anchor: self.anchor()?,
+                    baseline_source_digest: Digest32::from_bytes(self.array()?),
+                    source_generation: self.u64()?,
+                    baseline_source_counters: [self.u64()?, self.u64()?, self.u64()?],
+                }
             }
             _ => return Err(invalid("unknown archived predicate")),
         })

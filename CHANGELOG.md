@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased — Preserve original inventory-growth baselines
+
+- Add the typed `EntityQuantityIncrease` predicate and additive canonical/archive
+  tag 15, sealing the original quantity, positive increase, anchor, source
+  digest, generation and allocator floors without changing legacy identities.
+- Share complete source-qualified quantity measurement with current evaluation;
+  preserve Unknown inputs, checked arithmetic and conservative scan budgets.
+- Bind all baseline fields into archives and query continuations, require a
+  forward canonical lineage and refuse implicit historical-baseline rebasing.
+- Author six world, two archive and one MCP witness regression. The recovered
+  sources have independent review; new growth tests remain unexecuted after the
+  executor disconnected. Native/MCP consumer work follows this core checkpoint.
+- Fix the Tree-origin closure's unconstrained error type. Before the outage,
+  the annotated/formatted baseline passed all 15 focused handoff component
+  tests. Preserve the exact observed scope and limitations without claiming
+  a full transport or current-head qualification.
+
 ## Unreleased — Select harvested material through the workshop MCP flow
 
 - Add a closed opt-in workshop configuration that imports acknowledged Tree

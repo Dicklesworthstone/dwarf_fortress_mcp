@@ -93,6 +93,13 @@ impl ReadWitness {
             Predicate::EntityQuantity { kind, .. } => {
                 self.entity_domains.insert(kind.as_str().to_owned());
             }
+            Predicate::EntityQuantityIncrease { kind, .. } => {
+                self.entity_domains.insert(kind.as_str().to_owned());
+                // The sealed historical baseline is outside the two current
+                // snapshots. An ordinary unchanged-field witness cannot
+                // authorize rebasing its original source/anchor identity.
+                self.unbounded = true;
+            }
             Predicate::All(children) | Predicate::Any(children) => {
                 for child in children {
                     self.predicate(child);
@@ -513,6 +520,34 @@ mod tests {
                 "entities":[], "edges":[], "regions":[], "pause":false,
             })
         );
+    }
+
+    #[test]
+    fn inventory_increase_reads_whole_domain_and_refuses_implicit_baseline_rebase() {
+        let base = WorldSnapshot::new(
+            FortressId::new(1),
+            GameTick(0),
+            ObservationCursor::ORIGIN,
+            true,
+            WorldGraph::default(),
+        );
+        let mut witness = ReadWitness::default();
+        witness.predicate(&Predicate::EntityQuantityIncrease {
+            kind: EntityKind::Item,
+            filter_field: "type_key".into(),
+            filter_value: dfmcp_world::Value::Text("BED".into()),
+            quantity_field: Some("stack_size".into()),
+            baseline: 0,
+            increase: 1,
+            baseline_anchor: base.anchor(),
+            baseline_source_digest: Digest32::of_bytes(b"sealed baseline"),
+            source_generation: 1,
+            baseline_source_counters: [0, 0, 1],
+        });
+        assert_eq!(witness.to_json()["entity_domains"]["kinds"], json!(["item"]));
+        // A present-world comparison cannot validate the original historical
+        // baseline, even when both supplied snapshots are byte-identical.
+        assert!(witness.first_change(&base, &base).is_some());
     }
 
     #[test]

@@ -335,6 +335,31 @@ impl<'a> PredicateEvidence<'a> {
         Ok(matches!(self.evaluate(predicate)?, PredicateTruth::True))
     }
 
+    /// Measure a complete, independently source-qualified domain. `None` means
+    /// the quantity is unknown, including incomplete coverage, an unavailable
+    /// selector/quantity, or arithmetic overflow. A complete empty domain is a
+    /// known zero. The caller owns any historical baseline custody and native
+    /// incarnation validation; this scope certifies only its exact snapshot.
+    pub fn entity_quantity_total(
+        &self,
+        kind: &EntityKind,
+        filter_field: &str,
+        filter_value: &Value,
+        quantity_field: Option<&str>,
+    ) -> Result<Option<u64>> {
+        crate::query::validate_entity_quantity_fields(
+            kind, filter_field, filter_value, quantity_field,
+        )?;
+        crate::query::validate_entity_quantity_scan(self.snapshot.graph.entities.len())?;
+        if !self.entity_absence_complete(Some(kind)) {
+            return Ok(None);
+        }
+        Ok(crate::query::entity_quantity_total(
+            self.snapshot, kind, filter_field, filter_value, quantity_field,
+            |fact| self.fact_value(fact),
+        ))
+    }
+
     // EntityKind::Other("unit") and EdgeKind::Custom("assigned_to")
     // encode exactly like their named variants. Evidence must follow those
     // canonical identities, not the in-memory enum representation. Duplicate
@@ -448,7 +473,8 @@ impl<'a> PredicateEvidence<'a> {
                     .and_then(|fact| self.fact_value(fact))
                     .map_or(Unknown, |known| crate::query::compare(known, *op, value))
             }
-            Predicate::EntityQuantity { kind, .. } => {
+            Predicate::EntityQuantity { kind, .. }
+            | Predicate::EntityQuantityIncrease { kind, .. } => {
                 if !self.entity_absence_complete(Some(kind)) {
                     return Unknown;
                 }

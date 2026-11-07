@@ -275,6 +275,38 @@ fn encode_predicate(bytes: &mut Vec<u8>, predicate: &Predicate) -> Result<()> {
                 bytes.extend_from_slice(&civilian.generation.to_be_bytes());
             }
         }
+        Predicate::EntityQuantityIncrease {
+            kind,
+            filter_field,
+            filter_value,
+            quantity_field,
+            baseline,
+            increase,
+            baseline_anchor,
+            baseline_source_digest,
+            source_generation,
+            baseline_source_counters,
+        } => {
+            bytes.push(15);
+            encode_entity_kind(bytes, kind)?;
+            put_str(bytes, filter_field);
+            filter_value.encode(bytes);
+            match quantity_field {
+                Some(field) => {
+                    bytes.push(1);
+                    put_str(bytes, field);
+                }
+                None => bytes.push(0),
+            }
+            put_u64(bytes, *baseline);
+            put_u64(bytes, *increase);
+            crate::canonical::put_anchor(bytes, *baseline_anchor);
+            bytes.extend_from_slice(baseline_source_digest.as_bytes());
+            put_u64(bytes, *source_generation);
+            for counter in baseline_source_counters {
+                put_u64(bytes, *counter);
+            }
+        }
     }
     if bytes.len() > MAX_QUERY_IDENTITY_BYTES {
         return Err(DfmcpError::new(

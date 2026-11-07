@@ -1,0 +1,80 @@
+{
+  "schema": "dfmcp.local-component-observation/1",
+  "source_baseline": "00bc977bc535ab5a8c17b9e2c3968bf3e5031834",
+  "overlay": {
+    "file": "crates/dfmcp-adapter/src/tree_harvest/material_origin.rs",
+    "sha256": "c9c95d4a4cca88950222ff228fba941d90b1ab2f4190d3a3351c729077facb7f",
+    "change": "Explicit Result<TreeMaterialOrigin> annotation plus rustfmt"
+  },
+  "toolchain": "rustc 1.101.0-nightly (c980177d8 2026-11-06)",
+  "flags": "-Zunstable-options -Zthreads=1 --jobs-backend=1 -Cdebuginfo=0",
+  "cargo": {
+    "locked": true,
+    "offline": true,
+    "jobs": 1,
+    "test_threads": 1,
+    "profile": "test",
+    "debug": 0,
+    "incremental": false,
+    "codegen_units": 256
+  },
+  "result": {
+    "passed": 15,
+    "failed": 0,
+    "ignored": 0,
+    "measured": 0,
+    "filtered_out": 17,
+    "build_seconds": 5.84,
+    "test_seconds": 0.2
+  },
+  "new_case_groups": {
+    "adapter_material": 10,
+    "mcp_configuration": 3,
+    "mcp_agent_turn": 2
+  },
+  "component_roots": [
+    "bounded_run",
+    "build_placement",
+    "control_effect_journal",
+    "dfhack_rpc",
+    "dfhack_wire",
+    "fenced_live_source",
+    "live_connect",
+    "live_jobs",
+    "live_map",
+    "live_observation",
+    "live_session",
+    "manager_appointment",
+    "order_run",
+    "owned_file_lock",
+    "tree_harvest",
+    "workshop_construction"
+  ],
+  "source_inventory": {
+    "archived_files": 511,
+    "unrelated_test_module_exclusions": 146,
+    "unrelated_adapter_root_omissions": 67,
+    "exact_external_lock_packages": 11
+  },
+  "seams": [
+    "runtime_io returns Ok in out-of-tree MCP runtime copy",
+    "current_admission_provenance returns None using exact original type/getters"
+  ],
+  "limitations": [
+    "single-crate alias does not compile external adapter crate visibility",
+    "MCP transport/macros and owned Asupersync Cx excluded",
+    "No new actual modern-stdio process campaign executed",
+    "No full workspace, SDK, live-game, registry or runtime admission qualification"
+  ],
+  "log_path": "/workspace/scratch/7cd3f9756216/dfmcp_tree_material_component/material-tests.log",
+  "full_log_sha256": null,
+  "log_hash_note": "Executor disconnected before full-log hashing; completion/counts directly observed in tool output.",
+  "prior_failures": [
+    "Full-adapter assembly: real E0282 then rustc SIGKILL",
+    "Corrected full-adapter assembly: rustc SIGKILL without further source diagnostics"
+  ],
+  "next_lanes_status": {
+    "entity_quantity_increase": "not started",
+    "workflow_5": "not written/run"
+  }
+}
