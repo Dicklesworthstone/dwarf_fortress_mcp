@@ -359,7 +359,7 @@ pub(super) fn world_value(value: &WorldValue) -> Value {
     }
 }
 
-fn fact_json(fact: &Fact) -> Value {
+pub(super) fn fact_json(fact: &Fact) -> Value {
     let source_state = match &fact.source {
         FactSource::DfhackField(_) => "observed",
         FactSource::Derived(_) => "inferred",

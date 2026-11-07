@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased — Bounded exact numeric ranking
+
+- Add shared `ranked_entities` queries with up to three exact i64, u64 or
+  fixed-scale ordering keys, mixed directions, optional age limits and stable
+  entity-ID ties.
+- Retain only the requested page in a bounded heap; prepay complete-source,
+  predicate and ordering costs, and preserve whole-row continuation semantics.
+- Keep unavailable/mistyped/old/future keys explicitly Unknown and return the
+  ranking facts with their original provenance, without mutation authority.
+- Wire the same executor into semantic and historical laboratory queries, with
+  closed schema, guides and 15 component plus one public-façade regressions.
+- Keep the semantic publisher's active-watch output reservation separate from
+  the full source-read allowance, with a focused budget regression.
+- Record the completed pre-outage component result as 100 passed / one source-
+  budget fixture failure. The focused fixture correction and recovered final
+  sources were reviewed but could not be rerun after executor loss; no full
+  workspace or native qualification is claimed.
+
 ## Unreleased — Create finite orders using already enabled labor
 
 - Add closed `kind=existing_labor` planning to the combined host: one original

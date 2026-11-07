@@ -951,3 +951,65 @@ fn lab_related_entities_publish_witnesses_and_resume_only_the_authorized_source(
     );
     Ok(())
 }
+
+#[test]
+fn lab_ranked_entities_resume_exact_history_with_current_authority() -> TestResult {
+    let _serial = crate::test_serial();
+    let (session_id, source) = open_fixture()?;
+    let mut request = wrapper(
+        json!({
+            "kind":"ranked_entities", "kinds":["unit"],
+            "order_by":[{"field":"stock","numeric_type":"u64","direction":"descending"}],
+            "fields":["alive","concealed"], "limit":1
+        }),
+        None,
+    );
+    let first = query(&session_id, request.clone())?;
+    assert_eq!(first["ok"], true, "{first}");
+    assert_eq!(first["matched"], 4);
+    assert_eq!(first["rows"][0]["entity_id"], "4");
+    assert_eq!(
+        first["rows"][0]["ranking"]["facts"]["stock"]["epistemic_state"],
+        "inferred"
+    );
+    assert_eq!(first["rows"][0]["fields"]["concealed"]["presence"], "redacted");
+    assert!(!first["rows"].to_string().contains("concealedpayload"));
+    assert_eq!(first["coverage"]["absence_proven"], false);
+    assert_eq!(first["agent_turn"]["anchor"], anchor_json(&source.anchor()));
+    assert!(first["continuation"].is_string());
+
+    request["request"]["query"]["continuation"] = first["continuation"].clone();
+    request["request"]["query"]["limit"] = json!(2);
+    let current = advance(&session_id)?;
+    expect_refusal(&query(&session_id, request.clone())?, "stale_anchor");
+    request["at"] = json!(source.state_hash.to_string());
+    let historical = query(&session_id, request.clone())?;
+    assert_eq!(historical["ok"], true, "{historical}");
+    assert_eq!(historical["historical"], true);
+    assert_eq!(historical["anchor"], anchor_json(&source.anchor()));
+    assert_eq!(historical["current_anchor"], anchor_json(&current.anchor()));
+    assert_eq!(historical["agent_turn"]["anchor"], anchor_json(&current.anchor()));
+    assert_eq!(historical["rows"][0]["entity_id"], "3");
+    assert_eq!(historical["rows"][1]["entity_id"], "2");
+    assert_eq!(historical["rows"][0]["generation"], 1);
+    assert_eq!(historical["coverage"]["eligible_as_mutation_evidence"], false);
+    assert_eq!(historical["rows"][0]["ranking"]["eligible_as_mutation_evidence"], false);
+
+    request["request"]["query"]["continuation"] = historical["continuation"].clone();
+    let session = resolve_session(Some(session_id.clone()))?;
+    {
+        let mut guard = session.lock().map_err(|_| "session poisoned")?;
+        guard
+            .grants
+            .iter_mut()
+            .find(|grant| grant.capability == Capability::Query)
+            .ok_or("Query grant missing")?
+            .expires_at_tick = Some(source.tick);
+    }
+    expect_refusal(&query(&session_id, request)?, "capability_denied");
+    assert_eq!(
+        session.lock().map_err(|_| "session poisoned")?.adapter.snapshot(),
+        &current
+    );
+    Ok(())
+}

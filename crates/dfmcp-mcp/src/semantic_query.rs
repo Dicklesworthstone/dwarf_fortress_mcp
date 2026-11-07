@@ -16,6 +16,8 @@ mod operational_query;
 mod query_history;
 #[path = "query_watch.rs"]
 mod query_watch;
+#[path = "ranked_entity_query.rs"]
+mod ranked_entity_query;
 #[path = "related_entity_query.rs"]
 mod related_entity_query;
 #[path = "spatial_entity_query.rs"]
@@ -154,6 +156,7 @@ pub fn execute(
         Some("events") => event_query::execute(snapshot, context, input),
         Some("spatial_entities") => spatial_entity_query::execute(snapshot, context, input),
         Some("related_entities") => related_entity_query::execute(snapshot, context, input),
+        Some("ranked_entities") => ranked_entity_query::execute(snapshot, context, input),
         Some("item_quantity") => query_watch::quantity_query(snapshot, context, input),
         Some("condition_evaluation") => query_watch::condition_query(snapshot, context, input),
         Some("dominators") => dominance_query::execute(snapshot, context, input),
@@ -287,6 +290,16 @@ where
     {
         Some("watch" | "poll_watch" | "watches" | "cancel_watch" | "release_watch") => {
             query_watch::execute(snapshot, context, input, publish)
+        }
+        Some("ranked_entities") => {
+            let narrowed = result_context(context)?;
+            let value = ranked_entity_query::execute_with_output_budget(
+                snapshot,
+                context,
+                input,
+                narrowed.budget.max_bytes,
+            )?;
+            publish_with_active_work(context, value, publish)
         }
         Some("capture" | "changes" | "baselines" | "release_baseline") => {
             let narrowed = result_context(context)?;

@@ -2,7 +2,7 @@
 
 The default `serve` runtime accepts stateless `dfmcp.query/1` requests through
 the existing `fortress_query` tool. This exposes the same typed entity,
-aggregate, lexical, spatial and relationship executors used by the read-only development
+aggregate, lexical, spatial, relationship and numeric-ranking executors used by the read-only development
 surfaces, over the laboratory world in which plans actually execute.
 
 Pass a JSON string as the existing `mode` argument:
@@ -26,7 +26,7 @@ Pass a JSON string as the existing `mode` argument:
 The closed outer wrapper accepts only `mode`, `request` and optional `at`.
 `at` is the exact lowercase state hash of a current or retained world. The
 inner envelope accepts the existing schema, `query`, and optional complete
-`expected_anchor`. These nine query kinds are available:
+`expected_anchor`. These ten query kinds are available:
 
 | Kind | Purpose |
 | --- | --- |
@@ -39,6 +39,7 @@ inner envelope accepts the existing schema, `query`, and optional complete
 | `events` | Inclusive retained-event windows, kind/subject selection, typed fields and chronological pages |
 | `spatial_entities` | Inclusive intersection or containment of explicitly named point/cuboid entity geometry |
 | `related_entities` | Entities with witnessed one-hop relations to targets selected by kinds, IDs and typed facts |
+| `ranked_entities` | Best bounded page under one to three exact numeric field orderings, with fact provenance |
 
 There is no watch, baseline, native capture, plan or effect dispatch through
 this wrapper. Existing `summary`, `entities`, `terrain`, `path`, `search`,
@@ -95,6 +96,51 @@ Results separate excluded/unavailable inputs from actual samples. Sums,
 minima and maxima use decimal integer strings; a mean is an exact rational.
 These are advisory statistics over the selected projection, not a complete
 stock or mutation-precondition certificate.
+
+## Ranking by numeric facts
+
+Select the most relevant records without retrieving and sorting the population
+in the caller. For example, if the source records a signed `stress` fact:
+
+```json
+{
+  "kind": "ranked_entities",
+  "kinds": ["unit"],
+  "order_by": [
+    {"field": "stress", "numeric_type": "i64", "direction": "descending", "max_age_ticks": 20}
+  ],
+  "fields": ["profession", "alive"],
+  "limit": 4
+}
+```
+
+Use this object as `request.query`. Supply one to three distinct field names.
+Each key explicitly declares `i64`, `u64` or `fixed`, ascending or descending.
+A fixed key also requires its exact `scale`; other numeric types cannot specify
+one. Keys are compared in the requested sequence, then by ascending entity ID.
+There is no float conversion, signed/unsigned coercion, scale conversion or
+zero-filling of unavailable values.
+
+Every ordering fact must be available and consistently Known, have the declared
+type and scale, and have an observation tick no later than the source tick.
+Optional `max_age_ticks` applies independently to each key. Without it, an older
+Known fact may be ranked while retaining its original tick and epistemic class.
+Missing, unavailable, future, over-age or mistyped keys exclude that entity and
+appear in `selection.unknown_rank`, separately from typed-filter False and
+Unknown exclusions. Reason counts name the first unusable key per entity.
+
+Rows include the exact ranking facts and their provenance even when `fields`
+does not request them. Advisory inferred or assumed facts keep those classes;
+ranking never grants mutation authority or proves complete-world absence.
+The bounded heap retains at most the requested page: four rows by default,
+at most 128, with O(N log K) ordering work and O(K) retained candidates.
+Complete-source admission and hashing still apply on every page.
+
+The `rk1` continuation binds the session, full source anchor, filter, selected
+kinds and fields, all ordering rules and the last returned ID and generation.
+The page width may change. Pagination never skips a row that does not fit;
+narrow the field projection or increase the output budget. Exact retained
+sources and current authority follow the rules below.
 
 ## Spatial selection
 
@@ -241,14 +287,15 @@ continuity in the Agent Turn. It cannot supply fresh mutation evidence.
 An unknown or collected hash returns `stale_anchor`; there is no substitution
 of a newer world or another session's retained source.
 
-For entity, search, event, spatial or relationship pages, copy the returned `continuation` string into
+For entity, search, event, spatial, relationship or ranked pages, copy the returned `continuation` string into
 `request.query.continuation`. Keep the query selection unchanged. Entity
 continuations also bind selected fields, ordering, source anchor and session.
 Event continuations bind the time window, kind and subject sets, selected
 fields, order, complete source anchor and session. Spatial continuations also bind
 the region, geometry field names, relation and typed filter. Relationship
 continuations bind both endpoint selectors and filters, edge kinds, direction,
-fields, ordering and the last returned entity generation. The requested page
+fields, ordering and the last returned entity generation. Ranked continuations
+also bind key sequence, numeric types, scales, directions and age bounds. The requested page
 width may change. After the current world advances, resume
 by explicitly adding the original `at` hash while that source is retained,
 or restart from the new world. Historical reads do not pin retention.
@@ -274,7 +321,7 @@ budget-error envelope.
 ## Verification scope
 
 `lab_structured_query_tests.rs` drives the actual public laboratory façade for
-the nine kinds, exact historical/current anchors, capability refusal, unavailable
+the available kinds, exact historical/current anchors, capability refusal, unavailable
 facts, continuation integrity, legacy grammar, source work and complete-packet
 budgets. These source regressions do not establish live DFHack compatibility,
 game effects, production admission or full workspace qualification.

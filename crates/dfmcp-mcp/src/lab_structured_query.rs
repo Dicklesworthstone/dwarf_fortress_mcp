@@ -12,6 +12,9 @@ mod event_query;
 #[path = "operational_query.rs"]
 #[allow(clippy::duplicate_mod)]
 mod operational_query;
+#[path = "ranked_entity_query.rs"]
+#[allow(clippy::duplicate_mod)]
+mod ranked_entity_query;
 #[path = "related_entity_query.rs"]
 #[allow(clippy::duplicate_mod)]
 mod related_entity_query;
@@ -110,10 +113,11 @@ pub(super) fn parse(raw: &str) -> Result<Option<Request>> {
                 | "events"
                 | "spatial_entities"
                 | "related_entities"
+                | "ranked_entities"
         )
     ) {
         return Err(invalid(
-            "structured laboratory queries support only entities, inspect, traverse, dependencies, aggregate, search, events, spatial_entities, and related_entities",
+            "structured laboratory queries support only entities, inspect, traverse, dependencies, aggregate, search, events, spatial_entities, related_entities, and ranked_entities",
         ));
     }
     Ok(Some(request))
@@ -140,6 +144,9 @@ pub(super) fn execute(
         }
         Some("related_entities") => {
             related_entity_query::execute(snapshot, &source_context, &request.request)?
+        }
+        Some("ranked_entities") => {
+            ranked_entity_query::execute(snapshot, &source_context, &request.request)?
         }
         _ => core_query::execute(snapshot, &source_context, &request.request)?,
     };

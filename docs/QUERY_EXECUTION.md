@@ -117,6 +117,90 @@ requests preserve their previous result fields and values.
 The filter is available to existing structured live-read consumers. It performs
 no bridge read, creates no watch and grants no effect authority.
 
+## Exact numeric entity ranking
+
+`ranked_entities` selects an ordered page from a canonical source by one to
+three distinct numeric facts. It is shared by semantic-query runtimes and the
+default laboratory structured-query wrapper. This fills the field-ordering
+portion of the DfQL plan without adding a tool, changing an effect family, or
+introducing a runtime dependency.
+
+```json
+{
+  "schema": "dfmcp.query/1",
+  "query": {
+    "kind": "ranked_entities",
+    "kinds": ["unit"],
+    "order_by": [
+      {"field": "stress", "numeric_type": "i64", "direction": "descending", "max_age_ticks": 20},
+      {"field": "age", "numeric_type": "u64", "direction": "ascending"}
+    ],
+    "fields": ["profession"],
+    "limit": 4
+  }
+}
+```
+
+Field names refer to facts actually published by the selected source; this
+example does not add stress or age to a native projection. The existing typed,
+three-valued `where` predicate and kind selection run before ranking.
+
+Each key declares `i64`, `u64` or `fixed` plus `ascending` or `descending`.
+Fixed keys require a scale in 0..=u32::MAX and compare their signed units only
+when that scale matches exactly. Non-fixed keys cannot supply a scale.
+There is no numeric coercion, floating-point conversion or descending-order
+negation; i64::MIN, i64::MAX and u64::MAX retain their exact ordering. Keys are
+compared lexicographically in request order, with ascending entity ID as the
+final tie-break. A field cannot occur twice.
+
+Every key must pass `Fact::known_value()`, match its declared numeric type and
+scale, and have an observation tick no later than the source tick. Optional
+`max_age_ticks` is inclusive and applies independently to each key. Without
+an age bound, earlier Known facts remain usable with their original timestamp
+and epistemic class. Missing, unavailable, conflicting, future, over-age,
+mistyped and differently scaled facts never become zero or a synthetic extreme.
+The entire entity is excluded from ranking if any key is unusable.
+
+`selection` separates kind-selected entities, filter False, filter Unknown,
+and `unknown_rank`. `unknown_rank_reasons` counts the first unusable key per
+entity, not every bad fact. Selection completeness concerns only the supplied
+canonical projection and is independent of page truncation. Rows always include
+the ranking facts, even when those fields were not explicitly projected.
+Their presence, values, source digests, ticks and epistemic classes use the
+shared fact encoder. Inferred and assumed values retain those classes.
+Ranking is advisory and cannot certify a causal priority, absence or mutation
+precondition.
+
+A bounded binary heap keeps at most K candidate references for the requested
+page, with O(N log K) ordering work and O(K) retained candidates. It does not
+sort or clone the entire population or retain a hidden mutable index.
+`source_cost.maximum_retained_candidates` records the actual peak.
+K defaults to four and is bounded by 128 and the negotiated entity allowance.
+Complete-source preflight still covers unselected entities, edges, chunks,
+events, fields, nested values and provenance before hash verification.
+The existing 100,000-record, 16-MiB, depth-64 and 4,000,000-work ceilings apply
+alongside negotiated limits. Predicate, lookup, comparison, heap and final-page
+sorting costs are charged before selection; wall time is checked throughout.
+
+The `rk1` continuation binds the session ID, complete source anchor, canonical
+kind set, typed predicate, normalized projected fields, key sequence and every
+key's type, direction, scale and age bound. It carries the last returned
+entity's ID and generation. Page width and output budget may change. The
+executor re-derives that row's ordering values from the same verified immutable
+source; a missing, ineligible, wrong-generation or final-position target
+returns `cursor_gap`. Modified or differently bound tokens return
+`stale_anchor`. Digest integrity is not authentication: current Query
+authorization is repeated on every request.
+
+Output admits complete rows with both projected and ranking facts. If the next
+ranked row cannot fit, the prior page ends before it and the continuation
+preserves that position; no smaller later row is substituted. An oversized
+first row returns `budget_exceeded`. The semantic publisher reserves active-watch metadata against the output cap
+without replacing the original source-read byte allowance. The enclosing
+runtime still has to admit the complete Agent Turn. Historical laboratory pages explicitly select the
+retained source hash while current grants and the current Agent Turn anchor
+remain authoritative.
+
 ## Spatial entity intersection and containment
 
 The shared stateless `dfmcp.query/1` executor accepts `spatial_entities` through

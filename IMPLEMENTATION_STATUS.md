@@ -1,5 +1,46 @@
 # Implementation Status
 
+## Unreleased — Rank canonical entities by exact numeric facts
+
+The shared structured-query layer now accepts `kind=ranked_entities` in the
+semantic runtimes and default laboratory façade. One to three distinct numeric
+keys declare exact signed, unsigned or fixed-scale types and ascending or
+descending order, with canonical entity-ID tie-breaking. Optional per-key age
+limits, three-valued filters, rank-fact provenance and separate Unknown reasons
+preserve the source's knowledge boundary. No unavailable value becomes zero or
+mutation evidence.
+
+A bounded heap retains only the requested page, with O(N log K) ordering work
+and O(K) candidate storage. Complete-source admission, hashing, current Query
+authority and wall/byte/work limits still apply. Whole-row `rk1` pagination binds
+the session, complete anchor, selectors, key order/types/scales/age bounds and
+last returned ID/generation; a narrower output never skips an oversized row.
+Current and retained laboratory sources use the same executor and current grants.
+The semantic publisher reserves active-watch output bytes independently of
+complete-source admission, so a small ranked page does not reduce the authorized
+source population to the output allowance. The closed schema, guides and
+public-façade regression are included.
+
+Before the executor became unavailable, the exact-lock actual-source component
+compiled and ran 101 tests: 100 passed, including 13 new ranking tests and all
+87 prior query/world/output tests. The remaining 4,096-entity heap test correctly
+hit its fixture's default 4-MiB source budget before its heap assertion; its
+source allowance is now explicitly 16 MiB, within the unchanged production cap.
+That correction has not been rerun. The successful tests included exhaustive
+four-record/three-key ordering against an independent sort.
+
+Production source was recovered from complete overlapping source reads after
+the outage; its post-rustfmt byte identity is unavailable. The first two tests
+and partial extrema case were retained verbatim; intervening regression cases
+were reconstructed from the recorded behavior and APIs. All 15 final ranking
+tests and the new public-façade/history/grant regression remain unexecuted on
+these final bytes. Independent source review, JSON parsing, 71 local schema
+references and targeted 5-positive/14-negative schema cases were checked.
+The final source/output-budget separation and its regression were also added
+after the outage and remain unexecuted. These are scoped development observations, not a full Rust qualification,
+native-game result or admission. Dependencies, native protocol generations,
+production runner map and empty compatibility registry remain unchanged.
+
 ## Unreleased — Produce with current labor without an assignment effect
 
 The combined development host accepts the closed `kind=existing_labor` request
