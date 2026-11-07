@@ -458,3 +458,43 @@ fn negotiated_source_bytes_include_unselected_geometry_outside_the_region() -> T
     }
     Ok(())
 }
+
+
+#[test]
+fn reserved_output_preserves_source_allowance_and_still_enforces_both_caps() -> TestResult {
+    let (mut snapshot, mut context) = fixture();
+    snapshot.graph.entities.get_mut(&EntityId::new(1)).ok_or("entity")?
+        .fields.insert("source_only_payload".to_owned(),
+            known(WorldValue::Text("x".repeat(65_536))));
+    refresh(&mut snapshot, &mut context);
+    let mut input = request();
+    input["query"]["limit"] = json!(1);
+    let maximum_output_bytes = 8192;
+    let first = execute_with_output_budget(&snapshot, &context, &input, maximum_output_bytes)?;
+    assert_eq!(ids(&first), vec![json!("1")]);
+    assert!(first["source_cost"]["bounded_bytes"].as_u64().ok_or("source bytes")?
+        > maximum_output_bytes);
+    assert!(serde_json::to_vec(&first)?.len() as u64 <= maximum_output_bytes);
+    input["query"]["continuation"] = first["continuation"].clone();
+    let second = execute_with_output_budget(&snapshot, &context, &input, maximum_output_bytes)?;
+    assert_eq!(ids(&second), vec![json!("2")]);
+    assert_eq!(second["query_digest"], first["query_digest"]);
+
+    let mut narrowed = context.clone();
+    narrowed.budget.max_bytes = maximum_output_bytes;
+    assert!(matches!(
+        execute_with_output_budget(&snapshot, &narrowed, &input, u64::MAX),
+        Err(error) if error.code == ErrorCode::BudgetExceeded
+    ));
+    assert!(matches!(
+        execute_with_output_budget(&snapshot, &context, &input, 1),
+        Err(error) if error.code == ErrorCode::BudgetExceeded
+    ));
+    let mut tiny_output = context.clone();
+    tiny_output.budget.max_output_tokens = 1;
+    assert!(matches!(
+        execute_with_output_budget(&snapshot, &tiny_output, &input, u64::MAX),
+        Err(error) if error.code == ErrorCode::BudgetExceeded
+    ));
+    Ok(())
+}

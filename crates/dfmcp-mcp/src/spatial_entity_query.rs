@@ -262,6 +262,18 @@ pub(super) fn execute(
     context: &OperationContext,
     input: &Value,
 ) -> Result<Value> {
+    execute_with_output_budget(snapshot, context, input, context.budget.max_bytes)
+}
+
+/// Reserve presentation bytes without reducing the authorized source allowance.
+/// The separate cap narrows only output; all source, authority and work checks
+/// continue to use the original request context.
+pub(super) fn execute_with_output_budget(
+    snapshot: &WorldSnapshot,
+    context: &OperationContext,
+    input: &Value,
+    max_output_bytes: u64,
+) -> Result<Value> {
     let started = Instant::now();
     context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
     if context.anchor != snapshot.anchor() {
@@ -396,7 +408,7 @@ pub(super) fn execute(
         ));
     }
     let maximum = usize::try_from(
-        context.budget.max_bytes.min(
+        context.budget.max_bytes.min(max_output_bytes).min(
             u64::from(context.budget.max_output_tokens).saturating_mul(4),
         ),
     ).map_err(|_| exhausted("spatial response budget cannot be represented"))?;

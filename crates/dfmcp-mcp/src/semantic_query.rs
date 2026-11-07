@@ -291,14 +291,14 @@ where
         Some("watch" | "poll_watch" | "watches" | "cancel_watch" | "release_watch") => {
             query_watch::execute(snapshot, context, input, publish)
         }
-        Some("ranked_entities") => {
+        Some(kind @ ("spatial_entities" | "related_entities" | "ranked_entities")) => {
             let narrowed = result_context(context)?;
-            let value = ranked_entity_query::execute_with_output_budget(
-                snapshot,
-                context,
-                input,
-                narrowed.budget.max_bytes,
-            )?;
+            let execute_page = match kind {
+                "spatial_entities" => spatial_entity_query::execute_with_output_budget,
+                "related_entities" => related_entity_query::execute_with_output_budget,
+                _ => ranked_entity_query::execute_with_output_budget,
+            };
+            let value = execute_page(snapshot, context, input, narrowed.budget.max_bytes)?;
             publish_with_active_work(context, value, publish)
         }
         Some("capture" | "changes" | "baselines" | "release_baseline") => {
@@ -313,3 +313,7 @@ where
         }
     }
 }
+
+#[cfg(test)]
+#[path = "semantic_query_publication_tests.rs"]
+mod publication_tests;

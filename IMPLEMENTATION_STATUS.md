@@ -1,5 +1,28 @@
 # Implementation Status
 
+## Unreleased — Separate query source and output budgets
+
+Spatial and relationship entity queries now retain the caller's full authorized
+source byte allowance when the semantic publisher reserves a smaller output
+page. The previous coupling could refuse a small result because an unselected
+part of the complete fortress snapshot exceeded the response reservation.
+Ranking already had the separate allowance; all three publishers now follow
+that same bounded contract. Source hashes, authority, entity limits, complete
+source admission and deadlines still use the original context. Output cannot
+widen its token or byte cap, and whole-row continuations remain source-bound.
+
+The unchanged production modules and real semantic publisher/watch tree passed
+55 focused tests: core 9, spatial 14, relationships 14, ranking 15 and publisher
+3. The publisher cases cover full sources larger than 64 KiB with small result
+pages, active-watch reservation and continuation, and refusal before callbacks
+on actual source or selected-output overflow. All 346 repository files loaded
+by that compiler matched pre-build SHA-256 hashes; all 11 external dependency
+identities matched Cargo.lock. The isolated runner reported rustc
+1.100.0-nightly (908501772 2026-08-30). This is actual component execution, not
+full latest-nightly, transport, native-peer or live-game qualification. The
+whole MCP build was separately killed in unchanged Asupersync. Bead
+df-lab-structured-query-f7q remains in progress for its broader acceptance.
+
 ## Unreleased — Bounded operations inspection without an original plan
 
 The adapter now exposes OperationsInspectionProjection for inspecting a

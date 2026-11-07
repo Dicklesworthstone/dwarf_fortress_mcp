@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased — Keep small query pages usable on large captured sources
+
+- Separate full-source admission from rendered-output reservation for spatial
+  and relationship entity queries, matching the existing ranking path.
+- Keep caller authority, source hash, entity/byte-work and deadline limits on the
+  original context while clamping complete output pages to remaining tokens
+  after active-watch metadata.
+- Execute 55 exact-source regressions: 52 core/spatial/relationship/ranking cases
+  and three actual semantic-publisher cases. Continuations and active watches
+  survive small pages; real source/output overflow refuses before publication.
+- Use the actual repository dependency crates and exact locked external package
+  identities. This scoped result does not claim CLI, transport, native-game or
+  full-workspace qualification.
+
 ## Unreleased — Inspect operations before an original production plan
 
 - Add an immutable, bounded OperationsInspectionProjection that supports real
