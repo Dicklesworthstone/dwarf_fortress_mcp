@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased — Report complete bounded world-change domains
+
+- Add relation creation, modification and removal to Agent Turn and historical
+  change queries, including endpoint incarnation changes.
+- Report retained-event arrival, revision and retention loss without inventing
+  event occurrence, authenticity or subject generations.
+- Include entity label/kind/revision changes and provenance-only field changes;
+  preserve unavailable-value masking and exact comparison anchors.
+- Bound entities, relations, events and terrain independently with explicit
+  omission counts; report cross-epoch resets and reversed-endpoint gaps.
+- Pass 19 actual-source component tests before executor loss. Add two public
+  facade regressions; their execution and final-generation qualification remain
+  pending. See docs/WORLD_CHANGES.md.
+
 ## Unreleased — Require known-clear failure evidence for goal success
 
 - Preserve three-valued failure conditions in temporal obligations: Unknown

@@ -1293,6 +1293,164 @@ fn every_turn_reports_what_changed_in_the_world() -> TestResult {
 }
 
 #[test]
+fn relation_event_and_metadata_changes_reach_agent_turns_and_historical_queries() -> TestResult {
+    use dfmcp_core::{Digest32, EdgeId, EntityId, EventId};
+    use dfmcp_world::{
+        EdgeKind, EdgeRecord, Fact, FactPresence, FactSource, WorldEvent, WorldEventKind,
+    };
+
+    let session = open("72341", true, &[])?;
+    let baseline = parsed(&fortress_observe(Some(session.clone())))?;
+    let since = baseline["anchor"]["state_hash"]
+        .as_str()
+        .ok_or("baseline anchor")?;
+    let source = crate::server::lookup_session_str(&session)?;
+    {
+        let mut guard = source.lock().map_err(|_| "session poisoned")?;
+        let mut snapshot = guard.adapter.snapshot().clone();
+        snapshot.cursor = snapshot.cursor.checked_next().ok_or("cursor exhausted")?;
+        let mut concealed = Fact::known(
+            dfmcp_world::Value::Text("withheld-assignment-detail".to_owned()),
+            snapshot.tick,
+            FactSource::Replay,
+            Digest32::ZERO,
+        );
+        concealed.presence = Some(FactPresence::Redacted("assignment-policy".to_owned()));
+        snapshot.graph.edges.insert(
+            EdgeId::new(91),
+            EdgeRecord {
+                id: EdgeId::new(91),
+                revision: 1,
+                kind: EdgeKind::AssignedTo,
+                from: EntityId::new(1001),
+                to: EntityId::new(4001),
+                fields: BTreeMap::from([("detail".to_owned(), concealed)]),
+            },
+        );
+        snapshot.graph.events.insert(
+            EventId::new(81),
+            WorldEvent {
+                id: EventId::new(81),
+                tick: snapshot.tick,
+                kind: WorldEventKind::Announcement,
+                subject: Some(EntityId::new(1001)),
+                summary: "Assignment notice".to_owned(),
+                fields: BTreeMap::from([("ready".to_owned(), dfmcp_world::Value::Bool(true))]),
+            },
+        );
+        let entity = snapshot
+            .graph
+            .entities
+            .get_mut(&EntityId::new(1002))
+            .ok_or("dwarf")?;
+        entity.label = "Urist renamed without a field change".to_owned();
+        entity.revision += 1;
+        snapshot.refresh_hash();
+        guard.adapter.inject_snapshot(snapshot)?;
+    }
+    let observed = parsed(&fortress_observe(Some(session.clone())))?;
+    assert_eq!(observed["ok"], true, "{observed}");
+    let changes = observed["agent_turn"]["changes"]
+        .as_array()
+        .ok_or("turn changes")?;
+    let relation = changes
+        .iter()
+        .find(|change| change["kind"] == "relation_created")
+        .ok_or("assignment change absent")?;
+    assert_eq!(relation["subject"]["edge_id"], "91");
+    assert_eq!(relation["after"]["from"], "1001");
+    assert_eq!(relation["after"]["to"], "4001");
+    assert_eq!(relation["after"]["from_generation"], 1);
+    assert_eq!(relation["fields"][0]["after_presence"]["state"], "redacted");
+    assert!(relation["fields"][0]["after"].is_null());
+    let renamed = changes
+        .iter()
+        .find(|change| change["kind"] == "entity_changed")
+        .ok_or("metadata change absent")?;
+    assert_eq!(renamed["subject"]["entity_id"], "1002");
+    assert_eq!(renamed["fields_changed"], 0);
+    assert_eq!(renamed["after"]["label"], "Urist renamed without a field change");
+    let event = changes
+        .iter()
+        .find(|change| change["kind"] == "event_observed")
+        .ok_or("retained event absent")?;
+    assert_eq!(event["subject"]["event_id"], "81");
+    assert_eq!(event["coverage"]["history_complete"], false);
+    assert_eq!(event["coverage"]["eligible_as_mutation_evidence"], false);
+    for change in changes {
+        assert_eq!(change["basis"]["from"]["state_hash"], since);
+        assert_eq!(change["basis"]["to"], observed["anchor"]);
+    }
+    assert!(!observed.to_string().contains("withheld-assignment-detail"));
+    let history = parsed(&fortress_query(
+        Some(session.clone()),
+        Some(json!({"mode":"changes", "since":since}).to_string()),
+    ))?;
+    assert_eq!(history["ok"], true, "{history}");
+    assert_eq!(history["changes"], observed["agent_turn"]["changes"]);
+    assert!(!history.to_string().contains("withheld-assignment-detail"));
+
+    {
+        let mut guard = source.lock().map_err(|_| "session poisoned")?;
+        let mut snapshot = guard.adapter.snapshot().clone();
+        snapshot.cursor = snapshot.cursor.checked_next().ok_or("cursor exhausted")?;
+        snapshot.graph.edges.remove(&EdgeId::new(91));
+        snapshot.graph.events.remove(&EventId::new(81));
+        snapshot.refresh_hash();
+        guard.adapter.inject_snapshot(snapshot)?;
+    }
+    let removed = parsed(&fortress_observe(Some(session.clone())))?;
+    let changes = removed["agent_turn"]["changes"]
+        .as_array()
+        .ok_or("removal changes")?;
+    assert!(changes.iter().any(|change| change["kind"] == "relation_removed"));
+    assert!(changes.iter().any(|change| change["kind"] == "event_no_longer_retained"));
+    let unchanged = parsed(&fortress_observe(Some(session)))?;
+    assert!(unchanged["agent_turn"]["changes"].as_array().is_none_or(Vec::is_empty));
+    Ok(())
+}
+
+#[test]
+fn restored_worlds_report_reset_instead_of_fictitious_history_deltas() -> TestResult {
+    let session = open("72342", false, &[("restore", "guarded")])?;
+    let checkpoint = parsed(&fortress_checkpoint(Some(session.clone()), None))?;
+    let advanced = parsed(&fortress_wait(Some(session.clone()), Some(50)))?;
+    assert_eq!(advanced["ok"], true, "{advanced}");
+    let since = advanced["anchor"]["state_hash"]
+        .as_str()
+        .ok_or("advanced anchor")?;
+    let restored = parsed(&fortress_restore(
+        Some(session.clone()),
+        checkpoint["checkpoint_id"]
+            .as_str()
+            .ok_or("checkpoint")?
+            .to_owned(),
+    ))?;
+    assert_eq!(restored["ok"], true, "{restored}");
+    assert_eq!(restored["agent_turn"]["continuity"]["status"], "reset");
+    let changes = restored["agent_turn"]["changes"]
+        .as_array()
+        .ok_or("reset changes")?;
+    let reset = changes
+        .iter()
+        .find(|change| change["kind"] == "world_observation_reset")
+        .ok_or("world reset missing")?;
+    assert_eq!(reset["subject"]["reason"], "observation_epoch_changed");
+    assert!(changes.iter().all(|change| matches!(
+        change["kind"].as_str(),
+        Some("observation_epoch_reset" | "world_observation_reset")
+    )));
+    let history = parsed(&fortress_query(
+        Some(session),
+        Some(json!({"mode":"changes", "since":since}).to_string()),
+    ))?;
+    assert_eq!(history["ok"], true, "{history}");
+    assert_eq!(history["changes"].as_array().map(Vec::len), Some(1));
+    assert_eq!(history["changes"][0], *reset);
+    Ok(())
+}
+
+#[test]
 fn a_fortress_runs_dry_and_the_agent_brews_its_way_back() -> TestResult {
     let session = open("72088", false, &ALL_EFFECTS)?;
     let alert_of = |turn: &Value, id: &str| -> Option<Value> {

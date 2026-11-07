@@ -485,7 +485,12 @@ saw last and the current one: `game_time_passed`, `fortress_paused` /
 (each changed field with its value before and after; at most 8 fields and 24
 entities per turn, with `entity_changes_omitted` beyond that) and
 `terrain_changed` per level (tiles changed, bounding box, tile transitions such
-as `wall->floor`). If the previous anchor aged out of the history the turn says
+as `wall->floor`). Entity metadata-only changes, relation creation/removal/updates
+and retained-event arrival/correction/retention loss are included too, with
+independent domain bounds, exact endpoint anchors and presence-preserving fields.
+A restore yields an explicit reset instead of ordinary cross-epoch differences.
+See [laboratory world changes](WORLD_CHANGES.md) for the record meanings, source
+limitations and omission contract. If the previous anchor aged out of the history the turn says
 `history_not_retained` (epistemic state `unknown`) instead of guessing.
 
 The same history serves exact historical reads: structured `fortress_query`

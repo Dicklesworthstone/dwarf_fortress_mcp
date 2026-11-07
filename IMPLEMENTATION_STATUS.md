@@ -1,5 +1,38 @@
 # Implementation Status
 
+## Unreleased — Observe relation, retained-event and metadata changes
+
+The shared world-change comparison now covers every canonical graph record
+family used by laboratory Agent Turn and explicit historical changes queries.
+Relations report creation, removal and changes to kind, endpoints, revision,
+fields or endpoint generations. Entity metadata and fact provenance changes no
+longer disappear when ordinary field values remain equal. Missing, unavailable,
+null and omitted values retain their distinct presence descriptions.
+
+Retained events report arrival, changed records and loss from the retained
+projection. Arrival does not establish occurrence since the basis; disappearance
+does not mean an event was undone. Event source authenticity and mutation-evidence
+eligibility remain unestablished, and the implementation does not invent subject
+generations that WorldEvent does not record.
+
+Entities, relations, events and terrain each have an independent 24-item or level
+allowance, with exact omission counts and eight changed fields per record.
+Comparison items carry both exact endpoint anchors; normal compact Pulse shaping
+may elide the per-item basis. A fortress/epoch boundary produces an explicit reset
+instead of ordinary creations/deletions, and reversed endpoints produce an
+unknown history gap. See docs/WORLD_CHANGES.md.
+
+Executed before executor loss: 19 actual-source component tests passed (11
+world-change and eight shared projection tests), zero failed or ignored. The
+harness used the repository modules and core/world crates, with tile_name copied
+verbatim from lab_world.rs; it excluded the MCP facade and transport. Two public
+facade regressions were added and parsed by rustfmt but were not executed.
+A rerun seeded with the repository lockfile did not return before disconnection.
+Final source was preserved through exact-baseline GitHub reconstruction and
+reviewed; its final bytes have not received a fresh compile/formatter or complete
+verify.sh/qualify_local.sh run. The structured-query bead remains in_progress.
+Native protocols, dependencies and admission are unchanged.
+
 ## Unreleased — Preserve Unknown failure conditions through goal and clock control
 
 A configured failure predicate must be established False before a true terminal
