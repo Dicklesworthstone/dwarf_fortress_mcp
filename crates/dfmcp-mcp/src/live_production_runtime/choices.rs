@@ -13,6 +13,7 @@ pub(crate) struct ObserveRequest {
     units: Option<Vec<EntityId>>,
     option_offset: usize,
     existing_labor_offset: usize,
+    include_production: bool,
 }
 
 // workforce/1.17 admits at most 128 labor columns. No request can ask for an
@@ -29,6 +30,8 @@ impl ObserveRequest {
             option_offset: usize,
             #[serde(default)]
             existing_labor_offset: usize,
+            #[serde(default)]
+            include_production: bool,
         }
         if raw.len() > 4096 {
             return Err(exhausted("combined observe request exceeds 4096 bytes"));
@@ -73,9 +76,16 @@ impl ObserveRequest {
             units,
             option_offset: input.option_offset,
             existing_labor_offset: input.existing_labor_offset,
+            include_production: input.include_production,
         })
     }
 
+    pub(crate) fn include_production(&self) -> bool {
+        self.include_production
+    }
+
+    // The independent production attachment does not change the workforce
+    // projection or its existing witness bytes.
     pub(crate) fn is_default(&self) -> bool {
         self.units.is_none() && self.option_offset == 0 && self.existing_labor_offset == 0
     }

@@ -132,7 +132,8 @@
         "unknown_selected_citizens": "rejected before native workforce contact",
         "default_request": "first 32 canonical citizens and first eight eligible options",
         "nondefault_request_after_original_plan": "rejected before native contact",
-        "optional_existing_labor_offset": "integer from zero through 128; default zero; independent existing-labor option page"
+        "optional_existing_labor_offset": "integer from zero through 128; default zero; independent existing-labor option page",
+        "optional_include_production": "Boolean; default false; explicit pre-plan source-pinned operations inspection without changing workforce witness bytes"
       },
       "explicit_selection": "canonical_id_ascending_explicit",
       "option_paging": {
@@ -295,7 +296,13 @@
       "tests/stdio/combined_existing_labor_portfolio.py",
       "crates/dfmcp-mcp/src/semantic_work_order_runtime/inventory_baseline.rs",
       "crates/dfmcp-mcp/src/semantic_work_order_runtime/inventory_increase_tests.rs",
-      "crates/dfmcp-mcp/src/semantic_work_order_runtime/inventory_clock_runtime_tests.rs"
+      "crates/dfmcp-mcp/src/semantic_work_order_runtime/inventory_clock_runtime_tests.rs",
+      "crates/dfmcp-mcp/src/live_production_runtime/planning_inspection.rs",
+      "crates/dfmcp-mcp/src/live_production_runtime/planning_inspection_tests.rs",
+      "crates/dfmcp-mcp/src/live_production_presentation_preplan_tests.rs",
+      "crates/dfmcp-mcp/src/semantic_work_order_runtime/policy.rs",
+      "tests/stdio/combined_production_preplan.py",
+      "crates/dfmcp-mcp/src/live_production_runtime/inspection_anchor_tests.rs"
     ],
     "private_custody_platforms": [
       "linux-x86_64",
@@ -699,6 +706,58 @@
       "new_item_identity_required": false,
       "causal_production_material_or_usability_proven": false,
       "runtime_admission": false
+    },
+    "preplan_production_inspection": {
+      "owner_bead": "df-production-preplan-inspection-7hd",
+      "observe_request_field": "include_production",
+      "default": false,
+      "native_protocol": "operations/1.3",
+      "complete_native_reads_per_requested_observe": 1,
+      "before_original_plan_only": true,
+      "query_kinds": [
+        "production_diagnosis",
+        "inventory_plan",
+        "entities",
+        "inspect",
+        "traverse",
+        "dependencies"
+      ],
+      "source": "retained LiveOperationsState from one complete independently pinned paused capture",
+      "scope": "preplan_captured_operations",
+      "attribution": "not_order_attributed",
+      "original_order_selector": null,
+      "source_and_citizen_anchors_distinct": true,
+      "source_fortress_and_tick_match_canonical_citizens": true,
+      "source_generations_preserved_across_withdrawal_and_refresh": true,
+      "consumed_tick_retained_before_source_or_tick_refusal": true,
+      "pinned_source_allocator_and_tick_floors_retained_on_rejected_capture": true,
+      "native_regression_fences_further_preplan_capture": true,
+      "read_capabilities": [
+        "Query",
+        "Observe"
+      ],
+      "plan_or_mutation_authority_required": false,
+      "operator_source_pins_revalidated_on_query": true,
+      "query_native_contact": false,
+      "source_entity_and_byte_work_budgeted": true,
+      "source_bound_continuations": true,
+      "complete_rows_or_refusal": true,
+      "source_connection_closed_before_local_projection": true,
+      "mutations": false,
+      "reservations": false,
+      "native_recipe_feasibility_proven": false,
+      "original_goal_evidence": false,
+      "growth_planning_reuses_inspection_baseline": false,
+      "withdrawn_after": [
+        "failed_call",
+        "new_observe_without_include_production",
+        "original_planning",
+        "restart",
+        "offline_recovery"
+      ],
+      "existing_goal_inspection_unchanged": true,
+      "new_protocol_or_admission": false,
+      "test_campaign": "tests/stdio/combined_production_preplan.py"
     }
   },
   "selected_work_order_goal_monitor": {

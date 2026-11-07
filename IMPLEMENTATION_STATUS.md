@@ -62,11 +62,49 @@ anchors use the combined host's public representation. Opaque continuation
 tokens retain their complete source, session and query bindings; foreign,
 incomplete and changed public anchors still refuse the query.
 
-Focused regressions exercise actual Operations projections, diagnosis follow-ups,
-strict anchor matching and pagination. They are authored but remain unexecuted
-while the real MCP build runs. No native DFHack or live-game qualification is
-claimed. This repairs an existing inspection path as a prerequisite of bead
+Five focused regressions exercise actual Operations projections, diagnosis
+follow-ups, strict anchor matching and pagination. They remain unexecuted: the
+real MCP build was killed with SIGKILL while compiling the pinned asupersync
+dependency, before reaching the MCP crate. A lower-memory diagnostic build is
+in progress. No native DFHack or live-game qualification is claimed. This repairs an existing inspection path as a prerequisite of bead
 `df-production-preplan-inspection-7hd`.
+
+## Unreleased — Inspect production before choosing an original goal
+
+The combined development host now accepts optional `include_production=true`
+on its existing Observe request before original planning. One authenticated,
+complete Operations/1.3 capture supplies jobs, buildings, items and attachments
+at the exact paused citizen tick. Query can then diagnose production conditions,
+inspect entities and relations, or allocate caller-declared stack-unit demands
+without native contact, an inserted order, a Created receipt or Plan authority.
+The ordinary Observe request retains its existing reads and workforce witness.
+
+The operations owner retains its own canonical cursor and entity generations.
+Its descriptor exposes both the operations and citizen anchors, cached source
+digest, coverage, and source-bound diagnosis and inventory requests. Independent
+operator pins and current Query/Observe authority qualify every capture and
+query. Consumed native time survives rejected reads; valid pinned allocation
+frontiers survive a later tick refusal, and regression fences further source
+acquisition. Complete-source and final-response budgets remain bounded.
+
+An error, refresh without the selector, original planning, offline recovery or
+restart withdraws the public inspection source. Query verifies current private
+custodians without creating an original archive, frontier, goal history, native
+effect or clock run. Inspection remains advisory: it does not establish native
+recipe feasibility, reserve inputs, attribute production or prove a goal.
+Inventory-growth planning still acquires its own fresh qualified census.
+
+Eight source-owner tests, seven Agent Turn tests and eight public stdio scenarios
+cover the new path. The stdio fixture makes only the existing Operations read
+available before order creation; it does not fabricate a Created receipt.
+Repository integrity, the eleven-tool Agent Turn contract and whitespace checks
+passed. The actual world library passed all 138 tests, including the recently
+added inventory-growth predicates. MCP compilation was killed with SIGKILL in the existing pinned asupersync
+dependency before reaching this crate. A lower-memory diagnostic build is in
+progress; the new MCP and public stdio scenarios remain unexecuted. No new
+full-head, native DFHack, live-game or production admission qualification is
+claimed. Bead `df-production-preplan-inspection-7hd`
+tracks this increment.
 
 ## Unreleased — Plan and recover explicit inventory increases
 

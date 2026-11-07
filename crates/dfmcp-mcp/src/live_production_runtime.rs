@@ -35,6 +35,7 @@ mod existing_labor_request;
 mod goals;
 mod inspection;
 mod inventory_clock;
+mod planning_inspection;
 mod portfolio;
 mod portfolio_request;
 mod request;
@@ -50,6 +51,7 @@ use inspection::InspectionSource;
 use inventory_clock::ProductionInventoryClock;
 use orders::Shell as OrderShell;
 use orders::inventory_baseline::{self, InventoryBaselines};
+use planning_inspection::PlanningInspection;
 use portfolio::PortfolioState;
 pub(crate) use portfolio_request::PortfolioRequest;
 pub(crate) use request::Request;
@@ -192,6 +194,7 @@ pub(crate) struct Runtime {
     budget: WorkBudget,
     anchor: StateAnchor,
     observation_tick_floor: GameTick,
+    planning_inspection: PlanningInspection,
     opening_labor: bool,
     opening_orders: bool,
     opening_clock: bool,
@@ -346,6 +349,7 @@ impl Runtime {
             budget,
             anchor,
             observation_tick_floor,
+            planning_inspection: PlanningInspection::default(),
             opening_labor,
             opening_orders,
             opening_clock,
@@ -698,6 +702,7 @@ impl Runtime {
         Ok(())
     }
     pub(crate) fn abandon_preparation(&mut self) {
+        self.planning_inspection.withdraw();
         self.invalidate_portfolio_samples();
         self.clock_review = None;
         self.inventory_clock_review = None;
@@ -894,6 +899,7 @@ impl Runtime {
         c: &OperationContext,
     ) -> Result<View> {
         self.check(c, false)?;
+        self.planning_inspection.withdraw();
         if self.mode == Mode::Offline {
             return Err(denied(
                 "offline combined recovery cannot acquire live observations",
@@ -984,6 +990,9 @@ impl Runtime {
             )?;
             (choices, Some(capture))
         };
+        if request.include_production() {
+            self.capture_planning_inspection(&mut work)?;
+        }
         self.config.current()?;
         work.current()?;
         self.anchor = projection.snapshot.anchor();
@@ -999,9 +1008,15 @@ impl Runtime {
     pub(crate) fn plan(&mut self, request: Request, c: &OperationContext) -> Result<View> {
         request.validate()?;
         let objectives: Vec<_> = request.objective.iter().collect();
-        self.plan_compiled(request.observation()?, false, &objectives, c, |evidence, baselines, current| {
-            request.compile_with_inventory(evidence, baselines, current)
-        })
+        self.plan_compiled(
+            request.observation()?,
+            false,
+            &objectives,
+            c,
+            |evidence, baselines, current| {
+                request.compile_with_inventory(evidence, baselines, current)
+            },
+        )
     }
     pub(crate) fn plan_portfolio(
         &mut self,
@@ -1009,10 +1024,20 @@ impl Runtime {
         c: &OperationContext,
     ) -> Result<View> {
         request.validate()?;
-        let objectives: Vec<_> = request.orders.iter().filter_map(|order| order.objective.as_ref()).collect();
-        self.plan_compiled(request.observation()?, true, &objectives, c, |evidence, baselines, current| {
-            request.compile_with_inventory(evidence, baselines, current)
-        })
+        let objectives: Vec<_> = request
+            .orders
+            .iter()
+            .filter_map(|order| order.objective.as_ref())
+            .collect();
+        self.plan_compiled(
+            request.observation()?,
+            true,
+            &objectives,
+            c,
+            |evidence, baselines, current| {
+                request.compile_with_inventory(evidence, baselines, current)
+            },
+        )
     }
     pub(crate) fn plan_existing_labor(
         &mut self,
@@ -1022,8 +1047,14 @@ impl Runtime {
         request.validate()?;
         let objectives: Vec<_> = request.objective.iter().collect();
         self.plan_existing_workers(
-            request.observation()?, (request.unit_ids()?, request.labor.clone()), false, &objectives, c,
-            |evidence, requirement, baselines, current| request.compile_with_inventory(evidence, requirement, baselines, current),
+            request.observation()?,
+            (request.unit_ids()?, request.labor.clone()),
+            false,
+            &objectives,
+            c,
+            |evidence, requirement, baselines, current| {
+                request.compile_with_inventory(evidence, requirement, baselines, current)
+            },
         )
     }
     pub(crate) fn plan_existing_labor_portfolio(
@@ -1032,10 +1063,20 @@ impl Runtime {
         c: &OperationContext,
     ) -> Result<View> {
         request.validate()?;
-        let objectives: Vec<_> = request.orders.iter().filter_map(|order| order.objective.as_ref()).collect();
+        let objectives: Vec<_> = request
+            .orders
+            .iter()
+            .filter_map(|order| order.objective.as_ref())
+            .collect();
         self.plan_existing_workers(
-            request.observation()?, (request.unit_ids()?, request.labor.clone()), true, &objectives, c,
-            |evidence, requirement, baselines, current| request.compile_with_inventory(evidence, requirement, baselines, current),
+            request.observation()?,
+            (request.unit_ids()?, request.labor.clone()),
+            true,
+            &objectives,
+            c,
+            |evidence, requirement, baselines, current| {
+                request.compile_with_inventory(evidence, requirement, baselines, current)
+            },
         )
     }
     fn plan_existing_workers(
@@ -1045,7 +1086,12 @@ impl Runtime {
         portfolio: bool,
         objectives: &[&orders::request::Objective],
         c: &OperationContext,
-        compile: impl FnOnce(&PredicateEvidence<'_>, &ExistingLaborRequirement, &InventoryBaselines, &OperationContext) -> Result<PreparedPlan>,
+        compile: impl FnOnce(
+            &PredicateEvidence<'_>,
+            &ExistingLaborRequirement,
+            &InventoryBaselines,
+            &OperationContext,
+        ) -> Result<PreparedPlan>,
     ) -> Result<View> {
         let (selected, labor) = selection;
         let basis = self
@@ -1058,43 +1104,50 @@ impl Runtime {
             denied("existing-labor planning requires a fresh selected workforce capture")
         })?;
         let scope = self.config.workforce.acceptance().clone();
-        self.plan_compiled(observation, portfolio, objectives, c, |evidence, baselines, current| {
-            let identity =
-                LiveRoutingEvidence::citizens_v1(evidence.clone(), &projection, &capsule)?;
-            let units = identity.resolve_units(&selected)?;
-            let historical = units
-                .iter()
-                .map(|unit| {
-                    let native = capture
+        self.plan_compiled(
+            observation,
+            portfolio,
+            objectives,
+            c,
+            |evidence, baselines, current| {
+                let identity =
+                    LiveRoutingEvidence::citizens_v1(evidence.clone(), &projection, &capsule)?;
+                let units = identity.resolve_units(&selected)?;
+                let historical =
+                    units
+                        .iter()
+                        .map(|unit| {
+                            let native = capture
                         .citizens()
                         .iter()
                         .find(|native| native.id() == unit.native_id)
                         .ok_or_else(|| {
                             denied("selected citizen was not in the exact workforce observation")
                         })?;
-                    Ok((unit.canonical_id, native.historical_id()))
-                })
-                .collect::<Result<Vec<_>>>()?;
-            let requirement = ExistingLaborRequirement::new(labor, historical)?;
-            let plan = compile(evidence, &requirement, baselines, current)?;
-            let observed =
-                ExistingLaborProjection::new(&plan, &identity, capture, current.anchor.cursor)?;
-            if observed.anchor().tick != current.anchor.tick {
-                return Err(denied(
-                    "existing labor does not share the original paused observation tick",
-                ));
-            }
-            let policy = scope.existing_labor(&observed, current)?;
-            if !observed
-                .evidence(policy)?
-                .establishes(&requirement.predicate())?
-            {
-                return Err(denied(
-                    "selected existing labor and citizen eligibility are not known true",
-                ));
-            }
-            Ok(plan)
-        })
+                            Ok((unit.canonical_id, native.historical_id()))
+                        })
+                        .collect::<Result<Vec<_>>>()?;
+                let requirement = ExistingLaborRequirement::new(labor, historical)?;
+                let plan = compile(evidence, &requirement, baselines, current)?;
+                let observed =
+                    ExistingLaborProjection::new(&plan, &identity, capture, current.anchor.cursor)?;
+                if observed.anchor().tick != current.anchor.tick {
+                    return Err(denied(
+                        "existing labor does not share the original paused observation tick",
+                    ));
+                }
+                let policy = scope.existing_labor(&observed, current)?;
+                if !observed
+                    .evidence(policy)?
+                    .establishes(&requirement.predicate())?
+                {
+                    return Err(denied(
+                        "selected existing labor and citizen eligibility are not known true",
+                    ));
+                }
+                Ok(plan)
+            },
+        )
     }
     fn plan_compiled(
         &mut self,
@@ -1102,16 +1155,23 @@ impl Runtime {
         portfolio: bool,
         objectives: &[&orders::request::Objective],
         c: &OperationContext,
-        compile: impl FnOnce(&PredicateEvidence<'_>, &InventoryBaselines, &OperationContext) -> Result<PreparedPlan>,
+        compile: impl FnOnce(
+            &PredicateEvidence<'_>,
+            &InventoryBaselines,
+            &OperationContext,
+        ) -> Result<PreparedPlan>,
     ) -> Result<View> {
         self.check(c, true)?;
+        self.planning_inspection.withdraw();
         if self.original.is_some() {
             return Err(invalid(
                 "retain original combined plan; prepare its next step without recompiling",
             ));
         }
         if c.anchor.tick < self.observation_tick_floor {
-            return Err(denied("reobserve the canonical source before any original planning"));
+            return Err(denied(
+                "reobserve the canonical source before any original planning",
+            ));
         }
         let basis = self
             .basis

@@ -74,7 +74,10 @@ fn portfolio_parent_valid(view: &Value, parent: &Value, anchor: Option<StateAnch
     let Some(anchors) = parent["selected_anchors"].as_array() else {
         return false;
     };
-    let offset = match steps.first().and_then(|step| step["action"]["kind"].as_str()) {
+    let offset = match steps
+        .first()
+        .and_then(|step| step["action"]["kind"].as_str())
+    {
         Some("set_labor") if steps[0]["step_id"] == 0 && steps[0]["depends_on"] == json!([]) => 1,
         Some("create_work_order") => 0,
         _ => return false,
@@ -122,7 +125,11 @@ fn portfolio_parent_valid(view: &Value, parent: &Value, anchor: Option<StateAnch
             || goal["stable_samples"] != step["obligation"]["stable_samples"]
             || !matches!(
                 goal["kind"].as_str(),
-                Some("retained_order_completion" | "observed_inventory_minimum" | "observed_inventory_increase")
+                Some(
+                    "retained_order_completion"
+                        | "observed_inventory_minimum"
+                        | "observed_inventory_increase"
+                )
             )
             || !matches!(
                 goal["current_truth"].as_str(),
@@ -161,8 +168,7 @@ fn portfolio_parent_valid(view: &Value, parent: &Value, anchor: Option<StateAnch
         (_, expected, Some(actual)) => expected == actual,
         _ => false,
     };
-    consistent
-        && parent["original_goal_proven"] == (reported_truth == Some("true") && all_proven)
+    consistent && parent["original_goal_proven"] == (reported_truth == Some("true") && all_proven)
 }
 
 #[cfg(test)]
@@ -198,13 +204,24 @@ fn compact_goal(value: &Value) -> Value {
             object.remove("minimum_stack_units");
         }
     } else if value["kind"] == "observed_inventory_increase" {
-        for field in ["baseline_stack_units", "increase_stack_units", "target_stack_units", "baseline_source_generation"] {
+        for field in [
+            "baseline_stack_units",
+            "increase_stack_units",
+            "target_stack_units",
+            "baseline_source_generation",
+        ] {
             result[field] = json!(value[field].as_u64());
         }
         result["baseline_anchor"] = compact_anchor(&value["baseline_anchor"]);
         result["baseline_source_digest"] = json!(digest(&value["baseline_source_digest"]));
         result["baseline_source_protocol"] = json!("operations/1.3");
-        result["baseline_source_counters"] = json!(value["baseline_source_counters"].as_array().map(|rows| rows.iter().take(3).map(Value::as_u64).collect::<Vec<_>>()));
+        result["baseline_source_counters"] = json!(
+            value["baseline_source_counters"].as_array().map(|rows| rows
+                .iter()
+                .take(3)
+                .map(Value::as_u64)
+                .collect::<Vec<_>>())
+        );
         result["preexisting_stock_alone_satisfies_goal"] = json!(false);
         result["new_production"] = json!("unknown");
         if let Some(object) = result.as_object_mut() {
@@ -379,6 +396,45 @@ fn anchor_value(a: StateAnchor) -> Value {
         "sequence":a.cursor.sequence,"tick":a.tick.get(),"state_hash":a.state_hash.to_hex()})
 }
 
+/// An optional operations capture retains its own source-local cursor/hash.
+/// Its citizen anchor binds the planning context, without turning inspection
+/// into an original goal sample or mutation precondition evidence.
+fn preplan_inspection_matches(view: &Value, source: &Value) -> bool {
+    let source_anchor = &source["anchor"];
+    view["original_plan"].is_null()
+        && view["observation"]["paused"] == true
+        && digest(&view["observation"]["seal"]).is_some()
+        && source["scope"] == "preplan_captured_operations"
+        && source["attribution"] == "not_order_attributed"
+        && source["order_step_id"].is_null()
+        && source["parent_anchor"] == view["anchor"]
+        && source["canonical_anchor"] == view["anchor"]
+        && source_anchor["fortress_id"] == view["anchor"]["fortress_id"]
+        && source_anchor["tick"] == view["anchor"]["tick"]
+        && source_anchor["epoch"].is_u64()
+        && source_anchor["sequence"].is_u64()
+        && digest(&source_anchor["state_hash"]).is_some()
+        && digest(&source["source_digest"]).is_some()
+        && source["mutation_authority"] == false
+        && source["restored_from_history"] == false
+        && source["diagnosis_request"]["schema"] == "dfmcp.query/1"
+        && source["diagnosis_request"]["query"]["kind"] == "production_diagnosis"
+        && source["diagnosis_request"]["expected_anchor"] == *source_anchor
+}
+
+/// A new read preserves the caller's selected citizens and choice windows.
+/// Only existing closed selector fields are copied into the suggested call.
+fn production_observation_request(view: &Value) -> Value {
+    let selection = &view["observation"]["workforce_choices"]["selection_request"];
+    let mut request = json!({"include_production":true});
+    for field in ["units", "option_offset", "existing_labor_offset"] {
+        if let Some(value) = selection.get(field) {
+            request[field] = value.clone();
+        }
+    }
+    request
+}
+
 struct ParentLaborDiagnostics {
     summary: Value,
     blockers: Vec<Value>,
@@ -502,7 +558,12 @@ fn encode(
         && order_goal["scope"] == "selected_original_order_step";
     let raw_selected_goal = if retained_order {
         order_goal
-    } else if order_goal.is_null() && matches!(inventory_goal["kind"].as_str(), Some("observed_inventory_minimum" | "observed_inventory_increase")) {
+    } else if order_goal.is_null()
+        && matches!(
+            inventory_goal["kind"].as_str(),
+            Some("observed_inventory_minimum" | "observed_inventory_increase")
+        )
+    {
         inventory_goal
     } else {
         &Value::Null
@@ -626,7 +687,11 @@ fn encode(
         && selected_goal["scope"] == "selected_original_order_step"
         && matches!(
             selected_goal["kind"].as_str(),
-            Some("observed_inventory_minimum" | "observed_inventory_increase" | "retained_order_completion")
+            Some(
+                "observed_inventory_minimum"
+                    | "observed_inventory_increase"
+                    | "retained_order_completion"
+            )
         )
         && !selected_proven
         && selected_goal["terminal_failure"] != true
@@ -635,8 +700,10 @@ fn encode(
     let clock_goal_ready = |owner: ClockOwner| {
         current_goal_ready
             && if owner == INVENTORY_CLOCK {
-                matches!(selected_goal["kind"].as_str(), Some("observed_inventory_minimum" | "observed_inventory_increase"))
-                    && selected_goal["current_truth"] == "true"
+                matches!(
+                    selected_goal["kind"].as_str(),
+                    Some("observed_inventory_minimum" | "observed_inventory_increase")
+                ) && selected_goal["current_truth"] == "true"
                     && joined_goal["current_truth"] == "true"
             } else {
                 selected_goal["receipt_linked"] == true
@@ -771,23 +838,38 @@ fn encode(
         clock_active["native"]["phase"] == "source_lost" && clock["needs_reconciliation"] == false;
     let labor = parent_labor_diagnostics(&parent_goal);
     let inspection_source = &view["production_inspection_source"];
-    let inspection_available = verified
+    let current_inspection_allowed = verified
         && !uncertain
         && mode != Some("offline")
         && !clock_invalidates_goal
         && !parent_fenced
-        && current_tick
+        && current_tick;
+    let selected_inspection_available = current_inspection_allowed
         && inspection_source["scope"] == "captured_operations"
         && inspection_source["attribution"] == "not_order_attributed"
         && inspection_source["parent_anchor"] == view["anchor"]
         && inspection_source["anchor"] == selected_goal["anchor"]
         && inspection_source["order_step_id"] == selected_goal["step_id"]
         && digest(&inspection_source["source_digest"]).is_some();
+    let preplan_inspection_available = current_inspection_allowed
+        && session.is_some()
+        && result["closed"] != true
+        && preplan_inspection_matches(view, inspection_source);
+    let inspection_available = selected_inspection_available || preplan_inspection_available;
     let inspection = &view["production_inspection"];
     let diagnosis_seen = inspection_available
         && inspection["kind"] == "production_diagnosis"
         && inspection["anchor"] == inspection_source["anchor"]
-        && inspection["source_digest"] == inspection_source["source_digest"];
+        && inspection["source_digest"] == inspection_source["source_digest"]
+        && (!preplan_inspection_available
+            || (inspection["inspection_scope"] == "preplan_captured_operations"
+                && inspection["canonical_anchor"] == view["anchor"]));
+    let preplan_capture_needed = current_inspection_allowed
+        && view["original_plan"].is_null()
+        && view["observation"]["paused"] == true
+        && digest(&view["observation"]["seal"]).is_some()
+        && !preplan_inspection_available;
+    let preplan_diagnosis_needed = preplan_inspection_available && !diagnosis_seen;
     let recommendation = if session.is_none() || result["closed"] == true {
         None
     } else if uncertain && mode == Some("offline") {
@@ -964,6 +1046,20 @@ fn encode(
             false,
             json!({}),
         ))
+    } else if preplan_capture_needed {
+        Some((
+            "fortress_observe",
+            "Inspect complete captured jobs, buildings and inventory before choosing finite production amounts; acquire a fresh paused observation with the same workforce selection.",
+            false,
+            json!({"request":production_observation_request(view).to_string()}),
+        ))
+    } else if preplan_diagnosis_needed {
+        Some((
+            "fortress_query",
+            "Inspect observed production conditions before compiling the original plan. This captured source does not prove native recipe feasibility or reserve materials.",
+            false,
+            json!({"request":inspection_source["diagnosis_request"].to_string()}),
+        ))
     } else if view["original_plan"].is_null()
         && mode == Some("control")
         && view["production_control_enabled"] == true
@@ -1006,6 +1102,43 @@ fn encode(
             recommendation_fn(tool, reason, confirm, arguments)
         })
         .collect::<Vec<_>>();
+    if (preplan_capture_needed || preplan_diagnosis_needed)
+        && let Some(next) = recommendations.first_mut()
+        && matches!(
+            next["tool"].as_str(),
+            Some("fortress_observe" | "fortress_query")
+        )
+    {
+        next["recommendation_id"] = json!(if preplan_capture_needed {
+            "inspect-production-before-planning"
+        } else {
+            "diagnose-captured-production-before-planning"
+        });
+        next["expected_utility"] =
+            json!("Choose finite amounts and inventory objectives using observed operations.");
+        next["expected_information_value"] = json!(
+            "Identify existing stock and observed job conditions before committing resources."
+        );
+        next["reversibility"] = json!("not_applicable");
+        next["estimated_cost"]["game_ticks"] = json!(0);
+        if preplan_diagnosis_needed {
+            next["estimated_cost"]["bridge_bytes"] = json!(0);
+        }
+        next["prerequisites"] = json!(["current Query and Observe authority", "no original plan"]);
+        next["invalidating_conditions"] = json!([
+            "original plan created",
+            "canonical observation changed",
+            "source withdrawn",
+            "read authority revoked"
+        ]);
+        let mut evidence = json!({"canonical_anchor":view["anchor"],
+            "observation_seal":view["observation"]["seal"]});
+        if preplan_inspection_available {
+            evidence["source_anchor"] = inspection_source["anchor"].clone();
+            evidence["source_digest"] = inspection_source["source_digest"].clone();
+        }
+        next["confidence"]["evidence"] = json!([evidence]);
+    }
     for owner in CLOCK_OWNERS {
         if clock_cancel(owner)
             && result["closed"] != true
@@ -1060,6 +1193,9 @@ fn encode(
         ));
     }
     let mut partial_domains = vec!["retained_original_plan"];
+    if preplan_inspection_available {
+        partial_domains.push("preplan_captured_operations");
+    }
     if diagnosis_seen {
         partial_domains.push("observed_production_conditions");
     }
@@ -1126,6 +1262,12 @@ fn encode(
             _ => Vec::new(),
         }
     };
+    if preplan_inspection_available {
+        uncertainty.push(json!({"scope":"preplan_captured_operations","epistemic_status":"unknown",
+            "anchor":inspection_source["anchor"],"source_digest":inspection_source["source_digest"],
+            "finding":"Captured stock and job conditions do not establish native recipe feasibility, path access, reservations or goal completion.",
+            "resolution":"Inspect the source-bound inventory query and declared-demand allocation before choosing the original request; planning and commit independently revalidate their required sources."}));
+    }
     for owner in CLOCK_OWNERS {
         let clock = owner.view(view);
         let reconciliation = clock_reconciliation(clock);
@@ -1239,6 +1381,8 @@ fn encode(
             "current_parent_goal_truth":parent_truth,
             "current_parent_labor":labor.as_ref().map(|labor| &labor.summary),
             "production_inspection_available":inspection_available,
+            "production_inspection_scope":if inspection_available {inspection_source["scope"].as_str()} else {None},
+            "preplan_production_inspection_available":preplan_inspection_available,
             "observed_production_conditions":if diagnosis_seen {Some(&inspection["summary"])} else {None},
             "parent_goal_observation_fenced":parent_fenced,
             "clock_control_enabled":clock_authority(ORDER_CLOCK),
@@ -1359,6 +1503,10 @@ mod clock_tests;
 #[cfg(test)]
 #[path = "live_production_presentation_inventory_clock_tests.rs"]
 mod inventory_clock_tests;
+
+#[cfg(test)]
+#[path = "live_production_presentation_preplan_tests.rs"]
+mod preplan_tests;
 
 #[cfg(test)]
 mod tests {

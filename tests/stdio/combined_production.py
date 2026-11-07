@@ -26,6 +26,10 @@ inspection_spec = importlib.util.spec_from_file_location(
     'combined_production_inspection', ROOT / 'tests/stdio/combined_production_inspection.py')
 inspection = importlib.util.module_from_spec(inspection_spec)
 inspection_spec.loader.exec_module(inspection)
+preplan_spec = importlib.util.spec_from_file_location(
+    'combined_production_preplan', ROOT / 'tests/stdio/combined_production_preplan.py')
+preplan = importlib.util.module_from_spec(preplan_spec)
+preplan_spec.loader.exec_module(preplan)
 existing_labor_spec = importlib.util.spec_from_file_location(
     'combined_existing_labor', ROOT / 'tests/stdio/combined_existing_labor.py')
 existing_labor = importlib.util.module_from_spec(existing_labor_spec)
@@ -618,7 +622,7 @@ def environment(directory, endpoint):
     return env
 
 
-class CombinedProduction(inspection.InspectionTests, existing_labor.ExistingLaborTests, unittest.TestCase):
+class CombinedProduction(preplan.PreplanInspectionTests, inspection.InspectionTests, existing_labor.ExistingLaborTests, unittest.TestCase):
     def setUp(self):
         self.directory = LOGS / self._testMethodName
         self.directory.mkdir(mode=0o700)
@@ -2253,10 +2257,15 @@ class CombinedProduction(inspection.InspectionTests, existing_labor.ExistingLabo
                          [f'LABOR_{i}' for i in range(8)])
         self.assertEqual(choices['next_observation_request'], {'units': ['43'], 'option_offset': 8})
         recommendations = [r for r in first['agent_turn']['recommendations'] if r['tool'] == 'fortress_observe']
-        self.assertEqual(len(recommendations), 1)
-        self.assertEqual(json.loads(recommendations[0]['arguments']['request']),
-                         choices['next_observation_request'])
-        second = self.client.tool('observe', **recommendations[0]['arguments'])
+        self.assertEqual(len(recommendations), 2)
+        pages = [r for r in recommendations if json.loads(r['arguments']['request'])
+                 == choices['next_observation_request']]
+        captures = [r for r in recommendations if json.loads(r['arguments']['request'])
+                    == {**choices['selection_request'], 'include_production': True}]
+        self.assertEqual(len(pages), 1, 'the existing option page remains separately actionable')
+        self.assertEqual(len(captures), 1, 'production capture preserves the current selection')
+        self.assertNotEqual(pages[0], captures[0])
+        second = self.client.tool('observe', **pages[0]['arguments'])
         self.assertTrue(second['ok'], second)
         self.assertEqual([option['labor'] for option in second['observation']['workforce_choices']['options']],
                          ['LABOR_8', 'LABOR_9'])
@@ -2297,7 +2306,7 @@ def main():
     print(json.dumps({'schema': 'dfmcp.combined-production-stdio/1', 'tests': result.testsRun,
         'failed': len(result.failures), 'errors': len(result.errors), 'skipped': len(result.skipped),
         'actual_modern_stdio': True, 'loopback_peers_are_doubles': True, 'live_game': False}))
-    raise SystemExit(0 if result.wasSuccessful() and result.testsRun == 56 and not result.skipped else 1)
+    raise SystemExit(0 if result.wasSuccessful() and result.testsRun == 64 and not result.skipped else 1)
 
 
 if __name__ == '__main__': main()

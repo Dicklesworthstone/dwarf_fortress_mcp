@@ -144,7 +144,9 @@ impl Action {
             Self::InspectProduction(request, step) => runtime.inspect_production(request, step, c),
             Self::Plan(request) => runtime.plan(request, c),
             Self::PlanExistingLabor(request) => runtime.plan_existing_labor(request, c),
-            Self::PlanExistingLaborPortfolio(request) => runtime.plan_existing_labor_portfolio(request, c),
+            Self::PlanExistingLaborPortfolio(request) => {
+                runtime.plan_existing_labor_portfolio(request, c)
+            }
             Self::PlanPortfolio(request) => runtime.plan_portfolio(request, c),
             Self::PlanRun(request, step) => {
                 runtime.select_order(step, c)?;
@@ -535,10 +537,7 @@ fn scoped_run(raw: &str) -> Result<(String, Option<u32>)> {
             "invalid closed original clock request",
         )
     })?;
-    if value
-        .order_step_id
-        .is_some_and(|step| step > 4)
-    {
+    if value.order_step_id.is_some_and(|step| step > 4) {
         return Err(error(
             ErrorCode::InvalidRequest,
             "order_step_id must name an original order from zero through four",
@@ -667,7 +666,7 @@ pub fn fortress_open_session(
     result.unwrap_or_else(|cause| unbound("fortress.open_session", &cause))
 }
 #[tool(
-    description = "Observe paused canonical citizens and advisory labor choices. Optional closed JSON request selects 1-32 canonical units and an option_offset; every page is a fresh observation. No clock advance."
+    description = "Observe paused canonical citizens and advisory labor choices. Optional closed JSON request selects 1-32 canonical units, option_offset or existing_labor_offset; every page is a fresh observation. Before original planning, include_production=true additionally captures complete source-pinned jobs, buildings and inventory at the same paused tick for read-only Query inspection. No clock advance or production authority is granted."
 )]
 pub fn fortress_observe(session_id: String, request: Option<String>) -> String {
     with_session(session_id, "fortress.observe", None, || {
@@ -679,7 +678,7 @@ pub fn fortress_observe(session_id: String, request: Option<String>) -> String {
     })
 }
 #[tool(
-    description = "Inspect retained original plan, frontier, review and recovery custody. Optional order_step_id selects an original portfolio order. After a successful Wait, optional closed dfmcp.query/1 JSON request supports production_diagnosis, inventory_plan, entities, inspect, traverse and dependencies over that exact captured operations state. expected_anchor names production_inspection_source.anchor, not the parent anchor. Diagnoses are observed conditions across captured jobs, not order-attributed causes; inventory plans allocate declared stack units without reserving items or proving native recipe feasibility. No native contact or clock advance."
+    description = "Inspect retained state, original plan, frontier, review and recovery custody. Optional order_step_id selects an original portfolio order. After Observe(include_production=true) before planning, or after a successful original-goal Wait, optional closed dfmcp.query/1 JSON request supports production_diagnosis, inventory_plan, entities, inspect, traverse and dependencies over that exact captured operations state. expected_anchor names production_inspection_source.anchor, not the citizen or parent anchor. Pre-plan inspection has no order selector and grants no mutation or goal authority. Diagnoses are observed conditions across captured jobs, not order-attributed causes; inventory plans allocate declared stack units without reserving items or proving native recipe feasibility. No native contact or clock advance."
 )]
 pub fn fortress_query(
     session_id: String,
@@ -789,13 +788,25 @@ mod tests {
         let mut raw = serde_json::json!({"kind":"existing_labor_portfolio","expected_observation":"11".repeat(32),
             "units":["43"],"labor":"MINE","orders":[{"recipe":"wooden_bed","amount":1},{"recipe":"wooden_door","amount":2}],
             "deadline_tick":300});
-        assert!(matches!(super::plan_action(&raw.to_string()),Ok(super::Action::PlanExistingLaborPortfolio(_))));
+        assert!(matches!(
+            super::plan_action(&raw.to_string()),
+            Ok(super::Action::PlanExistingLaborPortfolio(_))
+        ));
         raw["enabled"] = true.into();
         assert!(super::plan_action(&raw.to_string()).is_err());
         let mut run = serde_json::json!({"kind":"run","original_paired_seal":"11".repeat(32),
             "game_ticks":5,"wall_millis":1000,"order_step_id":0});
-        assert_eq!(super::scoped_run(&run.to_string()).expect("zero original order").1,Some(0));
-        for invalid in [serde_json::Value::Null,serde_json::json!(5),serde_json::json!(-1)] {
+        assert_eq!(
+            super::scoped_run(&run.to_string())
+                .expect("zero original order")
+                .1,
+            Some(0)
+        );
+        for invalid in [
+            serde_json::Value::Null,
+            serde_json::json!(5),
+            serde_json::json!(-1),
+        ] {
             run["order_step_id"] = invalid;
             assert!(super::scoped_run(&run.to_string()).is_err());
         }

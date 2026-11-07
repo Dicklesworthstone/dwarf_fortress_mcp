@@ -38,8 +38,26 @@
   entity/relationship follow-ups work with the advertised source anchor.
 - Return query and graph-witness anchors in that same public representation,
   while preserving opaque continuation identity and rejecting changed or
-  incomplete anchors. Added focused source-backed regressions; MCP compilation
-  and their execution remain in progress. No live qualification is claimed.
+  incomplete anchors. Added focused source-backed regressions; the real MCP build was killed in the existing asupersync dependency, before
+  compiling the MCP crate. The new regressions remain unexecuted pending a
+  lower-memory diagnostic retry. No live qualification is claimed.
+
+## Unreleased — Inspect inventory and production before planning
+
+- Add optional pre-plan `include_production=true` observation to the combined
+  development host, using one complete independently pinned Operations/1.3
+  capture at the paused citizen tick.
+- Expose the existing six bounded inspection query kinds before order insertion,
+  including joint declared-material allocation, with no native Query contact,
+  mutation authority, reservation or goal-completion claim.
+- Preserve source-local identities, allocation/time floors and source-bound
+  continuations; withdraw current handles after errors, refresh, planning and
+  recovery. Cache the qualified source digest for bounded descriptor rendering.
+- Add source-aware Agent Turn guidance and 23 focused source-owner, presentation
+  and public-stdio tests. Keep growth baseline acquisition independent of prior
+  inspection and preserve the existing eleven tools and native protocols.
+- Record the actual 138-test world-library pass. New MCP checks are in progress;
+  no full-workspace, native, live-game or admission pass is implied.
 
 ## Unreleased — Request net inventory growth through production MCP
 

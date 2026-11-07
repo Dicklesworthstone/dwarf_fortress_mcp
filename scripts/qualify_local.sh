@@ -165,6 +165,7 @@ run_gate python-syntax python3 -m py_compile \
   tests/stdio/workshop.py \
   tests/stdio/workshop_tree_material.py \
   tests/stdio/combined_production.py \
+  tests/stdio/combined_production_preplan.py \
   scripts/announcement_source_custody.py \
   scripts/test_announcement_source_custody.py \
   scripts/validate_repo.py \

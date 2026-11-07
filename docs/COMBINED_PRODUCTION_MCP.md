@@ -85,7 +85,9 @@ Use the exact names returned by `tools/list`. The logical operations below
 retain the frozen eleven-tool waist; this profile's wire names are underscores.
 
 1. Open `mode="control"`. Offline and Reconcile modes do not gain write authority.
-2. Observe the paused canonical citizen roster. Retain its `observation.seal`
+2. Observe the paused canonical citizen roster. Set `include_production=true`
+   in the optional closed `request` to also inspect jobs, buildings and inventory
+   before choosing production amounts, as described below. Retain its `observation.seal`
    and canonical citizen `entity_id` values; native unit IDs are not substitutes.
    Current source also returns `observation.workforce_choices`, described below.
    The complete roster is bounded at 200 citizens, acquired in native pages of
@@ -123,6 +125,75 @@ Either unresolved run blocks paused goal acquisition. Explicit `scope="run"` or
 `scope="inventory_run"` cancellation retires that owner's prepared run or requests
 its native safety pause;
 it does not change the labor assignment or remove the manager order.
+
+## Inspect production before choosing the original plan
+
+Before an original plan exists, the same Observe tool can acquire a complete
+operations/1.3 capture alongside the paused citizen and selected-workforce view:
+
+```json
+{
+  "session_id": "<the current combined session ID>",
+  "request": "{\"include_production\":true}"
+}
+```
+
+`include_production` is a Boolean and defaults to false. It can be combined with
+the existing `units`, `option_offset` and `existing_labor_offset` selectors.
+Explicit true acquires exactly one complete operations capture. It needs current
+Query and Observe authority and the configured operations read credential; it
+does not require Plan or grant any production authority. The host independently
+checks the operator's world/site, software and operations-generation pins, and
+requires the same paused game tick as the complete canonical citizen observation.
+Unqualified or incomplete reads refuse the combined publication.
+
+The returned `production_inspection_source` has
+`scope="preplan_captured_operations"` and `order_step_id=null`. Its `anchor`
+belongs to the operations snapshot; `canonical_anchor` and `parent_anchor` name
+the citizen observation used for subsequent planning. These are distinct
+source identities, even at the same tick. The source descriptor includes its
+digest, a ready `diagnosis_request`, a ready `inventory_request`, and the six
+supported query kinds. Use the descriptor's operations `anchor` for query
+`expected_anchor`, and the current citizen `observation.seal` for original Plan.
+Neither field substitutes for the other.
+
+Call `fortress_query` with the same session ID and the JSON encoding of
+`diagnosis_request` or `inventory_request` as its `request` string. No
+`order_step_id` is accepted before an original exists. Query uses only the
+retained capture, rechecking current read authority and source pins without
+native contact. It supports the same `production_diagnosis`, `inventory_plan`,
+`entities`, `inspect`, `traverse` and `dependencies` operations described below.
+The diagnosis can identify observed suspension, worker, holder and attachment
+conditions. The inventory query exposes actual item types and stack quantities;
+declared-demand allocation can then show competing demand and conservative
+shortage without counting the same stack units twice.
+
+Agent Turn guidance offers this explicit read before original planning when
+production inspection is missing, preserving the current workforce selectors.
+After capture it offers the exact source-bound diagnosis. Recommendations carry
+the citizen anchor and, when available, operations anchor and digest. The read
+uses zero game ticks; diagnosis also uses zero bridge bytes. These are
+information-gathering suggestions. Captured supply does not establish native
+recipe costs, workshop suitability, path access, future labor productivity,
+reservations or goal completion. The source remains
+`attribution="not_order_attributed"` and grants no mutation authority.
+
+Source state retains generation history across explicit refreshes, so a removed
+and reappearing native identity cannot reuse its previous canonical generation.
+Every new Observe withdraws the previously exposed inspection; omitting the
+flag does not preserve it. A failed call, consumed newer source tick, original
+plan creation, session close or restart also withdraws current inspection.
+Offline recovery restores no such capture. Native ticks consumed by refused
+reads remain an authority floor and cannot revive older read grants.
+Continuations and drill-down handles bind the exact source and session; use
+new handles after a changed capture.
+
+The normal native preparation and commit paths independently revalidate their
+required evidence. In particular, choosing an `observed_inventory_increase`
+objective still acquires a fresh complete census during original Plan. It does
+not reuse this advisory inspection as the immutable baseline. After planning,
+`include_production=true` is refused before native contact; the original-goal
+Wait path supplies subsequent production inspection.
 
 ## Use workers whose labor is already enabled
 
@@ -202,9 +273,11 @@ explicit existing-labor portfolio described below.
 
 ## Inspect observed production conditions and declared inventory
 
-After Wait successfully publishes a joined original goal sample, Query and
+After an original exists and Wait successfully publishes a joined goal sample, Query and
 Explain expose `production_inspection_source`. Its `anchor` and `source_digest`
 identify the exact selected operations projection collected with that goal.
+This descriptor uses `scope="captured_operations"` and the actual selected
+original `order_step_id`, distinct from the pre-plan read described above.
 The enclosing labor/order or portfolio anchor remains separately named
 `parent_anchor`. Entity IDs, generations and query continuations belong to the
 selected projection.
@@ -276,7 +349,7 @@ smaller of the negotiated allowance and 4096 tokens; the complete Agent Turn
 still has to fit the host's final response bounds. Pages retain complete rows
 and their original continuation; an oversized final packet is refused.
 
-Inspection performs current authority, operator-pin and private-custody checks
+Inspection of an original goal performs current authority, operator-pin and private-custody checks
 before and after analysis. It does not contact native sources or advance time.
 A failed call, new goal observation, owned clock run or restart withdraws the
 current inspection source. Offline recovery restores no operations snapshot;
@@ -602,7 +675,9 @@ count as the MCP agent discovering a valid intent.
 Before an original plan exists, Observe reads workforce/1.17 for at most
 32 canonical citizens. Its default remains the first 32 in numeric order.
 The optional `request` argument is a closed JSON string containing `units`,
-`option_offset`, or both. `units` selects 1–32 distinct canonical citizen IDs
+`option_offset`, `existing_labor_offset` and/or the Boolean `include_production`.
+The latter adds the pre-plan operations read described above; its default false
+does not add native operations I/O. `units` selects 1–32 distinct canonical citizen IDs
 from `observation.citizens`, encoded as nonzero decimal strings. IDs are
 normalized numerically; duplicates, noncanonical spellings, unknown fields
 and absent citizens are refused. Explicit selection makes citizens beyond the
@@ -679,7 +754,7 @@ goods, workshop/material feasibility or the original terminal predicate is true.
 world. `original_goal_proven` requires the separate qualified current-parent
 sample described below; native receipts alone always leave it false.
 After an original exists, default Observe reports retained original custody.
-A nondefault selection or page request is refused before native contact; the
+A nondefault selection, page or production-capture request is refused before native contact; the
 host cannot acquire a replacement canonical world or rebase the original
 anchor through these selectors.
 

@@ -1,12 +1,14 @@
 //! Explicit operator acceptance of a small development source contract.
 //! This is not compatibility-registry admission and cannot be configured by MCP.
 use super::{denied, invalid};
+use dfmcp_adapter::live_operations::LiveOperationsObservation;
 use dfmcp_adapter::live_projection::LiveWorldProjection;
 use dfmcp_adapter::semantic_work_orders::goal_projection::{
     ORDER_COUNTER_SOURCE, ORDER_STATUS_SOURCE,
 };
 use dfmcp_adapter::semantic_work_orders::{
-    InventoryBaselineProjection, ObservedInventoryGoal, RetainedOrderObjective, WorkOrderGoalProjection,
+    InventoryBaselineProjection, ObservedInventoryGoal, RetainedOrderObjective,
+    WorkOrderGoalProjection,
 };
 use dfmcp_adapter::work_orders::rpc::WorkOrderManifest;
 use dfmcp_adapter::{BridgeManifest, LiveObservationCapsule};
@@ -209,25 +211,23 @@ impl SourceAcceptance {
         projection: &InventoryBaselineProjection,
         context: &OperationContext,
     ) -> Result<EvidencePolicy> {
-        self.context(context)?;
+        self.planning_operations(projection.operations(), context)?;
         let operations = projection.operations();
-        operations.validate()?;
-        if projection.original_anchor() != context.anchor
-            || operations.jobs.world_folder != self.world_folder
-            || operations.jobs.site_id != self.site_id as i32
-            || operations.jobs.df_version != self.df_version
-            || operations.jobs.dfhack_version != self.dfhack_version
-            || operations.jobs.bridge_generation != self.operations_generation
-            || operations.jobs.tick() != context.anchor.tick
-            || !operations.jobs.paused
-        {
-            return Err(denied("inventory baseline differs from exact original source pins or paused tick"));
+        if projection.original_anchor() != context.anchor {
+            return Err(denied(
+                "inventory baseline differs from exact original source pins or paused tick",
+            ));
         }
         let mut policy = EvidencePolicy::at(projection.snapshot().anchor());
         policy.paused = true;
-        policy.entity_kinds.insert(EntityKind::Item, EvidenceCoverage::Complete);
+        policy
+            .entity_kinds
+            .insert(EntityKind::Item, EvidenceCoverage::Complete);
         let available = projection.observed_sources();
-        for field in ["operations/1.3.item.type_key", "operations/1.3.item.getStackSize"] {
+        for field in [
+            "operations/1.3.item.type_key",
+            "operations/1.3.item.getStackSize",
+        ] {
             let source = EvidenceSource::Observed {
                 field: field.into(),
                 source_digest: projection.source_digest(),
@@ -241,6 +241,31 @@ impl SourceAcceptance {
         }
         projection.evidence(policy.clone())?;
         Ok(policy)
+    }
+
+    /// Qualify a read-only pre-plan operations capture independently of an
+    /// original plan, Created receipt, or mutation grant. This permits bounded
+    /// inspection, not a new source policy for mutation predicates.
+    pub(crate) fn planning_operations(
+        &self,
+        operations: &LiveOperationsObservation,
+        context: &OperationContext,
+    ) -> Result<()> {
+        self.context(context)?;
+        operations.validate()?;
+        if operations.jobs.world_folder != self.world_folder
+            || operations.jobs.site_id != self.site_id as i32
+            || operations.jobs.df_version != self.df_version
+            || operations.jobs.dfhack_version != self.dfhack_version
+            || operations.jobs.bridge_generation != self.operations_generation
+            || operations.jobs.tick() != context.anchor.tick
+            || !operations.jobs.paused
+        {
+            return Err(denied(
+                "planning operations differ from exact source pins or paused citizen tick",
+            ));
+        }
+        Ok(())
     }
     pub fn goal(
         &self,
@@ -322,11 +347,7 @@ impl SourceAcceptance {
         if let Some(ObservedInventoryGoal::Increase(objective)) = &inventory {
             objective.validate_operations(projection.operations())?;
         }
-        self.goal_with_inventory(
-            inventory.is_some(),
-            projection,
-            context,
-        )
+        self.goal_with_inventory(inventory.is_some(), projection, context)
     }
 
     /// Qualify only the exact selected original objective. Default retained
@@ -344,7 +365,9 @@ impl SourceAcceptance {
         if let Some(ObservedInventoryGoal::Increase(objective)) = &inventory {
             objective.validate_operations(projection.operations())?;
         }
-        if inventory.is_none() && RetainedOrderObjective::from_selected_plan(original, step).is_none() {
+        if inventory.is_none()
+            && RetainedOrderObjective::from_selected_plan(original, step).is_none()
+        {
             return Err(denied(
                 "selected original step has no supported order-completion or inventory objective",
             ));

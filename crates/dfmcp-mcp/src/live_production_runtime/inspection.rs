@@ -1,5 +1,6 @@
-//! Read the exact operations source of a successfully published original goal.
-//! No capture, reprojection, native contact, or new proof authority lives here.
+//! Read an explicitly captured planning source or the exact operations source
+//! of a successfully published original goal. Query itself performs no native
+//! contact, reprojection, or new proof-authority issuance.
 use super::*;
 use dfmcp_adapter::semantic_work_orders::WorkOrderGoalProjection;
 use dfmcp_core::{DfmcpError, ErrorCode, StepId};
@@ -176,6 +177,9 @@ impl Runtime {
     }
 
     pub(super) fn inspection_source_json(&self) -> Value {
+        if self.original.is_none() {
+            return self.planning_inspection_json();
+        }
         self.current_inspection_source()
             .map_or(Value::Null, |source| {
                 let anchor = anchor_json(source.projection.anchor());
@@ -212,6 +216,14 @@ impl Runtime {
         context: &OperationContext,
     ) -> Result<View> {
         self.check(context, false)?;
+        if self.original.is_none() {
+            if step.is_some() {
+                return Err(invalid(
+                    "pre-plan production inspection has no original order selector",
+                ));
+            }
+            return self.inspect_planning_production(request, context);
+        }
         if step.is_some() {
             self.select_order(step, context)?;
         }
@@ -286,6 +298,73 @@ impl Runtime {
         verified?;
         disarmed?;
         work.current()?;
+        self.check(&work.narrow(context)?, false)?;
+        view.value["production_inspection"] = payload;
+        Ok(view)
+    }
+
+    fn inspect_planning_production(
+        &mut self,
+        request: InspectionRequest,
+        context: &OperationContext,
+    ) -> Result<View> {
+        let mut work = Work::new(context)?;
+        // Verify the existing empty native custodians without creating an
+        // original archive, frontier, goal monitor, or native order receipt.
+        let final_view = work.take(256 * MIB)?;
+        let mut view = self.view(&mut Work::new(&work.take(256 * MIB)?)?)?;
+        let authority = work.current()?;
+        inventory_baseline::authorize_observe(&authority, self.observation_tick_floor)?;
+        let source = self.current_planning_inspection().ok_or_else(|| {
+            denied("no current planning operations; Observe with include_production=true before planning")
+        })?;
+        let observation = source
+            .observation()
+            .ok_or_else(|| denied("planning source absent"))?;
+        self.config
+            .orders
+            .acceptance()
+            .planning_operations(observation, &authority)?;
+        let snapshot = source
+            .snapshot()
+            .ok_or_else(|| denied("planning projection absent"))?;
+        if snapshot.graph.entities.len() > authority.budget.max_entities as usize {
+            return Err(exhausted(
+                "production inspection exceeds the complete source entity budget",
+            ));
+        }
+        // Reserve the full bounded projection before hashing/serializing it;
+        // a tiny page or selector does not bypass the cost of its whole source.
+        let source_budget = work.take(planning_inspection::PROJECTION_BYTES)?;
+        if snapshot.canonical_bytes().len() as u64 > source_budget.budget.max_bytes {
+            return Err(exhausted(
+                "planning inspection exceeds its complete source byte budget",
+            ));
+        }
+        let source_digest = source.source_digest()?;
+        let mut query_context = work.rest(512 * MIB)?;
+        query_context.anchor = snapshot.anchor();
+        query_context.budget.max_output_tokens =
+            query_context.budget.max_output_tokens.min(MAX_QUERY_TOKENS);
+        let mut payload = if production::handles(&request.0) {
+            production::execute(source, &query_context, &request.0)?
+        } else {
+            execute_structured(snapshot, &query_context, &request.0)?
+        };
+        payload["inspection_scope"] = json!("preplan_captured_operations");
+        payload["attribution"] = json!("not_order_attributed");
+        payload["source_digest"] = json!(source_digest.to_hex());
+        payload["canonical_anchor"] = anchor_json(self.anchor);
+        payload["order_step_id"] = Value::Null;
+        payload["mutation_authority"] = json!(false);
+        payload["commit_compatible"] = json!(false);
+        payload["original_goal_evidence"] = json!(false);
+
+        self.config.current()?;
+        inventory_baseline::authorize_observe(&work.current()?, self.observation_tick_floor)?;
+        // Source-pure Query still verifies immutable current local custody both
+        // before and after analysis. No game read or write is hidden here.
+        self.view(&mut Work::new(&work.narrow(&final_view)?)?)?;
         self.check(&work.narrow(context)?, false)?;
         view.value["production_inspection"] = payload;
         Ok(view)
