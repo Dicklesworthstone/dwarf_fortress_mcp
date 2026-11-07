@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased — Production inspection anchor routing
+
+### Fixed
+- Existing combined production inspection advertised source anchors using
+  `tick`, while its structured query engine expected `game_tick`. Added a
+  strict boundary adapter so copied item queries and diagnosis-generated
+  entity/relationship follow-ups work with the advertised source anchor.
+- Return query and graph-witness anchors in that same public representation,
+  while preserving opaque continuation identity and rejecting changed or
+  incomplete anchors. Added focused source-backed regressions; MCP compilation
+  and their execution remain in progress. No live qualification is claimed.
+
 ## Unreleased — Request net inventory growth through production MCP
 
 - Add server-derived complete inventory baselines at the exact original paused

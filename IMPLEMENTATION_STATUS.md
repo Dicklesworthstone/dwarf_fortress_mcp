@@ -1,5 +1,21 @@
 # Implementation Status
 
+## Unreleased — Follow advertised production inspection anchors
+
+Combined production inspection now translates its exact public source anchor
+to the structured query engine's internal representation. Advertised item
+queries and diagnosis-generated entity/relationship drill-downs consequently
+use the same source as their descriptor. Returned query and graph-witness
+anchors use the combined host's public representation. Opaque continuation
+tokens retain their complete source, session and query bindings; foreign,
+incomplete and changed public anchors still refuse the query.
+
+Focused regressions exercise actual Operations projections, diagnosis follow-ups,
+strict anchor matching and pagination. They are authored but remain unexecuted
+while the real MCP build runs. No native DFHack or live-game qualification is
+claimed. This repairs an existing inspection path as a prerequisite of bead
+`df-production-preplan-inspection-7hd`.
+
 ## Unreleased — Plan and recover explicit inventory increases
 
 Both semantic production hosts now accept the closed objective

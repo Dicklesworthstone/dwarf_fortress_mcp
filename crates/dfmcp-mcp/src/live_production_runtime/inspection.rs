@@ -2,7 +2,8 @@
 //! No capture, reprojection, native contact, or new proof authority lives here.
 use super::*;
 use dfmcp_adapter::semantic_work_orders::WorkOrderGoalProjection;
-use dfmcp_core::StepId;
+use dfmcp_core::{DfmcpError, ErrorCode, StepId};
+use dfmcp_world::WorldSnapshot;
 use serde::Deserialize;
 
 #[allow(clippy::duplicate_mod)]
@@ -19,7 +20,9 @@ pub(crate) struct InspectionRequest(Value);
 impl InspectionRequest {
     pub(crate) fn parse(raw: &str) -> Result<Self> {
         if raw.len() > MAX_REQUEST {
-            return Err(exhausted("production inspection request exceeds 65536 bytes"));
+            return Err(exhausted(
+                "production inspection request exceeds 65536 bytes",
+            ));
         }
         // Direct deserialization also refuses duplicate envelope fields. Each
         // query engine independently validates its own closed query fields.
@@ -54,6 +57,68 @@ impl InspectionRequest {
             value["expected_anchor"] = anchor;
         }
         Ok(Self(value))
+    }
+}
+
+/// This host publishes `tick`, while the reusable structured-query engine has
+/// an established `game_tick` wire shape. Accept only the complete host anchor
+/// before translating it; otherwise normalization could disguise a stale or
+/// malformed caller precondition. Other structured-query hosts remain unchanged.
+fn execute_structured(
+    snapshot: &WorldSnapshot,
+    context: &OperationContext,
+    input: &Value,
+) -> Result<Value> {
+    context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
+    let public_anchor = anchor_json(snapshot.anchor());
+    let engine_anchor = structured::anchor_json(snapshot.anchor());
+    let mut translated = input.clone();
+    if let Some(expected) = input.get("expected_anchor") {
+        if *expected != public_anchor {
+            return Err(DfmcpError::new(
+                ErrorCode::StaleAnchor,
+                "expected_anchor does not match the complete production inspection anchor",
+            ));
+        }
+        translated["expected_anchor"] = engine_anchor.clone();
+    }
+    let mut payload = structured::execute(snapshot, context, &translated)?;
+    payload["anchor"] = public_anchor.clone();
+    if let Some(witness) = payload.get_mut("witness") {
+        if witness["anchor"] != engine_anchor {
+            return Err(DfmcpError::new(
+                ErrorCode::InternalInvariantViolation,
+                "structured query witness changed its source anchor",
+            ));
+        }
+        witness["anchor"] = public_anchor;
+    }
+    // A stale fact's reason carries its historical anchor, not the current
+    // source anchor. Rename only the known wire key without rebasing that fact
+    // or touching user-visible object values. Every replacement shrinks output.
+    if let Some(rows) = payload.get_mut("rows").and_then(Value::as_array_mut) {
+        for row in rows {
+            normalize_stale_fact_anchors(row);
+        }
+    }
+    if let Some(row) = payload.get_mut("row") {
+        normalize_stale_fact_anchors(row);
+    }
+    // Continuations are opaque engine tokens. Keeping them unchanged preserves
+    // the exact session, selected-field and complete-snapshot identity checks.
+    Ok(payload)
+}
+
+fn normalize_stale_fact_anchors(row: &mut Value) {
+    if let Some(fields) = row.get_mut("fields").and_then(Value::as_object_mut) {
+        for fact in fields.values_mut() {
+            if fact["presence"] == "stale"
+                && let Some(reason) = fact.get_mut("reason").and_then(Value::as_object_mut)
+                && let Some(tick) = reason.remove("game_tick")
+            {
+                reason.insert("tick".into(), tick);
+            }
+        }
     }
 }
 
@@ -105,8 +170,7 @@ impl Runtime {
                 .as_ref()
                 .and_then(|p| p.current.as_ref())
                 .is_some_and(|p| {
-                    p.anchor == self.anchor
-                        && p.selected_anchors.contains(&(source.step, anchor))
+                    p.anchor == self.anchor && p.selected_anchors.contains(&(source.step, anchor))
                 });
         joined.then_some(source)
     }
@@ -195,7 +259,7 @@ impl Runtime {
         let mut payload = if production::handles(&request.0) {
             production::execute(&source.projection, &query_context, &request.0)?
         } else {
-            structured::execute(snapshot, &query_context, &request.0)?
+            execute_structured(snapshot, &query_context, &request.0)?
         };
         payload["inspection_scope"] = json!("captured_operations");
         payload["attribution"] = json!("not_order_attributed");
@@ -256,3 +320,7 @@ mod tests {
         assert!(InspectionRequest::parse(&" ".repeat(MAX_REQUEST + 1)).is_err());
     }
 }
+
+#[cfg(test)]
+#[path = "inspection_anchor_tests.rs"]
+mod anchor_tests;
