@@ -30,6 +30,17 @@
       {"enum": ["located_at", "contained_in", "assigned_to", "member_of", "performs", "requires", "produces", "uses", "supports", "threatens", "ordered_by", "parent_of"]},
       {"type": "string", "pattern": "^custom:.+$", "maxLength": 128}
     ]},
+    "relation_selector": {
+      "type":"object", "additionalProperties":false, "required":["edge_kinds"],
+      "properties":{
+        "edge_kinds":{"type":"array", "items":{"$ref":"#/$defs/edge_kind"}, "minItems":1, "maxItems":32},
+        "direction":{"anyOf":[{"enum":["outgoing","incoming","undirected"]},{"type":"null"}]},
+        "target_kinds":{"type":"array", "items":{"$ref":"#/$defs/entity_kind"}, "maxItems":32},
+        "target_ids":{"type":"array", "items":{"$ref":"#/$defs/entity_id"}, "maxItems":64},
+        "where":{"anyOf":[{"$ref":"#/$defs/filter"},{"type":"null"}]}
+      },
+      "description":"Positive one-hop relationship selection. Outgoing is the default; target means the opposite endpoint in the selected direction. Empty target selectors include all recorded endpoints. Missing endpoint records and unavailable target filter facts remain Unknown. Negated relation existence is unsupported without complete relation-domain evidence."
+    },
     "anchor": {
       "type": "object", "additionalProperties": false,
       "required": ["fortress_id", "epoch", "sequence", "game_tick", "state_hash"],
@@ -106,6 +117,19 @@
       {
         "type": "object", "additionalProperties": false, "required": ["kind", "entity_id", "generation"],
         "properties": {"kind": {"const": "inspect"}, "entity_id": {"$ref": "#/$defs/entity_id"}, "generation": {"type": "integer", "minimum": 0, "maximum": 4294967295}, "fields": {"type": "array", "items": {"$ref": "#/$defs/name"}, "maxItems": 32, "minItems": 0}}
+      },
+      {
+        "type":"object", "additionalProperties":false, "required":["kind","relation"],
+        "properties":{
+          "kind":{"const":"related_entities"}, "relation":{"$ref":"#/$defs/relation_selector"},
+          "kinds":{"type":"array", "items":{"$ref":"#/$defs/entity_kind"}, "maxItems":32},
+          "where":{"anyOf":[{"$ref":"#/$defs/filter"},{"type":"null"}]},
+          "fields":{"type":"array", "items":{"$ref":"#/$defs/name"}, "maxItems":32},
+          "order":{"anyOf":[{"enum":["id_ascending","id_descending"]},{"type":"null"}]},
+          "limit":{"anyOf":[{"type":"integer", "minimum":1, "maximum":128},{"type":"null"}]},
+          "continuation":{"anyOf":[{"type":"string", "maxLength":256},{"type":"null"}]}
+        },
+        "description":"Select each source entity once when at least one recorded edge joins it to a target satisfying the relation selector. Source and target filters are independent and three-valued. Results preserve source field provenance, exact edge revisions and current source endpoint generations, with at most four witnesses per row and an explicit omitted count. Complete-source scan admission precedes selection; continuations bind the session, full anchor, both filters and every selector. No observed match never proves absence outside the projection or authorizes an effect."
       },
       {
         "type": "object", "additionalProperties": false, "required": ["kind", "roots", "max_depth"],

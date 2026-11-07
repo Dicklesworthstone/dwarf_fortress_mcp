@@ -1,5 +1,38 @@
 # Implementation Status
 
+## Unreleased — Select entities by witnessed relationships
+
+The shared `related_entities` query selects source entities with a positive
+one-hop relation to targets filtered by canonical kinds, IDs and typed facts.
+Source and target predicates share the existing three-valued grammar. Incoming,
+outgoing and undirected directions, parallel edges and self-loops are handled
+deterministically. Each row includes its generation, an exact matching-edge
+count and up to four edge-revision/target-generation witnesses with omissions.
+
+Both endpoint selectors, filters, edge kinds, direction, fields, ordering,
+session and complete source anchor bind continuation pages. The executor scans
+entities and edges once under the existing complete-source byte/record/work/time
+limits. Whole rows fit output budgets without advancing past an omitted row.
+Missing targets and unavailable facts remain Unknown; no observed match never
+becomes proof of complete-world absence, edge authenticity or mutation authority.
+The laboratory wrapper and structured live-read dispatch use the same executor.
+
+Executed on 2026-11-07: 87 actual-source query/world/output component tests passed,
+including 13 new relation tests and the prior 74 tests. The independent incidence
+oracle covers all 512 directed three-vertex graphs in all three directions.
+All external dependency versions, sources and checksums match Cargo.lock. The
+closed schema passed meta-validation plus four valid and twelve invalid request
+cases. Scoped formatting and diff checks passed; independent source review found
+no blocker. One new public laboratory/history/authority regression is included
+but awaits the full MCP test build. No native or full qualification is claimed.
+
+This run also executes the final spatial, world-change, projection and query
+budget component bytes that could not be rerun after the previous executor loss.
+It supersedes those earlier component-execution limitations, while their public
+facade and native qualification limits remain. The broader structured-query bead
+`df-lab-structured-query-f7q` stays in progress. See docs/QUERY_EXECUTION.md and
+docs/LAB_STRUCTURED_QUERY.md.
+
 ## Unreleased — Concurrent independent unit edits through the real commit loop
 
 The shared laboratory commit path now refines a whole-entity witness conflict

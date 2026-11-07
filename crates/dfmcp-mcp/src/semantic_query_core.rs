@@ -203,7 +203,7 @@ pub(super) fn bounded_names(mut names: Vec<String>, maximum: usize) -> Result<Ve
     Ok(names)
 }
 
-fn entity_id(raw: &str) -> Result<EntityId> {
+pub(super) fn entity_id(raw: &str) -> Result<EntityId> {
     if raw.is_empty()
         || raw.len() > 20
         || raw.starts_with('0')
@@ -245,7 +245,7 @@ pub(super) fn entity_kind(raw: &str) -> Result<EntityKind> {
     })
 }
 
-fn edge_kind(raw: &str) -> Result<EdgeKind> {
+pub(super) fn edge_kind(raw: &str) -> Result<EdgeKind> {
     Ok(match raw {
         "located_at" => EdgeKind::LocatedAt,
         "contained_in" => EdgeKind::ContainedIn,

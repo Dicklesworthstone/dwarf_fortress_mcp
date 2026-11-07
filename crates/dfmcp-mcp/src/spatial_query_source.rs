@@ -1,4 +1,4 @@
-//! Admission before hashing or rendering a complete spatial-query source.
+//! Shared admission before hashing or rendering a complete structured-query source.
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
@@ -25,7 +25,7 @@ impl Budget {
         {
             return Err(DfmcpError::new(
                 ErrorCode::BudgetExceeded,
-                "spatial query exceeds its source byte, work, or wall-time allowance",
+                "structured query exceeds its source byte, work, or wall-time allowance",
             ));
         }
         Ok(())
@@ -43,7 +43,7 @@ impl Budget {
             if depth > 64 {
                 return Err(DfmcpError::new(
                     ErrorCode::BudgetExceeded,
-                    "spatial-query source value nesting exceeds 64",
+                    "structured-query source value nesting exceeds 64",
                 ));
             }
             self.charge(32, 1)?;
@@ -54,14 +54,19 @@ impl Budget {
             };
             // Admit frontier shape before allocating it, including unselected
             // fields and contradictory compatibility representations.
-            if self.work.saturating_add(pending.len()).saturating_add(children) > MAX_WORK
-                || self.bytes.saturating_add(
-                    pending.len().saturating_add(children).saturating_mul(32),
-                ) > self.maximum_bytes
+            if self
+                .work
+                .saturating_add(pending.len())
+                .saturating_add(children)
+                > MAX_WORK
+                || self
+                    .bytes
+                    .saturating_add(pending.len().saturating_add(children).saturating_mul(32))
+                    > self.maximum_bytes
             {
                 return Err(DfmcpError::new(
                     ErrorCode::BudgetExceeded,
-                    "spatial-query source value frontier exceeds its bound",
+                    "structured-query source value frontier exceeds its bound",
                 ));
             }
             match value {
@@ -124,7 +129,10 @@ pub(super) fn render_fits(
     maximum: usize,
     budget: &mut Budget,
 ) -> Result<bool> {
-    let mut minimum = entity.label.len().saturating_add(entity.kind.as_str().len());
+    let mut minimum = entity
+        .label
+        .len()
+        .saturating_add(entity.kind.as_str().len());
     for name in fields.iter().chain(geometry_fields) {
         minimum = minimum.saturating_add(name.len());
         if let Some(fact) = entity.fields.get(name) {
@@ -188,21 +196,26 @@ pub(super) fn preflight(
     context: &OperationContext,
     started: Instant,
 ) -> Result<Budget> {
-    let records = snapshot.graph.entities.len()
+    let records = snapshot
+        .graph
+        .entities
+        .len()
         .saturating_add(snapshot.graph.edges.len())
         .saturating_add(snapshot.graph.chunks.len())
         .saturating_add(snapshot.graph.events.len());
     if records > (context.budget.max_entities as usize).min(MAX_RECORDS) {
         return Err(DfmcpError::new(
             ErrorCode::BudgetExceeded,
-            "spatial query exceeds its complete-source record allowance",
+            "structured query exceeds its complete-source record allowance",
         ));
     }
-    let maximum_bytes = usize::try_from(context.budget.max_bytes.min(MAX_BYTES as u64))
-        .map_err(|_| DfmcpError::new(
-            ErrorCode::BudgetExceeded,
-            "spatial source byte allowance cannot be represented",
-        ))?;
+    let maximum_bytes =
+        usize::try_from(context.budget.max_bytes.min(MAX_BYTES as u64)).map_err(|_| {
+            DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                "structured-query source byte allowance cannot be represented",
+            )
+        })?;
     let mut budget = Budget {
         bytes: 256,
         work: 0,
@@ -215,11 +228,13 @@ pub(super) fn preflight(
         if *id == EntityId::NIL || *id != entity.id {
             return Err(DfmcpError::new(
                 ErrorCode::InternalInvariantViolation,
-                "spatial-query source entity identity is inconsistent",
+                "structured-query source entity identity is inconsistent",
             ));
         }
         budget.charge(
-            128usize.saturating_add(entity.label.len()).saturating_add(entity.kind.as_str().len()),
+            128usize
+                .saturating_add(entity.label.len())
+                .saturating_add(entity.kind.as_str().len()),
             1,
         )?;
         budget.facts(&entity.fields)?;
@@ -240,7 +255,9 @@ pub(super) fn preflight(
     }
     for event in snapshot.graph.events.values() {
         budget.charge(
-            128usize.saturating_add(event.summary.len()).saturating_add(event.kind.as_str().len()),
+            128usize
+                .saturating_add(event.summary.len())
+                .saturating_add(event.kind.as_str().len()),
             1,
         )?;
         budget.values(&event.fields)?;

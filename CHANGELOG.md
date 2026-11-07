@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased — Select entities through their relationships
+
+- Add shared `related_entities` selection with source/target typed filters,
+  target kinds and IDs, explicit edge kinds and all three directions.
+- Return exact positive relation witnesses, endpoint generations, matched-edge
+  counts and explicit witness omissions; preserve Unknown endpoint evidence.
+- Bind whole-row pagination to every selector, the exact source and the current
+  session; charge the complete source before hashing and a single bounded scan.
+- Expose the query through laboratory and structured live-read consumers without
+  granting negative existence proof or mutation authority.
+- Pass all 87 exact-lock actual-source query/world/output component tests,
+  including 13 new relation tests and an exhaustive independent graph oracle.
+  Add a public facade/history regression; full MCP execution remains pending.
+
 ## Unreleased — Rebase independent edits to the same laboratory dwarf
 
 - Add a bounded field witness to the real shared-session commit path for

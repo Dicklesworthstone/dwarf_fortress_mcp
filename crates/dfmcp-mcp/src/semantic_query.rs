@@ -7,8 +7,6 @@ mod core_query;
 mod dominance_query;
 #[path = "event_query.rs"]
 mod event_query;
-#[path = "spatial_entity_query.rs"]
-mod spatial_entity_query;
 #[cfg(test)]
 #[path = "query_history_tests.rs"]
 mod history_tests;
@@ -18,6 +16,10 @@ mod operational_query;
 mod query_history;
 #[path = "query_watch.rs"]
 mod query_watch;
+#[path = "related_entity_query.rs"]
+mod related_entity_query;
+#[path = "spatial_entity_query.rs"]
+mod spatial_entity_query;
 
 use dfmcp_core::{
     Capability, DfmcpError, Digest32, ErrorCode, OperationContext, Result, RiskTier, StateAnchor,
@@ -151,6 +153,7 @@ pub fn execute(
         Some("aggregate" | "search") => operational_query::execute(snapshot, context, input),
         Some("events") => event_query::execute(snapshot, context, input),
         Some("spatial_entities") => spatial_entity_query::execute(snapshot, context, input),
+        Some("related_entities") => related_entity_query::execute(snapshot, context, input),
         Some("item_quantity") => query_watch::quantity_query(snapshot, context, input),
         Some("condition_evaluation") => query_watch::condition_query(snapshot, context, input),
         Some("dominators") => dominance_query::execute(snapshot, context, input),

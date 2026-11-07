@@ -223,6 +223,105 @@ facade regression across current publication, retained-source pagination and
 grant expiry. These tests define the component contract; they are not native
 DFHack admission evidence.
 
+## Selecting entities by observed relationships
+
+The shared stateless `dfmcp.query/1` executor accepts `related_entities` through
+the default laboratory structured wrapper and existing structured live-read
+consumers. This selects entities by a positive relationship to another recorded
+entity, without first downloading the whole graph. For example, find suspended
+jobs that require an item whose recorded `eligible` fact is true:
+
+```json
+{
+  "schema": "dfmcp.query/1",
+  "query": {
+    "kind": "related_entities",
+    "kinds": ["job"],
+    "where": {
+      "op": "compare", "field": "suspended", "comparison": "eq",
+      "value": {"type": "bool", "value": true}
+    },
+    "relation": {
+      "edge_kinds": ["requires"],
+      "direction": "outgoing",
+      "target_kinds": ["item"],
+      "where": {
+        "op": "compare", "field": "eligible", "comparison": "eq",
+        "value": {"type": "bool", "value": true}
+      }
+    },
+    "fields": ["suspended"],
+    "limit": 4
+  }
+}
+```
+
+The field and kind names must exist in the supplied canonical projection; the
+query does not produce missing relations or facts. `where` outside `relation`
+filters the returned entity. `relation.where` filters the opposite endpoint.
+Both use the existing typed, three-valued field grammar. `target_ids` can
+additionally restrict that endpoint to at most 64 canonical positive decimal
+u64 IDs. Empty source-kind, target-kind or target-ID sets impose no restriction.
+At least one explicit edge kind is required, with at most 32 edge kinds. Kind
+selectors compare canonical names, including reserved-name aliases.
+
+`outgoing` follows source → target and is the default. `incoming` follows
+target → source; `undirected` accepts either direction. Each selected entity
+appears once even when several edges match. Distinct parallel edge records
+count separately, and an undirected self-loop counts once. The result preserves
+up to four witnesses per row in ascending edge-ID order, plus the exact matched
+edge count and omitted witness count. Each witness names the edge's full
+128-bit ID, revision, kind and direction, and the opposite endpoint's ID,
+generation and revision. These identities resolve in this exact snapshot;
+they do not establish historical causal attribution when an ID was reused.
+Selected source fields retain their ordinary Fact presence and provenance.
+
+A missing target record or an Unknown target filter is reported separately.
+A witnessed positive match selects the source even if another edge has an
+unknown target. Without a positive witness, an undecidable relevant endpoint
+makes the relation Unknown. `no_observed_match` counts other source candidates;
+it describes only the supplied projection. There is no `exists: false` selector
+or negative relationship proof. Unavailable facts stay Unknown under field
+negation. Aggregate missing-target and unknown-target counters count oriented
+source/edge incidences; one undirected edge can contribute to both endpoints.
+
+Coverage names `positive_relations_in_canonical_projection`.
+`selection_complete_within_projection` means every kind-selected entity's
+membership was decidable within those recorded facts. Pagination is described
+separately by `truncated` and `continuation`. `relation_domain_complete`,
+`absence_proven` and `eligible_as_mutation_evidence` remain false, and edge-source
+authenticity remains unestablished. No result, including an empty one, proves
+that an unrecorded dependency, assignment or containment relation is absent.
+
+Ordering is ascending or descending entity ID; the default page has four rows
+and the maximum is 128. An `rq1` continuation binds the session, complete source
+anchor, source kinds and filter, edge kinds and direction, target kinds, IDs
+and filter, projected fields, ordering and the last row's generation. Selector
+sets are normalized; predicate-tree order remains part of identity. Page width
+may change. A missing or final cursor position is refused. Every call still
+checks current authority; a cursor supplies no capability or source retention.
+
+Source admission uses the same bounded full-snapshot accounting as spatial
+selection: all entities, edges, events and nested values must fit the source
+record allowance, the smaller of the negotiated byte budget and 16 MiB, depth
+64, and the 4,000,000-work-unit ceiling before hashing and selection. The byte
+measure is conservative accounting for in-memory canonical data, not an exact
+wire encoding. Narrow target filters cannot exempt unselected source records.
+Source and target predicates are evaluated at most once per entity, then edges
+are scanned once; no traversal is repeated for every candidate. Conservative
+selector/predicate work is charged before evaluation, and the wall budget is
+checked throughout scanning and publication.
+
+Whole rows and their witnesses fit both byte and output-token budgets. If a
+later row cannot fit, the cursor remains at the last returned row; an oversized
+first row is refused. The enclosing runtime also checks the complete Agent Turn.
+The component regressions include an independent incidence oracle over all
+512 directed graphs on three vertices in all three directions, parallel edges,
+self-loops, full-width IDs, unavailable facts, missing endpoints, canonical
+aliases, source/session/selector binding and whole-row/source-budget refusal.
+The public laboratory regression resumes a retained source after the current
+world advances and verifies current grant expiry.
+
 ## Bounded retained-event windows
 
 The shared stateless `dfmcp.query/1` executor accepts `kind: "events"` on the

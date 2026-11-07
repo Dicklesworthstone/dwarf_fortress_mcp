@@ -2,7 +2,7 @@
 
 The default `serve` runtime accepts stateless `dfmcp.query/1` requests through
 the existing `fortress_query` tool. This exposes the same typed entity,
-aggregate, lexical, spatial and graph executors used by the read-only development
+aggregate, lexical, spatial and relationship executors used by the read-only development
 surfaces, over the laboratory world in which plans actually execute.
 
 Pass a JSON string as the existing `mode` argument:
@@ -26,7 +26,7 @@ Pass a JSON string as the existing `mode` argument:
 The closed outer wrapper accepts only `mode`, `request` and optional `at`.
 `at` is the exact lowercase state hash of a current or retained world. The
 inner envelope accepts the existing schema, `query`, and optional complete
-`expected_anchor`. These eight query kinds are available:
+`expected_anchor`. These nine query kinds are available:
 
 | Kind | Purpose |
 | --- | --- |
@@ -38,6 +38,7 @@ inner envelope accepts the existing schema, `query`, and optional complete
 | `dependencies` | Prerequisite order, cycle components, cycle blockers and an unweighted critical chain |
 | `events` | Inclusive retained-event windows, kind/subject selection, typed fields and chronological pages |
 | `spatial_entities` | Inclusive intersection or containment of explicitly named point/cuboid entity geometry |
+| `related_entities` | Entities with witnessed one-hop relations to targets selected by kinds, IDs and typed facts |
 
 There is no watch, baseline, native capture, plan or effect dispatch through
 this wrapper. Existing `summary`, `entities`, `terrain`, `path`, `search`,
@@ -135,6 +136,44 @@ rules below. See `QUERY_EXECUTION.md` for geometry, provenance and budget detail
 
 ## Relationships and dependencies
 
+Find units assigned to a particular recorded squad without first finding every
+unit ID or traversing the whole graph:
+
+```json
+{
+  "kind": "related_entities",
+  "kinds": ["unit"],
+  "where": {"op":"compare","field":"alive","comparison":"eq","value":{"type":"bool","value":true}},
+  "relation": {
+    "edge_kinds": ["assigned_to"],
+    "direction": "outgoing",
+    "target_kinds": ["squad"],
+    "target_ids": ["100"]
+  },
+  "fields": ["profession", "alive"],
+  "limit": 4
+}
+```
+
+Use this object as `request.query`. It requires the named edge and target record
+to exist in the canonical source. `relation.where` can independently filter the
+target's typed fields. Direction is `outgoing` by default, or `incoming` or
+`undirected`; target always means the opposite endpoint. At least one edge kind
+is required. A returned entity appears once, with its matched edge count and
+up to four exact edge-revision/target-generation witnesses. Additional witnesses
+have an explicit omitted count; self-loops are counted once in undirected mode.
+
+Missing targets and unavailable target facts remain Unknown. A positive witness
+is enough to select a row; no observed match cannot establish absence of
+unrecorded relations. Negative existence selectors are therefore unavailable.
+Source facts keep their provenance, but canonical edges do not supply source
+authenticity or mutation authority. Selection completeness and page truncation
+are separate. ID ordering, at most 128 whole rows, exact-source historical reads
+and current authority follow the same rules below. See `QUERY_EXECUTION.md` for
+the complete selection, witness and budget contract.
+
+For multi-hop exploration from known roots, use traversal:
+
 ```json
 {"kind":"traverse","roots":["100"],"edge_kinds":["requires"],"direction":"outgoing","max_depth":3,"target":"102"}
 ```
@@ -202,12 +241,14 @@ continuity in the Agent Turn. It cannot supply fresh mutation evidence.
 An unknown or collected hash returns `stale_anchor`; there is no substitution
 of a newer world or another session's retained source.
 
-For entity, search, event or spatial pages, copy the returned `continuation` string into
+For entity, search, event, spatial or relationship pages, copy the returned `continuation` string into
 `request.query.continuation`. Keep the query selection unchanged. Entity
 continuations also bind selected fields, ordering, source anchor and session.
 Event continuations bind the time window, kind and subject sets, selected
 fields, order, complete source anchor and session. Spatial continuations also bind
-the region, geometry field names, relation and typed filter. The requested page
+the region, geometry field names, relation and typed filter. Relationship
+continuations bind both endpoint selectors and filters, edge kinds, direction,
+fields, ordering and the last returned entity generation. The requested page
 width may change. After the current world advances, resume
 by explicitly adding the original `at` hash while that source is retained,
 or restart from the new world. Historical reads do not pin retention.
@@ -233,7 +274,7 @@ budget-error envelope.
 ## Verification scope
 
 `lab_structured_query_tests.rs` drives the actual public laboratory façade for
-the eight kinds, exact historical/current anchors, capability refusal, unavailable
+the nine kinds, exact historical/current anchors, capability refusal, unavailable
 facts, continuation integrity, legacy grammar, source work and complete-packet
 budgets. These source regressions do not establish live DFHack compatibility,
 game effects, production admission or full workspace qualification.
