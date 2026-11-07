@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased — Require known-clear failure evidence for goal success
+
+- Preserve three-valued failure conditions in temporal obligations: Unknown
+  interrupts unfinished stability instead of counting as evidence of safety.
+- Require current failure clearance in excavation, construction, workforce and
+  work-order goal monitors, including after a historical fulfillment.
+- Apply the same guard to native clock readiness and agent Plan/Commit offers;
+  retain cancellation and the original deadlines, receipts and history.
+- Add five intent, four adapter-monitor and four clock-presentation regression
+  groups, including off-cadence evidence loss, recovery and missing guard fields.
+- Production intent compilation reached the library-test build before SIGKILL.
+  New tests and full MCP qualification remain unexecuted after executor loss.
+
 ## Unreleased — Diagnose original production goals through MCP
 
 - Add optional closed structured requests to the combined host's existing

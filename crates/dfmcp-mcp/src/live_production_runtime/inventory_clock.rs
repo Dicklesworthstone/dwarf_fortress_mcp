@@ -342,7 +342,7 @@ impl Runtime {
                 sample.anchor.tick == self.anchor.tick
                     && (self.portfolio.is_some() || sample.anchor.cursor == self.anchor.cursor)
                     && sample.current_goal == PredicateTruth::True
-                    && sample.failure_predicate != Some(PredicateTruth::True)
+                    && matches!(sample.failure_predicate, None | Some(PredicateTruth::False))
             })
             .ok_or_else(|| {
                 denied("inventory clock requires a fresh qualified True inventory sample")

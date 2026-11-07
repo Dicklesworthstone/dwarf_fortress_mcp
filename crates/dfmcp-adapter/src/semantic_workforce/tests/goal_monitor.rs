@@ -588,3 +588,61 @@ fn explicit_128_mib_foreground_budget_executes_real_observation_path() -> Result
     assert!(result.semantic_completion_proven());
     Ok(())
 }
+
+#[test]
+fn unknown_failure_breaks_labor_stability_and_withdraws_only_current_proof() -> Result<()> {
+    let mut f = goal_fixture(true)?;
+    let spec = f.plan.steps[0]
+        .obligation
+        .as_mut()
+        .ok_or_else(|| invalid("missing spec"))?;
+    spec.failure = Some(Predicate::Paused(false));
+    reseal(&mut f.plan);
+    let review = commit_goal(&mut f)?;
+    let mut monitor = begin(&mut f, &review)?;
+    let c = read_context(&f);
+    let mut achieved = None;
+    let mut terminal = None;
+    for (sequence, tick, clear) in [
+        (1, 125, true),
+        (2, 126, false),
+        (3, 130, true),
+        (4, 135, true),
+        (5, 140, false),
+        (6, 145, true),
+    ] {
+        native_sample(&f, tick, true);
+        let result = f.owner.poll_original_goal(
+            &mut monitor,
+            ObservationCursor { epoch: 0, sequence },
+            &c,
+            |binding, context| f.native.connect(binding, context),
+            |projection, context| {
+                let mut policy = current_policy(projection, context)?;
+                policy.paused = clear;
+                Ok(policy)
+            },
+        )?;
+        assert_eq!(result.progress().current_goal, PredicateTruth::True);
+        assert_eq!(
+            result.progress().failure_predicate,
+            Some(if clear { PredicateTruth::False } else { PredicateTruth::Unknown })
+        );
+        assert_eq!(result.original_goal_proven(), matches!(sequence, 4 | 6));
+        assert_eq!(result.semantic_completion_proven(), matches!(sequence, 4 | 6));
+        if sequence == 2 {
+            assert_eq!(stable(&result), 0);
+        }
+        if sequence == 4 {
+            achieved = result.progress().first_satisfied_anchor;
+            terminal = result.progress().obligation.clone();
+            assert!(achieved.is_some());
+        }
+        if sequence >= 4 {
+            assert_eq!(result.progress().first_satisfied_anchor, achieved);
+            assert_eq!(result.progress().obligation, terminal);
+            assert_eq!(monitor.first_satisfied_anchor(), achieved);
+        }
+    }
+    Ok(())
+}

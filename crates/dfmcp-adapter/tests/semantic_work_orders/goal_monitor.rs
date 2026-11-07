@@ -1618,3 +1618,59 @@ mod goal_history;
 
 #[path = "production_analysis.rs"]
 mod production_analysis;
+
+#[test]
+fn unknown_failure_never_proves_current_work_order_completion_or_stability() -> Result<()> {
+    let (f, mut session, review) = goal_fixture_with_config(WorkOrderState::Created, |plan| {
+        if let Some(spec) = &mut plan.steps[0].obligation {
+            spec.failure = Some(Predicate::Paused(false));
+            spec.stable_for_observations = 2;
+            spec.poll_interval_ticks = 10;
+        }
+    })?;
+    let mut monitor = session.begin_goal_monitor(review.seal(), &f.context)?;
+    let mut achieved = None;
+    let mut terminal = None;
+    for (n, tick, clear) in [
+        (1, 10, true),
+        (2, 11, false),
+        (3, 20, true),
+        (4, 30, true),
+        (5, 40, false),
+        (6, 50, true),
+    ] {
+        let result = poll(&f, &mut session, &mut monitor, n, tick, 0, true, false, |p| {
+            let mut policy = grant(p);
+            policy.paused = clear;
+            Ok(policy)
+        })?;
+        assert_eq!(result.progress().current_goal, PredicateTruth::True);
+        assert_eq!(
+            result.progress().failure_predicate,
+            Some(if clear { PredicateTruth::False } else { PredicateTruth::Unknown })
+        );
+        assert_eq!(result.original_goal_proven(), matches!(n, 4 | 6));
+        assert_eq!(result.semantic_completion_proven(), matches!(n, 4 | 6));
+        if n == 2 {
+            assert!(matches!(
+                result.progress().obligation,
+                Some(ObligationStatus::Active {
+                    consecutive_stable_observations: 0,
+                    ..
+                })
+            ));
+        }
+        if n == 4 {
+            achieved = result.progress().first_satisfied_anchor;
+            terminal = result.progress().obligation.clone();
+            assert!(achieved.is_some());
+        }
+        if n >= 4 {
+            assert_eq!(result.progress().first_satisfied_anchor, achieved);
+            assert_eq!(result.progress().obligation, terminal);
+        }
+    }
+    assert_eq!(monitor.original_plan(), &f.original);
+    assert_eq!(f.native.borrow().commits, 1);
+    Ok(())
+}

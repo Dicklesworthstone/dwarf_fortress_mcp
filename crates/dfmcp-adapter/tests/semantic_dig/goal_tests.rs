@@ -8,8 +8,9 @@ use dfmcp_adapter::semantic_dig::{
     SemanticDigReview,
 };
 use dfmcp_core::{Capability, GameTick, ObservationCursor, OperationContext, Result};
+use dfmcp_intent::{ObligationStatus, PreparedPlan};
 use dfmcp_world::map_region::{Cell, Shape};
-use dfmcp_world::{EvidencePolicy, PredicateTruth};
+use dfmcp_world::{EvidencePolicy, Predicate, PredicateTruth};
 
 struct Source(LiveSpatialCitizenObservation);
 impl DigGoalSource for Source {
@@ -28,12 +29,19 @@ fn granted(p: &DigGoalProjection, _: &OperationContext) -> Result<EvidencePolicy
     Ok(policy)
 }
 fn designated(stable: u32) -> Result<(Fixture, SemanticDigReview)> {
+    designated_with(stable, |_| {})
+}
+fn designated_with(
+    stable: u32,
+    update: impl FnOnce(&mut PreparedPlan),
+) -> Result<(Fixture, SemanticDigReview)> {
     let mut f = Fixture::new()?;
     f.original = reseal(&f.original, |p| {
         if let Some(o) = &mut p.steps[0].obligation {
             o.stable_for_observations = stable;
             o.poll_interval_ticks = 1;
         }
+        update(p);
     });
     let review = f.prepared()?;
     f.session.commit(
@@ -294,5 +302,66 @@ fn original_deadline_is_not_extended_by_late_completed_terrain() -> Result<()> {
         result.progress().obligation,
         Some(dfmcp_intent::ObligationStatus::Failed { .. })
     ));
+    Ok(())
+}
+
+#[test]
+fn unknown_failure_blocks_excavation_proof_without_erasing_durable_achievement() -> Result<()> {
+    let (mut f, review) = designated_with(2, |plan| {
+        if let Some(spec) = &mut plan.steps[0].obligation {
+            spec.failure = Some(Predicate::Paused(false));
+        }
+    })?;
+    let mut monitor = durable(&mut f, &review, Memory::default())?;
+    let mut achieved = None;
+    let mut terminal = None;
+    for n in 1..=6 {
+        let raw = floors(&f.capture, f.capture.tick() + n)?;
+        let cursor = cursor(&f, n);
+        let result = f.session.poll_original_goal_durable(
+            &mut monitor,
+            cursor,
+            &f.context,
+            move |_, _| Ok(Source(raw)),
+            |projection, context| {
+                let mut policy = granted(projection, context)?;
+                policy.paused = !matches!(n, 2 | 5);
+                Ok(policy)
+            },
+        )?;
+        assert!(result.progress().excavation_proven);
+        assert_eq!(result.progress().current_goal, PredicateTruth::True);
+        assert_eq!(
+            result.progress().failure_predicate,
+            Some(if matches!(n, 2 | 5) {
+                PredicateTruth::Unknown
+            } else {
+                PredicateTruth::False
+            }),
+        );
+        assert_eq!(result.original_goal_proven(), matches!(n, 4 | 6));
+        assert_eq!(result.semantic_completion_proven(), matches!(n, 4 | 6));
+        if n == 2 {
+            assert!(matches!(
+                result.progress().obligation,
+                Some(ObligationStatus::Active {
+                    consecutive_stable_observations: 0,
+                    ..
+                })
+            ));
+        }
+        if n == 4 {
+            achieved = result.progress().first_satisfied_anchor;
+            terminal = result.progress().obligation.clone();
+            assert!(achieved.is_some());
+        }
+        if n >= 4 {
+            assert_eq!(result.progress().first_satisfied_anchor, achieved);
+            assert_eq!(result.progress().obligation, terminal);
+            assert_eq!(monitor.first_satisfied_anchor(), achieved);
+        }
+    }
+    assert_eq!(monitor.original_plan(), &f.original);
+    assert_eq!(f.native.borrow().commits, 1);
     Ok(())
 }

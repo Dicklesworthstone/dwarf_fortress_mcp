@@ -6,7 +6,7 @@ fn viable(progress: &FurnitureGoalProgress) -> Result<()> {
     if !progress.receipt_linked
         || !matches!(progress.construction_condition, "pending" | "condition_met")
         || progress.current_goal == PredicateTruth::Unknown
-        || progress.failure_predicate == Some(PredicateTruth::True)
+        || !matches!(progress.failure_predicate, None | Some(PredicateTruth::False))
         || !matches!(
             progress.obligation,
             Some(ObligationStatus::Pending | ObligationStatus::Active { .. })

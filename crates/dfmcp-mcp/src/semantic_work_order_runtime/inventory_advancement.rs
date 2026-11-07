@@ -7,7 +7,7 @@ use dfmcp_adapter::bounded_run::rpc::RunSource;
 
 fn viable(goal: &WorkOrderGoalProgress) -> Result<()> {
     if goal.current_goal != PredicateTruth::True
-        || goal.failure_predicate == Some(PredicateTruth::True)
+        || !matches!(goal.failure_predicate, None | Some(PredicateTruth::False))
         || !matches!(
             goal.obligation,
             Some(ObligationStatus::Pending | ObligationStatus::Active { .. })

@@ -1,5 +1,35 @@
 # Implementation Status
 
+## Unreleased — Preserve Unknown failure conditions through goal and clock control
+
+A configured failure predicate must be established False before a true terminal
+predicate contributes to an obligation's stability window. The shared obligation
+engine now retains True/False/Unknown instead of reducing failure to a boolean.
+Unknown clears an unfinished streak even off cadence or at a changed same-tick
+observation. A known failure still takes immediate precedence; the original
+absolute deadline and sampling cadence are unchanged.
+
+All four native semantic goal monitors require current known-clear failure
+evidence. A previously fulfilled obligation and its first-achievement anchor
+remain immutable, but neither substitutes for current evidence after a source
+or coverage loss. Native clock eligibility and clock Plan/Commit guidance also
+require the absent-or-False guard. Missing or malformed presentation guard
+fields are not treated as a clear condition, and cancellation remains available.
+
+Added five intent regressions, four actual adapter-monitor regressions and four
+clock-presentation regression groups. These cover independent unknown failure
+evidence, complete-domain absence, due/off-cadence/same-tick observations,
+deadlines, recovery, historical achievement, prepared commits and cancellation.
+The production intent library compiled before its library-test compilation was
+SIGKILLed. Adapter compilation and MCP dependency compilation were also killed
+under shared resource pressure; no new test execution completed. Scoped Rust
+formatting and whitespace checks passed before the executor disconnected.
+The preserved GitHub source was reconstructed from the exact baseline and edits;
+its final bytes have not received a fresh compiler/formatter or full
+verify.sh/qualify_local.sh run. This is an implementation update to
+df-predicate-evidence-authority-r7m, which remains in_progress. No native
+admission, protocol, dependency or authority expansion is claimed.
+
 ## Unreleased — Combined original-goal diagnosis and inventory inspection
 
 The combined labor/order host now accepts an optional closed dfmcp.query/1

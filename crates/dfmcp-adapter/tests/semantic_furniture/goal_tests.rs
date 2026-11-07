@@ -155,6 +155,7 @@ struct SourceState {
     policies: usize,
     permitted: bool,
     grant_sources: bool,
+    grant_pause: bool,
     fail_read: bool,
 }
 type Source = Rc<RefCell<SourceState>>;
@@ -170,6 +171,7 @@ fn source(record: &BuildRecord, review: &SemanticFurnitureReview, tick: u64) -> 
         policies: 0,
         permitted: true,
         grant_sources: true,
+        grant_pause: true,
         fail_read: false,
     })))
 }
@@ -235,7 +237,7 @@ fn policy(
             ));
         }
         let mut granted = EvidencePolicy::at(projection.anchor());
-        granted.paused = true;
+        granted.paused = state.grant_pause;
         granted
             .entity_kinds
             .insert(EntityKind::Building, EvidenceCoverage::Observed);
@@ -738,5 +740,65 @@ fn failed_publication_sync_never_exposes_success_or_recovers_a_dispatch_permit()
     assert!(durable_poll(&mut fixture, &mut recovered, 2, &source).is_err());
     assert_eq!(source.borrow().opened, calls);
     assert_eq!(fixture.native.borrow().commits, 1);
+    Ok(())
+}
+
+#[test]
+fn unknown_failure_interrupts_construction_stability_and_withdraws_current_completion() -> Result<()> {
+    let (mut fixture, review, record) = placed(2, |plan| {
+        if let Some(spec) = &mut plan.steps[0].obligation {
+            spec.failure = Some(Predicate::Paused(false));
+            spec.poll_interval_ticks = 10;
+        }
+    })?;
+    let mut monitor = fixture
+        .session
+        .begin_goal_monitor(review.seal(), &fixture.context)?;
+    let observed = source(&record, &review, fixture.capture.tick() + 10)?;
+    let mut achieved = None;
+    let mut terminal = None;
+    for (index, relative_tick, clear) in [
+        (1, 10, true),
+        (2, 11, false),
+        (3, 20, true),
+        (4, 30, true),
+        (5, 40, false),
+        (6, 50, true),
+    ] {
+        {
+            let mut state = observed.borrow_mut();
+            state.sample = sample(&record, fixture.capture.tick() + relative_tick, |_| {})?;
+            state.grant_pause = clear;
+        }
+        let result = poll(&mut fixture, &mut monitor, index, &observed)?;
+        assert!(result.progress().construction_proven);
+        assert_eq!(result.progress().current_goal, PredicateTruth::True);
+        assert_eq!(
+            result.progress().failure_predicate,
+            Some(if clear { PredicateTruth::False } else { PredicateTruth::Unknown })
+        );
+        assert_eq!(result.original_goal_proven(), matches!(index, 4 | 6));
+        assert_eq!(result.semantic_completion_proven(), matches!(index, 4 | 6));
+        if index == 2 {
+            assert!(matches!(
+                result.progress().obligation,
+                Some(ObligationStatus::Active {
+                    consecutive_stable_observations: 0,
+                    ..
+                })
+            ));
+        }
+        if index == 4 {
+            achieved = result.progress().first_satisfied_anchor;
+            terminal = result.progress().obligation.clone();
+            assert!(achieved.is_some());
+        }
+        if index >= 4 {
+            assert_eq!(result.progress().first_satisfied_anchor, achieved);
+            assert_eq!(result.progress().obligation, terminal);
+        }
+    }
+    assert_eq!(fixture.native.borrow().commits, 1);
+    assert_eq!(observed.borrow().active, 0);
     Ok(())
 }

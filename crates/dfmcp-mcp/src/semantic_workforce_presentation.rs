@@ -364,6 +364,8 @@ fn render(
     // the remaining stable samples instead of spending the whole deadline.
     let fresh_true_goal = goal.is_some_and(|g| {
         g["current_truth"] == "true"
+            && (matches!(g.get("failure_predicate"), Some(Value::Null))
+                || g["failure_predicate"] == "false")
             && anchor(&g["anchor"]).is_some()
             && g["anchor"] == view["anchor"]
             && anchor_tick == known_tick

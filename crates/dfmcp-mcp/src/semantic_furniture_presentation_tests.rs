@@ -426,6 +426,54 @@ fn clock_offers_require_current_viable_evidence_scope_allowance_and_original_dea
 }
 
 #[test]
+fn unknown_or_missing_failure_evidence_blocks_clock_control_but_not_cancellation()
+-> Result<(), serde_json::Error> {
+    for prepared in [false, true] {
+        for failure in [
+            Some(json!("unknown")),
+            Some(json!("true")),
+            Some(json!(false)),
+            None,
+        ] {
+            let mut view = construction_clock_source();
+            if prepared {
+                prepare_clock(&mut view);
+            }
+            match failure {
+                Some(value) => view["current_goal"]["failure_predicate"] = value,
+                None => {
+                    view["current_goal"]
+                        .as_object_mut()
+                        .expect("goal")
+                        .remove("failure_predicate");
+                }
+            }
+            let packet = clock_packet("fortress.query", view, 1200)?;
+            assert!(!offers_clock(&packet, "fortress.plan"));
+            assert!(!offers_clock(&packet, "fortress.commit"));
+            if prepared {
+                assert!(offers_clock(&packet, "fortress.cancel"));
+            }
+        }
+        let mut view = construction_clock_source();
+        view["current_goal"]["failure_predicate"] = json!("false");
+        if prepared {
+            prepare_clock(&mut view);
+        }
+        let packet = clock_packet("fortress.query", view, 1200)?;
+        assert!(offers_clock(
+            &packet,
+            if prepared {
+                "fortress.commit"
+            } else {
+                "fortress.plan"
+            }
+        ));
+    }
+    Ok(())
+}
+
+#[test]
 fn prepared_clock_uses_its_distinct_review_and_never_recommends_placement()
 -> Result<(), serde_json::Error> {
     let mut view = construction_clock_source();

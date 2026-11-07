@@ -143,7 +143,8 @@ pub(super) fn offers(c: Context<'_>) -> Offers {
         g["receipt_linked"] == true
             && g["original_goal_proven"] == false
             && g["semantic_completion_proven"] == false
-            && g["failure_predicate"] != "true"
+            && (matches!(g.get("failure_predicate"), Some(Value::Null))
+                || g["failure_predicate"] == "false")
             && g["temporal_status"]
                 .as_str()
                 .is_some_and(|status| status == "Pending" || status.starts_with("Active {"))

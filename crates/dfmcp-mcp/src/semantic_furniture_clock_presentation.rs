@@ -144,7 +144,8 @@ pub(super) fn offers(c: Context<'_>) -> Offers {
                 Some("pending" | "condition_met")
             )
             && matches!(g["current_truth"].as_str(), Some("true" | "false"))
-            && g["failure_predicate"] != "true"
+            && (matches!(g.get("failure_predicate"), Some(Value::Null))
+                || g["failure_predicate"] == "false")
             && g["semantic_completion_proven"] == false
             && anchor(&g["anchor"]).is_some()
             && g["anchor"] == view["anchor"]

@@ -18,7 +18,7 @@ use dfmcp_intent::{
 };
 use dfmcp_world::{
     CompareOp, EntityKind, EntityRecord, EvidenceCoverage, EvidencePolicy, EvidenceSource, Fact,
-    FactSource, Predicate, PredicateEvidence, Value, WorldGraph, WorldSnapshot,
+    FactSource, Predicate, PredicateEvidence, PredicateTruth, Value, WorldGraph, WorldSnapshot,
 };
 
 const UNIT: EntityId = EntityId::new(1);
@@ -472,5 +472,241 @@ fn recovered_explicit_evidence_restarts_cadence_without_inheriting_trust_or_stre
     let retained = explicit.after_restart(&another_restart)?;
     assert_eq!(retained.status(), explicit.status());
     assert_eq!(retained.last_observation_anchor(), proof);
+    Ok(())
+}
+
+fn failure_scope(snapshot: &WorldSnapshot, authorize_failure: bool) -> EvidencePolicy {
+    let mut policy = scoped_policy(snapshot);
+    policy.paused = true;
+    if !authorize_failure {
+        policy.sources.clear();
+    }
+    policy
+}
+
+fn observed_ready(tick: u64, epoch: u64, ready: bool) -> WorldSnapshot {
+    snapshot(
+        tick,
+        epoch,
+        ready,
+        FactSource::DfhackField("unit.ready".to_owned()),
+        digest(),
+    )
+}
+
+#[test]
+fn true_terminal_does_not_fulfill_while_independent_failure_evidence_is_unknown() -> Result<()> {
+    let sample = observed_ready(10, 0, true);
+    let evidence = PredicateEvidence::scoped(&sample, failure_scope(&sample, false))?;
+    assert_eq!(evidence.evaluate(&Predicate::Paused(true))?, PredicateTruth::True);
+    for failure in [ready(false), Predicate::Not(Box::new(ready(true)))] {
+        assert_eq!(evidence.evaluate(&failure)?, PredicateTruth::Unknown);
+        let action = ActionId::new(1);
+        let mut runtime = ObligationRuntime::new();
+        runtime.register_obligation(
+            action,
+            obligation(Predicate::Paused(true), Some(failure), 1),
+            GameTick(0),
+        )?;
+        runtime.step_tick_with_evidence(&evidence)?;
+        assert_streak(runtime.get_status(action), 0);
+        assert_eq!(runtime.last_observation_anchor(action), Some(sample.anchor()));
+
+        let clear = observed_ready(20, 0, true);
+        runtime.step_tick_with_evidence(&PredicateEvidence::scoped(
+            &clear,
+            failure_scope(&clear, true),
+        )?)?;
+        assert!(matches!(
+            runtime.get_status(action),
+            Some(ObligationStatus::Fulfilled { fulfilled_at_tick: GameTick(20), .. })
+        ));
+    }
+    Ok(())
+}
+
+#[test]
+fn unknown_failure_resets_due_off_cadence_and_same_tick_stability() -> Result<()> {
+    for unknown_tick in [10, 11, 20] {
+        let action = ActionId::new(1);
+        let mut runtime = ObligationRuntime::new();
+        runtime.register_obligation(
+            action,
+            obligation(Predicate::Paused(true), Some(ready(false)), 2),
+            GameTick(0),
+        )?;
+        let first = observed_ready(10, 0, true);
+        runtime.step_tick_with_evidence(&PredicateEvidence::scoped(
+            &first,
+            failure_scope(&first, true),
+        )?)?;
+        assert_streak(runtime.get_status(action), 1);
+
+        let unknown = observed_ready(unknown_tick, 0, true);
+        runtime.step_tick_with_evidence(&PredicateEvidence::scoped(
+            &unknown,
+            failure_scope(&unknown, false),
+        )?)?;
+        assert_streak(runtime.get_status(action), 0);
+        // Restoring source authority at the same tick cannot restore the lost
+        // streak or move the next eligible sample beyond the original cadence.
+        runtime.step_tick_with_evidence(&PredicateEvidence::scoped(
+            &unknown,
+            failure_scope(&unknown, true),
+        )?)?;
+        assert_streak(runtime.get_status(action), 0);
+        let next_tick = if unknown_tick == 20 { 30 } else { 20 };
+        let next = observed_ready(next_tick, 0, true);
+        runtime.step_tick_with_evidence(&PredicateEvidence::scoped(
+            &next,
+            failure_scope(&next, true),
+        )?)?;
+        assert_streak(runtime.get_status(action), 1);
+        let last = observed_ready(next_tick + 10, 0, true);
+        runtime.step_tick_with_evidence(&PredicateEvidence::scoped(
+            &last,
+            failure_scope(&last, true),
+        )?)?;
+        assert!(matches!(
+            runtime.get_status(action),
+            Some(ObligationStatus::Fulfilled { .. })
+        ));
+    }
+    Ok(())
+}
+
+#[test]
+fn failure_absence_needs_complete_domain_even_with_a_proven_terminal() -> Result<()> {
+    let action = ActionId::new(1);
+    let mut runtime = ObligationRuntime::new();
+    runtime.register_obligation(
+        action,
+        obligation(
+            Predicate::Paused(true),
+            Some(Predicate::EntityExists(MISSING)),
+            1,
+        ),
+        GameTick(0),
+    )?;
+    let first = observed_ready(10, 0, true);
+    let partial = PredicateEvidence::scoped(&first, failure_scope(&first, true))?;
+    assert_eq!(
+        partial.evaluate(&Predicate::EntityExists(MISSING))?,
+        PredicateTruth::Unknown
+    );
+    runtime.step_tick_with_evidence(&partial)?;
+    assert_streak(runtime.get_status(action), 0);
+
+    let next = observed_ready(20, 0, true);
+    let mut policy = failure_scope(&next, true);
+    policy.all_entities = EvidenceCoverage::Complete;
+    runtime.step_tick_with_evidence(&PredicateEvidence::scoped(&next, policy)?)?;
+    assert!(matches!(
+        runtime.get_status(action),
+        Some(ObligationStatus::Fulfilled { .. })
+    ));
+    Ok(())
+}
+
+#[test]
+fn unknown_failure_cannot_extend_deadline_or_replace_true_failure_precedence() -> Result<()> {
+    for (tick, qualified_failure) in [(15, false), (16, false), (16, true)] {
+        let action = ActionId::new(1);
+        let mut runtime = ObligationRuntime::new();
+        let mut spec = obligation(Predicate::Paused(true), Some(ready(false)), 1);
+        spec.deadline_tick = GameTick(15);
+        spec.poll_interval_ticks = 100;
+        runtime.register_obligation(action, spec, GameTick(0))?;
+        let sample = observed_ready(tick, 0, false);
+        runtime.step_tick_with_evidence(&PredicateEvidence::scoped(
+            &sample,
+            failure_scope(&sample, qualified_failure),
+        )?)?;
+        let status = runtime.get_status(action);
+        assert!(
+            matches!(status, Some(ObligationStatus::Failed { .. })),
+            "uncleared failure at the deadline must not fulfill: {status:?}"
+        );
+        if let Some(ObligationStatus::Failed {
+            failed_at_tick,
+            reason,
+        }) = status
+        {
+            assert_eq!(*failed_at_tick, GameTick(tick));
+            assert_eq!(reason.contains("failure predicate"), qualified_failure);
+            assert_eq!(reason.contains("deadline"), !qualified_failure);
+        }
+        let terminal = runtime.get_status(action).cloned();
+        let later = observed_ready(30, 0, true);
+        runtime.step_tick_with_evidence(&PredicateEvidence::scoped(
+            &later,
+            failure_scope(&later, true),
+        )?)?;
+        assert_eq!(runtime.get_status(action), terminal.as_ref());
+    }
+    Ok(())
+}
+
+#[test]
+fn recovery_requires_fresh_failure_clearance_without_rewriting_terminal_history() -> Result<()> {
+    let action = ActionId::new(1);
+    let mut spec = obligation(Predicate::Paused(true), Some(ready(false)), 2);
+    spec.deadline_tick = GameTick(60);
+    let frontier = observed_ready(20, 1, true);
+    let mut monitor = RecoveredObligation::new_with_evidence(
+        action,
+        spec,
+        GameTick(0),
+        &PredicateEvidence::scoped(&frontier, failure_scope(&frontier, true))?,
+    )?;
+    let first = observed_ready(30, 1, true);
+    monitor.observe_with_evidence(&PredicateEvidence::scoped(
+        &first,
+        failure_scope(&first, true),
+    )?)?;
+    assert_streak(monitor.status(), 1);
+
+    let restarted = observed_ready(35, 2, true);
+    let mut monitor = monitor.after_restart_with_evidence(&PredicateEvidence::scoped(
+        &restarted,
+        failure_scope(&restarted, false),
+    )?)?;
+    let unknown = observed_ready(45, 2, true);
+    monitor.observe_with_evidence(&PredicateEvidence::scoped(
+        &unknown,
+        failure_scope(&unknown, false),
+    )?)?;
+    assert_streak(monitor.status(), 0);
+    let first_clear = observed_ready(55, 2, true);
+    monitor.observe_with_evidence(&PredicateEvidence::scoped(
+        &first_clear,
+        failure_scope(&first_clear, true),
+    )?)?;
+    assert_streak(monitor.status(), 1);
+    let final_clear = observed_ready(60, 2, true);
+    monitor.observe_with_evidence(&PredicateEvidence::scoped(
+        &final_clear,
+        failure_scope(&final_clear, true),
+    )?)?;
+    assert!(matches!(
+        monitor.status(),
+        Some(ObligationStatus::Fulfilled {
+            fulfilled_at_tick: GameTick(60),
+            ..
+        })
+    ));
+
+    let terminal = monitor.status().cloned();
+    let achieved = monitor.last_observation_anchor();
+    let later = observed_ready(70, 2, false);
+    monitor.observe_with_evidence(&PredicateEvidence::scoped(
+        &later,
+        failure_scope(&later, false),
+    )?)?;
+    assert_eq!(monitor.status(), terminal.as_ref());
+    assert_eq!(monitor.last_observation_anchor(), achieved);
+    let restored = monitor.after_restart(&observed_ready(80, 3, false))?;
+    assert_eq!(restored.status(), terminal.as_ref());
+    assert_eq!(restored.last_observation_anchor(), achieved);
     Ok(())
 }

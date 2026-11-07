@@ -202,7 +202,7 @@ fn clock_view() -> Value {
     let mut view = applied();
     view["recovery"]["clock_journal_id"] = json!("2".repeat(64));
     view["current_goal"] = json!({"anchor":anchor_value(original_anchor()),"current_truth":"true",
-        "original_goal_proven":false,"semantic_completion_proven":false});
+        "original_goal_proven":false,"semantic_completion_proven":false,"failure_predicate":null});
     view["clock"] = json!({"journal_id":"2".repeat(64),"head":"3".repeat(64),
         "mode":"control","target_digest":"4".repeat(64),"original_paired_seal":"c".repeat(64),
         "run_count":0,"pending":false,"unresolved":false,"may_be_running":false,
@@ -763,6 +763,70 @@ fn a_fresh_matching_goal_sample_is_required_before_another_run() {
             p["agent_turn"]["recommendations"][0]["tool"],
             "fortress.wait"
         );
+    }
+}
+
+#[test]
+fn unknown_or_missing_failure_evidence_blocks_clock_control_but_not_cancellation() {
+    for prepared in [false, true] {
+        for failure in [
+            Some(json!("unknown")),
+            Some(json!("true")),
+            Some(json!(false)),
+            None,
+        ] {
+            let mut view = clock_view();
+            if prepared {
+                view["clock"]["active_run"] = prepared_run();
+                view["clock"]["pending"] = json!(true);
+                view["clock"]["run_count"] = json!(1);
+            }
+            match failure {
+                Some(value) => view["current_goal"]["failure_predicate"] = value,
+                None => {
+                    view["current_goal"]
+                        .as_object_mut()
+                        .expect("goal")
+                        .remove("failure_predicate");
+                }
+            }
+            let packet = clock_output(
+                "fortress.query",
+                "control",
+                clock_success(),
+                view,
+                clock_budget(1200),
+                false,
+            );
+            assert!(!clock_enabled(&packet, "fortress.plan"));
+            assert!(!clock_enabled(&packet, "fortress.commit"));
+            if prepared {
+                assert!(clock_enabled(&packet, "fortress.cancel"));
+            }
+        }
+        let mut view = clock_view();
+        view["current_goal"]["failure_predicate"] = json!("false");
+        if prepared {
+            view["clock"]["active_run"] = prepared_run();
+            view["clock"]["pending"] = json!(true);
+            view["clock"]["run_count"] = json!(1);
+        }
+        let packet = clock_output(
+            "fortress.query",
+            "control",
+            clock_success(),
+            view,
+            clock_budget(1200),
+            false,
+        );
+        assert!(clock_enabled(
+            &packet,
+            if prepared {
+                "fortress.commit"
+            } else {
+                "fortress.plan"
+            }
+        ));
     }
 }
 

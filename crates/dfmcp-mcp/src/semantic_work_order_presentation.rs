@@ -369,7 +369,12 @@ fn render(
             && v["original_paired_seal"] == view["review"]["paired_seal"]
             && v["journal_id"] == view["recovery"]["clock_journal_id"]
     });
+    let failure_clear = goal.is_some_and(|value| {
+        matches!(value.get("failure_predicate"), Some(Value::Null))
+            || value["failure_predicate"] == "false"
+    });
     let clock_commit = clock_authority
+        && failure_clear
         && !inventory_pending
         && clock_linked
         && !uncertain
@@ -392,6 +397,7 @@ fn render(
                     .is_some_and(|(end, deadline)| end <= deadline)
         });
     let run_proposal = clock_authority
+        && failure_clear
         && !inventory_pending
         && clock_linked
         && !uncertain
@@ -414,9 +420,9 @@ fn render(
     });
     let inventory_viable = inventory.is_some()
         && !objective_proven
+        && failure_clear
         && goal.is_some_and(|value| {
             value["current_truth"] == "true"
-                && value["failure_predicate"] != "true"
                 && value["temporal_status"]
                     .as_str()
                     .is_some_and(|status| status == "Pending" || status.starts_with("Active {"))

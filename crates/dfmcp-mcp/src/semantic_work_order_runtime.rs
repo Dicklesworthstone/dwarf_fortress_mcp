@@ -1312,6 +1312,11 @@ impl<S: Shell> Runtime<S> {
             .ok_or_else(|| {
                 denied("clock control requires a fresh receipt-linked original-goal sample")
             })?;
+        if !matches!(goal.failure_predicate, None | Some(PredicateTruth::False)) {
+            return Err(denied(
+                "clock control requires the original failure condition to be known clear",
+            ));
+        }
         let inventory_goal = sample
             .original
             .as_ref()

@@ -9,7 +9,7 @@ fn viable(progress: &DigGoalProgress, readiness: Option<&ClockReadiness>) -> Res
                 || ready.anchor != progress.anchor
                 || ready.source_digest != progress.source_digest
         })
-        || progress.failure_predicate == Some(PredicateTruth::True)
+        || !matches!(progress.failure_predicate, None | Some(PredicateTruth::False))
         || !matches!(
             progress.obligation,
             Some(ObligationStatus::Pending | ObligationStatus::Active { .. })

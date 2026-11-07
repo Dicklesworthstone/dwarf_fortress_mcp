@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 use dfmcp_core::{
     ActionId, DfmcpError, ErrorCode, Evidence, EvidenceKind, GameTick, Result, StateAnchor,
 };
-use dfmcp_world::{Predicate, PredicateEvidence, WorldSnapshot};
+use dfmcp_world::{Predicate, PredicateEvidence, PredicateTruth, WorldSnapshot};
 
 use crate::plan::ObligationSpec;
 
@@ -211,7 +211,9 @@ impl ObligationRuntime {
     ///
     /// Poll cadence limits positive stability samples, not the failure evidence
     /// a caller has already supplied. An off-cadence contradiction resets the
-    /// streak without moving the next eligible poll. Terminal records are immutable.
+    /// streak without moving the next eligible poll. An unknown configured
+    /// failure condition also interrupts stability: absence of failure evidence
+    /// cannot establish that the condition is clear. Terminal records are immutable.
     pub fn step_tick(&mut self, snapshot: &WorldSnapshot) -> Result<()> {
         self.step_tick_with_evidence(&PredicateEvidence::untrusted(snapshot)?)
     }
@@ -262,14 +264,12 @@ impl ObligationRuntime {
                     "obligation observation changed lineage, regressed, or forked a cursor",
                 ));
             }
-            let failure = obligation
-                .spec
-                .failure
-                .as_ref()
-                .map(|predicate| evidence.establishes(predicate))
-                .transpose()?
-                .unwrap_or(false);
-            let satisfied = evidence.establishes(&obligation.spec.terminal)?;
+            let failure = match &obligation.spec.failure {
+                Some(predicate) => evidence.evaluate(predicate)?,
+                None => PredicateTruth::False,
+            };
+            let satisfied = evidence.establishes(&obligation.spec.terminal)?
+                && failure == PredicateTruth::False;
             predicates.insert(obligation.action_id, (failure, satisfied));
         }
 
@@ -292,9 +292,8 @@ impl ObligationRuntime {
             // when a second observation at the same game tick changes the facts.
             let (failure, satisfied) = predicates
                 .get(&obligation.action_id)
-                .copied()
-                .unwrap_or((false, false));
-            if failure {
+                .map_or((PredicateTruth::Unknown, false), |values| *values);
+            if failure == PredicateTruth::True {
                 obligation.status = ObligationStatus::Failed {
                     failed_at_tick: snapshot.tick,
                     reason: "obligation failure predicate triggered".to_owned(),

@@ -389,7 +389,7 @@ fn clock_retained(prepared: bool) -> Value {
     view["current_goal_available"] = json!(true);
     view["current_goal"] = json!({"anchor":anchor_value(original_anchor()),"current_truth":"false",
         "original_goal_proven":false,"receipt_linked":true,"physical_quiescence_proven":false,
-        "semantic_completion_proven":false});
+        "semantic_completion_proven":false,"failure_predicate":null});
     let run = json!({"review_seal":"2".repeat(64),"key":"semantic-clock-original-key",
         "plan_digest":"3".repeat(64),"state":"prepared","native_order_id":99,
         "before_tick":40,"game_ticks":20,"wall_millis":1000,"pending":true,"unresolved":false,
@@ -463,6 +463,46 @@ fn clock_only_control_proposes_closed_bounded_run_without_production_grant() {
         p["agent_turn"]["budget"]["admitted"]["max_game_ticks"],
         1200
     );
+}
+
+#[test]
+fn unknown_or_missing_failure_evidence_blocks_clock_control_but_not_cancellation() {
+    for prepared in [false, true] {
+        for failure in [
+            Some(json!("unknown")),
+            Some(json!("true")),
+            Some(json!(false)),
+            None,
+        ] {
+            let mut view = clock_retained(prepared);
+            match failure {
+                Some(value) => view["current_goal"]["failure_predicate"] = value,
+                None => {
+                    view["current_goal"]
+                        .as_object_mut()
+                        .expect("goal")
+                        .remove("failure_predicate");
+                }
+            }
+            let packet = clock_output("control", clock_success(), view, 1200, false);
+            assert!(!clock_enabled(&packet, "fortress.plan"));
+            assert!(!clock_enabled(&packet, "fortress.commit"));
+            if prepared {
+                assert!(clock_enabled(&packet, "fortress.cancel"));
+            }
+        }
+        let mut view = clock_retained(prepared);
+        view["current_goal"]["failure_predicate"] = json!("false");
+        let packet = clock_output("control", clock_success(), view, 1200, false);
+        assert!(clock_enabled(
+            &packet,
+            if prepared {
+                "fortress.commit"
+            } else {
+                "fortress.plan"
+            }
+        ));
+    }
 }
 
 #[test]

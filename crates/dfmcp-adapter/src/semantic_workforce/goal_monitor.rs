@@ -113,7 +113,7 @@ impl WorkforceGoalProgress {
     /// This says nothing about an unresolved native action.
     pub fn current_goal_proven(&self) -> bool {
         self.current_goal == PredicateTruth::True
-            && self.failure_predicate != Some(PredicateTruth::True)
+            && matches!(self.failure_predicate, None | Some(PredicateTruth::False))
             && self
                 .obligation
                 .as_ref()

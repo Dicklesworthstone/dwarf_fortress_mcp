@@ -85,7 +85,7 @@ impl<S: Shell> Runtime<S> {
             .filter(|g| g.anchor == self.anchor)
             .ok_or_else(|| denied("clock control requires fresh original labor evidence"))?;
         if goal.current_goal != PredicateTruth::True
-            || goal.failure_predicate == Some(PredicateTruth::True)
+            || !matches!(goal.failure_predicate, None | Some(PredicateTruth::False))
         {
             return Err(denied(
                 "clock advancement requires current true original labor predicates",
@@ -172,7 +172,7 @@ impl<S: Shell> Runtime<S> {
         let progress = sample.progress();
         if progress.anchor.tick != c.anchor.tick
             || progress.current_goal != PredicateTruth::True
-            || progress.failure_predicate == Some(PredicateTruth::True)
+            || !matches!(progress.failure_predicate, None | Some(PredicateTruth::False))
         {
             return Err(denied(
                 "labor source changed after clock review; native unpause refused",
