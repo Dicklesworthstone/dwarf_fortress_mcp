@@ -152,20 +152,23 @@ The returned `production_inspection_source` has
 belongs to the operations snapshot; `canonical_anchor` and `parent_anchor` name
 the citizen observation used for subsequent planning. These are distinct
 source identities, even at the same tick. The source descriptor includes its
-digest, a ready `diagnosis_request`, a ready `inventory_request`, and the six
-supported query kinds. Use the descriptor's operations `anchor` for query
+digest, ready `diagnosis_request`, `inventory_request` and
+`inventory_totals_request` handles, and the seven supported query kinds.
+Use the descriptor's operations `anchor` for query
 `expected_anchor`, and the current citizen `observation.seal` for original Plan.
 Neither field substitutes for the other.
 
 Call `fortress_query` with the same session ID and the JSON encoding of
-`diagnosis_request` or `inventory_request` as its `request` string. No
+`diagnosis_request`, `inventory_request` or `inventory_totals_request` as its
+`request` string. No
 `order_step_id` is accepted before an original exists. Query uses only the
 retained capture, rechecking current read authority and source pins without
 native contact. It supports the same `production_diagnosis`, `inventory_plan`,
-`entities`, `inspect`, `traverse` and `dependencies` operations described below.
+`entities`, `inspect`, `traverse`, `dependencies` and `aggregate` operations described below.
 The diagnosis can identify observed suspension, worker, holder and attachment
-conditions. The inventory query exposes actual item types and stack quantities;
-declared-demand allocation can then show competing demand and conservative
+conditions. The inventory query exposes individual item types and stack quantities,
+while the totals request groups complete observed stock by item type in one bounded
+result. Declared-demand allocation can then show competing demand and conservative
 shortage without counting the same stack units twice.
 
 Agent Turn guidance offers this explicit read before original planning when
@@ -283,8 +286,9 @@ The enclosing labor/order or portfolio anchor remains separately named
 selected projection.
 
 Call `fortress_query` with the session ID and an optional `request` string
-containing one closed `dfmcp.query/1` envelope. The descriptor supplies a ready
-`diagnosis_request`, including the correct `expected_anchor`. For a portfolio,
+containing one closed `dfmcp.query/1` envelope. The descriptor supplies ready
+`diagnosis_request` and `inventory_totals_request` handles, including the correct
+`expected_anchor`. For a portfolio,
 `order_step_id` optionally selects the exact original leaf. A leaf is inspectable
 only when its source matches the current selected sample or an exact member of
 the current complete portfolio cohort. A different leaf's same-tick observation
@@ -315,6 +319,74 @@ full native recipe requirements, path access or labor-eligibility proof.
 The result explicitly carries `attribution="not_order_attributed"`. It neither
 identifies a proven causal blocker for the selected order nor changes the
 original goal's proof, deadline, plan or clock authority.
+
+### Count the complete captured stock
+
+Copy `production_inspection_source.inventory_totals_request` into the Query
+request to obtain item records and stack-unit totals by `type_key`. The same
+handle is available before original planning and after a successful original-goal
+Wait. It names the source's exact public `anchor`, so the result stays attached to
+the operations census the caller inspected. Query uses the retained source and
+performs the existing current-authority and whole-source budget checks.
+
+The ready request has this query body:
+
+```json
+{
+  "kind": "aggregate",
+  "kinds": ["item"],
+  "group_by": {"kind": "field", "field": "type_key"},
+  "metrics": [
+    {"name": "stack_units", "field": "stack_size", "numeric_type": "u64"}
+  ],
+  "max_groups": 32
+}
+```
+
+Each `groups` entry contains its typed `key`, a `count` of matching item records,
+and `metrics.stack_units`. The metric reports numeric samples and excluded
+values, source categories, exact decimal-string `sum`, `minimum` and `maximum`,
+and an exact rational `mean`. Record counts and stack quantities are separate:
+three WOOD records with stack sizes 1, 7 and 99 produce `count=3` and `sum="107"`.
+If the first record is rotten and the last removed, the conservative inventory
+allocator can still expose only seven eligible units from the same source.
+
+The descriptor labels these totals with
+`inventory_totals_semantics="observed_stock_not_usable_supply"`. The report repeats
+that value as `stock_semantics`, with `eligibility="not_assessed"`,
+`reservation_created=false` and `original_goal_evidence=false`. This is an inferred
+summary of recorded quantities. Access, usable materials, native recipe
+feasibility, and production attribution remain separate questions. A large
+captured total cannot establish completion of the original goal or replace the
+fresh baseline required by an inventory-increase Plan.
+
+Use the existing typed `where` filter to select a narrower total. For example,
+this filter selects BED records:
+
+```json
+{
+  "op": "compare",
+  "field": "type_key",
+  "comparison": "eq",
+  "value": {"type": "text", "value": "BED"}
+}
+```
+
+Omit `group_by` to obtain one total for that selection. The `selection` object
+distinguishes `matched`, `excluded_false` and `excluded_unknown`; a missing or
+unavailable field remains Unknown even under negation. An empty selection still
+has one all-group with `count=0`, but its `sum`, `minimum`, `maximum` and `mean`
+are null when there are no numeric samples. Check sample and exclusion counts
+before interpreting a total. `coverage.absence_proven` remains false.
+
+`max_groups` defaults to 32 and accepts 1–128; at most 16 uniquely named metrics
+are accepted. Metric numeric types are `u64`, `i64` or `fixed`; fixed metrics
+require an explicit scale, while integer metrics omit it. Exceeding the group
+bound refuses the complete result, so raise the bound within its limit or narrow
+the filter before requesting a new source. Aggregate has no `limit` or
+continuation fields and never publishes partial totals. A refused aggregate
+withdraws all current inspection handles: acquire another explicit production
+Observe before planning, or another successful original-goal Wait afterward.
 
 The `inventory_plan` query allocates caller-declared stack-unit requirements
 against conservatively eligible observed inventory. For example:

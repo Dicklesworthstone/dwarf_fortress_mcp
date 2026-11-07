@@ -1,5 +1,36 @@
 # Implementation Status
 
+## Unreleased — Summarize captured stock before choosing production targets
+
+Both combined production inspection paths now accept the existing typed
+`aggregate` query over their exact retained Operations snapshot. The public
+descriptor supplies an `inventory_totals_request` that groups item records by
+type and sums observed stack units. Agents can obtain complete bounded totals
+without downloading and adding every item page or performing another game read.
+The same exact public-anchor translation applies to all seven inspection kinds.
+
+These are observed-stock statistics. They include captured items that may be
+removed, rotten, contained or otherwise unsuitable for allocation. The separate
+declared-inventory allocator retains its conservative eligibility rules; the
+regression fixture has 107 observed WOOD stack units but only seven allocatable
+units. Aggregate results explicitly report eligibility as unassessed, create no
+reservations and provide no original-goal evidence. They never substitute for
+the fresh independently qualified baseline acquired during growth planning.
+
+The shared engine preserves typed filters, separate False and Unknown counts,
+exact decimal sums and rational means, and null statistics when there are no
+numeric samples. Group limits refuse an incomplete result instead of publishing
+partial totals. Complete-source budgets, current read authority, custody checks,
+source withdrawal and final result bounds remain enforced.
+
+Six focused Rust cases and four additional public stdio scenarios are authored.
+Python syntax and actual suite discovery pass with 68 scenarios. Their Rust and
+stdio execution remains unverified while a lower-memory diagnostic build is
+attempted after the pinned asupersync compiler was killed by SIGKILL. Existing
+138-test world-library evidence is separate; no full-head, native or live-game
+qualification is claimed. This advances `df-production-preplan-inspection-7hd`
+and the structured-query functionality described by the comprehensive plan.
+
 ## Unreleased — Separate query source and output budgets
 
 Spatial and relationship entity queries now retain the caller's full authorized

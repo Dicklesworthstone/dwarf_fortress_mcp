@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased — Complete captured inventory totals
+
+- Add typed `aggregate` queries to both combined production inspection paths,
+  with a ready `inventory_totals_request` grouped by item type and exact observed
+  stack-unit totals. Retain the same capture, public source anchor and digest.
+- Distinguish observed stock from usable supply. Preserve the separate inventory
+  allocator's eligibility rules, Unknown filter outcomes, null empty statistics,
+  complete-group limits and final output bounds. No additional native read,
+  reservation or goal evidence is created.
+- Add six Rust regressions and four public stdio scenarios; the suite now
+  discovers 68 cases. Rust/stdio execution remains pending the lower-memory
+  diagnostic retry after a dependency compiler SIGKILL; no live pass is claimed.
+
 ## Unreleased — Keep small query pages usable on large captured sources
 
 - Separate full-source admission from rendered-output reservation for spatial

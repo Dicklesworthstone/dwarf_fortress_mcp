@@ -98,7 +98,8 @@ class PreplanInspectionTests:
         self.assertFalse(source['restored_from_history'])
         self.assertEqual(set(source['query_kinds']), {
             'production_diagnosis', 'inventory_plan', 'entities', 'inspect',
-            'traverse', 'dependencies'})
+            'traverse', 'dependencies', 'aggregate'})
+        self.assertEqual(source['inventory_totals_semantics'], 'observed_stock_not_usable_supply')
         self.assert_preplan_no_effect(result)
         return result
 
@@ -149,7 +150,7 @@ class PreplanInspectionTests:
                 'objective': {'kind': 'observed_inventory_increase', 'item_type': 'BED',
                               'increase_stack_units': 1}}
 
-    def test_preplan_discovers_inventory_diagnosis_and_all_six_queries_without_plan(self):
+    def test_preplan_discovers_inventory_diagnosis_and_retained_queries_without_plan(self):
         sid = self.preplan_open()
         observed = self.preplan_observe(sid)
         self.assertEqual(self.preplan_reads(), 1)
@@ -187,6 +188,105 @@ class PreplanInspectionTests:
         self.assertEqual(allocation['summary']['allocated_units'], 7)
         self.assertEqual(allocation['certificate']['shortage']['deficit'], 1)
         self.assertEqual(self.preplan_reads(), 1, 'Query must use the single retained capture')
+
+    def test_preplan_copied_stock_totals_count_observed_units_without_allocating_them(self):
+        sid = self.preplan_open()
+        observed = self.preplan_observe(sid)
+        source = observed['production_inspection_source']
+        request = source['inventory_totals_request']
+        self.assertEqual(request, envelope({
+            'kind': 'aggregate', 'kinds': ['item'],
+            'group_by': {'kind': 'field', 'field': 'type_key'},
+            'metrics': [{'name': 'stack_units', 'field': 'stack_size', 'numeric_type': 'u64'}],
+            'max_groups': 32}, source['anchor']))
+        report = self.preplan_query(sid, request, observed)
+        self.assert_observed_stock_aggregate(report)
+        self.assertEqual(report['matched'], 5)
+        groups = {group['key']['value']['value']: group for group in report['groups']}
+        self.assertEqual(set(groups), {'WOOD', 'BED', 'BIN'})
+        wood = groups['WOOD']
+        self.assertEqual(wood['key'], {
+            'kind': 'field', 'presence': 'known', 'value': {'type': 'text', 'value': 'WOOD'}})
+        self.assertEqual(wood['count'], 3, 'record count is distinct from stack units')
+        stats = wood['metrics']['stack_units']
+        self.assertEqual(stats['samples'], 3)
+        self.assertEqual(stats['sum'], '107')
+        self.assertEqual(stats['minimum'], '1')
+        self.assertEqual(stats['maximum'], '99')
+        self.assertEqual(stats['mean'], {'numerator': '107', 'denominator': 3})
+        for kind in ('BED', 'BIN'):
+            self.assertEqual(groups[kind]['count'], 1)
+            self.assertEqual(groups[kind]['metrics']['stack_units']['sum'], '1')
+        allocation = self.preplan_query(sid, envelope({
+            'kind': 'inventory_plan', 'quantity_unit': 'stack_units',
+            'demands': [{'key': 'logs', 'units': 108, 'item_types': ['WOOD']}], 'limit': 8},
+            source['anchor']), observed)
+        self.assertEqual(allocation['summary']['candidate_stack_units'], 7)
+        self.assertEqual(allocation['summary']['allocated_units'], 7)
+        self.assertFalse(allocation['model_feasible'])
+        self.assertFalse(allocation['reservation_created'])
+        self.assertEqual(self.preplan_reads(), 1)
+
+    def test_preplan_stock_filters_preserve_false_unknown_and_empty_statistics(self):
+        sid = self.preplan_open()
+        observed = self.preplan_observe(sid)
+        base = observed['production_inspection_source']['inventory_totals_request']
+        unavailable = {'op': 'compare', 'field': 'native_recipe_eligible', 'comparison': 'eq',
+                       'value': {'type': 'bool', 'value': False}}
+        cases = [
+            ('known false flag', {'op': 'compare', 'field': 'removed', 'comparison': 'eq',
+                                  'value': {'type': 'bool', 'value': False}}, 4, 1, 0, '10'),
+            ('no matching type', {'op': 'compare', 'field': 'type_key', 'comparison': 'eq',
+                                 'value': {'type': 'text', 'value': 'DOOR'}}, 0, 5, 0, None),
+            ('unknown field', unavailable, 0, 0, 5, None),
+            ('negated unknown', {'op': 'not', 'arg': unavailable}, 0, 0, 5, None),
+        ]
+        for name, predicate, matched, false_rows, unknown_rows, total in cases:
+            with self.subTest(selection=name):
+                request = copy.deepcopy(base)
+                request['query'].pop('group_by')
+                request['query']['where'] = predicate
+                report = self.preplan_query(sid, request, observed)
+                self.assert_observed_stock_aggregate(report)
+                self.assertEqual(report['matched'], matched)
+                self.assertEqual(report['selection']['selected_entities'], 5)
+                self.assertEqual(report['selection']['excluded_false'], false_rows)
+                self.assertEqual(report['selection']['excluded_unknown'], unknown_rows)
+                self.assertEqual(report['selection']['complete_within_projection'], unknown_rows == 0)
+                self.assertEqual(len(report['groups']), 1)
+                group = report['groups'][0]
+                self.assertEqual(group['key'], {'kind': 'all'})
+                self.assertEqual(group['count'], matched)
+                stats = group['metrics']['stack_units']
+                self.assertEqual(stats['samples'], matched)
+                self.assertEqual(stats['sum'], total)
+                if matched == 0:
+                    for field in ('sum', 'minimum', 'maximum', 'mean'):
+                        self.assertIsNone(stats[field], 'an empty statistic is not a stock value')
+        self.assertEqual(self.preplan_reads(), 1)
+
+    def test_preplan_aggregate_limits_withdraw_all_source_handles_until_new_observe(self):
+        sid = self.preplan_open()
+        for invalid in ('too few groups', 'invalid metric type'):
+            with self.subTest(request=invalid):
+                observed = self.preplan_observe(sid)
+                valid = observed['production_inspection_source']['inventory_totals_request']
+                request = copy.deepcopy(valid)
+                if invalid == 'too few groups':
+                    request['query']['max_groups'] = 1
+                else:
+                    request['query']['metrics'][0]['numeric_type'] = 'f64'
+                self.assert_inspection_refused(self.inspection_request(sid, request))
+                self.assert_inspection_refused(self.inspection_request(sid, valid))
+                retained = self.client.tool('query', session_id=sid)
+                self.assertTrue(retained['ok'], retained)
+                self.assertIsNone(retained['production_inspection_source'])
+                self.assert_preplan_no_effect(retained)
+        fresh = self.preplan_observe(sid)
+        report = self.preplan_query(
+            sid, fresh['production_inspection_source']['inventory_totals_request'], fresh)
+        self.assert_observed_stock_aggregate(report)
+        self.assertEqual(self.preplan_reads(), 3)
 
     def test_preplan_opt_in_refresh_withdrawal_and_stale_continuation(self):
         sid = self.preplan_open()
@@ -373,7 +473,7 @@ class PreplanInspectionTests:
             '{', envelope({'kind': 'production_diagnosis', 'max_work': 1}),
             envelope({'kind': 'production_diagnosis', 'repair': True}),
             envelope({'kind': 'production_diagnosis', 'limit': 0}),
-            envelope({'kind': 'aggregate'}),
+            envelope({'kind': 'arbitrary_unknown_query'}),
         ]
         for bad_request in invalid:
             with self.subTest(request=bad_request):

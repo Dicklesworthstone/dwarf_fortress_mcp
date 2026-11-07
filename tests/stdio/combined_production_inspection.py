@@ -104,6 +104,20 @@ class InspectionTests:
         retained = result.get('retained_reference', {})
         self.assertIsNone(retained.get('production_inspection_source'))
 
+    def assert_observed_stock_aggregate(self, report):
+        self.assertEqual(report['kind'], 'aggregate')
+        self.assertEqual(report['epistemic_state'], 'inferred')
+        self.assertEqual(report['stock_semantics'], 'observed_stock_not_usable_supply')
+        self.assertEqual(report['eligibility'], 'not_assessed')
+        self.assertFalse(report['reservation_created'])
+        self.assertFalse(report['original_goal_evidence'])
+        self.assertFalse(report['mutation_authority'])
+        self.assertFalse(report['commit_compatible'])
+        self.assertFalse(report['coverage']['absence_proven'])
+        self.assertFalse(report['truncated'])
+        self.assertIsNone(report['continuation'])
+        self.assertEqual(len(report['query_digest']), 64)
+
     def test_production_inspection_diagnoses_pages_and_follows_exact_source_links(self):
         self.peer.operations_capture = operations_capture
         sid, original, _ = self.order_plan()
@@ -225,7 +239,7 @@ class InspectionTests:
             envelope({'kind': 'production_diagnosis'}, first['anchor']),
             stale_page,
             wrong_generation,
-            envelope({'kind': 'aggregate'}),
+            envelope({'kind': 'arbitrary_unknown_query'}),
         ]
         for index, request in enumerate(invalid):
             with self.subTest(request=request):
@@ -242,6 +256,28 @@ class InspectionTests:
         self.assert_inspection_refused(
             self.inspection_request(sid, page_request, order_step_id=999))
         self.assert_inspection_refused(self.inspection_request(sid, page_request))
+
+    def test_production_stock_aggregate_preserves_the_original_goal_and_selected_source(self):
+        self.peer.operations_capture = operations_capture
+        sid, original, _ = self.inventory_plan(stable_samples=2)
+        current = self.goal_sample(sid, 125)
+        self.assertFalse(current['original_goal_proven'])
+        source = current['production_inspection_source']
+        self.assertEqual(source['inventory_totals_semantics'], 'observed_stock_not_usable_supply')
+        self.assertIn('aggregate', source['query_kinds'])
+        result = self.inspection_request(sid, source['inventory_totals_request'])
+        report = self.assert_inspection(result, current, inventory=True)
+        self.assert_observed_stock_aggregate(report)
+        self.assertEqual(report['inspection_scope'], 'captured_operations')
+        self.assertEqual(report['order_step_id'], source['order_step_id'])
+        self.assertEqual(result['production_inspection_source'], source)
+        self.assertEqual(result['selected_inventory_goal'], current['selected_inventory_goal'])
+        self.assertEqual(result['current_parent_goal'], current['current_parent_goal'])
+        self.assertFalse(result['original_goal_proven'])
+        groups = {group['key']['value']['value']: group for group in report['groups']}
+        self.assertEqual(groups['WOOD']['metrics']['stack_units']['sum'], '107')
+        self.assertEqual(groups['BED']['metrics']['stack_units']['sum'], '1')
+        self.assert_single_original_effects(result, original)
 
     def test_production_inspection_withdraws_after_a_failed_parent_bracket(self):
         self.peer.operations_capture = operations_capture

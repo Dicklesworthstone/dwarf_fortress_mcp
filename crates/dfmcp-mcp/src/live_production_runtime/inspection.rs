@@ -13,9 +13,27 @@ mod production;
 #[allow(clippy::duplicate_mod)]
 #[path = "../semantic_query_core.rs"]
 mod structured;
+// The shared aggregate engine uses the same typed filter decoder as entity
+// inspection. This alias preserves that private module contract without
+// admitting any of the shared engine's other query kinds at this boundary.
+use structured as core_query;
+#[allow(clippy::duplicate_mod)]
+#[path = "../operational_query.rs"]
+mod operational;
 
 const MAX_REQUEST: usize = 65_536;
 const MAX_QUERY_TOKENS: u32 = 4_096;
+pub(super) const INVENTORY_TOTALS_SEMANTICS: &str = "observed_stock_not_usable_supply";
+
+/// A bounded complete summary of the captured item records. This deliberately
+/// keeps physical stack quantities separate from allocatable or usable supply.
+pub(super) fn inventory_totals_request(anchor: StateAnchor) -> Value {
+    json!({"schema":"dfmcp.query/1","expected_anchor":anchor_json(anchor),
+        "query":{"kind":"aggregate","kinds":["item"],
+            "group_by":{"kind":"field","field":"type_key"},
+            "metrics":[{"name":"stack_units","field":"stack_size","numeric_type":"u64"}],
+            "max_groups":32}})
+}
 
 pub(crate) struct InspectionRequest(Value);
 impl InspectionRequest {
@@ -46,6 +64,7 @@ impl InspectionRequest {
                         | "inspect"
                         | "traverse"
                         | "dependencies"
+                        | "aggregate"
                 )
             )
         {
@@ -83,7 +102,10 @@ fn execute_structured(
         }
         translated["expected_anchor"] = engine_anchor.clone();
     }
-    let mut payload = structured::execute(snapshot, context, &translated)?;
+    let mut payload = match translated["query"]["kind"].as_str() {
+        Some("aggregate") => operational::execute(snapshot, context, &translated)?,
+        _ => structured::execute(snapshot, context, &translated)?,
+    };
     payload["anchor"] = public_anchor.clone();
     if let Some(witness) = payload.get_mut("witness") {
         if witness["anchor"] != engine_anchor {
@@ -104,6 +126,25 @@ fn execute_structured(
     }
     if let Some(row) = payload.get_mut("row") {
         normalize_stale_fact_anchors(row);
+    }
+    if payload["kind"] == "aggregate" {
+        payload["stock_semantics"] = json!(INVENTORY_TOTALS_SEMANTICS);
+        payload["eligibility"] = json!("not_assessed");
+        payload["reservation_created"] = json!(false);
+        payload["original_goal_evidence"] = json!(false);
+        // Account for the additional stock-interpretation fields as part of
+        // the result. A complete summary cannot be clipped to fit a budget.
+        let maximum = context
+            .budget
+            .max_bytes
+            .min(u64::from(context.budget.max_output_tokens).saturating_mul(4));
+        let bytes = serde_json::to_vec(&payload)
+            .map_err(|_| invalid("cannot encode production aggregate result"))?;
+        if bytes.len() as u64 > maximum {
+            return Err(exhausted(
+                "complete production aggregate exceeds the response budget; narrow kinds, metrics, or groups",
+            ));
+        }
     }
     // Continuations are opaque engine tokens. Keeping them unchanged preserves
     // the exact session, selected-field and complete-snapshot identity checks.
@@ -190,7 +231,9 @@ impl Runtime {
                     "restored_from_history":false,"mutation_authority":false,
                     "diagnosis_request":{"schema":"dfmcp.query/1","expected_anchor":anchor,
                         "query":{"kind":"production_diagnosis","limit":4}},
-                    "query_kinds":["production_diagnosis","inventory_plan","entities","inspect","traverse","dependencies"],
+                    "inventory_totals_request":inventory_totals_request(source.projection.anchor()),
+                    "inventory_totals_semantics":INVENTORY_TOTALS_SEMANTICS,
+                    "query_kinds":["production_diagnosis","inventory_plan","entities","inspect","traverse","dependencies","aggregate"],
                     "unknown":["job_to_original_order_attribution","full_native_job_requirements",
                         "path_access","labor_eligibility","successful_job_completion"]})
             })
@@ -384,12 +427,15 @@ mod tests {
             "inspect",
             "traverse",
             "dependencies",
+            "aggregate",
         ] {
             let request = json!({"schema":"dfmcp.query/1","query":{"kind":kind}});
             assert!(InspectionRequest::parse(&request.to_string()).is_ok());
         }
         for raw in [
             r#"{"schema":"dfmcp.query/1","query":{"kind":"furniture_allocation"}}"#,
+            r#"{"schema":"dfmcp.query/1","query":{"kind":"ranked_entities"}}"#,
+            r#"{"schema":"dfmcp.query/1","query":{"kind":"search"}}"#,
             r#"{"schema":"dfmcp.query/1","query":{"kind":"production_diagnosis"},"confirmed":true}"#,
             r#"{"schema":"dfmcp.query/1","schema":"dfmcp.query/1","query":{"kind":"production_diagnosis"}}"#,
             r#"{"schema":"dfmcp.query/2","query":{"kind":"production_diagnosis"}}"#,
@@ -403,3 +449,7 @@ mod tests {
 #[cfg(test)]
 #[path = "inspection_anchor_tests.rs"]
 mod anchor_tests;
+
+#[cfg(test)]
+#[path = "inspection_aggregate_tests.rs"]
+mod aggregate_tests;

@@ -195,7 +195,9 @@ impl Runtime {
             "inventory_request":{"schema":"dfmcp.query/1","expected_anchor":anchor,
                 "query":{"kind":"entities","kinds":["item"],
                     "fields":["type_key","stack_size","material_type","material_index"],"limit":16}},
-            "query_kinds":["production_diagnosis","inventory_plan","entities","inspect","traverse","dependencies"],
+            "inventory_totals_request":inspection::inventory_totals_request(snapshot.anchor()),
+            "inventory_totals_semantics":inspection::INVENTORY_TOTALS_SEMANTICS,
+            "query_kinds":["production_diagnosis","inventory_plan","entities","inspect","traverse","dependencies","aggregate"],
             "unknown":["native_recipe_requirements","workshop_subtype","path_access",
                 "labor_eligibility","production_attribution","future_production_success"],
             "original_goal_evidence":false,"baseline_reused_for_planning":false})

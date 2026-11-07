@@ -302,7 +302,9 @@
       "crates/dfmcp-mcp/src/live_production_presentation_preplan_tests.rs",
       "crates/dfmcp-mcp/src/semantic_work_order_runtime/policy.rs",
       "tests/stdio/combined_production_preplan.py",
-      "crates/dfmcp-mcp/src/live_production_runtime/inspection_anchor_tests.rs"
+      "crates/dfmcp-mcp/src/live_production_runtime/inspection_anchor_tests.rs",
+      "crates/dfmcp-mcp/src/operational_query.rs",
+      "crates/dfmcp-mcp/src/live_production_runtime/inspection_aggregate_tests.rs"
     ],
     "private_custody_platforms": [
       "linux-x86_64",
@@ -551,7 +553,8 @@
         "entities",
         "inspect",
         "traverse",
-        "dependencies"
+        "dependencies",
+        "aggregate"
       ],
       "source": "exact selected WorkOrderGoalProjection from successful joined original-goal sample",
       "selected_anchor_and_parent_anchor_distinct": true,
@@ -581,7 +584,10 @@
       "unavailable_in_offline_recovery": true,
       "diagnostic_guidance_for_pending_original_goal": true,
       "test_campaign": "tests/stdio/combined_production_inspection.py",
-      "test_execution_status": "added_not_executed_executor_unavailable"
+      "test_execution_status": "added_not_executed_executor_unavailable",
+      "aggregate_inventory_semantics": "observed_stock_not_usable_supply",
+      "aggregate_complete_groups_or_refusal": true,
+      "aggregate_native_contact": false
     },
     "existing_labor": {
       "request_kind": "existing_labor",
@@ -720,7 +726,8 @@
         "entities",
         "inspect",
         "traverse",
-        "dependencies"
+        "dependencies",
+        "aggregate"
       ],
       "source": "retained LiveOperationsState from one complete independently pinned paused capture",
       "scope": "preplan_captured_operations",
@@ -757,7 +764,10 @@
       ],
       "existing_goal_inspection_unchanged": true,
       "new_protocol_or_admission": false,
-      "test_campaign": "tests/stdio/combined_production_preplan.py"
+      "test_campaign": "tests/stdio/combined_production_preplan.py",
+      "aggregate_inventory_semantics": "observed_stock_not_usable_supply",
+      "aggregate_complete_groups_or_refusal": true,
+      "aggregate_native_contact": false
     }
   },
   "selected_work_order_goal_monitor": {
