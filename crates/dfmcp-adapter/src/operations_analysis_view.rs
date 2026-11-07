@@ -3,6 +3,7 @@
 use crate::live_operations::{LiveOperationsObservation, LiveOperationsState};
 use crate::live_spatial::citizens::LiveSpatialCitizenState;
 use crate::live_spatial::{LiveSpatialState, SpatialStateView};
+use crate::operations_inspection::OperationsInspectionProjection;
 use crate::semantic_work_orders::WorkOrderGoalProjection;
 use dfmcp_core::{DfmcpError, Digest32, ErrorCode, Result};
 use dfmcp_world::WorldSnapshot;
@@ -13,6 +14,7 @@ mod sealed {
     impl Sealed for super::LiveSpatialState {}
     impl Sealed for super::LiveSpatialCitizenState {}
     impl Sealed for super::WorkOrderGoalProjection {}
+    impl Sealed for super::OperationsInspectionProjection {}
 }
 
 /// Only canonical, privately published adapter states can implement this view.
@@ -77,6 +79,20 @@ impl OperationsStateView for WorkOrderGoalProjection {
     }
     fn operations_snapshot(&self) -> Option<&WorldSnapshot> {
         Some(self.snapshot())
+    }
+    fn operations_source_digest(&self) -> Result<Digest32> {
+        Ok(self.source_digest())
+    }
+}
+
+/// Preflight analysis borrows the exact published operations source without
+/// synthesizing an original order, parent goal or evidence policy.
+impl OperationsStateView for OperationsInspectionProjection {
+    fn operations_observation(&self) -> Option<&LiveOperationsObservation> {
+        self.operations().ok()
+    }
+    fn operations_snapshot(&self) -> Option<&WorldSnapshot> {
+        self.snapshot().ok()
     }
     fn operations_source_digest(&self) -> Result<Digest32> {
         Ok(self.source_digest())

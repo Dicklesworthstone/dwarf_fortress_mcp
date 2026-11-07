@@ -65,6 +65,7 @@ pub mod live_spatial;
 pub mod live_version;
 pub mod manager_appointment;
 pub mod operations_analysis;
+pub mod operations_inspection;
 pub mod operations_journal;
 pub mod order_progress;
 pub mod order_run;

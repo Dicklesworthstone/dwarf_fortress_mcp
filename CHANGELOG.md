@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased — Inspect operations before an original production plan
+
+- Add an immutable, bounded OperationsInspectionProjection that supports real
+  job diagnosis and joint declared-inventory allocation without a plan, order
+  or native effect.
+- Keep the canonical parent separate from the operations anchor and preserve
+  entity retirement generations and native allocator floors across refreshes.
+  Refuse source resets, replaced parents, rewinds and cross-session reuse.
+- Require whole-source Query/Observe authority, the same paused fortress tick,
+  at most 4096 entities and 8192 edges, and prepaid bounded projection work.
+- Add twelve adapter regressions for diagnosis/allocation consumers, immutable
+  refresh, stale handles, lineage, authority and budgets. Source review and
+  formatting are complete; executable validation is in progress. This adapter
+  checkpoint does not add a native protocol, tool or production admission.
+
 ## Unreleased — Production inspection anchor routing
 
 ### Fixed

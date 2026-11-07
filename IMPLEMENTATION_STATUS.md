@@ -1,5 +1,34 @@
 # Implementation Status
 
+## Unreleased — Bounded operations inspection without an original plan
+
+The adapter now exposes OperationsInspectionProjection for inspecting a
+complete Operations/1.3 capture before creating a production plan or manager
+order. It implements the existing sealed OperationsStateView, so the actual
+production-diagnosis and joint inventory-allocation consumers accept it without
+manufacturing a goal projection or mutation evidence policy. The host still
+owns independent qualification of operator source/version/generation pins.
+
+The source retains its own anchor and an explicit canonical parent. Both must
+name the same fortress and paused tick; their cursor epochs remain independent.
+Refresh clones the bounded LiveOperationsState publisher, preserving retired
+entity generations and next-job/building/item floors. Source identity changes,
+allocator rewinds, parent replacement/regression and cross-session reuse refuse
+without mutating the prior projection. Whole-source Query/Observe permission,
+4096-entity/8192-edge bounds and 128 MiB logical work admission apply before
+projection. This grants no reservations, causal production evidence, mutation
+policy or completion proof.
+
+Twelve focused adapter regressions are authored and independently reviewed.
+Formatting and source checks have completed; execution is still in progress.
+The full MCP build was killed while compiling unchanged Asupersync, so no
+modern-stdio, live-game or full-workspace qualification is claimed. Separate
+world quantity tests did execute: 17 passed, including the six inventory-growth
+cases from the previous checkpoint. Combined-host Observe/Query integration
+follows this adapter checkpoint. Bead dfmcp-reality-wiring-proof-4bf.14.4 remains
+in progress because native prerequisite repair and proven end-to-end production
+are still open.
+
 ## Unreleased — Follow advertised production inspection anchors
 
 Combined production inspection now translates its exact public source anchor
