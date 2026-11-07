@@ -1,5 +1,60 @@
 # Implementation Status
 
+## Unreleased — Use newly harvested logs through workshop MCP
+
+The original `dfmcp-workshop-v1-20-dev-server` now has an opt-in closed
+`dfmcp.workshop-tree-material-mcp-development/1` configuration. It accepts
+acknowledged original Tree custody instead of a startup `item_id`, opens that
+donor read-only, and exposes fresh bounded log offers through the existing
+eleven tools. The operator retains a fixed workshop center, independently pinned
+native sources, private custody and explicit read/mutation scopes.
+
+`fortress_plan` accepts `kind=carpenters_from_tree_supply`, the exact discovery
+witness and one retained opaque handle. It refreshes Tree supply, requires the
+selected log to preserve ID, position and material, and independently qualifies
+Workshop/1.20 material, floor and worker evidence at the same paused game tick.
+Both donor files are reverified around the native reads. All offers remain
+visible; the initial capture prefers an offer allowed by the host's spatial
+policy. Agent Turn recommendations match the actual observed item, or clearly
+request independent qualification of an alternative without asserting native
+eligibility or commit authority. Missing spatial clearance is not positive
+evidence.
+
+A separate internal authorization floor retains consumed Tree ticks across
+failed requests and donor release, preventing an expired grant from regaining
+I/O permission when a later peer response regresses. The displayed native
+observation keeps its actual source anchor. Retained Tree lineage and accepted
+progress floors remain distinct from malformed or rejected peer envelopes.
+
+The existing Workshop Intent stores the exact chosen capture. After successful
+preparation the host releases donor custody; commit, lost-reply reconciliation
+and offline reopening use the same original workshop key, plan, log and ACK.
+Recovery does not open Tree files, look up the Tree credential, contact Tree
+or choose replacement material. Legacy fixed-item configuration and both
+native wire generations remain unchanged. The new profile has a bounded
+256 MiB default work allowance for repeated donor verification; the legacy
+default remains 128 MiB.
+
+Five new MCP unit cases, five two-binary stdio scenarios and their Rust wrapper
+are authored alongside the ten adapter regressions in the preceding checkpoint.
+The stdio campaign covers successful handoff/offline recovery, forged and stale
+handles, independent material/source drift, expiry across failed requests, and
+a lost workshop reply with no Tree reads during same-original recovery.
+Independent source/API reviews found no remaining concrete blocker. The exact
+51-file workshop inventory, 37 source-token boundaries, declared case counts,
+eleven handlers and machine-contract values were reconciled from preserved
+GitHub contents. This reconciliation is source consistency, not execution of
+the Python gate.
+
+The executor remains unavailable. No new handoff Rust build, formatter, Python
+syntax/gate execution, actual stdio run or full qualification was completed.
+The separately recorded 102 query and 60 adapter passes apply to baseline
+`8235b34d` before this handoff. No SDK/live-game evidence or production admission
+is claimed. Discovery does not establish causal log provenance, renew the
+original Tree deadline, prove timely Tree-goal completion, or supply a complete
+Tree/workshop/Manager/finite-bed controller. Original bead
+`dfmcp-reality-wiring-proof-4bf.14` remains in progress.
+
 ## Unreleased — Acknowledged Tree material adapter checkpoint
 
 The workshop adapter can now derive bounded material offers from one real

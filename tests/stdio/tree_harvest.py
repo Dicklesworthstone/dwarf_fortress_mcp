@@ -288,7 +288,8 @@ class Peer:
                             self.record = "cancelled"; raw += blob(10, keyed("cancelled", request[9].decode(), self.vectors))
                         elif op == 6:
                             assert set(request) == {1, 2, 3, 4, 6, 7, 8, 13, 14}
-                            assert [request[t] for t in (6, 7, 8, 13, 14)] == [15, 15, 2, 1000, 3]
+                            horizon = int.from_bytes(self.vectors["capture"][48:52], "big")
+                            assert [request[t] for t in (6, 7, 8, 13, 14)] == [15, 15, 2, horizon, 3]
                             raw += blob(9, self.vectors["progress_supply"])
                         raw += number(12, 0) + number(13, int(self.record is not None))
                         self.reply(stream, raw)

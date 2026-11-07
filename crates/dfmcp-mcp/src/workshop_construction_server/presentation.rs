@@ -129,11 +129,58 @@ fn next_step(
         );
     }
     if observed["eligible_at_anchor"] == true {
+        if result["material_policy"] == "tree_supply" {
+            let discovery = &result["tree_material"];
+            let selected = discovery["offers"].as_array().and_then(|offers| {
+                offers.iter().find(|offer| offer["item_id"] == observed["selection"]["item_id"]
+                    && offer["host_selection_allowed"] == true)
+            });
+            if let Some(offer) = selected {
+                let request = json!({"kind":"carpenters_from_tree_supply",
+                    "expected_observation":discovery["witness"],"material":offer["material_handle"]}).to_string();
+                return (
+                    "fortress_plan",
+                    json!({"session_id":session.to_string(),"request":request}),
+                    "Select this observed Tree material offer, requalify it independently for the Carpenter footprint, and prepare the original workshop for review.",
+                );
+            }
+            if discovery["offers"].as_array().is_some_and(|offers| {
+                !offers.is_empty() && offers.iter().all(|offer| offer["host_selection_allowed"] == false)
+            }) {
+                return (
+                    "fortress_explain",
+                    args,
+                    "The offered logs or fixed footprint exceed the host's scope or protected regions; inspect the configured spatial policy.",
+                );
+            }
+            return (
+                "fortress_observe",
+                args,
+                "Refresh the exact Tree material offers before selecting a workshop material.",
+            );
+        }
         let request=json!({"kind":"carpenters","expected_observation":observed["witness"],"material":observed["material_handle"]}).to_string();
         return (
             "fortress_plan",
             json!({"session_id":session.to_string(),"request":request}),
             "Prepare this exact observed Carpenter/log offer for review without constructing it.",
+        );
+    }
+    if result["material_policy"] == "tree_supply"
+        && let Some(offer) = result["tree_material"]["offers"].as_array().and_then(|offers| {
+            offers.iter().find(|offer| {
+                offer["host_selection_allowed"] == true
+                    && offer["item_id"] != observed["selection"]["item_id"]
+            })
+        })
+    {
+        let request = json!({"kind":"carpenters_from_tree_supply",
+            "expected_observation":result["tree_material"]["witness"],
+            "material":offer["material_handle"]}).to_string();
+        return (
+            "fortress_plan",
+            json!({"session_id":session.to_string(),"request":request}),
+            "Independently qualify this alternative Tree material candidate; its workshop eligibility is still unestablished and construction requires a later reviewed commit.",
         );
     }
     (
@@ -198,6 +245,7 @@ pub(super) fn packet(
             "fresh_original_completion_proven":verified && original["fresh_completion_proven"]==true,
             "historical_goal":original["historical_goal"],"current_pause_proven":false,
             "automatic_redispatch":false,"clock_advanced":false,"manager_activation_available":false,
+            "material_policy":result["material_policy"],"tree_material_discovery_available":verified && result["tree_material"].is_object(),
             "finite_bed_output_proven":false}))
         .active_work(json!({"pending_plans":if prepared {vec![evidence.clone()]} else {vec![]},
             "actions":if original.is_object() {vec![json!({"evidence":evidence,"state":original["state"],"native_phase":original["native_phase"],"unresolved":original["unresolved"]})]} else {vec![]},
@@ -210,7 +258,7 @@ pub(super) fn packet(
             json!({"uncertainty_id":"production_prerequisites","epistemic_state":"unknown",
             "statement":"This slice has no manager, activation, game-clock or finite-bed production path. Original .14 remains open until its untouched-game and finite-output criteria are independently met."})])
         .coverage(json!({"status":"partial","complete_domains":if verified {vec!["this_original_workshop_custody"]} else {vec![]},
-            "source":"workshop/1.20 only","canonical_operations_join":false,"continuous_history_proven":false}))
+            "source":if verified && result["tree_material"].is_object() {"workshop/1.20 and independently pinned tree_harvest/1.21 material discovery"} else {"workshop/1.20 only"},"canonical_operations_join":false,"continuous_history_proven":false}))
         .budget(json!({"max_output_bytes":RESPONSE_BYTES,"max_game_ticks":0}))
         .references(vec![evidence]);
     let mut value = turn.build();

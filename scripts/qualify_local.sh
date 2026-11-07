@@ -163,6 +163,7 @@ run_gate python-syntax python3 -m py_compile \
   scripts/test_workshop_source_inventory.py \
   scripts/test_workshop_native.py \
   tests/stdio/workshop.py \
+  tests/stdio/workshop_tree_material.py \
   tests/stdio/combined_production.py \
   scripts/announcement_source_custody.py \
   scripts/test_announcement_source_custody.py \

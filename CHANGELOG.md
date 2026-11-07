@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased — Select harvested material through the workshop MCP flow
+
+- Add a closed opt-in workshop configuration that imports acknowledged Tree
+  custody and discovers logs without a startup native item ID.
+- Expose at most 64 opaque material offers and route
+  `carpenters_from_tree_supply` through fresh Tree identity checks, independent
+  Workshop qualification and the existing original-intent preparation flow.
+- Verify read-only donor custody around native reads, preserve consumed
+  authorization ticks across failures, and retain original-only recovery
+  without Tree files, credentials or native calls.
+- Prefer a spatially allowed initial candidate, retain the complete offer set,
+  and recommend independently qualifying an alternative when appropriate.
+  Recommendations never turn unknown host clearance or eligibility positive.
+- Author five MCP cases and five actual two-binary stdio scenarios, register
+  their Rust wrapper and exact source/contract gates, and document the complete
+  operator and recovery flow.
+- Preserve both native protocol generations, legacy fixed-item identities,
+  original deadlines, causal uncertainty and unadmitted status. New sources
+  received independent review and source-consistency checks; build, formatting,
+  Python and stdio execution remain blocked by the unavailable executor.
+
 ## Unreleased — Import original Tree supply for workshop material selection
 
 - Add a read-only acknowledged Tree-origin descriptor reconstructed from exact

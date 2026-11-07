@@ -239,7 +239,7 @@ python3 -m py_compile \
   scripts/test_admitted_live_launcher.py \
   scripts/test_live_admission_ticket.py \
   scripts/check_dependency_policy.py
-python3 -m py_compile scripts/check_workshop_construction.py scripts/test_workshop_source_inventory.py scripts/test_workshop_native.py tests/stdio/workshop.py
+python3 -m py_compile scripts/check_workshop_construction.py scripts/test_workshop_source_inventory.py scripts/test_workshop_native.py tests/stdio/workshop.py tests/stdio/workshop_tree_material.py
 python3 -m py_compile scripts/check_tree_harvest.py scripts/test_tree_harvest_source_inventory.py scripts/test_tree_harvest_native.py tests/stdio/tree_harvest.py
 python3 -m py_compile scripts/check_manager_appointment.py scripts/test_manager_source_inventory.py scripts/test_manager_native.py scripts/check_manager_v1_23.py scripts/test_manager_v1_23_source_inventory.py scripts/test_manager_v1_23_native.py tests/stdio/manager_appointment.py
 python3 -m py_compile scripts/test_job_suspension_native.py scripts/test_job_control_sdk_guard.py

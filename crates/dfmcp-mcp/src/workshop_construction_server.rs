@@ -69,7 +69,13 @@ fn id(raw: &str) -> Result<SessionId> {
 fn budgets(wall: Option<u64>, bytes: Option<u64>, output: Option<u32>) -> Result<WorkBudget> {
     let b = WorkBudget {
         max_wall_millis: wall.unwrap_or(60000),
-        max_bytes: bytes.unwrap_or(128 * 1024 * 1024),
+        max_bytes: bytes.unwrap_or_else(|| {
+            if std::env::var("DFMCP_ALLOW_UNADMITTED_WORKSHOP_TREE_MATERIAL").ok().as_deref() == Some("1") {
+                256 * 1024 * 1024
+            } else {
+                128 * 1024 * 1024
+            }
+        }),
         max_output_tokens: output.unwrap_or(32768),
         max_entities: 128,
         max_actions: 1,
@@ -268,7 +274,7 @@ pub fn fortress_open_session(
     result.unwrap_or_else(|e| failure("fortress.open_session", e, None, None, Value::Null))
 }
 #[tool(
-    description = "Observe the one original operator-scoped Carpenter workshop footprint, exact log, complete bounded worker census and current native source. Observed availability does not guarantee worker assignment. Cannot replace a retained original goal."
+    description = "Observe the fixed operator-scoped Carpenter footprint and current material/worker evidence. An explicitly configured Tree material import also exposes bounded opaque offers from its exact acknowledged original, with fresh independent source checks. Observed availability does not guarantee worker assignment. Cannot replace a retained original goal."
 )]
 pub fn fortress_observe(session_id: String) -> String {
     with_session(session_id, "fortress.observe", Action::Observe)
@@ -280,7 +286,7 @@ pub fn fortress_query(session_id: String) -> String {
     with_session(session_id, "fortress.query", Action::Inspect)
 }
 #[tool(
-    description = "Prepare the original Carpenter workshop without constructing it. Closed JSON request contains kind=carpenters, expected_observation and the exact observed material handle. Returns the whole original plan and separate exact review seal. One goal, no replacement keys, no game clock or manager changes."
+    description = "Prepare the original Carpenter workshop without constructing it. Closed JSON contains kind=carpenters, expected_observation and material for a pinned log; the separate Tree-import configuration requires kind=carpenters_from_tree_supply, the discovery witness and one exact observed Tree material handle. Selection is freshly requalified by workshop/1.20 and sealed in original custody. Returns the whole original plan and exact review seal. One goal, no replacement keys, game clock or manager changes."
 )]
 pub fn fortress_plan(session_id: String, request: String) -> String {
     with_session(session_id, "fortress.plan", Action::Plan(request))

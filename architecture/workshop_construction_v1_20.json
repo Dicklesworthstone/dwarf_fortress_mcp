@@ -268,6 +268,9 @@
     "crates/dfmcp-mcp/src/workshop_construction_server/runtime.rs",
     "crates/dfmcp-mcp/src/workshop_construction_server/presentation.rs",
     "crates/dfmcp-mcp/src/workshop_construction_server/tests.rs",
+    "crates/dfmcp-mcp/src/workshop_construction_server/material_selection.rs",
+    "crates/dfmcp-mcp/src/workshop_construction_server/tree_material.rs",
+    "crates/dfmcp-mcp/src/workshop_construction_server/tree_material_tests.rs",
     "crates/dfmcp-mcp/src/bin/dfmcp-workshop-v1-20-dev-server.rs",
     "crates/dfmcp-mcp/tests/workshop_construction_stdio.rs",
     "tests/native/workshop/stubs.h",
@@ -275,13 +278,16 @@
     "tests/native/workshop/vectors.json",
     "tests/native/workshop/continuity_vectors.json",
     "tests/stdio/workshop.py",
+    "tests/stdio/workshop_tree_material.py",
+    "tests/stdio/tree_harvest.py",
     "scripts/read_stable_repository_file.py",
     "scripts/test_workshop_native.py",
     "scripts/test_workshop_source_inventory.py",
     "scripts/check_workshop_construction.py",
     "scripts/verify.sh",
     "scripts/qualify_local.sh",
-    "docs/WORKSHOP_CONSTRUCTION_MCP.md"
+    "docs/WORKSHOP_CONSTRUCTION_MCP.md",
+    "docs/TREE_HARVEST_MCP.md"
   ],
   "upstream_api_inspection": {
     "dfhack_revision": "0bf381cc1615656acf756e6e67573fffca715125",
@@ -331,7 +337,7 @@
     "canonical_world_adapter": false,
     "canonical_anchor": null,
     "canonical_continuity": "unestablished",
-    "candidate_policy": "one operator-pinned original log and 3x3 Carpenter footprint; MCP chooses the exact observed material handle",
+    "candidate_policy": "operator-pinned log or opt-in acknowledged Tree supply; one fixed 3x3 Carpenter footprint, selected by an exact observed opaque material handle",
     "source_acceptance_is_admission": false,
     "new_keys_after_original": false,
     "checkpoint_default": "required",
@@ -366,10 +372,10 @@
   },
   "focused_test_contract": {
     "adapter_rust_cases": 23,
-    "mcp_unit_cases": 7,
-    "rust_stdio_cases": 1,
+    "mcp_unit_cases": 9,
+    "rust_stdio_cases": 2,
     "python_stdio_cases": 7,
-    "python_inventory_cases": 7,
+    "python_inventory_cases": 8,
     "native_scenarios": 13,
     "compiled_mutants": 12,
     "failed_allowed": 0,
@@ -380,7 +386,9 @@
       "scripts/qualify_local.sh"
     ],
     "full_qualification_requires_reviewed_frozen_clean_source": true,
-    "tree_material_adapter_rust_cases": 10
+    "tree_material_adapter_rust_cases": 10,
+    "tree_material_mcp_unit_cases": 3,
+    "tree_material_python_stdio_cases": 5
   },
   "shared_native_engine": {
     "source": "bridge/common/one_attempt_native.h",
@@ -422,5 +430,44 @@
     "generations_independently_pinned": true,
     "selection_latch": "original Workshop Intent capture",
     "recovery_rediscovery": false
+  },
+  "tree_material_consumer": {
+    "schema": "dfmcp.workshop-tree-material-mcp-development/1",
+    "opt_in": "DFMCP_ALLOW_UNADMITTED_WORKSHOP_TREE_MATERIAL=1",
+    "read_credential": "DFMCP_TREE_HARVEST_TOKEN",
+    "operator_item_id": false,
+    "donor_config_fields": [
+      "directory",
+      "endpoint",
+      "generation",
+      "root",
+      "scope",
+      "read_scope",
+      "acknowledged"
+    ],
+    "read_scope": "complete loaded map",
+    "donor_mode": "offline exclusive private custody",
+    "donor_reverified_around_native_reads": true,
+    "original_tree_mutation_authority": false,
+    "native_protocols_unchanged": true,
+    "plan_kind": "carpenters_from_tree_supply",
+    "plan_fields": [
+      "kind",
+      "expected_observation",
+      "material"
+    ],
+    "handle_prefix": "tree-workshop-material:",
+    "maximum_offers": 64,
+    "default_request_bytes": 268435456,
+    "legacy_default_request_bytes": 134217728,
+    "consumed_authority_tick_survives_failure": true,
+    "donor_released_after": "immutable Workshop Intent and native preparation",
+    "recovery_material_source": "original Workshop Intent capture only",
+    "recovery_tree_files_opened": false,
+    "recovery_tree_credential_read": false,
+    "recovery_tree_native_calls": false,
+    "harvest_goal_completion_proven": false,
+    "causal_provenance_known": false,
+    "host_selection_allowed": "operator scope, protected regions and footprint only; no native eligibility claim"
   }
 }

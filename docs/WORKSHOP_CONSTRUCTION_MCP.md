@@ -9,7 +9,9 @@ Operations use dotted semantic tags; directly callable MCP tool names use
 underscores, for example `fortress_open_session` and `fortress_commit`.
 No tool accepts a path, endpoint, native address, arbitrary command or Lua.
 
-The operator pins one candidate log and one fixed 3x3 Carpenter workshop center.
+The operator pins one fixed 3x3 Carpenter workshop center. The original profile
+pins a candidate log; the opt-in Tree material profile below discovers new log
+candidates from acknowledged Tree/1.21 custody.
 `open_session(mode="control")` and `observe` expose the actual workshop/1.20
 source, all nine floor witnesses, exact material, bounded complete worker census,
 eligibility blockers and a witness-bound material handle. This is bounded
@@ -86,6 +88,118 @@ provider. The already authorized disposable-fortress experiment may instead set
 `"disposable-fortress-no-checkpoint"` before opening. MCP arguments cannot grant
 or change this exception. No order activation, manager state or validated flag
 is forced by this profile.
+
+## Discover material from an acknowledged Tree original
+
+The opt-in material profile removes the need to know a log ID before harvesting.
+It imports one real Tree/1.21 original and its independently acknowledged
+history, reads current ground-WOOD supply for that original, and offers at most
+64 opaque material handles. It then independently qualifies the selected log
+with Workshop/1.20. Both native wire generations, the eleven public MCP tools
+and the one-attempt workshop journal remain unchanged.
+
+Finish or reconcile the Tree operation and close its session before importing
+its custody. The importer holds the original `tree-harvest.journal` and
+`tree-harvest.ack` exclusively in Offline mode. It rechecks both exact files
+around native discovery and qualification reads without appending, sampling or
+advancing Tree custody. The donor must have an independently acknowledged
+original designation receipt, resolved history, no pending sample and intact
+original source continuity. An arbitrary progress capsule, caller-provided
+native item ID, unacknowledged journal or replacement Tree plan cannot serve as
+a donor.
+
+Keep the workshop environment above and add:
+
+```text
+DFMCP_ALLOW_UNADMITTED_WORKSHOP_TREE_MATERIAL=1
+DFMCP_TREE_HARVEST_TOKEN=<operator-held read-only discovery credential>
+```
+
+Use `schema="dfmcp.workshop-tree-material-mcp-development/1"`,
+omit `item_id`, and add the following field to the common workshop
+configuration:
+
+```json
+{
+  "tree_material_source": {
+    "directory": "/private/tree",
+    "endpoint": "127.0.0.1:5001",
+    "generation": 7,
+    "root": [15, 15, 2],
+    "scope": [0, 0, 0, 63, 63, 3],
+    "read_scope": [0, 0, 0, 63, 63, 3],
+    "acknowledged": {
+      "journal_id": "<externally preserved Tree journal digest>",
+      "head": "<externally preserved Tree head digest>",
+      "frames": 4
+    }
+  }
+}
+```
+
+These values are examples, not observed source identities. The Tree directory
+must be distinct from workshop custody and satisfy the same private-file rules.
+Its root, scope, endpoint and generation must match the retained Tree binding.
+The common fortress folder, site, map dimensions, DF version and DFHack version
+must agree across the imported history and both independently authenticated
+native sources. Tree and Workshop generation numbers are independently pinned;
+their numeric values need not match. `read_scope` must explicitly cover the
+complete loaded map because the Tree supply RPC inspects that domain. The
+workshop's mutation scope and protected regions still constrain the selected
+log, footprint and eligible worker.
+
+The additional opt-in permits only the Tree read credential. It does not permit
+Tree designation configuration, mutation opt-ins, other development profiles or
+production launch state. The original workshop schema continues to require its
+fixed item and rejects the donor configuration. The new profile defaults to
+256 MiB of bounded request work to cover repeated donor custody verification;
+the original profile retains its 128 MiB default. This is a work allowance,
+not a native payload or output limit.
+
+1. Open a control session or call `fortress_observe`. The result contains
+   `tree_material.witness`, the exact original Tree key/digest and ACK,
+   current source facts, original/current item horizons and sorted bounded
+   offers. Each offer contains a `material_handle`, observed log ID,
+   position and material. IDs are evidence for review; they are not selection
+   arguments. The `host_selection_allowed` flag checks only operator scope,
+   protected regions and the fixed footprint. The initial capture prefers the
+   first such candidate. If that captured log is ineligible, a recommendation
+   may select another allowed handle for fresh independent qualification; the
+   flag and recommendation do not assert native eligibility.
+2. Follow the returned recommendation or call `fortress_plan` with this
+   closed JSON request:
+
+```json
+{
+  "kind": "carpenters_from_tree_supply",
+  "expected_observation": "<tree_material.witness>",
+  "material": "<one tree_material.offers[].material_handle>"
+}
+```
+
+3. Planning resolves the exact retained handle, rereads Tree supply, and refuses
+   loss or changes in the selected log's identity, position or material. A
+   fresh Workshop/1.20 capture must agree on fortress, dimensions and paused
+   game tick, and independently prove material, footprint and worker
+   eligibility. Source regressions, expired authority or changed donor custody
+   withdraw the selection before preparation.
+4. Review and commit the resulting original workshop plan through the same
+   existing `review_seal` flow below. Its durable Intent embeds the exact
+   selected Workshop capture. After preparation the workshop owner releases
+   the donor; it cannot replace the selected log or renew the Tree goal.
+
+The discovery is a fresh material-readiness observation. It does not attribute
+logs causally to the Tree operation, prove the original harvest goal within its
+deadline, reserve a log, establish a canonical world anchor, or claim an atomic
+cross-plugin snapshot. Those distinctions are explicit in the response.
+Ordinary workshop fresh revalidation still guards the eventual writer.
+
+Recover and offline modes derive selection exclusively from the original
+workshop Intent. They do not open Tree files, read the Tree credential, contact
+the Tree endpoint or rerun material discovery. Preserve the original workshop
+journal, ACK and external pin, keep the chosen material policy in operator
+configuration, and set `initialize=false` as described below. Loss of a commit
+reply remains attached to the same original key and log.
 
 ## Original plan and one attempt
 
@@ -188,7 +302,12 @@ gaps under that original item. Operator UI activity is not MCP capability.
 `scripts/check_workshop_construction.py` bind the exact registered source and
 consumer boundaries. Both mandatory verification commands run the static gate,
 required-input negatives and compiled native mutants; Cargo discovers the
-workshop Rust and actual stdio integration tests in debug and release.
+workshop Rust and actual stdio integration tests in debug and release. The
+material-handoff wrapper runs both actual development binaries against joined
+Tree and Workshop protocol doubles, including forged/stale selection,
+independent material/source drift, lost reply and credential-free offline
+recovery scenarios. The machine contract records these cases separately from
+the unchanged native component scenarios.
 The native harness uses SDK/protobuf doubles. Its raw compiler/program streams,
 exits and reports are component evidence; a passing run is not real SDK or R1.
 Historical vectors remain unchanged; a separate continuous-absence vector

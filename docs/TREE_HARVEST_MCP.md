@@ -219,3 +219,21 @@ are required because they share the extracted one-attempt engine. Source/focused
 execution, full Rust qualification, native R1, live proof, cleanup and admission
 remain distinct. Original `.14` workshop and finite-bed criteria stay open until
 their independent real acceptance evidence exists.
+
+## Supply handoff to workshop construction
+
+The opt-in `dfmcp.workshop-tree-material-mcp-development/1` workshop profile
+can import a resolved, independently acknowledged original Tree designation and
+read fresh ground-WOOD supply through Tree/1.21. Close the Tree session first so
+the importer can hold its existing private journal and ACK exclusively. It
+opens both files in Offline mode and never appends a Tree sample, changes the
+original deadline, designates another tree or grants Tree writer permission.
+
+The workshop exposes bounded witness-bound material handles and independently
+requalifies the selected log, footprint and workers through Workshop/1.20.
+Current supply readiness does not prove causal tree provenance or timely
+completion of the original harvest goal. After the workshop Intent retains the
+selected capture, its recovery requires only the original workshop custody and
+never rediscovers or replaces material. See
+[WORKSHOP_CONSTRUCTION_MCP.md](WORKSHOP_CONSTRUCTION_MCP.md#discover-material-from-an-acknowledged-tree-original)
+for operator configuration, authority limits and the closed planning request.

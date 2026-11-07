@@ -1,5 +1,9 @@
 //! One original workshop goal. Operator configuration supplies sources and authority;
 //! tool arguments select only an observed offer and its exact review.
+#[path = "tree_material.rs"]
+mod tree_material;
+#[path = "material_selection.rs"]
+mod material_selection;
 use dfmcp_adapter::build_placement::journal::private_file::PrivateBuildFile;
 use dfmcp_adapter::build_placement::rpc::BuildCancellation;
 use dfmcp_adapter::workshop_construction::{
@@ -77,9 +81,14 @@ pub(super) fn validate_environment() -> Result<()> {
             "workshop build permission must be absent or exactly 1",
         ));
     }
+    let tree_material = std::env::var(tree_material::OPT_IN).ok().as_deref() == Some("1");
     for (key, _) in std::env::vars_os() {
         let key = key.to_string_lossy();
-        if key.starts_with("DFMCP_") && ![CONFIG, OPT_IN, TOKEN, BUILD].contains(&key.as_ref()) {
+        if key.starts_with("DFMCP_")
+            && ![CONFIG, OPT_IN, TOKEN, BUILD].contains(&key.as_ref())
+            && !(tree_material
+                && [tree_material::OPT_IN, tree_material::TOKEN].contains(&key.as_ref()))
+        {
             return Err(denied(
                 "workshop profile refuses production launch and other DFMCP profile state",
             ));
@@ -132,7 +141,8 @@ struct Input {
     generation: u64,
     recovery_generation: Option<u64>,
     map_dimensions: [u32; 3],
-    item_id: u32,
+    item_id: Option<u32>,
+    tree_material_source: Option<tree_material::Input>,
     center: [u32; 3],
     scope: [u32; 6],
     #[serde(default)]
@@ -145,7 +155,8 @@ struct Input {
 pub(super) struct Config {
     input: Input,
     endpoint: SocketAddr,
-    selection: WorkshopSelection,
+    selection: Option<WorkshopSelection>,
+    tree_material: Option<tree_material::Config>,
     scope: MapCuboid,
     protected: Vec<MapCuboid>,
     identity: FortressIdentity,
@@ -172,7 +183,8 @@ impl Config {
             .directory
             .to_str()
             .ok_or_else(|| invalid("custody path must be UTF-8"))?;
-        if i.schema != "dfmcp.workshop-mcp-development/1"
+        if !["dfmcp.workshop-mcp-development/1", tree_material::SCHEMA]
+            .contains(&i.schema.as_str())
             || !i.directory.is_absolute()
             || path.len() < 2
             || path.len() > 3800
@@ -201,7 +213,19 @@ impl Config {
         if !endpoint.is_ipv4() || endpoint.port() == 0 || endpoint.to_string() != i.endpoint {
             return Err(invalid("canonical IPv4 loopback endpoint required"));
         }
-        let selection = WorkshopSelection::new(i.item_id, i.center)?;
+        let selection = i
+            .item_id
+            .map(|item| WorkshopSelection::new(item, i.center))
+            .transpose()?;
+        // Validate the fixed footprint even when a donor supplies the material.
+        WorkshopSelection::new(0, i.center)?;
+        let tree_material = match (&i.schema[..], &i.tree_material_source, selection) {
+            ("dfmcp.workshop-mcp-development/1", None, Some(_)) => None,
+            (tree_material::SCHEMA, Some(source), None) => {
+                Some(tree_material::Config::parse(source.clone(), &i)?)
+            }
+            _ => return Err(invalid("workshop schema must select exactly one material policy")),
+        };
         if i.center[0] + 1 >= i.map_dimensions[0]
             || i.center[1] + 1 >= i.map_dimensions[1]
             || i.center[2] >= i.map_dimensions[2]
@@ -220,6 +244,7 @@ impl Config {
             input: i,
             endpoint,
             selection,
+            tree_material,
             scope,
             protected,
             identity,
@@ -229,14 +254,27 @@ impl Config {
     }
     pub(super) fn environment() -> Result<Self> {
         validate_environment()?;
-        Self::parse(
+        let config = Self::parse(
             &std::env::var(CONFIG)
                 .map_err(|_| denied("operator workshop configuration is missing"))?,
-        )
+        )?;
+        config.material_environment()?;
+        Ok(config)
+    }
+    fn material_environment(&self) -> Result<()> {
+        let opted_in = std::env::var(tree_material::OPT_IN).ok().as_deref() == Some("1");
+        if opted_in != self.tree_material.is_some()
+            || (self.tree_material.is_none()
+                && std::env::var_os(tree_material::TOKEN).is_some())
+        {
+            return Err(denied("Tree material import requires its exact independent development opt-in and configuration"));
+        }
+        Ok(())
     }
     fn current(&self) -> Result<()> {
         runtime_io()?;
         validate_environment()?;
+        self.material_environment()?;
         let raw =
             std::env::var(CONFIG).map_err(|_| denied("operator workshop configuration removed"))?;
         if raw.len() > 16 * 1024 || Digest32::of_bytes(raw.as_bytes()) != self.hash {
@@ -264,7 +302,8 @@ impl Config {
         if c.fortress() != &self.identity
             || c.generation() != self.input.generation
             || c.dimensions() != self.input.map_dimensions
-            || c.selection() != self.selection
+            || c.selection().center() != self.input.center
+            || self.selection.is_some_and(|selection| c.selection() != selection)
         {
             return Err(denied(
                 "workshop observation differs from exact original source or selection",
@@ -346,6 +385,7 @@ fn nonce(context: &OperationContext) -> Result<[u8; 32]> {
 
 struct Guard {
     config: Config,
+    selection: Option<WorkshopSelection>,
     acks: Arc<Mutex<WorkshopAcknowledgements<PrivateBuildFile>>>,
     leases: LeaseManager,
     lease: Option<LeaseId>,
@@ -370,7 +410,7 @@ impl WorkshopGuard for Guard {
     ) -> Result<()> {
         self.config.current()?;
         self.config.binding(binding)?;
-        if c.session_id != self.session || selection != self.config.selection {
+        if c.session_id != self.session || self.selection != Some(selection) {
             return Err(denied(
                 "workshop guard belongs to another session/selection",
             ));
@@ -461,6 +501,9 @@ impl Work {
         c.budget.max_bytes = bytes;
         Ok(c)
     }
+    fn advance_authorization_tick(&mut self, tick: u64) {
+        self.context.anchor.tick = GameTick(tick.max(self.context.anchor.tick.get()));
+    }
     fn reserve(&mut self, bytes: u64) -> Result<OperationContext> {
         self.bytes = self.bytes.checked_sub(bytes).ok_or_else(exhausted)?;
         self.current(bytes)
@@ -491,7 +534,9 @@ pub(super) struct Runtime {
     guard: Guard,
     source: Option<WorkshopRpc>,
     observation: Option<WorkshopCapture>,
+    tree_material: Option<tree_material::Owner>,
     pub(super) anchor: Option<StateAnchor>,
+    authority_tick: u64,
     next_request: u64,
 }
 fn pin_json(pin: WorkshopPin) -> Value {
@@ -573,6 +618,17 @@ impl Runtime {
             cancellation_requested: false,
         };
         let mut work = Work::new(&context)?;
+        let mut tree_material = if config.input.initialize {
+            config
+                .tree_material
+                .clone()
+                .map(|source| tree_material::Owner::open(source, &mut work))
+                .transpose()?
+        } else {
+            // The sealed workshop original is sufficient for reconciliation.
+            // Reopening must not discover another material or contact its donor.
+            None
+        };
         let mut acks = open_private_acknowledgements(
             &config.input.directory.join("workshop.ack"),
             &work.reserve(1024 * 1024)?,
@@ -582,14 +638,25 @@ impl Runtime {
         )?;
         let mut observation = None;
         let expected = if config.input.initialize {
+            let selection = match &mut tree_material {
+                Some(donor) => donor.refresh(&config, &mut work)?,
+                None => config
+                    .selection
+                    .ok_or_else(|| invalid("workshop material policy has no selection"))?,
+            };
             let mut source = config.source(&work.reserve(CONNECT_BYTES)?, mode)?;
             let c = work.reserve(CONNECT_BYTES)?;
             let observed = source.observe(
-                config.selection,
+                selection,
                 &c,
                 std::time::Duration::from_millis(c.budget.max_wall_millis),
             )?;
             config.capture(&observed)?;
+            work.advance_authorization_tick(observed.tick());
+            if let Some(donor) = &mut tree_material {
+                donor.check_capture_clock(&observed)?;
+                donor.verify(&mut work)?;
+            }
             if !observed.paused() {
                 return Err(denied("workshop initialization requires a paused source"));
             }
@@ -605,7 +672,7 @@ impl Runtime {
             None
         };
         let opening = work.reserve(32 * 1024 * 1024)?;
-        let journal = open_private_workshop(
+        let mut journal = open_private_workshop(
             &config.input.directory.join("workshop.journal"),
             &opening,
             mode,
@@ -618,6 +685,20 @@ impl Runtime {
             acks.latest(),
         )?;
         config.binding(journal.binding())?;
+        let selection = if let Some(observed) = &observation {
+            Some(observed.selection())
+        } else if let Some(selection) = config.selection {
+            Some(selection)
+        } else {
+            let inventory = journal.inventory(&work.reserve(INSPECT_BYTES)?)?;
+            if inventory.entries().len() > 1 {
+                return Err(denied("workshop consumer owns exactly one original goal"));
+            }
+            inventory.entries().first().map(|entry| entry.plan().before().selection())
+        };
+        if selection.is_some_and(|selection| selection.center() != config.input.center) {
+            return Err(denied("retained workshop selection differs from the fixed host footprint"));
+        }
         if mode != WorkshopMode::Offline {
             acks.acknowledge(journal.pin(), &work.reserve(1024 * 1024)?)?;
         }
@@ -635,8 +716,10 @@ impl Runtime {
             None
         };
         let current_anchor = observation.as_ref().map(anchor);
+        let authority_tick = work.context.anchor.tick.get().max(journal.high_tick());
         let guard = Guard {
             config: config.clone(),
+            selection,
             acks,
             leases,
             lease,
@@ -651,22 +734,31 @@ impl Runtime {
             guard,
             source: None,
             observation,
+            tree_material,
             anchor: current_anchor,
+            authority_tick,
             next_request: 2,
         })
     }
     pub(super) fn context(&mut self) -> Result<OperationContext> {
         let request = self.next_request;
         self.next_request = self.next_request.checked_add(1).ok_or_else(exhausted)?;
+        // This clock is an authority floor only. The observed native anchor
+        // retained in self.anchor and exposed in source_json remains unchanged.
+        let mut authority_anchor = self.anchor.unwrap_or(StateAnchor {
+            fortress_id: self.config.identity.fortress_id(),
+            cursor: ObservationCursor::ORIGIN,
+            tick: GameTick(self.journal.high_tick()),
+            state_hash: Digest32::ZERO,
+        });
+        authority_anchor.tick = GameTick(authority_anchor.tick.get().max(self.authority_tick));
+        if let Some(donor) = &self.tree_material {
+            authority_anchor.tick = GameTick(authority_anchor.tick.get().max(donor.high_tick()));
+        }
         Ok(OperationContext {
             session_id: self.session,
             request_id: RequestId::new(u128::from(request)),
-            anchor: self.anchor.unwrap_or(StateAnchor {
-                fortress_id: self.config.identity.fortress_id(),
-                cursor: ObservationCursor::ORIGIN,
-                tick: GameTick(self.journal.high_tick()),
-                state_hash: Digest32::ZERO,
-            }),
+            anchor: authority_anchor,
             budget: self.budget,
             grants: Self::grants(
                 &self.config,
@@ -677,6 +769,12 @@ impl Runtime {
     }
     fn view(&mut self, c: &OperationContext, fresh: bool) -> Result<Value> {
         self.config.current()?;
+        let mut authority = c.clone();
+        authority.anchor.tick = GameTick(authority.anchor.tick.get().max(self.authority_tick));
+        if let Some(donor) = &self.tree_material {
+            authority.anchor.tick = GameTick(authority.anchor.tick.get().max(donor.high_tick()));
+        }
+        let c = &authority;
         let inv = self.journal.inventory(c)?;
         if inv.entries().len() > 1 {
             return Err(denied("workshop consumer owns exactly one original goal"));
@@ -715,6 +813,8 @@ impl Runtime {
             "journal_fenced":self.journal.is_fenced(),"acknowledged":pin_json(self.journal.pin()),
             "retained_state_currently_verified":true,"original":original,
             "observation":self.observation.as_ref().map(source_json),"current_goal_available":fresh,
+            "material_policy":if self.config.tree_material.is_some() {"tree_supply"} else {"operator_pinned"},
+            "tree_material":self.tree_material.as_ref().map(|owner|owner.view(&self.config)),
             "manager_activation_available":false,"finite_bed_output_proven":false}),
         )
     }
@@ -725,6 +825,10 @@ impl Runtime {
         let result = (|| {
             self.config.current()?;
             let mut work = Work::new(c)?;
+            work.advance_authorization_tick(self.authority_tick);
+            if let Some(donor) = &self.tree_material {
+                work.advance_authorization_tick(donor.high_tick());
+            }
             let mut fresh = false;
             match action {
                 Action::Inspect => {}
@@ -745,24 +849,7 @@ impl Runtime {
                             "an original goal cannot be replaced by another observation or key",
                         ));
                     }
-                    let mut source = self
-                        .config
-                        .source(&work.reserve(CONNECT_BYTES)?, self.mode)?;
-                    let current = work.reserve(CONNECT_BYTES)?;
-                    let capture = source.observe(
-                        self.config.selection,
-                        &current,
-                        std::time::Duration::from_millis(current.budget.max_wall_millis),
-                    )?;
-                    self.config.capture(&capture)?;
-                    if capture.tick() < self.anchor.map_or(0, |a| a.tick.get()) {
-                        return Err(error(
-                            ErrorCode::StaleAnchor,
-                            "workshop observation clock regressed",
-                        ));
-                    }
-                    self.anchor = Some(anchor(&capture));
-                    self.observation = Some(capture);
+                    self.observe_material(&mut work)?;
                 }
                 Action::Plan(raw) => {
                     if raw.len() > 2048 {
@@ -770,19 +857,6 @@ impl Runtime {
                     }
                     let request: PlanInput = serde_json::from_str(&raw)
                         .map_err(|_| invalid("invalid closed original workshop request"))?;
-                    let before = self
-                        .observation
-                        .as_ref()
-                        .ok_or_else(|| invalid("observe the original workshop offer first"))?;
-                    if request.kind != "carpenters"
-                        || digest(&request.expected_observation)? != before.witness()
-                        || request.material != material(before)
-                    {
-                        return Err(error(
-                            ErrorCode::StaleAnchor,
-                            "workshop request must select the exact observed Carpenter/log offer",
-                        ));
-                    }
                     let inv = self.journal.inventory(&work.reserve(INSPECT_BYTES)?)?;
                     if !inv.entries().is_empty() {
                         return Err(denied(
@@ -792,6 +866,8 @@ impl Runtime {
                     if self.mode != WorkshopMode::Control || !self.config.input.initialize {
                         return Err(denied("recovery cannot grant fresh construction authority"));
                     }
+                    self.select_material(&request, &mut work)?;
+                    let before = self.observation.as_ref().ok_or_else(|| invalid("observe the original workshop offer first"))?;
                     if !before.workers().iter().any(|w| {
                         w.eligible()
                             && self.config.scope.contains(MapCoord::new(
@@ -815,6 +891,9 @@ impl Runtime {
                     self.journal
                         .prepare(&mut source, &p, &current, &mut self.guard)?;
                     self.source = Some(source);
+                    // The immutable Workshop original now owns the chosen item.
+                    // Its independent native qualification ends the donor handoff.
+                    self.tree_material = None;
                 }
                 Action::Commit {
                     seal: requested,
@@ -903,6 +982,9 @@ impl Runtime {
             }
             self.view(&work.current(INSPECT_BYTES)?, fresh)
         })();
+        if let Some(donor) = &self.tree_material {
+            self.authority_tick = self.authority_tick.max(donor.high_tick());
+        }
         if result.is_err() {
             self.withdraw();
         }
@@ -912,6 +994,9 @@ impl Runtime {
         self.observation = None;
         self.anchor = None;
         self.source = None;
+        if let Some(donor) = &mut self.tree_material {
+            donor.withdraw();
+        }
         self.journal.abandon();
     }
     pub(super) fn failure_reference(&self) -> Value {
@@ -934,7 +1019,7 @@ pub(super) fn source_json(c: &WorkshopCapture) -> Value {
     };
     json!({"witness":c.witness().to_hex(),"profile":"workshop/1.20","generation":c.generation(),"sequence":c.sequence(),"tick":c.tick(),
         "world_folder":c.folder(),"site_id":c.site(),"map_dimensions":c.dimensions(),"paused_at_anchor":c.paused(),
-        "selection":{"kind":"carpenters","center":c.selection().center(),"footprint":c.selection().footprint()},
+        "selection":{"kind":"carpenters","item_id":c.selection().item_id(),"center":c.selection().center(),"footprint":c.selection().footprint()},
         "material_handle":material(c),"selected_material":item,"material_inside_footprint":c.item_inside_footprint(),
         "tiles":c.tiles().iter().map(|t|match t {
             WorkshopTile::Visible(v)=>json!({"presence":"visible","visible":true,"shape":v.shape(),"liquid_depth":v.liquid(),"dry":t.dry(),"empty_floor":t.empty_floor(),"building_occupied_at_anchor":v.occupied()}),

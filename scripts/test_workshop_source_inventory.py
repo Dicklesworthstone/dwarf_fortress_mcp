@@ -2,6 +2,7 @@
 """Required workshop component inputs cannot silently disappear from evidence."""
 from pathlib import Path
 import os
+import json
 import shutil
 import tempfile
 import unittest
@@ -102,6 +103,24 @@ class WorkshopSourceInventoryTests(unittest.TestCase):
                 text = path.read_text()
                 self.assertGreater(text.count(before), 0)
                 path.write_text(text.replace(before, after))
+                with self.assertRaises(ValueError):
+                    check(root)
+
+    def test_tree_material_import_cannot_grant_writes_or_recovery_discovery(self) -> None:
+        mutations = (
+            ("tree_material_adapter", "donor_writes", True),
+            ("tree_material_adapter", "causal_provenance_known", True),
+            ("tree_material_consumer", "recovery_tree_native_calls", True),
+            ("tree_material_consumer", "maximum_offers", 65),
+        )
+        for section, field, value in mutations:
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                self.copy_consumer(root)
+                path = root / "architecture/workshop_construction_v1_20.json"
+                contract = json.loads(path.read_text())
+                contract[section][field] = value
+                path.write_text(json.dumps(contract))
                 with self.assertRaises(ValueError):
                     check(root)
 
