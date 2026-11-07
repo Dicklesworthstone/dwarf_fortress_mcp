@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased — Inspect the operations behind original production goals
+
+- Make the exact immutable operations projection of a selected original production
+  goal available to the existing bounded diagnosis and inventory-allocation
+  engines, preserving its enclosing source digest and canonical entity generations.
+- Add public-monitor regressions for source identity, observed job and inventory
+  conditions, generation changes, and authority/budget refusals. The new cases
+  were added and formatted but could not execute before the shared environment
+  became unavailable.
+- Type-check the full original adapter crate against real core/world/intent
+  dependencies. This is component compile evidence only; it does not establish
+  MCP transport, native gameplay, production admission, or whole-head qualification.
+
 ## Unreleased — Execute complete native production portfolios
 
 - Add an explicit bounded portfolio request for one original labor assignment

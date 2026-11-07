@@ -65,6 +65,13 @@ impl SelectedParentGoalResult {
     pub fn parent_progress(&self) -> &SelectedParentGoalProgress {
         &self.parent
     }
+    /// Borrow the exact selected order's immutable operations/progress sample.
+    /// Its anchor and source digest remain distinct from the enclosing parent
+    /// projection. Read consumers must recheck current authority; possession of
+    /// this sample proves neither current freshness nor order-attributed output.
+    pub fn operations_projection(&self) -> &WorkOrderGoalProjection {
+        self.selected.inner.projection()
+    }
     pub fn selected_goal_proven(&self) -> bool {
         self.selected.selected_goal_proven()
     }

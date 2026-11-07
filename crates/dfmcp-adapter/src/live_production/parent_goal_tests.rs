@@ -137,6 +137,20 @@ fn parent_truth_needs_current_labor_and_original_inventory_stability() -> Result
     assert_eq!(parent.anchor.tick, parent.selected_anchor.tick);
     assert_ne!(parent.anchor.state_hash, parent.selected_anchor.state_hash);
     assert_ne!(parent.source_digest, achieved.progress().source_digest);
+    let selected = achieved.operations_projection();
+    assert_eq!(selected.anchor(), parent.selected_anchor);
+    assert_eq!(selected.source_digest(), achieved.progress().source_digest);
+    assert_ne!(selected.source_digest(), parent.source_digest);
+    assert_eq!(selected.original_anchor(), f.plan.anchor);
+    assert!(
+        selected
+            .snapshot()
+            .graph
+            .entities
+            .values()
+            .all(|entity| entity.kind != EntityKind::Unit),
+        "the child observation must not be rebuilt in the joined workforce universe"
+    );
     let lost = sample_parent(
         &mut f,
         &mut monitor,

@@ -3,6 +3,7 @@
 use crate::live_operations::{LiveOperationsObservation, LiveOperationsState};
 use crate::live_spatial::citizens::LiveSpatialCitizenState;
 use crate::live_spatial::{LiveSpatialState, SpatialStateView};
+use crate::semantic_work_orders::WorkOrderGoalProjection;
 use dfmcp_core::{DfmcpError, Digest32, ErrorCode, Result};
 use dfmcp_world::WorldSnapshot;
 
@@ -11,6 +12,7 @@ mod sealed {
     impl Sealed for super::LiveOperationsState {}
     impl Sealed for super::LiveSpatialState {}
     impl Sealed for super::LiveSpatialCitizenState {}
+    impl Sealed for super::WorkOrderGoalProjection {}
 }
 
 /// Only canonical, privately published adapter states can implement this view.
@@ -63,5 +65,20 @@ impl OperationsStateView for LiveSpatialCitizenState {
                 )
             })?
             .source_digest()
+    }
+}
+
+/// Analysis stays in the selected original order's published source universe.
+/// The complete operations roster does not establish that any job or item was
+/// created by that order, and this borrowed view grants no source authority.
+impl OperationsStateView for WorkOrderGoalProjection {
+    fn operations_observation(&self) -> Option<&LiveOperationsObservation> {
+        Some(self.operations())
+    }
+    fn operations_snapshot(&self) -> Option<&WorldSnapshot> {
+        Some(self.snapshot())
+    }
+    fn operations_source_digest(&self) -> Result<Digest32> {
+        Ok(self.source_digest())
     }
 }

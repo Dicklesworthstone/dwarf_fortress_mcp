@@ -1,5 +1,26 @@
 # Implementation Status
 
+## Unreleased — Original-goal operations available for diagnosis
+
+A selected original production-goal result now exposes its existing immutable
+operations projection. The sealed OperationsStateView implementation borrows that
+same snapshot, capture and enclosing digest. It does not reproject operations,
+reset entity generations, acquire a second capture, or add source authority.
+The existing diagnosis and conservative declared-inventory allocation algorithms
+can therefore inspect the source used by the original-goal monitor.
+
+Four new public-monitor integration cases cover identity and no additional source
+I/O, direct/inherited item flags and joint stock shortage, retirement/reappearance
+generations, and current authority/anchor/work refusals. Their source was added and
+formatted; the tests have not run. Full original core/world/intent crates compiled
+and the full adapter production module tree passed metadata-only compilation on
+rustc 1.101.0-nightly (249c1e4e3, 2026-11-05). Adapter code generation was interrupted
+by shared memory pressure and subsequent executor loss. The full MCP offline
+check was independently blocked by missing exact FastMCP revision
+13461caf1f23bef675e0588b5e0c5ba8cf81b9f8. No dependencies or native protocols changed.
+This increment does not claim current-source qualification, native DFHack/gameplay
+proof, admission, or closure of the broader production bead.
+
 ## Unreleased — Complete bounded native production portfolios
 
 The combined labor/order development host accepts an explicit `kind: portfolio`

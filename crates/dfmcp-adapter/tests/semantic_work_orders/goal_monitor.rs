@@ -1615,3 +1615,6 @@ fn changed_second_progress_endpoint_still_fences_later_counter_increase() -> Res
 
 #[path = "goal_history.rs"]
 mod goal_history;
+
+#[path = "production_analysis.rs"]
+mod production_analysis;
