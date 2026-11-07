@@ -15,6 +15,9 @@ use dfmcp_core::{Capability, GameTick, OperationContext, RiskTier, SessionId};
 use std::io::SeekFrom;
 use std::path::Path;
 use std::time::{Duration, Instant};
+#[path = "material_origin.rs"]
+mod material_origin;
+pub use material_origin::TreeMaterialOrigin;
 #[cfg(all(test, target_os = "linux"))]
 #[path = "journal_tests.rs"]
 pub(crate) mod journal_tests;

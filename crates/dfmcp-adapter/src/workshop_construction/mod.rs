@@ -12,6 +12,8 @@
 pub mod acknowledgement;
 pub mod journal;
 pub mod rpc;
+mod tree_material;
+pub use tree_material::{WorkshopMaterialDiscovery, WorkshopMaterialOffer};
 
 use crate::bounded_run::{Reader, error, hash, require, validate_key};
 pub use crate::order_run::FortressIdentity;

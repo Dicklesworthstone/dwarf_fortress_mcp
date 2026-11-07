@@ -13,6 +13,7 @@ from read_stable_repository_file import read_stable_regular_file
 
 ROOT = Path(__file__).resolve().parents[1]
 ADAPTER = "crates/dfmcp-adapter/src/workshop_construction/"
+TREE = "crates/dfmcp-adapter/src/tree_harvest/"
 MCP = "crates/dfmcp-mcp/src/"
 METHODS = ["Handshake", "ReadWorkshop", "PrepareWorkshop", "CommitWorkshop", "QueryWorkshop", "CancelWorkshop", "ReadWorkshopProgress"]
 TOOLS = ["fortress_" + name for name in ("open_session", "observe", "query", "plan", "commit", "wait", "cancel", "checkpoint", "restore", "explain", "doctor")]
@@ -22,6 +23,9 @@ SOURCES = [
     "bridge/dfhack-workshop-v1_20/dfmcp_workshop_v1_20.cpp", "crates/dfmcp-adapter/src/lib.rs",
     "crates/dfmcp-adapter/src/build_placement/rpc/codec.rs", "crates/dfmcp-adapter/src/build_placement/rpc/link.rs",
     *[ADAPTER + name for name in ("mod.rs", "acknowledgement.rs", "journal.rs", "journal_tests.rs", "rpc.rs", "rpc_tests.rs", "tests.rs")],
+    ADAPTER + "tree_material.rs", ADAPTER + "tree_material_tests.rs",
+    *[TREE + name for name in ("mod.rs", "journal.rs", "material_origin.rs", "rpc.rs", "tests.rs", "journal_tests.rs")],
+    "tests/native/tree_harvest/vectors.json",
     MCP + "lib.rs", MCP + "workshop_construction_server.rs",
     *[MCP + "workshop_construction_server/" + name for name in ("runtime.rs", "presentation.rs", "tests.rs")],
     MCP + "bin/dfmcp-workshop-v1-20-dev-server.rs", "crates/dfmcp-mcp/tests/workshop_construction_stdio.rs",
@@ -53,7 +57,10 @@ def check(root: Path = ROOT) -> dict:
         "crates/dfmcp-adapter/src/lib.rs": ["pubmodworkshop_construction;"],
         MCP + "lib.rs": ["pubmodworkshop_construction_server;"],
         MCP + "bin/dfmcp-workshop-v1-20-dev-server.rs": ["dfmcp_mcp::workshop_construction_server::run_stdio();"],
-        ADAPTER + "mod.rs": ["pubmodacknowledgement;", "pubmodjournal;", "pubmodrpc;"],
+        ADAPTER + "mod.rs": ["pubmodacknowledgement;", "pubmodjournal;", "pubmodrpc;", "modtree_material;", "WorkshopMaterialDiscovery,WorkshopMaterialOffer"],
+        TREE + "journal.rs": ["modmaterial_origin;", "pubusematerial_origin::TreeMaterialOrigin;"],
+        TREE + "material_origin.rs": ["pubfnmaterial_origin<", "acknowledgement.verify_tree(", "self.material_projection(&self.raw"],
+        ADAPTER + "tree_material.rs": ["pubconstMAX_OFFERS:usize=64;", "Progress::decode(progress.bytes(),&origin.original().plan)?!=progress", "capture.tick()!=self.progress.tick"],
         ADAPTER + "rpc.rs": ["self.prepared.take().as_ref()==Some(permit.plan())"],
         MCP + "workshop_construction_server/runtime.rs": ["open_private_acknowledgements(", "acks.latest()", "self.withdraw();"],
         MCP + "workshop_construction_server/presentation.rs": ["spine(operation,session,request)", "canonical_world_anchor_available", "\"fortress_commit\"", "\"fortress_plan\"", "\"fortress_observe\""],
@@ -98,6 +105,7 @@ def check(root: Path = ROOT) -> dict:
         raise ValueError("independent worker guards lack individual mutants")
     actual_counts = {
         "adapter_rust_cases": sum(text[ADAPTER + name].count("#[test]") for name in ("tests.rs", "journal_tests.rs", "rpc_tests.rs")),
+        "tree_material_adapter_rust_cases": text[ADAPTER + "tree_material_tests.rs"].count("#[test]"),
         "mcp_unit_cases": text[MCP + "workshop_construction_server/tests.rs"].count("#[test]"),
         "rust_stdio_cases": text["crates/dfmcp-mcp/tests/workshop_construction_stdio.rs"].count("#[test]"),
         "python_stdio_cases": len(re.findall(r"^    def test_", text["tests/stdio/workshop.py"], re.MULTILINE)),
@@ -107,6 +115,24 @@ def check(root: Path = ROOT) -> dict:
     }
     if any(contract["focused_test_contract"][key] != value for key, value in actual_counts.items()):
         raise ValueError(f"workshop exact registered test count differs: {actual_counts}")
+    expected_tree_material_adapter = {
+        "source_profile": "tree_harvest/1.21",
+        "origin": "exact original designation and independently acknowledged private Offline custody",
+        "donor_writes": False,
+        "arbitrary_native_item_selector": False,
+        "maximum_offers": 64,
+        "complete_supply_required": True,
+        "origin_goal_completion_required": False,
+        "original_deadline_renewed": False,
+        "causal_provenance_known": False,
+        "handle_binding": ["original custody", "complete fresh Tree progress", "session", "workshop center", "item"],
+        "independent_workshop_qualification": ["fortress", "map dimensions", "same paused game tick", "selected log position and material", "workshop eligibility"],
+        "generations_independently_pinned": True,
+        "selection_latch": "original Workshop Intent capture",
+        "recovery_rediscovery": False,
+    }
+    if contract.get("tree_material_adapter") != expected_tree_material_adapter:
+        raise ValueError("Tree material adapter contract differs")
     expected_review_budget = {
         "bead": "dfmcp-reality-wiring-proof-4bf.14.3",
         "default_wall_millis": 60000, "maximum_wall_millis": 60000,

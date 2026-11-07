@@ -281,6 +281,16 @@ impl<S: EffectJournalStorage> WorkshopAcknowledgements<S> {
         }
         Ok(())
     }
+    /// A Tree material import must verify its own independently retained ACK;
+    /// an equal-looking pin under another native profile cannot substitute.
+    pub(crate) fn verify_tree(
+        &mut self,
+        context: &OperationContext,
+        scope: MapCuboid,
+    ) -> Result<()> {
+        check(matches!(self.protocol, Protocol::Tree) && self.scope == Some(scope))?;
+        self.verify(context)
+    }
     pub fn acknowledge(&mut self, pin: WorkshopPin, context: &OperationContext) -> Result<()> {
         self.verify(context)?;
         if self.latest == Some(pin) {

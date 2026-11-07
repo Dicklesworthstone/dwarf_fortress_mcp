@@ -254,6 +254,15 @@
     "crates/dfmcp-adapter/src/workshop_construction/rpc.rs",
     "crates/dfmcp-adapter/src/workshop_construction/rpc_tests.rs",
     "crates/dfmcp-adapter/src/workshop_construction/tests.rs",
+    "crates/dfmcp-adapter/src/workshop_construction/tree_material.rs",
+    "crates/dfmcp-adapter/src/workshop_construction/tree_material_tests.rs",
+    "crates/dfmcp-adapter/src/tree_harvest/mod.rs",
+    "crates/dfmcp-adapter/src/tree_harvest/journal.rs",
+    "crates/dfmcp-adapter/src/tree_harvest/material_origin.rs",
+    "crates/dfmcp-adapter/src/tree_harvest/rpc.rs",
+    "crates/dfmcp-adapter/src/tree_harvest/tests.rs",
+    "crates/dfmcp-adapter/src/tree_harvest/journal_tests.rs",
+    "tests/native/tree_harvest/vectors.json",
     "crates/dfmcp-mcp/src/lib.rs",
     "crates/dfmcp-mcp/src/workshop_construction_server.rs",
     "crates/dfmcp-mcp/src/workshop_construction_server/runtime.rs",
@@ -370,7 +379,8 @@
       "scripts/verify.sh",
       "scripts/qualify_local.sh"
     ],
-    "full_qualification_requires_reviewed_frozen_clean_source": true
+    "full_qualification_requires_reviewed_frozen_clean_source": true,
+    "tree_material_adapter_rust_cases": 10
   },
   "shared_native_engine": {
     "source": "bridge/common/one_attempt_native.h",
@@ -384,5 +394,33 @@
     "connection_deadline_renewal": false,
     "pre_dispatch_expiry": "reject before durable dispatch; consume local permission; retain original preparation custody for reconciliation",
     "after_dispatch_failure": "indeterminate original effect; no automatic retry"
+  },
+  "tree_material_adapter": {
+    "source_profile": "tree_harvest/1.21",
+    "origin": "exact original designation and independently acknowledged private Offline custody",
+    "donor_writes": false,
+    "arbitrary_native_item_selector": false,
+    "maximum_offers": 64,
+    "complete_supply_required": true,
+    "origin_goal_completion_required": false,
+    "original_deadline_renewed": false,
+    "causal_provenance_known": false,
+    "handle_binding": [
+      "original custody",
+      "complete fresh Tree progress",
+      "session",
+      "workshop center",
+      "item"
+    ],
+    "independent_workshop_qualification": [
+      "fortress",
+      "map dimensions",
+      "same paused game tick",
+      "selected log position and material",
+      "workshop eligibility"
+    ],
+    "generations_independently_pinned": true,
+    "selection_latch": "original Workshop Intent capture",
+    "recovery_rediscovery": false
   }
 }

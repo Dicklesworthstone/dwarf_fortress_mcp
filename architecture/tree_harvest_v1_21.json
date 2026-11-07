@@ -114,6 +114,7 @@
     "crates/dfmcp-adapter/src/tree_harvest/mod.rs",
     "crates/dfmcp-adapter/src/tree_harvest/rpc.rs",
     "crates/dfmcp-adapter/src/tree_harvest/journal.rs",
+    "crates/dfmcp-adapter/src/tree_harvest/material_origin.rs",
     "crates/dfmcp-adapter/src/tree_harvest/tests.rs",
     "crates/dfmcp-adapter/src/tree_harvest/rpc_tests.rs",
     "crates/dfmcp-adapter/src/tree_harvest/journal_tests.rs",
@@ -253,5 +254,17 @@
     "connection_deadline_renewal": false,
     "pre_dispatch_expiry": "reject before durable dispatch; consume local permission; retain original preparation custody for reconciliation",
     "after_dispatch_failure": "indeterminate original effect; no automatic retry"
+  },
+  "read_only_material_import": {
+    "consumer": "workshop/1.20 material discovery",
+    "owner_mode": "offline",
+    "requires_current_independent_tree_ack": true,
+    "original_designation_receipt_required": true,
+    "pending_or_indeterminate_history_accepted": false,
+    "retained_source_floors": "derive from exact privately retained original and every consumed progress frame",
+    "canonical_history_rewritten": false,
+    "native_calls_or_custody_writes": false,
+    "restores_preparation_or_dispatch_permission": false,
+    "current_material_or_causal_provenance_proved": false
   }
 }

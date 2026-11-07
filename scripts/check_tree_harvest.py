@@ -24,7 +24,7 @@ SOURCES = [
     A + "lib.rs", A + "bounded_run/mod.rs", A + "order_run/mod.rs",
     *[A + "build_placement/rpc/" + n for n in ("codec.rs", "link.rs")],
     A + "build_placement/journal/private_file.rs", A + "workshop_construction/acknowledgement.rs",
-    *[A + "tree_harvest/" + n for n in ("mod.rs", "rpc.rs", "journal.rs", "tests.rs", "rpc_tests.rs", "journal_tests.rs")],
+    *[A + "tree_harvest/" + n for n in ("mod.rs", "rpc.rs", "journal.rs", "material_origin.rs", "tests.rs", "rpc_tests.rs", "journal_tests.rs")],
     M + "src/lib.rs", M + "src/tree_harvest_server.rs", M + "src/tree_harvest_server/runtime.rs",
     M + "src/tree_harvest_server/presentation.rs",
     M + "src/tree_harvest_server/server_tests.rs", M + "src/bin/dfmcp-tree-harvest-v1-21-dev-server.rs",
@@ -57,6 +57,7 @@ def check(root: Path = ROOT) -> dict:
         M + "src/lib.rs": ["pubmodtree_harvest_server;"],
         A + "tree_harvest/mod.rs": ["pubmodjournal;", "pubmodrpc;", "pub(crate)modtests;"],
         A + "tree_harvest/journal.rs": ["pub(crate)modjournal_tests;", "ack.acknowledge(self.pin(),&w.reserve(crate::workshop_construction::acknowledgement::WORK_BYTESasusize)?,)?;", "letpermitted=self.dispatchable();self.permit=false;"],
+        A + "tree_harvest/material_origin.rs": ["self.mode==Mode::Offline", "work.charge(raw.len())?;", "acknowledgement.verify_tree(", "check(raw==self.raw)?;", "sample.generation==self.binding.generation", "last_state==State::Terminalasu8&&!pending_sample", "require(record.phase==2,"],
         A + "tree_harvest/rpc.rs": ["modrpc_tests;", "self.prepared.take().as_ref()==Some(p)", "progress.generation==self.binding.generation", "consumed_tree_tick"],
         M + "src/tree_harvest_server.rs": ["modserver_tests;", "modpresentation;", "spine(operation,session,request)", "\"fortress_plan\"", "\"fortress_commit\"", "reference[\"uncertain_effect\"]==true"],
         M + "src/tree_harvest_server/presentation.rs": ["constCHUNK_BYTES:usize=24_000;", "ResultMeta::empty()", "CoreResult::Final(FinalCoreResult::ToolsCall{", ".encode()", "ENVELOPE_BYTES", ".len()+4096+", "\"dfmcp.tree-native-capture/1\"", "Digest32::of_bytes(chunk)", "overflow_packet("],
@@ -123,6 +124,20 @@ def check(root: Path = ROOT) -> dict:
     for wrapper in ("scripts/verify.sh", "scripts/qualify_local.sh"):
         if any(name not in texts[wrapper] for name in ("check_tree_harvest.py", "test_tree_harvest_source_inventory.py", "test_tree_harvest_native.py --mutations", "tests/stdio/tree_harvest.py")):
             raise ValueError("tree mandatory gate wiring absent")
+    expected_material_import = {
+        "consumer": "workshop/1.20 material discovery",
+        "owner_mode": "offline",
+        "requires_current_independent_tree_ack": True,
+        "original_designation_receipt_required": True,
+        "pending_or_indeterminate_history_accepted": False,
+        "retained_source_floors": "derive from exact privately retained original and every consumed progress frame",
+        "canonical_history_rewritten": False,
+        "native_calls_or_custody_writes": False,
+        "restores_preparation_or_dispatch_permission": False,
+        "current_material_or_causal_provenance_proved": False,
+    }
+    if contract.get("read_only_material_import") != expected_material_import:
+        raise ValueError("Tree read-only material import contract differs")
     expected_review_budget = {
         "bead": "dfmcp-reality-wiring-proof-4bf.14.3",
         "default_wall_millis": 60000, "maximum_wall_millis": 60000,

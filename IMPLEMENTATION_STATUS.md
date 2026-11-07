@@ -1,5 +1,56 @@
 # Implementation Status
 
+## Unreleased — Acknowledged Tree material adapter checkpoint
+
+The workshop adapter can now derive bounded material offers from one real
+Tree/1.21 original and its independently acknowledged private history.
+`TreeMaterialOrigin` reconstructs the original from the validated immutable
+journal bytes, verifies the separate Tree-specific ACK, requires an Offline
+owner and resolved designation, and preserves the complete retained source
+frontier. Mutable public inspection fields cannot manufacture an original or
+erase a pending sample or continuity break.
+
+`WorkshopMaterialDiscovery` consumes a fresh complete paused supply read and
+offers at most 64 deterministically ordered handles bound to original custody,
+the complete progress witness, session and fixed workshop center. Selection
+then independently qualifies the exact log with Workshop/1.20 at the same
+paused game tick, including fortress, dimensions, material, position and
+workshop eligibility. Native generations are independently pinned; neither
+imported history nor a handle grants build authority. The existing Workshop
+Intent is the immutable material latch. Tree custody, its original deadline,
+both native wire formats and the production admission map remain unchanged.
+
+Ten focused adapter regressions are authored, including real private-file
+reopen, ACK substitution, mutable-view tampering, rejected clock regression and
+pending recovery, stale handles, independent material/source/eligibility
+changes, authority/work limits and the complete 64-offer bound. This checkpoint
+is adapter source; the opt-in MCP consumer is the next implementation increment.
+The executor disconnected before these additions could be compiled, formatted
+or executed. They have independent source/API review, not a new Rust pass.
+
+Before these handoff edits, restored exact current-main source `8235b34d`
+completed two bounded component runs:
+
+- Query: 102 passed, zero failed or ignored, including all 15 numeric-ranking
+  cases, the corrected large-population work bound and the source/output
+  reservation regression. The harness checked 97 source/resource identities and
+  the 11 external lock tuples. Log SHA-256:
+  `6a304ee0c4d9524c4f3e06c601eb78e4086600a45544a1226a83e59e3e71927f`.
+- Adapter: 60 passed, zero failed or ignored, including the eight
+  existing-worker portfolio additions. The component used actual copied
+  production sources with explicit unrelated test exclusions; 339 source files,
+  147 exclusions and 148 dependency inputs were checked. Log SHA-256:
+  `b94f0d4d8966f1ca2f8678ed36ff0ac3f41a1736d140d5cea441f324d49076b6`.
+
+Raw component logs remain under
+`/workspace/scratch/7cd3f9756216/dfmcp_component_extensions` and
+`/workspace/scratch/7cd3f9756216/dfmcp_adapter_extensions_component`.
+The native-host baseline did not execute: ordinary and serialized-backend
+builds were SIGKILLed in actual adapter/unchanged world code without a source
+diagnostic. No final MCP, new handoff, actual stdio, full clean-source, SDK,
+live-game or admission qualification follows from those component results.
+The owning bead `dfmcp-reality-wiring-proof-4bf.14` remains in progress.
+
 ## Unreleased — Run a finite portfolio with existing enabled workers
 
 The combined development host now accepts the closed

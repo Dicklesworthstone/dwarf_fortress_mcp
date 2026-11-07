@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased — Import original Tree supply for workshop material selection
+
+- Add a read-only acknowledged Tree-origin descriptor reconstructed from exact
+  private journal history and a separate Tree-profile acknowledgement.
+- Add bounded fresh supply discovery, deterministic opaque material handles and
+  independent Workshop/1.20 qualification of the selected log at the same
+  paused source frontier, preserving independent native generation pins.
+- Retain original deadlines, custody and one-attempt workshop selection; do not
+  grant Tree mutation permission or infer causal provenance.
+- Author ten adapter regressions covering custody, source/authority drift,
+  canonical evidence, independent eligibility and the 64-offer bound. New
+  handoff source was reviewed but could not be executed after executor loss.
+- Complete restored pre-handoff component validation of current main:
+  102 query tests and 60 adapter tests passed with zero failures or ignored
+  cases. These results cover the earlier ranking and existing-worker portfolio
+  changes; they do not cover the new handoff or establish full qualification.
+
 ## Unreleased — Existing-worker finite production portfolios
 
 - Add `existing_labor_portfolio` planning for one to four normalized, distinct
