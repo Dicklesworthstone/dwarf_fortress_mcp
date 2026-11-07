@@ -22,6 +22,10 @@ import bounded_run_client as inventory_run_wire
 spec = importlib.util.spec_from_file_location('workshop_stdio', ROOT / 'tests/stdio/workshop.py')
 stdio = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(stdio)
+inspection_spec = importlib.util.spec_from_file_location(
+    'combined_production_inspection', ROOT / 'tests/stdio/combined_production_inspection.py')
+inspection = importlib.util.module_from_spec(inspection_spec)
+inspection_spec.loader.exec_module(inspection)
 number, blob, fields, receive = stdio.number, stdio.blob, stdio.fields, stdio.receive
 
 DF = b'0.51.11'
@@ -249,6 +253,7 @@ class Peer:
         self.order_sequence = 11
         self.progress_sequence = 0
         self.inventory_stack = 1
+        self.operations_capture = operations_capture
         self.after_operations_read = None
         self.drop_workforce_reply = False
         self.clock_sequence = 0
@@ -478,7 +483,7 @@ class Peer:
                         + number(6, IGEN) + blob(7, DF) + blob(8, DFH))
             if op == 'ReadObservation':
                 assert self.order_created
-                response += blob(9, operations_capture(self.order_tick, self.inventory_stack))
+                response += blob(9, self.operations_capture(self.order_tick, self.inventory_stack))
                 if self.after_operations_read is not None:
                     hook, self.after_operations_read = self.after_operations_read, None
                     hook()
@@ -600,7 +605,7 @@ def environment(directory, endpoint):
     return env
 
 
-class CombinedProduction(unittest.TestCase):
+class CombinedProduction(inspection.InspectionTests, unittest.TestCase):
     def setUp(self):
         self.directory = LOGS / self._testMethodName
         self.directory.mkdir(mode=0o700)
@@ -611,6 +616,18 @@ class CombinedProduction(unittest.TestCase):
     def tearDown(self):
         try: self.client.close()
         finally: self.peer.close()
+
+    def inspection_custody(self):
+        return custody_files(self.directory)
+
+    def inspection_reopen_offline(self, previous):
+        self.client.close()
+        env = reopen_environment(self.env, previous['recovery'],
+                                 previous['native_custody']['workforce_journal_id'])
+        del env['DFMCP_SEMANTIC_WORKFORCE_ALLOW_LABOR']
+        del env['DFMCP_SEMANTIC_WORK_ORDER_ALLOW_PRODUCTION']
+        self.client = stdio.Client(self.directory, {}, suffix='inspection-offline', env=env)
+        return self.client.open(mode='offline', max_wall_millis=60000)
 
     def enable_clock(self):
         self.client.close()
@@ -2257,7 +2274,7 @@ def main():
     print(json.dumps({'schema': 'dfmcp.combined-production-stdio/1', 'tests': result.testsRun,
         'failed': len(result.failures), 'errors': len(result.errors), 'skipped': len(result.skipped),
         'actual_modern_stdio': True, 'loopback_peers_are_doubles': True, 'live_game': False}))
-    raise SystemExit(0 if result.wasSuccessful() and result.testsRun == 43 and not result.skipped else 1)
+    raise SystemExit(0 if result.wasSuccessful() and result.testsRun == 49 and not result.skipped else 1)
 
 
 if __name__ == '__main__': main()

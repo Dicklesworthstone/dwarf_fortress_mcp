@@ -19,6 +19,7 @@ struct Leaf {
     history_present: bool,
     current_withdrawn: bool,
     parent: Option<SelectedParentGoalProgress>,
+    inspection: Option<InspectionSource>,
     clock: Option<ProductionClock>,
     clock_invalidates: bool,
     clock_review: Option<Digest32>,
@@ -242,6 +243,7 @@ impl Runtime {
             history_present: self.goal_history_present,
             current_withdrawn: self.goal_current_withdrawn,
             parent: self.parent_goal.take(),
+            inspection: self.inspection_source.take(),
             clock: self.clock.take(),
             clock_invalidates: self.clock_invalidates_goal,
             clock_review: self.clock_review.take(),
@@ -256,6 +258,7 @@ impl Runtime {
         self.goal_history_present = next.history_present;
         self.goal_current_withdrawn = next.current_withdrawn;
         self.parent_goal = next.parent;
+        self.inspection_source = next.inspection;
         self.clock = next.clock;
         self.clock_invalidates_goal = next.clock_invalidates;
         self.clock_review = next.clock_review;
@@ -390,6 +393,7 @@ impl Runtime {
     /// the next complete cohort must requalify each leaf at the new tick.
     pub(super) fn withdraw_portfolio_current(&mut self) {
         self.portfolio_sample = None;
+        self.inspection_source = None;
         if let Some(p) = &mut self.portfolio {
             self.goal_current_withdrawn = true;
             self.parent_goal = None;
@@ -398,6 +402,7 @@ impl Runtime {
             for leaf in p.leaves.values_mut() {
                 leaf.current_withdrawn = true;
                 leaf.parent = None;
+                leaf.inspection = None;
                 leaf.clock_review = None;
                 leaf.inventory_review = None;
             }

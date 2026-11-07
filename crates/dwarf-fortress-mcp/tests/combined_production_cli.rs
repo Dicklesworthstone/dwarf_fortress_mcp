@@ -52,7 +52,7 @@ fn standard_cli_combined_production_actual_modern_stdio_two_steps()
             .last()
             .ok_or("missing actual test counters")?,
     )?;
-    assert_eq!(report["tests"], 43);
+    assert_eq!(report["tests"], 49);
     assert_eq!(report["failed"], 0);
     assert_eq!(report["errors"], 0);
     assert_eq!(report["skipped"], 0);

@@ -1,6 +1,8 @@
 #![forbid(unsafe_code)]
 //! Unadmitted combined labor and finite-order MCP host.
-use crate::live_production_runtime::{Config, Mode, ObserveRequest, Request, Runtime, View};
+use crate::live_production_runtime::{
+    Config, InspectionRequest, Mode, ObserveRequest, Request, Runtime, View,
+};
 use crate::semantic_work_order_runtime::clock::RunRequest;
 use crate::semantic_work_order_runtime::inventory_clock::RunRequest as InventoryRunRequest;
 use crate::semantic_workforce_runtime::digest;
@@ -59,6 +61,8 @@ fn merge_recovery(old: &mut Option<Value>, latest: &Value) {
     retained["selected_order_goal"] = latest["selected_order_goal"].clone();
     retained["portfolio"] = latest["portfolio"].clone();
     retained["selected_parent_goal"] = Value::Null;
+    retained["production_inspection_source"] = Value::Null;
+    retained["production_inspection"] = Value::Null;
     if latest.get("clock").is_some() {
         retained["clock"] = latest["clock"].clone();
     }
@@ -89,6 +93,7 @@ enum Action {
     Observe(ObserveRequest),
     Inspect,
     InspectOrder(u32),
+    InspectProduction(InspectionRequest, Option<u32>),
     Plan(Request),
     PlanPortfolio(crate::live_production_runtime::PortfolioRequest),
     PlanRun(RunRequest, Option<u32>),
@@ -134,6 +139,7 @@ impl Action {
             Self::Observe(request) => runtime.observe(request, c),
             Self::Inspect => runtime.inspect(c),
             Self::InspectOrder(step) => runtime.inspect_order(Some(step), c),
+            Self::InspectProduction(request, step) => runtime.inspect_production(request, step, c),
             Self::Plan(request) => runtime.plan(request, c),
             Self::PlanPortfolio(request) => runtime.plan_portfolio(request, c),
             Self::PlanRun(request, step) => {
@@ -664,11 +670,19 @@ pub fn fortress_observe(session_id: String, request: Option<String>) -> String {
     })
 }
 #[tool(
-    description = "Inspect retained original plan, frontier, review and recovery custody. For a portfolio, optional order_step_id selects that exact original order and its clock seals without native contact."
+    description = "Inspect retained original plan, frontier, review and recovery custody. Optional order_step_id selects an original portfolio order. After a successful Wait, optional closed dfmcp.query/1 JSON request supports production_diagnosis, inventory_plan, entities, inspect, traverse and dependencies over that exact captured operations state. expected_anchor names production_inspection_source.anchor, not the parent anchor. Diagnoses are observed conditions across captured jobs, not order-attributed causes; inventory plans allocate declared stack units without reserving items or proving native recipe feasibility. No native contact or clock advance."
 )]
-pub fn fortress_query(session_id: String, order_step_id: Option<u32>) -> String {
-    with_session(session_id, "fortress.query", None, || {
-        Ok(order_step_id.map_or(Action::Inspect, Action::InspectOrder))
+pub fn fortress_query(
+    session_id: String,
+    order_step_id: Option<u32>,
+    request: Option<String>,
+) -> String {
+    with_session(session_id, "fortress.query", None, || match request {
+        Some(raw) => Ok(Action::InspectProduction(
+            InspectionRequest::parse(&raw)?,
+            order_step_id,
+        )),
+        None => Ok(order_step_id.map_or(Action::Inspect, Action::InspectOrder)),
     })
 }
 #[tool(

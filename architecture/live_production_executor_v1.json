@@ -255,7 +255,13 @@
       "crates/dfmcp-mcp/src/live_production_runtime/portfolio_request.rs",
       "crates/dfmcp-adapter/src/live_production/portfolio_goal.rs",
       "tests/stdio/combined_portfolio.py",
-      "crates/dwarf-fortress-mcp/tests/combined_portfolio_cli.rs"
+      "crates/dwarf-fortress-mcp/tests/combined_portfolio_cli.rs",
+      "crates/dfmcp-mcp/src/live_production_runtime/inspection.rs",
+      "crates/dfmcp-mcp/src/operations_production.rs",
+      "crates/dfmcp-mcp/src/semantic_query_core.rs",
+      "crates/dfmcp-adapter/src/operations_analysis_view.rs",
+      "crates/dfmcp-adapter/tests/semantic_work_orders/production_analysis.rs",
+      "tests/stdio/combined_production_inspection.py"
     ],
     "private_custody_platforms": [
       "linux-x86_64",
@@ -488,6 +494,46 @@
       "extra_history_paths": "goal-{2,3,4}.history",
       "extra_clock_paths": "portfolio-{2,3,4}-{clock,inventory-clock}.journal",
       "new_protocol_or_admission": false
+    },
+    "production_inspection": {
+      "optional_query_request_schema": "dfmcp.query/1",
+      "query_kinds": [
+        "production_diagnosis",
+        "inventory_plan",
+        "entities",
+        "inspect",
+        "traverse",
+        "dependencies"
+      ],
+      "source": "exact selected WorkOrderGoalProjection from successful joined original-goal sample",
+      "selected_anchor_and_parent_anchor_distinct": true,
+      "complete_portfolio_requires_exact_selected_anchor_tuple": true,
+      "canonical_generations_and_enclosing_digest_preserved": true,
+      "scope": "captured_operations",
+      "attribution": "not_order_attributed",
+      "current_query_and_observe_authority_before_selected_anchor_rebind": true,
+      "operator_source_pins_revalidated": true,
+      "private_custody_checked_before_and_after_analysis": true,
+      "source_entity_and_byte_work_budgeted": true,
+      "query_output_tokens_max": 4096,
+      "source_bound_continuations": true,
+      "complete_rows_or_refusal": true,
+      "native_contact": false,
+      "native_effects": false,
+      "reservations": false,
+      "mutation_authority": false,
+      "native_recipe_feasibility_proven": false,
+      "full_goal_proof_added": false,
+      "fresh_sample_required_after": [
+        "failed_call",
+        "new_observation",
+        "clock_run",
+        "restart"
+      ],
+      "unavailable_in_offline_recovery": true,
+      "diagnostic_guidance_for_pending_original_goal": true,
+      "test_campaign": "tests/stdio/combined_production_inspection.py",
+      "test_execution_status": "added_not_executed_executor_unavailable"
     }
   },
   "selected_work_order_goal_monitor": {

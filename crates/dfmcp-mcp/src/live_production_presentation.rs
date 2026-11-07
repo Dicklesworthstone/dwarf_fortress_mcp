@@ -42,6 +42,7 @@ pub(super) fn compact(view: &Value) -> Value {
         "selected_order_goal":compact_goal(&view["selected_order_goal"]),
         "portfolio":compact_portfolio(&view["portfolio"]),
         "selected_parent_goal":null,
+        "production_inspection_source":null,"production_inspection":null,
         "current_parent_goal":null,
         "parent_goal_observation_fenced":view["parent_goal_observation_fenced"] == true,
         "clock":clock_summary(&view["clock"],false,ORDER_CLOCK),"clock_control_enabled":false,
@@ -736,6 +737,24 @@ fn encode(
     let clock_source_lost =
         clock_active["native"]["phase"] == "source_lost" && clock["needs_reconciliation"] == false;
     let labor = parent_labor_diagnostics(&parent_goal);
+    let inspection_source = &view["production_inspection_source"];
+    let inspection_available = verified
+        && !uncertain
+        && mode != Some("offline")
+        && !clock_invalidates_goal
+        && !parent_fenced
+        && current_tick
+        && inspection_source["scope"] == "captured_operations"
+        && inspection_source["attribution"] == "not_order_attributed"
+        && inspection_source["parent_anchor"] == view["anchor"]
+        && inspection_source["anchor"] == selected_goal["anchor"]
+        && inspection_source["order_step_id"] == selected_goal["step_id"]
+        && digest(&inspection_source["source_digest"]).is_some();
+    let inspection = &view["production_inspection"];
+    let diagnosis_seen = inspection_available
+        && inspection["kind"] == "production_diagnosis"
+        && inspection["anchor"] == inspection_source["anchor"]
+        && inspection["source_digest"] == inspection_source["source_digest"];
     let recommendation = if session.is_none() || result["closed"] == true {
         None
     } else if uncertain && mode == Some("offline") {
@@ -823,6 +842,23 @@ fn encode(
             "Prepare the next dependency-satisfied original step.",
             false,
             json!({"request":json!({"kind":"step", "original_plan_digest":view["original_plan"]["plan_digest"]}).to_string()}),
+        ))
+    } else if inspection_available
+        && selected_goal["current_truth"] == "false"
+        && !diagnosis_seen
+        && inspection_source["diagnosis_request"].is_object()
+    {
+        let mut arguments = json!({
+            "request":inspection_source["diagnosis_request"].to_string()
+        });
+        if portfolio {
+            arguments["order_step_id"] = inspection_source["order_step_id"].clone();
+        }
+        Some((
+            "fortress_query",
+            "Inspect observed job conditions before choosing another bounded run. The captured jobs have no proven attribution to this original order.",
+            false,
+            arguments,
         ))
     } else if let Some(request) = &clock_proposal {
         Some((
@@ -962,6 +998,9 @@ fn encode(
         ));
     }
     let mut partial_domains = vec!["retained_original_plan"];
+    if diagnosis_seen {
+        partial_domains.push("observed_production_conditions");
+    }
     if selected_goal.is_object() {
         partial_domains.push(if retained_order {
             "selected_original_order_completion_goal"
@@ -1099,6 +1138,14 @@ fn encode(
     } else {
         vec![]
     };
+    if !inspection_available {
+        if result.get("production_inspection_source").is_some() {
+            result["production_inspection_source"] = Value::Null;
+        }
+        if result.get("production_inspection").is_some() {
+            result["production_inspection"] = Value::Null;
+        }
+    }
     if clock_invalidates_goal {
         result["original_goal_proven"] = json!(false);
         result["current_state_proven"] = json!(false);
@@ -1129,6 +1176,8 @@ fn encode(
             "retained_state_currently_verified":verified,"current_state_proven":false,"original_goal_proven":parent_proven,
             "current_parent_goal_truth":parent_truth,
             "current_parent_labor":labor.as_ref().map(|labor| &labor.summary),
+            "production_inspection_available":inspection_available,
+            "observed_production_conditions":if diagnosis_seen {Some(&inspection["summary"])} else {None},
             "parent_goal_observation_fenced":parent_fenced,
             "clock_control_enabled":clock_authority(ORDER_CLOCK),
             "inventory_clock_control_enabled":clock_authority(INVENTORY_CLOCK),
@@ -1141,6 +1190,7 @@ fn encode(
             "selected_order_goal_proven_at_anchor":selected_proven && retained_order}))
         .active_work(json!({"pending_plans":pending_plans,"actions":actions,"clock":clock_views[0],
             "inventory_clock":clock_views[1],
+            "production_inspection_source":if inspection_available {Some(inspection_source)} else {None},
             "obligations":if selected_goal.is_null() {vec![]} else {vec![selected_goal]},
             "current_parent_goal":parent_goal,"cancellation_drains":cancellation_drains,
             "indeterminate_effects":if uncertain {vec![json!({"state":"unknown","reconcile_original_key":true,
@@ -1307,6 +1357,55 @@ mod tests {
         view["selected_order_goal"] = goal;
         view["current_parent_goal"]["scope"] = json!("complete_original_labor_and_order_goal");
         (anchor, view)
+    }
+
+    #[test]
+    fn diagnosis_guidance_requires_the_current_selected_source() {
+        let (anchor, mut view) = joined_order_goal_view("false", false);
+        view["selected_order_goal"]["current_truth"] = json!("false");
+        let selected = view["selected_order_goal"]["anchor"].clone();
+        let source = json!({"scope":"captured_operations","attribution":"not_order_attributed",
+            "anchor":selected,"parent_anchor":anchor_value(anchor),"order_step_id":1,
+            "source_digest":"d".repeat(64),"diagnosis_request":{"schema":"dfmcp.query/1",
+                "expected_anchor":selected,"query":{"kind":"production_diagnosis","limit":4}}});
+        view["production_inspection_source"] = source.clone();
+        let turn = joined_packet(anchor, &view, "control", true, false);
+        assert_eq!(turn["agent_turn"]["briefing"]["production_inspection_available"], true);
+        assert_eq!(turn["agent_turn"]["briefing"]["original_goal_proven"], false);
+        assert_eq!(turn["agent_turn"]["recommendations"][0]["tool"], "fortress_query");
+        let request: Value = serde_json::from_str(
+            turn["agent_turn"]["recommendations"][0]["arguments"]["request"]
+                .as_str().expect("query request"),
+        ).expect("query envelope");
+        assert_eq!(request["expected_anchor"], selected);
+
+        view["production_inspection"] = json!({"kind":"production_diagnosis",
+            "anchor":selected,"source_digest":"d".repeat(64),"summary":{"jobs_with_findings":1}});
+        let diagnosed = joined_packet(anchor, &view, "control", true, false);
+        assert_eq!(
+            diagnosed["agent_turn"]["briefing"]["observed_production_conditions"]["jobs_with_findings"],
+            1
+        );
+        assert_eq!(diagnosed["agent_turn"]["briefing"]["original_goal_proven"], false);
+        assert_ne!(diagnosed["agent_turn"]["recommendations"][0]["tool"], "fortress_query");
+
+        for field in ["anchor", "parent_anchor", "order_step_id", "source_digest"] {
+            view["production_inspection_source"] = source.clone();
+            view["production_inspection_source"][field] = Value::Null;
+            let stale = joined_packet(anchor, &view, "control", true, false);
+            assert_eq!(stale["agent_turn"]["briefing"]["production_inspection_available"], false);
+            assert!(stale["agent_turn"]["active_work"]["production_inspection_source"].is_null());
+        }
+        view["production_inspection_source"] = source;
+        for (mode, verified, uncertain) in [
+            ("offline", true, false),
+            ("control", false, false),
+            ("control", true, true),
+        ] {
+            let refused = joined_packet(anchor, &view, mode, verified, uncertain);
+            assert_eq!(refused["agent_turn"]["briefing"]["production_inspection_available"], false);
+            assert!(refused["agent_turn"]["briefing"]["observed_production_conditions"].is_null());
+        }
     }
 
     #[test]

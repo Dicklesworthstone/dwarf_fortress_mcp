@@ -1,5 +1,48 @@
 # Implementation Status
 
+## Unreleased — Combined original-goal diagnosis and inventory inspection
+
+The combined labor/order host now accepts an optional closed dfmcp.query/1
+request on its existing fortress_query tool. After a successful joined goal
+sample it serves production_diagnosis, inventory_plan, entities, inspect,
+traverse and dependencies from the exact retained WorkOrderGoalProjection.
+No additional operations capture, projection universe or native RPC is created.
+The selected source anchor/digest and enclosing parent anchor stay distinct.
+
+Diagnosis uses the existing observed-condition engine for suspension, missing
+workers, unfinished holders, unattached filters, direct/inherited item flags,
+shared attachments and related conditions. It does not attribute jobs to the
+selected original manager order or establish native causal blockers. Declared
+stack-unit supply plans reuse the joint allocation solver and shortage
+certificate, without creating reservations or proving native recipe feasibility.
+Agent Turn guidance offers diagnosis for a pending original goal and reports an
+observed-condition summary without promoting it to goal completion.
+
+Every query rechecks current Query/Observe authority at the consumed-time floor,
+exact operator source pins and immutable private custody. Complete source
+entities/bytes, a shrinking wall deadline, a 4096-token inner ceiling and the
+existing whole-packet response limit bound publication. Portfolio leaves retain
+their own source alongside their parent/monitor/clock state; exact selected-anchor
+membership is required after whole-portfolio composition. Failed sampling,
+failed query/publication, clock advancement and restart withdraw current sources.
+Offline recovery never reconstructs a queryable current operations snapshot.
+
+Six new stdio/TCP scenarios exercise source identity, diagnosis paging and
+drilldown, joint inventory shortage, closed requests and stale/work refusals,
+workforce-bracket failure, clock invalidation and offline restart. They use real
+wire-format doubles and check that query calls do not contact native peers or
+rewrite custody. Existing suite count is now 43 + 6 = 49. New parser/presentation
+tests exercise closed inspection requests and suppression of stale guidance.
+
+Verification is limited: two independent source reviews found no remaining
+interface/source-lifecycle mismatch, but these MCP and stdio changes have not
+compiled or executed. The shared execution environment became unavailable;
+earlier full MCP checking was blocked by the missing exact offline FastMCP
+revision. Only the preceding adapter component metadata typecheck completed.
+No full verify.sh or qualify_local.sh run, native DFHack/gameplay proof, or
+production admission is claimed. Broad first-fortress and production beads stay
+in progress. Usage and exact limitations are in docs/COMBINED_PRODUCTION_MCP.md.
+
 ## Unreleased — Close legacy query budget bypasses
 
 The default laboratory query handler now admits the complete canonical source

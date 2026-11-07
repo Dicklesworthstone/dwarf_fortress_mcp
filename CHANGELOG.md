@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased — Diagnose original production goals through MCP
+
+- Add optional closed structured requests to the combined host's existing
+  fortress_query tool: production diagnosis, declared inventory allocation,
+  entity inspection, traversal and dependencies over the exact selected goal
+  source. Expose distinct source and parent anchors without new native reads.
+- Retain each portfolio leaf's own operations snapshot and require its exact
+  current parent or complete-cohort association. Clock runs, failed calls and
+  restart withdraw current inspection sources; recovery restores no snapshot.
+- Offer bounded diagnostic guidance for pending goals, with observed conditions
+  explicitly separated from causal blockers, native recipe feasibility,
+  reservations and original-goal proof.
+- Add six authentic-wire stdio/TCP scenarios plus parser and presentation tests;
+  the combined production suite now contains 49 cases. These additions were
+  source-reviewed but not executed after the shared executor went offline.
+
 ## Unreleased — Enforce budgets across every laboratory query mode
 
 - Apply complete canonical source record and byte admission to summary, entities,

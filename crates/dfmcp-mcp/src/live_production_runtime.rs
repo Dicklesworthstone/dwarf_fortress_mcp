@@ -28,6 +28,7 @@ mod clock;
 mod config;
 mod custody;
 mod goals;
+mod inspection;
 mod inventory_clock;
 mod portfolio;
 mod portfolio_request;
@@ -37,6 +38,8 @@ pub(crate) use choices::ObserveRequest;
 use clock::ProductionClock;
 pub(crate) use config::Config;
 use custody::{GuardedEvidence, SharedCustody};
+pub(crate) use inspection::InspectionRequest;
+use inspection::InspectionSource;
 use inventory_clock::ProductionInventoryClock;
 use orders::Shell as OrderShell;
 use portfolio::PortfolioState;
@@ -170,6 +173,7 @@ pub(crate) struct Runtime {
     goal_history_present: bool,
     goal_current_withdrawn: bool,
     parent_goal: Option<SelectedParentGoalProgress>,
+    inspection_source: Option<InspectionSource>,
     portfolio: Option<PortfolioState>,
     portfolio_sample: Option<live_production::SelectedParentGoalResult>,
 }
@@ -340,6 +344,7 @@ impl Runtime {
             goal_history_present: false,
             goal_current_withdrawn: false,
             parent_goal: None,
+            inspection_source: None,
             portfolio: None,
             portfolio_sample: None,
         };
@@ -717,6 +722,7 @@ impl Runtime {
         json!({"mode":self.mode.as_str(),"anchor":anchor_json(self.anchor),"recovery":self.recovery_json(),
             "portfolio":self.portfolio_json(),
             "selected_parent_goal":null,
+            "production_inspection_source":null,"production_inspection":null,
             "observation_tick_floor":self.observation_tick_floor.get(),
             "original_plan":self.original.as_ref().map(plan_json),"runtime_admitted":false,
             "selected_inventory_goal":if selected_goal["kind"] == "observed_inventory_minimum" {Some(&selected_goal)}else{None},
@@ -824,6 +830,7 @@ impl Runtime {
             "inventory_clock_control_enabled":self.inventory_clock_control_enabled(),
             "inventory_clock_invalidates_goal":self.inventory_clock_invalidates_goal,
             "current_parent_goal":self.parent_goal_json(),
+            "production_inspection_source":self.inspection_source_json(),
             "parent_goal_observation_fenced":self.parent_goal_observation_fenced(),
             "recovery":self.recovery_json(),"labor_control_enabled":self.labor_enabled(),"production_control_enabled":self.orders_enabled(),
             "native_custody":{"workforce_journal_id":self.workforce_journal.to_hex(),"order_journal_id":self.order_journal.to_hex()},

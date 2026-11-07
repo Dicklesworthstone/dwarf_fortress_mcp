@@ -12,7 +12,9 @@ platforms refuse private-journal opening.
 
 Owner: `df-dfhack-bridge-plane-c-pic.4.1`. The broader dispatcher and recovery
 tasks `.4` and `.5` remain open. This host does not supply a complete fortress
-controller or material/workshop planning. Separately configured bounded clock
+controller or proven native material/workshop feasibility. It can diagnose
+captured operations and allocate caller-declared inventory within the original
+session. Separately configured bounded clock
 runs can advance an original receipt-linked production order or finish an already
 observed inventory stability interval after the order retires. Wait monitors the
 original order's completion by default, or an explicitly selected inventory
@@ -117,6 +119,90 @@ Either unresolved run blocks paused goal acquisition. Explicit `scope="run"` or
 `scope="inventory_run"` cancellation retires that owner's prepared run or requests
 its native safety pause;
 it does not change the labor assignment or remove the manager order.
+
+## Inspect observed production conditions and declared inventory
+
+After Wait successfully publishes a joined original goal sample, Query and
+Explain expose `production_inspection_source`. Its `anchor` and `source_digest`
+identify the exact selected operations projection collected with that goal.
+The enclosing labor/order or portfolio anchor remains separately named
+`parent_anchor`. Entity IDs, generations and query continuations belong to the
+selected projection.
+
+Call `fortress_query` with the session ID and an optional `request` string
+containing one closed `dfmcp.query/1` envelope. The descriptor supplies a ready
+`diagnosis_request`, including the correct `expected_anchor`. For a portfolio,
+`order_step_id` optionally selects the exact original leaf. A leaf is inspectable
+only when its source matches the current selected sample or an exact member of
+the current complete portfolio cohort. A different leaf's same-tick observation
+is insufficient.
+
+For example, a diagnosis request without the optional expected anchor is:
+
+```json
+{
+  "schema": "dfmcp.query/1",
+  "query": {
+    "kind": "production_diagnosis",
+    "limit": 4
+  }
+}
+```
+
+The `production_inspection` result reuses the existing complete-row diagnosis
+renderer. It can report suspended jobs, absent worker assignments, unfinished
+holder buildings, unattached input filters, direct and inherited item flags,
+and shared or zero-sized attachments. Job and holder filters use exact canonical
+`entity_id` and `generation` handles. Its inspection and relationship requests can
+be passed back to the same Query tool.
+
+These are observed conditions in the complete captured operations roster.
+operations/1.3 supplies no job-to-manager-order provenance, workshop subtype,
+full native recipe requirements, path access or labor-eligibility proof.
+The result explicitly carries `attribution="not_order_attributed"`. It neither
+identifies a proven causal blocker for the selected order nor changes the
+original goal's proof, deadline, plan or clock authority.
+
+The `inventory_plan` query allocates caller-declared stack-unit requirements
+against conservatively eligible observed inventory. For example:
+
+```json
+{
+  "schema": "dfmcp.query/1",
+  "query": {
+    "kind": "inventory_plan",
+    "quantity_unit": "stack_units",
+    "demands": [
+      {"key": "first_batch", "units": 4, "item_types": ["WOOD"]},
+      {"key": "second_batch", "units": 4, "item_types": ["WOOD"]}
+    ],
+    "limit": 4
+  }
+}
+```
+
+The existing joint allocation solver prevents the same stack units from serving
+both demands and reports a shortage certificate when the joint requirements
+cannot be met. Demand names and quantities are supplied by the caller; they are
+not inferred native recipe costs. This query creates no reservation, mutation
+permit or commit-compatible artifact.
+
+`entities`, `inspect`, `traverse` and `dependencies` provide canonical drilldown
+over the same source. Unknown envelope/query fields, unsupported kinds,
+mismatched expected anchors, stale generations and continuations from a different
+source/session are refused by the existing query engines. The entire source
+must fit the entity and byte-work budgets. Inner query output is capped at the
+smaller of the negotiated allowance and 4096 tokens; the complete Agent Turn
+still has to fit the host's final response bounds. Pages retain complete rows
+and their original continuation; an oversized final packet is refused.
+
+Inspection performs current authority, operator-pin and private-custody checks
+before and after analysis. It does not contact native sources or advance time.
+A failed call, new goal observation, owned clock run or restart withdraws the
+current inspection source. Offline recovery restores no operations snapshot;
+a new successful Wait is required. While an original goal is pending and this
+source is available, Agent Turn guidance offers diagnosis before another bounded
+run. A diagnostic summary is never goal-completion evidence.
 
 ## One original production portfolio
 

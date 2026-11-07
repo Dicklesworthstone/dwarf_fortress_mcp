@@ -336,6 +336,7 @@ impl Runtime {
         // No earlier complete-parent proof survives an attempted new sample,
         // including failures before the first durable selected-history event.
         self.parent_goal = None;
+        self.inspection_source = None;
         let result = self.wait_with_goal_inner(c);
         self.raise_goal_floor();
         self.raise_clock_floor();
@@ -349,6 +350,7 @@ impl Runtime {
 
     pub(super) fn wait_with_goal_inner(&mut self, c: &OperationContext) -> Result<View> {
         self.check(c, false)?;
+        self.inspection_source = None;
         if self.mode == Mode::Offline {
             return self.inspect(c);
         }
@@ -566,6 +568,7 @@ impl Runtime {
             // anchor remains separately visible and is never relabelled.
             self.anchor = result.parent_progress().anchor;
             self.parent_goal = Some(result.parent_progress().clone());
+            self.inspection_source = Some(InspectionSource::from_sample(&result));
             if self.portfolio.is_some() {
                 self.portfolio_sample = Some(result);
             }
