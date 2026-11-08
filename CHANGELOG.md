@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased — Hand off an original workshop to production
+
+- Add a read-only adapter import of exact independently acknowledged Workshop
+  custody. Qualify the original Carpenter building with a fresh progress read
+  between custody checks; historical completion cannot authorize later effects.
+- Keep the original descriptor immutable and preserve consumed tick, generation,
+  allocator and identity-loss fences. Add one-way withdrawal for connection
+  uncertainty and monotone caller-held recovery floors without donor writes.
+- Expose independently accepted source pins and bounded private association
+  storage for the importing host. Combined production host integration remains
+  separate; no new tool, native protocol, canonical workshop fact or admission.
+- Execute all sixteen new adapter regressions, the 53-source static contract and
+  nine inventory checks. The preceding 48-case workshop run passed; the final
+  49-case run passed 44 and failed five unchanged TCP fixtures, one of which
+  passed separately afterward. Preserve that limitation in Implementation Status.
+
 ## Unreleased — Complete bounded production inspection before planning
 
 - Expand both captured-production inspection paths to twelve pure query kinds,

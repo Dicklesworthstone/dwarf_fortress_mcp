@@ -271,6 +271,81 @@ Failures withhold current completion. Full and bounded-overflow responses use
 the same Agent Turn spine, retain compact original hazards and recovery
 references, and never fabricate a canonical world anchor.
 
+## Hand off an original workshop to production
+
+The adapter exposes `workshop_construction::production_origin` so an importing
+production host can require the exact original Carpenter workshop to be complete
+before its own effects. This is an embedding API; combined-host configuration,
+original-plan association and guarded execution are a separate integration step.
+It adds no MCP tool or native method and creates no canonical workshop fact.
+
+Close the workshop session before importing its exclusive private custody. Open
+both `workshop.journal` and `workshop.ack` in Offline mode with the independently
+retained acknowledgement, then call `WorkshopJournal::production_origin` with
+the exact original key and plan digest. The importer requires the resolved
+original `Placed` receipt and rejects an unacknowledged journal, valid prefix
+rollback, another protocol's acknowledgement or retained source discontinuity.
+A historical completion sample is optional because it cannot establish current
+readiness. The original receipt supplies the exact building and material IDs;
+the importing request does not select an arbitrary native building.
+
+`WorkshopBinding::from_source_pins` constructs independently accepted endpoint,
+fortress, generation, dimensions and software pins without inventing a capture.
+These pins do not issue source authority. The host still authenticates and
+qualifies the actual native source under its current Query and Observe grants.
+
+The non-cloneable `WorkshopProductionOrigin` retains stable descriptor bytes and
+a digest covering the exact binding, acknowledged donor pin, original receipt
+and retained floor seed. A host can bind these bytes to its immutable original
+production plan. `verify` rechecks local historical custody without credentials,
+native contact or donor writes. `refresh` independently checks that custody
+around one fresh `ReadWorkshopProgress` for the original building. It requires
+the original source incarnation, exact geometry/material/maximum stage, complete
+construction with no remaining ConstructBuilding job, and the host's freshly
+observed paused tick. It does not call the donor's `sample` method, which may
+return already achieved historical completion.
+
+Every decoded tick, generation and building allocator horizon is consumed before
+later authority, custody or host-tick checks can fail. Complete retained history
+is checked at import, so an older sample's higher allocator horizon cannot be
+hidden by the latest sample. Source resets, original absence or identity
+contradiction permanently fence fresh qualification. An incomplete current
+workshop can be sampled again while preserving its original identity and floors.
+The host must retain one origin owner throughout the session. Connection or
+handshake uncertainty before `refresh` must call its one-way `fence`; withdrawal
+requires no surviving capability grant and cannot be reversed by Query.
+
+Recovery has two distinct inputs. The immutable donor descriptor binds the
+original workshop. The separate `retain_recovery_floor` API consumes the
+importing host's externally retained tick, native generation, next-building
+counter and sticky fence. It rejects lower or invalid values and never clears
+a fence. These caller-held recovery floors are rejection evidence, **not a
+local durable acknowledgement of fresh progress reads**. The importer does not
+append to the donor journal or ACK. A host must preserve those consumed floors
+across handoff or recovery, rather than remint an owner from old donor history.
+
+Each operation prepays its complete logical work and keeps one shrinking wall
+deadline of at most 60 seconds:
+
+| Operation | Required byte allowance |
+| --- | ---: |
+| Import complete original custody | 96 MiB |
+| Verify exact local custody | 24 MiB |
+| Refresh between both custody checks | 64 MiB |
+
+Native connection setup has a separate host-owned reservation before contact.
+The narrow `open_private_association_storage` helper lets that host create an
+immutable association in at most 64 KiB of the existing private-file custody.
+Creation requires Query and Plan; reopening uses Offline mode. It supplies no
+association codec, automatic initialization, repair or publication guarantee.
+
+Qualified completion applies to the exact fresh read. Every later effect
+boundary must refresh it again. It does not prove manager readiness, available
+production material, worker scheduling, cross-plugin atomicity, global restore
+continuity, finished furniture or causal production by an order. The original
+workshop history and deadlines are unchanged. Current production control and
+original-goal proof still belong to their separately authorized owners.
+
 ## Separately reviewed game progress
 
 This consumer does not control time. The existing standalone

@@ -23,6 +23,7 @@ SOURCES = [
     "bridge/dfhack-workshop-v1_20/dfmcp_workshop_v1_20.cpp", "crates/dfmcp-adapter/src/lib.rs",
     "crates/dfmcp-adapter/src/build_placement/rpc/codec.rs", "crates/dfmcp-adapter/src/build_placement/rpc/link.rs",
     *[ADAPTER + name for name in ("mod.rs", "acknowledgement.rs", "journal.rs", "journal_tests.rs", "rpc.rs", "rpc_tests.rs", "tests.rs")],
+    ADAPTER + "production_origin.rs", ADAPTER + "production_origin_tests.rs",
     ADAPTER + "tree_material.rs", ADAPTER + "tree_material_tests.rs",
     *[TREE + name for name in ("mod.rs", "journal.rs", "material_origin.rs", "rpc.rs", "tests.rs", "journal_tests.rs")],
     "tests/native/tree_harvest/vectors.json",
@@ -58,7 +59,10 @@ def check(root: Path = ROOT) -> dict:
         "crates/dfmcp-adapter/src/lib.rs": ["pubmodworkshop_construction;"],
         MCP + "lib.rs": ["pubmodworkshop_construction_server;"],
         MCP + "bin/dfmcp-workshop-v1-20-dev-server.rs": ["dfmcp_mcp::workshop_construction_server::run_stdio();"],
-        ADAPTER + "mod.rs": ["pubmodacknowledgement;", "pubmodjournal;", "pubmodrpc;", "modtree_material;", "WorkshopMaterialDiscovery,WorkshopMaterialOffer"],
+        ADAPTER + "mod.rs": ["pubmodacknowledgement;", "pubmodjournal;", "pubmodrpc;", "modtree_material;", "WorkshopMaterialDiscovery,WorkshopMaterialOffer", "pubusejournal::production_origin;", "pubfnfrom_source_pins("],
+        ADAPTER + "journal.rs": ["pubmodproduction_origin;"],
+        ADAPTER + "acknowledgement.rs": ["fnverify_workshop_offline(", "matches!(self.protocol,Protocol::Workshop)&&self.scope.is_none()&&self.offline"],
+        ADAPTER + "production_origin.rs": ["pubfnproduction_origin<", "self.production_floors(key,&mutwork)?", "acknowledgement.verify_workshop_offline(", "pubfnretain_recovery_floor(", "pubfnfence(&mutself)", "self.high_tick=self.high_tick.max(progress.tick());", "ifgoal!=WorkshopGoal::Complete"],
         TREE + "journal.rs": ["modmaterial_origin;", "pubusematerial_origin::TreeMaterialOrigin;"],
         TREE + "material_origin.rs": ["pubfnmaterial_origin<", "acknowledgement.verify_tree(", "self.material_projection(&self.raw"],
         ADAPTER + "tree_material.rs": ["pubconstMAX_OFFERS:usize=64;", "Progress::decode(progress.bytes(),&origin.original().plan)?!=progress", "capture.tick()!=self.progress.tick"],
@@ -109,6 +113,7 @@ def check(root: Path = ROOT) -> dict:
     actual_counts = {
         "adapter_rust_cases": sum(text[ADAPTER + name].count("#[test]") for name in ("tests.rs", "journal_tests.rs", "rpc_tests.rs")),
         "tree_material_adapter_rust_cases": text[ADAPTER + "tree_material_tests.rs"].count("#[test]"),
+        "production_origin_adapter_rust_cases": text[ADAPTER + "production_origin_tests.rs"].count("#[test]"),
         "mcp_unit_cases": text[MCP + "workshop_construction_server/tests.rs"].count("#[test]"),
         "tree_material_mcp_unit_cases": text[MCP + "workshop_construction_server/tree_material_tests.rs"].count("#[test]"),
         "rust_stdio_cases": text["crates/dfmcp-mcp/tests/workshop_construction_stdio.rs"].count("#[test]"),
@@ -120,6 +125,33 @@ def check(root: Path = ROOT) -> dict:
     }
     if any(contract["focused_test_contract"][key] != value for key, value in actual_counts.items()):
         raise ValueError(f"workshop exact registered test count differs: {actual_counts}")
+    expected_production_origin = {
+        "api": "workshop_construction::production_origin",
+        "origin": "exact original Placed receipt and independently acknowledged private Offline Workshop custody",
+        "historical_completion_required": False,
+        "fresh_complete_required": True,
+        "donor_reverified_around_native_reads": True,
+        "donor_writes": False,
+        "native_methods_added": False,
+        "public_tools_added": False,
+        "canonical_world_fact": False,
+        "original_descriptor_immutable": True,
+        "owner_cloneable": False,
+        "consumed_floors": ["tick", "native_generation", "next_building_id", "sticky_fence"],
+        "recovery_floor_custody": "externally retained by the importing host; not a local durable acknowledgement of fresh reads",
+        "connection_failure": "host invokes one-way fence before any future qualification",
+        "read_reservations_bytes": {"import": 100663296, "verify": 25165824, "refresh": 67108864},
+        "association_max_bytes": 65536,
+        "association_create_authority": ["Query", "Plan"],
+        "association_reopen_mode": "Offline",
+        "combined_host_integration": "tracked separately from this embedding API",
+        "manager_material_or_causal_production_proof": False,
+    }
+    if contract.get("production_origin_adapter") != expected_production_origin:
+        raise ValueError("Workshop production origin adapter contract differs")
+    if any(token in compact[ADAPTER + "production_origin.rs"] for token in
+           ("source.prepare(", "source.commit(", "source.cancel(", "journal.sample(")):
+        raise ValueError("Workshop production importer cannot mutate or advance donor custody")
     expected_tree_material_adapter = {
         "source_profile": "tree_harvest/1.21",
         "origin": "exact original designation and independently acknowledged private Offline custody",

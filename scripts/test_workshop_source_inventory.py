@@ -74,12 +74,15 @@ class WorkshopSourceInventoryTests(unittest.TestCase):
         self.assertFalse(result["sdk_or_game_executed"])
 
     def test_missing_consumer_source_and_unregistered_module_are_refused(self) -> None:
-        for kind in ("missing", "unregistered"):
+        for kind in ("missing", "origin", "origin_tests", "unregistered"):
             with self.subTest(kind=kind), tempfile.TemporaryDirectory() as folder:
                 root = Path(folder)
                 self.copy_consumer(root)
                 if kind == "missing":
                     (root / "crates/dfmcp-adapter/src/workshop_construction/rpc_tests.rs").unlink()
+                elif kind in ("origin", "origin_tests"):
+                    name = "production_origin.rs" if kind == "origin" else "production_origin_tests.rs"
+                    (root / "crates/dfmcp-adapter/src/workshop_construction" / name).unlink()
                 else:
                     path = root / "crates/dfmcp-adapter/src/lib.rs"
                     text = path.read_text()
@@ -120,6 +123,25 @@ class WorkshopSourceInventoryTests(unittest.TestCase):
                 path = root / "architecture/workshop_construction_v1_20.json"
                 contract = json.loads(path.read_text())
                 contract[section][field] = value
+                path.write_text(json.dumps(contract))
+                with self.assertRaises(ValueError):
+                    check(root)
+
+    def test_production_origin_contract_preserves_readonly_custody_and_freshness(self) -> None:
+        mutations = (
+            ("donor_writes", True),
+            ("fresh_complete_required", False),
+            ("canonical_world_fact", True),
+            ("owner_cloneable", True),
+            ("recovery_floor_custody", "acknowledged by donor"),
+        )
+        for field, value in mutations:
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                self.copy_consumer(root)
+                path = root / "architecture/workshop_construction_v1_20.json"
+                contract = json.loads(path.read_text())
+                contract["production_origin_adapter"][field] = value
                 path.write_text(json.dumps(contract))
                 with self.assertRaises(ValueError):
                     check(root)

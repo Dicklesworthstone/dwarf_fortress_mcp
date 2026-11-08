@@ -1,5 +1,49 @@
 # Implementation Status
 
+## Unreleased — Original workshop prerequisite adapter
+
+`WorkshopJournal::production_origin` now imports one exact original Placed
+receipt from independently acknowledged private Offline Workshop custody. Its
+non-cloneable owner binds the native source, donor pin, original plan/receipt and
+retained floor seed in immutable descriptor bytes. Local verification performs
+no native call. Fresh qualification brackets an original-building progress read
+with custody checks and requires exact current completion at the independently
+observed paused host tick. Historical goal achievement never substitutes for
+that read. The source supplies no canonical workshop fact, effect permission,
+manager/material readiness or causal production proof.
+
+Complete retained history contributes tick, native-generation and next-building
+floors. New decoded frontiers and observed identity loss survive later authority,
+budget, custody or publication refusals. A one-way `fence` also withdraws future
+qualification after host-owned connection or handshake ambiguity. Recovery can
+only raise valid floors or preserve a sticky fence. These fresh-read recovery
+floors are externally retained by the importing host; they are not durably
+acknowledged in the unchanged donor journal or ACK. The host must keep one owner
+and preserve those external floors rather than remint from older donor history.
+
+The adapter prepays 96 MiB for import, 24 MiB for local verification and 64 MiB
+for refresh under a shrinking maximum 60-second deadline. A separate bounded
+private-file helper supports the host's immutable plan association at at most
+64 KiB, with Query/Plan on creation and Offline reopen. Native connection setup
+remains separately budgeted by the host. The combined host consumer and its
+original-plan sidecar are still an integration task at this adapter checkpoint.
+
+Validation on 2026-11-08 uses the actual repository adapter target with rustc
+1.102.0-nightly (f5cedb83a, 2026-11-07), `--locked --offline --jobs 1` and
+`--test-threads=1`. All sixteen new production-origin regressions execute and
+pass on the final source. Before the one-way host-fence addition, all 48 cases
+in `cargo +nightly test -p dfmcp-adapter workshop_construction --lib` passed.
+The final 49-case run passed 44 and failed five unchanged Workshop RPC fixtures
+with `invalid workshop native envelope` near their five-second deadlines.
+The unchanged original prepare/commit/progress TCP case subsequently passed in
+isolation on final source. Concurrent compilation was present, but a scheduling
+cause is not established; no complete 49-case final-source pass is claimed.
+The updated static contract passes with 53 registered sources, and all nine
+Python required-inventory/refusal tests pass. No full MCP, real SDK, native-game,
+live-fortress or production-admission qualification is inferred. Original
+workshop and finite-production beads remain in progress under their broader
+acceptance criteria.
+
 ## Unreleased — Inspect retained production sources before choosing goals
 
 The combined development host now exposes twelve bounded inspection kinds

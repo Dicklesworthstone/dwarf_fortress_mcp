@@ -12,6 +12,7 @@
 pub mod acknowledgement;
 pub mod journal;
 pub mod rpc;
+pub use journal::production_origin;
 mod tree_material;
 pub use tree_material::{WorkshopMaterialDiscovery, WorkshopMaterialOffer};
 
@@ -1519,6 +1520,35 @@ pub struct WorkshopBinding {
     dfhack_version: String,
 }
 impl WorkshopBinding {
+    /// Independently accepted operator pins, not an observed capture or source
+    /// grant. The caller must still qualify every authenticated native read.
+    pub fn from_source_pins(
+        endpoint: SocketAddr,
+        fortress: FortressIdentity,
+        generation: u64,
+        dimensions: [u32; 3],
+        df: &str,
+        dfhack: &str,
+    ) -> Result<Self> {
+        require(
+            endpoint.is_ipv4()
+                && endpoint.ip().is_loopback()
+                && endpoint.port() != 0
+                && generation > 0
+                && generation < u64::MAX
+                && dimensions.iter().all(|n| (1..=32768).contains(n)),
+            "invalid workshop source pins",
+        )?;
+        Ok(Self {
+            endpoint,
+            generation,
+            fortress,
+            dimensions,
+            df_version: text(df.as_bytes(), 128)?,
+            dfhack_version: text(dfhack.as_bytes(), 128)?,
+        })
+    }
+
     pub fn new(
         endpoint: SocketAddr,
         df: &str,

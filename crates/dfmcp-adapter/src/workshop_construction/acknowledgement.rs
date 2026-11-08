@@ -291,6 +291,12 @@ impl<S: EffectJournalStorage> WorkshopAcknowledgements<S> {
         check(matches!(self.protocol, Protocol::Tree) && self.scope == Some(scope))?;
         self.verify(context)
     }
+    /// A production importer holds the independent Workshop acknowledgement
+    /// read-only. An equal-looking Tree/Manager pin cannot stand in for it.
+    pub(crate) fn verify_workshop_offline(&mut self, context: &OperationContext) -> Result<()> {
+        check(matches!(self.protocol, Protocol::Workshop) && self.scope.is_none() && self.offline)?;
+        self.verify(context)
+    }
     pub fn acknowledge(&mut self, pin: WorkshopPin, context: &OperationContext) -> Result<()> {
         self.verify(context)?;
         if self.latest == Some(pin) {

@@ -254,6 +254,8 @@
     "crates/dfmcp-adapter/src/workshop_construction/rpc.rs",
     "crates/dfmcp-adapter/src/workshop_construction/rpc_tests.rs",
     "crates/dfmcp-adapter/src/workshop_construction/tests.rs",
+    "crates/dfmcp-adapter/src/workshop_construction/production_origin.rs",
+    "crates/dfmcp-adapter/src/workshop_construction/production_origin_tests.rs",
     "crates/dfmcp-adapter/src/workshop_construction/tree_material.rs",
     "crates/dfmcp-adapter/src/workshop_construction/tree_material_tests.rs",
     "crates/dfmcp-adapter/src/tree_harvest/mod.rs",
@@ -375,7 +377,7 @@
     "mcp_unit_cases": 9,
     "rust_stdio_cases": 2,
     "python_stdio_cases": 7,
-    "python_inventory_cases": 8,
+    "python_inventory_cases": 9,
     "native_scenarios": 13,
     "compiled_mutants": 12,
     "failed_allowed": 0,
@@ -388,7 +390,8 @@
     "full_qualification_requires_reviewed_frozen_clean_source": true,
     "tree_material_adapter_rust_cases": 10,
     "tree_material_mcp_unit_cases": 3,
-    "tree_material_python_stdio_cases": 5
+    "tree_material_python_stdio_cases": 5,
+    "production_origin_adapter_rust_cases": 16
   },
   "shared_native_engine": {
     "source": "bridge/common/one_attempt_native.h",
@@ -469,5 +472,39 @@
     "harvest_goal_completion_proven": false,
     "causal_provenance_known": false,
     "host_selection_allowed": "operator scope, protected regions and footprint only; no native eligibility claim"
+  },
+  "production_origin_adapter": {
+    "api": "workshop_construction::production_origin",
+    "origin": "exact original Placed receipt and independently acknowledged private Offline Workshop custody",
+    "historical_completion_required": false,
+    "fresh_complete_required": true,
+    "donor_reverified_around_native_reads": true,
+    "donor_writes": false,
+    "native_methods_added": false,
+    "public_tools_added": false,
+    "canonical_world_fact": false,
+    "original_descriptor_immutable": true,
+    "owner_cloneable": false,
+    "consumed_floors": [
+      "tick",
+      "native_generation",
+      "next_building_id",
+      "sticky_fence"
+    ],
+    "recovery_floor_custody": "externally retained by the importing host; not a local durable acknowledgement of fresh reads",
+    "connection_failure": "host invokes one-way fence before any future qualification",
+    "read_reservations_bytes": {
+      "import": 100663296,
+      "verify": 25165824,
+      "refresh": 67108864
+    },
+    "association_max_bytes": 65536,
+    "association_create_authority": [
+      "Query",
+      "Plan"
+    ],
+    "association_reopen_mode": "Offline",
+    "combined_host_integration": "tracked separately from this embedding API",
+    "manager_material_or_causal_production_proof": false
   }
 }

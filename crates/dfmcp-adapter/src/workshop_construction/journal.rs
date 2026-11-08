@@ -39,6 +39,9 @@ const FRAME: &[u8; 8] = b"DFMWJF20";
 const END: &[u8; 8] = b"DFMWJEND";
 const MAX_BINDING_BYTES: usize = 1024;
 
+#[path = "production_origin.rs"]
+pub mod production_origin;
+
 pub(super) fn error(code: ErrorCode, message: &str) -> dfmcp_core::DfmcpError {
     dfmcp_core::DfmcpError::new(code, message)
 }
