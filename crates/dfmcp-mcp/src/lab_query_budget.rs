@@ -105,7 +105,10 @@ pub(crate) fn finish_response(response: String, elapsed: Duration) -> String {
     if payload["ok"] != true {
         return fitted;
     }
-    let structured = payload["mode"] == "structured";
+    let structured = matches!(
+        payload["mode"].as_str(),
+        Some("structured" | "query_changes")
+    );
     let publishable = serde_json::from_str::<Value>(&fitted).is_ok_and(|value| {
         matches!(
             value["output_budget"]["tier"].as_str(),
@@ -122,6 +125,9 @@ pub(crate) fn finish_response(response: String, elapsed: Duration) -> String {
         return fitted;
     }
     let mut turn = payload["agent_turn"].clone();
+    // No successful comparison or detail path survives withdrawal of its page.
+    // Keep independent active work, but do not summarize unpublished evidence.
+    turn["changes"] = json!([]);
     turn["coverage"] = json!({"status": "partial", "complete_domains": [],
         "partial_domains": [], "absence_proof_scope": [], "continuation": null,
         "reason": "query result was not published"});

@@ -62,6 +62,23 @@ pub(crate) mod structured_query;
 #[path = "lab_query_budget.rs"]
 pub(crate) mod query_budget;
 
+// The laboratory owns its temporal query state independently of every native
+// profile. Reuse the same selection, comparison and publication semantics.
+#[allow(dead_code, clippy::duplicate_mod)]
+#[path = "semantic_query.rs"]
+pub(crate) mod semantic_query;
+
+#[allow(dead_code, clippy::duplicate_mod)]
+#[path = "query_response.rs"]
+mod query_response;
+
+#[path = "lab_query_comparison.rs"]
+mod query_comparison;
+
+#[cfg(test)]
+#[path = "lab_query_comparison_mcp_tests.rs"]
+mod query_comparison_mcp_tests;
+
 #[cfg(test)]
 #[path = "lab_structured_query_tests.rs"]
 mod structured_query_tests;
@@ -2975,11 +2992,12 @@ pub fn fortress_observe(session_id: Option<String>) -> String {
 /// `{"mode":"entities","kind":"unit","limit":25,"offset":0}` /
 /// `{"mode":"terrain","min":[x,y,z],"max":[x,y,z]}`.
 #[tool(
-    description = "Run a bounded laboratory query. The closed structured wrapper {\"mode\":\"structured\",\"request\":{\"schema\":\"dfmcp.query/1\",\"query\":{...}},\"at\"?:state_hash} exposes stateless typed queries under current Query authority. Other mode: \"summary\" (default), \"entities\", or a JSON object {\"mode\":\"entities\",\"kind\":\"unit\",\"limit\":25,\"offset\":0} or {\"mode\":\"terrain\",\"min\":[x,y,z],\"max\":[x,y,z]}. Full DfQL is not implemented."
+    description = "Run a bounded laboratory query. The closed structured wrapper {\"mode\":\"structured\",\"request\":{\"schema\":\"dfmcp.query/1\",\"query\":{...}},\"at\"?:state_hash} exposes stateless typed queries under current Query authority. The closed query_changes wrapper takes before (exact retained hash), after (optional, defaults to current), select (complete entities selection), limit and continuation; it reports selected endpoint differences without proving intermediate history or mutation evidence. Other mode: \"summary\" (default), \"entities\", or a JSON object {\"mode\":\"entities\",\"kind\":\"unit\",\"limit\":25,\"offset\":0} or {\"mode\":\"terrain\",\"min\":[x,y,z],\"max\":[x,y,z]}. Full DfQL is not implemented."
 )]
 pub fn fortress_query(session_id: Option<String>, mode: Option<String>) -> String {
     let mode = mode.map_or_else(|| "summary".to_owned(), |value| value);
     let structured = structured_query::parse(&mode);
+    let comparison = query_comparison::parse(&mode);
     let is_structured = matches!(&structured, Ok(Some(_)));
     let session = match resolve_session(session_id) {
         Ok(value) => value,
@@ -2993,10 +3011,11 @@ pub fn fortress_query(session_id: Option<String>, mode: Option<String>) -> Strin
                 Ok(value) => value,
                 Err(error) => return dfmcp_error_payload("fortress.query", &error),
             };
-            let result = authorize_entry(&ctx, Capability::Query, RiskTier::ReadOnly)
-                .and_then(|()| {
+            let result =
+                authorize_entry(&ctx, Capability::Query, RiskTier::ReadOnly).and_then(|()| {
                     let structured = structured?;
-                    if structured.is_none() && mode.len() > MAX_MODE_BYTES {
+                    let comparison = comparison?;
+                    if structured.is_none() && comparison.is_none() && mode.len() > MAX_MODE_BYTES {
                         return Err(DfmcpError::new(
                             ErrorCode::BudgetExceeded,
                             "query mode exceeds its explicit byte bound",
@@ -3004,6 +3023,11 @@ pub fn fortress_query(session_id: Option<String>, mode: Option<String>) -> Strin
                     }
                     // Select historical state only after authorizing at the current
                     // game tick. Neither an old source nor its cursor renews a grant.
+                    if let Some(request) = &comparison {
+                        let before = retained_resource_snapshot(guard, Some(&request.before))?;
+                        let after = retained_resource_snapshot(guard, request.after.as_deref())?;
+                        return query_comparison::execute(before, after, &ctx, request);
+                    }
                     if let Some(request) = &structured {
                         return retained_resource_snapshot(guard, request.at.as_deref())
                             .and_then(|source| structured_query::execute(source, &ctx, request));
@@ -3049,11 +3073,7 @@ fn legacy_query(
     let source_work = query_budget::admit_sources(&[snapshot], context)?;
     if mode != "summary" {
         let mut payload = crate::lab_world::query(snapshot, mode)?;
-        crate::resources::link_entity_resources(
-            &mut payload,
-            guard.session_id,
-            snapshot.anchor(),
-        )?;
+        crate::resources::link_entity_resources(&mut payload, guard.session_id, snapshot.anchor())?;
         payload["ok"] = json!(true);
         payload["session_id"] = json!(guard.session_id.to_string());
         payload["anchor"] = anchor_json(&snapshot.anchor());
@@ -4082,8 +4102,10 @@ fn rebase_by_witness(
         match crate::witness::FieldWitness::prove(&stale.plan, &base, &now, session.budget) {
             Ok(proof) => Some((proof, change)),
             Err(reason) => {
-                return Err(json!({"accepted":false, "reason":"a read of the plan changed",
-                    "change":change, "refinement_refusal":reason}));
+                return Err(
+                    json!({"accepted":false, "reason":"a read of the plan changed",
+                    "change":change, "refinement_refusal":reason}),
+                );
             }
         }
     } else {

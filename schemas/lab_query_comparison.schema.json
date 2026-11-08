@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dwarf-fortress-mcp.org/schemas/0.1.0/lab_query_comparison.schema.json",
+  "title": "Exact laboratory selected endpoint comparison",
+  "description": "Decoded JSON value of the mode string on the default laboratory fortress_query tool. The owning session resolves exact retained worlds and checks current Query authority. This compares complete selected endpoint projections, not continuous history, and creates no baseline, watch or game effect.",
+  "$comment": "Selection definitions are the existing urn:dfmcp:query:1 schema in mcp_query_v1.json. Runtime additionally enforces the 65536 UTF-8 request-byte bound, duplicate wrapper/selection fields, bounded predicates and names, exact current-epoch source identity, joint distinct-source work budgets, complete selected rows and whole-response publication. Hashes and continuation checksums grant no authority.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["mode", "before", "select"],
+  "properties": {
+    "mode": {"const": "query_changes"},
+    "before": {"$ref": "#/$defs/state_hash"},
+    "after": {
+      "anyOf": [{"$ref": "#/$defs/state_hash"}, {"type": "null"}],
+      "description": "Exact later retained world. Omitted or null selects the current world owned by the session for this call."
+    },
+    "select": {"$ref": "urn:dfmcp:query:1#/$defs/capture_selection"},
+    "limit": {
+      "type": ["integer", "null"],
+      "minimum": 1,
+      "maximum": 128,
+      "description": "Whole change rows per page, independently narrowed by the current session budget; defaults to at most 16."
+    },
+    "continuation": {
+      "type": ["string", "null"],
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^qh1:[1-9][0-9]*:[0-9a-f]{64}$",
+      "not": {"type": "string", "pattern": "\\s"},
+      "description": "Return the exact prior token with the same source pair, selection, session and current authority anchor. Page width may change."
+    }
+  },
+  "$defs": {
+    "state_hash": {
+      "type": "string",
+      "minLength": 64,
+      "maxLength": 64,
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  }
+}

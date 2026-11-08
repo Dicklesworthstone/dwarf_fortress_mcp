@@ -6,8 +6,8 @@ use dfmcp_core::{
     ObservationCursor, RequestId, SessionId, WorkBudget,
 };
 use dfmcp_world::{
-    ChunkCoord, EdgeKind, EdgeRecord, EntityKind, EntityRecord, MapChunk, TerrainRun,
-    WorldEvent, WorldEventKind, WorldGraph,
+    ChunkCoord, EdgeKind, EdgeRecord, EntityKind, EntityRecord, MapChunk, TerrainRun, WorldEvent,
+    WorldEventKind, WorldGraph,
 };
 
 type TestResult = std::result::Result<(), Box<dyn std::error::Error>>;
@@ -194,10 +194,7 @@ fn legacy_whole_rows_and_cursors_fit_current_bytes_and_tokens_together() -> Test
     context.budget.max_bytes = 4095;
     context.budget.max_output_tokens = 8192;
     for mode in ["entities", "observation"] {
-        let encoded = finish_response(
-            response(Ok(page(mode)), &context, false),
-            Duration::ZERO,
-        );
+        let encoded = finish_response(response(Ok(page(mode)), &context, false), Duration::ZERO);
         assert!(encoded.len() <= 4095);
         assert!(encoded.len().div_ceil(4) <= 1023);
         let result: Value = serde_json::from_str(&encoded)?;
@@ -208,10 +205,16 @@ fn legacy_whole_rows_and_cursors_fit_current_bytes_and_tokens_together() -> Test
         assert_eq!(result["returned"], rows.len());
         assert_eq!(result["continuation"]["offset"], rows.len());
         assert_eq!(result["continuation"]["at"], "exact-retained-source");
-        assert_eq!(result["continuation"]["where"], page(mode)["query"]["where"]);
-        assert_eq!(result["rows"][0]["fields"]["coordinates"], json!([1,2,3]));
+        assert_eq!(
+            result["continuation"]["where"],
+            page(mode)["query"]["where"]
+        );
+        assert_eq!(result["rows"][0]["fields"]["coordinates"], json!([1, 2, 3]));
         assert_eq!(result["complete_domain"], false);
-        assert_eq!(result["observation_coverage"]["absence_proof_scope"], json!([]));
+        assert_eq!(
+            result["observation_coverage"]["absence_proof_scope"],
+            json!([])
+        );
         assert_eq!(
             result["agent_turn"]["coverage"]["continuation"],
             result["continuation"]
@@ -237,7 +240,10 @@ fn structured_cursor_and_oversized_first_legacy_row_are_refused_without_advancin
         assert!(result.get("rows").is_none());
         assert!(result.get("continuation").is_none());
         assert_eq!(result["agent_turn"]["anchor"]["state_hash"], "current");
-        assert_eq!(result["agent_turn"]["coverage"]["absence_proof_scope"], json!([]));
+        assert_eq!(
+            result["agent_turn"]["coverage"]["absence_proof_scope"],
+            json!([])
+        );
     }
     Ok(())
 }
@@ -262,5 +268,49 @@ fn publication_deadline_refuses_a_legacy_result_without_a_hidden_page() -> TestR
     assert!(result.get("rows").is_none());
     assert!(result.get("continuation").is_none());
     assert_eq!(result["error"]["effect_may_have_occurred"], false);
+    Ok(())
+}
+
+#[test]
+fn comparison_finalizer_never_clips_rows_or_summarizes_an_unpublished_page() -> TestResult {
+    let (_, mut context) = fixture();
+    context.budget.max_bytes = 4096;
+    let mut payload = page("query_changes");
+    payload
+        .as_object_mut()
+        .ok_or("object missing")?
+        .remove("rows");
+    payload["changes"] = json!(
+        (1..=16)
+            .map(|id| json!({
+                "kind":"changed_in_result", "entity_id":id.to_string(), "generation":1,
+                "before":{"fields":{"stock":{"value":"before ".repeat(50)}}},
+                "after":{"fields":{"stock":{"value":"after ".repeat(50)}}},
+            }))
+            .collect::<Vec<_>>()
+    );
+    payload["continuation"] = json!(format!("qh1:16:{}", "a".repeat(64)));
+    payload["agent_turn"]["changes"] = json!([{
+        "kind":"query_endpoint_comparison", "change_count":32, "returned":16,
+        "detail_path":"changes", "intermediate_history_proven":false,
+    }]);
+    for elapsed in [
+        Duration::ZERO,
+        Duration::from_millis(context.budget.max_wall_millis),
+    ] {
+        let result: Value = serde_json::from_str(&finish_response(
+            response(Ok(payload.clone()), &context, false),
+            elapsed,
+        ))?;
+        assert_eq!(result["ok"], false, "{result}");
+        assert_eq!(result["error"]["code"], "budget_exceeded");
+        assert!(result.get("changes").is_none());
+        assert!(result.get("continuation").is_none());
+        assert_eq!(result["agent_turn"]["changes"], json!([]));
+        assert_eq!(
+            result["agent_turn"]["coverage"]["absence_proof_scope"],
+            json!([])
+        );
+    }
     Ok(())
 }

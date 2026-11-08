@@ -1,5 +1,32 @@
 # Implementation Status
 
+## Unreleased — Compare selected retained laboratory endpoints
+
+The default `fortress.query` now accepts the closed `query_changes` wrapper.
+It resolves exact retained `before` and optional `after` hashes under current
+Query authority, materializes the same complete entity selection at both
+endpoints, and reports entered, departed and changed entity generations. The
+current authority anchor stays distinct from historical result anchors.
+Continuations bind both endpoints, selection, session and current anchor.
+Distinct complete sources share one record/byte allowance; identical endpoints
+charge one source. Full comparison rows and cursors survive publication intact
+or the complete query is refused, with unpublished summaries withdrawn.
+
+The existing eleven tools and dependency graph are unchanged. Comparisons are
+foreground reads over the laboratory reference world. They create no baseline,
+prove no continuous or intermediate history, and supply no mutation authority.
+See `docs/LAB_QUERY_COMPARISON.md` for the usable request and paging contract.
+
+At this implementation checkpoint, schema validation passes four meta-checks,
+15 valid requests and 36 invalid-request cases; scoped Rust formatting,
+repository integrity and the eleven-tool Agent Turn contract pass. Thirteen
+helper tests, six actual public-facade workflows and one final-publication
+regression are added. Their Rust compilation/execution is still pending the
+unchanged pinned dependency build; no Rust pass or whole-workspace/live-game
+qualification is claimed here. `scripts/verify.sh` reaches bead coverage and
+is blocked by the unavailable `br` executable. The feature bead remains open
+until execution evidence is recorded.
+
 ## Unreleased — Reach original Tree clock and supply through the existing MCP tools
 
 The Tree development MCP server now optionally owns Run/1.13 intervals for its

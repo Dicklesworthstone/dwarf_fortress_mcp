@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased — Compare exact retained laboratory selections
+
+- Add `query_changes` to the existing laboratory query tool: compare complete
+  entity selections across exact retained endpoints, including field and
+  generation changes, filtered membership changes and unchanged heartbeats.
+- Bind pagination to both sources, selection, session and current authority;
+  charge complete sources together and keep historical/current anchors distinct.
+- Preserve whole comparison rows and cursors through Agent Turn publication;
+  refuse overflow without exposing an unpublished comparison summary.
+- Add request schema, usage guidance and focused helper/public-facade regression
+  coverage. Rust execution remains pending at this checkpoint; see status.
+
 ## Unreleased — Complete original Tree harvesting in one bounded MCP session
 
 - Expose optional `run_tree` planning and separate clock-scope commit, Wait and

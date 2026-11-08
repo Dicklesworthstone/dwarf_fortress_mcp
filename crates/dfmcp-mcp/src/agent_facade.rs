@@ -995,6 +995,17 @@ fn changes(operation: &str, ok: bool, payload: &Value) -> Vec<Value> {
         return Vec::new();
     }
     match operation {
+        "fortress.query" if payload["mode"] == "query_changes" => vec![json!({
+            "kind": "query_endpoint_comparison",
+            "basis": payload["basis"],
+            "target": payload["anchor"],
+            "change_count": payload["change_count"],
+            "returned": payload["returned"],
+            "epistemic_state": "inferred",
+            "evidence": [payload["basis_result_digest"], payload["target_result_digest"]],
+            "detail_path": "changes",
+            "intermediate_history_proven": false,
+        })],
         "fortress.plan" => match payload.get("plan_digest").and_then(Value::as_str) {
             Some(digest) => vec![json!({
                 "kind": "plan_prepared",
@@ -1415,6 +1426,15 @@ fn continuity_status(
     if operation == "fortress.restore" {
         return ContinuityStatus::Reset;
     }
+    if payload["mode"] == "query_changes" {
+        return if payload["historical"] == true {
+            ContinuityStatus::Stale
+        } else if payload["truncated"] == true || payload["anchor_advanced"] == true {
+            ContinuityStatus::Partial
+        } else {
+            ContinuityStatus::Heartbeat
+        };
+    }
     if payload["mode"] == "structured" {
         if payload["historical"] == true {
             return ContinuityStatus::Stale;
@@ -1568,6 +1588,11 @@ fn project_response(
     );
     let reset_reason = (status == ContinuityStatus::Reset)
         .then_some("checkpoint_restore_created_new_observation_epoch".to_owned());
+    let continuity_basis = if is_ok(&payload) && payload["mode"] == "query_changes" {
+        payload.get("basis").cloned()
+    } else {
+        previous_anchor.clone()
+    };
     let references = match session_id.as_ref() {
         Some(id) => vec![
             json!({"kind": "resource", "uri": format!("df://session/{id}/summary")}),
@@ -1592,7 +1617,7 @@ fn project_response(
         ranked_attention(attention(operation, is_ok(&payload), &payload, &state));
     let mut builder = AgentTurnBuilder::new(operation, phase)
         .turn_id(format!("presentation-turn-{turn_sequence}"))
-        .continuity(status, previous_anchor, None, reset_reason)
+        .continuity(status, continuity_basis, None, reset_reason)
         .profile(profile)
         .briefing(briefing(&state, &payload))
         .changes({
@@ -1731,7 +1756,7 @@ pub fn fortress_observe(session_id: Option<String>) -> String {
 }
 
 #[tool(
-    description = "Run a bounded laboratory query with explicit coverage, uncertainty, affordances, and next-step guidance. JSON {\"mode\":\"structured\",\"request\":{\"schema\":\"dfmcp.query/1\",\"query\":{\"kind\":\"entities|inspect|traverse|dependencies|aggregate|search|events\",...}},\"at\"?:state_hash} runs typed field projections, filters, bound continuations, generation-aware inspection, graph dependency analysis, exact integer/fixed aggregates, lexical search, or bounded retained-event windows on the current or exact retained world. Structured results never authorize effects; historical reads recheck current Query authority. The complete page and Agent Turn must fit without dropping rows. Current mode \"civilian_recovery\" reports the world-owned stable-clear interval and exact roster; it accepts no historical at selector or caller clearance. Other mode: \"summary\" (default), \"entities\", or JSON: {\"mode\":\"observation\",\"completeness_profile\":\"control-minimum|operations|spatial|historical|research-full\",\"section\":\"entities|relations|chunks|events\",\"limit\"?,\"offset\"?} (bounded profile records with distinct source/projected anchors and explicit omissions), {\"mode\":\"entities\",\"kind\"?,\"limit\"?,\"offset\"?}, {\"mode\":\"terrain\",\"min\":[x,y,z],\"max\":[x,y,z]}, {\"mode\":\"search\",\"text\":...,\"limit\"?}, {\"mode\":\"path\",\"from\":[x,y,z],\"to\":[x,y,z]} (walkability route over observed terrain; unproven absence is reported as unknown); entities accept \"where\": {\"field\",\"op\": eq|ne|lt|le|gt|ge,\"value\"} or {\"all\"|\"any\":[...]} or {\"not\":{...}} (unknown facts never match); add \"at\":<state_hash> to read an earlier retained world version exactly; {\"mode\":\"changes\",\"since\":<state_hash>} lists observed changes from that version to now (each session retains its last 32 versions)."
+    description = "Run a bounded laboratory query with explicit coverage, uncertainty, affordances, and next-step guidance. JSON {\"mode\":\"structured\",\"request\":{\"schema\":\"dfmcp.query/1\",\"query\":{\"kind\":\"entities|inspect|traverse|dependencies|aggregate|search|events\",...}},\"at\"?:state_hash} runs typed field projections, filters, bound continuations, generation-aware inspection, graph dependency analysis, exact integer/fixed aggregates, lexical search, or bounded retained-event windows on the current or exact retained world. The closed query_changes wrapper takes before (exact retained hash), optional after (default current), select (entities with kinds/where/fields/order), optional limit and continuation. It reports generation-aware entered_result, left_result and changed_in_result rows between complete endpoint selections, with jointly charged source budgets and current-anchor-bound pages. It does not establish intermediate history. Structured results never authorize effects; historical reads recheck current Query authority. The complete page and Agent Turn must fit without dropping rows. Current mode \"civilian_recovery\" reports the world-owned stable-clear interval and exact roster; it accepts no historical at selector or caller clearance. Other mode: \"summary\" (default), \"entities\", or JSON: {\"mode\":\"observation\",\"completeness_profile\":\"control-minimum|operations|spatial|historical|research-full\",\"section\":\"entities|relations|chunks|events\",\"limit\"?,\"offset\"?} (bounded profile records with distinct source/projected anchors and explicit omissions), {\"mode\":\"entities\",\"kind\"?,\"limit\"?,\"offset\"?}, {\"mode\":\"terrain\",\"min\":[x,y,z],\"max\":[x,y,z]}, {\"mode\":\"search\",\"text\":...,\"limit\"?}, {\"mode\":\"path\",\"from\":[x,y,z],\"to\":[x,y,z]} (walkability route over observed terrain; unproven absence is reported as unknown); entities accept \"where\": {\"field\",\"op\": eq|ne|lt|le|gt|ge,\"value\"} or {\"all\"|\"any\":[...]} or {\"not\":{...}} (unknown facts never match); add \"at\":<state_hash> to read an earlier retained world version exactly; {\"mode\":\"changes\",\"since\":<state_hash>} lists observed changes from that version to now (each session retains its last 32 versions)."
 )]
 pub fn fortress_query(session_id: Option<String>, mode: Option<String>) -> String {
     let started = std::time::Instant::now();

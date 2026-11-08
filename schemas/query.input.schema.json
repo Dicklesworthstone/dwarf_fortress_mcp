@@ -1,6 +1,12 @@
 {
   "$id": "https://dwarf-fortress-mcp.org/schemas/0.1.0/query.input.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "The root remains the phase-zero design envelope. The laboratory_query_changes definition describes the decoded mode-string value accepted by the default laboratory fortress_query tool; it is not an alternative top-level tool envelope.",
+  "$defs": {
+    "laboratory_query_changes": {
+      "$ref": "./lab_query_comparison.schema.json"
+    }
+  },
   "allOf": [
     {
       "$ref": "./dfmcp.schema.json#/$defs/QueryInput"
