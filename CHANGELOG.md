@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased — Page selected entity fields within the complete output budget
+
+- Borrow canonical candidates and render only selected fields, so large
+  unselected values no longer consume the projected response allowance.
+- Fit complete rows, result metadata and exact continuations together. Never
+  skip an oversized row or issue an empty advancing cursor; handle the smaller
+  terminal envelope when its continuation disappears.
+- Preserve existing cursor bytes and all ordering rules. Keep full source work
+  admission separate from live active-work/output reservations, with a pure
+  complete-packet fitting hook for enclosing presentation layers.
+- Pass 16 actual world-query tests and 42 exact-source query component tests.
+  Clock presentation validation also passes all 29 component cases.
+
 ## Unreleased — Combine lexical search with typed entity selection
 
 - Add optional `where` predicates to structured search, sharing the existing

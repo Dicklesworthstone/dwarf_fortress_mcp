@@ -291,9 +291,10 @@ where
         Some("watch" | "poll_watch" | "watches" | "cancel_watch" | "release_watch") => {
             query_watch::execute(snapshot, context, input, publish)
         }
-        Some(kind @ ("spatial_entities" | "related_entities" | "ranked_entities")) => {
+        Some(kind @ ("entities" | "spatial_entities" | "related_entities" | "ranked_entities")) => {
             let narrowed = result_context(context)?;
             let execute_page = match kind {
+                "entities" => core_query::execute_with_output_budget,
                 "spatial_entities" => spatial_entity_query::execute_with_output_budget,
                 "related_entities" => related_entity_query::execute_with_output_budget,
                 _ => ranked_entity_query::execute_with_output_budget,

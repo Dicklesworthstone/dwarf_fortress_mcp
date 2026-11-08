@@ -967,7 +967,10 @@ fn validate_predicate_shape(root: &Predicate) -> Result<()> {
                 ..
             } => {
                 validate_entity_quantity_fields(
-                    kind, filter_field, filter_value, quantity_field.as_deref(),
+                    kind,
+                    filter_field,
+                    filter_value,
+                    quantity_field.as_deref(),
                 )?;
                 if let Predicate::EntityQuantityIncrease {
                     baseline,
@@ -1177,12 +1180,13 @@ pub fn execute_query(
     execute_bounded_query(snapshot, query, hard_limit, None)
 }
 
-pub fn execute_bounded_query(
-    snapshot: &WorldSnapshot,
+/// Select and order borrowed records without materializing their full values.
+/// Both canonical-row and caller-projected pages share this exact evaluator.
+pub(crate) fn select_query_candidates<'a>(
+    snapshot: &'a WorldSnapshot,
     query: &WorldQuery,
     hard_limit: u32,
-    byte_limit: Option<usize>,
-) -> Result<QueryResult> {
+) -> Result<(Vec<&'a EntityRecord>, usize)> {
     query.validate(hard_limit)?;
     if snapshot.graph.entities.len() > MAX_QUERY_SCAN_ENTITIES {
         return Err(DfmcpError::new(
@@ -1237,13 +1241,6 @@ pub fn execute_bounded_query(
         })
         .collect();
 
-    let matched = u64::try_from(entities.len()).map_err(|_| {
-        DfmcpError::new(
-            ErrorCode::InternalInvariantViolation,
-            "query match count cannot be represented",
-        )
-    })?;
-
     match query.order {
         QueryOrder::EntityIdAscending => entities.sort_by_key(|entity| entity.id),
         QueryOrder::EntityIdDescending => {
@@ -1272,6 +1269,22 @@ pub fn execute_bounded_query(
             "query continuation offset is at or beyond the deterministic result horizon",
         ));
     }
+    Ok((entities, offset))
+}
+
+pub fn execute_bounded_query(
+    snapshot: &WorldSnapshot,
+    query: &WorldQuery,
+    hard_limit: u32,
+    byte_limit: Option<usize>,
+) -> Result<QueryResult> {
+    let (entities, offset) = select_query_candidates(snapshot, query, hard_limit)?;
+    let matched = u64::try_from(entities.len()).map_err(|_| {
+        DfmcpError::new(
+            ErrorCode::InternalInvariantViolation,
+            "query match count cannot be represented",
+        )
+    })?;
     let remaining = if offset < entities.len() {
         &entities[offset..]
     } else {

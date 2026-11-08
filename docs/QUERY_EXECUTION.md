@@ -565,3 +565,31 @@ the filter invalidates an old continuation. Every page rechecks Query authority.
 
 This is bounded lexical retrieval over published canonical facts. It adds no
 native reads, effects, hidden index, semantic model or FrankenSearch dependency.
+
+## Projected entity pages
+
+Structured `entities` queries budget the requested field projection and its
+complete result envelope. A large field omitted from `fields` no longer prevents
+a small page from fitting, and the executor borrows canonical records instead of
+cloning their unselected values. Whole-source record, structural byte, depth,
+work and wall-time admission still apply before source hashing; selecting fewer
+fields does not authorize a larger scan or conceal unavailable source data.
+
+The page contains a complete ordered prefix. `returned` counts only published
+rows, `matched` describes the selected source population, and the continuation
+resumes immediately after the last published row. If the next complete row does
+not fit, it is never skipped. A first row that cannot fit returns an explicit
+budget error; narrowing `fields` or increasing output allowance can resume the
+same request. Empty results also require the complete envelope to fit.
+
+Existing `sp1`/`q1` cursor identities and all four ordering rules remain stable.
+Page width may change while resuming the same exact source, session and selected
+fields. Changed filters, ordering, source or session still invalidate the cursor.
+The final page is considered even when removing its continuation makes it
+smaller than the preceding prefix.
+
+Callers can reserve response metadata independently of source admission and can
+provide an immutable complete-packet size check while the page is selected. This
+check cannot publish or advance session state. The enclosing MCP surface still
+enforces its final Agent Turn budget; an incomplete structured row or a cursor
+that advances past unpublished rows is never a successful response.

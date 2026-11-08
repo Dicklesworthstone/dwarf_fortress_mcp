@@ -7,7 +7,9 @@
 use dfmcp_core::{DfmcpError, Digest32, ErrorCode, Result};
 
 use crate::canonical::{put_bytes, put_str, put_u32, put_u64};
-use crate::{ContinuationToken, EdgeKind, EntityKind, Predicate, QueryOrder, QueryResult};
+use crate::{
+    ContinuationToken, EdgeKind, EntityKind, EntityRecord, Predicate, QueryOrder, QueryResult,
+};
 use crate::{WorldQuery, WorldSnapshot};
 
 const MAX_QUERY_WORK: usize = 4_000_000;
@@ -34,6 +36,97 @@ pub fn execute_bounded_query(
     hard_limit: u32,
     byte_limit: Option<usize>,
 ) -> Result<QueryResult> {
+    let (inner, identity) = prepare_query(snapshot, query, hard_limit)?;
+    let mut result = match byte_limit {
+        Some(limit) => {
+            crate::query::execute_bounded_query(snapshot, &inner, hard_limit, Some(limit))?
+        }
+        None => crate::query::execute_query(snapshot, &inner, hard_limit)?,
+    };
+    if let Some(token) = result.continuation.take() {
+        let offset = ContinuationToken::decode(&token)?.offset;
+        result.continuation = Some(encode_cursor(offset, identity));
+    }
+    Ok(result)
+}
+
+/// Borrowed candidates for a caller that budgets its own field projection.
+/// Source validation, matching, ordering and cursor identity are identical to
+/// `execute_query`; no complete entity is cloned or charged as rendered output.
+/// The caller must admit source work and fit its entire output envelope before
+/// publishing a prefix and the corresponding continuation.
+#[derive(Debug)]
+pub struct QueryCandidates<'a> {
+    entities: Vec<&'a EntityRecord>,
+    matched: u64,
+    offset: usize,
+    identity: Digest32,
+}
+
+impl<'a> QueryCandidates<'a> {
+    #[must_use]
+    pub fn entities(&self) -> &[&'a EntityRecord] {
+        &self.entities
+    }
+
+    #[must_use]
+    pub fn matched(&self) -> u64 {
+        self.matched
+    }
+
+    /// Continue after exactly the published prefix. Empty-progress cursors and
+    /// counts beyond this admitted page are refused, never used to skip rows.
+    pub fn continuation_after(&self, published: usize) -> Result<Option<String>> {
+        if published > self.entities.len() || (published == 0 && !self.entities.is_empty()) {
+            return Err(DfmcpError::new(
+                ErrorCode::InvalidRequest,
+                "projected query continuation requires a nonempty admitted prefix",
+            ));
+        }
+        let consumed = self.offset.checked_add(published).ok_or_else(|| {
+            DfmcpError::new(ErrorCode::BudgetExceeded, "query page offset overflowed")
+        })?;
+        if (consumed as u64) < self.matched {
+            let offset = u32::try_from(consumed).map_err(|_| {
+                DfmcpError::new(ErrorCode::BudgetExceeded, "query page offset exceeds u32")
+            })?;
+            Ok(Some(encode_cursor(offset, self.identity)))
+        } else {
+            Ok(None)
+        }
+    }
+}
+
+/// Select at most the requested page width while borrowing the canonical
+/// records. The retained candidates are O(page width); selection and sorting
+/// still perform the same bounded full-source work as the canonical evaluator.
+pub fn query_candidates<'a>(
+    snapshot: &'a WorldSnapshot,
+    query: &WorldQuery,
+    hard_limit: u32,
+) -> Result<QueryCandidates<'a>> {
+    let (inner, identity) = prepare_query(snapshot, query, hard_limit)?;
+    let (selected, offset) = crate::query::select_query_candidates(snapshot, &inner, hard_limit)?;
+    let matched = u64::try_from(selected.len())
+        .map_err(|_| DfmcpError::new(ErrorCode::BudgetExceeded, "query match count exceeds u64"))?;
+    let entities = selected
+        .into_iter()
+        .skip(offset)
+        .take(query.limit as usize)
+        .collect();
+    Ok(QueryCandidates {
+        entities,
+        matched,
+        offset,
+        identity,
+    })
+}
+
+fn prepare_query(
+    snapshot: &WorldSnapshot,
+    query: &WorldQuery,
+    hard_limit: u32,
+) -> Result<(WorldQuery, Digest32)> {
     query.validate(hard_limit)?;
     let per_entity = query
         .kinds
@@ -68,17 +161,7 @@ pub fn execute_bounded_query(
         .continuation
         .as_ref()
         .map(|_| ContinuationToken::new(snapshot.fortress_id, snapshot.cursor, offset).encode());
-    let mut result = match byte_limit {
-        Some(limit) => {
-            crate::query::execute_bounded_query(snapshot, &inner, hard_limit, Some(limit))?
-        }
-        None => crate::query::execute_query(snapshot, &inner, hard_limit)?,
-    };
-    if let Some(token) = result.continuation.take() {
-        let offset = ContinuationToken::decode(&token)?.offset;
-        result.continuation = Some(encode_cursor(offset, identity));
-    }
-    Ok(result)
+    Ok((inner, identity))
 }
 
 fn query_identity(snapshot: &WorldSnapshot, query: &WorldQuery) -> Result<Digest32> {
@@ -375,4 +458,151 @@ fn decode_cursor(token: &str, identity: Digest32) -> Result<u32> {
         ));
     }
     Ok(parsed)
+}
+
+#[cfg(test)]
+mod projected_tests {
+    use super::*;
+    use crate::{CompareOp, Fact, FactSource, Value, WorldGraph};
+    use dfmcp_core::{EntityId, FortressId, GameTick, ObservationCursor};
+    use std::collections::BTreeMap;
+
+    fn snapshot() -> WorldSnapshot {
+        let mut graph = WorldGraph::default();
+        for (id, label, revision) in [
+            (1, "Zon", 1),
+            (2, "Urist", 3),
+            (3, "Urist", 3),
+            (4, "Domas", 2),
+        ] {
+            let id = EntityId::new(id);
+            graph.entities.insert(
+                id,
+                EntityRecord {
+                    id,
+                    generation: 1,
+                    revision,
+                    kind: EntityKind::Unit,
+                    label: label.to_owned(),
+                    fields: BTreeMap::from([(
+                        "payload".to_owned(),
+                        Fact::known(
+                            Value::Text("large unselected value".repeat(4096)),
+                            GameTick(8),
+                            FactSource::Replay,
+                            Digest32::ZERO,
+                        ),
+                    )]),
+                },
+            );
+        }
+        WorldSnapshot::new(
+            FortressId::new(1),
+            GameTick(8),
+            ObservationCursor::ORIGIN,
+            true,
+            graph,
+        )
+    }
+
+    fn query(order: QueryOrder, limit: u32) -> WorldQuery {
+        WorldQuery {
+            kinds: vec![EntityKind::Unit],
+            predicate: None,
+            order,
+            limit,
+            continuation: None,
+        }
+    }
+
+    #[test]
+    fn borrowed_pages_preserve_reference_order_and_existing_cursor_bytes() -> Result<()> {
+        let snapshot = snapshot();
+        for order in [
+            QueryOrder::EntityIdAscending,
+            QueryOrder::EntityIdDescending,
+            QueryOrder::RevisionDescending,
+            QueryOrder::LabelAscending,
+        ] {
+            let mut selection = query(order, 3);
+            let owned = execute_query(&snapshot, &selection, 10)?;
+            let borrowed = query_candidates(&snapshot, &selection, 10)?;
+            assert_eq!(borrowed.matched(), owned.matched);
+            for (reference, owned) in borrowed.entities().iter().zip(&owned.entities) {
+                assert_eq!(*reference, owned);
+                assert!(std::ptr::eq(
+                    *reference,
+                    &snapshot.graph.entities[&reference.id]
+                ));
+            }
+            assert_eq!(borrowed.continuation_after(3)?, owned.continuation);
+            selection.limit = 1;
+            let one = execute_query(&snapshot, &selection, 10)?;
+            assert_eq!(borrowed.continuation_after(1)?, one.continuation);
+            selection.continuation = borrowed.continuation_after(1)?;
+            selection.limit = 3;
+            let rest = query_candidates(&snapshot, &selection, 10)?;
+            let reference = execute_query(&snapshot, &selection, 10)?;
+            assert_eq!(rest.entities().len(), 3);
+            assert_eq!(
+                rest.entities()
+                    .iter()
+                    .map(|entity| entity.id)
+                    .collect::<Vec<_>>(),
+                reference
+                    .entities
+                    .iter()
+                    .map(|entity| entity.id)
+                    .collect::<Vec<_>>()
+            );
+            assert_eq!(rest.continuation_after(3)?, None);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn borrowed_selection_never_copies_or_budgets_unselected_full_records() -> Result<()> {
+        let snapshot = snapshot();
+        let selection = query(QueryOrder::EntityIdAscending, 2);
+        assert!(
+            matches!(execute_bounded_query(&snapshot, &selection, 10, Some(1024)),
+            Err(error) if error.code == ErrorCode::BudgetExceeded)
+        );
+        let page = query_candidates(&snapshot, &selection, 10)?;
+        assert_eq!(page.entities().len(), 2);
+        assert_eq!(page.matched(), 4);
+        assert!(page.continuation_after(0).is_err());
+        assert!(page.continuation_after(3).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn borrowed_selection_keeps_unknown_predicates_and_source_identity_fail_closed() -> Result<()> {
+        let mut snapshot = snapshot();
+        let mut selection = query(QueryOrder::EntityIdAscending, 2);
+        let page = query_candidates(&snapshot, &selection, 10)?;
+        selection.continuation = page.continuation_after(1)?;
+        let mut changed = selection.clone();
+        changed.order = QueryOrder::EntityIdDescending;
+        assert!(matches!(query_candidates(&snapshot, &changed, 10),
+            Err(error) if error.code == ErrorCode::StaleAnchor));
+        snapshot.paused = false;
+        assert!(matches!(query_candidates(&snapshot, &selection, 10),
+            Err(error) if error.code == ErrorCode::InternalInvariantViolation));
+        snapshot.refresh_hash();
+        assert!(matches!(query_candidates(&snapshot, &selection, 10),
+            Err(error) if error.code == ErrorCode::StaleAnchor));
+        selection.continuation = None;
+        selection.predicate = Some(Predicate::Not(Box::new(Predicate::FieldCompare {
+            entity_id: EntityId::NIL,
+            field: "missing".to_owned(),
+            op: CompareOp::Eq,
+            value: Value::Null,
+        })));
+        let empty = query_candidates(&snapshot, &selection, 10)?;
+        assert_eq!(empty.matched(), 0);
+        assert!(empty.entities().is_empty());
+        assert_eq!(empty.continuation_after(0)?, None);
+        Ok(())
+    }
 }

@@ -221,3 +221,50 @@ fn source_and_selected_output_overflow_never_reach_publication() -> TestResult {
     }
     Ok(())
 }
+
+#[test]
+fn projected_entity_pages_reserve_active_work_without_narrowing_source_admission() -> TestResult {
+    let (snapshot, context) = fixture();
+    let create = json!({"schema":"dfmcp.query/1","query":{"kind":"watch",
+        "key":"entity-page-watch","condition":{"op":"paused","value":false},
+        "deadline_tick":100}});
+    let watch = publish(&snapshot, &context, &create)?;
+    let mut input = json!({"schema":"dfmcp.query/1","query":{"kind":"entities",
+        "kinds":["unit"],"fields":["rank"],"limit":1}});
+    let first = publish(&snapshot, &context, &input)?;
+    assert_eq!(first["matched"], 5);
+    assert_eq!(first["rows"][0]["entity_id"], "1");
+    assert_eq!(
+        first["_condition_watch_work"],
+        watch["_condition_watch_work"]
+    );
+    input["query"]["continuation"] = first["continuation"].clone();
+    let second = publish(&snapshot, &context, &input)?;
+    assert_eq!(second["rows"][0]["entity_id"], "2");
+    assert_eq!(
+        second["_condition_watch_work"],
+        watch["_condition_watch_work"]
+    );
+    let called = Cell::new(false);
+    let mut small_source = context.clone();
+    small_source.budget.max_bytes = 8192;
+    assert!(
+        matches!(execute_with_publisher(&snapshot, &small_source, &input, |value| {
+        called.set(true); Ok(value.to_string())
+    }), Err(error) if error.code == ErrorCode::BudgetExceeded)
+    );
+    assert!(!called.get());
+    input["query"]
+        .as_object_mut()
+        .ok_or("query missing")?
+        .remove("continuation");
+    input["query"]["fields"] = json!(["source_only_payload"]);
+    assert!(
+        matches!(execute_with_publisher(&snapshot, &context, &input, |value| {
+        called.set(true); Ok(value.to_string())
+    }), Err(error) if error.code == ErrorCode::BudgetExceeded)
+    );
+    assert!(!called.get());
+    release_session_resources(context.session_id, true, |value| Ok(value.to_string()))?;
+    Ok(())
+}

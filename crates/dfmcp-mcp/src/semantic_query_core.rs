@@ -2,6 +2,7 @@
 //! This presentation layer never reads the bridge or dispatches an effect.
 
 use std::collections::BTreeMap;
+use std::time::Instant;
 
 use dfmcp_core::{
     Capability, DfmcpError, Digest32, EntityId, ErrorCode, MapCoord, OperationContext, Result,
@@ -11,12 +12,16 @@ use dfmcp_world::graph_query::{
     GraphBudget, GraphDirection, GraphTraversalQuery, GraphWitness, analyze_dependencies,
     traverse_graph,
 };
+use dfmcp_world::query_page::{QueryCandidates, query_candidates};
 use dfmcp_world::{
     CompareOp, EdgeKind, EntityKind, EntityRecord, Fact, FactPresence, FactSource, Predicate,
-    QueryOrder, Value as WorldValue, WorldQuery, WorldSnapshot, execute_bounded_query,
+    QueryOrder, Value as WorldValue, WorldQuery, WorldSnapshot,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
+
+#[path = "spatial_query_source.rs"]
+mod source;
 
 const SCHEMA: &str = "dfmcp.query/1";
 const MAX_INPUT_BYTES: usize = 65_536;
@@ -445,6 +450,107 @@ fn unwrap_continuation(raw: Option<String>, identity: Digest32) -> Result<Option
     Ok(Some(inner.to_owned()))
 }
 
+fn result_envelope(snapshot: &WorldSnapshot, mut payload: Value) -> Value {
+    payload["schema"] = json!("dfmcp.query.result/1");
+    payload["anchor"] = anchor_json(snapshot.anchor());
+    payload["coverage"] = json!({"domain":"observed_projection", "absence_proven":false,
+        "note":"filters, paths, and dependencies describe this projection only; missing data is not complete-world absence"});
+    payload
+}
+
+fn projected_page(
+    snapshot: &WorldSnapshot,
+    candidates: &QueryCandidates<'_>,
+    identity: Digest32,
+    rows: &[Value],
+) -> Result<Value> {
+    let continuation = candidates
+        .continuation_after(rows.len())?
+        .map(|token| format!("sp1:{identity}:{token}"));
+    Ok(result_envelope(
+        snapshot,
+        json!({"kind":"entities",
+        "matched":candidates.matched(), "returned":rows.len(),
+        "truncated":continuation.is_some(), "continuation":continuation,
+        "rows":rows}),
+    ))
+}
+
+struct PageBudget<'a> {
+    maximum_bytes: usize,
+    fits: &'a dyn Fn(&Value) -> Result<bool>,
+}
+
+impl PageBudget<'_> {
+    fn accepts(&self, page: &Value) -> Result<bool> {
+        let bytes =
+            serde_json::to_vec(page).map_err(|_| invalid("query page cannot be encoded"))?;
+        Ok(bytes.len() <= self.maximum_bytes && (self.fits)(page)?)
+    }
+}
+
+fn projected_entities(
+    snapshot: &WorldSnapshot,
+    query: &WorldQuery,
+    hard_limit: u32,
+    fields: &[String],
+    identity: Digest32,
+    output: &PageBudget<'_>,
+    work: &mut source::Budget,
+) -> Result<Value> {
+    let candidates = query_candidates(snapshot, query, hard_limit)?;
+    let reaches_terminal = candidates
+        .continuation_after(candidates.entities().len())?
+        .is_none();
+    work.charge(
+        0,
+        snapshot.graph.entities.len().saturating_mul(
+            query
+                .kinds
+                .len()
+                .max(1)
+                .saturating_add(query.predicate.as_ref().map_or(1, Predicate::complexity)),
+        ),
+    )?;
+    let mut rows = Vec::new();
+    let mut accepted = None;
+    for entity in candidates.entities() {
+        if !source::render_fits(entity, fields, &[], output.maximum_bytes, work)? {
+            break;
+        }
+        rows.push(entity_json(entity, fields));
+        let page = projected_page(snapshot, &candidates, identity, &rows)?;
+        if !output.accepts(&page)? {
+            // Dropping the terminal cursor can make the final complete page
+            // smaller than a preceding prefix of tiny rows. Keep considering
+            // that endpoint only while its minimum envelope still fits; this
+            // bounds intermediate materialization without skipping any row.
+            if !reaches_terminal {
+                break;
+            }
+            let mut terminal_minimum = page;
+            terminal_minimum["continuation"] = Value::Null;
+            terminal_minimum["truncated"] = json!(false);
+            if !output.accepts(&terminal_minimum)? {
+                break;
+            }
+            work.check()?;
+            continue;
+        }
+        accepted = Some(page);
+        work.check()?;
+    }
+    match accepted {
+        Some(page) => Ok(page),
+        None if candidates.entities().is_empty() => {
+            projected_page(snapshot, &candidates, identity, &[])
+        }
+        None => Err(budget(
+            "one complete projected entity row and its envelope exceed the output budget; select fewer fields or increase the output allowance",
+        )),
+    }
+}
+
 /// Execute only on a snapshot owned by the resolved server session. Whole-fortress
 /// Query authority is required; scoped grants are not widened by empty selectors.
 /// The caller must additionally enforce adapter health and bound the final MCP packet.
@@ -453,6 +559,32 @@ pub fn execute(
     context: &OperationContext,
     input: &Value,
 ) -> Result<Value> {
+    execute_with_output_budget(snapshot, context, input, context.budget.max_bytes)
+}
+
+/// Source admission uses the full authorized context. A caller may narrow only
+/// the rendered output to reserve its Agent Turn and active-work metadata.
+pub(super) fn execute_with_output_budget(
+    snapshot: &WorldSnapshot,
+    context: &OperationContext,
+    input: &Value,
+    output_bytes: u64,
+) -> Result<Value> {
+    execute_with_page_budget(snapshot, context, input, output_bytes, &|_| Ok(true))
+}
+
+/// Fit complete entity pages against an immutable caller-owned presentation.
+/// `fits` must be a pure output-size check: false rejects this candidate, while
+/// errors abort the query. It must not publish, advance state, or acquire source
+/// authority. The complete source still uses the original authorized budget.
+pub(super) fn execute_with_page_budget(
+    snapshot: &WorldSnapshot,
+    context: &OperationContext,
+    input: &Value,
+    output_bytes: u64,
+    fits: &dyn Fn(&Value) -> Result<bool>,
+) -> Result<Value> {
+    let started = Instant::now();
     context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
     if context.anchor != snapshot.anchor() {
         return Err(DfmcpError::new(
@@ -479,7 +611,12 @@ pub fn execute(
             "expected_anchor does not match the complete current anchor",
         ));
     }
-    if !snapshot.hash_is_valid() {
+    let mut source_work = if matches!(&request.query, Query::Entities { .. }) {
+        Some(source::preflight(snapshot, context, started)?)
+    } else {
+        None
+    };
+    if source_work.is_none() && !snapshot.hash_is_valid() {
         return Err(DfmcpError::new(
             ErrorCode::InternalInvariantViolation,
             "query snapshot hash is invalid",
@@ -488,9 +625,14 @@ pub fn execute(
     let max_bytes = context
         .budget
         .max_bytes
+        .min(output_bytes)
         .min(u64::from(context.budget.max_output_tokens).saturating_mul(4));
     let byte_limit =
         usize::try_from(max_bytes).map_err(|_| budget("query byte limit cannot be represented"))?;
+    let output = PageBudget {
+        maximum_bytes: byte_limit,
+        fits,
+    };
     let graph_budget = GraphBudget {
         max_vertices: (context.budget.max_entities as usize).min(100_000),
         max_edges: (context.budget.max_entities as usize)
@@ -528,11 +670,15 @@ pub fn execute(
                 limit: limit.map_or(hard_limit.min(4), |value| value),
                 continuation: unwrap_continuation(continuation, identity)?,
             };
-            let page = execute_bounded_query(snapshot, &query, hard_limit, Some(byte_limit))?;
-            json!({"kind":"entities", "matched":page.matched, "returned":page.entities.len(),
-                "truncated":page.truncated,
-                "continuation":page.continuation.map(|token| format!("sp1:{identity}:{token}")),
-                "rows":page.entities.iter().map(|entity| entity_json(entity,&fields)).collect::<Vec<_>>()})
+            let work = source_work.as_mut().ok_or_else(|| {
+                DfmcpError::new(
+                    ErrorCode::InternalInvariantViolation,
+                    "projected entity query is missing source admission",
+                )
+            })?;
+            projected_entities(
+                snapshot, &query, hard_limit, &fields, identity, &output, work,
+            )?
         }
         Query::Inspect {
             entity_id: raw_id,
@@ -622,16 +768,15 @@ pub fn execute(
                 "witness":witness_json(&result.witness)})
         }
     };
-    payload["schema"] = json!("dfmcp.query.result/1");
-    payload["anchor"] = anchor_json(snapshot.anchor());
-    payload["coverage"] = json!({"domain":"observed_projection", "absence_proven":false,
-        "note":"filters, paths, and dependencies describe this projection only; missing data is not complete-world absence"});
-    let encoded =
-        serde_json::to_vec(&payload).map_err(|_| invalid("query result cannot be encoded"))?;
-    if encoded.len() > byte_limit {
+    payload = result_envelope(snapshot, payload);
+    if !output.accepts(&payload)? {
         return Err(budget(
             "rendered query result exceeds the output budget; reduce limit, selected fields, roots, or graph depth",
         ));
+    }
+    if let Some(work) = source_work {
+        work.check()?;
+        context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
     }
     Ok(payload)
 }
@@ -891,6 +1036,250 @@ mod tests {
         );
         input["expected_anchor"]["game_tick"] = json!(2);
         assert!(matches!(execute(&snapshot,&ctx,&input),Err(e) if e.code==ErrorCode::StaleAnchor));
+        Ok(())
+    }
+
+    #[test]
+    fn small_projected_entity_pages_do_not_clone_or_charge_unselected_values() -> Result<()> {
+        let (mut snapshot, mut ctx) = fixture();
+        snapshot
+            .graph
+            .entities
+            .get_mut(&EntityId::new(1))
+            .ok_or_else(|| invalid("fixture"))?
+            .fields
+            .insert(
+                "unselected".to_owned(),
+                Fact::known(
+                    WorldValue::Text("not part of the response".repeat(4096)),
+                    snapshot.tick,
+                    FactSource::Replay,
+                    Digest32::ZERO,
+                ),
+            );
+        snapshot.refresh_hash();
+        ctx.anchor = snapshot.anchor();
+        ctx.budget.max_output_tokens = 1024;
+        let input = envelope(json!({"kind":"entities", "fields":["sane"], "limit":4}));
+        let page = execute(&snapshot, &ctx, &input)?;
+        assert_eq!(page["returned"], 4);
+        assert_eq!(page["rows"][0]["entity_id"], "1");
+        assert!(page["rows"][0]["fields"].get("unselected").is_none());
+        assert!(page.to_string().len() <= 4096);
+        ctx.budget.max_bytes = 8192;
+        assert!(matches!(execute(&snapshot, &ctx, &input),
+            Err(error) if error.code == ErrorCode::BudgetExceeded));
+        Ok(())
+    }
+
+    #[test]
+    fn projected_pages_fit_their_complete_envelope_and_resume_every_row() -> Result<()> {
+        let (snapshot, ctx) = fixture();
+        for order in [
+            "id_ascending",
+            "id_descending",
+            "label_ascending",
+            "revision_descending",
+        ] {
+            let one = envelope(json!({"kind":"entities", "order":order,
+                "fields":["sane","unknown"], "limit":1}));
+            let first = execute(&snapshot, &ctx, &one)?;
+            // Different facts have different encoded widths (false is one
+            // byte longer than true). Admit the largest complete one-row
+            // page, including its actual continuation, for this ordering.
+            let mut single = one.clone();
+            let mut maximum = 0;
+            loop {
+                let page = execute(&snapshot, &ctx, &single)?;
+                maximum = maximum.max(page.to_string().len() as u64);
+                if page["continuation"].is_null() {
+                    break;
+                }
+                single["query"]["continuation"] = page["continuation"].clone();
+            }
+            let mut all = one.clone();
+            all["query"]["limit"] = json!(4);
+            let full = execute(&snapshot, &ctx, &all)?;
+            let mut seen = Vec::new();
+            loop {
+                let page = execute_with_output_budget(&snapshot, &ctx, &all, maximum)?;
+                assert!(page.to_string().len() as u64 <= maximum);
+                let rows = page["rows"]
+                    .as_array()
+                    .ok_or_else(|| invalid("rows missing"))?;
+                assert!(!rows.is_empty());
+                seen.extend(rows.iter().cloned());
+                if page["continuation"].is_null() {
+                    break;
+                }
+                all["query"]["continuation"] = page["continuation"].clone();
+            }
+            assert_eq!(json!(seen), full["rows"]);
+            let limited = execute_with_output_budget(&snapshot, &ctx, &one, maximum)?;
+            assert_eq!(limited, first);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn one_row_and_empty_entity_pages_require_their_complete_envelope() -> Result<()> {
+        let (snapshot, ctx) = fixture();
+        for input in [
+            envelope(json!({"kind":"entities", "fields":["sane"], "limit":1})),
+            envelope(json!({"kind":"entities", "kinds":["building"], "limit":1})),
+        ] {
+            let page = execute(&snapshot, &ctx, &input)?;
+            let exact = page.to_string().len() as u64;
+            assert_eq!(
+                execute_with_output_budget(&snapshot, &ctx, &input, exact)?,
+                page
+            );
+            assert!(
+                matches!(execute_with_output_budget(&snapshot, &ctx, &input, exact - 1),
+                Err(error) if error.code == ErrorCode::BudgetExceeded)
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn a_terminal_entity_page_can_fit_when_its_cursor_bearing_prefix_cannot() -> Result<()> {
+        let (mut snapshot, mut ctx) = fixture();
+        snapshot
+            .graph
+            .entities
+            .retain(|id, _| *id <= EntityId::new(2));
+        snapshot.graph.edges.clear();
+        snapshot.refresh_hash();
+        ctx.anchor = snapshot.anchor();
+        let full_request = envelope(json!({"kind":"entities", "limit":2}));
+        let full = execute(&snapshot, &ctx, &full_request)?;
+        let prefix = execute(
+            &snapshot,
+            &ctx,
+            &envelope(json!({"kind":"entities", "limit":1})),
+        )?;
+        assert_eq!(full["returned"], 2);
+        assert!(full["continuation"].is_null());
+        assert!(prefix["continuation"].is_string());
+        let maximum = full.to_string().len() as u64;
+        assert!(prefix.to_string().len() as u64 > maximum);
+        assert_eq!(
+            execute_with_output_budget(&snapshot, &ctx, &full_request, maximum)?,
+            full
+        );
+        let render = |page: &Value| json!({"result":page, "cursor":page["continuation"]});
+        let wrapped_maximum = render(&full).to_string().len();
+        assert_eq!(
+            execute_with_page_budget(
+                &snapshot,
+                &ctx,
+                &full_request,
+                ctx.budget.max_bytes,
+                &|page| Ok(render(page).to_string().len() <= wrapped_maximum)
+            )?,
+            full
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn caller_presentation_budget_selects_complete_pages_without_narrowing_source() -> Result<()> {
+        let (snapshot, ctx) = fixture();
+        let one = envelope(json!({"kind":"entities", "fields":["unknown"], "limit":1}));
+        let first = execute(&snapshot, &ctx, &one)?;
+        let render = |page: &Value| {
+            json!({"result":page,
+            "active_work":"retained task metadata".repeat(200),
+            "coverage":{"continuation":page["continuation"]}})
+        };
+        let maximum = render(&first).to_string().len();
+        let fits = |page: &Value| Ok(render(page).to_string().len() <= maximum);
+        let mut request = one.clone();
+        request["query"]["limit"] = json!(4);
+        let mut ids = Vec::new();
+        loop {
+            let page =
+                execute_with_page_budget(&snapshot, &ctx, &request, ctx.budget.max_bytes, &fits)?;
+            assert!(render(&page).to_string().len() <= maximum);
+            for row in page["rows"]
+                .as_array()
+                .ok_or_else(|| invalid("rows missing"))?
+            {
+                ids.push(row["entity_id"].clone());
+            }
+            if page["continuation"].is_null() {
+                break;
+            }
+            request["query"]["continuation"] = page["continuation"].clone();
+        }
+        assert_eq!(json!(ids), json!(["1", "2", "3", "4"]));
+        let empty = envelope(json!({"kind":"entities", "kinds":["building"]}));
+        for input in [one, empty] {
+            assert!(matches!(execute_with_page_budget(&snapshot, &ctx, &input,
+                ctx.budget.max_bytes, &|_| Ok(false)),
+                Err(error) if error.code == ErrorCode::BudgetExceeded));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn an_oversized_projected_row_is_not_skipped_or_given_an_empty_cursor() -> Result<()> {
+        let (mut snapshot, mut ctx) = fixture();
+        snapshot
+            .graph
+            .entities
+            .get_mut(&EntityId::new(2))
+            .ok_or_else(|| invalid("fixture"))?
+            .label = "large rendered label".repeat(1024);
+        snapshot.refresh_hash();
+        ctx.anchor = snapshot.anchor();
+        let mut input = envelope(json!({"kind":"entities", "limit":4}));
+        let first = execute_with_output_budget(&snapshot, &ctx, &input, 2048)?;
+        assert_eq!(first["returned"], 1);
+        assert_eq!(first["rows"][0]["entity_id"], "1");
+        assert_eq!(first["truncated"], true);
+        input["query"]["continuation"] = first["continuation"].clone();
+        assert!(
+            matches!(execute_with_output_budget(&snapshot, &ctx, &input, 2048),
+            Err(error) if error.code == ErrorCode::BudgetExceeded)
+        );
+        let resumed = execute(&snapshot, &ctx, &input)?;
+        assert_eq!(resumed["rows"][0]["entity_id"], "2");
+        Ok(())
+    }
+
+    #[test]
+    fn projected_pages_mask_unavailable_values_but_charge_the_complete_source() -> Result<()> {
+        let (mut snapshot, mut ctx) = fixture();
+        let mut hidden = Fact::known(
+            WorldValue::Text("hidden_marker".repeat(4096)),
+            snapshot.tick,
+            FactSource::Replay,
+            Digest32::ZERO,
+        );
+        hidden.presence = Some(FactPresence::Redacted("policy".to_owned()));
+        snapshot
+            .graph
+            .entities
+            .get_mut(&EntityId::new(1))
+            .ok_or_else(|| invalid("fixture"))?
+            .fields
+            .insert("hidden".to_owned(), hidden);
+        snapshot.refresh_hash();
+        ctx.anchor = snapshot.anchor();
+        let input = envelope(json!({"kind":"entities", "fields":["hidden"], "limit":1}));
+        let result = execute_with_output_budget(&snapshot, &ctx, &input, 2048)?;
+        assert_eq!(
+            result["rows"][0]["fields"]["hidden"]["presence"],
+            "redacted"
+        );
+        assert!(!result.to_string().contains("hidden_marker"));
+        ctx.budget.max_entities = snapshot.graph.entities.len() as u32;
+        assert!(
+            matches!(execute_with_output_budget(&snapshot, &ctx, &input, 2048),
+            Err(error) if error.code == ErrorCode::BudgetExceeded)
+        );
         Ok(())
     }
 }

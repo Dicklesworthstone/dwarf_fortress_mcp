@@ -1,5 +1,43 @@
 # Implementation Status
 
+## Unreleased — Borrow and budget projected entity pages
+
+Structured entity queries now share the canonical selector through a borrowed
+candidate API. They render only requested fields and admit the complete JSON
+envelope before accepting each prefix. Large unselected values remain part of
+bounded whole-source admission, but are neither cloned nor charged as requested
+output. Existing `q1`/`sp1` identities, ordering, Unknown filtering and resumable
+page-width changes remain intact. Oversized next rows are not skipped; first-row
+and empty-envelope overflow refuse explicitly. A final page is considered even
+when dropping its continuation makes it smaller than a preceding prefix.
+
+The live publisher now reserves active-work/output bytes independently of the
+authorized source allowance for entities, matching the newer spatial/relation/
+ranking routes. A pure complete-page fitting hook allows enclosing metadata to
+participate during selection without publishing or advancing session state.
+Laboratory final-envelope integration follows separately; its existing lossless
+publication/refusal guard remains in force at this checkpoint.
+
+Owning bead: `df-lab-structured-query-f7q`. Actual latest-nightly locked/offline
+world-query tests pass **16/16**, including three new borrowed-candidate cases.
+An exact-source component run passes **42/42** tests: 16 core query and 26
+operational query cases, including variable row widths, complete-envelope
+boundaries, terminal cursor shrink, pure wrapper fitting, masked values and
+whole-source limits. Its actual core/world dependencies and 11 registry package
+versions/checksums match the unchanged workspace lock; all 60 source inputs are
+stable across execution. The registered live active-work publication regression
+still requires the full MCP test target. These component runs exclude transport,
+native gameplay and full workspace qualification.
+
+Clock follow-up validation is now executed: **29/29** presentation component
+tests pass (11 Tree, 12 Workshop, six shared Agent Turn). This harness compiles
+five complete original modules and 13 byte-identical helper/lifecycle excerpts
+against actual core and unchanged locked registry packages; all 26 input files
+are stable. It excludes the full adapter, native RPC/journal/runtime, transport,
+Asupersync supervision and admission consumption. The attempted full adapter
+codegen was SIGKILLed without a source diagnostic. Repository verification passes
+its initial contracts and stops at bead coverage because `br` is unavailable.
+
 ## Unreleased — Typed predicates in structured lexical search
 
 Structured `search` now accepts the same optional `where` language as entity
