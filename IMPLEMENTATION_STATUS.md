@@ -1,5 +1,36 @@
 # Implementation Status
 
+## Unreleased — Compare bounded laboratory plan alternatives
+
+Candidate planning now has a source-present core for evaluating two to four alternatives against
+one original objective and reserve frontier on discarded reference-world forks. The comparison
+uses the real plan compiler and static planner, reports unavailable predictions explicitly, and
+ranks only complete comparable predictions by risk, checkpoint requirement, completion tick,
+action count, and stable candidate key. It does not replace the caller's pending plan or advance
+the canonical world.
+
+A shared forecast budget charges source admission, copied canonical records and bytes, candidate
+actions, simulated ticks, slices, action polls, and one wall deadline across the whole comparison.
+This accounting does not claim to measure the complete adapter heap. Forecasts advance physical
+world jobs and the selected candidate's action chain; they do not dispatch other retained plans'
+deferred actions. Predictions are conditional laboratory evidence, never commit authority.
+
+Closed version-one comparison and selection wrappers use the existing plan blueprint field.
+Selection binds a canonical candidate source to its exact anchor and content digest, then
+recompiles and prepares it under current authority. The digest is an integrity label, not proof
+that a prior comparison ran. Public routing and complete-response publication follow in the next
+implementation increment.
+
+Development evidence before the execution environment became unavailable: the isolated lean
+server harness compiled the mounted core and ran 34 selected tests, with 31 passing and three
+failing. All 21 forecast tests passed; 10 of 13 comparison tests passed. The three failures exposed
+a decimal FortressId versus hexadecimal selection-parser mismatch. Its canonical decimal-u64
+correction and negative cases were applied, but the corrected run did not complete. The core was
+recovered from recorded patches after the outage and verified against uploaded GitHub blobs;
+post-rustfmt byte identity and executable validation of recovered files are not established.
+This is partial development evidence, not full transport, runtime, native, or workspace
+qualification. Owning bead: `df-lab-plan-comparison-c9r`.
+
 ## Unreleased — Use laboratory condition preflight and foreground watches
 
 The default `fortress.query` now exposes `watch`, `poll_watch`, atomic

@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased — Add bounded same-objective candidate planning
+
+- Add the laboratory candidate-comparison core: closed two-to-four candidate requests, canonical
+  source-bound selection, exact original-goal/reserve comparison, deterministic rankings, and
+  explicit unavailable prediction rows.
+- Share source, fork, action, simulated-tick, polling, and wall-time limits across discarded
+  forecast forks while retaining existing single-plan forecast entrypoints.
+- Add 13 comparison and six bounded-forecast test groups. The pre-correction isolated execution
+  passed 31 of 34 selected tests; all three failures identified the now-corrected decimal
+  FortressId parser. The environment outage prevented its rerun. Public routing follows next.
+
 ## Unreleased — Expose laboratory watch workflows and stateless preflight
 
 - Add closed watch registration, listing, single/coherent batch polling,

@@ -138,6 +138,8 @@ mod room_continuation_mcp_tests;
 #[path = "plan_forecast.rs"]
 mod plan_forecast;
 use plan_forecast::forecast_plan;
+#[path = "lab_plan_comparison.rs"]
+mod plan_comparison;
 
 #[path = "lab_progress.rs"]
 mod lab_progress;
