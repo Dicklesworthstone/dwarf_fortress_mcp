@@ -1756,19 +1756,25 @@ pub fn fortress_observe(session_id: Option<String>) -> String {
 }
 
 #[tool(
-    description = "Run a bounded laboratory query with explicit coverage, uncertainty, affordances, and next-step guidance. JSON {\"mode\":\"structured\",\"request\":{\"schema\":\"dfmcp.query/1\",\"query\":{\"kind\":\"entities|inspect|traverse|dependencies|aggregate|search|events\",...}},\"at\"?:state_hash} runs typed field projections, filters, bound continuations, generation-aware inspection, graph dependency analysis, exact integer/fixed aggregates, lexical search, or bounded retained-event windows on the current or exact retained world. The closed query_changes wrapper takes before (exact retained hash), optional after (default current), select (entities with kinds/where/fields/order), optional limit and continuation. It reports generation-aware entered_result, left_result and changed_in_result rows between complete endpoint selections, with jointly charged source budgets and current-anchor-bound pages. It does not establish intermediate history. Structured results never authorize effects; historical reads recheck current Query authority. The complete page and Agent Turn must fit without dropping rows. Current mode \"civilian_recovery\" reports the world-owned stable-clear interval and exact roster; it accepts no historical at selector or caller clearance. Other mode: \"summary\" (default), \"entities\", or JSON: {\"mode\":\"observation\",\"completeness_profile\":\"control-minimum|operations|spatial|historical|research-full\",\"section\":\"entities|relations|chunks|events\",\"limit\"?,\"offset\"?} (bounded profile records with distinct source/projected anchors and explicit omissions), {\"mode\":\"entities\",\"kind\"?,\"limit\"?,\"offset\"?}, {\"mode\":\"terrain\",\"min\":[x,y,z],\"max\":[x,y,z]}, {\"mode\":\"search\",\"text\":...,\"limit\"?}, {\"mode\":\"path\",\"from\":[x,y,z],\"to\":[x,y,z]} (walkability route over observed terrain; unproven absence is reported as unknown); entities accept \"where\": {\"field\",\"op\": eq|ne|lt|le|gt|ge,\"value\"} or {\"all\"|\"any\":[...]} or {\"not\":{...}} (unknown facts never match); add \"at\":<state_hash> to read an earlier retained world version exactly; {\"mode\":\"changes\",\"since\":<state_hash>} lists observed changes from that version to now (each session retains its last 32 versions)."
+    description = "Run a bounded laboratory query with explicit coverage, uncertainty, affordances, and next-step guidance. JSON {\"mode\":\"structured\",\"request\":{\"schema\":\"dfmcp.query/1\",\"query\":{\"kind\":\"entities|inspect|traverse|dependencies|aggregate|search|events\",...}},\"at\"?:state_hash} runs typed field projections, filters, bound continuations, generation-aware inspection, graph dependency analysis, exact integer/fixed aggregates, lexical search, or bounded retained-event windows on the current or exact retained world. The closed temporal wrapper {mode:temporal,request:{schema:dfmcp.query/1,query:{kind:capture|changes|baselines|release_baseline,...}}} owns up to eight foreground selected baselines per session; capture uses key, select and max_game_ticks, changes uses baseline with optional limit/continuation, release_baseline uses baseline. Complete results and current active work are published atomically before private baseline changes; restart loses baselines and restore invalidates their epoch. The closed query_changes wrapper takes before (exact retained hash), optional after (default current), select (entities with kinds/where/fields/order), optional limit and continuation. It reports generation-aware entered_result, left_result and changed_in_result rows between complete endpoint selections, with jointly charged source budgets and current-anchor-bound pages. It does not establish intermediate history. Structured results never authorize effects; historical reads recheck current Query authority. The complete page and Agent Turn must fit without dropping rows. Current mode \"civilian_recovery\" reports the world-owned stable-clear interval and exact roster; it accepts no historical at selector or caller clearance. Other mode: \"summary\" (default), \"entities\", or JSON: {\"mode\":\"observation\",\"completeness_profile\":\"control-minimum|operations|spatial|historical|research-full\",\"section\":\"entities|relations|chunks|events\",\"limit\"?,\"offset\"?} (bounded profile records with distinct source/projected anchors and explicit omissions), {\"mode\":\"entities\",\"kind\"?,\"limit\"?,\"offset\"?}, {\"mode\":\"terrain\",\"min\":[x,y,z],\"max\":[x,y,z]}, {\"mode\":\"search\",\"text\":...,\"limit\"?}, {\"mode\":\"path\",\"from\":[x,y,z],\"to\":[x,y,z]} (walkability route over observed terrain; unproven absence is reported as unknown); entities accept \"where\": {\"field\",\"op\": eq|ne|lt|le|gt|ge,\"value\"} or {\"all\"|\"any\":[...]} or {\"not\":{...}} (unknown facts never match); add \"at\":<state_hash> to read an earlier retained world version exactly; {\"mode\":\"changes\",\"since\":<state_hash>} lists observed changes from that version to now (each session retains its last 32 versions)."
 )]
 pub fn fortress_query(session_id: Option<String>, mode: Option<String>) -> String {
     let started = std::time::Instant::now();
     let recorded = json!({"mode": mode});
-    let response = project_response(
-        crate::server::fortress_query(session_id.clone(), mode),
-        "fortress.query",
-        AgentPhase::Inspect,
-        ObservationProfile::Tactical,
-        session_id.as_deref(),
-    );
-    let response = crate::server::query_budget::finish_response(response, started.elapsed());
+    let response =
+        match crate::server::fortress_query_publication(session_id.clone(), mode, started) {
+            crate::server::QueryPublication::Published(response) => response,
+            crate::server::QueryPublication::Pending(raw) => {
+                let projected = project_response(
+                    raw,
+                    "fortress.query",
+                    AgentPhase::Inspect,
+                    ObservationProfile::Tactical,
+                    session_id.as_deref(),
+                );
+                crate::server::query_budget::finish_response(projected, started.elapsed())
+            }
+        };
     crate::replay::record("fortress.query", session_id.as_deref(), recorded, &response);
     response
 }

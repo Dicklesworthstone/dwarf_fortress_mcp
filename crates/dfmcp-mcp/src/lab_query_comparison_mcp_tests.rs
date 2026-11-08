@@ -214,6 +214,17 @@ fn lab_comparison_public_pages_preserve_generation_changes_and_bind_selection() 
     assert_eq!(changes[1]["generation"], 1);
     assert_eq!(changes[2]["kind"], "entered_result");
     assert_eq!(changes[2]["generation"], 2);
+    {
+        let owner = resolve_session(Some(id.clone()))?;
+        let guard = owner.lock().map_err(|_| "session poisoned")?;
+        let replay = crate::replay::bundle_json(&guard.replay);
+        assert_eq!(replay["replayable"], false);
+        assert!(
+            replay["not_replayable_reason"]
+                .as_str()
+                .is_some_and(|reason| reason.contains("continuations"))
+        );
+    }
     input["continuation"] = first["continuation"].clone();
     input["select"]["fields"] = json!([]);
     refusal(&query(&id, input)?, "stale_anchor");

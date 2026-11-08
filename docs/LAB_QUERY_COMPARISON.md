@@ -159,3 +159,10 @@ revocation, pagination binding, native-token domain separation, joint source
 budgets, complete selection bounds and whole-row output. Public-facade tests
 add session lookup, retained-world ownership and final Agent Turn publication.
 These tests do not establish live DFHack or full-workspace qualification.
+
+## Transcript replay
+
+A transcript that successfully consumes a comparison continuation is marked
+nonreplayable: that cursor binds the original session, while replay creates a
+new session. The replay log states this limitation instead of reporting a false
+semantic divergence. First-page comparisons still use exact retained anchors.

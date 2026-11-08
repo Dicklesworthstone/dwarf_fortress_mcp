@@ -87,6 +87,20 @@ pub(crate) fn record(
     };
     let anchor_after = Some(guard.adapter.snapshot().anchor());
     let log = &mut guard.replay;
+    if ok
+        && tool == "fortress.query"
+        && arguments
+            .get("mode")
+            .and_then(Value::as_str)
+            .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+            .is_some_and(|query| {
+                query["mode"] == "query_changes" && query["continuation"].is_string()
+            })
+    {
+        log.mark_not_replayable(
+            "query comparison continuations are bound to the original session and cannot be replayed into a new session",
+        );
+    }
     if log.calls.len() >= MAX_RECORDED_CALLS {
         log.truncated = true;
         log.mark_not_replayable("the call log exceeded its bound and was truncated");

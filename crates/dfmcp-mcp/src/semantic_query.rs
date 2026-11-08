@@ -273,6 +273,36 @@ where
     query_watch::with_active_work(context, value, publish)
 }
 
+/// Laboratory baseline sessions have no condition-watch registry to project.
+/// Their owner reserves the complete Agent Turn and retained baseline catalog
+/// separately, then narrows only the output-token allowance. Preserve source
+/// byte and record budgets during the baseline engine's complete acquisition.
+/// This entry point shares the existing baseline store and publication commit
+/// boundary; it accepts only the four foreground baseline lifecycle operations.
+pub(super) fn execute_laboratory_baseline_with_publisher<F>(
+    snapshot: &WorldSnapshot,
+    context: &OperationContext,
+    input: &Value,
+    publish: F,
+) -> Result<String>
+where
+    F: FnOnce(Value) -> Result<String>,
+{
+    match input
+        .get("query")
+        .and_then(|query| query.get("kind"))
+        .and_then(Value::as_str)
+    {
+        Some("capture" | "changes" | "baselines" | "release_baseline") => {
+            query_history::execute(snapshot, context, input, publish)
+        }
+        _ => Err(DfmcpError::new(
+            ErrorCode::InvalidRequest,
+            "laboratory baseline publication requires a foreground baseline lifecycle query",
+        )),
+    }
+}
+
 /// No watch/baseline mutation is visible before the full response is accepted.
 pub fn execute_with_publisher<F>(
     snapshot: &WorldSnapshot,

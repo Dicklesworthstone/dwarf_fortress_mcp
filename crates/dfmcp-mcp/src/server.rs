@@ -79,6 +79,19 @@ mod query_comparison;
 #[path = "lab_query_comparison_mcp_tests.rs"]
 mod query_comparison_mcp_tests;
 
+#[path = "lab_temporal_query.rs"]
+mod temporal_query;
+
+#[path = "lab_temporal_response.rs"]
+mod temporal_response;
+
+#[path = "lab_temporal_handler.rs"]
+mod temporal_handler;
+
+#[cfg(test)]
+#[path = "lab_temporal_mcp_tests.rs"]
+mod temporal_mcp_tests;
+
 #[cfg(test)]
 #[path = "lab_structured_query_tests.rs"]
 mod structured_query_tests;
@@ -162,6 +175,8 @@ struct NegotiatedCapability {
 /// within the same session share state without crossing `static` boundaries.
 pub(crate) struct LabSession {
     pub(crate) session_id: SessionId,
+    /// Reclaim private foreground query roots with their owning session.
+    _query_resources: temporal_query::SessionGuard,
     #[allow(dead_code)]
     pub(crate) fortress_id: FortressId,
     /// The capabilities the caller negotiated in `fortress_open_session`.
@@ -2730,6 +2745,7 @@ pub(crate) fn open_session_in_scenario(
     );
     let session = Arc::new(Mutex::new(LabSession {
         session_id,
+        _query_resources: temporal_query::SessionGuard::new(session_id),
         fortress_id,
         grants,
         budget,
@@ -2992,49 +3008,131 @@ pub fn fortress_observe(session_id: Option<String>) -> String {
 /// `{"mode":"entities","kind":"unit","limit":25,"offset":0}` /
 /// `{"mode":"terrain","min":[x,y,z],"max":[x,y,z]}`.
 #[tool(
-    description = "Run a bounded laboratory query. The closed structured wrapper {\"mode\":\"structured\",\"request\":{\"schema\":\"dfmcp.query/1\",\"query\":{...}},\"at\"?:state_hash} exposes stateless typed queries under current Query authority. The closed query_changes wrapper takes before (exact retained hash), after (optional, defaults to current), select (complete entities selection), limit and continuation; it reports selected endpoint differences without proving intermediate history or mutation evidence. Other mode: \"summary\" (default), \"entities\", or a JSON object {\"mode\":\"entities\",\"kind\":\"unit\",\"limit\":25,\"offset\":0} or {\"mode\":\"terrain\",\"min\":[x,y,z],\"max\":[x,y,z]}. Full DfQL is not implemented."
+    description = "Run a bounded laboratory query. The closed structured wrapper {\"mode\":\"structured\",\"request\":{\"schema\":\"dfmcp.query/1\",\"query\":{...}},\"at\"?:state_hash} exposes stateless typed queries under current Query authority. The closed temporal wrapper {mode:temporal,request:{schema:dfmcp.query/1,query:{kind:capture|changes|baselines|release_baseline,...}}} owns up to eight foreground selected baselines per session; capture uses key, select and max_game_ticks, changes uses baseline with optional limit/continuation, release_baseline uses baseline. Complete results and current active work are published atomically before private baseline changes; restart loses baselines and restore invalidates their epoch. The closed query_changes wrapper takes before (exact retained hash), after (optional, defaults to current), select (complete entities selection), limit and continuation; it reports selected endpoint differences without proving intermediate history or mutation evidence. Other mode: \"summary\" (default), \"entities\", or a JSON object {\"mode\":\"entities\",\"kind\":\"unit\",\"limit\":25,\"offset\":0} or {\"mode\":\"terrain\",\"min\":[x,y,z],\"max\":[x,y,z]}. Full DfQL is not implemented."
 )]
 pub fn fortress_query(session_id: Option<String>, mode: Option<String>) -> String {
+    match fortress_query_publication(session_id, mode, std::time::Instant::now()) {
+        QueryPublication::Pending(response) | QueryPublication::Published(response) => response,
+    }
+}
+
+/// Retained query mutations publish their complete Agent Turn before commit.
+/// The outer facade must not fit, replace or refuse that accepted packet later.
+pub(crate) enum QueryPublication {
+    Pending(String),
+    Published(String),
+}
+
+/// Baselines own private query state, not game or durable-world progress. Keep
+/// the same admission/owner/world/session fences without starting persistence
+/// or retaining another world version after their accepted publication.
+fn with_query_session<T>(
+    session: &Arc<Mutex<LabSession>>,
+    temporal: bool,
+    poisoned: impl FnOnce() -> T,
+    body: impl FnOnce(&mut LabSession) -> T,
+) -> T {
+    if !temporal {
+        return with_session(session, poisoned, body);
+    }
+    let _admission = match LAB_ADMISSION.read() {
+        Ok(guard) => guard,
+        Err(_) => return poisoned(),
+    };
+    if ensure_durable_owner(session).is_err() {
+        return poisoned();
+    }
+    with_session_view(session, poisoned, body, false)
+}
+
+pub(crate) fn fortress_query_publication(
+    session_id: Option<String>,
+    mode: Option<String>,
+    started: std::time::Instant,
+) -> QueryPublication {
     let mode = mode.map_or_else(|| "summary".to_owned(), |value| value);
     let structured = structured_query::parse(&mode);
     let comparison = query_comparison::parse(&mode);
+    let temporal = temporal_query::parse(&mode);
     let is_structured = matches!(&structured, Ok(Some(_)));
+    let is_temporal = matches!(&temporal, Ok(Some(_)));
     let session = match resolve_session(session_id) {
         Ok(value) => value,
-        Err(error) => return dfmcp_error_payload("fortress.query", &error),
+        Err(error) => {
+            return QueryPublication::Pending(dfmcp_error_payload("fortress.query", &error));
+        }
     };
-    with_session(
+    with_query_session(
         &session,
-        || mutex_poisoned_payload("fortress.query"),
+        is_temporal,
+        || QueryPublication::Pending(mutex_poisoned_payload("fortress.query")),
         |guard| {
             let (_, ctx) = match next_context(guard) {
                 Ok(value) => value,
-                Err(error) => return dfmcp_error_payload("fortress.query", &error),
+                Err(error) => {
+                    return QueryPublication::Pending(dfmcp_error_payload(
+                        "fortress.query",
+                        &error,
+                    ));
+                }
             };
             let result =
                 authorize_entry(&ctx, Capability::Query, RiskTier::ReadOnly).and_then(|()| {
                     let structured = structured?;
                     let comparison = comparison?;
-                    if structured.is_none() && comparison.is_none() && mode.len() > MAX_MODE_BYTES {
+                    let temporal = temporal?;
+                    if structured.is_none()
+                        && comparison.is_none()
+                        && temporal.is_none()
+                        && mode.len() > MAX_MODE_BYTES
+                    {
                         return Err(DfmcpError::new(
                             ErrorCode::BudgetExceeded,
                             "query mode exceeds its explicit byte bound",
                         ));
                     }
+                    if let Some(request) = &temporal {
+                        let spent_millis = started.elapsed().as_nanos().div_ceil(1_000_000);
+                        if spent_millis >= u128::from(ctx.budget.max_wall_millis) {
+                            return Err(DfmcpError::new(ErrorCode::BudgetExceeded,
+                                "temporal query exhausted its wall-time allowance before owning the session"));
+                        }
+                        let mut remaining = ctx.clone();
+                        remaining.budget.max_wall_millis -= spent_millis as u64;
+                        let response = temporal_handler::execute(guard, &remaining, request)?;
+                        if request.kind() == "capture" {
+                            guard.replay.mark_not_replayable(
+                                "query baselines use process-local session handles that cannot be replayed into a new session",
+                            );
+                        }
+                        return Ok(QueryPublication::Published(response));
+                    }
                     // Select historical state only after authorizing at the current
                     // game tick. Neither an old source nor its cursor renews a grant.
-                    if let Some(request) = &comparison {
+                    let payload = if let Some(request) = &comparison {
                         let before = retained_resource_snapshot(guard, Some(&request.before))?;
                         let after = retained_resource_snapshot(guard, request.after.as_deref())?;
-                        return query_comparison::execute(before, after, &ctx, request);
-                    }
-                    if let Some(request) = &structured {
-                        return retained_resource_snapshot(guard, request.at.as_deref())
-                            .and_then(|source| structured_query::execute(source, &ctx, request));
-                    }
-                    legacy_query(guard, &ctx, &mode)
+                        query_comparison::execute(before, after, &ctx, request)?
+                    } else if let Some(request) = &structured {
+                        let source = retained_resource_snapshot(guard, request.at.as_deref())?;
+                        structured_query::execute(source, &ctx, request)?
+                    } else {
+                        legacy_query(guard, &ctx, &mode)?
+                    };
+                    Ok(QueryPublication::Pending(query_budget::response(
+                        Ok(payload),
+                        &ctx,
+                        is_structured,
+                    )))
                 });
-            query_budget::response(result, &ctx, is_structured)
+            match result {
+                Ok(published) => published,
+                Err(error) => QueryPublication::Pending(query_budget::response(
+                    Err(error),
+                    &ctx,
+                    is_structured,
+                )),
+            }
         },
     )
 }

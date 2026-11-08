@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dwarf-fortress-mcp.org/schemas/0.1.0/lab_query_baselines.schema.json",
+  "title": "Foreground laboratory query baselines",
+  "description": "Decoded JSON value of the mode string on the default laboratory fortress_query tool. Captures a complete selected current projection for later endpoint comparison, lists session-owned baseline metadata, or explicitly releases retained rows. These bounded process-local allocations have no game effect, durable monitoring or mutation authority.",
+  "$comment": "The existing urn:dfmcp:query:1 schema in mcp_query_v1.json supplies anchor, baseline and capture_selection definitions. Runtime additionally rejects duplicate wrapper, envelope, operation and selection fields; enforces a 65536 UTF-8 request-byte bound, complete-source budgets, exact current authority and anchors, baseline capacity/deadlines, and atomic complete Agent Turn publication. Capture selectors cannot supply pagination. This is a laboratory mode-string wrapper, not an alternative root tool envelope or native protocol extension.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["mode", "request"],
+  "properties": {
+    "mode": {"const": "temporal"},
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "query"],
+      "properties": {
+        "schema": {"const": "dfmcp.query/1"},
+        "expected_anchor": {
+          "anyOf": [{"$ref": "urn:dfmcp:query:1#/$defs/anchor"}, {"type": "null"}],
+          "description": "Optional exact current session anchor. A mismatch refuses the entire lifecycle operation before changing retained state."
+        },
+        "query": {"$ref": "#/$defs/baseline_operation"}
+      }
+    }
+  },
+  "$defs": {
+    "baseline_operation": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "key", "select", "max_game_ticks"],
+          "properties": {
+            "kind": {"const": "capture"},
+            "key": {"type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[A-Za-z0-9._-]{1,64}$"},
+            "select": {"$ref": "urn:dfmcp:query:1#/$defs/capture_selection"},
+            "max_game_ticks": {"type": "integer", "minimum": 1, "maximum": 18446744073709551615}
+          },
+          "description": "Capture at most 256 complete selected rows and 256 KiB of serialized rows. Lifetime must fit the current session tick budget. The same key reuses only the exact same anchor, selection and lifetime."
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "baseline"],
+          "properties": {
+            "kind": {"const": "changes"},
+            "baseline": {"$ref": "urn:dfmcp:query:1#/$defs/baseline"},
+            "limit": {"type": ["integer", "null"], "minimum": 1, "maximum": 256},
+            "continuation": {
+              "type": ["string", "null"],
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^qh1:[1-9][0-9]*:[0-9a-f]{64}$",
+              "description": "Return the exact prior token with the same baseline and current target anchor; page width may change."
+            }
+          },
+          "description": "Compare complete retained selection rows against the exact current laboratory world. Does not advance, renew or consume the baseline. Only endpoint differences are established."
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind"],
+          "properties": {"kind": {"const": "baselines"}},
+          "description": "List this session's at most eight retained, expired or epoch-invalidated baselines. No baseline is evaluated, renewed or silently removed."
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "baseline"],
+          "properties": {
+            "kind": {"const": "release_baseline"},
+            "baseline": {"$ref": "urn:dfmcp:query:1#/$defs/baseline"}
+          },
+          "description": "Release only this session's matching baseline after the full result is publishable. Repeated or foreign-session release returns released=false without affecting another owner."
+        }
+      ]
+    }
+  }
+}

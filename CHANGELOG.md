@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased — Retain selected laboratory query baselines
+
+- Add capture, catalog, changes and release through the existing query tool,
+  using bounded session-owned roots, exact retry keys and game-time expiry.
+- Publish complete results, retained catalog and current pending game work
+  before root changes; reject overflow or elapsed admission without hidden state.
+- Preserve source budgets independently of output; reclaim roots on session
+  disposal and expose restore invalidation. Mark process-local handles and
+  consumed comparison cursors nonreplayable instead of reporting false divergence.
+- Add 26 baseline helper/renderer/public-facade regressions and schema/usage docs.
+  Schema/static checks pass. Rust verification is blocked by recorded memory/disk
+  failures; zero new Rust tests executed in this session.
+
 ## Unreleased — Page selected entity fields within the complete output budget
 
 - Borrow canonical candidates and render only selected fields, so large
@@ -45,7 +58,7 @@
 - Preserve whole comparison rows and cursors through Agent Turn publication;
   refuse overflow without exposing an unpublished comparison summary.
 - Add request schema, usage guidance and focused helper/public-facade regression
-  coverage. Rust execution remains pending at this checkpoint; see status.
+  coverage. Rust execution remains resource-blocked; see status.
 
 ## Unreleased — Complete original Tree harvesting in one bounded MCP session
 

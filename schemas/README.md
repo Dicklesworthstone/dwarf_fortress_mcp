@@ -16,3 +16,13 @@ Its exact retained hashes, current authority and epoch checks, distinct-source
 work budget and complete-page behavior are documented in
 [`LAB_QUERY_COMPARISON.md`](../docs/LAB_QUERY_COMPARISON.md). This runtime mode
 does not change the phase-zero root envelope or add a top-level tool.
+
+`lab_query_baselines.schema.json` describes the decoded `mode` string for the
+default laboratory's `temporal` baseline lifecycle: capture, changes, list and
+explicit release. It reuses the same `mcp_query_v1.json` selection and anchor
+definitions and is discoverable at
+`query.input.schema.json#/$defs/laboratory_query_baselines`. Session ownership,
+exclusive deadlines, restore invalidation, complete publication and bounded
+process-local retention are documented in
+[`LAB_QUERY_BASELINES.md`](../docs/LAB_QUERY_BASELINES.md). These operations add
+neither a root tool envelope nor a native protocol, watch or durability claim.

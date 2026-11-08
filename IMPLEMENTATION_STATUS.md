@@ -1,5 +1,39 @@
 # Implementation Status
 
+## Unreleased — Own selected laboratory baselines transactionally
+
+The default query tool now accepts the closed `mode:"temporal"` wrapper for
+`capture`, `changes`, `baselines` and `release_baseline`. Agents can retain a
+complete bounded entity selection under an exact retry key, recover its handle
+from the session catalog, compare later generation-aware endpoints and release
+it. The existing engine enforces eight baselines per session, 128 per process,
+256 selected rows and 256 KiB per baseline, with exact anchors and game-time
+expiry. This wrapper uses the current laboratory world and creates no watch,
+background sampler, native read, game effect or new tool.
+
+Capture/release commit only after the complete successful Agent Turn is rendered
+and checked: unchanged public result fields, exact session/request/anchor and
+candidate baseline catalog, current authority, output bounds and deadline.
+Pending plans, action receipts, obligations and objectives remain visible.
+Output-token reservations preserve the original source byte/record allowance,
+so an admitted large source can still yield a small selected baseline. Failed
+publication cannot leave a hidden capture or release.
+
+The handler preserves admission/owner/world/session fences, charges admission
+and lock wait before commit, and uses a non-progress session view. No durable
+world publication or version retention follows a baseline commit, and the outer
+facade cannot refit the accepted packet. Session Drop releases private roots;
+restart loses them and restore invalidates their old epoch. Successful capture
+marks transcripts nonreplayable because handles belong to the original session.
+
+Baseline schema checks accept seven valid wrappers and reject twelve malformed
+or unsupported wrappers. Added regressions comprise ten helper, five renderer
+and eleven public-facade cases, including a real labor loop, handle recovery,
+paging, cleanup, current grants, pending-plan preservation, publication rollback,
+restore, large-source/small-output behavior, replay and expired admission.
+Their Rust compilation/execution remains blocked as detailed below; no pass is
+claimed. See `docs/LAB_QUERY_BASELINES.md` for requests and lifecycle limits.
+
 ## Unreleased — Borrow and budget projected entity pages
 
 Structured entity queries now share the canonical selector through a borrowed
@@ -98,15 +132,26 @@ foreground reads over the laboratory reference world. They create no baseline,
 prove no continuous or intermediate history, and supply no mutation authority.
 See `docs/LAB_QUERY_COMPARISON.md` for the usable request and paging contract.
 
-At this implementation checkpoint, schema validation passes four meta-checks,
-15 valid requests and 36 invalid-request cases; scoped Rust formatting,
-repository integrity and the eleven-tool Agent Turn contract pass. Thirteen
-helper tests, six actual public-facade workflows and one final-publication
-regression are added. Their Rust compilation/execution is still pending the
-unchanged pinned dependency build; no Rust pass or whole-workspace/live-game
-qualification is claimed here. `scripts/verify.sh` reaches bead coverage and
-is blocked by the unavailable `br` executable. The feature bead remains open
-until execution evidence is recorded.
+Validation passes four schema meta-checks, 15 valid requests and 36 invalid
+requests, scoped Rust formatting, repository integrity and the eleven-tool
+Agent Turn contract. Thirteen helper tests, six actual public-facade workflows
+and one final-publication regression are added. Consumed comparison continuations
+now mark transcripts nonreplayable because their cursor binds the old session.
+
+Rust verification remains **blocked, not passed**. Actual repository test
+code generation was SIGKILLed in unchanged `asupersync`; real-crate `cargo check
+--tests` hit ENOSPC in dependency metadata. A smaller exact-source component
+assembly built the real core/world/intent libraries, but its test build and
+metadata-only fallback both hit ENOSPC in unchanged `dfmcp-adapter` before
+reaching the changed helper/test bodies. **Zero new Rust tests executed.** A
+public-handler assembly was prepared but not compiled against the same blocked
+graph; its explicit transport/registration/task-service seams cannot establish
+actual MCP execution. No source, dependency pin or gate was weakened.
+
+`scripts/verify.sh` reaches bead coverage and fails because `br` is unavailable.
+Development `scripts/qualify_local.sh` passes its earlier static gates, then
+fails compiling native Workshop regressions with ENOSPC. No whole-workspace or
+live-game qualification is claimed; both feature beads remain in progress.
 
 ## Unreleased — Reach original Tree clock and supply through the existing MCP tools
 
