@@ -227,6 +227,7 @@ pub struct WorkshopRpc {
     manifest: WorkshopManifest,
     retained: u64,
     unresolved: bool,
+    progress_tick_floor: u64,
     fenced: bool,
     prepare_attempted: bool,
     prepared: Option<WorkshopPlan>,
@@ -300,6 +301,7 @@ impl WorkshopRpc {
             },
             retained: 0,
             unresolved: false,
+            progress_tick_floor: 0,
             fenced: false,
             prepare_attempted: false,
             prepared: None,
@@ -311,6 +313,12 @@ impl WorkshopRpc {
     }
     pub fn is_fenced(&self) -> bool {
         self.fenced
+    }
+    /// Bind fresh progress to an independently consumed game-time floor.
+    /// This only narrows acceptable observations; it does not alter authority,
+    /// native evidence, or the original workshop's completion predicate.
+    pub fn require_progress_at_or_after(&mut self, tick: u64) {
+        self.progress_tick_floor = self.progress_tick_floor.max(tick);
     }
     fn finish<T>(&mut self, result: Result<T>) -> Result<T> {
         if result.is_err() {
@@ -645,6 +653,12 @@ impl WorkshopSource for WorkshopRpc {
                     && progress.item_id() == item,
                 "workshop progress scope differs",
             )?;
+            if progress.tick() < self.progress_tick_floor {
+                return Err(error(
+                    ErrorCode::StaleAnchor,
+                    "workshop progress predates the independently consumed clock floor",
+                ));
+            }
             authority(context, &self.fortress, true, false, progress.tick())?;
             Ok(progress)
         })();

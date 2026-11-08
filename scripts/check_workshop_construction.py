@@ -29,10 +29,10 @@ SOURCES = [
     *[TREE + name for name in ("mod.rs", "journal.rs", "material_origin.rs", "rpc.rs", "tests.rs", "journal_tests.rs")],
     "tests/native/tree_harvest/vectors.json",
     MCP + "lib.rs", MCP + "workshop_construction_server.rs",
-    *[MCP + "workshop_construction_server/" + name for name in ("runtime.rs", "presentation.rs", "tests.rs", "material_selection.rs", "tree_material.rs", "tree_material_tests.rs")],
+    *[MCP + "workshop_construction_server/" + name for name in ("runtime.rs", "presentation.rs", "tests.rs", "clock.rs", "clock_config_tests.rs", "clock_presentation_tests.rs", "material_selection.rs", "tree_material.rs", "tree_material_tests.rs")],
     MCP + "bin/dfmcp-workshop-v1-20-dev-server.rs", "crates/dfmcp-mcp/tests/workshop_construction_stdio.rs",
     *["tests/native/workshop/" + name for name in ("stubs.h", "handler.cpp", "vectors.json", "continuity_vectors.json")],
-    "tests/stdio/workshop.py", "tests/stdio/workshop_tree_material.py", "tests/stdio/tree_harvest.py",
+    "tests/stdio/workshop.py", "tests/stdio/workshop_tree_material.py", "tests/stdio/workshop_clock.py", "tests/stdio/tree_harvest.py",
     "scripts/read_stable_repository_file.py", "scripts/test_workshop_native.py",
     "scripts/test_workshop_source_inventory.py", "scripts/check_workshop_construction.py", "scripts/verify.sh",
     "scripts/qualify_local.sh", "docs/WORKSHOP_CONSTRUCTION_MCP.md", "docs/TREE_HARVEST_MCP.md",
@@ -93,7 +93,7 @@ def check(root: Path = ROOT) -> dict:
     if "generation>=self.generation" not in compact[ADAPTER + "mod.rs"]:
         raise ValueError("workshop source fencing missing")
     for wrapper in ("scripts/verify.sh", "scripts/qualify_local.sh"):
-        if any(name not in text[wrapper] for name in ("check_workshop_construction.py", "test_workshop_source_inventory.py", "test_workshop_native.py --mutations", "tests/stdio/workshop.py", "tests/stdio/workshop_tree_material.py")):
+        if any(name not in text[wrapper] for name in ("check_workshop_construction.py", "test_workshop_source_inventory.py", "test_workshop_native.py --mutations", "tests/stdio/workshop.py", "tests/stdio/workshop_tree_material.py", "tests/stdio/workshop_clock.py")):
             raise ValueError("workshop static/component/syntax gates missing from mandatory wrapper")
     native = ast.parse(text["scripts/test_workshop_native.py"])
     constants = {}
@@ -118,6 +118,9 @@ def check(root: Path = ROOT) -> dict:
         "tree_material_adapter_rust_cases": text[ADAPTER + "tree_material_tests.rs"].count("#[test]"),
         "production_origin_adapter_rust_cases": text[ADAPTER + "production_origin_tests.rs"].count("#[test]"),
         "mcp_unit_cases": text[MCP + "workshop_construction_server/tests.rs"].count("#[test]"),
+        "clock_mcp_config_cases": text[MCP + "workshop_construction_server/clock_config_tests.rs"].count("#[test]"),
+        "clock_mcp_presentation_cases": text[MCP + "workshop_construction_server/clock_presentation_tests.rs"].count("#[test]"),
+        "clock_python_stdio_cases": len(re.findall(r"^    def test_", text["tests/stdio/workshop_clock.py"], re.MULTILINE)),
         "tree_material_mcp_unit_cases": text[MCP + "workshop_construction_server/tree_material_tests.rs"].count("#[test]"),
         "rust_stdio_cases": text["crates/dfmcp-mcp/tests/workshop_construction_stdio.rs"].count("#[test]"),
         "python_stdio_cases": len(re.findall(r"^    def test_", text["tests/stdio/workshop.py"], re.MULTILINE)),

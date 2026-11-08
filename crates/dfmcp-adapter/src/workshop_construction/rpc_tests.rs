@@ -385,6 +385,70 @@ fn actual_tcp_workshop_prepares_commits_and_reads_original_progress() -> Result<
     assert_eq!(peer.finish()?, vec![1, 4, 2, 1, 3, 6]);
     Ok(())
 }
+
+#[test]
+fn actual_tcp_progress_floor_is_monotone_and_blocks_stale_completion_before_persistence()
+-> Result<()> {
+    let original = vector("progress_complete")?;
+    let stale_tick = WorkshopProgress::decode(&original)?.tick();
+    let floor = stale_tick.checked_add(10).ok_or_else(malformed)?;
+    let mut steps = preparation()?;
+    steps.extend([Step::new(1, None)?, Step::new(3, Some("placed"))?]);
+    let mut stale = Step::new(6, None)?;
+    stale.observation = Some(original.clone());
+    let mut current_bytes = original;
+    current_bytes[16..24].copy_from_slice(&floor.to_be_bytes());
+    let mut current = Step::new(6, None)?;
+    current.observation = Some(current_bytes);
+    let peer = peer(vec![steps, vec![stale], vec![current]])?;
+    let c = context()?;
+    let p = plan()?;
+    let path = directory()?;
+    let mut journal = journal!(peer, &c, path);
+    let mut rpc = connect(&peer, &c, Box::new(|_| Ok(())))?;
+    journal.prepare(&mut rpc, &p, &c, &mut Guard)?;
+    journal.commit(&mut rpc, p.key(), p.digest(), &c, &mut Guard)?;
+    drop(rpc);
+    let original_pin = journal.pin();
+
+    // The settled independent clock has consumed a later tick, while this
+    // workshop journal still contains only its original Placed receipt.
+    let mut later = c.clone();
+    later.anchor.tick = GameTick(floor);
+    let mut rpc = connect(&peer, &later, Box::new(|_| Ok(())))?;
+    rpc.require_progress_at_or_after(floor);
+    rpc.require_progress_at_or_after(stale_tick);
+    rpc.require_progress_at_or_after(0);
+    assert_eq!(
+        journal
+            .sample(&mut rpc, p.key(), p.digest(), &later, &mut Guard)
+            .err()
+            .map(|cause| cause.code),
+        Some(ErrorCode::StaleAnchor)
+    );
+    assert!(rpc.is_fenced());
+    assert_eq!(journal.pin(), original_pin);
+    let retained = journal.get(p.key(), p.digest(), &later)?;
+    assert!(retained.placed() && !retained.goal_complete());
+    assert_eq!(retained.samples(), 0);
+    assert!(retained.latest_sample().is_none());
+    drop(rpc);
+
+    // A separately authenticated sample at the exact floor remains admissible.
+    let mut rpc = connect(&peer, &later, Box::new(|_| Ok(())))?;
+    rpc.require_progress_at_or_after(floor);
+    let sampled = journal.sample(&mut rpc, p.key(), p.digest(), &later, &mut Guard)?;
+    assert_eq!(sampled.goal(), Some(WorkshopGoal::Complete));
+    assert_eq!(sampled.samples(), 1);
+    assert_eq!(
+        sampled.latest_sample().map(WorkshopProgress::tick),
+        Some(floor)
+    );
+    assert_ne!(journal.pin(), original_pin);
+    assert_eq!(peer.finish()?, vec![1, 4, 2, 1, 3, 6, 6]);
+    Ok(())
+}
+
 #[test]
 fn actual_tcp_lost_reply_reopens_without_second_writer() -> Result<()> {
     let mut steps = preparation()?;

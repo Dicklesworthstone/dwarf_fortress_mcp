@@ -1,9 +1,11 @@
 //! One original workshop goal. Operator configuration supplies sources and authority;
 //! tool arguments select only an observed offer and its exact review.
-#[path = "tree_material.rs"]
-mod tree_material;
+#[path = "clock.rs"]
+mod clock;
 #[path = "material_selection.rs"]
 mod material_selection;
+#[path = "tree_material.rs"]
+mod tree_material;
 use dfmcp_adapter::build_placement::journal::private_file::PrivateBuildFile;
 use dfmcp_adapter::build_placement::rpc::BuildCancellation;
 use dfmcp_adapter::workshop_construction::{
@@ -30,6 +32,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 pub(super) const RESPONSE_BYTES: u64 = 128 * 1024;
+pub(super) const VIEW_BYTES: u64 = 32 * 1024 * 1024;
 const INSPECT_BYTES: u64 = 4 * 1024 * 1024;
 const CONNECT_BYTES: u64 = 1024 * 1024;
 const CONFIG: &str = "DFMCP_WORKSHOP_MCP_CONFIG";
@@ -82,12 +85,19 @@ pub(super) fn validate_environment() -> Result<()> {
         ));
     }
     let tree_material = std::env::var(tree_material::OPT_IN).ok().as_deref() == Some("1");
+    let clock = std::env::var(clock::OPT_IN).ok().as_deref() == Some("1");
+    if std::env::var_os(clock::ALLOW).is_some_and(|v| v.to_str() != Some("1")) {
+        return Err(denied(
+            "workshop clock permission must be absent or exactly 1",
+        ));
+    }
     for (key, _) in std::env::vars_os() {
         let key = key.to_string_lossy();
         if key.starts_with("DFMCP_")
             && ![CONFIG, OPT_IN, TOKEN, BUILD].contains(&key.as_ref())
             && !(tree_material
                 && [tree_material::OPT_IN, tree_material::TOKEN].contains(&key.as_ref()))
+            && !(clock && [clock::OPT_IN, clock::TOKEN, clock::ALLOW].contains(&key.as_ref()))
         {
             return Err(denied(
                 "workshop profile refuses production launch and other DFMCP profile state",
@@ -143,6 +153,7 @@ struct Input {
     map_dimensions: [u32; 3],
     item_id: Option<u32>,
     tree_material_source: Option<tree_material::Input>,
+    clock: Option<clock::Input>,
     center: [u32; 3],
     scope: [u32; 6],
     #[serde(default)]
@@ -157,6 +168,7 @@ pub(super) struct Config {
     endpoint: SocketAddr,
     selection: Option<WorkshopSelection>,
     tree_material: Option<tree_material::Config>,
+    clock: Option<clock::Config>,
     scope: MapCuboid,
     protected: Vec<MapCuboid>,
     identity: FortressIdentity,
@@ -173,6 +185,13 @@ fn area(raw: [u32; 6], dimensions: [u32; 3]) -> Result<MapCuboid> {
     )
 }
 impl Config {
+    fn view_bytes(&self) -> u64 {
+        if self.clock.is_some() {
+            VIEW_BYTES
+        } else {
+            INSPECT_BYTES
+        }
+    }
     pub(super) fn parse(raw: &str) -> Result<Self> {
         if raw.is_empty() || raw.len() > 16 * 1024 {
             return Err(invalid("workshop operator configuration exceeds 16 KiB"));
@@ -183,8 +202,7 @@ impl Config {
             .directory
             .to_str()
             .ok_or_else(|| invalid("custody path must be UTF-8"))?;
-        if !["dfmcp.workshop-mcp-development/1", tree_material::SCHEMA]
-            .contains(&i.schema.as_str())
+        if !["dfmcp.workshop-mcp-development/1", tree_material::SCHEMA].contains(&i.schema.as_str())
             || !i.directory.is_absolute()
             || path.len() < 2
             || path.len() > 3800
@@ -224,7 +242,11 @@ impl Config {
             (tree_material::SCHEMA, Some(source), None) => {
                 Some(tree_material::Config::parse(source.clone(), &i)?)
             }
-            _ => return Err(invalid("workshop schema must select exactly one material policy")),
+            _ => {
+                return Err(invalid(
+                    "workshop schema must select exactly one material policy",
+                ));
+            }
         };
         if i.center[0] + 1 >= i.map_dimensions[0]
             || i.center[1] + 1 >= i.map_dimensions[1]
@@ -240,11 +262,17 @@ impl Config {
             .collect::<Result<Vec<_>>>()?;
         let identity = FortressIdentity::new(&i.world_folder, i.site_id)?;
         let pin = i.acknowledged.as_ref().map(PinInput::decode).transpose()?;
+        let clock = i
+            .clock
+            .clone()
+            .map(|input| clock::Config::parse(input, &i, endpoint))
+            .transpose()?;
         Ok(Self {
             input: i,
             endpoint,
             selection,
             tree_material,
+            clock,
             scope,
             protected,
             identity,
@@ -259,15 +287,17 @@ impl Config {
                 .map_err(|_| denied("operator workshop configuration is missing"))?,
         )?;
         config.material_environment()?;
+        config.clock_environment()?;
         Ok(config)
     }
     fn material_environment(&self) -> Result<()> {
         let opted_in = std::env::var(tree_material::OPT_IN).ok().as_deref() == Some("1");
         if opted_in != self.tree_material.is_some()
-            || (self.tree_material.is_none()
-                && std::env::var_os(tree_material::TOKEN).is_some())
+            || (self.tree_material.is_none() && std::env::var_os(tree_material::TOKEN).is_some())
         {
-            return Err(denied("Tree material import requires its exact independent development opt-in and configuration"));
+            return Err(denied(
+                "Tree material import requires its exact independent development opt-in and configuration",
+            ));
         }
         Ok(())
     }
@@ -275,11 +305,26 @@ impl Config {
         runtime_io()?;
         validate_environment()?;
         self.material_environment()?;
+        self.clock_environment()?;
         let raw =
             std::env::var(CONFIG).map_err(|_| denied("operator workshop configuration removed"))?;
         if raw.len() > 16 * 1024 || Digest32::of_bytes(raw.as_bytes()) != self.hash {
             return Err(denied(
                 "operator workshop source or authority changed; preserve and close the original session",
+            ));
+        }
+        Ok(())
+    }
+    fn clock_environment(&self) -> Result<()> {
+        let opted_in = std::env::var(clock::OPT_IN).ok().as_deref() == Some("1");
+        if opted_in != self.clock.is_some()
+            || (self.clock.is_none()
+                && [clock::TOKEN, clock::ALLOW]
+                    .iter()
+                    .any(|key| std::env::var_os(key).is_some()))
+        {
+            return Err(denied(
+                "workshop clock requires its independent opt-in and exact operator configuration",
             ));
         }
         Ok(())
@@ -303,7 +348,9 @@ impl Config {
             || c.generation() != self.input.generation
             || c.dimensions() != self.input.map_dimensions
             || c.selection().center() != self.input.center
-            || self.selection.is_some_and(|selection| c.selection() != selection)
+            || self
+                .selection
+                .is_some_and(|selection| c.selection() != selection)
         {
             return Err(denied(
                 "workshop observation differs from exact original source or selection",
@@ -477,12 +524,12 @@ struct Work {
     bytes: u64,
 }
 impl Work {
-    fn new(c: &OperationContext) -> Result<Self> {
+    fn new(c: &OperationContext, view_bytes: u64) -> Result<Self> {
         c.budget.validate()?;
         let bytes = c
             .budget
             .max_bytes
-            .checked_sub(RESPONSE_BYTES + INSPECT_BYTES)
+            .checked_sub(RESPONSE_BYTES + view_bytes)
             .ok_or_else(exhausted)?;
         Ok(Self {
             context: c.clone(),
@@ -515,7 +562,9 @@ pub(super) enum Action {
     Plan(String),
     Commit { seal: String, confirmed: bool },
     Wait,
+    WaitClock,
     Cancel,
+    CancelClock,
     Unavailable,
 }
 #[derive(Deserialize)]
@@ -535,6 +584,7 @@ pub(super) struct Runtime {
     source: Option<WorkshopRpc>,
     observation: Option<WorkshopCapture>,
     tree_material: Option<tree_material::Owner>,
+    clock: Option<clock::Owner>,
     pub(super) anchor: Option<StateAnchor>,
     authority_tick: u64,
     next_request: u64,
@@ -570,10 +620,16 @@ fn seal(id: Digest32, p: &WorkshopPlan) -> Digest32 {
     Digest32::of_bytes(&data)
 }
 impl Runtime {
-    fn grants(config: &Config, control: bool) -> Vec<CapabilityGrant> {
+    fn grants(config: &Config, control: bool, clock_control: bool) -> Vec<CapabilityGrant> {
         let mut capabilities = vec![Capability::Query, Capability::Observe];
         if control {
             capabilities.extend([Capability::Plan, Capability::Construct]);
+        }
+        if clock_control {
+            if !control {
+                capabilities.push(Capability::Plan);
+            }
+            capabilities.push(Capability::ControlClock);
         }
         capabilities
             .into_iter()
@@ -613,11 +669,18 @@ impl Runtime {
                 tick: GameTick(0),
                 state_hash: Digest32::ZERO,
             },
-            grants: Self::grants(&config, control),
+            grants: Self::grants(
+                &config,
+                control,
+                config
+                    .clock
+                    .as_ref()
+                    .is_some_and(|clock| clock.control(mode)),
+            ),
             budget,
             cancellation_requested: false,
         };
-        let mut work = Work::new(&context)?;
+        let mut work = Work::new(&context, config.view_bytes())?;
         let mut tree_material = if config.input.initialize {
             config
                 .tree_material
@@ -694,10 +757,15 @@ impl Runtime {
             if inventory.entries().len() > 1 {
                 return Err(denied("workshop consumer owns exactly one original goal"));
             }
-            inventory.entries().first().map(|entry| entry.plan().before().selection())
+            inventory
+                .entries()
+                .first()
+                .map(|entry| entry.plan().before().selection())
         };
         if selection.is_some_and(|selection| selection.center() != config.input.center) {
-            return Err(denied("retained workshop selection differs from the fixed host footprint"));
+            return Err(denied(
+                "retained workshop selection differs from the fixed host footprint",
+            ));
         }
         if mode != WorkshopMode::Offline {
             acks.acknowledge(journal.pin(), &work.reserve(1024 * 1024)?)?;
@@ -725,6 +793,12 @@ impl Runtime {
             lease,
             session,
         };
+        work.advance_authorization_tick(authority_tick);
+        let clock = if config.clock.is_some() {
+            Some(clock::Owner::open(&config, mode, &mut work)?)
+        } else {
+            None
+        };
         Ok(Self {
             session,
             mode,
@@ -735,6 +809,7 @@ impl Runtime {
             source: None,
             observation,
             tree_material,
+            clock,
             anchor: current_anchor,
             authority_tick,
             next_request: 2,
@@ -755,6 +830,9 @@ impl Runtime {
         if let Some(donor) = &self.tree_material {
             authority_anchor.tick = GameTick(authority_anchor.tick.get().max(donor.high_tick()));
         }
+        if let Some(clock) = &self.clock {
+            authority_anchor.tick = GameTick(authority_anchor.tick.get().max(clock.high_tick()));
+        }
         Ok(OperationContext {
             session_id: self.session,
             request_id: RequestId::new(u128::from(request)),
@@ -763,6 +841,10 @@ impl Runtime {
             grants: Self::grants(
                 &self.config,
                 self.mode == WorkshopMode::Control && self.config.input.initialize,
+                self.config
+                    .clock
+                    .as_ref()
+                    .is_some_and(|clock| clock.control(self.mode)),
             ),
             cancellation_requested: false,
         })
@@ -775,18 +857,24 @@ impl Runtime {
             authority.anchor.tick = GameTick(authority.anchor.tick.get().max(donor.high_tick()));
         }
         let c = &authority;
-        let inv = self.journal.inventory(c)?;
+        if c.budget.max_bytes < self.config.view_bytes() {
+            return Err(exhausted());
+        }
+        let mut inventory_context = c.clone();
+        inventory_context.budget.max_bytes = INSPECT_BYTES;
+        let inv = self.journal.inventory(&inventory_context)?;
         if inv.entries().len() > 1 {
             return Err(denied("workshop consumer owns exactly one original goal"));
         }
         if self.mode != WorkshopMode::Offline {
-            self.guard.acknowledge(self.journal.pin(), c)?;
+            self.guard
+                .acknowledge(self.journal.pin(), &inventory_context)?;
         } else {
             self.guard
                 .acks
                 .try_lock()
                 .map_err(|_| denied("workshop acknowledgement busy"))?
-                .verify(c)?;
+                .verify(&inventory_context)?;
         }
         let original=inv.entries().first().map(|e| {
             let p=e.plan(); let receipt=e.native();
@@ -807,24 +895,80 @@ impl Runtime {
                 "fresh_goal":if fresh { e.goal().map(WorkshopGoal::as_str) } else {None},
                 "fresh_completion_proven":fresh && e.goal_complete()})
         });
+        let clock = self.clock_view(&inv, c, fresh)?;
         Ok(
             json!({"ok":true,"mode":self.mode.as_str(),"source_profile":"workshop/1.20",
-            "runtime_admitted":false,"automatic_redispatch":false,"clock_advanced":false,
+            "runtime_admitted":false,"automatic_redispatch":false,
+            "clock_advanced":if self.clock.is_some() {Value::Null}else{json!(false)},
             "journal_fenced":self.journal.is_fenced(),"acknowledged":pin_json(self.journal.pin()),
             "retained_state_currently_verified":true,"original":original,
             "observation":self.observation.as_ref().map(source_json),"current_goal_available":fresh,
             "material_policy":if self.config.tree_material.is_some() {"tree_supply"} else {"operator_pinned"},
             "tree_material":self.tree_material.as_ref().map(|owner|owner.view(&self.config)),
+            "clock":clock,
             "manager_activation_available":false,"finite_bed_output_proven":false}),
         )
     }
     pub(super) fn inspect(&mut self, c: &OperationContext) -> Result<Value> {
         self.view(c, false)
     }
+    fn sample_after_clock(&mut self, work: &mut Work) -> Result<bool> {
+        let mut source_entered = false;
+        let result = (|| {
+            let inventory = self.journal.inventory(&work.reserve(INSPECT_BYTES)?)?;
+            let entry = inventory.entries().first().ok_or_else(|| {
+                denied("original workshop unavailable after clock reconciliation")
+            })?;
+            if !entry.placed() || entry.unresolved() {
+                return Err(denied(
+                    "only the exact resolved original workshop can be sampled after the clock",
+                ));
+            }
+            if entry.goal_complete() {
+                return Ok(false);
+            }
+            self.source = None;
+            self.observation = None;
+            let connect = work.reserve(CONNECT_BYTES)?;
+            source_entered = true;
+            let mut source = self.config.source(&connect, WorkshopMode::Recover)?;
+            source.require_progress_at_or_after(self.authority_tick);
+            let sampled = self.journal.sample(
+                &mut source,
+                entry.plan().key(),
+                entry.plan().digest(),
+                &work.reserve(work.bytes)?,
+                &mut self.guard,
+            )?;
+            self.authority_tick = self.authority_tick.max(sampled.high_tick());
+            work.advance_authorization_tick(self.authority_tick);
+            let fresh = sampled.samples() > entry.samples();
+            if fresh && let Some(progress) = sampled.latest_sample() {
+                self.anchor = Some(StateAnchor {
+                    fortress_id: progress.fortress().fortress_id(),
+                    cursor: ObservationCursor {
+                        epoch: 0,
+                        sequence: self.next_request,
+                    },
+                    tick: GameTick(progress.tick()),
+                    state_hash: progress.witness(),
+                });
+            }
+            Ok(fresh)
+        })();
+        if result.is_err()
+            && source_entered
+            && let Some(clock) = &mut self.clock
+        {
+            clock.fence_advancement();
+        }
+        result
+    }
     pub(super) fn perform(&mut self, action: Action, c: &OperationContext) -> Result<Value> {
+        let mut workshop_source_entered = false;
         let result = (|| {
             self.config.current()?;
-            let mut work = Work::new(c)?;
+            let mut work = Work::new(c, self.config.view_bytes())?;
             work.advance_authorization_tick(self.authority_tick);
             if let Some(donor) = &self.tree_material {
                 work.advance_authorization_tick(donor.high_tick());
@@ -834,7 +978,7 @@ impl Runtime {
                 Action::Inspect => {}
                 Action::Unavailable => {
                     return Err(denied(
-                        "this isolated profile has no checkpoint, restore, clock, manager or activation provider",
+                        "this isolated profile has no checkpoint, restore, manager or activation provider",
                     ));
                 }
                 Action::Observe => {
@@ -852,6 +996,10 @@ impl Runtime {
                     self.observe_material(&mut work)?;
                 }
                 Action::Plan(raw) => {
+                    if clock::is_request(&raw)? {
+                        self.clock_action(clock::Action::Plan(&raw), &mut work)?;
+                        return self.view(&work.current(self.config.view_bytes())?, false);
+                    }
                     if raw.len() > 2048 {
                         return Err(exhausted());
                     }
@@ -867,7 +1015,10 @@ impl Runtime {
                         return Err(denied("recovery cannot grant fresh construction authority"));
                     }
                     self.select_material(&request, &mut work)?;
-                    let before = self.observation.as_ref().ok_or_else(|| invalid("observe the original workshop offer first"))?;
+                    let before = self
+                        .observation
+                        .as_ref()
+                        .ok_or_else(|| invalid("observe the original workshop offer first"))?;
                     if !before.workers().iter().any(|w| {
                         w.eligible()
                             && self.config.scope.contains(MapCoord::new(
@@ -899,6 +1050,19 @@ impl Runtime {
                     seal: requested,
                     confirmed,
                 } => {
+                    let requested_digest = digest(&requested)?;
+                    if self.clock.as_ref().and_then(clock::Owner::prepared_seal)
+                        == Some(requested_digest)
+                    {
+                        self.clock_action(
+                            clock::Action::Commit {
+                                seal: requested_digest,
+                                confirmed,
+                            },
+                            &mut work,
+                        )?;
+                        return self.view(&work.current(self.config.view_bytes())?, false);
+                    }
                     let inv = self.journal.inventory(&work.reserve(INSPECT_BYTES)?)?;
                     let e = inv
                         .entries()
@@ -910,7 +1074,7 @@ impl Runtime {
                             "review and confirm the exact original workshop seal",
                         ));
                     }
-                    if digest(&requested)? != seal(inv.journal_id, e.plan()) {
+                    if requested_digest != seal(inv.journal_id, e.plan()) {
                         return Err(error(
                             ErrorCode::Conflict,
                             "workshop review seal differs from original goal",
@@ -937,6 +1101,9 @@ impl Runtime {
                         ));
                     }
                     let cancel = matches!(action, Action::Cancel);
+                    if !cancel {
+                        self.clock_allows_goal_sample(&mut work)?;
+                    }
                     let inv = self.journal.inventory(&work.reserve(INSPECT_BYTES)?)?;
                     let e = inv
                         .entries()
@@ -944,9 +1111,10 @@ impl Runtime {
                         .ok_or_else(|| invalid("no original workshop goal to recover"))?;
                     self.source = None;
                     self.observation = None;
-                    let mut source = self
-                        .config
-                        .source(&work.reserve(CONNECT_BYTES)?, WorkshopMode::Recover)?;
+                    let connect = work.reserve(CONNECT_BYTES)?;
+                    workshop_source_entered = true;
+                    let mut source = self.config.source(&connect, WorkshopMode::Recover)?;
+                    source.require_progress_at_or_after(self.authority_tick);
                     let current = work.reserve(work.bytes)?;
                     if e.needs_reconciliation() || cancel {
                         self.journal.recover(
@@ -979,13 +1147,35 @@ impl Runtime {
                         }
                     }
                 }
+                Action::WaitClock | Action::CancelClock => {
+                    let cancel = matches!(action, Action::CancelClock);
+                    let settled = self.clock_action(
+                        if cancel {
+                            clock::Action::Cancel
+                        } else {
+                            clock::Action::Wait
+                        },
+                        &mut work,
+                    )?;
+                    if settled && !cancel {
+                        fresh = self.sample_after_clock(&mut work)?;
+                    }
+                }
             }
-            self.view(&work.current(INSPECT_BYTES)?, fresh)
+            self.authority_tick = self.authority_tick.max(self.journal.high_tick());
+            self.view(&work.current(self.config.view_bytes())?, fresh)
         })();
         if let Some(donor) = &self.tree_material {
             self.authority_tick = self.authority_tick.max(donor.high_tick());
         }
+        self.authority_tick = self.authority_tick.max(self.journal.high_tick());
+        if let Some(clock) = &self.clock {
+            self.authority_tick = self.authority_tick.max(clock.high_tick());
+        }
         if result.is_err() {
+            if workshop_source_entered && let Some(clock) = &mut self.clock {
+                clock.fence_advancement();
+            }
             self.withdraw();
         }
         result
@@ -997,6 +1187,9 @@ impl Runtime {
         if let Some(donor) = &mut self.tree_material {
             donor.withdraw();
         }
+        if let Some(clock) = &mut self.clock {
+            clock.withdraw();
+        }
         self.journal.abandon();
     }
     pub(super) fn failure_reference(&self) -> Value {
@@ -1006,6 +1199,7 @@ impl Runtime {
                 "state":e.state().as_str(),"dispatch_started":e.dispatch_started(),"unresolved":e.unresolved(),
                 "native_receipt":e.native().map(|r|r.receipt().to_hex()),"current_goal":null,"currently_verified":false})),
             "current_goal_available":false,"automatic_redispatch":false,
+            "clock":self.clock.as_ref().map(clock::Owner::reference),
             "recovery":"Keep both original workshop.journal and independent workshop.ack, plus the externally retained acknowledgement. Reopen recover/offline; never construct a replacement key."})
     }
 }

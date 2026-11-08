@@ -272,6 +272,9 @@
     "crates/dfmcp-mcp/src/workshop_construction_server/runtime.rs",
     "crates/dfmcp-mcp/src/workshop_construction_server/presentation.rs",
     "crates/dfmcp-mcp/src/workshop_construction_server/tests.rs",
+    "crates/dfmcp-mcp/src/workshop_construction_server/clock.rs",
+    "crates/dfmcp-mcp/src/workshop_construction_server/clock_config_tests.rs",
+    "crates/dfmcp-mcp/src/workshop_construction_server/clock_presentation_tests.rs",
     "crates/dfmcp-mcp/src/workshop_construction_server/material_selection.rs",
     "crates/dfmcp-mcp/src/workshop_construction_server/tree_material.rs",
     "crates/dfmcp-mcp/src/workshop_construction_server/tree_material_tests.rs",
@@ -283,6 +286,7 @@
     "tests/native/workshop/continuity_vectors.json",
     "tests/stdio/workshop.py",
     "tests/stdio/workshop_tree_material.py",
+    "tests/stdio/workshop_clock.py",
     "tests/stdio/tree_harvest.py",
     "scripts/read_stable_repository_file.py",
     "scripts/test_workshop_native.py",
@@ -347,8 +351,8 @@
     "new_keys_after_original": false,
     "checkpoint_default": "required",
     "disposable_exception": "operator-only disposable-fortress-no-checkpoint before preparation",
-    "game_clock_control": false,
-    "separate_existing_clock": "run/1.13 standalone; independent review/identity; no cross-plugin atomicity, fortress identity or causality claim",
+    "game_clock_control": true,
+    "separate_existing_clock": "optional integrated run/1.13 original-workshop clock or standalone; independent authority, review and custody; no cross-plugin atomicity, fortress identity or causality claim",
     "manager_or_activation_provider": false,
     "finite_bed_output_proven": false
   },
@@ -376,9 +380,9 @@
     "version": "DFMWA020"
   },
   "focused_test_contract": {
-    "adapter_rust_cases": 23,
+    "adapter_rust_cases": 24,
     "mcp_unit_cases": 9,
-    "rust_stdio_cases": 2,
+    "rust_stdio_cases": 3,
     "python_stdio_cases": 7,
     "python_inventory_cases": 9,
     "native_scenarios": 13,
@@ -395,7 +399,10 @@
     "tree_material_mcp_unit_cases": 3,
     "tree_material_python_stdio_cases": 5,
     "production_origin_adapter_rust_cases": 17,
-    "clock_adapter_rust_cases": 20
+    "clock_adapter_rust_cases": 20,
+    "clock_mcp_config_cases": 7,
+    "clock_mcp_presentation_cases": 12,
+    "clock_python_stdio_cases": 10
   },
   "shared_native_engine": {
     "source": "bridge/common/one_attempt_native.h",
@@ -527,5 +534,45 @@
     "recovery_restores_control": false,
     "run_receipt_proves_workshop_completion": false,
     "native_protocols_unchanged": true
+  },
+  "clock_consumer": {
+    "opt_in": "DFMCP_ALLOW_UNADMITTED_WORKSHOP_CLOCK=1",
+    "credential": "DFMCP_RUN_TOKEN",
+    "control_permission": "DFMCP_RUN_ALLOW_CLOCK=1",
+    "custody_file": "workshop.clock.journal",
+    "configuration_fields": [
+      "initialize",
+      "generation",
+      "recovery_generation",
+      "deadline_tick",
+      "recovery"
+    ],
+    "source_endpoint_and_software": "inherited exact operator Workshop pins",
+    "default_game_ticks": 0,
+    "maximum_game_ticks": 1200,
+    "default_request_bytes": 268435456,
+    "plan_kind": "run_workshop",
+    "plan_fields": [
+      "kind",
+      "target_id",
+      "game_ticks",
+      "wall_millis"
+    ],
+    "commit": "existing exact review_seal and confirmed arguments; independent clock seal",
+    "wait_scope": "clock",
+    "cancel_scope": "clock",
+    "workshop_guard_samples": "durably append and independently acknowledge at both Run intent/dispatch boundaries",
+    "post_settlement": "one fresh original Workshop sample in the same foreground wait request",
+    "original_sample_capacity": 64,
+    "failed_native_contact_fences_new_advancement": true,
+    "fence_preserves_authorized_safety_stop": true,
+    "offline_reads_credentials": false,
+    "offline_native_calls": false,
+    "recovery_restores_control": false,
+    "new_clock_may_attach_to_acknowledged_existing_workshop": true,
+    "restores_construction_permission": false,
+    "default_goal_wait_unchanged": true,
+    "native_protocols_unchanged": true,
+    "post_run_progress_floor": "at least the maximum consumed Run/Workshop tick; typed RPC rejects stale completion before journal retention"
   }
 }

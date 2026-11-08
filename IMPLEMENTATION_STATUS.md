@@ -1,5 +1,73 @@
 # Implementation Status
 
+## Unreleased — Finish original workshops through separately reviewed game time
+
+The Workshop/1.20 development MCP server now optionally owns finite Run/1.13
+intervals for its exact original Carpenter. The existing eleven tools cover
+construction, separate run planning/review/commit, one-shot run reconciliation,
+and a fresh original-building sample after settlement. The default game-tick
+allowance stays zero. Explicit operator clock permission and session ticks are
+required, and every interval fits the frozen absolute horizon. A second interval
+requires a fresh plan and review; a Run receipt never proves construction.
+
+The host independently owns `workshop.clock.journal`, pins the Run generation
+separately, and issues native NIL grants separately from Workshop authority.
+Both control guards durably sample and acknowledge the original workshop before
+returning to the Run writer. All sources share the narrowing foreground work
+budget, with complete clock/guard/output reservations before native contact.
+The original 64-sample limit also reserves the two guards and later goal sample.
+Successful, failed, oversized and closed-session responses preserve both custody
+roots and any unresolved run. Lost reviews recommend local retirement when
+permitted; terminal unknown and sticky continuity failures expose blockers instead
+of endless polling. Failed native contacts conservatively fence further time
+advancement while preserving separately authorized safety stop and read recovery.
+The typed Workshop RPC also enforces a monotone caller-supplied progress floor,
+so completion older than a consumed Run receipt is rejected before journal
+retention. A real RPC/durable-journal regression and a joined-server scenario
+cover rejection of stale completion followed by a valid fresh goal observation.
+
+An independently authorized new clock can attach to an acknowledged existing
+workshop without restoring construction permission. Recover/offline reopen the
+exact original custody and external pins; no recovered clock can prepare or
+unpause, and Offline reads neither credential nor endpoint. The opt-in works with
+the existing fixed-log and Tree-material workshop configurations. No native wire,
+manager/activation behavior, public tool count or production admission changed.
+
+Validation uses the actual locked workspace and latest nightly, rustc
+1.102.0-nightly (f5cedb83a, 2026-11-07). An earlier clock production checkpoint
+passed `cargo check --locked --offline -p dfmcp-adapter --lib`, after the final
+zero-identity and pending-sampling refinements but before the concurrent
+production-origin merge and the new RPC progress floor. The later adapter check
+containing the RPC floor was SIGKILLed without a Rust source diagnostic. Incoming
+commit `22f9a3d` subsequently records 70/70 adapter Workshop tests, including the
+byte-identical final twenty clock cases and seventeen production-origin cases.
+Its source does not include the new RPC floor or regression; the now-71-case
+merged target remains unexecuted here. The prior 53-case adapter pass and
+test-build limitation remain documented in the historical clock entry below.
+The first actual MCP library check was SIGKILLed in unchanged Asupersync 0.5.0;
+a materially lower-memory retry was interrupted after its bounded attempt,
+still in dependencies and before MCP compilation began. Neither attempt supplies
+a current-source MCP verdict.
+
+Added 7 pure host configuration tests, 12 recommendation/evidence tests, one
+real Workshop RPC/journal progress-floor regression and 10 actual-server stdio
+scenarios with joined Workshop/Run peers and private custody. These additions
+remain authored, not executed. Rustfmt parsed all changed Rust sources, the
+merged workshop static contract passed, and all 9 source-inventory negatives
+passed. Before the final production-host merge, `scripts/verify.sh` passed its
+static contracts and dependency policy,
+then exited because the `br` executable is unavailable. A development-only
+`DFMCP_ALLOW_DIRTY=1 scripts/qualify_local.sh` attempt passed its 17 initial
+contract gates and the existing Workshop/Tree native component suites using
+SDK doubles; it was then explicitly interrupted during the broader regression
+gate (exit 130), with no qualification receipt. No current full Rust, native
+SDK, game, full qualification or live admission verdict is claimed.
+
+See [WORKSHOP_CLOCK.md](docs/WORKSHOP_CLOCK.md) for operator configuration, the
+complete agent loop, exact recovery semantics and source-identity limits. The
+broader original first-fortress workshop-and-furniture-output acceptance remains
+open; this implementation advances `dfmcp-reality-wiring-proof-4bf.14.6`.
+
 ## Unreleased — Bind completed original workshops to production
 
 The combined labor/order development owner now consumes an independently

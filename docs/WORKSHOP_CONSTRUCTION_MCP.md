@@ -360,15 +360,19 @@ original-goal proof still belong to their separately authorized owners.
 
 ## Separately reviewed game progress
 
-This consumer does not control time. The existing standalone
-`dfmcp-live-run-dev-server`, documented in
-[BOUNDED_SIMULATION_MCP.md](BOUNDED_SIMULATION_MCP.md), can provide a separately
-authorized finite run/1.13 interval without furniture/work-order/workforce goals
-or manager flags. Its independent eleven-tool session follows
-open-control, observe, plan with original idempotency key/expected witness,
-review exact digest, confirm commit, and wait on that same key/digest. Limits
-remain at most 1200 ticks and 60000 native wall milliseconds per reviewed run.
-It is not the earlier work-order-linked clock.
+The optional independently authorized [workshop clock](WORKSHOP_CLOCK.md) now
+connects finite Run/1.13 intervals to this exact original Carpenter in the same
+eleven-tool session. Its default tick allowance is zero. Each interval needs a
+separate plan, exact review and confirmed commit, fresh durably acknowledged
+original-workshop guards, and its own Run journal/recovery identity. A settled
+`fortress_wait(scope="clock")` acquires fresh original-building progress before
+reporting completion. Unknown source continuity never grants another interval.
+
+The existing standalone `dfmcp-live-run-dev-server`, documented in
+[BOUNDED_SIMULATION_MCP.md](BOUNDED_SIMULATION_MCP.md), remains available as an
+independent clock consumer. Both paths retain the native limits of at most
+1200 ticks and 60000 wall milliseconds per reviewed run. They do not establish
+manager state, activate orders or produce furniture by themselves.
 
 Before gameplay, the exact native artifacts and same-game endpoint/owned process
 identity must be independently established. Protocol 1.13 does not name a

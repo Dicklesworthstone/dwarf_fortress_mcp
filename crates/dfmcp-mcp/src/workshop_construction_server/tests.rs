@@ -10,12 +10,14 @@ fn workshop_namespace_is_process_scoped_and_distinct() -> Result<()> {
     Ok(())
 }
 #[test]
-fn workshop_output_and_zero_tick_bounds_are_enforced() -> Result<()> {
-    let b = budgets(None, None, None)?;
+fn workshop_output_and_explicit_tick_bounds_are_enforced() -> Result<()> {
+    let b = budgets(None, None, None, None)?;
     assert_eq!(b.max_game_ticks, 0);
-    assert!(budgets(Some(60001), None, None).is_err());
-    assert!(budgets(None, Some(64 * 1024 * 1024 - 1), None).is_err());
-    assert!(budgets(None, None, Some(32767)).is_err());
+    assert_eq!(budgets(None, None, None, Some(1200))?.max_game_ticks, 1200);
+    assert!(budgets(None, None, None, Some(1201)).is_err());
+    assert!(budgets(Some(60001), None, None, None).is_err());
+    assert!(budgets(None, Some(64 * 1024 * 1024 - 1), None, None).is_err());
+    assert!(budgets(None, None, Some(32767), None).is_err());
     Ok(())
 }
 #[test]
@@ -54,7 +56,7 @@ fn overflow_preserves_full_agent_turn_spine_and_compact_original_hazard() -> Res
         "fortress.commit",
         Some(session),
         Some(request),
-        Some(budgets(None, None, None)?),
+        Some(budgets(None, None, None, None)?),
         json!({"ok":true,"retained_state_currently_verified":true,"oversized":"x".repeat(RESPONSE_BYTES as usize+1)}),
         reference,
     );
@@ -99,7 +101,7 @@ fn failed_budget_withdraws_prepared_connection_and_old_seal() -> Result<()> {
         return crate::run_with_runtime_cx(|_|async {
             let config=Config::environment()?;
             let session=SessionId::new((1u128<<127)|FAMILY|1);
-            let mut runtime=Runtime::open(config,WorkshopMode::Control,session,budgets(Some(60000),None,None)?)?;
+            let mut runtime=Runtime::open(config,WorkshopMode::Control,session,budgets(Some(60000),None,None,None)?)?;
             let c=runtime.context()?;
             let observed=runtime.inspect(&c)?;
             let request=json!({"kind":"carpenters","expected_observation":observed["observation"]["witness"],
@@ -193,7 +195,8 @@ fn workshop_source_presentation_preserves_hidden_and_absent_facts() -> Result<()
 }
 
 #[test]
-fn tree_material_agent_turn_uses_discovery_handle_and_retains_independent_proof_limits() -> Result<()> {
+fn tree_material_agent_turn_uses_discovery_handle_and_retains_independent_proof_limits()
+-> Result<()> {
     let session = SessionId::new((1u128 << 127) | FAMILY | 19);
     let handle = format!("tree-workshop-material:{}", "b".repeat(64));
     let mut result = json!({
@@ -208,29 +211,52 @@ fn tree_material_agent_turn_uses_discovery_handle_and_retains_independent_proof_
     });
     let packet = |result: Value| -> Result<Value> {
         serde_json::from_str(&presentation::packet(
-            "fortress.observe",Some(session),Some(RequestId::new(3)),
-            Some(budgets(None,None,None)?),result,Value::Null,
-        )).map_err(|_| error(ErrorCode::InvalidRequest,"invalid presentation JSON"))
+            "fortress.observe",
+            Some(session),
+            Some(RequestId::new(3)),
+            Some(budgets(None, None, None, None)?),
+            result,
+            Value::Null,
+        ))
+        .map_err(|_| error(ErrorCode::InvalidRequest, "invalid presentation JSON"))
     };
     let shown = packet(result.clone())?;
     let next = &shown["agent_turn"]["recommendations"][0];
     assert_eq!(next["tool"], "fortress_plan");
-    let request: Value = serde_json::from_str(next["arguments"]["request"].as_str()
-        .ok_or_else(|| error(ErrorCode::InvalidRequest,"missing request"))?)
-        .map_err(|_| error(ErrorCode::InvalidRequest,"invalid closed request"))?;
+    let request: Value = serde_json::from_str(
+        next["arguments"]["request"]
+            .as_str()
+            .ok_or_else(|| error(ErrorCode::InvalidRequest, "missing request"))?,
+    )
+    .map_err(|_| error(ErrorCode::InvalidRequest, "invalid closed request"))?;
     assert_eq!(request["kind"], "carpenters_from_tree_supply");
     assert_eq!(request["expected_observation"], "a".repeat(64));
     assert_eq!(request["material"], handle);
     assert_eq!(next["grants_authority"], false);
     assert!(shown["agent_turn"]["anchor"].is_null());
-    assert_eq!(shown["agent_turn"]["briefing"]["mutation_admissible"], false);
-    assert_eq!(shown["agent_turn"]["briefing"]["tree_material_discovery_available"], true);
-    assert_eq!(shown["result"]["tree_material"]["harvest_goal_completion_proven"], false);
-    assert_eq!(shown["result"]["tree_material"]["causal_provenance_known"], false);
+    assert_eq!(
+        shown["agent_turn"]["briefing"]["mutation_admissible"],
+        false
+    );
+    assert_eq!(
+        shown["agent_turn"]["briefing"]["tree_material_discovery_available"],
+        true
+    );
+    assert_eq!(
+        shown["result"]["tree_material"]["harvest_goal_completion_proven"],
+        false
+    );
+    assert_eq!(
+        shown["result"]["tree_material"]["causal_provenance_known"],
+        false
+    );
     let mut blocked = result.clone();
     blocked["tree_material"]["offers"][1]["host_selection_allowed"] = json!(false);
     let blocked = packet(blocked)?;
-    assert_eq!(blocked["agent_turn"]["recommendations"][0]["tool"], "fortress_explain");
+    assert_eq!(
+        blocked["agent_turn"]["recommendations"][0]["tool"],
+        "fortress_explain"
+    );
     let mut alternative = result.clone();
     alternative["observation"]["eligible_at_anchor"] = json!(false);
     let alternative_handle = format!("tree-workshop-material:{}", "d".repeat(64));
@@ -238,14 +264,25 @@ fn tree_material_agent_turn_uses_discovery_handle_and_retains_independent_proof_
         .ok_or_else(|| error(ErrorCode::InvalidRequest,"missing offers"))?
         .push(json!({"item_id":43,"material_handle":alternative_handle,"host_selection_allowed":true}));
     let alternative = packet(alternative)?;
-    assert_eq!(alternative["agent_turn"]["recommendations"][0]["tool"], "fortress_plan");
+    assert_eq!(
+        alternative["agent_turn"]["recommendations"][0]["tool"],
+        "fortress_plan"
+    );
     let alternative_request: Value = serde_json::from_str(
-        alternative["agent_turn"]["recommendations"][0]["arguments"]["request"].as_str()
-            .ok_or_else(|| error(ErrorCode::InvalidRequest,"missing alternative request"))?
-    ).map_err(|_| error(ErrorCode::InvalidRequest,"invalid alternative request"))?;
+        alternative["agent_turn"]["recommendations"][0]["arguments"]["request"]
+            .as_str()
+            .ok_or_else(|| error(ErrorCode::InvalidRequest, "missing alternative request"))?,
+    )
+    .map_err(|_| error(ErrorCode::InvalidRequest, "invalid alternative request"))?;
     assert_eq!(alternative_request["material"], alternative_handle);
-    assert_eq!(alternative["result"]["observation"]["eligible_at_anchor"], false);
-    assert_eq!(alternative["agent_turn"]["briefing"]["development_commit_available"], false);
+    assert_eq!(
+        alternative["result"]["observation"]["eligible_at_anchor"],
+        false
+    );
+    assert_eq!(
+        alternative["agent_turn"]["briefing"]["development_commit_available"],
+        false
+    );
 
     result["mode"] = json!("offline");
     result["tree_material"] = Value::Null;
@@ -254,10 +291,22 @@ fn tree_material_agent_turn_uses_discovery_handle_and_retains_independent_proof_
         "prepared_in_this_connection":false,"dispatch_started":true,"unresolved":false,
         "source":{"selection":{"item_id":42}}});
     let recovered = packet(result)?;
-    assert_eq!(recovered["agent_turn"]["recommendations"][0]["tool"], "fortress_query");
-    assert_eq!(recovered["result"]["original"]["source"]["selection"]["item_id"], 42);
-    assert_eq!(recovered["agent_turn"]["briefing"]["tree_material_discovery_available"], false);
-    assert_eq!(recovered["agent_turn"]["briefing"]["development_commit_available"], false);
+    assert_eq!(
+        recovered["agent_turn"]["recommendations"][0]["tool"],
+        "fortress_query"
+    );
+    assert_eq!(
+        recovered["result"]["original"]["source"]["selection"]["item_id"],
+        42
+    );
+    assert_eq!(
+        recovered["agent_turn"]["briefing"]["tree_material_discovery_available"],
+        false
+    );
+    assert_eq!(
+        recovered["agent_turn"]["briefing"]["development_commit_available"],
+        false
+    );
     Ok(())
 }
 
@@ -272,7 +321,10 @@ fn tree_material_agent_turn_never_substitutes_a_legacy_or_unmatched_offer() -> R
             "offers":[{"item_id":42,"material_handle":format!("tree-workshop-material:{}","b".repeat(64))}]}),
     ] {
         let encoded = presentation::packet(
-            "fortress.observe",Some(session),None,Some(budgets(None,None,None)?),
+            "fortress.observe",
+            Some(session),
+            None,
+            Some(budgets(None, None, None, None)?),
             json!({"ok":true,"mode":"control","retained_state_currently_verified":true,
                 "material_policy":"tree_supply","original":null,"tree_material":discovery,
                 "observation":{"eligible_at_anchor":true,"selection":{"item_id":42},
@@ -280,8 +332,11 @@ fn tree_material_agent_turn_never_substitutes_a_legacy_or_unmatched_offer() -> R
             Value::Null,
         );
         let shown: Value = serde_json::from_str(&encoded)
-            .map_err(|_| error(ErrorCode::InvalidRequest,"invalid presentation JSON"))?;
-        assert_eq!(shown["agent_turn"]["recommendations"][0]["tool"], "fortress_observe");
+            .map_err(|_| error(ErrorCode::InvalidRequest, "invalid presentation JSON"))?;
+        assert_eq!(
+            shown["agent_turn"]["recommendations"][0]["tool"],
+            "fortress_observe"
+        );
         assert!(shown["agent_turn"]["recommendations"][0]["arguments"]["request"].is_null());
     }
     Ok(())

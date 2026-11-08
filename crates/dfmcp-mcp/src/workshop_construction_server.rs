@@ -27,7 +27,9 @@ fn retained(view: &Value) -> Value {
     let o = &view["original"];
     json!({"acknowledged":view["acknowledged"],"original":{"key":o["key"],"plan_digest":o["plan_digest"],
         "review_seal":o["review_seal"],"native_receipt":o["native_receipt"],"state":o["state"],
-        "dispatch_started":o["dispatch_started"],"unresolved":o["unresolved"]},"current_goal_available":false,"currently_verified":false})
+        "dispatch_started":o["dispatch_started"],"unresolved":o["unresolved"]},
+        "clock":presentation::clock_reference(&view["clock"]),
+        "current_goal_available":false,"currently_verified":false})
 }
 fn lock() -> Result<MutexGuard<'static, Option<State>>> {
     SESSION.try_lock().map_err(|e| match e {
@@ -66,11 +68,22 @@ fn id(raw: &str) -> Result<SessionId> {
     }
     Ok(id)
 }
-fn budgets(wall: Option<u64>, bytes: Option<u64>, output: Option<u32>) -> Result<WorkBudget> {
+fn budgets(
+    wall: Option<u64>,
+    bytes: Option<u64>,
+    output: Option<u32>,
+    game_ticks: Option<u64>,
+) -> Result<WorkBudget> {
     let b = WorkBudget {
         max_wall_millis: wall.unwrap_or(60000),
         max_bytes: bytes.unwrap_or_else(|| {
-            if std::env::var("DFMCP_ALLOW_UNADMITTED_WORKSHOP_TREE_MATERIAL").ok().as_deref() == Some("1") {
+            if [
+                "DFMCP_ALLOW_UNADMITTED_WORKSHOP_TREE_MATERIAL",
+                "DFMCP_ALLOW_UNADMITTED_WORKSHOP_CLOCK",
+            ]
+            .iter()
+            .any(|key| std::env::var(key).ok().as_deref() == Some("1"))
+            {
                 256 * 1024 * 1024
             } else {
                 128 * 1024 * 1024
@@ -79,20 +92,63 @@ fn budgets(wall: Option<u64>, bytes: Option<u64>, output: Option<u32>) -> Result
         max_output_tokens: output.unwrap_or(32768),
         max_entities: 128,
         max_actions: 1,
-        max_game_ticks: 0,
+        max_game_ticks: game_ticks.unwrap_or(0),
     };
     b.validate()?;
     if b.max_wall_millis > 60000
         || !(64 * 1024 * 1024..=512 * 1024 * 1024).contains(&b.max_bytes)
         || b.max_output_tokens > 32768
+        || b.max_game_ticks > 1200
         || u64::from(b.max_output_tokens) * 4 < RESPONSE_BYTES
     {
         return Err(error(
             ErrorCode::BudgetExceeded,
-            "workshop needs bounded complete custody/output reserves, at most 60000ms and zero game ticks",
+            "workshop needs bounded complete custody/output reserves, at most 60000ms and 1200 explicit game ticks",
         ));
     }
     Ok(b)
+}
+fn scope_action(scope: Option<&str>, cancel: bool) -> Result<Action> {
+    match (scope.unwrap_or("goal"), cancel) {
+        ("goal", false) => Ok(Action::Wait),
+        ("clock", false) => Ok(Action::WaitClock),
+        ("goal", true) => Ok(Action::Cancel),
+        ("clock", true) => Ok(Action::CancelClock),
+        _ => Err(error(
+            ErrorCode::InvalidRequest,
+            if cancel {
+                "scope must be goal, clock or session"
+            } else {
+                "scope must be goal or clock"
+            },
+        )),
+    }
+}
+fn scope_failure(raw: &str, operation: &str, cause: dfmcp_core::DfmcpError) -> String {
+    let retained = (|| -> Result<(SessionId, WorkBudget, Value)> {
+        let session = id(raw)?;
+        let mut guard = lock()?;
+        let state = guard
+            .as_mut()
+            .filter(|s| s.runtime.session == session)
+            .ok_or_else(|| error(ErrorCode::SessionNotFound, "workshop session absent"))?;
+        state.runtime.withdraw();
+        Ok((
+            session,
+            state.runtime.budget,
+            json!({
+                "last_complete_reference":state.last_reference,
+                "latest_unverified_reference":state.runtime.failure_reference(),
+                "current_goal_available":false,
+            }),
+        ))
+    })();
+    match retained {
+        Ok((session, budget, reference)) => {
+            failure(operation, cause, Some(session), Some(budget), reference)
+        }
+        Err(_) => failure(operation, cause, None, None, Value::Null),
+    }
 }
 fn failure(
     operation: &str,
@@ -179,13 +235,14 @@ fn with_session(raw: String, operation: &str, action: Action) -> String {
 }
 
 #[tool(
-    description = "Open one explicitly unadmitted workshop/1.20 goal. mode=control initializes exact operator-pinned sources; recover/offline require both original custody files and an externally held acknowledged pin. No opening advances time. The default wall budget is 60000ms; the original prepared connection deadline is never renewed."
+    description = "Open one explicitly unadmitted workshop/1.20 goal. mode=control uses exact operator-pinned sources; recover/offline preserve original custody and its acknowledged pin. Optional separately configured run/1.13 control also requires an explicit max_game_ticks allowance, default zero, maximum 1200. Opening never advances time. The default wall budget is 60000ms; the original prepared connection deadline is never renewed."
 )]
 pub fn fortress_open_session(
     mode: String,
     max_wall_millis: Option<u64>,
     max_bytes: Option<u64>,
     max_output_tokens: Option<u32>,
+    max_game_ticks: Option<u64>,
 ) -> String {
     let result = (|| -> Result<String> {
         let start = Instant::now();
@@ -202,7 +259,12 @@ pub fn fortress_open_session(
                 ));
             }
         };
-        let display = budgets(max_wall_millis, max_bytes, max_output_tokens)?;
+        let display = budgets(
+            max_wall_millis,
+            max_bytes,
+            max_output_tokens,
+            max_game_ticks,
+        )?;
         let config = Config::environment()?;
         let mut guard = lock()?;
         if guard.is_some() {
@@ -235,7 +297,7 @@ pub fn fortress_open_session(
                     "workshop opening deadline expired",
                 )
             })?;
-        context.budget.max_bytes = 4 * 1024 * 1024;
+        context.budget.max_bytes = runtime::VIEW_BYTES;
         let reference = runtime.failure_reference();
         // Hold custody even if final inspection fails, so the client can preserve
         // original references and explicitly release this session's locks.
@@ -280,19 +342,19 @@ pub fn fortress_observe(session_id: String) -> String {
     with_session(session_id, "fortress.observe", Action::Observe)
 }
 #[tool(
-    description = "Inspect the original workshop plan, material/worker/footprint/source witnesses, exact review, insertion receipt, historical goal samples and independent durable acknowledgement. This local read does not establish current game facts."
+    description = "Inspect the original workshop plan, material/worker/footprint/source witnesses, exact review, insertion receipt, historical goal samples and independent durable acknowledgement. When configured, also inspect the separately retained bounded run and its recovery reference. This local read does not establish current game facts."
 )]
 pub fn fortress_query(session_id: String) -> String {
     with_session(session_id, "fortress.query", Action::Inspect)
 }
 #[tool(
-    description = "Prepare the original Carpenter workshop without constructing it. Closed JSON contains kind=carpenters, expected_observation and material for a pinned log; the separate Tree-import configuration requires kind=carpenters_from_tree_supply, the discovery witness and one exact observed Tree material handle. Selection is freshly requalified by workshop/1.20 and sealed in original custody. Returns the whole original plan and exact review seal. One goal, no replacement keys, game clock or manager changes."
+    description = "Prepare the original Carpenter workshop without constructing it. Closed JSON contains kind=carpenters, expected_observation and material, or kind=carpenters_from_tree_supply with one exact observed Tree material handle. Optional kind=run_workshop takes the returned target_id, game_ticks and wall_millis to prepare a separately authorized bounded run for that original workshop. Review its distinct exact seal before commit. Planning never constructs or unpauses; no replacement workshop keys or manager changes."
 )]
 pub fn fortress_plan(session_id: String, request: String) -> String {
     with_session(session_id, "fortress.plan", Action::Plan(request))
 }
 #[tool(
-    description = "Confirm the exact original review_seal with confirmed=true. Revalidate original source/footprint/material/worker, current scoped authority and lease; fsync the dispatch journal AND its independent acknowledgement before the sole native writer. Insertion is not completion. Lost replies never permit redispatch."
+    description = "Confirm an exact retained review_seal with confirmed=true. A workshop seal revalidates source/footprint/material/worker, scoped authority and lease, then synchronizes construction custody before its sole writer. A distinct bounded-run seal requires current clock authority and synchronizes its own dispatch custody before one unpause attempt. Insertion or a run receipt does not prove workshop completion. Lost replies never permit redispatch."
 )]
 pub fn fortress_commit(session_id: String, review_seal: String, confirmed: bool) -> String {
     with_session(
@@ -305,13 +367,16 @@ pub fn fortress_commit(session_id: String, review_seal: String, confirmed: bool)
     )
 }
 #[tool(
-    description = "Reconcile only the original native key, or take one fresh workshop/1.20 original-building progress sample after insertion. Exact subtype, material, geometry, stage and source continuity are mandatory. Old log availability and worker idleness are not completion conditions. Never unpauses or starts background work."
+    description = "scope=goal (default) reconciles the original construction key or takes one fresh workshop/1.20 original-building progress sample. scope=clock reconciles the separately retained bounded run without unpausing or extending it; once settled, the same request takes a fresh original-building sample. Only Workshop evidence can establish construction progress. Exact subtype, material, geometry, stage and source continuity remain mandatory."
 )]
-pub fn fortress_wait(session_id: String) -> String {
-    with_session(session_id, "fortress.wait", Action::Wait)
+pub fn fortress_wait(session_id: String, scope: Option<String>) -> String {
+    match scope_action(scope.as_deref(), false) {
+        Ok(action) => with_session(session_id, "fortress.wait", action),
+        Err(cause) => scope_failure(&session_id, "fortress.wait", cause),
+    }
 }
 #[tool(
-    description = "scope=goal retires an unattempted native preparation or queries uncertain original work; it never deconstructs. scope=session releases local sockets/locks even after fencing or permission loss, preserving both custody files and all original evidence."
+    description = "scope=goal (default) retires unattempted construction preparation or queries uncertain original work; it never deconstructs. scope=clock retires an undispatched run or requests its bounded safety stop under current authority. scope=session releases local sockets/locks even after fencing or permission loss, preserving construction and clock custody. Closing does not cancel game effects or prove a pause."
 )]
 pub fn fortress_cancel(session_id: String, scope: Option<String>) -> String {
     if scope.as_deref() == Some("session") {
@@ -328,26 +393,22 @@ pub fn fortress_cancel(session_id: String, scope: Option<String>) -> String {
                 None,
                 Some(state.runtime.budget),
                 json!({"ok":true,"session_closed":true,"effects_cancelled":false,"custody_deleted":false,"automatic_redispatch":false,"current_goal_available":false}),
-                state.last_reference.clone(),
+                json!({"last_complete_reference":state.last_reference,
+                    "latest_unverified_reference":state.runtime.failure_reference(),
+                    "current_goal_available":false}),
             );
             drop(guard.take());
             Ok(out)
         })();
         return result.unwrap_or_else(|e| failure("fortress.cancel", e, None, None, Value::Null));
     }
-    if scope.as_deref().is_some_and(|s| s != "goal") {
-        return failure(
-            "fortress.cancel",
-            error(ErrorCode::InvalidRequest, "scope must be goal or session"),
-            None,
-            None,
-            Value::Null,
-        );
+    match scope_action(scope.as_deref(), true) {
+        Ok(action) => with_session(session_id, "fortress.cancel", action),
+        Err(cause) => scope_failure(&session_id, "fortress.cancel", cause),
     }
-    with_session(session_id, "fortress.cancel", Action::Cancel)
 }
 #[tool(
-    description = "Explain exact original workshop evidence and recovery identities. Local historical inspection only; no native call or mutation authority."
+    description = "Explain exact original workshop evidence and independent construction/run recovery identities. Local historical inspection only; no native call or mutation authority."
 )]
 pub fn fortress_explain(session_id: String) -> String {
     with_session(session_id, "fortress.explain", Action::Inspect)
@@ -382,9 +443,11 @@ pub fn run_stdio() {
         .tool(FortressOpenSession).tool(FortressObserve).tool(FortressQuery).tool(FortressPlan)
         .tool(FortressCommit).tool(FortressWait).tool(FortressCancel).tool(FortressCheckpoint)
         .tool(FortressRestore).tool(FortressExplain).tool(FortressDoctor)
-        .instructions("Unadmitted workshop/1.20 development profile. Observe one exact original Carpenter/log offer, plan, review the whole source/worker/material/footprint seal, confirm one construction, then wait for authoritative original-building completion. Independent acknowledgement is synchronized before dispatch. Preserve both custody files and external acknowledgement; uncertain effects never permit replacement keys or redispatch. No game clock, manager, activation or finite-bed production path. Original .14 remains open.").build();
+        .instructions("Unadmitted workshop/1.20 development profile. Observe one exact original Carpenter/log offer, plan, review its whole source/worker/material/footprint seal, confirm one construction, then wait for authoritative original-building completion. An optional operator-configured run/1.13 owner permits separately reviewed bounded game intervals only with explicit game-tick budget and clock authority. Reconcile scope=clock; once settled, the same request obtains fresh original-workshop evidence. Run receipts never prove construction completion. Preserve independent construction acknowledgement and clock recovery custody. Uncertain effects never permit replacement keys or redispatch. No manager, activation or finite-bed production path. Original .14 remains open.").build();
     crate::run_modern_stdio(server);
 }
 
+#[cfg(test)]
+mod clock_presentation_tests;
 #[cfg(test)]
 mod tests;

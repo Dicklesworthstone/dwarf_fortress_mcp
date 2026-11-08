@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased — Complete workshops in one bounded MCP session
+
+- Integrate the original Carpenter clock into the existing eleven-tool Workshop
+  server. Explicit tick allowance, independent permission and a separate exact
+  review are required before each finite interval; default allowance is zero.
+- Reconcile each run once, then acquire fresh original-workshop evidence after
+  settlement. Preserve immutable source/horizon/custody and the original sample
+  cap; unknown run outcomes cannot authorize more time or prove construction.
+- Add clock recovery/offline inspection and optional attachment to an existing
+  acknowledged workshop without restoring construction permission. Preserve
+  hazards on failure/overflow/close and keep useful retirement/blocker guidance.
+- Fence fresh advancement after failed source contacts while retaining authorized
+  safety stop. Reject Workshop completion older than the independently consumed
+  clock floor before it reaches durable goal evidence.
+- Add 7 configuration, 12 presentation, one real RPC/journal regression and
+  10 actual-server stdio scenarios. Their execution and the interrupted or killed
+  qualification attempts are recorded explicitly in Implementation Status.
+
 ## Unreleased — Use completed original workshops in production
 
 - Add an optional closed `workshop_prerequisite` to the combined production
