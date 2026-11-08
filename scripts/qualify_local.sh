@@ -159,6 +159,7 @@ run_gate python-syntax python3 -m py_compile \
   scripts/test_tree_harvest_source_inventory.py \
   scripts/test_tree_harvest_native.py \
   tests/stdio/tree_harvest.py \
+  tests/stdio/tree_clock_runtime_peer.py \
   scripts/check_workshop_construction.py \
   scripts/test_workshop_source_inventory.py \
   scripts/test_workshop_native.py \

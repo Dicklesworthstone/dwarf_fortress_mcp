@@ -3,9 +3,10 @@
 This development component connects one acknowledged Tree/1.21 designation to
 separately reviewed finite Run/1.13 intervals. It preserves the original Tree
 obligation and its existing deadline while allowing game time to progress.
-The adapter is implemented; the same-session Tree MCP consumer is the next
-increment. A separate generic Run MCP server already exists. This component
-adds the original-Tree binding and guards, not a new native clock protocol.
+The adapter and same-session Tree MCP consumer are implemented. The existing
+eleven tools now cover the original designation, separate clock review and
+commit, bounded reconciliation, and fresh supply observation. The underlying
+native Tree and Run protocols are unchanged.
 
 ## Immutable original
 
@@ -77,19 +78,109 @@ new ground WOOD above the original item horizon. A run receipt or elapsed time
 alone proves none of these. Causal provenance of the wood remains unknown.
 Historical supply and the current pause state also remain distinct.
 
+## Use the clock in the Tree MCP session
+
+The clock is optional. Add this closed object to the ordinary Tree configuration:
+
+```json
+{
+  "clock": {
+    "initialize": true,
+    "generation": 41,
+    "recovery_generation": null,
+    "recovery": null
+  }
+}
+```
+
+Use the actual independently pinned Run generation; 41 is illustrative. The
+clock inherits the parent Tree endpoint and exact software pins. Its source
+incarnation is independent of the Tree generation. Run/1.13 itself does not
+identify a named fortress, so matching endpoint/software and joined observations
+do not claim independently proven shared-process identity. The configuration
+accepts no alternate endpoint, root, source selector, native command or deadline.
+
+Set `DFMCP_ALLOW_UNADMITTED_TREE_CLOCK=1`, provide the independent native
+`DFMCP_RUN_TOKEN`, and set `DFMCP_RUN_ALLOW_CLOCK=1` for a new control owner.
+The existing Tree read credential and designation permission remain separate.
+Without a configured clock, the Tree launch still rejects unrelated clock state.
+New clock custody exclusively creates `tree-harvest.clock.journal` in the same
+private directory. It never repairs or replaces an existing clock file.
+
+Open Control with an explicit `max_game_ticks` between 1 and 1200; the default
+remains zero. The logical byte-work default is 512 MiB when a clock is configured
+and remains 256 MiB otherwise. The existing public maximum remains 512 MiB.
+Smaller explicit byte allowances can inspect custody, but a Plan/Commit clock
+operation needs its full 481 MiB admitted before either native source is entered,
+including final Tree/ACK and Run publication checks. This is logical work
+accounting, not an eager memory allocation.
+
+1. Observe, plan and confirm the original `fell_one_visible_tree` designation
+   using the ordinary default goal scope.
+2. Call Wait in the default goal scope to obtain fresh original Tree progress.
+   If unfinished evidence, deadline, authority and capacity permit advancement,
+   `clock.new_run_available` is true and `clock.target_id` names the exact goal.
+3. Plan a separate finite clock interval, for example:
+
+   ```json
+   {
+     "kind": "run_tree",
+     "target_id": "<clock.target_id>",
+     "game_ticks": 100,
+     "wall_millis": 1000
+   }
+   ```
+
+4. Review `clock.active_run` and confirm with `scope="clock"`, its exact
+   `review_seal` and `confirmed=true`. The Tree designation seal cannot confirm
+   this interval. Plan never unpauses; each interval gets a separate review.
+5. Call Wait with `scope="clock"` once. It queries the original run key and,
+   after settlement, acquires a fresh acknowledged Tree supply sample. A running
+   or unresolved clock blocks ordinary goal sampling. There is no polling loop
+   or repeated unpause attempt.
+6. If fresh supply is still unfinished and the original deadline and complete
+   remaining sample capacity permit, review another interval under the same
+   target. Root absence with neither felling jobs nor eligible wood is a supply
+   blocker, not a promise that more time will help.
+
+Cancel with `scope="clock"` retires that owner's undispatched preparation or
+requests an independently authorized safety pause of its retained run. It does
+not undesignate the tree, reverse elapsed time or renew the original goal.
+The default `scope="goal"` retains the existing Tree cancellation behavior;
+`scope="session"` releases local ownership while retaining all recovery custody.
+
+The Agent Turn keeps Tree and clock confirmations separate, recommends
+reconciliation and an available safety stop for uncertainty, and withholds more
+time when capacity or the original source is blocked. `clock_advanced` is null
+when a clock exists: a failed or missing reply cannot establish zero exposure.
+Retained run receipts, attempts and consumed floors remain visible independently.
+Failed encoded publication withdraws a held review before releasing the owner.
+
 ## Recovery and evidence
 
 Keep the exact Tree ACK and the independent Run journal identity/head. Offline
 inspection verifies retained bytes without either native credential or native
-contact. Recovery restores no local review. Missing, replaced or rolled-back
-custody refuses; unknown outcomes are queried under their original keys without
-another unpause. Safety stop requires separate current authority.
+contact. To reopen, set both initializers false, retain the latest ordinary Tree
+`acknowledged` pin, and provide `clock.recovery` with the exact Run journal ID and
+externally retained head. Recover and Offline restore no review or native clock
+control. Recover may append newly queried evidence to local custody and sample
+the original Tree after settlement; Offline performs neither native contact nor
+custody writes. Unknown outcomes are queried under their original keys without
+another unpause; native safety stop belongs to the
+independently authorized current Control owner. Missing, replaced or rolled-back
+custody refuses. An optional new clock may be attached to an existing acknowledged
+Tree only when that clock custody does not already exist; this does not restore
+Tree designation permission.
 
-The adapter checkpoint passes 43 actual repository Tree tests: 20 new guarded
-clock lifecycle cases, eight exact journal/ACK and capacity cases, one native
-TCP regression for stale progress, and 14 existing Tree regressions. Synthetic
-sources and loopback peers are component evidence. No live DFHack/game,
-full MCP transport, whole-workspace qualification or production admission is
-claimed by this checkpoint.
+The adapter passes 43 actual repository Tree tests: 20 new guarded clock cases,
+eight exact journal/ACK and capacity cases, one native TCP stale-progress case,
+and 14 existing regressions. The host's 15 focused tests pass, including seven
+configuration/parser cases, six presentation cases and two actual Runtime/TCP
+campaigns covering 13 scenarios plus recovery/corruption subcases. The complete
+host component suite passes 424 tests, and the actual MCP library and all test
+targets pass locked/offline typechecking. The component harness excludes MCP
+transport and Asupersync supervision; the real crate typecheck covers those
+registrations but does not execute them. These synthetic-peer results do not
+claim a live DFHack/game, whole-workspace qualification or production admission.
 
 The machine description is [tree_clock_v1.json](../architecture/tree_clock_v1.json).

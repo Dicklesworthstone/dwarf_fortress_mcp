@@ -87,6 +87,21 @@ fn detach(value: &mut Value, path: &str, blocks: &mut Vec<String>) -> Option<()>
     Some(())
 }
 
+/// The owner checks the exact deterministic codec boundary while it still
+/// holds the session lock. A failed review publication withdraws its permit
+/// before another request can acquire that owner.
+pub(super) fn publishable(raw: &str) -> bool {
+    let Ok(mut packet) = serde_json::from_str::<Value>(raw) else {
+        return false;
+    };
+    let mut texts = vec![String::new()];
+    if detach(&mut packet, "", &mut texts).is_none() {
+        return false;
+    }
+    texts[0] = packet.to_string();
+    fits(&complete(texts))
+}
+
 pub(super) fn present(raw: String) -> McpResult<CompleteResult<FinalCallToolResult>> {
     let mut packet: Value =
         serde_json::from_str(&raw).map_err(|_| McpError::internal_error("invalid Tree packet"))?;
@@ -111,11 +126,12 @@ pub(super) fn present(raw: String) -> McpResult<CompleteResult<FinalCallToolResu
         .as_str()
         .and_then(|s| u128::from_str_radix(s, 16).ok())
         .map(RequestId::new);
+    let retained = super::withdraw_unpublished_review(session, &original["retained_reference"]);
     let fallback = complete(vec![overflow_packet(
         turn["operation"].as_str().unwrap_or("fortress.query"),
         session,
         request,
-        original["retained_reference"].clone(),
+        retained,
     )]);
     if fits(&fallback) {
         Ok(fallback)

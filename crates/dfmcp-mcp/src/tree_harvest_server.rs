@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 //! Dedicated, explicitly unadmitted tree-harvest/1.21 modern stdio consumer.
+mod clock_presentation;
 mod presentation;
 mod runtime;
 #[cfg(test)]
@@ -163,6 +164,8 @@ fn packet(
     if let Some(b) = turn["briefing"].as_object_mut() {
         b.remove("admission");
     }
+    turn["budget"]["max_game_ticks"] = result.get("max_game_ticks").cloned().unwrap_or(json!(0));
+    clock_presentation::augment(&mut turn, &result, &reference, session);
     let out=json!({"agent_turn":turn,"result":result,"retained_reference":reference,"retained_reference_current":false}).to_string();
     if out.len() as u64 <= RESPONSE_BYTES {
         return out;
@@ -185,10 +188,11 @@ fn overflow_packet(
     } else {
         vec![]
     };
-    let minimal=spine(operation,session,request).briefing(json!({"runtime_admitted":false,"mutation_admissible":false,"current_goal_available":false,"canonical_world_anchor_available":false}))
+    let mut minimal=spine(operation,session,request).briefing(json!({"runtime_admitted":false,"mutation_admissible":false,"current_goal_available":false,"canonical_world_anchor_available":false}))
         .active_work(json!({"pending_plans":[],"actions":[],"obligations":[],"cancellation_drains":[],"indeterminate_effects":indeterminate,"publications":[],"confirmations":[]}))
         .uncertainty(vec![json!({"uncertainty_id":"output_bound","epistemic_state":"indeterminate","statement":"Evidence output exceeded its bound. Preserve the original custody and reconcile; never redispatch."})])
         .coverage(json!({"status":"unavailable","omitted_domains":["full_native_evidence"]})).references(references).build();
+    clock_presentation::augment(&mut minimal, &json!({"ok":false}), &reference, session);
     json!({"agent_turn":minimal,"result":{"ok":false,"error":{"code":"budget_exceeded"},"custody":reference},"retained_reference":reference}).to_string()
 }
 fn failed(
@@ -258,19 +262,44 @@ fn call(operation: &str, id: String, action: Action) -> String {
     let request = Some(runtime.last_request_id());
     let reference = runtime.reference();
     match result {
-        Ok(value) => packet(operation, Some(session), request, value, reference),
+        Ok(value) => {
+            let raw = packet(operation, Some(session), request, value, reference);
+            if serde_json::from_str::<Value>(&raw).is_ok_and(|v| v["result"]["ok"] == true)
+                && presentation::publishable(&raw)
+            {
+                raw
+            } else {
+                // A review that could not be published must not remain usable.
+                runtime.withdraw_permission();
+                overflow_packet(operation, Some(session), request, runtime.reference())
+            }
+        }
         Err(e) => failed(operation, Some(session), request, e, reference),
+    }
+}
+
+pub(super) fn withdraw_unpublished_review(session: Option<SessionId>, retained: &Value) -> Value {
+    if let Ok(mut guard) = SESSION.try_lock()
+        && let Some(runtime) = guard
+            .as_mut()
+            .filter(|runtime| Some(runtime.session) == session)
+    {
+        runtime.withdraw_permission();
+        runtime.reference()
+    } else {
+        retained.clone()
     }
 }
 #[tool(
     name = "fortress_open_session",
-    description = "Open one isolated tree/1.21 root-predicate obligation. Default offline. Control requires explicit fortress-registry read scope, host-bounded tree/block effect scope, source pins, disposable-fortress permission and fresh journal/ACK custody. Opening never designates or advances time."
+    description = "Open one isolated tree/1.21 root-predicate obligation. Default offline. Control requires explicit fortress-registry read scope, host-bounded tree/block effect scope, source pins, disposable-fortress permission and fresh journal/ACK custody. An optional independently configured clock requires explicit max_game_ticks (1..1200); its default is zero. Byte-work defaults to 512MiB with a clock, otherwise 256MiB. Opening never designates or advances time."
 )]
 pub fn fortress_open_session(
     mode: Option<String>,
     max_wall_millis: Option<u64>,
     max_bytes: Option<u64>,
     max_output_tokens: Option<u32>,
+    max_game_ticks: Option<u64>,
 ) -> McpResult<CompleteResult<FinalCallToolResult>> {
     presentation::present({
         let result = (|| {
@@ -282,13 +311,18 @@ pub fn fortress_open_session(
                 "offline" => Mode::Offline,
                 _ => return Err(error(ErrorCode::InvalidRequest, "unknown tree mode")),
             };
+            let config = Config::load()?;
             let budget = WorkBudget {
                 max_wall_millis: max_wall_millis.unwrap_or(60000),
-                max_bytes: max_bytes.unwrap_or(256 * 1024 * 1024),
+                max_bytes: max_bytes.unwrap_or(if config.has_clock() {
+                    512 * 1024 * 1024
+                } else {
+                    256 * 1024 * 1024
+                }),
                 max_output_tokens: max_output_tokens.unwrap_or(131072),
                 max_entities: 4096,
                 max_actions: 1,
-                max_game_ticks: 0,
+                max_game_ticks: max_game_ticks.unwrap_or(0),
             };
             budget.validate()?;
             if budget.max_wall_millis > 60000
@@ -296,13 +330,14 @@ pub fn fortress_open_session(
                 || budget.max_bytes > 512 * 1024 * 1024
                 || budget.max_output_tokens < 131072
                 || budget.max_output_tokens > 131072
+                || budget.max_game_ticks > 1200
+                || (budget.max_game_ticks > 0 && !config.has_clock())
             {
                 return Err(error(
                     ErrorCode::BudgetExceeded,
                     "tree profile work/output limits",
                 ));
             }
-            let config = Config::load()?;
             let mut guard = SESSION
                 .try_lock()
                 .map_err(|_| error(ErrorCode::Conflict, "tree session busy"))?;
@@ -363,39 +398,71 @@ pub fn fortress_query(session_id: String) -> McpResult<CompleteResult<FinalCallT
 }
 #[tool(
     name = "fortress_plan",
-    description = "Prepare one original root-predicate intent. Closed request: kind=fell_one_visible_tree, expected_observation, deadline_tick within 12000 ticks. No automatic clock runs or renewal; each external run remains separately confirmed and bounded. Returns exact review seal without game writes."
+    description = "Prepare one original root-predicate intent: kind=fell_one_visible_tree, expected_observation, deadline_tick within12000 ticks. After acknowledged designation, kind=run_tree with target_id, game_ticks (1..1200), wall_millis (1..60000) prepares one independently authorized finite interval under the same original deadline and remaining sample capacity. Each exact seal needs separate confirmation. Planning never advances time."
 )]
 pub fn fortress_plan(
     session_id: String,
     request: String,
 ) -> McpResult<CompleteResult<FinalCallToolResult>> {
-    presentation::present(call("fortress.plan", session_id, Action::Plan(request)))
+    let clock = request.len() <= 4096
+        && serde_json::from_str::<Value>(&request).is_ok_and(|value| value["kind"] == "run_tree");
+    presentation::present(call(
+        "fortress.plan",
+        session_id,
+        if clock {
+            Action::ClockPlan(request)
+        } else {
+            Action::Plan(request)
+        },
+    ))
 }
 #[tool(
     name = "fortress_commit",
-    description = "Confirm the exact original tree seal once on its prepared connection. Journal and independent ACK sync before supported markPlant. Lost replies never permit another writer."
+    description = "Confirm an exact current review. Default scope=goal designates the original tree once on its prepared connection after durable journal and independent ACK. scope=clock confirms only the separately prepared finite Tree clock interval; fresh original Tree evidence is checked after its durable dispatch marker. Lost replies never authorize another designation or unpause."
 )]
 pub fn fortress_commit(
     session_id: String,
     review_seal: String,
     confirmed: bool,
+    scope: Option<String>,
 ) -> McpResult<CompleteResult<FinalCallToolResult>> {
-    presentation::present(call(
-        "fortress.commit",
-        session_id,
-        Action::Commit(review_seal, confirmed),
-    ))
+    let action = match scope.as_deref().unwrap_or("goal") {
+        "goal" => Action::Commit(review_seal, confirmed),
+        "clock" => Action::ClockCommit(review_seal, confirmed),
+        _ => {
+            return presentation::present(rejected(
+                "fortress.commit",
+                session_id,
+                error(ErrorCode::InvalidRequest, "unknown Tree commit scope"),
+            ));
+        }
+    };
+    presentation::present(call("fortress.commit", session_id, action))
 }
 #[tool(
     name = "fortress_wait",
-    description = "One foreground original-key reconciliation or fresh root-predicate/job/new-ground-WOOD sample. No redispatch, polling loop or clock. Designation, root absence and supply remain separate claims."
+    description = "Default scope=goal performs one foreground original designation reconciliation or fresh root/job/new-ground-WOOD sample. scope=clock reconciles the retained clock key once and, after settlement, obtains fresh original Tree progress. An unresolved clock blocks goal sampling. No polling loop, redispatch or new unpause. Designation, clock settlement, root absence and supply remain separate claims."
 )]
-pub fn fortress_wait(session_id: String) -> McpResult<CompleteResult<FinalCallToolResult>> {
-    presentation::present(call("fortress.wait", session_id, Action::Wait))
+pub fn fortress_wait(
+    session_id: String,
+    scope: Option<String>,
+) -> McpResult<CompleteResult<FinalCallToolResult>> {
+    let action = match scope.as_deref().unwrap_or("goal") {
+        "goal" => Action::Wait,
+        "clock" => Action::ClockWait,
+        _ => {
+            return presentation::present(rejected(
+                "fortress.wait",
+                session_id,
+                error(ErrorCode::InvalidRequest, "unknown Tree wait scope"),
+            ));
+        }
+    };
+    presentation::present(call("fortress.wait", session_id, action))
 }
 #[tool(
     name = "fortress_cancel",
-    description = "scope=goal retires only undispatched native preparation or inspects original uncertainty. Never undesignates or undoes felling. scope=session releases local sockets and locks while preserving custody."
+    description = "scope=goal retires only undispatched Tree preparation or inspects original uncertainty. scope=clock retires its local preparation or requests a separately authorized safety pause of the retained run. Never undesignates or undoes felling. scope=session releases local sockets and locks while preserving both custody families."
 )]
 pub fn fortress_cancel(
     session_id: String,
@@ -408,13 +475,14 @@ fn cancel_packet(session_id: String, scope: Option<String>) -> String {
     if scope.as_deref().unwrap_or("goal") == "goal" {
         return call("fortress.cancel", session_id, Action::Cancel);
     }
+    if scope.as_deref() == Some("clock") {
+        return call("fortress.cancel", session_id, Action::ClockCancel);
+    }
     if scope.as_deref() != Some("session") {
-        return failed(
+        return rejected(
             "fortress.cancel",
-            None,
-            None,
+            session_id,
             error(ErrorCode::InvalidRequest, "unknown tree cancellation scope"),
-            Value::Null,
         );
     }
     let result = (|| {
@@ -471,6 +539,16 @@ pub fn fortress_restore(session_id: String) -> McpResult<CompleteResult<FinalCal
     presentation::present(unsupported("fortress.restore", session_id))
 }
 fn unsupported(operation: &str, id: String) -> String {
+    rejected(
+        operation,
+        id,
+        error(
+            ErrorCode::CapabilityDenied,
+            "tree profile has no checkpoint/restore provider",
+        ),
+    )
+}
+fn rejected(operation: &str, id: String, e: dfmcp_core::DfmcpError) -> String {
     let session = parse_id(&id).ok();
     let mut reference = Value::Null;
     if let Ok(mut guard) = SESSION.try_lock()
@@ -479,16 +557,7 @@ fn unsupported(operation: &str, id: String) -> String {
         runtime.withdraw_permission();
         reference = runtime.reference();
     }
-    failed(
-        operation,
-        session,
-        None,
-        error(
-            ErrorCode::CapabilityDenied,
-            "tree profile has no checkpoint/restore provider",
-        ),
-        reference,
-    )
+    failed(operation, session, None, e, reference)
 }
 pub fn run_stdio() {
     if let Err(e) = runtime::environment() {
@@ -498,6 +567,6 @@ pub fn run_stdio() {
     let server=ServerBuilder::new("dfmcp-tree-harvest-v1-21-dev",env!("CARGO_PKG_VERSION"))
         .tool(FortressOpenSession).tool(FortressObserve).tool(FortressQuery).tool(FortressPlan).tool(FortressCommit).tool(FortressWait)
         .tool(FortressCancel).tool(FortressExplain).tool(FortressDoctor).tool(FortressCheckpoint).tool(FortressRestore)
-        .instructions("Unadmitted tree/1.21: one coordinate/source predicate, no stable plant ID. Observe, plan, review, confirm once, reconcile/prove foreground. markPlant ACK is not wood. Tools are offers, never assigned equipment. Independent ACK precedes dispatch; uncertainty never permits new keys. No clock, workshop construction or production admission. Original .14 remains open.").build();
+        .instructions("Unadmitted tree/1.21: one coordinate/source predicate, no stable plant ID. Observe, plan, review, confirm once, reconcile/prove foreground. markPlant ACK is not wood. Tools are offers, never assigned equipment. Independent ACK precedes dispatch; uncertainty never permits new keys. An optional independent Run/1.13 clock uses explicit session ticks and kind=run_tree with the original target_id. Review and confirm each interval with scope=clock, then Wait scope=clock once and obtain fresh Tree evidence after settlement. Every interval inherits the original deadline and needs enough remaining samples; time or a Run receipt never proves harvesting. Default tick allowance is zero. Retain both original Tree ACK and clock recovery references through failures, close and Offline recovery. No workshop construction or production admission. Original .14 remains open.").build();
     crate::run_modern_stdio(server);
 }

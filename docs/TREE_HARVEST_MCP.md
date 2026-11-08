@@ -49,7 +49,7 @@ and 1.16 continue to exclude TREE.
 
 ## Closed host launch
 
-The only accepted DFMCP environment names are:
+Without the optional original-bound clock, the accepted DFMCP environment names are:
 
 ```text
 DFMCP_ALLOW_UNADMITTED_TREE_HARVEST_V1_21=1
@@ -63,7 +63,10 @@ before stdio starts, with nonzero process status. The native plugin has its own
 1.21 opt-in, credential and write gate. The dedicated process uses the existing
 process-scoped family 31; this number is also used by other isolated development
 profiles, so process isolation and closed launch state are required. No core ID
-format is enlarged and no production ticket is consumed.
+format is enlarged and no production ticket is consumed. The optional clock adds
+only `DFMCP_ALLOW_UNADMITTED_TREE_CLOCK`, `DFMCP_RUN_TOKEN` and
+`DFMCP_RUN_ALLOW_CLOCK` under its independently configured policy; see
+[the original Tree clock](TREE_HARVEST_CLOCK.md).
 
 The configuration is environment JSON, not an externally mutable config file:
 
@@ -191,7 +194,10 @@ It reserves the larger admitted ID representation: a 4096-byte integer lexeme
 (string IDs allow 256 encoded bytes), plus framing and newline, inside the
 existing 512KiB product ceiling. If remaining metadata cannot fit, the bounded AgentTurnBuilder fallback
 keeps original custody/ACK and uncertainty and explicitly omits full evidence.
-It does not report an effect completed or grant retry permission.
+It does not report an effect completed or grant retry permission. The exact
+encoded publication boundary is checked while the session owner is still held;
+a review that cannot be published loses its local permit before another request
+can acquire the owner.
 
 Live I's rejected result and its initial custody remain untouched. Independent
 old-cfcc replay of unchanged J's 30489-byte native capsule reproduces `-32603`;
@@ -205,10 +211,21 @@ their exact-source receipts exist. Neither replay proves felling or wood supply.
 
 Broader world evolution and future falling-tree consequences require separately
 authorized clock exposure; visible body checks do not certify falling safety.
-The existing standalone run/1.13 profile remains limited to separately confirmed
-1200 ticks and 60000 wall milliseconds per run. Multiple reviewed runs may fit
-the fixed monitoring horizon; no run extends that horizon, grants tree authority
-or proves causality. No new clock implementation is added.
+The Tree server can now optionally own original-bound Run/1.13 intervals through
+its existing tools. Explicit `max_game_ticks` defaults to zero; `kind="run_tree"`
+and separate `scope="clock"` review/commit/Wait/Cancel preserve the same original
+Tree target and inherited deadline. Each interval remains at most 1200 game ticks
+and 60000 wall milliseconds. Both durable Run boundaries require fresh Tree
+progress and independent ACK, and complete sample/frame/byte capacity is admitted
+before control. A settled clock is followed by fresh Tree supply evidence.
+
+The native protocols and separate generic Run server are unchanged. The new
+consumer removes manual cross-server coordination without granting designation
+permission, proving causal wood output, or renewing the horizon. Keep the Tree
+ACK and `tree-harvest.clock.journal` recovery ID/head through failure, close and
+reopening. Recover/Offline restore no clock control. The full configuration,
+review sequence, capacity limits and executed evidence are in
+[TREE_HARVEST_CLOCK.md](TREE_HARVEST_CLOCK.md).
 
 Both mandatory full commands retain all 43 gate IDs and add Tree checks inside
 existing gates. The machine contract and static checker bind exact source/test

@@ -21,6 +21,8 @@ use std::io::Read;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
+#[path = "clock.rs"]
+mod clock;
 pub(super) const RESPONSE_BYTES: u64 = 512 * 1024;
 const CONFIG: &str = "DFMCP_TREE_HARVEST_MCP_CONFIG";
 const OPT: &str = "DFMCP_ALLOW_UNADMITTED_TREE_HARVEST_V1_21";
@@ -55,9 +57,16 @@ pub(super) fn environment() -> Result<()> {
     if std::env::var_os(WRITE).is_some_and(|v| v.to_str() != Some("1")) {
         return Err(denied("tree designation gate must be absent or exactly 1"));
     }
+    let clock = std::env::var(clock::OPT_IN).ok().as_deref() == Some("1");
+    if std::env::var_os(clock::ALLOW).is_some_and(|v| v.to_str() != Some("1")) {
+        return Err(denied("tree clock permission must be absent or exactly 1"));
+    }
     for (name, _) in std::env::vars_os() {
         let name = name.to_string_lossy();
-        if name.starts_with("DFMCP_") && ![CONFIG, OPT, TOKEN, WRITE].contains(&name.as_ref()) {
+        if name.starts_with("DFMCP_")
+            && ![CONFIG, OPT, TOKEN, WRITE].contains(&name.as_ref())
+            && !(clock && [clock::OPT_IN, clock::TOKEN, clock::ALLOW].contains(&name.as_ref()))
+        {
             return Err(denied(
                 "tree profile refuses other DFMCP and production launch state",
             ));
@@ -104,6 +113,7 @@ struct Input {
     authority_expires_tick: u64,
     lease_ticks: u64,
     checkpoint: String,
+    clock: Option<clock::Input>,
 }
 #[derive(Clone)]
 pub(super) struct Config {
@@ -113,6 +123,7 @@ pub(super) struct Config {
     hash: Digest32,
     scope: MapCuboid,
     protected: Vec<MapCuboid>,
+    clock: Option<clock::Config>,
 }
 fn area(raw: [u32; 6], d: [u32; 3]) -> Result<MapCuboid> {
     if (0..3).any(|i| raw[i] > raw[i + 3] || raw[i + 3] >= d[i]) {
@@ -194,6 +205,11 @@ impl Config {
                 })
             })
             .transpose()?;
+        let clock = i
+            .clock
+            .clone()
+            .map(|input| clock::Config::parse(input, &i, endpoint))
+            .transpose()?;
         Ok(Self {
             input: i,
             binding,
@@ -201,17 +217,38 @@ impl Config {
             hash: Digest32::of_bytes(raw.as_bytes()),
             scope,
             protected,
+            clock,
         })
     }
     pub(super) fn load() -> Result<Self> {
         environment()?;
-        Self::parse(
+        let config = Self::parse(
             &std::env::var(CONFIG).map_err(|_| denied("tree operator configuration missing"))?,
-        )
+        )?;
+        config.clock_environment()?;
+        Ok(config)
+    }
+    pub(super) fn has_clock(&self) -> bool {
+        self.clock.is_some()
+    }
+    fn clock_environment(&self) -> Result<()> {
+        let opted_in = std::env::var(clock::OPT_IN).ok().as_deref() == Some("1");
+        if opted_in != self.clock.is_some()
+            || (self.clock.is_none()
+                && [clock::TOKEN, clock::ALLOW]
+                    .iter()
+                    .any(|key| std::env::var_os(key).is_some()))
+        {
+            return Err(denied(
+                "tree clock requires its independent opt-in and exact operator configuration",
+            ));
+        }
+        Ok(())
     }
     fn current(&self) -> Result<()> {
         runtime_io()?;
         environment()?;
+        self.clock_environment()?;
         let raw = std::env::var(CONFIG).map_err(|_| denied("tree configuration withdrawn"))?;
         if Digest32::of_bytes(raw.as_bytes()) != self.hash {
             return Err(denied(
@@ -285,7 +322,7 @@ fn context(
     if mode == Mode::Control && config.input.initialize {
         capabilities.extend([Capability::Plan, Capability::Designate]);
     }
-    let grants = capabilities
+    let mut grants = capabilities
         .into_iter()
         .map(|capability| CapabilityGrant {
             capability,
@@ -315,7 +352,29 @@ fn context(
             },
             remaining_uses: None,
         })
-        .collect();
+        .collect::<Vec<_>>();
+    // Named-fortress clock authority is separate from the scoped designation
+    // lease and from Run/1.13's independent NIL-fortress native authority.
+    if config
+        .clock
+        .as_ref()
+        .is_some_and(|clock| clock.control(mode))
+    {
+        grants.extend(
+            [Capability::Plan, Capability::ControlClock]
+                .into_iter()
+                .map(|capability| CapabilityGrant {
+                    capability,
+                    scope: CapabilityScope {
+                        fortress_id: Some(config.binding.source.fortress_id()),
+                        ..CapabilityScope::default()
+                    },
+                    max_risk: RiskTier::Guarded,
+                    expires_at_tick: Some(GameTick(config.input.authority_expires_tick)),
+                    remaining_uses: None,
+                }),
+        );
+    }
     OperationContext {
         session_id: session,
         request_id: RequestId::new(u128::from(request)),
@@ -337,6 +396,10 @@ pub(super) enum Action {
     Wait,
     Query,
     Cancel,
+    ClockPlan(String),
+    ClockCommit(String, bool),
+    ClockWait,
+    ClockCancel,
 }
 struct TurnWork {
     start: Instant,
@@ -395,6 +458,7 @@ pub(super) struct Runtime {
     next_request: u64,
     high_tick: u64,
     high_sequence: u64,
+    clock: Option<clock::Owner>,
 }
 impl Runtime {
     pub(super) fn open(
@@ -476,13 +540,23 @@ impl Runtime {
             next_request: 2,
             high_tick,
             high_sequence,
+            clock: None,
         };
         // Initial publication belongs to the same opening operation, not a renewed Query budget.
         let mut current = current;
         current.anchor.tick = GameTick(high_tick);
-        runtime.guard(&work.reserve(&current, 32 * 1024 * 1024)?, false)?;
+        if runtime.config.has_clock() {
+            runtime.clock = Some(clock::Owner::open(
+                &runtime.config,
+                mode,
+                &mut work,
+                &current,
+            )?);
+        }
+        let clock = runtime.clock_view(&mut work, &current, false)?;
         work.reserve(&current, 0)?;
-        let view = runtime.view(false);
+        let mut view = runtime.view(false);
+        view["clock"] = clock;
         Ok((runtime, view))
     }
     fn withdraw(&mut self) {
@@ -490,6 +564,9 @@ impl Runtime {
         self.journal.abandon();
         if let Some(mut source) = self.source.take() {
             source.fence();
+        }
+        if let Some(clock) = &mut self.clock {
+            clock.withdraw();
         }
     }
     pub(super) fn withdraw_permission(&mut self) {
@@ -512,7 +589,9 @@ impl Runtime {
             self.session,
             self.budget,
             request,
-            self.high_tick.max(self.journal.high_tick),
+            self.high_tick
+                .max(self.journal.high_tick)
+                .max(self.clock.as_ref().map_or(0, clock::Owner::high_tick)),
             self.observation
                 .as_ref()
                 .map_or(Digest32::ZERO, Capture::witness),
@@ -577,8 +656,62 @@ impl Runtime {
         self.high_sequence = cap.sequence;
         Ok(())
     }
+    fn sample_goal(&mut self, work: &mut TurnWork, c: &OperationContext) -> Result<bool> {
+        if self.mode == Mode::Offline || self.journal.achieved_tick.is_some() {
+            return Ok(false);
+        }
+        self.clock_allows_goal_sample(work, c)?;
+        let original = self
+            .journal
+            .original
+            .clone()
+            .ok_or_else(|| denied("no original tree intent"))?;
+        let mut current = c.clone();
+        current.anchor.tick = GameTick(self.high_tick.max(self.journal.high_tick));
+        self.journal
+            .begin_sample(&work.reserve(&current, 32 * 1024 * 1024)?, &mut self.acks)?;
+        let result = (|| {
+            let mut source = self
+                .config
+                .connect(&work.reserve(&current, CONNECT_BYTES)?, self.mode)?;
+            source.require_progress_at_or_after(self.high_tick.max(self.journal.high_tick));
+            match source.progress(&original.plan, &work.reserve(&current, CONNECT_BYTES)?) {
+                Ok(progress) => {
+                    self.high_tick = self.high_tick.max(progress.tick);
+                    self.high_sequence = self.high_sequence.max(progress.sequence);
+                    current.anchor.tick = GameTick(self.high_tick);
+                    self.journal.sample(
+                        progress,
+                        &work.reserve(&current, 32 * 1024 * 1024)?,
+                        &mut self.acks,
+                    )?;
+                    Ok(true)
+                }
+                Err(cause) => {
+                    if let Some(progress) = source.consumed_progress.take() {
+                        self.high_tick = self.high_tick.max(progress.tick);
+                        self.high_sequence = self.high_sequence.max(progress.sequence);
+                        current.anchor.tick = GameTick(self.high_tick);
+                        self.journal.consume_uncredited(
+                            progress,
+                            &work.reserve(&current, 32 * 1024 * 1024)?,
+                            &mut self.acks,
+                        )?;
+                    }
+                    Err(cause)
+                }
+            }
+        })();
+        if result.is_err()
+            && let Some(clock) = &mut self.clock
+        {
+            clock.fence_advancement();
+        }
+        result
+    }
     pub(super) fn perform(&mut self, action: Action) -> Result<Value> {
         // Fallible entry checks are inside withdrawal handling; restored bytes cannot revive a permit.
+        let mut tree_source_entered = false;
         let result = (|| {
             let start = Instant::now();
             let mut c = self.current()?;
@@ -591,7 +724,9 @@ impl Runtime {
                     if self.mode == Mode::Offline {
                         return Err(denied("offline tree custody cannot observe"));
                     }
+                    self.clock_allows_goal_sample(&mut work, &c)?;
                     self.withdraw();
+                    tree_source_entered = true;
                     let mut source = self
                         .config
                         .connect(&work.reserve(&c, CONNECT_BYTES)?, self.mode)?;
@@ -631,6 +766,7 @@ impl Runtime {
                             Plan::new(&key, observed.clone())?,
                             request.deadline_tick,
                         )?;
+                        tree_source_entered = true;
                         let mut source = self
                             .config
                             .connect(&work.reserve(&c, CONNECT_BYTES)?, self.mode)?;
@@ -696,6 +832,7 @@ impl Runtime {
                     };
                     // Reject an already expired original connection before claiming
                     // dispatch. No deadline/permit is renewed by this preflight.
+                    tree_source_entered = true;
                     source.preflight_commit(&original.plan, &work.reserve(&c, CONNECT_BYTES)?)?;
                     let record = self.journal.dispatch(
                         seal,
@@ -718,6 +855,7 @@ impl Runtime {
                             .clone()
                             .ok_or_else(|| denied("no original tree intent"))?;
                         if self.journal.native.as_ref().is_none_or(|n| n.phase < 2) {
+                            tree_source_entered = true;
                             let mut source = self
                                 .config
                                 .connect(&work.reserve(&c, CONNECT_BYTES)?, self.mode)?;
@@ -734,34 +872,7 @@ impl Runtime {
                         if self.journal.native.as_ref().is_some_and(|n| n.phase == 2)
                             && self.journal.achieved_tick.is_none()
                         {
-                            self.journal.begin_sample(
-                                &work.reserve(&c, 32 * 1024 * 1024)?,
-                                &mut self.acks,
-                            )?;
-                            let mut source = self
-                                .config
-                                .connect(&work.reserve(&c, CONNECT_BYTES)?, self.mode)?;
-                            match source.progress(&original.plan, &work.reserve(&c, CONNECT_BYTES)?)
-                            {
-                                Ok(p) => {
-                                    self.journal.sample(
-                                        p,
-                                        &work.reserve(&c, 32 * 1024 * 1024)?,
-                                        &mut self.acks,
-                                    )?;
-                                    fresh = true;
-                                }
-                                Err(e) => {
-                                    if let Some(p) = source.consumed_progress.take() {
-                                        self.journal.consume_uncredited(
-                                            p,
-                                            &work.reserve(&c, 32 * 1024 * 1024)?,
-                                            &mut self.acks,
-                                        )?;
-                                    }
-                                    return Err(e);
-                                }
-                            }
+                            fresh = self.sample_goal(&mut work, &c)?;
                         }
                     }
                 }
@@ -776,6 +887,7 @@ impl Runtime {
                             .original
                             .clone()
                             .ok_or_else(|| denied("no original tree intent"))?;
+                        tree_source_entered = true;
                         let mut source = self
                             .config
                             .connect(&work.reserve(&c, CONNECT_BYTES)?, self.mode)?;
@@ -788,9 +900,32 @@ impl Runtime {
                         )?;
                     }
                 }
+                Action::ClockPlan(raw) => {
+                    self.clock_action(clock::Action::Plan(&raw), &mut work, &c)?;
+                }
+                Action::ClockCommit(seal, confirmed) => {
+                    self.clock_action(
+                        clock::Action::Commit {
+                            seal: digest(&seal)?,
+                            confirmed,
+                        },
+                        &mut work,
+                        &c,
+                    )?;
+                }
+                Action::ClockWait => {
+                    if self.clock_action(clock::Action::Wait, &mut work, &c)? {
+                        fresh = self.sample_goal(&mut work, &c)?;
+                    }
+                }
+                Action::ClockCancel => {
+                    self.clock_action(clock::Action::Cancel, &mut work, &c)?;
+                }
             }
-            self.guard(&work.reserve(&c, 32 * 1024 * 1024)?, false)?;
-            Ok(self.view(fresh))
+            let clock = self.clock_view(&mut work, &c, fresh)?;
+            let mut view = self.view(fresh);
+            view["clock"] = clock;
+            Ok(view)
         })();
         if let Err(e) = &result {
             for (key, value) in &e.details {
@@ -800,17 +935,25 @@ impl Runtime {
                     self.high_tick = self.high_tick.max(tick);
                 }
             }
+            if tree_source_entered && let Some(clock) = &mut self.clock {
+                clock.fence_advancement();
+            }
             self.withdraw();
         }
         result
     }
     pub(super) fn reference(&self) -> Value {
         let pin = self.journal.pin();
-        json!({"acknowledged":self.acks.latest().map(|a|json!({"journal_id":a.journal_id.to_hex(),"head":a.head.to_hex(),"frames":a.frames})),
+        let mut reference = json!({"acknowledged":self.acks.latest().map(|a|json!({"journal_id":a.journal_id.to_hex(),"head":a.head.to_hex(),"frames":a.frames})),
             "journal_pin_unverified":{"journal_id":pin.journal_id.to_hex(),"head":pin.head.to_hex(),"frames":pin.frames},
             "original_key":self.journal.original.as_ref().map(|o|o.plan.key()),"original_review_seal":self.journal.original.as_ref().map(|o|o.seal().to_hex()),
             "dispatch_started":self.journal.dispatch_started,"uncertain_effect":self.journal.effect_uncertain,
-            "consumed_tick_floor":self.high_tick.max(self.journal.high_tick),"automatic_redispatch":false})
+            "consumed_tick_floor":self.high_tick.max(self.journal.high_tick)
+                .max(self.clock.as_ref().map_or(0,clock::Owner::high_tick)),"automatic_redispatch":false});
+        if let Some(clock) = &self.clock {
+            reference["clock"] = clock.reference();
+        }
+        reference
     }
     fn view(&self, fresh: bool) -> Value {
         let original=self.journal.original.as_ref().map(|o|json!({"key":o.plan.key(),"plan_digest":o.plan.digest.to_hex(),"review_seal":o.seal().to_hex(),
@@ -824,9 +967,14 @@ impl Runtime {
         json!({"ok":true,"source_profile":"tree-harvest/1.21","mode":self.mode.as_str(),"retained_state_currently_verified":true,"original":original,
             "observation":if self.journal.original.is_none(){self.observation.as_ref().map(capture_json)}else{None},"recommended_deadline_tick":self.observation.as_ref().map(|c|(c.tick+journal::MAX_HORIZON_TICKS).min(self.config.input.authority_expires_tick)),"custody":self.reference(),"canonical_world_anchor":null,"canonical_world_continuity":"unestablished",
             "direct_effect_scope":"observed tree/halo plus complete designation scheduling block","deferred_clock_exposure":"separately authorized; fallout unproved","local_lease_global_fence":false,"visibility_policy":"complete_tree_body_and_horizontal_halo_visible; belowground roots unobserved",
-            "tool_assignment_proven":false,"clock_advanced":false,"automatic_redispatch":false,"runtime_admitted":false})
+            "tool_assignment_proven":false,"clock_advanced":if self.config.has_clock(){Value::Null}else{json!(false)},"max_game_ticks":self.budget.max_game_ticks,
+            "automatic_redispatch":false,"runtime_admitted":false})
     }
 }
+
+#[cfg(test)]
+#[path = "clock_runtime_tests.rs"]
+mod clock_runtime_tests;
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|n| format!("{n:02x}")).collect()
 }

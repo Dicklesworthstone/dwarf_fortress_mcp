@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased — Complete original Tree harvesting in one bounded MCP session
+
+- Expose optional `run_tree` planning and separate clock-scope commit, Wait and
+  cancellation through the existing eleven Tree tools. Explicit tick allowance
+  defaults to zero; each interval inherits the original Tree deadline.
+- Own exact Tree and Run custody together, require fresh durably acknowledged
+  Tree guards after native control markers, and sample original supply after
+  clock settlement. Pending or uncertain runs block competing goal samples.
+- Admit complete remaining Tree capacity and final publication work before
+  control. Preserve consumed floors, source fences, separate confirmations,
+  safety stop and both recovery references through errors, overflow and close.
+- Pass 15 focused host tests, including 13 actual Runtime/TCP scenarios plus
+  recovery phases, all 424 host component regressions and actual MCP library/test
+  typechecking. Live-game and whole-workspace qualification remain separate.
+
 ## Unreleased — Bind bounded game time to the original Tree goal
 
 - Add a Tree-specific guarded clock adapter over the existing Run/1.13 owner.

@@ -40,6 +40,16 @@ class TreeSourceInventoryTests(unittest.TestCase):
             ("crates/dfmcp-mcp/src/tree_harvest_server/runtime.rs", "c.budget.max_bytes < 32", "c.budget.max_bytes < 0"),
             ("crates/dfmcp-mcp/src/tree_harvest_server/presentation.rs", "const CHUNK_BYTES: usize = 24_000;", "const CHUNK_BYTES: usize = 48_000;"),
             ("crates/dfmcp-mcp/src/tree_harvest_server.rs", "-> McpResult<CompleteResult<FinalCallToolResult>>", "-> String"),
+            ("crates/dfmcp-adapter/src/tree_harvest/mod.rs", "pub mod clock;", ""),
+            ("crates/dfmcp-adapter/src/tree_harvest/journal/clock_origin.rs", None, None),
+            ("crates/dfmcp-adapter/src/tree_harvest/journal/clock_origin.rs", "self.clock_projection(&mut work)?", "self.public_view_projection(&mut work)?"),
+            ("crates/dfmcp-adapter/src/tree_harvest/rpc.rs", "self.progress_tick_floor.max(tick)", "tick"),
+            ("crates/dfmcp-mcp/src/tree_harvest_server/clock.rs", "origin.require_capacity(", "origin.skip_capacity("),
+            ("crates/dfmcp-mcp/src/tree_harvest_server/clock.rs", "clock.commit_guarded(", "clock.commit_unguarded("),
+            ("crates/dfmcp-mcp/src/tree_harvest_server.rs", "Action::ClockCommit(review_seal, confirmed)", "Action::Commit(review_seal, confirmed)"),
+            ("tests/stdio/tree_clock_runtime_peer.py", None, None),
+            ("architecture/tree_harvest_v1_21.json", '"clock_control": true', '"clock_control": false'),
+            ("scripts/verify.sh", " tests/stdio/tree_clock_runtime_peer.py", ""),
         ]
         mutations.append(("crates/dfmcp-mcp/src/tree_harvest_server/presentation.rs", ".len() + 4096 +", ".len() + 256 +"))
         for name, before, after in mutations:

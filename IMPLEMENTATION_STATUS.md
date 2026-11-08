@@ -1,5 +1,68 @@
 # Implementation Status
 
+## Unreleased — Reach original Tree clock and supply through the existing MCP tools
+
+The Tree development MCP server now optionally owns Run/1.13 intervals for its
+exact acknowledged Tree/1.21 original. This completes the native host path for
+`df-tree-clock-8q4`: original designation, fresh unfinished evidence, separately
+reviewed `run_tree`, explicit clock-scope confirmation, one-shot reconciliation
+and fresh original root/job/eligible-WOOD evidence after settlement. The existing
+eleven tools and native protocols are unchanged. Tick allowance defaults to
+zero; enabled clock sessions default to 512 MiB of logical work, inside the
+existing maximum, while legacy sessions retain their 256 MiB default.
+
+The optional configuration supplies only independent Run generation and exact
+initialization/recovery pins. It inherits the parent endpoint/software and
+original Tree deadline, and cannot select another root or a replacement horizon.
+Tree read scope, designation authority and both named-fortress/native NIL clock
+grants remain separate. Each original writer edge verifies the private Tree
+bytes and ACK, admits complete remaining sample/frame/byte capacity, and records
+a real Tree sample plus ACK after the durable Run marker. The full 481 MiB
+control call, including its final publication checks, is admitted before source
+contact. Pending/unresolved runs block ordinary goal sampling; changed source
+fences further advancement while preserving a separately authorized current
+Control owner's safety stop.
+
+Tree and Run consumed floors survive later refusals. An old Tree reply cannot
+establish supply after a later Run receipt. Original-key recovery never repeats
+unpause or restores control: Recover may query and append fresh evidence, while
+Offline needs no native credential/contact or custody write. Both recovery
+families survive errors, response overflow and close. Clock confirmations remain
+separate from designation seals, and failed encoded review publication withdraws
+the local permit before releasing the session owner. Clock exposure is reported
+as unknown when only incomplete/historical evidence is available, not falsely
+as no advancement. Neither Run settlement nor time alone proves Tree supply or
+causal wood provenance.
+
+Executed current-source host evidence: **15/15 focused tests passed**, comprising
+seven configuration/parser, six presentation and two actual Runtime/TCP test
+campaigns. The peer campaigns cover **13 scenarios and 17 child phases**:
+successful supply, two intervals under one original deadline, stale completion
+after a later stopped receipt, exhausted sample capacity, source/root changes
+before and after checksum-verified durable Run markers, wrong review, ACK drift,
+lost reply, credential-free Offline inspection, damage to either custody family
+and read-only recovery with exactly one unpause attempt. Tests use the actual
+public 512 MiB maximum, not a widened fixture allowance.
+
+The full exact-source host component suite passes **424/424**, zero failures or
+ignored tests. Actual repository `cargo +nightly check -p dfmcp-mcp --tests
+--locked --offline --jobs1` passes for the real library and every test registration
+on rustc 1.102.0-nightly (f5cedb83a, 2026-11-07), in 2 minutes. The tested component
+snapshot contains 509 exact MCP copies, 24 exact excerpts, 895 linked resources,
+600 actual dependency inputs and 11 unchanged external lock identities. Seven
+declared glue files omit MCP transport/admission and Asupersync supervision;
+Tree's runtime supervision seam and synchronous test entry are explicit harness
+substitutions. The actual crate typecheck covers their real registration but
+is not a transport execution claim. The separate actual Tree adapter suite
+passes **43/43**. Required Tree static inventory and its three mutation/control
+tests pass with 60 exact inputs and unchanged native vectors/mutants.
+
+No live DFHack/game harvest, whole-workspace qualification or production
+admission is claimed. The child and original first-fortress prerequisite beads
+remain open for broader qualification; synthetic peers do not close their live
+acceptance requirements. See `docs/TREE_HARVEST_CLOCK.md` for the usable flow and
+`architecture/tree_clock_v1.json` for its bounded contract.
+
 ## Unreleased — Original-bound Tree clock adapter
 
 The new Tree clock addresses a functional gap in first-fortress supply: the

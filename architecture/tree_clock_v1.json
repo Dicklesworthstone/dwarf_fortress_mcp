@@ -1,6 +1,6 @@
 {
   "schema": "dfmcp.tree-clock/1",
-  "status": "adapter_implemented_host_in_progress_unadmitted",
+  "status": "implemented_unadmitted_development_only",
   "obligation": "one exact acknowledged original Tree designation under its existing deadline",
   "tree_protocol": "tree-harvest/1.21",
   "clock_protocol": "run/1.13",
@@ -81,5 +81,56 @@
   },
   "new_native_protocol": false,
   "new_public_tool": false,
-  "production_admission_added": false
+  "production_admission_added": false,
+  "mcp_consumer": {
+    "binary": "dfmcp-tree-harvest-v1-21-dev-server",
+    "request_kind": "run_tree",
+    "commit_wait_cancel_scope": "clock",
+    "default_scope": "goal",
+    "clock_opt_in_env": "DFMCP_ALLOW_UNADMITTED_TREE_CLOCK",
+    "clock_permission_env": "DFMCP_RUN_ALLOW_CLOCK",
+    "clock_credential_env": "DFMCP_RUN_TOKEN",
+    "optional_config_fields": [
+      "initialize",
+      "generation",
+      "recovery_generation",
+      "recovery"
+    ],
+    "recovery_fields": [
+      "journal_id",
+      "head"
+    ],
+    "private_file": "tree-harvest.clock.journal",
+    "config_accepts_replacement_deadline": false,
+    "default_game_ticks": 0,
+    "max_game_ticks": 1200,
+    "legacy_default_bytes": 268435456,
+    "configured_default_bytes": 536870912,
+    "max_bytes": 536870912,
+    "control_operation_admission_bytes": 504365056,
+    "full_final_publication_work_admitted_before_contact": true,
+    "fresh_tree_guard_bytes": 218103808,
+    "guard_sample_persisted_with_independent_ack": true,
+    "unresolved_run_blocks_goal_sampling": true,
+    "settled_wait_acquires_fresh_tree_sample": true,
+    "reopened_clock_restores_control": false,
+    "offline_native_contact": false,
+    "query_native_contact": false,
+    "source_drift_fences_further_advancement": true,
+    "known_native_record_tick_retained_before_later_failure": true,
+    "clock_advanced_without_exact_event_evidence": null,
+    "failed_encoded_publication_withdraws_review": true,
+    "failure_overflow_close_retain_both_recovery_families": true,
+    "source_paths": [
+      "crates/dfmcp-mcp/src/tree_harvest_server.rs",
+      "crates/dfmcp-mcp/src/tree_harvest_server/runtime.rs",
+      "crates/dfmcp-mcp/src/tree_harvest_server/clock.rs",
+      "crates/dfmcp-mcp/src/tree_harvest_server/clock_config_tests.rs",
+      "crates/dfmcp-mcp/src/tree_harvest_server/clock_presentation.rs",
+      "crates/dfmcp-mcp/src/tree_harvest_server/clock_presentation_tests.rs",
+      "crates/dfmcp-mcp/src/tree_harvest_server/clock_runtime_tests.rs",
+      "crates/dfmcp-mcp/src/tree_harvest_server/presentation.rs",
+      "tests/stdio/tree_clock_runtime_peer.py"
+    ]
+  }
 }

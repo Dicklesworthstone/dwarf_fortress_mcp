@@ -18,21 +18,27 @@ M = "crates/dfmcp-mcp/"
 METHODS = ["Handshake", "ReadTreeHarvest", "PrepareTreeHarvest", "CommitTreeHarvest", "QueryTreeHarvest", "CancelTreeHarvest", "ReadTreeHarvestProgress"]
 TOOLS = ["fortress_" + name for name in ("open_session", "observe", "query", "plan", "commit", "wait", "cancel", "checkpoint", "restore", "explain", "doctor")]
 SOURCES = [
-    "architecture/tree_harvest_v1_21.json", "bridge/common/tree_harvest.h", "bridge/common/one_attempt_native.h",
+    "architecture/tree_harvest_v1_21.json", "architecture/tree_clock_v1.json",
+    "bridge/common/tree_harvest.h", "bridge/common/one_attempt_native.h",
     "bridge/common/workshop_construction.h", "bridge/common/retained_snapshot.h",
     *["bridge/dfhack-tree-harvest-v1_21/" + n for n in ("CMakeLists.txt", "DfmcpTreeHarvestV1_21.proto", "dfmcp_tree_harvest_v1_21.cpp")],
-    A + "lib.rs", A + "bounded_run/mod.rs", A + "order_run/mod.rs",
+    A + "lib.rs", *[A + "bounded_run/" + n for n in ("mod.rs", "journal.rs", "rpc.rs", "private_file.rs")], A + "order_run/mod.rs",
     *[A + "build_placement/rpc/" + n for n in ("codec.rs", "link.rs")],
     A + "build_placement/journal/private_file.rs", A + "workshop_construction/acknowledgement.rs",
     *[A + "tree_harvest/" + n for n in ("mod.rs", "rpc.rs", "journal.rs", "material_origin.rs", "tests.rs", "rpc_tests.rs", "journal_tests.rs")],
+    *[A + "tree_harvest/" + n for n in ("clock.rs", "clock/tests.rs", "journal/clock_origin.rs", "journal/clock_origin_tests.rs")],
     M + "src/lib.rs", M + "src/tree_harvest_server.rs", M + "src/tree_harvest_server/runtime.rs",
     M + "src/tree_harvest_server/presentation.rs",
-    M + "src/tree_harvest_server/server_tests.rs", M + "src/bin/dfmcp-tree-harvest-v1-21-dev-server.rs",
+    M + "src/tree_harvest_server/server_tests.rs",
+    *[M + "src/tree_harvest_server/" + n for n in ("clock.rs", "clock_config_tests.rs", "clock_presentation.rs", "clock_presentation_tests.rs", "clock_runtime_tests.rs")],
+    M + "src/bin/dfmcp-tree-harvest-v1-21-dev-server.rs",
     M + "tests/tree_harvest_stdio.rs", "tests/native/workshop/stubs.h",
     *["tests/native/tree_harvest/" + n for n in ("stubs.h", "handler.cpp", "vectors.json")],
-    "tests/stdio/tree_harvest.py", "scripts/read_stable_repository_file.py", "scripts/test_tree_harvest_native.py",
+    "tests/stdio/tree_harvest.py", "tests/stdio/tree_clock_runtime_peer.py",
+    "tests/stdio/workshop.py", "tests/stdio/workshop_clock.py", "tests/native/workshop/vectors.json", "scripts/bounded_run_client.py",
+    "scripts/read_stable_repository_file.py", "scripts/test_tree_harvest_native.py",
     "scripts/check_tree_harvest.py", "scripts/test_tree_harvest_source_inventory.py",
-    "scripts/verify.sh", "scripts/qualify_local.sh", "docs/TREE_HARVEST_MCP.md",
+    "scripts/verify.sh", "scripts/qualify_local.sh", "docs/TREE_HARVEST_MCP.md", "docs/TREE_HARVEST_CLOCK.md",
 ]
 
 
@@ -55,13 +61,18 @@ def check(root: Path = ROOT) -> dict:
     required = {
         A + "lib.rs": ["pubmodtree_harvest;"],
         M + "src/lib.rs": ["pubmodtree_harvest_server;"],
-        A + "tree_harvest/mod.rs": ["pubmodjournal;", "pubmodrpc;", "pub(crate)modtests;"],
-        A + "tree_harvest/journal.rs": ["pub(crate)modjournal_tests;", "ack.acknowledge(self.pin(),&w.reserve(crate::workshop_construction::acknowledgement::WORK_BYTESasusize)?,)?;", "letpermitted=self.dispatchable();self.permit=false;"],
+        A + "tree_harvest/mod.rs": ["pubmodclock;", "pubmodjournal;", "pubmodrpc;", "pub(crate)modtests;"],
+        A + "tree_harvest/journal.rs": ["pub(crate)modjournal_tests;", "modclock_origin;", "pubuseclock_origin::{CLOCK_ORIGIN_BYTES,TreeClockOrigin};", "ack.acknowledge(self.pin(),&w.reserve(crate::workshop_construction::acknowledgement::WORK_BYTESasusize)?,)?;", "letpermitted=self.dispatchable();self.permit=false;"],
         A + "tree_harvest/material_origin.rs": ["self.mode==Mode::Offline", "work.charge(raw.len())?;", "acknowledgement.verify_tree(", "check(raw==self.raw)?;", "sample.generation==self.binding.generation", "last_state==State::Terminalasu8&&!pending_sample", "require(record.phase==2,"],
-        A + "tree_harvest/rpc.rs": ["modrpc_tests;", "self.prepared.take().as_ref()==Some(p)", "progress.generation==self.binding.generation", "consumed_tree_tick"],
-        M + "src/tree_harvest_server.rs": ["modserver_tests;", "modpresentation;", "spine(operation,session,request)", "\"fortress_plan\"", "\"fortress_commit\"", "reference[\"uncertain_effect\"]==true"],
-        M + "src/tree_harvest_server/presentation.rs": ["constCHUNK_BYTES:usize=24_000;", "ResultMeta::empty()", "CoreResult::Final(FinalCoreResult::ToolsCall{", ".encode()", "ENVELOPE_BYTES", ".len()+4096+", "\"dfmcp.tree-native-capture/1\"", "Digest32::of_bytes(chunk)", "overflow_packet("],
-        M + "src/tree_harvest_server/runtime.rs": ["self.withdraw();", "acks.latest()", "work.reserve(&current,32*1024*1024)", "journal::open_private(", "c.authorize(Capability::Query,RiskTier::ReadOnly,&[],Some(area))?;", "nonce(c,self.scope)?", "nonce(&work.reserve(&current,32)?,config.scope)?", "c.budget.max_bytes<32"],
+        A + "tree_harvest/rpc.rs": ["modrpc_tests;", "self.prepared.take().as_ref()==Some(p)", "progress.generation==self.binding.generation", "consumed_tree_tick", "pubfnrequire_progress_at_or_after(", "self.progress_tick_floor=self.progress_tick_floor.max(tick);", "self.consumed_progress=Some(progress.clone());ifprogress.tick<self.progress_tick_floor"],
+        A + "tree_harvest/clock.rs": ["modtests;", "pubfnnew(origin:TreeClockOrigin)", "self.original.deadline_tick", "self.journal.prepare_guarded(", "self.journal.commit_guarded(", "letreview=self.review.take();", "checked.supply_observed()", "target.authorize(&canonical_check", "self.binding.read_scope()"],
+        A + "tree_harvest/journal/clock_origin.rs": ["pubfnclock_origin<", "pubfnrequire_capacity(", "self.samples.checked_add(count)", "self.pin.frames.checked_add(frames)", "self.retained_bytes.checked_add(bytes)", "acknowledgement.verify_tree(", "check(raw==self.raw)?;", "letorigin=self.clock_projection(&mutwork)?;", "modtests;"],
+        M + "src/tree_harvest_server.rs": ["modserver_tests;", "modpresentation;", "modclock_presentation;", "spine(operation,session,request)", "\"fortress_plan\"", "\"fortress_commit\"", "reference[\"uncertain_effect\"]==true", "Action::ClockPlan(request)", "Action::ClockCommit(review_seal,confirmed)", "Action::ClockWait", "Action::ClockCancel", "presentation::publishable(&raw)", "runtime.withdraw_permission();"],
+        M + "src/tree_harvest_server/presentation.rs": ["constCHUNK_BYTES:usize=24_000;", "ResultMeta::empty()", "CoreResult::Final(FinalCoreResult::ToolsCall{", ".encode()", "ENVELOPE_BYTES", ".len()+4096+", "\"dfmcp.tree-native-capture/1\"", "Digest32::of_bytes(chunk)", "overflow_packet(", "withdraw_unpublished_review("],
+        M + "src/tree_harvest_server/runtime.rs": ["modclock;", "modclock_runtime_tests;", "self.withdraw();", "acks.latest()", "work.reserve(&current,32*1024*1024)", "journal::open_private(", "c.authorize(Capability::Query,RiskTier::ReadOnly,&[],Some(area))?;", "nonce(c,self.scope)?", "nonce(&work.reserve(&current,32)?,config.scope)?", "c.budget.max_bytes<32", "self.clock_allows_goal_sample(work,c)?;", "source.require_progress_at_or_after("],
+        M + "src/tree_harvest_server/clock.rs": ["modclock_config_tests;", "DFMCP_ALLOW_UNADMITTED_TREE_CLOCK", "DFMCP_RUN_ALLOW_CLOCK", "DFMCP_RUN_TOKEN", "Target::new(origin)?", "origin.require_capacity(ifmatches!(action,Action::Plan(_)){3}else{2})?;", "CLOCK_ORIGIN_BYTES+6*VIEW_BYTES+GUARD_BYTES+OPERATION_BYTES+CONNECT_BYTES+TREE_LOCAL_BYTES", "clock.prepare_guarded(", "clock.commit_guarded(", "journal.begin_sample(", "journal.consume_uncredited(", "journal.sample(", "before.require_capacity(1)?;", "owner.fence_advancement();"],
+        M + "src/tree_harvest_server/clock_presentation.rs": ["modtests;", "args[\"scope\"]=json!(\"clock\");", "turn[\"briefing\"][\"clock_advanced\"]=Value::Null;", "\"current_pause_proven\"", "\"harvest_goal_proven\""],
+        M + "src/tree_harvest_server/clock_runtime_tests.rs": ["tree_clock_runtime_peer.py", "Command::new(\"python3\")"],
         M + "src/bin/dfmcp-tree-harvest-v1-21-dev-server.rs": ["dfmcp_mcp::tree_harvest_server::run_stdio();", "std::process::ExitCode::FAILURE"],
     }
     for name, tokens in required.items():
@@ -109,8 +120,8 @@ def check(root: Path = ROOT) -> dict:
         raise ValueError("tree native scenarios differ")
     if hashlib.sha256(texts["tests/native/tree_harvest/vectors.json"].encode()).hexdigest() != contract["native_vectors_sha256"]:
         raise ValueError("original tree vectors changed")
-    rust = [A + "tree_harvest/" + n for n in ("tests.rs", "journal_tests.rs", "rpc_tests.rs")]
-    unit = [M + "src/tree_harvest_server/server_tests.rs"]
+    rust = [A + "tree_harvest/" + n for n in ("tests.rs", "journal_tests.rs", "rpc_tests.rs", "clock/tests.rs", "journal/clock_origin_tests.rs")]
+    unit = [M + "src/tree_harvest_server/" + n for n in ("server_tests.rs", "clock_config_tests.rs", "clock_presentation_tests.rs", "clock_runtime_tests.rs")]
     integration = [M + "tests/tree_harvest_stdio.rs"]
     actual = {
         "adapter_rust_cases": [name for p in rust for name in re.findall(r"#\[test\]\s*fn (\w+)", texts[p])],
@@ -122,8 +133,36 @@ def check(root: Path = ROOT) -> dict:
     if actual != contract["focused_test_cases"]:
         raise ValueError(f"registered tree test names differ: {actual}")
     for wrapper in ("scripts/verify.sh", "scripts/qualify_local.sh"):
-        if any(name not in texts[wrapper] for name in ("check_tree_harvest.py", "test_tree_harvest_source_inventory.py", "test_tree_harvest_native.py --mutations", "tests/stdio/tree_harvest.py")):
+        if any(name not in texts[wrapper] for name in ("check_tree_harvest.py", "test_tree_harvest_source_inventory.py", "test_tree_harvest_native.py --mutations", "tests/stdio/tree_harvest.py", "tests/stdio/tree_clock_runtime_peer.py")):
             raise ValueError("tree mandatory gate wiring absent")
+    expected_clock = {
+        "contract": "architecture/tree_clock_v1.json",
+        "enabled_by_default": False,
+        "default_session_game_ticks": 0,
+        "native_protocol": "run/1.13",
+        "plan_kind": "run_tree",
+        "commit_wait_cancel_scope": "clock",
+        "opt_in": "DFMCP_ALLOW_UNADMITTED_TREE_CLOCK=1",
+        "permission": "DFMCP_RUN_ALLOW_CLOCK=1",
+        "credential": "DFMCP_RUN_TOKEN",
+        "independent_named_and_native_authority": True,
+        "deadline": "inherited original Tree deadline; never renewed",
+        "clock_receipt_proves_harvest": False,
+        "recovery_restores_control": False,
+    }
+    if (contract.get("clock_implementation_added") is not True
+            or contract.get("native_clock_implementation_added") is not False
+            or contract["mcp_consumer"].get("clock_control") is not True
+            or contract["mcp_consumer"].get("clock_control_policy") != expected_clock):
+        raise ValueError("optional independent Tree clock contract differs")
+    clock = json.loads(texts["architecture/tree_clock_v1.json"])
+    if (clock.get("schema") != "dfmcp.tree-clock/1"
+            or clock.get("tree_protocol") != "tree-harvest/1.21"
+            or clock.get("clock_protocol") != "run/1.13"
+            or any(clock.get(key) is not False for key in
+                   ("new_native_protocol", "new_public_tool", "production_admission_added"))
+            or not set(clock.get("source_paths", [])) <= set(SOURCES)):
+        raise ValueError("Tree clock cannot widen native protocols, tools or admission")
     expected_material_import = {
         "consumer": "workshop/1.20 material discovery",
         "owner_mode": "offline",

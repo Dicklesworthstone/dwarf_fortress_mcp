@@ -208,6 +208,13 @@ own eleven modern tools and typed plan/review/confirmation/recovery contract.
 `finite-bed` retains the finite-order runtime's existing bounded furniture
 recipes; request `wooden_bed` and amount 1 for the original bed objective.
 
+The Tree profile optionally owns [reviewed clock intervals](docs/TREE_HARVEST_CLOCK.md)
+for its exact original harvest. With independent clock authority and explicit
+session ticks, `kind="run_tree"` and `scope="clock"` advance and reconcile one
+finite interval, then acquire fresh original supply evidence. Each interval
+keeps the original deadline and remaining sample capacity; a clock receipt
+alone never establishes harvested wood.
+
 The legacy `manager` startup still selects [Manager 1.22](docs/MANAGER_APPOINTMENT_MCP.md).
 That generation proves its assignment/HF/history projection but omits the
 production-responsibility cache; a completed appointment can therefore leave
@@ -232,6 +239,11 @@ after that order retires. Lost replies reconcile their original run keys without
 repeating unpause; fresh joined evidence is still required for goal completion.
 Portfolio Wait samples each original leaf and proves the complete parent only
 when all original goals and current labor join at one coherent paused frontier.
+For a desired furniture minimum, `kind="stock_target"` derives one finite order
+amount from a fresh qualified inventory census using existing enabled workers.
+An already-met target creates no order; an oversized deficit refuses. The
+original census and a fresh empty manager queue are checked before insertion,
+and monitoring/recovery retain the same target and amount.
 Each process selects one runtime. A complete Tree-to-workshop-to-bed controller
 remains unfinished. Changing profile requires a
 separate configured process and preserves the previous original custody.
