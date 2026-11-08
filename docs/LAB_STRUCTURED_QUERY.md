@@ -33,7 +33,7 @@ inner envelope accepts the existing schema, `query`, and optional complete
 | `entities` | Typed filters, explicit field projection, deterministic ordering and source-bound pages |
 | `inspect` | Exact entity ID and generation, with explicit selected fields |
 | `aggregate` | Counts, grouping, and exact integer or fixed-scale numerical statistics |
-| `search` | Bounded lexical retrieval over selected kinds, fields and labels |
+| `search` | Bounded lexical retrieval over selected kinds, typed predicates, fields and labels |
 | `traverse` | Bounded observed graph traversal and a witnessed path to an optional target |
 | `dependencies` | Prerequisite order, cycle components, cycle blockers and an unweighted critical chain |
 | `events` | Inclusive retained-event windows, kind/subject selection, typed fields and chronological pages |
@@ -96,6 +96,31 @@ Results separate excluded/unavailable inputs from actual samples. Sums,
 minima and maxima use decimal integer strings; a mean is an exact rational.
 These are advisory statistics over the selected projection, not a complete
 stock or mutation-precondition certificate.
+
+## Filtered lexical search
+
+Combine text matching with the same typed `where` selection. For example:
+
+```json
+{
+  "kind": "search",
+  "text": "Urist",
+  "kinds": ["unit"],
+  "where": {
+    "op": "compare", "field": "alive", "comparison": "eq",
+    "value": {"type": "bool", "value": true}
+  },
+  "limit": 4
+}
+```
+
+Use this object as `request.query`. Only True predicate rows enter lexical
+matching and ranking. `selection.matched_predicate` counts those rows before
+text matching; top-level `matched` counts actual lexical hits. False and Unknown
+exclusions remain separate, and negation does not turn unavailable facts into
+matches. Filters participate in work admission and continuation identity.
+Unfiltered requests keep their existing shape and ranking. See
+`QUERY_EXECUTION.md` for text fields, matching rules and selection accounting.
 
 ## Ranking by numeric facts
 
@@ -306,7 +331,28 @@ The wrapper has a 64-KiB input ceiling; legacy query modes keep their existing
 1-KiB ceiling. Executor-specific field, depth, scan, work, group, result and
 continuation bounds still apply. The complete canonical source record count
 and canonical byte size must fit the session's work budgets before execution.
-A one-row page cannot bypass source verification costs.
+A separate bounded structural walk checks source nesting, value frontiers and
+work before canonical serialization. Its conservative estimate is distinct from
+the exact negotiated canonical-byte allowance. A one-row page cannot bypass
+source verification costs, including fields omitted from the response.
+
+For structured `entities`, the executor borrows the canonical candidates and
+renders only the requested `fields`. Large unselected values do not consume
+the projected output allowance. The complete laboratory wrapper and captured
+Agent Turn participate while the page is chosen, so `returned` can be smaller
+than the requested `limit` without requiring the caller to retry smaller limits.
+Rows form one ordered prefix and the continuation follows exactly that prefix.
+Neither an oversized row nor a zero-row advancing page is silently accepted.
+The final page can fit even when removing its continuation makes it smaller
+than the preceding prefix. Empty results still need room for their full packet.
+
+Presentation state is captured once outside the session lock and reused for
+pure page-size checks. Before execution resumes, the current anchor, retained
+source, grants and budget must still match. A refused query does not advance
+the cached successful orientation or claim newly observed query changes. If
+final output fitting or the publication deadline withdraws an otherwise valid
+page, its refusal is rebuilt from the prior observation and bounded again using
+the original query allowance, even when the first fit removed budget metadata.
 
 The final semantic response, including its Agent Turn, must fit both
 `max_bytes` and the laboratory `ceil(bytes / 4)` output-token estimate. The
@@ -325,3 +371,8 @@ the available kinds, exact historical/current anchors, capability refusal, unava
 facts, continuation integrity, legacy grammar, source work and complete-packet
 budgets. These source regressions do not establish live DFHack compatibility,
 game effects, production admission or full workspace qualification.
+
+`projected_entities_mcp_tests.rs` adds complete-turn pagination, retained work,
+required-row refusal, failed-query observation basis, historical authority and
+deferred-context checks. Focused pure helper and renderer execution is recorded
+separately from full public-facade execution in `IMPLEMENTATION_STATUS.md`.

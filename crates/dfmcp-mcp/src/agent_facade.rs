@@ -1570,125 +1570,251 @@ fn project_response(
     profile: ObservationProfile,
     session_hint: Option<&str>,
 ) -> String {
-    let mut payload: Value = match serde_json::from_str::<Value>(&raw) {
+    let mut payload = response_payload(&raw, operation);
+    let presentation = ResponsePresentation::capture(operation, &mut payload, session_hint);
+    let output = presentation.render(payload, operation, phase, profile);
+    crate::task_service::notify_progress();
+    output
+}
+
+fn response_payload(raw: &str, operation: &str) -> Value {
+    let mut payload = match serde_json::from_str::<Value>(raw) {
         Ok(value) if value.is_object() => value,
         Ok(_) | Err(_) => malformed_payload(operation),
     };
     attach_recovery(&mut payload);
-    let session_id = session_id_from(&payload, session_hint);
-    let (state, previous_anchor, turn_sequence) =
-        presentation_state(operation, &mut payload, session_id.as_ref());
-    let current_anchor = state.anchor.clone();
-    let status = continuity_status(
-        operation,
-        is_ok(&payload),
-        previous_anchor.as_ref(),
-        current_anchor.as_ref(),
-        &payload,
-    );
-    let reset_reason = (status == ContinuityStatus::Reset)
-        .then_some("checkpoint_restore_created_new_observation_epoch".to_owned());
-    let continuity_basis = if is_ok(&payload) && payload["mode"] == "query_changes" {
-        payload.get("basis").cloned()
-    } else {
-        previous_anchor.clone()
-    };
-    let references = match session_id.as_ref() {
-        Some(id) => vec![
-            json!({"kind": "resource", "uri": format!("df://session/{id}/summary")}),
-            json!({"kind": "resource", "uri": format!("df://session/{id}/capabilities")}),
-            json!({"kind": "resource", "uri": format!("df://session/{id}/handoff")}),
-        ],
-        None => Vec::new(),
-    };
+    payload
+}
 
-    // World changes disclose entity facts: only a session that negotiated
-    // observation may receive them, whatever tool it called.
-    let world_delta = if has_grant(&state, "observe") {
-        world_changes(
-            session_id.as_ref(),
-            previous_anchor.as_ref(),
-            current_anchor.as_ref(),
-        )
-    } else {
-        Vec::new()
-    };
-    let (ranked, selection) =
-        ranked_attention(attention(operation, is_ok(&payload), &payload, &state));
-    let mut builder = AgentTurnBuilder::new(operation, phase)
-        .turn_id(format!("presentation-turn-{turn_sequence}"))
-        .continuity(status, continuity_basis, None, reset_reason)
-        .profile(profile)
-        .briefing(briefing(&state, &payload))
-        .changes({
-            let mut listed = changes(operation, is_ok(&payload), &payload);
-            listed.extend(world_delta);
-            listed
-        })
-        .attention(ranked)
-        .active_work({
-            let mut work = active_work(&state);
-            if has_drain_observation(operation, &payload)
-                && payload["drain_progress"]["quiescent"] != true
-            {
-                work["cancellation_drains"] = json!([{
-                    "scope": payload["scope"],
-                    "drain_progress": payload["drain_progress"],
-                    "observed_anchor": payload["observed_anchor"],
-                    "finalize_certificate": payload["finalize_certificate"],
-                }]);
-            }
-            if has_grant(&state, "observe")
-                && let Some(id) = session_id.as_deref()
-                && crate::server::task_session::read_authority(id).is_ok()
-            {
-                let tasks = crate::task_service::session_handles(id);
-                if tasks.as_array().is_none_or(|tasks| !tasks.is_empty()) {
-                    work["mcp_tasks"] = tasks;
-                    work["mcp_task_coverage"] = crate::task_service::session_handle_coverage(id);
-                }
-            }
-            work
-        })
-        .affordances(affordances(&state))
-        .recommendations(recommendations(
+/// Capture mutable orientation and server-backed dependencies once. Rendering
+/// prospective query pages from this value is pure and cannot acquire a session
+/// lock, advance a turn, consume surprises, or change active work.
+struct ResponsePresentation {
+    session_id: Option<String>,
+    state: SessionOrientation,
+    previous_anchor: Option<Value>,
+    turn_sequence: u64,
+    world_delta: Vec<Value>,
+    task_work: Option<(Value, Value)>,
+}
+
+impl ResponsePresentation {
+    fn capture(operation: &str, payload: &mut Value, session_hint: Option<&str>) -> Self {
+        let session_id = session_id_from(payload, session_hint);
+        let (state, previous_anchor, turn_sequence) =
+            presentation_state(operation, payload, session_id.as_ref());
+        Self::from_state(session_id, state, previous_anchor, turn_sequence)
+    }
+
+    fn capture_query(orientation: &Value, session_hint: Option<&str>) -> (Self, Self) {
+        let session_id = session_id_from(orientation, session_hint);
+        // Reserve one turn without publishing the provisional source as an
+        // observation. A later validation or publication refusal must leave the
+        // cached anchor and its next-call change basis untouched.
+        let mut pending = json!({"ok":false, "session_id":session_id});
+        let (mut state, previous_anchor, turn_sequence) =
+            presentation_state("fortress.query", &mut pending, session_id.as_ref());
+        let previous_state = state.clone();
+        update_orientation("fortress.query", orientation, &mut state);
+        let success = Self::from_state(session_id, state, previous_anchor, turn_sequence);
+        let failure = Self {
+            session_id: success.session_id.clone(),
+            state: previous_state,
+            previous_anchor: success.previous_anchor.clone(),
+            turn_sequence,
+            world_delta: Vec::new(),
+            task_work: success.task_work.clone(),
+        };
+        (success, failure)
+    }
+
+    fn publish_query_orientation(&self, payload: &Value) {
+        if !is_ok(payload) {
+            return;
+        }
+        let Some(id) = self.session_id.as_ref() else {
+            return;
+        };
+        if let Some(state) = orientation_sessions().get_mut(id)
+            && state.turn_sequence == self.turn_sequence
+        {
+            update_orientation("fortress.query", payload, state);
+        }
+    }
+
+    fn from_state(
+        session_id: Option<String>,
+        state: SessionOrientation,
+        previous_anchor: Option<Value>,
+        turn_sequence: u64,
+    ) -> Self {
+        // World changes disclose entity facts only under observation authority.
+        let world_delta = if has_grant(&state, "observe") {
+            world_changes(
+                session_id.as_ref(),
+                previous_anchor.as_ref(),
+                state.anchor.as_ref(),
+            )
+        } else {
+            Vec::new()
+        };
+        let task_work = if has_grant(&state, "observe")
+            && let Some(id) = session_id.as_deref()
+            && crate::server::task_session::read_authority(id).is_ok()
+        {
+            let tasks = crate::task_service::session_handles(id);
+            tasks
+                .as_array()
+                .is_none_or(|tasks| !tasks.is_empty())
+                .then(|| (tasks, crate::task_service::session_handle_coverage(id)))
+        } else {
+            None
+        };
+        Self {
+            session_id,
+            state,
+            previous_anchor,
+            turn_sequence,
+            world_delta,
+            task_work,
+        }
+    }
+
+    /// A successful row selection can still miss the final publication bound.
+    /// Rebuild that refusal from the prior observation while preserving the
+    /// original authority-bearing budget, even if fitting removed its metadata.
+    fn finish_query(&self, failure: &Self, result: Value, started: std::time::Instant) -> String {
+        let succeeded = is_ok(&result);
+        let query_budget = result["query_budget"].clone();
+        let mode = result["mode"].clone();
+        let presentation = if succeeded { self } else { failure };
+        let rendered = presentation.render(
+            result,
+            "fortress.query",
+            AgentPhase::Inspect,
+            ObservationProfile::Tactical,
+        );
+        let response = crate::server::query_budget::finish_response(rendered, started.elapsed());
+        if !succeeded || !query_budget.is_object() {
+            return response;
+        }
+        let Ok(mut refusal) = serde_json::from_str::<Value>(&response) else {
+            return response;
+        };
+        if !refusal.is_object() || refusal["ok"] != false {
+            return response;
+        }
+        refusal["query_budget"] = query_budget;
+        refusal["mode"] = mode;
+        let rendered = failure.render(
+            refusal,
+            "fortress.query",
+            AgentPhase::Inspect,
+            ObservationProfile::Tactical,
+        );
+        crate::server::query_budget::finish_response(rendered, started.elapsed())
+    }
+
+    fn render(
+        &self,
+        mut payload: Value,
+        operation: &str,
+        phase: AgentPhase,
+        profile: ObservationProfile,
+    ) -> String {
+        attach_recovery(&mut payload);
+        let state = &self.state;
+        let session_id = self.session_id.clone();
+        let previous_anchor = self.previous_anchor.clone();
+        let turn_sequence = self.turn_sequence;
+        let current_anchor = state.anchor.clone();
+        let status = continuity_status(
             operation,
             is_ok(&payload),
+            previous_anchor.as_ref(),
+            current_anchor.as_ref(),
             &payload,
-            &state,
-        ))
-        .uncertainty(uncertainties(&state))
-        .coverage({
-            let mut covered = coverage(&payload);
-            covered["attention_selection"] = selection;
-            covered
-        })
-        .budget(budget(&state))
-        .references(references);
-    if let Some(id) = session_id {
-        builder = builder.session_id(id);
+        );
+        let reset_reason = (status == ContinuityStatus::Reset)
+            .then_some("checkpoint_restore_created_new_observation_epoch".to_owned());
+        let continuity_basis = if is_ok(&payload) && payload["mode"] == "query_changes" {
+            payload.get("basis").cloned()
+        } else {
+            previous_anchor.clone()
+        };
+        let references = match session_id.as_ref() {
+            Some(id) => vec![
+                json!({"kind": "resource", "uri": format!("df://session/{id}/summary")}),
+                json!({"kind": "resource", "uri": format!("df://session/{id}/capabilities")}),
+                json!({"kind": "resource", "uri": format!("df://session/{id}/handoff")}),
+            ],
+            None => Vec::new(),
+        };
+
+        let (ranked, selection) =
+            ranked_attention(attention(operation, is_ok(&payload), &payload, state));
+        let mut builder = AgentTurnBuilder::new(operation, phase)
+            .turn_id(format!("presentation-turn-{turn_sequence}"))
+            .continuity(status, continuity_basis, None, reset_reason)
+            .profile(profile)
+            .briefing(briefing(state, &payload))
+            .changes({
+                let mut listed = changes(operation, is_ok(&payload), &payload);
+                listed.extend(self.world_delta.clone());
+                listed
+            })
+            .attention(ranked)
+            .active_work({
+                let mut work = active_work(state);
+                if has_drain_observation(operation, &payload)
+                    && payload["drain_progress"]["quiescent"] != true
+                {
+                    work["cancellation_drains"] = json!([{
+                        "scope": payload["scope"],
+                        "drain_progress": payload["drain_progress"],
+                        "observed_anchor": payload["observed_anchor"],
+                        "finalize_certificate": payload["finalize_certificate"],
+                    }]);
+                }
+                if let Some((tasks, coverage)) = &self.task_work {
+                    work["mcp_tasks"] = tasks.clone();
+                    work["mcp_task_coverage"] = coverage.clone();
+                }
+                work
+            })
+            .affordances(affordances(state))
+            .recommendations(recommendations(operation, is_ok(&payload), &payload, state))
+            .uncertainty(uncertainties(state))
+            .coverage({
+                let mut covered = coverage(&payload);
+                covered["attention_selection"] = selection;
+                covered
+            })
+            .budget(budget(state))
+            .references(references);
+        if let Some(id) = session_id {
+            builder = builder.session_id(id);
+        }
+        if let Some(anchor) = current_anchor {
+            builder = builder.anchor(anchor);
+        }
+        let max_output_tokens = state
+            .budget
+            .get("max_output_tokens")
+            .and_then(Value::as_u64)
+            .unwrap_or(crate::output_budget::DEFAULT_MAX_OUTPUT_TOKENS);
+        // Query publication uses the current authority-bearing budget, not this
+        // orientation's opening budget. Its final guard preserves whole legacy
+        // pages/cursors and permits only lossless structured-page compaction.
+        let budgeted_query = operation == "fortress.query" && payload["query_budget"].is_object();
+        let shaped =
+            crate::output_budget::shape_for_profile(&builder.attach(payload), profile.as_str());
+        if budgeted_query {
+            shaped
+        } else {
+            crate::output_budget::fit(&shaped, max_output_tokens)
+        }
     }
-    if let Some(anchor) = current_anchor {
-        builder = builder.anchor(anchor);
-    }
-    let max_output_tokens = state
-        .budget
-        .get("max_output_tokens")
-        .and_then(Value::as_u64)
-        .unwrap_or(crate::output_budget::DEFAULT_MAX_OUTPUT_TOKENS);
-    // Query publication uses the current authority-bearing budget, not this
-    // orientation's opening budget. Its final guard preserves whole legacy
-    // pages/cursors and permits only lossless structured-page compaction.
-    let budgeted_query = operation == "fortress.query" && payload["query_budget"].is_object();
-    let shaped =
-        crate::output_budget::shape_for_profile(&builder.attach(payload), profile.as_str());
-    let output = if budgeted_query {
-        shaped
-    } else {
-        crate::output_budget::fit(&shaped, max_output_tokens)
-    };
-    crate::task_service::notify_progress();
-    output
 }
 
 #[tool(
@@ -1763,6 +1889,8 @@ pub fn fortress_query(session_id: Option<String>, mode: Option<String>) -> Strin
     let recorded = json!({"mode": mode});
     let response =
         match crate::server::fortress_query_publication(session_id.clone(), mode, started) {
+            // This packet was accepted before the retained-state transaction
+            // committed. No later fit or deadline check may replace it.
             crate::server::QueryPublication::Published(response) => response,
             crate::server::QueryPublication::Pending(raw) => {
                 let projected = project_response(
@@ -1773,6 +1901,29 @@ pub fn fortress_query(session_id: Option<String>, mode: Option<String>) -> Strin
                     session_id.as_deref(),
                 );
                 crate::server::query_budget::finish_response(projected, started.elapsed())
+            }
+            crate::server::QueryPublication::Projected { orientation, query } => {
+                let orientation = response_payload(&orientation, "fortress.query");
+                let (presentation, failure) =
+                    ResponsePresentation::capture_query(&orientation, session_id.as_deref());
+                let result = query.execute(started, &|page| {
+                    let rendered = presentation.render(
+                        page.clone(),
+                        "fortress.query",
+                        AgentPhase::Inspect,
+                        ObservationProfile::Tactical,
+                    );
+                    crate::server::query_budget::lossless_page_fits(
+                        &rendered,
+                        &page["query_budget"],
+                    )
+                });
+                crate::task_service::notify_progress();
+                let response = presentation.finish_query(&failure, result, started);
+                if let Ok(payload) = serde_json::from_str::<Value>(&response) {
+                    presentation.publish_query_orientation(&payload);
+                }
+                response
             }
         };
     crate::replay::record("fortress.query", session_id.as_deref(), recorded, &response);
@@ -2017,6 +2168,173 @@ pub fn run_stdio() {
             eprintln!("laboratory Tasks runtime failed: {error}");
             std::process::exit(1);
         }
+    }
+}
+
+#[cfg(test)]
+mod projected_query_publication_tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    type TestResult = std::result::Result<(), Box<dyn std::error::Error>>;
+
+    fn captured(id: &str) -> (ResponsePresentation, ResponsePresentation, Value) {
+        let prior_anchor = json!({"fortress_id":"71", "epoch":1, "sequence":4,
+            "game_tick":8, "state_hash":"1".repeat(64)});
+        let current_anchor = json!({"fortress_id":"71", "epoch":1, "sequence":5,
+            "game_tick":9, "state_hash":"2".repeat(64)});
+        let mut prior = SessionOrientation::from_payload(&json!({
+            "anchor":prior_anchor, "paused":true, "adapter":"memory",
+            "granted_capabilities":["query"],
+            "budget":{"max_output_tokens":32_768},
+        }));
+        prior.turn_sequence = 47;
+        prior.pending_plan_digest = Some("retained-reviewed-plan".to_owned());
+        orientation_sessions().insert(id.to_owned(), prior.clone());
+        let mut current = prior.clone();
+        current.anchor = Some(current_anchor.clone());
+        current.paused = Some(false);
+        let success = ResponsePresentation {
+            session_id: Some(id.to_owned()),
+            state: current,
+            previous_anchor: Some(prior_anchor.clone()),
+            turn_sequence: 47,
+            world_delta: vec![json!({"kind":"unpublished_observation"})],
+            task_work: None,
+        };
+        let failure = ResponsePresentation {
+            session_id: Some(id.to_owned()),
+            state: prior,
+            previous_anchor: Some(prior_anchor),
+            turn_sequence: 47,
+            world_delta: Vec::new(),
+            task_work: None,
+        };
+        let result = json!({"ok":true, "mode":"structured", "session_id":id,
+            "anchor":current_anchor, "current_anchor":current_anchor, "paused":false,
+            "matched":1, "returned":1,
+            "rows":[{"entity_id":"1", "label":"unpublished row"}],
+            "continuation":"sp1:unpublished-continuation",
+            "query_budget":{"maximum_response_bytes":131_072,
+                "max_output_tokens":32_768, "max_wall_millis":60_000}});
+        (success, failure, result)
+    }
+
+    #[test]
+    fn projected_query_late_refusals_keep_prior_orientation_and_the_reserved_turn() -> TestResult {
+        let id = "projected-query-late-refusal";
+        let (success, failure, result) = captured(id);
+        let prior_anchor = failure
+            .state
+            .anchor
+            .as_ref()
+            .ok_or("prior anchor missing")?;
+        for (tokens, wall_millis, elapsed, oversized_row) in [
+            (32_768_u64, 0_u64, Duration::ZERO, false),
+            (32_768, 1, Duration::from_millis(2), false),
+            (4_096, 60_000, Duration::ZERO, true),
+            (128, 0, Duration::ZERO, false),
+        ] {
+            let mut page = result.clone();
+            page["query_budget"]["max_output_tokens"] = json!(tokens);
+            page["query_budget"]["maximum_response_bytes"] = json!(tokens * 4);
+            page["query_budget"]["max_wall_millis"] = json!(wall_millis);
+            if oversized_row {
+                page["rows"][0]["label"] = json!("large selected value".repeat(4_096));
+            }
+            let started = Instant::now()
+                .checked_sub(elapsed)
+                .ok_or("clock underflow")?;
+            let response = success.finish_query(&failure, page, started);
+            let refusal: Value = serde_json::from_str(&response)?;
+            assert_eq!(refusal["ok"], false, "{refusal}");
+            assert_eq!(refusal["error"]["code"], "budget_exceeded");
+            assert!(response.len() as u64 <= tokens * 4, "{refusal}");
+            assert!(refusal.get("rows").is_none());
+            assert!(refusal.get("continuation").is_none());
+            if tokens >= 4_096 {
+                assert_eq!(&refusal["agent_turn"]["anchor"], prior_anchor);
+                assert_eq!(refusal["agent_turn"]["briefing"]["paused"], true);
+                assert_eq!(refusal["agent_turn"]["continuity"]["status"], "stale");
+                assert_eq!(refusal["agent_turn"]["changes"], json!([]));
+                assert_eq!(refusal["agent_turn"]["turn_id"], "presentation-turn-47");
+                assert_eq!(refusal["query_budget"]["max_output_tokens"], tokens);
+                assert_eq!(
+                    refusal["agent_turn"]["active_work"]["pending_plans"][0]["plan_digest"],
+                    "retained-reviewed-plan"
+                );
+            } else {
+                assert_eq!(refusal["output_budget"]["tier"], "refused");
+                assert!(refusal["agent_turn"]["anchor"].is_null());
+            }
+            success.publish_query_orientation(&refusal);
+            let registry = orientation_sessions();
+            let cached = registry.get(id).ok_or("orientation missing")?;
+            assert_eq!(cached.anchor, failure.state.anchor);
+            assert_eq!(cached.paused, Some(true));
+            assert_eq!(cached.turn_sequence, 47);
+        }
+        orientation_sessions().remove(id);
+        Ok(())
+    }
+
+    #[test]
+    fn projected_query_minimal_refusal_keeps_the_original_budget_after_metadata_is_removed()
+    -> TestResult {
+        let id = "projected-query-minimal-refusal";
+        let (success, failure, result) = captured(id);
+        let prior_anchor = failure
+            .state
+            .anchor
+            .as_ref()
+            .ok_or("prior anchor missing")?;
+        let mut exercised_missing_budget = false;
+        for tokens in (128_u64..=2_048).step_by(32) {
+            let mut page = result.clone();
+            page["query_budget"]["max_output_tokens"] = json!(tokens);
+            page["query_budget"]["maximum_response_bytes"] = json!(tokens * 4);
+            page["query_budget"]["max_wall_millis"] = json!(0);
+            let first = success.render(
+                page.clone(),
+                "fortress.query",
+                AgentPhase::Inspect,
+                ObservationProfile::Tactical,
+            );
+            let first = crate::server::query_budget::finish_response(first, Duration::ZERO);
+            let first: Value = serde_json::from_str(&first)?;
+            if first["ok"] != false
+                || first["query_budget"].is_object()
+                || first["agent_turn"]["anchor"] != result["current_anchor"]
+            {
+                continue;
+            }
+            exercised_missing_budget = true;
+            let response = success.finish_query(&failure, page, Instant::now());
+            let refusal: Value = serde_json::from_str(&response)?;
+            assert_eq!(refusal["ok"], false, "{refusal}");
+            assert!(response.len() as u64 <= tokens * 4, "{refusal}");
+            assert_eq!(refusal["output_budget"]["max_output_tokens"], tokens);
+            assert!(refusal.get("rows").is_none());
+            assert!(refusal.get("continuation").is_none());
+            if !refusal["agent_turn"]["anchor"].is_null() {
+                assert_eq!(&refusal["agent_turn"]["anchor"], prior_anchor);
+            }
+            success.publish_query_orientation(&refusal);
+            assert_eq!(
+                orientation_sessions()
+                    .get(id)
+                    .ok_or("orientation missing")?
+                    .anchor,
+                failure.state.anchor
+            );
+            break;
+        }
+        orientation_sessions().remove(id);
+        assert!(
+            exercised_missing_budget,
+            "minimal refusal branch was not exercised"
+        );
+        Ok(())
     }
 }
 

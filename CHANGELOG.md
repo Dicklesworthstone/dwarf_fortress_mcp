@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased — Fit laboratory entity pages through the complete Agent Turn
+
+- Choose whole entity pages against the exact laboratory wrapper, captured
+  active work, coverage and Agent Turn. Automatically reduce page width while
+  keeping each continuation aligned with the rows actually returned.
+- Capture presentation once outside session locks, recheck current authority,
+  anchors and budgets before executing, and publish successful orientation only
+  after the final packet fits. Refusals retain the prior observation basis,
+  including late deadline/output refusals and minimal budget responses.
+- Bound source structure before canonical serialization, while preserving the
+  exact negotiated canonical-byte allowance and admitting combined source/scan
+  work before selection. Output-token limits remain separate from source costs.
+- Add six public-facade regressions, four focused projected-query cases and
+  two deterministic late-refusal regressions; update the old expected-refusal
+  test for automatic whole-page selection. Focused helper and renderer/finalizer
+  suites pass 63/63 and 35/35. Full MCP execution remains blocked in the unchanged
+  Asupersync dependency, as detailed in implementation status.
+
 ## Unreleased — Add laboratory evidence to the foreground watch engine
 
 - Reuse the bounded predicate evaluator, cadence/stability state machine and

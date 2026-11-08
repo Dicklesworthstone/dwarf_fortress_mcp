@@ -687,6 +687,9 @@ fn lab_structured_full_packet_refuses_clipping_and_smaller_pages_resume_without_
         "fields": ["alive", "stock", "unseen_a", "unseen_b", "unseen_c", "unseen_d", "unseen_e", "unseen_f"]}),
         None,
     );
+    let mut first_observation = request.clone();
+    first_observation["request"]["query"]["limit"] = json!(1);
+    assert_eq!(query(&session_id, first_observation)?["ok"], true);
     let raw = super::fortress_query(Some(session_id.clone()), Some(request.to_string()));
     assert_eq!(parsed(&raw)?["ok"], true, "{raw}");
     let max_tokens = u32::try_from((raw.len() + 512).div_ceil(4))?;
@@ -695,7 +698,34 @@ fn lab_structured_full_packet_refuses_clipping_and_smaller_pages_resume_without_
         let mut guard = session.lock().map_err(|_| "session poisoned")?;
         guard.budget.max_output_tokens = max_tokens;
     }
-    let refusal = query(&session_id, request.clone())?;
+    let mut ids = Vec::new();
+    for page_index in 0..4 {
+        let result = query(&session_id, request.clone())?;
+        assert_eq!(result["ok"], true, "{result}");
+        assert!(result.to_string().len() <= max_tokens as usize * 4);
+        assert!(matches!(
+            result["output_budget"]["tier"].as_str(),
+            Some("full" | "compact_turn")
+        ));
+        let rows = result["rows"].as_array().ok_or("rows missing")?;
+        assert!(!rows.is_empty());
+        if page_index == 0 {
+            assert!(rows.len() < 4);
+        }
+        assert_eq!(result["returned"], rows.len());
+        ids.extend(rows.iter().map(|row| row["entity_id"].clone()));
+        if result["continuation"].is_null() {
+            break;
+        }
+        request["request"]["query"]["continuation"] = result["continuation"].clone();
+    }
+    assert_eq!(ids, vec![json!("1"), json!("2"), json!("3"), json!("4")]);
+    let oversized = wrapper(
+        json!({"kind":"entities", "kinds":["unit"], "limit":1,
+        "fields":(0..32).map(|index| format!("{index:02}-{}", "x".repeat(125))).collect::<Vec<_>>()}),
+        None,
+    );
+    let refusal = query(&session_id, oversized)?;
     expect_refusal(&refusal, "budget_exceeded");
     assert!(refusal.get("continuation").is_none());
     assert!(refusal.to_string().len() <= max_tokens as usize * 4);
@@ -703,22 +733,6 @@ fn lab_structured_full_packet_refuses_clipping_and_smaller_pages_resume_without_
         refusal["agent_turn"]["anchor"],
         anchor_json(&source.anchor())
     );
-
-    request["request"]["query"]["limit"] = json!(1);
-    let mut ids = Vec::new();
-    for _ in 0..4 {
-        let result = query(&session_id, request.clone())?;
-        assert_eq!(result["ok"], true, "{result}");
-        assert!(result.to_string().len() <= max_tokens as usize * 4);
-        assert_eq!(result["returned"], 1);
-        assert_eq!(result["rows"].as_array().ok_or("rows missing")?.len(), 1);
-        ids.push(result["rows"][0]["entity_id"].clone());
-        if result["continuation"].is_null() {
-            break;
-        }
-        request["request"]["query"]["continuation"] = result["continuation"].clone();
-    }
-    assert_eq!(ids, vec![json!("1"), json!("2"), json!("3"), json!("4")]);
     assert_eq!(
         session
             .lock()
@@ -972,7 +986,10 @@ fn lab_ranked_entities_resume_exact_history_with_current_authority() -> TestResu
         first["rows"][0]["ranking"]["facts"]["stock"]["epistemic_state"],
         "inferred"
     );
-    assert_eq!(first["rows"][0]["fields"]["concealed"]["presence"], "redacted");
+    assert_eq!(
+        first["rows"][0]["fields"]["concealed"]["presence"],
+        "redacted"
+    );
     assert!(!first["rows"].to_string().contains("concealedpayload"));
     assert_eq!(first["coverage"]["absence_proven"], false);
     assert_eq!(first["agent_turn"]["anchor"], anchor_json(&source.anchor()));
@@ -988,12 +1005,21 @@ fn lab_ranked_entities_resume_exact_history_with_current_authority() -> TestResu
     assert_eq!(historical["historical"], true);
     assert_eq!(historical["anchor"], anchor_json(&source.anchor()));
     assert_eq!(historical["current_anchor"], anchor_json(&current.anchor()));
-    assert_eq!(historical["agent_turn"]["anchor"], anchor_json(&current.anchor()));
+    assert_eq!(
+        historical["agent_turn"]["anchor"],
+        anchor_json(&current.anchor())
+    );
     assert_eq!(historical["rows"][0]["entity_id"], "3");
     assert_eq!(historical["rows"][1]["entity_id"], "2");
     assert_eq!(historical["rows"][0]["generation"], 1);
-    assert_eq!(historical["coverage"]["eligible_as_mutation_evidence"], false);
-    assert_eq!(historical["rows"][0]["ranking"]["eligible_as_mutation_evidence"], false);
+    assert_eq!(
+        historical["coverage"]["eligible_as_mutation_evidence"],
+        false
+    );
+    assert_eq!(
+        historical["rows"][0]["ranking"]["eligible_as_mutation_evidence"],
+        false
+    );
 
     request["request"]["query"]["continuation"] = historical["continuation"].clone();
     let session = resolve_session(Some(session_id.clone()))?;
@@ -1008,7 +1034,11 @@ fn lab_ranked_entities_resume_exact_history_with_current_authority() -> TestResu
     }
     expect_refusal(&query(&session_id, request)?, "capability_denied");
     assert_eq!(
-        session.lock().map_err(|_| "session poisoned")?.adapter.snapshot(),
+        session
+            .lock()
+            .map_err(|_| "session poisoned")?
+            .adapter
+            .snapshot(),
         &current
     );
     Ok(())

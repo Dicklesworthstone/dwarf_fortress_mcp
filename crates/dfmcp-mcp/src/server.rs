@@ -3011,8 +3011,13 @@ pub fn fortress_observe(session_id: Option<String>) -> String {
     description = "Run a bounded laboratory query. The closed structured wrapper {\"mode\":\"structured\",\"request\":{\"schema\":\"dfmcp.query/1\",\"query\":{...}},\"at\"?:state_hash} exposes stateless typed queries under current Query authority. The closed temporal wrapper {mode:temporal,request:{schema:dfmcp.query/1,query:{kind:capture|changes|baselines|release_baseline,...}}} owns up to eight foreground selected baselines per session; capture uses key, select and max_game_ticks, changes uses baseline with optional limit/continuation, release_baseline uses baseline. Complete results and current active work are published atomically before private baseline changes; restart loses baselines and restore invalidates their epoch. The closed query_changes wrapper takes before (exact retained hash), after (optional, defaults to current), select (complete entities selection), limit and continuation; it reports selected endpoint differences without proving intermediate history or mutation evidence. Other mode: \"summary\" (default), \"entities\", or a JSON object {\"mode\":\"entities\",\"kind\":\"unit\",\"limit\":25,\"offset\":0} or {\"mode\":\"terrain\",\"min\":[x,y,z],\"max\":[x,y,z]}. Full DfQL is not implemented."
 )]
 pub fn fortress_query(session_id: Option<String>, mode: Option<String>) -> String {
-    match fortress_query_publication(session_id, mode, std::time::Instant::now()) {
+    match query_publication(session_id, mode, std::time::Instant::now(), false) {
         QueryPublication::Pending(response) | QueryPublication::Published(response) => response,
+        QueryPublication::Projected { .. } => coded_error_payload(
+            "fortress.query",
+            ErrorCode::InternalInvariantViolation,
+            "direct laboratory query unexpectedly deferred entity publication",
+        ),
     }
 }
 
@@ -3021,6 +3026,69 @@ pub fn fortress_query(session_id: Option<String>, mode: Option<String>) -> Strin
 pub(crate) enum QueryPublication {
     Pending(String),
     Published(String),
+    /// A projected entity query captures presentation dependencies outside the
+    /// session/world locks, then executes once against its exact admitted source.
+    /// This provisional orientation is internal and never returned by a tool.
+    Projected {
+        orientation: String,
+        query: Box<PreparedEntityQuery>,
+    },
+}
+
+pub(crate) struct PreparedEntityQuery {
+    session: Arc<Mutex<LabSession>>,
+    current: OperationContext,
+    source: StateAnchor,
+    request: structured_query::Request,
+}
+
+impl PreparedEntityQuery {
+    pub(crate) fn execute(
+        self,
+        started: std::time::Instant,
+        fits: &dyn Fn(&serde_json::Value) -> Result<bool>,
+    ) -> serde_json::Value {
+        with_session_read(
+            &self.session,
+            |error| query_budget::response_payload(Err(error), &self.current, true),
+            |guard| {
+                let current = context_for(guard, self.current.request_id.get());
+                let result = authorize_entry(&current, Capability::Query, RiskTier::ReadOnly)
+                    .and_then(|()| {
+                        if current.anchor != self.current.anchor {
+                            return Err(DfmcpError::new(
+                                ErrorCode::StaleAnchor,
+                                "current world changed while preparing the query packet; retry at the new anchor",
+                            ));
+                        }
+                        if current.budget != self.current.budget {
+                            return Err(DfmcpError::new(
+                                ErrorCode::BudgetExceeded,
+                                "query budget changed while preparing the complete packet",
+                            ));
+                        }
+                        if current.grants != self.current.grants {
+                            return Err(DfmcpError::new(
+                                ErrorCode::CapabilityDenied,
+                                "session authority changed while preparing the query packet",
+                            ));
+                        }
+                        let hash = self.source.state_hash.to_string();
+                        let source = retained_resource_snapshot(guard, Some(&hash))?;
+                        if source.anchor() != self.source {
+                            return Err(DfmcpError::new(
+                                ErrorCode::StaleAnchor,
+                                "retained query source changed before page execution",
+                            ));
+                        }
+                        structured_query::execute_projected(
+                            source, &current, &self.request, started, fits,
+                        )
+                    });
+                query_budget::response_payload(result, &current, true)
+            },
+        )
+    }
 }
 
 /// Baselines own private query state, not game or durable-world progress. Keep
@@ -3049,6 +3117,15 @@ pub(crate) fn fortress_query_publication(
     session_id: Option<String>,
     mode: Option<String>,
     started: std::time::Instant,
+) -> QueryPublication {
+    query_publication(session_id, mode, started, true)
+}
+
+fn query_publication(
+    session_id: Option<String>,
+    mode: Option<String>,
+    started: std::time::Instant,
+    defer_entities: bool,
 ) -> QueryPublication {
     let mode = mode.map_or_else(|| "summary".to_owned(), |value| value);
     let structured = structured_query::parse(&mode);
@@ -3113,9 +3190,25 @@ pub(crate) fn fortress_query_publication(
                         let before = retained_resource_snapshot(guard, Some(&request.before))?;
                         let after = retained_resource_snapshot(guard, request.after.as_deref())?;
                         query_comparison::execute(before, after, &ctx, request)?
-                    } else if let Some(request) = &structured {
+                    } else if let Some(request) = structured {
                         let source = retained_resource_snapshot(guard, request.at.as_deref())?;
-                        structured_query::execute(source, &ctx, request)?
+                        if defer_entities && request.is_entities() {
+                            // The session's normal post-call retention and the
+                            // facade's change projection also inspect this
+                            // source. Bound it before releasing this first lock.
+                            query_budget::admit_sources(&[source], &ctx)?;
+                            let orientation = structured_query::orientation(source.anchor(), &ctx);
+                            return Ok(QueryPublication::Projected {
+                                orientation: query_budget::response(Ok(orientation), &ctx, true),
+                                query: Box::new(PreparedEntityQuery {
+                                    session: Arc::clone(&session),
+                                    current: ctx.clone(),
+                                    source: source.anchor(),
+                                    request,
+                                }),
+                            });
+                        }
+                        structured_query::execute(source, &ctx, &request)?
                     } else {
                         legacy_query(guard, &ctx, &mode)?
                     };

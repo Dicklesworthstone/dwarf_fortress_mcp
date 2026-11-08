@@ -7,6 +7,15 @@ use dfmcp_core::{Capability, DfmcpError, ErrorCode, OperationContext, Result, Ri
 use dfmcp_world::WorldSnapshot;
 use serde_json::{Value, json};
 
+// Reuse the iterative shape/depth/frontier checks. This caller needs only source
+// admission, not the module's projected-row rendering helper.
+#[path = "spatial_query_source.rs"]
+#[allow(dead_code, clippy::duplicate_mod)]
+mod source;
+
+const MAX_STRUCTURAL_SOURCE_BYTES: usize = 16 * 1024 * 1024;
+const MAX_STRUCTURAL_SOURCE_WORK: usize = 4_000_000;
+
 fn exhausted(message: &str) -> DfmcpError {
     DfmcpError::new(ErrorCode::BudgetExceeded, message)
 }
@@ -40,6 +49,26 @@ pub(super) fn admit_sources(
     if records > u64::from(current.budget.max_entities) {
         return Err(exhausted("query exceeds its complete source record budget"));
     }
+    // A structural hard bound protects the recursive canonical encoder before
+    // it allocates. Its conservative in-memory estimate is not the negotiated
+    // exact canonical-byte measure below, nor the response-token allowance.
+    // Every source shares one work/shape ceiling and the original wall deadline.
+    let mut structural_context = current.clone();
+    structural_context.budget.max_bytes = MAX_STRUCTURAL_SOURCE_BYTES as u64;
+    let mut structural_bytes = 0_usize;
+    let mut structural_work = 0_usize;
+    for source in sources {
+        let admitted = source::preflight(source, &structural_context, started)?;
+        structural_bytes = structural_bytes.saturating_add(admitted.bytes);
+        structural_work = structural_work.saturating_add(admitted.work);
+        if structural_bytes > MAX_STRUCTURAL_SOURCE_BYTES
+            || structural_work > MAX_STRUCTURAL_SOURCE_WORK
+        {
+            return Err(exhausted(
+                "query exceeds its complete-source structural byte or work bound",
+            ));
+        }
+    }
     let mut canonical_bytes = 0_u64;
     for source in sources {
         canonical_bytes = canonical_bytes.saturating_add(source.canonical_bytes().len() as u64);
@@ -62,6 +91,14 @@ pub(super) fn response(
     context: &OperationContext,
     structured: bool,
 ) -> String {
+    response_payload(result, context, structured).to_string()
+}
+
+pub(super) fn response_payload(
+    result: Result<Value>,
+    context: &OperationContext,
+    structured: bool,
+) -> Value {
     let mut payload = match result {
         Ok(payload) => payload,
         Err(error) => json!({"ok": false, "error": {
@@ -79,7 +116,31 @@ pub(super) fn response(
         "max_output_tokens": context.budget.max_output_tokens,
         "max_wall_millis": context.budget.max_wall_millis,
     });
-    payload.to_string()
+    payload
+}
+
+/// Pure admission for a prospective complete structured packet. The same
+/// lossless tiers as final publication are eligible; generic row clipping is
+/// never a way to make a bound cursor advance.
+pub(crate) fn lossless_page_fits(response: &str, query_budget: &Value) -> Result<bool> {
+    let maximum_bytes = query_budget["maximum_response_bytes"].as_u64().unwrap_or(0);
+    let maximum_tokens = query_budget["max_output_tokens"]
+        .as_u64()
+        .unwrap_or(0)
+        .min(maximum_bytes / 4);
+    let fitted = crate::output_budget::fit(response, maximum_tokens);
+    let payload: Value = serde_json::from_str(&fitted).map_err(|_| {
+        DfmcpError::new(
+            ErrorCode::InternalInvariantViolation,
+            "structured query presentation is not a JSON object",
+        )
+    })?;
+    Ok(payload["ok"] == true
+        && fitted.len() as u64 <= maximum_bytes
+        && matches!(
+            payload["output_budget"]["tier"].as_str(),
+            Some("full" | "compact_turn")
+        ))
 }
 
 /// Enforce the negotiated bytes, tokens and wall time on the entire Agent Turn.

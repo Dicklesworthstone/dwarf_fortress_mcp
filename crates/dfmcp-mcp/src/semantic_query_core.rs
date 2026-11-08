@@ -28,6 +28,7 @@ const MAX_INPUT_BYTES: usize = 65_536;
 const MAX_INPUT_NODES: usize = 4_096;
 const MAX_INPUT_DEPTH: usize = 24;
 const MAX_ROWS: u32 = 512;
+const MAX_SOURCE_STRUCTURE_BYTES: u64 = 16 * 1024 * 1024;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -498,10 +499,8 @@ fn projected_entities(
     output: &PageBudget<'_>,
     work: &mut source::Budget,
 ) -> Result<Value> {
-    let candidates = query_candidates(snapshot, query, hard_limit)?;
-    let reaches_terminal = candidates
-        .continuation_after(candidates.entities().len())?
-        .is_none();
+    // Admit the combined source and predicate scan before selection performs
+    // it; independent per-phase limits cannot widen one request's allowance.
     work.charge(
         0,
         snapshot.graph.entities.len().saturating_mul(
@@ -512,6 +511,10 @@ fn projected_entities(
                 .saturating_add(query.predicate.as_ref().map_or(1, Predicate::complexity)),
         ),
     )?;
+    let candidates = query_candidates(snapshot, query, hard_limit)?;
+    let reaches_terminal = candidates
+        .continuation_after(candidates.entities().len())?
+        .is_none();
     let mut rows = Vec::new();
     let mut accepted = None;
     for entity in candidates.entities() {
@@ -612,7 +615,18 @@ pub(super) fn execute_with_page_budget(
         ));
     }
     let mut source_work = if matches!(&request.query, Query::Entities { .. }) {
-        Some(source::preflight(snapshot, context, started)?)
+        // The conservative structural ceiling protects allocation and nesting;
+        // the negotiated source-byte measure is the exact canonical encoding.
+        // Keep them independent so a source admitted at its exact byte boundary
+        // is not rejected merely because the structural estimate is larger.
+        let mut structural_context = context.clone();
+        structural_context.budget.max_bytes = MAX_SOURCE_STRUCTURE_BYTES;
+        let work = source::preflight(snapshot, &structural_context, started)?;
+        if snapshot.canonical_bytes().len() as u64 > context.budget.max_bytes {
+            return Err(budget("query exceeds its canonical source byte budget"));
+        }
+        work.check()?;
+        Some(work)
     } else {
         None
     };

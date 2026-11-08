@@ -1,5 +1,78 @@
 # Implementation Status
 
+## Unreleased — Publish complete laboratory entity pages within their Agent Turn
+
+The default laboratory facade now includes its complete wrapper, coverage,
+active work and captured Agent Turn while selecting structured entity pages.
+It returns a fitting ordered prefix automatically, including the case where a
+terminal page becomes smaller after its continuation disappears. Structured
+publication still accepts only lossless full/compact-turn output; an oversized
+required row or complete envelope is refused without a hidden advancing cursor.
+
+Presentation is captured once outside the session/world locks. Deferred reads
+then recheck current Query authority, grants, budget, complete current anchor and
+exact retained source before one execution. Prospective page rendering is pure:
+it does not acquire session/task state, advance turns or publish notifications.
+The reserved presentation turn has separate success/failure templates. A refusal
+preserves the previous successful anchor and withdraws provisional world changes.
+Late output/deadline refusals are rebuilt through that same failure template and
+refitted under the original query allowance, including minimal responses that
+discarded budget metadata; they cannot expose the prospective anchor or briefing.
+Successful orientation is installed only after final publication succeeds and
+only if no newer presentation turn superseded it. Raw/legacy/query_changes routes
+keep their existing immediate execution. Concurrent selected-baseline capture,
+comparison, catalog and release preserve their transactional publication path:
+accepted stateful Agent Turns bypass all subsequent presentation and budget
+checks, so a committed root cannot become a facade refusal.
+
+Laboratory source admission now performs iterative structural/depth/frontier
+checks before canonical serialization. Sources share the structural/work ceiling
+and overall deadline; exact aggregate canonical bytes remain the negotiated
+source-byte measure. Core entities use the same independent structural and exact
+canonical limits, and admit combined source-plus-scan work before selecting rows.
+Output reservations do not widen or narrow the original source authority.
+
+Owning bead: `df-lab-structured-query-f7q`. Final focused Rust validation passes
+**63/63** tests: 42 core/search, four projected lab helper, nine lab budget and
+eight output-budget cases. The run uses complete original core/search/budget
+modules, two byte-identical lab helper spans and one original constant, actual
+core/world crates and 13 exact original lock identities; all 65 source inputs
+remain stable. It excludes the unrelated event/adapter/transport dispatcher.
+The final exact-source renderer/finalizer component passes **35/35**, including
+immutable repeated rendering, retained work, complete-page/cursor fitting and
+both new late-refusal regressions. Those regressions cover zero/expired wall
+deadlines, oversized output, the prior anchor and paused briefing, the same turn,
+retained plans, no cache advance, tiny-budget refusal and the minimal response
+that discards budget metadata. All 66 inputs and 11 original excerpts remain
+stable; all 13 original dependency identities match the lock. This component
+includes the original orientation registry and conditional cache publication,
+but excludes capture, session locking and server/transport execution. These
+suites overlap and their counts must not be added as unique tests. The final
+actual workspace world-query run again passes **16/16** on unchanged final bytes.
+The earlier clock presentation component remains **29/29** with its stated scope.
+
+Six actual public-facade regressions are registered for complete-turn paging,
+pending work, required-row refusal, failed-query observation basis, historical
+current authority and deferred-context rechecks. They and the updated legacy
+facade regression are not executed here: the actual latest-nightly locked/offline
+MCP `--tests` check was SIGKILLed in unchanged Asupersync 0.5.0 before compiling
+the MCP crate, without a Rust source diagnostic. A second actual check after
+merging the concurrent baseline work again ended in that dependency: 116.738
+seconds and 5,892,728 KiB peak child RSS, with one Cargo job and debug/incremental
+output disabled. No numeric container memory limit was exposed. The final pure
+renderer/finalizer code is compiled and executed; full server capture/deferral
+and the transactional-baseline coexistence remain independently source-reviewed.
+
+Final Agent Turn contract and edited-file formatting/diff checks pass.
+The session's `verify.sh` run passes its initial contracts and stops because bead
+coverage requires the unavailable `br` executable. The development
+`qualify_local.sh` run passes **34 gates**,
+including repository/native component regressions and Cargo metadata, then
+fails workspace rustfmt on **51 unchanged files**; none of this increment's edited
+files appears in that formatting failure. Its receipt is explicitly `failed`.
+No whole-workspace qualification, native-game result or production admission is
+claimed. No dependency, native protocol or eleven-tool waist is changed.
+
 ## Unreleased — Laboratory condition monitoring engine
 
 The shared foreground watch engine now has a private, immutable laboratory

@@ -2,12 +2,12 @@ use super::*;
 use std::collections::{BTreeMap, BTreeSet};
 
 use dfmcp_core::{
-    CapabilityGrant, CapabilityScope, EdgeId, EntityId, EventId, FortressId, GameTick,
+    CapabilityGrant, CapabilityScope, Digest32, EdgeId, EntityId, EventId, FortressId, GameTick,
     ObservationCursor, RequestId, SessionId, WorkBudget,
 };
 use dfmcp_world::{
-    ChunkCoord, EdgeKind, EdgeRecord, EntityKind, EntityRecord, MapChunk, TerrainRun, WorldEvent,
-    WorldEventKind, WorldGraph,
+    ChunkCoord, EdgeKind, EdgeRecord, EntityKind, EntityRecord, Fact, FactPresence, FactSource,
+    MapChunk, TerrainRun, Value as WorldValue, WorldEvent, WorldEventKind, WorldGraph,
 };
 
 type TestResult = std::result::Result<(), Box<dyn std::error::Error>>;
@@ -136,6 +136,70 @@ fn two_sources_share_one_record_and_byte_allowance() -> TestResult {
     assert_eq!(
         admit_sources(&[&before, &after], &context)?,
         json!({"records":10, "canonical_bytes":bytes})
+    );
+    Ok(())
+}
+
+#[test]
+fn structural_preflight_bounds_unselected_compatibility_values_before_canonical_encoding()
+-> TestResult {
+    for wide in [false, true] {
+        let (mut source, mut context) = fixture();
+        context.budget.max_bytes = 64 * 1024 * 1024;
+        let value = if wide {
+            WorldValue::List(vec![WorldValue::Null; MAX_STRUCTURAL_SOURCE_BYTES / 32])
+        } else {
+            let mut value = WorldValue::Null;
+            for _ in 0..65 {
+                value = WorldValue::List(vec![value]);
+            }
+            value
+        };
+        let mut concealed = Fact::known(value, source.tick, FactSource::Replay, Digest32::ZERO);
+        concealed.presence = Some(FactPresence::Redacted("unselected".to_owned()));
+        source
+            .graph
+            .entities
+            .get_mut(&EntityId::new(1))
+            .ok_or("entity missing")?
+            .fields
+            .insert("concealed".to_owned(), concealed);
+        // Deliberately do not encode or refresh this malformed source first.
+        let error = admit_sources(&[&source], &context)
+            .err()
+            .ok_or("source admitted")?;
+        assert_eq!(error.code, ErrorCode::BudgetExceeded);
+        assert!(
+            error
+                .message
+                .contains(if wide { "frontier" } else { "nesting" }),
+            "{}",
+            error.message
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn structural_source_cap_is_joint_and_current_authority_precedes_it() -> TestResult {
+    let (mut source, mut context) = fixture();
+    context.budget.max_bytes = 64 * 1024 * 1024;
+    source
+        .graph
+        .entities
+        .get_mut(&EntityId::new(1))
+        .ok_or("entity missing")?
+        .label = "x".repeat(MAX_STRUCTURAL_SOURCE_BYTES / 2);
+    assert!(admit_sources(&[&source], &context).is_ok());
+    let error = admit_sources(&[&source, &source], &context)
+        .err()
+        .ok_or("joint structural overflow admitted")?;
+    assert_eq!(error.code, ErrorCode::BudgetExceeded);
+    assert!(error.message.contains("complete-source structural"));
+    context.grants.clear();
+    assert_eq!(
+        admit_sources(&[&source], &context).map_err(|error| error.code),
+        Err(ErrorCode::CapabilityDenied)
     );
     Ok(())
 }
