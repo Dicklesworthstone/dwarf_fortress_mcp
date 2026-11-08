@@ -253,7 +253,12 @@ impl WorkshopProductionOrigin {
         result
     }
 
-    fn manifest(&mut self, current: &WorkshopManifest) -> Result<()> {
+    /// Retain an already decoded handshake before any later fallible budget,
+    /// authority or custody check. This only raises rejection floors or fences
+    /// the owner: it performs no I/O, needs no surviving grant and establishes
+    /// neither current completion nor permission. A matching manifest cannot
+    /// clear an existing fence or lower the retained source generation.
+    pub fn retain_source_manifest(&mut self, current: &WorkshopManifest) -> Result<()> {
         self.high_generation = self.high_generation.max(current.generation);
         if current.endpoint != self.binding.endpoint()
             || current.fortress != *self.binding.fortress()
@@ -280,6 +285,13 @@ impl WorkshopProductionOrigin {
         expected_tick: GameTick,
         context: &OperationContext,
     ) -> Result<CompletedWorkshopProduction> {
+        // The caller may already have consumed this manifest while connecting.
+        // Losing the remaining deadline or authority cannot erase that source
+        // generation before the bounded local and native read work begins.
+        if let Err(cause) = self.retain_source_manifest(source.manifest()) {
+            source.fence();
+            return Err(cause);
+        }
         let mut work = prepaid(context, REFRESH_WORK_BYTES)?;
         if self.fenced {
             return Err(stale(
@@ -294,7 +306,7 @@ impl WorkshopProductionOrigin {
         }
         let result = (|| {
             self.verify_with(journal, acknowledgement, &mut work)?;
-            self.manifest(source.manifest())?;
+            self.retain_source_manifest(source.manifest())?;
             let insertion = self.record.insertion().ok_or_else(corrupt)?;
             let (building, item) = (insertion.building_id(), insertion.item_id());
             let current = self.access(&work.reserve(RPC_RESERVE)?, true)?;
@@ -338,7 +350,7 @@ impl WorkshopProductionOrigin {
                     "original workshop is absent, contradicted or unqualified",
                 ));
             }
-            self.manifest(source.manifest())?;
+            self.retain_source_manifest(source.manifest())?;
             work.context = self.access(&work.current()?, true)?;
             self.verify_with(journal, acknowledgement, &mut work)?;
             if progress.tick() != expected_tick.get() {

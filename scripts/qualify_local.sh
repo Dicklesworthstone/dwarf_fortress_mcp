@@ -168,6 +168,7 @@ run_gate python-syntax python3 -m py_compile \
   tests/stdio/combined_production_preplan.py \
   tests/stdio/combined_production_preflight.py \
   tests/stdio/combined_production_runtime_peer.py \
+  tests/stdio/combined_workshop_runtime_peer.py \
   scripts/announcement_source_custody.py \
   scripts/test_announcement_source_custody.py \
   scripts/validate_repo.py \

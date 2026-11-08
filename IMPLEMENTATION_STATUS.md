@@ -1,5 +1,94 @@
 # Implementation Status
 
+## Unreleased — Bind completed original workshops to production
+
+The combined labor/order development owner now consumes an independently
+acknowledged original Carpenter workshop through closed operator
+`workshop_prerequisite` configuration. It opens the exact donor journal and
+Workshop ACK Offline, preserves the original Placed receipt and performs a fresh
+complete progress read at the current paused production tick. A historical
+completion sample never substitutes for that read. The donor files remain
+unchanged, and the dedicated read credential grants no construction permission.
+
+All four original request shapes bind the immutable imported witness before
+deriving their plan identities and step keys. A sealed original requirement
+marker and private immutable `original.workshop` association retain the complete
+parent digest, exact donor directory and original descriptor. Every original
+order, including later portfolio leaves and dependency-free existing-labor
+orders, requalifies the same workshop before preparation and after the durable
+dispatch marker. Refusal at the latter boundary retains the exact original
+uncertainty; it does not permit another key or automatic redispatch. Recovery
+checks the marked plan, donor, full sidecar and externally retained digest
+together, preventing removal or substitution of the original policy.
+
+The owner preserves consumed tick, native generation, building allocator and
+sticky fence state even when later checks or response publication fail.
+Successful handshake manifests are consumed before fallible refresh budget,
+authority or custody checks. A witnessed pre-plan checkpoint now exposes these
+floors before complete original recovery exists; reopening restores them before
+native contact and raises the authority floor without creating a canonical
+observation. Complete original recovery retains the separate association digest
+and consumed-source floor. Token-free Offline opening and Query verify local
+custody without restoring current completion or a confirmation permit.
+
+These fresh-read floors remain caller-held recovery custody, not new donor ACK
+records. A retained owner cannot lower them or clear its fence. A new owner can
+reject invalid floors and values below the immutable donor seed, but cannot
+independently detect rollback of an entire later external checkpoint or complete
+recovery floor that still satisfies that seed. Before any original archive or
+sidecar exists, omission of the checkpoint is likewise not locally detectable.
+The sealed plan and sidecar preserve the workshop policy after planning; they do
+not durably acknowledge later read floors. These limits remain explicit.
+
+The actual recovery campaign found that reserving the full 2 GiB workshop
+dispatch allowance for each read phase could exhaust one bounded Wait after
+successful original reconciliation and history creation. Configured read-only
+custody now has a 768 MiB ceiling; prepare/commit/cancel delegation retains the
+2 GiB dispatch ceiling. Legacy custody stays at 512 MiB, native frontier work
+stays at 2 GiB, and the public 8 GiB default/32 GiB maximum are unchanged. All
+reservations share the same shrinking operation allowance and deadline.
+
+Validation on 2026-11-08 after preserving the concurrent Workshop clock changes
+from `0838a14`: the byte-identical host component again passes **393/393 tests**,
+with zero failures or ignored tests, on rustc 1.102.0-nightly
+(f5cedb83a, 2026-11-07), locked/offline and one build job. This includes both
+actual Runtime/native TCP campaigns: the same real runtime and private file
+owners qualify fresh completion, refuse unfinished/removed/reincarnated donors,
+check pre-Prepare and post-DispatchStarted freshness, restore a fenced pre-plan
+checkpoint, reject another donor witness, reopen Offline without a Workshop
+token, reject dropped/swapped configuration or sidecars and damaged ACKs, and
+reconcile a lost insertion reply under its exact original key without another
+insertion. The two focused runtime tests also pass separately. Test peers supply
+native protocol responses; no DFHack process or live fortress is involved.
+
+The merged actual repository `dfmcp-adapter` Workshop target passes **70/70
+tests**, with zero failures or ignored tests, in a serialized run: seventeen
+production-origin cases, twenty preserved concurrent clock cases and thirty-three
+existing cases. The original native TCP fixtures and decoded-handshake retention
+before insufficient-budget or expired-authority refusal all pass. This
+post-merge result supersedes the earlier adapter checkpoint's five unresolved
+TCP failures and the concurrent clock increment's pending final-source rerun
+for this target; it does not establish the cause of earlier failures. The static
+Workshop contract passes with 56 inventoried sources and all nine
+required-inventory/refusal tests pass.
+
+The host component compiles actual runtime, configuration, request compilers,
+custody, presentation and their real repository dependency crates. It excludes
+MCP transport/tool macros, Asupersync and admission integration, the stateful
+query publisher and a top-level transport-coupled workforce test registration.
+Post-test hash verification matched 496 copied source files, 19 exact helper
+excerpts, 890 resource inputs, 594 dependency inputs and all eleven locked
+external package identities, with five declared harness glue files.
+Consequently this is not a full MCP/CLI campaign or whole-workspace
+qualification. The updated host contract covers 92 existing source paths, and
+its budget/feature assertions pass in the suite. The merged `scripts/verify.sh`
+attempt passed its preceding static admission and dependency-policy checks,
+then stopped because the required `br` executable is unavailable; full
+verification is still blocked. No new native protocol,
+public tool, canonical workshop predicate, manager/material feasibility proof,
+causal production claim or production admission is added. Workshop and
+finite-production beads remain in progress for their broader live acceptance.
+
 ## Unreleased — Bind finite clock intervals to the original Carpenter workshop
 
 Added the reusable `workshop_construction::clock` owner for the first-fortress

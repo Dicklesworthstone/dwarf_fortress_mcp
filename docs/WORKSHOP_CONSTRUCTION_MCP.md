@@ -275,8 +275,9 @@ references, and never fabricate a canonical world anchor.
 
 The adapter exposes `workshop_construction::production_origin` so an importing
 production host can require the exact original Carpenter workshop to be complete
-before its own effects. This is an embedding API; combined-host configuration,
-original-plan association and guarded execution are a separate integration step.
+before its own effects. The [combined production host](COMBINED_PRODUCTION_MCP.md#require-an-exact-completed-original-workshop)
+uses this embedding API for closed operator configuration, an immutable original
+plan association and fresh checks at every order preparation and dispatch boundary.
 It adds no MCP tool or native method and creates no canonical workshop fact.
 
 Close the workshop session before importing its exclusive private custody. Open
@@ -314,6 +315,12 @@ workshop can be sampled again while preserving its original identity and floors.
 The host must retain one origin owner throughout the session. Connection or
 handshake uncertainty before `refresh` must call its one-way `fence`; withdrawal
 requires no surviving capability grant and cannot be reversed by Query.
+Immediately after a successful handshake, the host calls
+`retain_source_manifest` before any fallible budget or deadline check. `refresh`
+also consumes that already decoded manifest before its local preconditions.
+This operation only raises the generation floor or fences a mismatched source;
+it performs no I/O and cannot grant authority or fresh completion. A matching
+later manifest cannot clear an earlier fence.
 
 Recovery has two distinct inputs. The immutable donor descriptor binds the
 original workshop. The separate `retain_recovery_floor` API consumes the
@@ -323,6 +330,11 @@ a fence. These caller-held recovery floors are rejection evidence, **not a
 local durable acknowledgement of fresh progress reads**. The importer does not
 append to the donor journal or ACK. A host must preserve those consumed floors
 across handoff or recovery, rather than remint an owner from old donor history.
+On a new owner, donor custody supplies only its immutable retained seed. It
+cannot independently detect rollback of a later externally held fresh-read
+floor that still satisfies that seed, including a floor in complete importing
+host recovery. An immutable host plan association prevents replacing the donor
+policy; it does not durably acknowledge subsequent read floors.
 
 Each operation prepays its complete logical work and keeps one shrinking wall
 deadline of at most 60 seconds:

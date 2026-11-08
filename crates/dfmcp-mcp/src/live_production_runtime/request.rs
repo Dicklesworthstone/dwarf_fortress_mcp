@@ -1,6 +1,6 @@
 //! Closed combined labor and finite furniture-order request compiler.
-use crate::semantic_work_order_runtime::request::Objective;
 use crate::semantic_work_order_runtime::inventory_baseline::InventoryBaselines;
+use crate::semantic_work_order_runtime::request::Objective;
 use crate::semantic_workforce_runtime::{digest, exhausted, invalid};
 use dfmcp_adapter::work_orders::WorkOrderRecipe;
 use dfmcp_core::{
@@ -89,6 +89,15 @@ impl Request {
         baselines: &InventoryBaselines,
         context: &OperationContext,
     ) -> Result<PreparedPlan> {
+        self.compile_with_workshop(evidence, baselines, context, None)
+    }
+    pub(crate) fn compile_with_workshop(
+        &self,
+        evidence: &PredicateEvidence<'_>,
+        baselines: &InventoryBaselines,
+        context: &OperationContext,
+        origin: Option<Digest32>,
+    ) -> Result<PreparedPlan> {
         self.validate()?;
         if evidence.snapshot().anchor() != context.anchor {
             return Err(invalid(
@@ -174,6 +183,7 @@ impl Request {
         if let Some(objective) = &self.objective {
             objective.append_identity(&mut bytes, baselines, context.anchor)?;
         }
+        super::workshop_binding::append_identity(&mut bytes, origin)?;
         let hash = Digest32::of_bytes(&bytes);
         let id = IntentId::new(u128::from_be_bytes(
             hash.as_bytes()[..16]
@@ -213,9 +223,15 @@ impl Request {
                 self.amount,
                 native.as_str()
             ),
-            Some(Objective::ObservedInventoryIncrease { item_type, increase_stack_units }) => format!(
+            Some(Objective::ObservedInventoryIncrease {
+                item_type,
+                increase_stack_units,
+            }) => format!(
                 "Configure {} for {} citizens, insert {} finite {} order units and observe an increase of at least {increase_stack_units} {item_type} stack units from the sealed original census; production attribution unknown",
-                self.labor, units.len(), self.amount, native.as_str()
+                self.labor,
+                units.len(),
+                self.amount,
+                native.as_str()
             ),
             None => format!(
                 "Configure {} for {} citizens and complete {} finite {} order units",
@@ -228,7 +244,7 @@ impl Request {
         let intent = Intent {
             id,
             anchor: context.anchor,
-            summary,
+            summary: super::workshop_binding::summary(summary, origin)?,
             terminal_condition: Predicate::All(vec![labor_goal.clone(), order_goal.clone()]),
             constraints: vec![Constraint::MaxRisk(RiskTier::Guarded)],
             requested_actions: vec![

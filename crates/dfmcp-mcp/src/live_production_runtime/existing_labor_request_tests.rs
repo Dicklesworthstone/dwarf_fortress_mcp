@@ -22,6 +22,45 @@ fn requirement() -> Result<ExistingLaborRequirement> {
 }
 
 #[test]
+fn workshop_bound_existing_labor_rebuilds_order_identity_without_an_assignment() -> Result<()> {
+    let (_, projection) = observation(&[42, 43])?;
+    let c = context(&projection.snapshot);
+    let evidence = PredicateEvidence::scoped(&projection.snapshot, policy(&projection.snapshot))?;
+    let baselines =
+        crate::semantic_work_order_runtime::inventory_baseline::InventoryBaselines::default();
+    let request = request()?;
+    let required = requirement()?;
+    let legacy = request.compile(&evidence, &required, &c)?;
+    assert_eq!(
+        legacy,
+        request.compile_with_workshop(&evidence, &required, &baselines, &c, None)?
+    );
+    let first_origin = Digest32::of_bytes(b"first completed workshop");
+    let second_origin = Digest32::of_bytes(b"second completed workshop");
+    let first =
+        request.compile_with_workshop(&evidence, &required, &baselines, &c, Some(first_origin))?;
+    let second =
+        request.compile_with_workshop(&evidence, &required, &baselines, &c, Some(second_origin))?;
+    super::super::workshop_binding::assert_compiled_binding(
+        &legacy,
+        &first,
+        &second,
+        first_origin,
+        second_origin,
+    )?;
+    assert_eq!(
+        ExistingLaborRequirement::from_plan(&first)?,
+        Some(required.clone())
+    );
+    assert!(
+        request
+            .compile_with_workshop(&evidence, &required, &baselines, &c, Some(Digest32::ZERO))
+            .is_err()
+    );
+    Ok(())
+}
+
+#[test]
 fn original_existing_labor_plan_has_only_the_exact_finite_order() -> Result<()> {
     let (_, projection) = observation(&[42, 43])?;
     let c = context(&projection.snapshot);

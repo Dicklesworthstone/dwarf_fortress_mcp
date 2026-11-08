@@ -147,10 +147,109 @@ fn machine_host_contract_preserves_bounded_development_scope() -> Result<()> {
     let paths = host["source_paths"]
         .as_array()
         .ok_or_else(|| invalid("missing source inventory"))?;
-    for file in ["choices.rs", "choices_tests.rs", "clock.rs"] {
+    for file in [
+        "choices.rs",
+        "choices_tests.rs",
+        "clock.rs",
+        "workshop_config.rs",
+        "workshop_binding.rs",
+        "workshop_prerequisite.rs",
+        "workshop_association_tests.rs",
+        "workshop_prerequisite_tests.rs",
+    ] {
         assert!(paths.contains(&json!(format!(
             "crates/dfmcp-mcp/src/live_production_runtime/{file}"
         ))));
+    }
+    for file in [
+        "crates/dfmcp-adapter/src/workshop_construction/production_origin.rs",
+        "crates/dfmcp-adapter/src/workshop_construction/production_origin_tests.rs",
+        "tests/stdio/combined_workshop_runtime_peer.py",
+    ] {
+        assert!(paths.contains(&json!(file)), "{file}");
+    }
+    let workshop = &host["workshop_prerequisite"];
+    assert_eq!(workshop["source_protocol"], "workshop/1.20");
+    assert_eq!(workshop["donor_mode"], "Offline");
+    assert_eq!(workshop["read_credential_env"], workshop_config::TOKEN);
+    assert_eq!(
+        workshop["association_file"],
+        workshop_prerequisite::FILE_NAME
+    );
+    assert!(
+        host["optional_parent_files"]
+            .as_array()
+            .ok_or_else(|| invalid("missing optional parent files"))?
+            .contains(&json!(workshop_prerequisite::FILE_NAME))
+    );
+    assert_eq!(
+        workshop["association_max_bytes"],
+        dfmcp_adapter::workshop_construction::production_origin::ASSOCIATION_MAX_BYTES
+    );
+    assert_eq!(
+        workshop["import_work_bytes"],
+        workshop_prerequisite::OPEN_BYTES
+    );
+    assert_eq!(
+        workshop["qualification_work_bytes"],
+        workshop_prerequisite::CHECK_BYTES
+    );
+    assert_eq!(
+        workshop["local_verification_work_bytes"],
+        workshop_prerequisite::LOCAL_BYTES
+    );
+    assert_eq!(
+        workshop["read_custody_work_max"],
+        WORKSHOP_CUSTODY_READ_BYTES
+    );
+    assert_eq!(
+        workshop["dispatch_custody_work_max"],
+        WORKSHOP_CUSTODY_DISPATCH_BYTES
+    );
+    assert_eq!(
+        workshop["qualify_at"],
+        json!([
+            "original_plan",
+            "each_original_order_prepare",
+            "each_original_order_commit_after_dispatch_started"
+        ])
+    );
+    assert_eq!(
+        workshop["preplan_checkpoint_fields"],
+        json!([
+            "origin_witness",
+            "tick",
+            "generation",
+            "next_building_id",
+            "fenced"
+        ])
+    );
+    for flag in [
+        "origin_binds_original_request_identity",
+        "preplan_checkpoint_mutually_exclusive_with_original_recovery",
+        "preplan_checkpoint_restored_before_native_contact",
+        "consumed_native_floors_retained_after_refusal",
+        "source_fence_is_sticky",
+        "failed_publication_retains_latest_checkpoint",
+        "unconfigured_original_identity_bytes_unchanged",
+        "full_read_budget_reserved_before_source_contact",
+        "decoded_manifest_consumed_before_refresh_preconditions",
+    ] {
+        assert_eq!(workshop[flag], true, "workshop {flag}");
+    }
+    for flag in [
+        "preplan_checkpoint_omission_independently_detectable",
+        "local_query_and_offline_need_native_credential",
+        "offline_restores_current_qualification",
+        "donor_writes",
+        "construction_permission",
+        "canonical_workshop_evidence",
+        "production_feasibility_proven",
+        "new_native_protocol",
+        "new_public_tool",
+        "production_admission_added",
+    ] {
+        assert_eq!(workshop[flag], false, "workshop {flag}");
     }
     for field in [
         "recovery_restores_commit_permit",
@@ -238,7 +337,11 @@ fn machine_host_contract_preserves_bounded_development_scope() -> Result<()> {
     assert_eq!(clock["new_unpause_attempts_per_run"], 1);
     assert_eq!(
         clock["supported_original_objectives"],
-        json!(["retained_order_completion", "observed_inventory_minimum", "observed_inventory_increase"])
+        json!([
+            "retained_order_completion",
+            "observed_inventory_minimum",
+            "observed_inventory_increase"
+        ])
     );
     for field in [
         "requires_settled_original_effects",

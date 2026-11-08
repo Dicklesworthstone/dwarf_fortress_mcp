@@ -7,8 +7,8 @@ use dfmcp_intent::{
     Constraint, Intent, ObligationSpec, RequestedAction, StaticPlanner, derive_step_idempotency_key,
 };
 use dfmcp_world::{CompareOp, Predicate, Value as FactValue};
-use orders::request::Objective;
 use orders::inventory_baseline::InventoryBaselines;
+use orders::request::Objective;
 use serde::Deserialize;
 
 pub(super) const MAX_ORDERS: usize = 4;
@@ -103,6 +103,15 @@ impl PortfolioRequest {
         baselines: &InventoryBaselines,
         c: &OperationContext,
     ) -> Result<PreparedPlan> {
+        self.compile_with_workshop(evidence, baselines, c, None)
+    }
+    pub(crate) fn compile_with_workshop(
+        &self,
+        evidence: &PredicateEvidence<'_>,
+        baselines: &InventoryBaselines,
+        c: &OperationContext,
+        origin: Option<Digest32>,
+    ) -> Result<PreparedPlan> {
         self.validate()?;
         let first = self
             .orders
@@ -143,6 +152,7 @@ impl PortfolioRequest {
                 objective.append_identity(&mut bytes, baselines, c.anchor)?;
             }
         }
+        super::workshop_binding::append_identity(&mut bytes, origin)?;
         let digest = Digest32::of_bytes(&bytes);
         let id = IntentId::new(u128::from_be_bytes(
             digest.as_bytes()[..16]
@@ -179,14 +189,12 @@ impl PortfolioRequest {
                 value,
             };
             let goal = match &requested.objective {
-                None => {
-                    Predicate::All(vec![
-                        equal("amount_total", FactValue::U64(u64::from(requested.amount))),
-                        equal("amount_remaining", FactValue::U64(0)),
-                        equal("validated", FactValue::Bool(true)),
-                        equal("active", FactValue::Bool(false)),
-                    ])
-                },
+                None => Predicate::All(vec![
+                    equal("amount_total", FactValue::U64(u64::from(requested.amount))),
+                    equal("amount_remaining", FactValue::U64(0)),
+                    equal("validated", FactValue::Bool(true)),
+                    equal("active", FactValue::Bool(false)),
+                ]),
                 Some(objective) => objective.predicate(baselines, c.anchor)?,
             };
             terminal.push(goal.clone());
@@ -208,12 +216,15 @@ impl PortfolioRequest {
         let intent = Intent {
             id,
             anchor: c.anchor,
-            summary: format!(
-                "Production portfolio: configure {} for {} citizens and satisfy {} original finite furniture goals",
-                self.labor,
-                units.len(),
-                self.orders.len()
-            ),
+            summary: super::workshop_binding::summary(
+                format!(
+                    "Production portfolio: configure {} for {} citizens and satisfy {} original finite furniture goals",
+                    self.labor,
+                    units.len(),
+                    self.orders.len()
+                ),
+                origin,
+            )?,
             terminal_condition: Predicate::All(terminal),
             constraints: vec![Constraint::MaxRisk(RiskTier::Guarded)],
             requested_actions: actions,

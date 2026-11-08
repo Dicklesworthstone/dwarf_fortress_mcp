@@ -1,5 +1,37 @@
 # Changelog
 
+## Unreleased — Use completed original workshops in production
+
+- Add an optional closed `workshop_prerequisite` to the combined production
+  owner. Import the exact acknowledged original Carpenter workshop Offline and
+  require a fresh complete native read before planning and at every original
+  order preparation and post-dispatch-marker boundary, including portfolios and
+  existing-labor plans.
+- Bind the immutable origin into the complete plan identity and private
+  `original.workshop` association. Original recovery checks the marked plan,
+  exact donor, sidecar and external association digest together; dropping or
+  substituting configuration cannot remove the original requirement.
+- Preserve consumed tick, generation, allocator and fence state in caller-held
+  recovery floors, including a witnessed checkpoint before any original exists.
+  Consume decoded handshake generations before later budget or authority
+  refusals. Query and Offline need no Workshop credential or native contact.
+  Fresh-floor rollback beyond the immutable donor seed remains an explicit
+  external-custody limit, not a local durable acknowledgement claim.
+- Separate configured read-only custody reservations (768 MiB) from native
+  dispatch reservations (2 GiB), so one bounded Wait can reconcile an uncertain
+  original, initialize history and sample its goal within the unchanged public
+  allowance. Preserve legacy custody and native frontier bounds.
+- Preserve the concurrent Workshop clock implementation and pass all 393 tests
+  again in the merged exact-source host component, including two actual
+  Runtime/native TCP campaigns for fresh prerequisites, refusal boundaries,
+  checkpoint restoration, token-free Offline custody and lost-reply original
+  reconciliation without redispatch. The actual repository Workshop adapter
+  target passes all 70 tests: 17 origin regressions, 20 concurrent clock cases
+  and 33 existing cases. Static Workshop checks cover 56 source files and all
+  nine inventory/refusal tests pass. The full verification script remains
+  blocked by missing `br`; these passes do not qualify MCP transport, real
+  DFHack, a live fortress or production admission.
+
 ## Unreleased — Add durable clock ownership for the original workshop
 
 - Bind independently reviewed finite Run/1.13 intervals to the exact original

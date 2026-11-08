@@ -134,6 +134,7 @@ class WorkshopSourceInventoryTests(unittest.TestCase):
             ("canonical_world_fact", True),
             ("owner_cloneable", True),
             ("recovery_floor_custody", "acknowledged by donor"),
+            ("decoded_manifest_consumed_before_refresh_preconditions", False),
         )
         for field, value in mutations:
             with self.subTest(field=field), tempfile.TemporaryDirectory() as folder:

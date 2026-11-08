@@ -372,3 +372,77 @@ fn retained_order_recognition_refuses_weakened_substituted_and_inventory_goals()
     assert!(RetainedOrderObjective::from_selected_plan(&inventory, StepId::new(1)).is_none());
     Ok(())
 }
+
+#[test]
+fn workshop_bound_assignment_rebuilds_order_predicates_under_its_original_identity() -> Result<()> {
+    let snapshot = snapshot();
+    let context = context(&snapshot);
+    let evidence = PredicateEvidence::laboratory(&snapshot)?;
+    let baselines = InventoryBaselines::default();
+    let request = request();
+    let legacy = request.compile(&evidence, &context)?;
+    assert_eq!(
+        legacy,
+        request.compile_with_workshop(&evidence, &baselines, &context, None)?
+    );
+    let first_origin = Digest32::of_bytes(b"first completed workshop");
+    let second_origin = Digest32::of_bytes(b"second completed workshop");
+    let first =
+        request.compile_with_workshop(&evidence, &baselines, &context, Some(first_origin))?;
+    let second =
+        request.compile_with_workshop(&evidence, &baselines, &context, Some(second_origin))?;
+    super::super::workshop_binding::assert_compiled_binding(
+        &legacy,
+        &first,
+        &second,
+        first_origin,
+        second_origin,
+    )?;
+    assert!(
+        request
+            .compile_with_workshop(&evidence, &baselines, &context, Some(Digest32::ZERO))
+            .is_err()
+    );
+    Ok(())
+}
+
+#[test]
+fn workshop_bound_portfolio_rebuilds_all_keys_and_keeps_each_original_goal() -> Result<()> {
+    use super::super::portfolio_request::PortfolioRequest;
+    let snapshot = snapshot();
+    let mut context = context(&snapshot);
+    context.budget.max_actions = 5;
+    let evidence = PredicateEvidence::laboratory(&snapshot)?;
+    let baselines = InventoryBaselines::default();
+    let request = PortfolioRequest::parse(&serde_json::json!({
+        "kind":"portfolio","expected_observation":"11".repeat(32),"units":["44","43"],
+        "labor":"CARPENTER","enabled":true,
+        "orders":[{"recipe":"wooden_table","amount":4},{"recipe":"wooden_bed","amount":2},
+            {"recipe":"wooden_door","amount":3,"objective":{"kind":"observed_inventory_minimum","item_type":"DOOR","minimum_stack_units":3}}],
+        "deadline_tick":300,"poll_interval_ticks":5,"stable_samples":2
+    }).to_string())?;
+    let legacy = request.compile(&evidence, &context)?;
+    assert_eq!(
+        legacy,
+        request.compile_with_workshop(&evidence, &baselines, &context, None)?
+    );
+    let first_origin = Digest32::of_bytes(b"first completed workshop");
+    let second_origin = Digest32::of_bytes(b"second completed workshop");
+    let first =
+        request.compile_with_workshop(&evidence, &baselines, &context, Some(first_origin))?;
+    let second =
+        request.compile_with_workshop(&evidence, &baselines, &context, Some(second_origin))?;
+    super::super::workshop_binding::assert_compiled_binding(
+        &legacy,
+        &first,
+        &second,
+        first_origin,
+        second_origin,
+    )?;
+    assert!(
+        request
+            .compile_with_workshop(&evidence, &baselines, &context, Some(Digest32::ZERO))
+            .is_err()
+    );
+    Ok(())
+}

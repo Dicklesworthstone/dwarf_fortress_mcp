@@ -23,7 +23,7 @@ pub(super) fn compact(view: &Value) -> Value {
         })
         .collect();
     let r = &view["recovery"];
-    json!({"observation_tick_floor":view["observation_tick_floor"].as_u64(),
+    let mut compacted = json!({"observation_tick_floor":view["observation_tick_floor"].as_u64(),
         "recovery":{"plan_digest":bounded(&r["plan_digest"],64),
         "object_digest":bounded(&r["object_digest"],64), "identity_digest":bounded(&r["identity_digest"],64),
         "goal_history_present":r["goal_history_present"].as_bool(),
@@ -41,6 +41,7 @@ pub(super) fn compact(view: &Value) -> Value {
         "selected_inventory_goal":compact_goal(&view["selected_inventory_goal"]),
         "selected_order_goal":compact_goal(&view["selected_order_goal"]),
         "portfolio":compact_portfolio(&view["portfolio"]),
+        "workshop_prerequisite":workshop_summary(&view["workshop_prerequisite"],false),
         "selected_parent_goal":null,
         "production_inspection_source":null,"production_inspection":null,
         "current_parent_goal":null,
@@ -50,7 +51,75 @@ pub(super) fn compact(view: &Value) -> Value {
         "inventory_clock_control_enabled":false,
         "clock_invalidates_goal":ORDER_CLOCK.invalidates_goal(view),
         "inventory_clock_invalidates_goal":INVENTORY_CLOCK.invalidates_goal(view),
-        "original_goal_proven":false,"current_state_proven":false,"details_omitted":true})
+        "original_goal_proven":false,"current_state_proven":false,"details_omitted":true});
+    // Absent optional fields stay absent in legacy recovery objects. A retained
+    // donor keeps both its association and consumed frontier, never a fresh read.
+    if !r["workshop_prerequisite_digest"].is_null() || !r["workshop_prerequisite_floor"].is_null() {
+        compacted["recovery"]["workshop_prerequisite_digest"] =
+            json!(digest(&r["workshop_prerequisite_digest"]));
+        compacted["recovery"]["workshop_prerequisite_floor"] =
+            workshop_floor(&r["workshop_prerequisite_floor"]);
+    }
+    compacted
+}
+
+fn workshop_floor(value: &Value) -> Value {
+    if !value.is_object() {
+        return Value::Null;
+    }
+    json!({"tick":value["tick"].as_u64(),"generation":value["generation"].as_u64(),
+        "next_building_id":value["next_building_id"].as_u64(),"fenced":value["fenced"].as_bool()})
+}
+
+fn workshop_checkpoint(value: &Value) -> Value {
+    let mut checkpoint = workshop_floor(value);
+    if checkpoint.is_object() {
+        checkpoint["origin_witness"] = json!(digest(&value["origin_witness"]));
+    }
+    checkpoint
+}
+
+/// Historical source and association identity only. Even a successful packet
+/// must not turn an earlier prerequisite read into current completion evidence.
+fn workshop_summary(value: &Value, retain_last: bool) -> Value {
+    if !value.is_object() {
+        return Value::Null;
+    }
+    let last = &value["last_qualified"];
+    let historical = if retain_last
+        && last.is_object()
+        && last["status"] == "complete"
+        && digest(&last["witness"]).is_some()
+    {
+        json!({"tick":last["tick"].as_u64(),"witness":digest(&last["witness"]),
+            "canonical_parent":compact_anchor(&last["canonical_parent"]),
+            "status":"complete","fresh_for_current_call":false,"current_completion_proven":false})
+    } else {
+        Value::Null
+    };
+    json!({"schema":bounded(&value["schema"],64),"source_protocol":bounded(&value["source_protocol"],32),
+        "scope":"original_workshop_dispatch_prerequisite","status":bounded(&value["status"],32),
+        "origin_witness":digest(&value["origin_witness"]),
+        "workshop_key":bounded(&value["workshop_key"],128),
+        "workshop_plan_digest":digest(&value["workshop_plan_digest"]),
+        "workshop_receipt":digest(&value["workshop_receipt"]),
+        "building_id":value["building_id"].as_u64(),"source_generation":value["source_generation"].as_u64(),
+        "association_digest":digest(&value["association_digest"]),
+        "consumed_tick_floor":value["consumed_tick_floor"].as_u64(),"source_fenced":value["source_fenced"].as_bool(),
+        "checkpoint":workshop_checkpoint(&value["checkpoint"]),
+        "last_qualified":historical,"current_state_proven":false,"current_completion_proven":false,
+        "canonical_workshop_evidence":false,"production_feasibility_proven":false,"mutation_authority":false})
+}
+
+fn labor_step(view: &Value, id: &Value) -> bool {
+    id.is_u64()
+        && view["original_plan"]["steps"]
+            .as_array()
+            .is_some_and(|steps| {
+                steps
+                    .iter()
+                    .any(|step| step["step_id"] == *id && step["action"]["kind"] == "set_labor")
+            })
 }
 fn compact_portfolio(value: &Value) -> Value {
     if value["schema"] != "dfmcp.production-portfolio/1" {
@@ -524,6 +593,7 @@ fn encode(
         _ => AgentPhase::Inspect,
     };
     let view = retained.unwrap_or(&Value::Null);
+    let workshop_fenced = view["workshop_prerequisite"]["source_fenced"] == true;
     let portfolio = view["portfolio"]["schema"] == "dfmcp.production-portfolio/1";
     let clock_reconciliation_needed = CLOCK_OWNERS
         .iter()
@@ -537,6 +607,10 @@ fn encode(
                     || clock_reconciliation(&order["inventory_clock"])
             });
     let uncertain = uncertain || clock_reconciliation_needed;
+    let workshop = workshop_summary(
+        &view["workshop_prerequisite"],
+        verified && !uncertain && !workshop_fenced && mode != Some("offline"),
+    );
     let clock_invalidates_goal = CLOCK_OWNERS
         .iter()
         .any(|owner| owner.invalidates_goal(view));
@@ -544,7 +618,10 @@ fn encode(
         .as_array()
         .cloned()
         .unwrap_or_default();
-    let review = if verified && !uncertain {
+    let workshop_blocks_review = workshop_fenced
+        && !(view["review"]["family"] == "workforce/1.17"
+            && labor_step(view, &view["review"]["step_id"]));
+    let review = if verified && !uncertain && !workshop_blocks_review {
         view["review"].clone()
     } else {
         Value::Null
@@ -951,6 +1028,7 @@ fn encode(
         ))
     } else if view["frontier"]["next_ready"].is_u64()
         && view["original_plan"]["plan_digest"].is_string()
+        && (!workshop_fenced || labor_step(view, &view["frontier"]["next_ready"]))
     {
         Some((
             "fortress_plan",
@@ -1061,6 +1139,7 @@ fn encode(
             json!({"request":inspection_source["diagnosis_request"].to_string()}),
         ))
     } else if view["original_plan"].is_null()
+        && !workshop_fenced
         && mode == Some("control")
         && view["production_control_enabled"] == true
         && view["observation"]["workforce_choices"]["existing_labor_options"]
@@ -1074,6 +1153,7 @@ fn encode(
             json!({}),
         ))
     } else if view["original_plan"].is_null()
+        && !workshop_fenced
         && mode == Some("control")
         && view["labor_control_enabled"] == true
         && view["production_control_enabled"] == true
@@ -1193,6 +1273,9 @@ fn encode(
         ));
     }
     let mut partial_domains = vec!["retained_original_plan"];
+    if workshop.is_object() {
+        partial_domains.push("original_workshop_prerequisite_custody");
+    }
     if preplan_inspection_available {
         partial_domains.push("preplan_captured_operations");
     }
@@ -1211,6 +1294,12 @@ fn encode(
         "production_attribution",
         "other_controllers",
     ];
+    if workshop.is_object() {
+        omitted_domains.extend([
+            "current_workshop_completion",
+            "workshop_production_feasibility",
+        ]);
+    }
     if parent_goal.is_object() {
         partial_domains.push("current_parent_terminal_predicate");
     } else {
@@ -1267,6 +1356,14 @@ fn encode(
             "anchor":inspection_source["anchor"],"source_digest":inspection_source["source_digest"],
             "finding":"Captured stock and job conditions do not establish native recipe feasibility, path access, reservations or goal completion.",
             "resolution":"Inspect the source-bound inventory query and declared-demand allocation before choosing the original request; planning and commit independently revalidate their required sources."}));
+    }
+    if workshop_fenced {
+        uncertainty.push(json!({"scope":"original_workshop_dispatch_prerequisite",
+            "epistemic_status":"unknown","state":"source_fenced","retryable_in_session":false,
+            "origin_witness":workshop["origin_witness"],"association_digest":workshop["association_digest"],
+            "consumed_tick_floor":workshop["consumed_tick_floor"],
+            "finding":"Source continuity for the original workshop prerequisite is fenced; earlier completion is historical only.",
+            "resolution":"Preserve the original association and consumed recovery floors. Further order dispatch is withheld; inspect source continuity and reconcile any already attempted effect under its original key."}));
     }
     for owner in CLOCK_OWNERS {
         let clock = owner.view(view);
@@ -1350,6 +1447,23 @@ fn encode(
             result["production_inspection"] = Value::Null;
         }
     }
+    if result.get("workshop_prerequisite").is_some() {
+        result["workshop_prerequisite"] = workshop.clone();
+    }
+    if result["retained_reference"]["workshop_prerequisite"].is_object() {
+        result["retained_reference"]["workshop_prerequisite"] = workshop_summary(
+            &result["retained_reference"]["workshop_prerequisite"],
+            false,
+        );
+    }
+    if workshop_blocks_review {
+        if result.get("review").is_some() {
+            result["review"] = Value::Null;
+        }
+        if result["frontier"].is_object() {
+            result["frontier"]["review"] = Value::Null;
+        }
+    }
     if clock_invalidates_goal {
         result["original_goal_proven"] = json!(false);
         result["current_state_proven"] = json!(false);
@@ -1385,6 +1499,11 @@ fn encode(
             "preplan_production_inspection_available":preplan_inspection_available,
             "observed_production_conditions":if diagnosis_seen {Some(&inspection["summary"])} else {None},
             "parent_goal_observation_fenced":parent_fenced,
+            "workshop_prerequisite":if workshop.is_object() {Some(json!({
+                "scope":"original_workshop_dispatch_prerequisite","origin_witness":workshop["origin_witness"],
+                "association_digest":workshop["association_digest"],"source_fenced":workshop["source_fenced"],
+                "consumed_tick_floor":workshop["consumed_tick_floor"],"current_completion_proven":false,
+                "canonical_workshop_evidence":false,"production_feasibility_proven":false}))}else{None},
             "clock_control_enabled":clock_authority(ORDER_CLOCK),
             "inventory_clock_control_enabled":clock_authority(INVENTORY_CLOCK),
             "clock_may_be_running":clock_unresolved(&view["clock"]),
@@ -1396,6 +1515,8 @@ fn encode(
             "selected_order_goal_proven_at_anchor":selected_proven && retained_order}))
         .active_work(json!({"pending_plans":pending_plans,"actions":actions,"clock":clock_views[0],
             "inventory_clock":clock_views[1],
+            "workshop_prerequisite":workshop,
+            "workshop_prerequisite_floor":workshop_floor(&view["recovery"]["workshop_prerequisite_floor"]),
             "production_inspection_source":if inspection_available {Some(inspection_source)} else {None},
             "obligations":if selected_goal.is_null() {vec![]} else {vec![selected_goal]},
             "current_parent_goal":parent_goal,"cancellation_drains":cancellation_drains,
@@ -1512,6 +1633,263 @@ mod preplan_tests;
 mod tests {
     use super::*;
     use dfmcp_core::{Digest32, FortressId, GameTick, ObservationCursor};
+
+    fn workshop_view(anchor: StateAnchor, fenced: bool) -> Value {
+        json!({"schema":"dfmcp.completed-workshop-prerequisite/1","source_protocol":"workshop/1.20",
+            "scope":"original_workshop_dispatch_prerequisite","origin_witness":"5".repeat(64),
+            "workshop_key":"original-carpenters","workshop_plan_digest":"6".repeat(64),
+            "workshop_receipt":"7".repeat(64),"building_id":42,"source_generation":30,
+            "association_digest":"8".repeat(64),"consumed_tick_floor":anchor.tick.get(),
+            "checkpoint":{"origin_witness":"5".repeat(64),"tick":anchor.tick.get(),
+                "generation":30,"next_building_id":43,"fenced":fenced},
+            "source_fenced":fenced,"last_qualified":{"tick":anchor.tick.get(),
+                "witness":"9".repeat(64),"canonical_parent":anchor_value(anchor),"status":"complete",
+                "fresh_for_current_call":false},"current_state_proven":false,
+            "canonical_workshop_evidence":false,"production_feasibility_proven":false,"mutation_authority":false})
+    }
+
+    #[test]
+    fn workshop_fence_withholds_only_new_order_dispatch_and_keeps_original_progress_guidance() {
+        let (anchor, goal_view) = joined_order_goal_view("false", false);
+        let call = |view: &Value, anchor, uncertain, ticks| {
+            let (raw, overflow) = packet(
+                "fortress.query",
+                Some(SessionId::new(1)),
+                anchor,
+                Some("control"),
+                None,
+                Some(WorkBudget {
+                    max_game_ticks: ticks,
+                    max_wall_millis: 60000,
+                    ..WorkBudget::default()
+                }),
+                view.clone(),
+                Some(view),
+                true,
+                uncertain,
+            );
+            assert!(!overflow);
+            serde_json::from_str::<Value>(&raw).expect("workshop packet")
+        };
+        let mut view = json!({"anchor":anchor_value(anchor),"original_plan":{"plan_digest":"a".repeat(64),
+            "steps":[{"step_id":0,"action":{"kind":"set_labor"}},
+                {"step_id":1,"action":{"kind":"create_work_order"}}]},
+            "frontier":{"next_ready":1,"all_applied":false,"needs_reconciliation":false,"entries":[]},
+            "workshop_prerequisite":workshop_view(anchor,false)});
+        assert_eq!(
+            call(&view, Some(anchor), false, 0)["agent_turn"]["recommendations"][0]["tool"],
+            "fortress_plan"
+        );
+        view["workshop_prerequisite"] = workshop_view(anchor, true);
+        let fenced = call(&view, Some(anchor), false, 0);
+        assert_eq!(fenced["agent_turn"]["recommendations"], json!([]));
+        assert_eq!(
+            fenced["agent_turn"]["briefing"]["workshop_prerequisite"]["source_fenced"],
+            true
+        );
+        assert!(
+            fenced["agent_turn"]["uncertainty"]
+                .as_array()
+                .expect("uncertainty")
+                .iter()
+                .any(
+                    |item| item["scope"] == "original_workshop_dispatch_prerequisite"
+                        && item["state"] == "source_fenced"
+                )
+        );
+        view["frontier"]["next_ready"] = json!(0);
+        assert_eq!(
+            call(&view, Some(anchor), false, 0)["agent_turn"]["recommendations"][0]["tool"],
+            "fortress_plan"
+        );
+        view["frontier"]["next_ready"] = Value::Null;
+        view["review"] =
+            json!({"step_id":1,"family":"work-orders/1.10","paired_seal":"b".repeat(64)});
+        let blocked = call(&view, Some(anchor), false, 0);
+        assert_eq!(blocked["agent_turn"]["recommendations"], json!([]));
+        assert_eq!(
+            blocked["agent_turn"]["active_work"]["confirmations"],
+            json!([])
+        );
+        assert!(blocked["review"].is_null());
+        view["review"] =
+            json!({"step_id":0,"family":"workforce/1.17","paired_seal":"b".repeat(64)});
+        assert_eq!(
+            call(&view, Some(anchor), false, 0)["agent_turn"]["recommendations"][0]["tool"],
+            "fortress_commit"
+        );
+        view["frontier"]["needs_reconciliation"] = json!(true);
+        assert_eq!(
+            call(&view, Some(anchor), true, 0)["agent_turn"]["recommendations"][0]["tool"],
+            "fortress_wait"
+        );
+
+        let unplanned = json!({"observation":{"seal":"a".repeat(64),"workforce_choices":{
+            "existing_labor_options":[{"labor":"CARPENTER","eligible_enabled_ids":["43"]}]}},
+            "production_control_enabled":true,"workshop_prerequisite":workshop_view(anchor,true)});
+        assert_eq!(
+            call(&unplanned, None, false, 0)["agent_turn"]["recommendations"],
+            json!([])
+        );
+        let mut unplanned_ready = unplanned;
+        unplanned_ready["workshop_prerequisite"] = workshop_view(anchor, false);
+        assert_eq!(
+            call(&unplanned_ready, None, false, 0)["agent_turn"]["recommendations"][0]["tool"],
+            "fortress_plan"
+        );
+
+        let mut settled = goal_view;
+        settled["workshop_prerequisite"] = workshop_view(anchor, true);
+        assert_eq!(
+            call(&settled, Some(anchor), false, 0)["agent_turn"]["recommendations"][0]["tool"],
+            "fortress_wait"
+        );
+        settled["selected_order_goal"]["current_truth"] = json!("false");
+        settled["selected_order_goal"]["receipt_linked"] = json!(true);
+        settled["original_plan"]["expires_at_tick"] = json!(300);
+        settled["original_plan"]["steps"] = json!([
+            {"step_id":0,"action":{"kind":"set_labor"}},
+            {"step_id":1,"action":{"kind":"create_work_order"},"obligation":{
+                "deadline_tick":300,"poll_interval_ticks":5,"stable_samples":2}}]);
+        settled["clock_control_enabled"] = json!(true);
+        settled["recovery"]["clock_journal_id"] = json!("1".repeat(64));
+        settled["clock"] = json!({"source":"order-run/1.14","target_scope":"selected_original_order_step",
+            "journal_id":"1".repeat(64),"target_digest":"2".repeat(64),"original_paired_seal":"3".repeat(64),
+            "mode":"control","pending":false,"unresolved":false,"may_be_running":false,
+            "needs_reconciliation":false,"active_run":null,"run_count":0,"high_tick":anchor.tick.get()});
+        let clock = call(&settled, Some(anchor), false, 10);
+        assert_eq!(
+            clock["agent_turn"]["recommendations"][0]["tool"],
+            "fortress_plan"
+        );
+        let request: Value = serde_json::from_str(
+            clock["agent_turn"]["recommendations"][0]["arguments"]["request"]
+                .as_str()
+                .expect("clock request"),
+        )
+        .expect("clock JSON");
+        assert_eq!(request["kind"], "run");
+        assert_eq!(
+            clock["agent_turn"]["briefing"]["workshop_prerequisite"]["current_completion_proven"],
+            false
+        );
+    }
+
+    #[test]
+    fn workshop_error_and_overflow_keep_original_custody_and_floors_without_current_proof() {
+        let (anchor, mut view) = joined_order_goal_view("true", true);
+        view["workshop_prerequisite"] = workshop_view(anchor, false);
+        let floor = json!({"tick":130,"generation":30,"next_building_id":43,"fenced":false});
+        view["recovery"]["workshop_prerequisite_digest"] = json!("8".repeat(64));
+        view["recovery"]["workshop_prerequisite_floor"] = floor.clone();
+        let checkpoint = view["workshop_prerequisite"]["checkpoint"].clone();
+        let successful = joined_packet(anchor, &view, "control", true, false);
+        let historical = &successful["agent_turn"]["active_work"]["workshop_prerequisite"];
+        assert_eq!(
+            historical["last_qualified"]["fresh_for_current_call"],
+            false
+        );
+        assert_eq!(historical["current_completion_proven"], false);
+        assert_eq!(historical["canonical_workshop_evidence"], false);
+        assert_eq!(historical["production_feasibility_proven"], false);
+        for retained in [compact(&view), compact(&compact(&view))] {
+            assert_eq!(retained["recovery"]["workshop_prerequisite_floor"], floor);
+            assert_eq!(
+                retained["recovery"]["workshop_prerequisite_digest"],
+                "8".repeat(64)
+            );
+            assert_eq!(
+                retained["workshop_prerequisite"]["workshop_key"],
+                "original-carpenters"
+            );
+            assert_eq!(
+                retained["workshop_prerequisite"]["workshop_receipt"],
+                "7".repeat(64)
+            );
+            assert!(retained["workshop_prerequisite"]["last_qualified"].is_null());
+            assert_eq!(retained["workshop_prerequisite"]["checkpoint"], checkpoint);
+        }
+        let failed = joined_packet(anchor, &view, "control", false, true);
+        assert_eq!(
+            failed["agent_turn"]["active_work"]["workshop_prerequisite"]["checkpoint"],
+            checkpoint
+        );
+        assert!(
+            failed["agent_turn"]["active_work"]["workshop_prerequisite"]["last_qualified"]
+                .is_null()
+        );
+        assert_eq!(
+            failed["agent_turn"]["active_work"]["workshop_prerequisite_floor"],
+            floor
+        );
+        let (raw, overflow) = packet(
+            "fortress.query",
+            Some(SessionId::new(1)),
+            Some(anchor),
+            Some("control"),
+            None,
+            None,
+            json!({"ok":true,"payload":"x".repeat(70_000)}),
+            Some(&view),
+            true,
+            false,
+        );
+        assert!(overflow);
+        let fallback: Value = serde_json::from_str(&raw).expect("overflow packet");
+        assert_eq!(
+            fallback["retained_reference"]["workshop_prerequisite"]["checkpoint"],
+            checkpoint
+        );
+        assert_eq!(
+            fallback["retained_reference"]["recovery"]["workshop_prerequisite_floor"],
+            floor
+        );
+        assert_eq!(
+            fallback["retained_reference"]["workshop_prerequisite"]["association_digest"],
+            "8".repeat(64)
+        );
+        assert!(
+            fallback["retained_reference"]["workshop_prerequisite"]["last_qualified"].is_null()
+        );
+        assert!(
+            fallback["agent_turn"]["active_work"]["workshop_prerequisite"]["last_qualified"]
+                .is_null()
+        );
+        assert_eq!(
+            fallback["agent_turn"]["briefing"]["original_goal_proven"],
+            false
+        );
+        let legacy = compact(&json!({"recovery":{"plan_digest":"a".repeat(64)}}));
+        assert!(
+            legacy["recovery"]
+                .get("workshop_prerequisite_digest")
+                .is_none()
+        );
+        assert!(
+            legacy["recovery"]
+                .get("workshop_prerequisite_floor")
+                .is_none()
+        );
+        let mut preplan = view;
+        preplan["original_plan"] = Value::Null;
+        preplan["recovery"] = Value::Null;
+        preplan["workshop_prerequisite"]["association_digest"] = Value::Null;
+        preplan["workshop_prerequisite"]["source_fenced"] = json!(true);
+        preplan["workshop_prerequisite"]["checkpoint"]["tick"] = json!(131);
+        preplan["workshop_prerequisite"]["checkpoint"]["generation"] = json!(31);
+        preplan["workshop_prerequisite"]["checkpoint"]["fenced"] = json!(true);
+        let preplan_retained = compact(&preplan);
+        assert_eq!(
+            preplan_retained["workshop_prerequisite"]["checkpoint"],
+            preplan["workshop_prerequisite"]["checkpoint"]
+        );
+        assert!(preplan_retained["workshop_prerequisite"]["last_qualified"].is_null());
+        let preplan_failed = joined_packet(anchor, &preplan, "control", false, false);
+        assert_eq!(
+            preplan_failed["agent_turn"]["active_work"]["workshop_prerequisite"]["checkpoint"],
+            preplan["workshop_prerequisite"]["checkpoint"]
+        );
+    }
 
     fn joined_goal_view(truth: &str, stable: bool) -> (StateAnchor, Value) {
         let anchor = StateAnchor {

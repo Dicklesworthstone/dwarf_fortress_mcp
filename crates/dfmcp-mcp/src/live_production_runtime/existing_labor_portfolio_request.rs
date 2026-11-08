@@ -10,8 +10,8 @@ use dfmcp_intent::{
     Constraint, Intent, ObligationSpec, RequestedAction, StaticPlanner, derive_step_idempotency_key,
 };
 use dfmcp_world::{CompareOp, Predicate, Value as FactValue};
-use orders::request::Objective;
 use orders::inventory_baseline::InventoryBaselines;
+use orders::request::Objective;
 use serde::Deserialize;
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
@@ -37,7 +37,9 @@ fn samples() -> u32 {
 impl ExistingLaborPortfolioRequest {
     pub(crate) fn parse(raw: &str) -> Result<Self> {
         if raw.len() > 8192 {
-            return Err(exhausted("existing-labor portfolio request exceeds 8192 bytes"));
+            return Err(exhausted(
+                "existing-labor portfolio request exceeds 8192 bytes",
+            ));
         }
         let mut value: Self = serde_json::from_str(raw)
             .map_err(|_| invalid("invalid closed existing-labor portfolio request"))?;
@@ -72,7 +74,10 @@ impl ExistingLaborPortfolioRequest {
         if self.kind != "existing_labor_portfolio"
             || self.orders.is_empty()
             || self.orders.len() > MAX_ORDERS
-            || self.orders.windows(2).any(|pair| pair[0].recipe >= pair[1].recipe)
+            || self
+                .orders
+                .windows(2)
+                .any(|pair| pair[0].recipe >= pair[1].recipe)
         {
             return Err(invalid(
                 "existing-labor portfolio requires one to four distinct recipes in canonical recipe order",
@@ -97,6 +102,16 @@ impl ExistingLaborPortfolioRequest {
         requirement: &ExistingLaborRequirement,
         baselines: &InventoryBaselines,
         c: &OperationContext,
+    ) -> Result<PreparedPlan> {
+        self.compile_with_workshop(evidence, requirement, baselines, c, None)
+    }
+    pub(crate) fn compile_with_workshop(
+        &self,
+        evidence: &PredicateEvidence<'_>,
+        requirement: &ExistingLaborRequirement,
+        baselines: &InventoryBaselines,
+        c: &OperationContext,
+        origin: Option<Digest32>,
     ) -> Result<PreparedPlan> {
         self.validate()?;
         // Reuse the exact single-request citizen, prerequisite and timing
@@ -124,6 +139,7 @@ impl ExistingLaborPortfolioRequest {
                 objective.append_identity(&mut bytes, baselines, c.anchor)?;
             }
         }
+        super::workshop_binding::append_identity(&mut bytes, origin)?;
         let digest = Digest32::of_bytes(&bytes);
         let id = IntentId::new(u128::from_be_bytes(
             digest.as_bytes()[..16]
@@ -179,10 +195,15 @@ impl ExistingLaborPortfolioRequest {
         let intent = Intent {
             id,
             anchor: c.anchor,
-            summary: format!(
-                "Use existing {} on {} citizens for {} original finite furniture goals",
-                self.labor, requirement.units().len(), self.orders.len()
-            ),
+            summary: super::workshop_binding::summary(
+                format!(
+                    "Use existing {} on {} citizens for {} original finite furniture goals",
+                    self.labor,
+                    requirement.units().len(),
+                    self.orders.len()
+                ),
+                origin,
+            )?,
             terminal_condition: Predicate::All(terminal),
             constraints: vec![Constraint::MaxRisk(RiskTier::Guarded)],
             requested_actions: actions,
@@ -198,7 +219,9 @@ impl ExistingLaborPortfolioRequest {
             || layout.assignment_step().is_some()
             || layout.order_steps().len() != self.orders.len()
         {
-            return Err(denied("compiled existing-labor portfolio lost its original prerequisite"));
+            return Err(denied(
+                "compiled existing-labor portfolio lost its original prerequisite",
+            ));
         }
         Ok(plan)
     }

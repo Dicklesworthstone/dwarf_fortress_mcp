@@ -570,6 +570,46 @@ fn production_origin_native_errors_and_changed_manifest_cannot_restore_old_sourc
 }
 
 #[test]
+fn production_origin_consumes_handshake_before_budget_or_authority_refusal() -> Result<()> {
+    for expired in [false, true] {
+        let mut fixture = Fixture::new("placed", &[])?;
+        let mut origin = fixture.origin()?;
+        let descriptor = origin.canonical_bytes().to_vec();
+        fixture.context.anchor.tick = GameTick(13000);
+        let mut source = Native::new(sample("progress_complete", 13000, 100)?)?;
+        let original_generation = source.manifest.generation;
+        source.manifest.generation += 1;
+        if expired {
+            for grant in &mut fixture.context.grants {
+                grant.expires_at_tick = Some(GameTick(12999));
+            }
+        } else {
+            fixture.context.budget.max_bytes = REFRESH_WORK_BYTES - 1;
+        }
+        let reads = fixture.reads();
+        let writes = fixture.writes();
+        assert!(fixture.refresh(&mut origin, &mut source).is_err());
+        assert_eq!(origin.high_generation(), original_generation + 1);
+        assert!(origin.is_fenced());
+        assert_eq!(fixture.reads(), reads);
+        assert_eq!(fixture.writes(), writes);
+        assert_eq!((source.progress_calls, source.other_calls), (0, 0));
+        assert_eq!(origin.canonical_bytes(), descriptor);
+
+        // Host-side bookkeeping remains possible even without a live context.
+        // A later matching handshake cannot resurrect the original incarnation.
+        source.manifest.generation = original_generation;
+        origin.retain_source_manifest(source.manifest())?;
+        assert_eq!(origin.high_generation(), original_generation + 1);
+        assert!(origin.is_fenced());
+        source.manifest.generation = original_generation + 2;
+        assert!(origin.retain_source_manifest(source.manifest()).is_err());
+        assert_eq!(origin.high_generation(), original_generation + 2);
+    }
+    Ok(())
+}
+
+#[test]
 fn production_origin_requires_full_budget_and_observe_before_native_contact() -> Result<()> {
     let mut fixture = Fixture::new("placed", &[])?;
     let reads = fixture.reads();

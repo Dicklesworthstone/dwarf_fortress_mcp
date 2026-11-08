@@ -314,7 +314,15 @@
       "crates/dfmcp-mcp/src/related_entity_query.rs",
       "crates/dfmcp-mcp/src/ranked_entity_query.rs",
       "tests/stdio/combined_production_preflight.py",
-      "tests/stdio/combined_production_runtime_peer.py"
+      "tests/stdio/combined_production_runtime_peer.py",
+      "crates/dfmcp-mcp/src/live_production_runtime/workshop_config.rs",
+      "crates/dfmcp-mcp/src/live_production_runtime/workshop_binding.rs",
+      "crates/dfmcp-mcp/src/live_production_runtime/workshop_prerequisite.rs",
+      "crates/dfmcp-mcp/src/live_production_runtime/workshop_association_tests.rs",
+      "crates/dfmcp-mcp/src/live_production_runtime/workshop_prerequisite_tests.rs",
+      "crates/dfmcp-adapter/src/workshop_construction/production_origin.rs",
+      "crates/dfmcp-adapter/src/workshop_construction/production_origin_tests.rs",
+      "tests/stdio/combined_workshop_runtime_peer.py"
     ],
     "private_custody_platforms": [
       "linux-x86_64",
@@ -329,7 +337,8 @@
       "capture_policy": "complete_coherent_or_refuse"
     },
     "optional_parent_files": [
-      "goal.history"
+      "goal.history",
+      "original.workshop"
     ],
     "current_parent_goal": {
       "response_field": "current_parent_goal",
@@ -801,6 +810,95 @@
       "native_factory_narrowed_entity_budget_checked_before_connection": true,
       "additional_test_campaign": "tests/stdio/combined_production_preflight.py",
       "actual_runtime_tcp_regressions": "crates/dfmcp-mcp/src/live_production_runtime/preflight_tests.rs"
+    },
+    "workshop_prerequisite": {
+      "configuration_field": "workshop_prerequisite",
+      "response_schema": "dfmcp.completed-workshop-prerequisite/1",
+      "response_scope": "original_workshop_dispatch_prerequisite",
+      "source_protocol": "workshop/1.20",
+      "read_credential_env": "DFMCP_COMBINED_PRODUCTION_WORKSHOP_TOKEN",
+      "donor_mode": "Offline",
+      "donor_files": [
+        "workshop.journal",
+        "workshop.ack"
+      ],
+      "donor_pin": "exact latest externally retained Workshop acknowledgement plus original key and plan digest",
+      "donor_kind": "original Carpenters workshop with a resolved Placed receipt",
+      "donor_matches_production_sources": [
+        "world_folder",
+        "site_id",
+        "df_version",
+        "dfhack_version"
+      ],
+      "donor_independent_pins": [
+        "endpoint",
+        "generation",
+        "map_dimensions"
+      ],
+      "qualified_native_status": "complete",
+      "qualify_at": [
+        "original_plan",
+        "each_original_order_prepare",
+        "each_original_order_commit_after_dispatch_started"
+      ],
+      "original_request_shapes": [
+        "legacy",
+        "existing_labor",
+        "portfolio",
+        "existing_labor_portfolio"
+      ],
+      "origin_binds_original_request_identity": true,
+      "sealed_original_requirement_marker": "dfmcp-workshop-prerequisite/1",
+      "association_file": "original.workshop",
+      "association_domain": "dfmcp-combined-workshop-prerequisite/1",
+      "association_max_bytes": 65536,
+      "association_binds": [
+        "complete_original_plan_digest",
+        "exact_donor_directory",
+        "immutable_origin_descriptor"
+      ],
+      "recovery_fields": [
+        "workshop_prerequisite_digest",
+        "workshop_prerequisite_floor"
+      ],
+      "floor_fields": [
+        "tick",
+        "generation",
+        "next_building_id",
+        "fenced"
+      ],
+      "preplan_checkpoint_field": "workshop_prerequisite_checkpoint",
+      "preplan_checkpoint_fields": [
+        "origin_witness",
+        "tick",
+        "generation",
+        "next_building_id",
+        "fenced"
+      ],
+      "preplan_checkpoint_mutually_exclusive_with_original_recovery": true,
+      "preplan_checkpoint_restored_before_native_contact": true,
+      "preplan_checkpoint_omission_independently_detectable": false,
+      "fresh_read_floor_custody": "externally retained caller checkpoint or full recovery floor; never appended to donor journal or ACK; omission or whole-floor rollback beyond the donor seed is not independently detectable",
+      "consumed_native_floors_retained_after_refusal": true,
+      "source_fence_is_sticky": true,
+      "failed_publication_retains_latest_checkpoint": true,
+      "local_query_and_offline_need_native_credential": false,
+      "offline_restores_current_qualification": false,
+      "unconfigured_original_identity_bytes_unchanged": true,
+      "full_read_budget_reserved_before_source_contact": true,
+      "import_work_bytes": 209715200,
+      "qualification_work_bytes": 83886080,
+      "local_verification_work_bytes": 33554432,
+      "donor_writes": false,
+      "construction_permission": false,
+      "canonical_workshop_evidence": false,
+      "production_feasibility_proven": false,
+      "new_native_protocol": false,
+      "new_public_tool": false,
+      "production_admission_added": false,
+      "decoded_manifest_consumed_before_refresh_preconditions": true,
+      "read_custody_work_max": 805306368,
+      "dispatch_custody_work_max": 2147483648
     }
   },
   "selected_work_order_goal_monitor": {

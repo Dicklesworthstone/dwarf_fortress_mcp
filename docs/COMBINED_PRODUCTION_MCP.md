@@ -18,7 +18,9 @@ Owner: `df-dfhack-bridge-plane-c-pic.4.1`. The broader dispatcher and recovery
 tasks `.4` and `.5` remain open. This host does not supply a complete fortress
 controller or proven native material/workshop feasibility. It can diagnose
 captured operations and allocate caller-declared inventory within the original
-session. Separately configured bounded clock
+session. An optional acknowledged original Carpenter workshop can also be bound
+as a fresh dispatch prerequisite for every original furniture order, as described
+below. Separately configured bounded clock
 runs can advance an original receipt-linked production order or finish an already
 observed inventory stability interval after the order retires. Wait monitors the
 original order's completion by default, or an explicitly selected inventory
@@ -48,10 +50,16 @@ generations remain independently pinned; they need not equal each other.
 
 `DFMCP_COMBINED_PRODUCTION_CONFIG` is a closed JSON object with schema
 `dfmcp.combined-production-development/1`, an absolute normalized `directory`,
-Boolean `initialize`, and optional `recovery`, `clock` and `inventory_clock`. All three custody directories
+Boolean `initialize`, and optional `recovery`, `clock`, `inventory_clock`,
+`workshop_prerequisite` and `workshop_prerequisite_checkpoint`. All three custody directories
 must be separate and nonnested. Existing private-file owners require real
 owner-private directories and regular no-follow files with canonical modes;
 the host neither repairs nor silently replaces custody.
+
+The optional `workshop_prerequisite` imports one exact independently acknowledged
+Workshop original. Its closed `workshop_prerequisite_checkpoint` is permitted
+only before complete original recovery exists. The donor directory is a fourth
+separate, nonnested private owner; neither object is an MCP argument.
 
 Only the following additional family environment names are accepted:
 
@@ -67,10 +75,14 @@ Only the following additional family environment names are accepted:
 - `DFMCP_SEMANTIC_WORK_ORDER_CLOCK_TOKEN`
 - `DFMCP_SEMANTIC_WORK_ORDER_ALLOW_INVENTORY_CLOCK`
 - `DFMCP_SEMANTIC_WORK_ORDER_INVENTORY_CLOCK_TOKEN`
+- `DFMCP_COMBINED_PRODUCTION_WORKSHOP_TOKEN`
 
 Each pair of clock environment names is accepted only when that clock is
 explicitly configured in the parent and child. Dropping configuration cannot
 hide an existing private clock journal.
+The Workshop read credential is accepted only with `workshop_prerequisite`.
+Standalone Workshop initialization, construction permission and configuration
+variables are not accepted by this host.
 
 Authority flags are absent or exactly `1`. Initializing in Control requires
 both write flags. Opening authority can later be reduced; it cannot be
@@ -78,6 +90,169 @@ increased within that session. All three exact configuration strings are sealed
 at opening and rechecked at native boundaries. A changed string, revoked opt-in,
 other `DFMCP_` variable or production launch/admission state refuses execution.
 Configuration, paths, credentials, pins and native methods are never MCP inputs.
+
+## Require an exact completed original workshop
+
+A furniture order can depend on the Carpenter workshop built by the separate
+[Workshop owner](WORKSHOP_CONSTRUCTION_MCP.md). The operator selects its original
+key and plan digest, exact private journal and matching Workshop acknowledgement.
+The combined owner imports those files Offline and never modifies them. It can
+consume a resolved `Placed` record without a historical completion sample:
+current completion must still be established by a fresh native progress read.
+
+Add this closed object to the parent configuration, using the actual donor
+source pins and latest externally retained acknowledgement:
+
+```json
+{
+  "schema": "dfmcp.combined-production-development/1",
+  "directory": "/private/combined-production",
+  "initialize": true,
+  "workshop_prerequisite": {
+    "directory": "/private/completed-workshop",
+    "endpoint": "127.0.0.1:5001",
+    "world_folder": "region1",
+    "site_id": 7,
+    "df_version": "<exact donor DF version>",
+    "dfhack_version": "<exact donor DFHack version>",
+    "generation": 30,
+    "map_dimensions": [64, 64, 4],
+    "acknowledged": {
+      "journal_id": "<64 lowercase hexadecimal digits>",
+      "head": "<64 lowercase hexadecimal digits>",
+      "frames": 7
+    },
+    "original_key": "original-carpenters.1",
+    "original_plan_digest": "<64 lowercase hexadecimal digits>"
+  }
+}
+```
+
+The example values are illustrative. The endpoint must be canonical numeric IPv4
+loopback, and the directory must be an absolute normalized owner-private path.
+The donor world, site and software must match both production families. Its
+native generation, endpoint and map dimensions remain separately pinned; a
+workforce or order incarnation cannot substitute for the Workshop incarnation.
+The latest retained ACK must name the exact complete donor journal. No building
+ID, input item ID, alternate file path, initialization flag or recovery
+generation can be supplied inside this object.
+
+Provide `DFMCP_COMBINED_PRODUCTION_WORKSHOP_TOKEN` for native qualification. It
+is a separately issued Workshop read credential, 32–256 UTF-8 bytes without NUL.
+The combined owner grants it no construction permission and pins it for each
+connection. Opening or inspecting retained custody Offline requires no Workshop
+token and performs no native contact. No new bridge protocol or public tool is
+introduced; the native source remains Workshop/1.20.
+
+### Bind the prerequisite to the complete production plan
+
+The ordinary assignment request, `existing_labor`, `portfolio` and
+`existing_labor_portfolio` retain their existing request fields. With the
+operator prerequisite configured, original Plan first obtains fresh complete
+progress for the exact original inserted building at the current paused citizen
+tick. A still unfinished, absent, replaced or differently qualified workshop
+cannot publish a production original. A historical completion sample or a
+cached successful check cannot authorize planning.
+
+The immutable imported origin witness participates in the complete original
+request identity before the IntentId, step keys and retained order identities
+are derived. A versioned requirement marker in the sealed original plan also
+names that witness. The parent then stores `original.workshop`, a private
+immutable association bounded at 64 KiB. Its bytes bind the complete production
+plan digest, exact donor directory and complete original Workshop descriptor,
+including the acknowledged pin and resolved receipt. Its digest is returned as
+`workshop_prerequisite.association_digest` and retained in complete recovery.
+An original without this optional prerequisite keeps its existing identity
+bytes and custody layout.
+
+Each original order requires another fresh completed-workshop check before
+native preparation and after its durable `DispatchStarted` marker before native
+insertion. This includes every portfolio leaf and dependency-free existing-labor
+orders. The same original donor, its ACK and the immutable parent association are
+reverified around each read. A changed donor, lost completion, changed paused
+tick, revoked source policy or unavailable qualification prevents insertion.
+A refusal after the dispatch marker retains that original frontier for
+reconciliation; it cannot authorize a replacement key or automatic redispatch.
+
+This is a host dispatch prerequisite for the original constructed workshop.
+It adds no workshop facts to the canonical citizen projection and changes no
+labor, inventory, cadence or stability predicate. It does not prove material
+supply, path access, productivity, manager feasibility or attribution of an order
+to that building. A later original-goal proof still means the exact sealed
+labor and production terminal holds at its reported anchor. The workshop's
+status does not itself prove that terminal or current whole-world state.
+
+### Preserve source floors and exact recovery custody
+
+`workshop_prerequisite` status reports the original witness, key, plan digest,
+receipt and inserted building, together with the association digest, consumed
+tick floor and sticky `source_fenced` flag. `last_qualified` is explicitly a
+historical check with `fresh_for_current_call=false`; Query does not contact the
+source or turn it into fresh dispatch evidence. Failed publication withdraws
+that sample while retaining the latest complete checkpoint.
+
+Every decoded native progress read can consume a newer tick, source generation
+or building allocator floor even when its final qualification fails. A missing
+original building, contradictory identity, source reset or ambiguous native
+connection fences the same owner. Fencing cannot be cleared by retry, local
+verification or lower-floor restoration within that retained owner. On reopening,
+the caller must supply the latest external floors: the new owner rejects values
+below the donor's retained seed, invalid generations and any regression it has
+itself consumed. The immutable origin descriptor and association bytes remain
+stable while these consumed floors advance.
+An already decoded handshake generation is retained immediately, before a later
+budget, authority or deadline refusal can prevent the progress read.
+
+Before an original plan exists, copy the complete returned
+`workshop_prerequisite.checkpoint` into the optional parent field
+`workshop_prerequisite_checkpoint` when reopening:
+
+```json
+{
+  "workshop_prerequisite_checkpoint": {
+    "origin_witness": "<the exact returned origin witness>",
+    "tick": 13212,
+    "generation": 30,
+    "next_building_id": 71,
+    "fenced": false
+  }
+}
+```
+
+Use every returned value exactly; these numbers only illustrate the shape. The
+checkpoint object is closed: missing or unknown fields, explicit null, malformed
+witnesses, illegal native bounds or generation rewind refuse. An increased
+generation must retain `fenced=true`. Opening verifies the witness against the
+newly imported exact donor and restores monotone floors before native contact.
+The consumed tick raises the opening authority floor; it does not manufacture a
+new canonical observation. This field requires `workshop_prerequisite` and is
+mutually exclusive with the complete original `recovery` object.
+
+After original publication, retain the whole returned recovery reference. In
+addition to its existing fields it requires
+`recovery.workshop_prerequisite_digest` and the closed
+`recovery.workshop_prerequisite_floor` containing `tick`, `generation`,
+`next_building_id` and `fenced`. The frontier authority floor must cover the
+Workshop tick. Reopening checks the marked original, exact donor descriptor,
+full `original.workshop` bytes and external digest together. Deleting the donor
+configuration or sidecar cannot downgrade that marked original into an
+unconstrained legacy plan. An unmarked original also refuses an unexpected
+sidecar. Offline recovery needs no Workshop token and restores no current
+qualification or confirmation permit; Reconcile resolves original native keys
+without another insertion.
+
+These fresh-read floors are externally held recovery custody. The combined
+reader does not append them to the donor journal or ACK. Before any original
+archive or sidecar exists, local files cannot detect a caller omitting a
+previously returned checkpoint on a later opening. Rolling back an entire
+externally held checkpoint, or the consumed-source floor inside complete
+original recovery, likewise cannot be independently detected when the supplied
+values still satisfy the immutable donor seed. After original publication, the
+marked plan and sidecar prevent dropping the workshop policy; they do not
+durably acknowledge later read floors. Preserve the latest complete external
+state across failures and close/reopen. The host does not claim independent
+durable acknowledgement or complete native continuity for omitted or rolled-back
+externally held state.
 
 ## Public sequence
 
@@ -1077,7 +1252,9 @@ the fence.
 
 Retain all native journals and semantic associations in both child directories,
 plus parent `original.plan`, `original.citizens`, `execution.journal` and
-`goal.history` if selected goal monitoring has started.
+`goal.history` if selected goal monitoring has started. A configured original
+Workshop prerequisite also retains its immutable parent `original.workshop` and
+the exact donor `workshop.journal`/`workshop.ack` pair in their separate directory.
 Persist the latest complete `recovery` object outside those files. It includes
 the original plan/object/citizen digests and anchor, and frontier journal/head/
 authority-tick-floor. The additive Boolean `goal_history_present` records
@@ -1085,6 +1262,10 @@ selected history; older recovery objects default to false. Preserve its latest
 value even when opening or publication fails. On reopen set all three configurations to
 `initialize=false`, supply that parent object, and retain the original child
 native journal identities required by their existing configurations.
+Configured workshop originals additionally retain the association digest and
+complete consumed-source floor described above. Pre-plan refusals instead
+return their separately witnessed `workshop_prerequisite.checkpoint` even when
+`recovery` is still null.
 
 Offline opens retain historical custody without contacting DFHack. Reconcile
 mode can consult the original keys under Query authority. Neither reconstructs
@@ -1148,6 +1329,19 @@ promise that every possible sample history will fit. The host reserves
 inspection. Complete escaped response text is limited to 60,000 bytes; overflow
 withdraws the local review and returns bounded recovery/uncertainty instead of
 truncating JSON. Smaller output budgets refuse before I/O.
+
+The optional Workshop owner prepays 200 MiB for bounded Offline import, 80 MiB
+for each fresh qualification and 32 MiB for local custody verification from the
+same shrinking allowance. The complete read reservation is made before token
+access or native contact. With this prerequisite configured, read-only original
+custody reserves at most 768 MiB per operation; native prepare, commit and cancel
+delegation can reserve up to 2 GiB for repeated boundary checks. This distinction
+lets a bounded Wait pay for reconciliation, history initialization and fresh
+parent sampling from one unchanged public allowance. Owners without the optional
+prerequisite keep the existing 512 MiB custody ceiling, and the native frontier
+ceiling remains 2 GiB.
+These are logical work charges, not native frame sizes or eager allocations;
+the immutable association itself remains at most 64 KiB.
 
 The machine description is
 [`live_production_executor_v1.json`](../architecture/live_production_executor_v1.json),

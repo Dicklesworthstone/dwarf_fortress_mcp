@@ -8,8 +8,8 @@ use dfmcp_intent::{
     Constraint, Intent, ObligationSpec, RequestedAction, StaticPlanner, derive_step_idempotency_key,
 };
 use dfmcp_world::{CompareOp, EntityKind, Predicate, Value as FactValue};
-use orders::request::Objective;
 use orders::inventory_baseline::InventoryBaselines;
+use orders::request::Objective;
 use serde::Deserialize;
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
@@ -92,6 +92,16 @@ impl ExistingLaborRequest {
         baselines: &InventoryBaselines,
         c: &OperationContext,
     ) -> Result<PreparedPlan> {
+        self.compile_with_workshop(evidence, requirement, baselines, c, None)
+    }
+    pub(crate) fn compile_with_workshop(
+        &self,
+        evidence: &PredicateEvidence<'_>,
+        requirement: &ExistingLaborRequirement,
+        baselines: &InventoryBaselines,
+        c: &OperationContext,
+        origin: Option<Digest32>,
+    ) -> Result<PreparedPlan> {
         self.validate()?;
         let units = self.unit_ids()?;
         if evidence.snapshot().anchor() != c.anchor
@@ -144,6 +154,7 @@ impl ExistingLaborRequest {
         if let Some(objective) = &self.objective {
             objective.append_identity(&mut bytes, baselines, c.anchor)?;
         }
+        super::workshop_binding::append_identity(&mut bytes, origin)?;
         let digest = Digest32::of_bytes(&bytes);
         let id = IntentId::new(u128::from_be_bytes(
             digest.as_bytes()[..16]
@@ -168,26 +179,27 @@ impl ExistingLaborRequest {
             value,
         };
         let goal = match &self.objective {
-            None => {
-                Predicate::All(vec![
-                    equal("amount_total", FactValue::U64(u64::from(self.amount))),
-                    equal("amount_remaining", FactValue::U64(0)),
-                    equal("validated", FactValue::Bool(true)),
-                    equal("active", FactValue::Bool(false)),
-                ])
-            },
+            None => Predicate::All(vec![
+                equal("amount_total", FactValue::U64(u64::from(self.amount))),
+                equal("amount_remaining", FactValue::U64(0)),
+                equal("validated", FactValue::Bool(true)),
+                equal("active", FactValue::Bool(false)),
+            ]),
             Some(objective) => objective.predicate(baselines, c.anchor)?,
         };
         let intent = Intent {
             id,
             anchor: c.anchor,
-            summary: format!(
-                "Use existing {} on {} citizens for {} finite {} order units",
-                self.labor,
-                units.len(),
-                self.amount,
-                native.as_str()
-            ),
+            summary: super::workshop_binding::summary(
+                format!(
+                    "Use existing {} on {} citizens for {} finite {} order units",
+                    self.labor,
+                    units.len(),
+                    self.amount,
+                    native.as_str()
+                ),
+                origin,
+            )?,
             terminal_condition: Predicate::All(vec![prerequisite, goal.clone()]),
             constraints: vec![Constraint::MaxRisk(RiskTier::Guarded)],
             requested_actions: vec![RequestedAction {

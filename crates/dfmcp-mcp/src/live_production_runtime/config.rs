@@ -1,4 +1,5 @@
 //! Fixed operator configuration for the combined, unadmitted development owner.
+use super::workshop_config::{self, WorkshopConfig};
 use crate::semantic_workforce_runtime::{denied, digest, invalid};
 use crate::{semantic_work_order_runtime as orders, semantic_workforce_runtime as workforce};
 use dfmcp_adapter::live_dispatch::durable;
@@ -44,6 +45,74 @@ pub(crate) struct Recovery {
     pub(crate) clock_journal_id: Option<Digest32>,
     pub(crate) inventory_clock_journal_id: Option<Digest32>,
     pub(crate) portfolio: Option<[Option<PortfolioRecovery>; 4]>,
+    pub(crate) workshop_prerequisite_digest: Option<Digest32>,
+    pub(super) workshop_prerequisite_floor: Option<WorkshopRecoveryFloor>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub(super) struct WorkshopRecoveryFloor {
+    pub(super) tick: u64,
+    pub(super) generation: u64,
+    pub(super) next_building_id: u32,
+    pub(super) fenced: bool,
+}
+
+impl WorkshopRecoveryFloor {
+    fn validate(self, original_generation: u64, authority_tick_floor: u64) -> Result<()> {
+        if self.tick > dfmcp_adapter::bounded_run::MAX_NATIVE_TICK
+            || self.generation < original_generation
+            || self.generation == u64::MAX
+            || (!self.fenced && self.generation != original_generation)
+            || self.next_building_id > i32::MAX as u32
+            || authority_tick_floor < self.tick
+        {
+            return Err(denied(
+                "workshop recovery must retain legal consumed source floors and sticky continuity loss",
+            ));
+        }
+        Ok(())
+    }
+}
+
+fn workshop_floor<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> std::result::Result<Option<WorkshopRecoveryFloor>, D::Error> {
+    WorkshopRecoveryFloor::deserialize(deserializer).map(Some)
+}
+
+/// Externally retained pre-plan rejection evidence. Its witness must match the
+/// newly verified donor before the runtime consumes these monotone floors.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct WorkshopPrerequisiteCheckpoint {
+    pub(super) origin_witness: Digest32,
+    pub(super) floor: WorkshopRecoveryFloor,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WorkshopCheckpointInput {
+    origin_witness: String,
+    tick: u64,
+    generation: u64,
+    next_building_id: u32,
+    fenced: bool,
+}
+
+fn workshop_checkpoint<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> std::result::Result<Option<WorkshopPrerequisiteCheckpoint>, D::Error> {
+    let input = WorkshopCheckpointInput::deserialize(deserializer)?;
+    let origin_witness = digest(&input.origin_witness).map_err(serde::de::Error::custom)?;
+    Ok(Some(WorkshopPrerequisiteCheckpoint {
+        origin_witness,
+        floor: WorkshopRecoveryFloor {
+            tick: input.tick,
+            generation: input.generation,
+            next_building_id: input.next_building_id,
+            fenced: input.fenced,
+        },
+    }))
 }
 
 #[derive(Clone, Copy)]
@@ -98,6 +167,9 @@ struct Input {
     recovery: Option<RecoveryInput>,
     clock: Option<ClockInput>,
     inventory_clock: Option<ClockInput>,
+    workshop_prerequisite: Option<workshop_config::Input>,
+    #[serde(default, deserialize_with = "workshop_checkpoint")]
+    workshop_prerequisite_checkpoint: Option<WorkshopPrerequisiteCheckpoint>,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -112,6 +184,10 @@ struct RecoveryInput {
     clock_journal_id: Option<String>,
     inventory_clock_journal_id: Option<String>,
     portfolio: Option<Vec<PortfolioRecoveryInput>>,
+    #[serde(default, deserialize_with = "journal_identity")]
+    workshop_prerequisite_digest: Option<String>,
+    #[serde(default, deserialize_with = "workshop_floor")]
+    workshop_prerequisite_floor: Option<WorkshopRecoveryFloor>,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -144,6 +220,8 @@ pub(crate) struct Config {
     pub(crate) recovery: Option<Recovery>,
     pub(crate) clock: Option<ClockConfig>,
     pub(crate) inventory_clock: Option<ClockConfig>,
+    pub(super) workshop_prerequisite: Option<WorkshopConfig>,
+    pub(super) workshop_prerequisite_checkpoint: Option<WorkshopPrerequisiteCheckpoint>,
     pub(crate) workforce: workforce::native::NativeShell,
     pub(crate) orders: orders::native::NativeShell,
     check: Arc<dyn Fn() -> Result<()> + Send + Sync>,
@@ -176,20 +254,26 @@ fn environment() -> Result<[String; 3]> {
         Ok(raw)
     };
     let raw = [read(CONFIG)?, read(WORKFORCE_CONFIG)?, read(ORDER_CONFIG)?];
-    let (_, _, _, clock, inventory_clock) = parse(&raw[0])?;
+    let (_, _, _, clock, inventory_clock, workshop, _) = parse(&raw[0])?;
     for (key, _) in std::env::vars_os() {
         let key = key.to_string_lossy();
-        if !allowed_key(&key, clock.is_some(), inventory_clock.is_some()) {
+        if !allowed_key(
+            &key,
+            clock.is_some(),
+            inventory_clock.is_some(),
+            workshop.is_some(),
+        ) {
             return Err(denied(
-                "combined development rejects other DFMCP state and unconfigured clock authority",
+                "combined development rejects other DFMCP state and unconfigured native credentials",
             ));
         }
     }
     Ok(raw)
 }
 
-fn allowed_key(key: &str, clock: bool, inventory_clock: bool) -> bool {
+fn allowed_key(key: &str, clock: bool, inventory_clock: bool, workshop: bool) -> bool {
     match key {
+        workshop_config::TOKEN => workshop,
         "DFMCP_SEMANTIC_WORK_ORDER_ALLOW_CLOCK" | "DFMCP_SEMANTIC_WORK_ORDER_CLOCK_TOKEN" => clock,
         "DFMCP_SEMANTIC_WORK_ORDER_ALLOW_INVENTORY_CLOCK"
         | "DFMCP_SEMANTIC_WORK_ORDER_INVENTORY_CLOCK_TOKEN" => inventory_clock,
@@ -211,6 +295,8 @@ fn parse(
     Option<Recovery>,
     Option<ClockConfig>,
     Option<ClockConfig>,
+    Option<WorkshopConfig>,
+    Option<WorkshopPrerequisiteCheckpoint>,
 )> {
     if raw.is_empty() || raw.len() > MAX_CONFIG_BYTES {
         return Err(invalid("combined operator configuration exceeds 16 KiB"));
@@ -238,6 +324,24 @@ fn parse(
         .inventory_clock
         .map(|clock| clock.validate(input.initialize))
         .transpose()?;
+    let workshop_prerequisite = input
+        .workshop_prerequisite
+        .map(|workshop| workshop.validate(&input.directory))
+        .transpose()?;
+    let workshop_prerequisite_checkpoint = input.workshop_prerequisite_checkpoint;
+    if let Some(checkpoint) = workshop_prerequisite_checkpoint {
+        let workshop = workshop_prerequisite.as_ref().ok_or_else(|| {
+            denied("pre-plan workshop checkpoint requires its exact configured donor")
+        })?;
+        if input.recovery.is_some() {
+            return Err(denied(
+                "pre-plan workshop checkpoint cannot compete with complete original recovery",
+            ));
+        }
+        checkpoint
+            .floor
+            .validate(workshop.binding.generation(), checkpoint.floor.tick)?;
+    }
     let recovery = input
         .recovery
         .map(|r| {
@@ -306,10 +410,31 @@ fn parse(
                     .map(digest)
                     .transpose()?,
                 portfolio,
+                workshop_prerequisite_digest: r
+                    .workshop_prerequisite_digest
+                    .as_deref()
+                    .map(digest)
+                    .transpose()?,
+                workshop_prerequisite_floor: r.workshop_prerequisite_floor,
             })
         })
         .transpose()?;
     if let Some(recovery) = recovery {
+        if recovery.workshop_prerequisite_digest.is_some() != workshop_prerequisite.is_some()
+            || recovery.workshop_prerequisite_floor.is_some() != workshop_prerequisite.is_some()
+        {
+            return Err(denied(
+                "combined recovery requires the exact workshop prerequisite association and consumed floors",
+            ));
+        }
+        if let (Some(workshop), Some(floor)) =
+            (&workshop_prerequisite, recovery.workshop_prerequisite_floor)
+        {
+            floor.validate(
+                workshop.binding.generation(),
+                recovery.frontier.authority_tick_floor,
+            )?;
+        }
         if let Some(entries) = recovery.portfolio {
             let first =
                 entries[0].ok_or_else(|| invalid("first portfolio recovery slot absent"))?;
@@ -340,10 +465,12 @@ fn parse(
         recovery,
         clock,
         inventory_clock,
+        workshop_prerequisite,
+        workshop_prerequisite_checkpoint,
     ))
 }
 
-fn distinct_directories(paths: [&Path; 3]) -> bool {
+fn distinct_directories<const N: usize>(paths: [&Path; N]) -> bool {
     (0..paths.len()).all(|i| {
         ((i + 1)..paths.len())
             .all(|j| !paths[i].starts_with(paths[j]) && !paths[j].starts_with(paths[i]))
@@ -369,7 +496,15 @@ impl Config {
         let digests = raw
             .each_ref()
             .map(|value| Digest32::of_bytes(value.as_bytes()));
-        let (directory, initialize, recovery, clock, inventory_clock) = parse(&raw[0])?;
+        let (
+            directory,
+            initialize,
+            recovery,
+            clock,
+            inventory_clock,
+            workshop_prerequisite,
+            workshop_prerequisite_checkpoint,
+        ) = parse(&raw[0])?;
         let check: Arc<dyn Fn() -> Result<()> + Send + Sync> = Arc::new(move || {
             let current = environment()?;
             if !matches_digests(&current, digests) {
@@ -402,6 +537,14 @@ impl Config {
             )?,
         };
         if !distinct_directories([&directory, w.custody_directory(), o.custody_directory()])
+            || workshop_prerequisite.as_ref().is_some_and(|workshop| {
+                !distinct_directories([
+                    &directory,
+                    w.custody_directory(),
+                    o.custody_directory(),
+                    &workshop.directory,
+                ])
+            })
             || w.endpoint() != o.endpoint()
             || w.initializing() != initialize
             || o.initializing() != initialize
@@ -415,6 +558,9 @@ impl Config {
         let wa = workforce::Shell::acceptance(&workforce);
         let oa = orders::Shell::acceptance(&orders);
         if !matching_sources(wa, oa)
+            || workshop_prerequisite
+                .as_ref()
+                .is_some_and(|workshop| !workshop.matching_sources(wa, oa))
             || recovery.is_some_and(|r| r.anchor.fortress_id != wa.fortress())
         {
             return Err(denied(
@@ -429,6 +575,8 @@ impl Config {
             recovery,
             clock,
             inventory_clock,
+            workshop_prerequisite,
+            workshop_prerequisite_checkpoint,
             workforce,
             orders,
             check,
@@ -438,6 +586,14 @@ impl Config {
     pub(crate) fn current(&self) -> Result<()> {
         (self.runtime_check)()?;
         (self.check)()
+    }
+    pub(super) fn read_guard(&self) -> Arc<dyn Fn() -> Result<()> + Send + Sync> {
+        let runtime_check = self.runtime_check;
+        let check = Arc::clone(&self.check);
+        Arc::new(move || {
+            runtime_check()?;
+            check()
+        })
     }
     pub(crate) fn path(&self, name: &str) -> PathBuf {
         self.directory.join(name)

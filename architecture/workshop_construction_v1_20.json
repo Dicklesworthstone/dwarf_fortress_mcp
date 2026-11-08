@@ -394,7 +394,7 @@
     "tree_material_adapter_rust_cases": 10,
     "tree_material_mcp_unit_cases": 3,
     "tree_material_python_stdio_cases": 5,
-    "production_origin_adapter_rust_cases": 16,
+    "production_origin_adapter_rust_cases": 17,
     "clock_adapter_rust_cases": 20
   },
   "shared_native_engine": {
@@ -509,7 +509,8 @@
     ],
     "association_reopen_mode": "Offline",
     "combined_host_integration": "tracked separately from this embedding API",
-    "manager_material_or_causal_production_proof": false
+    "manager_material_or_causal_production_proof": false,
+    "decoded_manifest_consumed_before_refresh_preconditions": true
   },
   "clock_adapter": {
     "module": "workshop_construction::clock",

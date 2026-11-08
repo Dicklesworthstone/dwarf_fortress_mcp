@@ -40,6 +40,16 @@ mod portfolio;
 mod portfolio_request;
 mod request;
 mod review;
+mod workshop_binding;
+mod workshop_config;
+mod workshop_prerequisite;
+#[cfg(all(
+    test,
+    target_os = "linux",
+    any(target_arch = "x86_64", target_arch = "aarch64")
+))]
+#[path = "live_production_runtime/workshop_prerequisite_tests.rs"]
+mod workshop_prerequisite_tests;
 pub(crate) use choices::ObserveRequest;
 use clock::ProductionClock;
 pub(crate) use config::Config;
@@ -58,12 +68,15 @@ pub(crate) use request::Request;
 pub(crate) use workforce::Mode;
 use workforce::Shell as WorkforceShell;
 use workforce::{denied, exhausted, invalid};
+use workshop_prerequisite::SharedWorkshop;
 
 pub(crate) const MAX_BYTES: u64 = 32 * 1024 * 1024 * 1024;
 pub(crate) const MAX_WALL_MILLIS: u64 = 60_000;
 pub(crate) const MAX_OUTPUT_TOKENS: u32 = 32_768;
 const MIB: u64 = 1024 * 1024;
 const MAX_FRONTIER_BYTES: u64 = 2 * 1024 * MIB;
+const WORKSHOP_CUSTODY_READ_BYTES: u64 = 768 * MIB;
+const WORKSHOP_CUSTODY_DISPATCH_BYTES: u64 = 2 * 1024 * MIB;
 type W = workforce::native::NativeShell;
 type O = orders::native::NativeShell;
 type File = dfmcp_adapter::build_placement::journal::private_file::PrivateBuildFile;
@@ -209,6 +222,7 @@ pub(crate) struct Runtime {
     execution: Option<Execution>,
     frontier: Option<Coordinator<File>>,
     custody: Option<SharedCustody>,
+    workshop: Option<SharedWorkshop>,
     original: Option<PreparedPlan>,
     layout: Option<ProductionLayout>,
     seal: Option<PlanArchiveSeal>,
@@ -364,6 +378,7 @@ impl Runtime {
             execution: None,
             frontier: None,
             custody: None,
+            workshop: None,
             original: None,
             layout: None,
             seal: None,
@@ -385,6 +400,43 @@ impl Runtime {
         let mut work = Work::new(&c)?;
         let clock_output = work.take(8 * MIB)?;
         let inventory_clock_output = work.take(8 * MIB)?;
+        // Import the acknowledged original Offline. No Workshop credential or
+        // connection is needed until a real planning/dispatch qualification.
+        out.workshop = out
+            .config
+            .workshop_prerequisite
+            .clone()
+            .map(|config| {
+                SharedWorkshop::open(
+                    config,
+                    out.config.read_guard(),
+                    &work.take(workshop_prerequisite::OPEN_BYTES)?,
+                )
+            })
+            .transpose()?;
+        if let Some(checkpoint) = out.config.workshop_prerequisite_checkpoint {
+            let workshop = out
+                .workshop
+                .as_ref()
+                .ok_or_else(|| denied("workshop checkpoint lost its original donor"))?;
+            if checkpoint.origin_witness != workshop.witness()? {
+                return Err(denied("workshop checkpoint names another original donor"));
+            }
+            workshop.restore_floor(
+                checkpoint.floor.tick,
+                checkpoint.floor.generation,
+                checkpoint.floor.next_building_id,
+                checkpoint.floor.fenced,
+                &work.take(MIB)?,
+            )?;
+        }
+        out.observation_tick_floor = out.authority_tick_floor();
+        if out.config.recovery.is_none() {
+            workshop_prerequisite::require_absent(
+                &out.config.path(workshop_prerequisite::FILE_NAME),
+                &work.take(MIB)?,
+            )?;
+        }
         let (w, wa, wid) = out
             .config
             .workforce
@@ -424,6 +476,39 @@ impl Runtime {
                     "combined original anchor differs from external recovery",
                 ));
             }
+            match (
+                workshop_binding::requirement(&original)?,
+                &out.workshop,
+                recovery.workshop_prerequisite_digest,
+                recovery.workshop_prerequisite_floor,
+            ) {
+                (Some(witness), Some(workshop), Some(seal), Some(floor))
+                    if witness == workshop.witness()? =>
+                {
+                    workshop.restore_floor(
+                        floor.tick,
+                        floor.generation,
+                        floor.next_building_id,
+                        floor.fenced,
+                        &work.take(MIB)?,
+                    )?;
+                    workshop.reopen(
+                        &out.config.path(workshop_prerequisite::FILE_NAME),
+                        &original,
+                        seal,
+                        &work.take(64 * MIB)?,
+                    )?;
+                }
+                (None, None, None, None) => workshop_prerequisite::require_absent(
+                    &out.config.path(workshop_prerequisite::FILE_NAME),
+                    &work.take(MIB)?,
+                )?,
+                _ => {
+                    return Err(denied(
+                        "recovery must retain the original plan's exact workshop prerequisite",
+                    ));
+                }
+            }
             let mut identity = workforce::identity::open_private_capsule(
                 &out.config.path("original.citizens"),
                 recovery.identity_digest,
@@ -449,7 +534,12 @@ impl Runtime {
             });
             out.seal = Some(recovery.seal);
             out.identity_digest = Some(recovery.identity_digest);
-            out.custody = Some(SharedCustody::new(archive, identity, original.clone()));
+            out.custody = Some(SharedCustody::new_with_workshop(
+                archive,
+                identity,
+                original.clone(),
+                out.workshop.clone(),
+            ));
             out.original = Some(original.clone());
             out.layout = Some(layout);
             out.frontier = Some(durable::open_private_coordinator(
@@ -566,6 +656,7 @@ impl Runtime {
     }
     pub(crate) fn context(&mut self, cancelled: bool) -> Result<OperationContext> {
         self.config.current()?;
+        self.observation_tick_floor = self.authority_tick_floor();
         self.request = self
             .request
             .checked_add(1)
@@ -578,6 +669,11 @@ impl Runtime {
             grants: self.grants(),
             cancellation_requested: cancelled,
         })
+    }
+    fn authority_tick_floor(&self) -> GameTick {
+        self.observation_tick_floor.max(GameTick(
+            self.workshop.as_ref().map_or(0, SharedWorkshop::high_tick),
+        ))
     }
     fn check(&self, c: &OperationContext, control: bool) -> Result<()> {
         self.config.current()?;
@@ -596,7 +692,7 @@ impl Runtime {
             ));
         }
         let mut authority = c.clone();
-        authority.anchor.tick = authority.anchor.tick.max(self.observation_tick_floor);
+        authority.anchor.tick = authority.anchor.tick.max(self.authority_tick_floor());
         authority.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
         if control {
             if self.mode != Mode::Control || self.initialization_failed || self.fenced {
@@ -609,12 +705,31 @@ impl Runtime {
         Ok(())
     }
     fn arm(&self, work: &mut Work) -> Result<()> {
+        // Parent sampling makes ten custody checks (68 MiB each with the
+        // donor). It does not acquire native workshop completion. Preserve the
+        // remaining allowance for reconciliation, history and that sample.
+        let ceiling = if self.workshop.is_some() {
+            WORKSHOP_CUSTODY_READ_BYTES
+        } else {
+            512 * MIB
+        };
+        self.arm_with_ceiling(work, ceiling)
+    }
+    fn arm_dispatch(&self, work: &mut Work) -> Result<()> {
+        let ceiling = if self.workshop.is_some() {
+            WORKSHOP_CUSTODY_DISPATCH_BYTES
+        } else {
+            512 * MIB
+        };
+        self.arm_with_ceiling(work, ceiling)
+    }
+    fn arm_with_ceiling(&self, work: &mut Work, ceiling: u64) -> Result<()> {
         if let Some(custody) = &self.custody {
-            let allowance = (work.bytes / 2).min(512 * MIB);
+            let allowance = (work.bytes / 2).min(ceiling);
             let mut reserved = work.take(allowance)?;
             // This is an authorization-time floor for immutable private reads,
             // not a new canonical snapshot or a native effect context.
-            reserved.anchor.tick = reserved.anchor.tick.max(self.observation_tick_floor);
+            reserved.anchor.tick = reserved.anchor.tick.max(self.authority_tick_floor());
             custody.arm(&reserved)?;
         }
         Ok(())
@@ -703,6 +818,11 @@ impl Runtime {
     }
     pub(crate) fn abandon_preparation(&mut self) {
         self.planning_inspection.withdraw();
+        if let Some(workshop) = &self.workshop
+            && workshop.withdraw().is_err()
+        {
+            self.fenced = true;
+        }
         self.invalidate_portfolio_samples();
         self.clock_review = None;
         self.inventory_clock_review = None;
@@ -739,7 +859,7 @@ impl Runtime {
                 let r = frontier.recovery();
                 let floor = r
                     .authority_tick_floor
-                    .max(self.observation_tick_floor.get())
+                    .max(self.authority_tick_floor().get())
                     .max(self.execution.as_ref().map_or(0, Execution::high_tick));
                 let mut value = json!({"plan_digest":seal.plan_digest.to_hex(),"object_digest":seal.object_digest.to_hex(),
                     "anchor":anchor_json(p.anchor),"identity_digest":identity.to_hex(),
@@ -754,6 +874,11 @@ impl Runtime {
                         portfolio[0]["inventory_clock_journal_id"].clone();
                     value["portfolio"] = portfolio;
                 }
+                if let Some(workshop) = &self.workshop {
+                    value["workshop_prerequisite_digest"] =
+                        json!(workshop.seal().map(|seal| seal.to_hex()));
+                    value["workshop_prerequisite_floor"] = workshop.recovery_floor();
+                }
                 value
             }
             _ => Value::Null,
@@ -762,10 +887,11 @@ impl Runtime {
     pub(crate) fn opening_recovery_reference(&self) -> Value {
         let selected_goal = self.selected_goal_json();
         json!({"mode":self.mode.as_str(),"anchor":anchor_json(self.anchor),"recovery":self.recovery_json(),
+            "workshop_prerequisite":self.workshop.as_ref().map(SharedWorkshop::status),
             "portfolio":self.portfolio_json(),
             "selected_parent_goal":null,
             "production_inspection_source":null,"production_inspection":null,
-            "observation_tick_floor":self.observation_tick_floor.get(),
+            "observation_tick_floor":self.authority_tick_floor().get(),
             "original_plan":self.original.as_ref().map(plan_json),"runtime_admitted":false,
             "selected_inventory_goal":if matches!(selected_goal["kind"].as_str(), Some("observed_inventory_minimum" | "observed_inventory_increase")) {Some(&selected_goal)}else{None},
             "selected_order_goal":if selected_goal["kind"] == "retained_order_completion" {Some(&selected_goal)}else{None},
@@ -790,6 +916,8 @@ impl Runtime {
         self.arm(work)?;
         if let Some(custody) = &self.custody {
             custody.verify(&work.current()?)?;
+        } else if let Some(workshop) = &self.workshop {
+            workshop.verify(&work.take(workshop_prerequisite::LOCAL_BYTES)?)?;
         }
         let frontier = if let Some(frontier) = &mut self.frontier {
             Some(frontier.inspect(&work.take(8 * MIB)?)?)
@@ -859,10 +987,11 @@ impl Runtime {
             "workforce_choices":if self.original.is_none(){b.choices.as_ref()}else{None} }));
         let selected_goal = self.selected_goal_json();
         let value = json!({"ok":true,"mode":self.mode.as_str(),"anchor":anchor_json(self.anchor),
+            "workshop_prerequisite":self.workshop.as_ref().map(SharedWorkshop::status),
             "portfolio":self.portfolio_json(),
             "selected_parent_goal":if self.portfolio.is_some(){self.selected_parent_goal_json()}else{Value::Null},
             "runtime_admitted":false,"observation":observation,"original_plan":self.original.as_ref().map(plan_json),
-            "observation_tick_floor":self.observation_tick_floor.get(),
+            "observation_tick_floor":self.authority_tick_floor().get(),
             "frontier":frontier,"review":review,
             "selected_inventory_goal":if matches!(selected_goal["kind"].as_str(), Some("observed_inventory_minimum" | "observed_inventory_increase")) {Some(&selected_goal)}else{None},
             "selected_order_goal":if selected_goal["kind"] == "retained_order_completion" {Some(&selected_goal)}else{None},
@@ -1010,8 +1139,8 @@ impl Runtime {
             false,
             &objectives,
             c,
-            |evidence, baselines, current| {
-                request.compile_with_inventory(evidence, baselines, current)
+            |evidence, baselines, current, origin| {
+                request.compile_with_workshop(evidence, baselines, current, origin)
             },
         )
     }
@@ -1031,8 +1160,8 @@ impl Runtime {
             true,
             &objectives,
             c,
-            |evidence, baselines, current| {
-                request.compile_with_inventory(evidence, baselines, current)
+            |evidence, baselines, current, origin| {
+                request.compile_with_workshop(evidence, baselines, current, origin)
             },
         )
     }
@@ -1049,8 +1178,8 @@ impl Runtime {
             false,
             &objectives,
             c,
-            |evidence, requirement, baselines, current| {
-                request.compile_with_inventory(evidence, requirement, baselines, current)
+            |evidence, requirement, baselines, current, origin| {
+                request.compile_with_workshop(evidence, requirement, baselines, current, origin)
             },
         )
     }
@@ -1071,8 +1200,8 @@ impl Runtime {
             true,
             &objectives,
             c,
-            |evidence, requirement, baselines, current| {
-                request.compile_with_inventory(evidence, requirement, baselines, current)
+            |evidence, requirement, baselines, current, origin| {
+                request.compile_with_workshop(evidence, requirement, baselines, current, origin)
             },
         )
     }
@@ -1088,6 +1217,7 @@ impl Runtime {
             &ExistingLaborRequirement,
             &InventoryBaselines,
             &OperationContext,
+            Option<Digest32>,
         ) -> Result<PreparedPlan>,
     ) -> Result<View> {
         let (selected, labor) = selection;
@@ -1106,7 +1236,7 @@ impl Runtime {
             portfolio,
             objectives,
             c,
-            |evidence, baselines, current| {
+            |evidence, baselines, current, origin| {
                 let identity =
                     LiveRoutingEvidence::citizens_v1(evidence.clone(), &projection, &capsule)?;
                 let units = identity.resolve_units(&selected)?;
@@ -1125,7 +1255,7 @@ impl Runtime {
                         })
                         .collect::<Result<Vec<_>>>()?;
                 let requirement = ExistingLaborRequirement::new(labor, historical)?;
-                let plan = compile(evidence, &requirement, baselines, current)?;
+                let plan = compile(evidence, &requirement, baselines, current, origin)?;
                 let observed =
                     ExistingLaborProjection::new(&plan, &identity, capture, current.anchor.cursor)?;
                 if observed.anchor().tick != current.anchor.tick {
@@ -1156,6 +1286,7 @@ impl Runtime {
             &PredicateEvidence<'_>,
             &InventoryBaselines,
             &OperationContext,
+            Option<Digest32>,
         ) -> Result<PreparedPlan>,
     ) -> Result<View> {
         self.check(c, true)?;
@@ -1194,7 +1325,16 @@ impl Runtime {
         } else {
             InventoryBaselines::default()
         };
-        let plan = compile(&evidence, &baselines, &work.take(8 * MIB)?)?;
+        let origin = if let Some(workshop) = &self.workshop {
+            workshop.qualify(&work.take(workshop_prerequisite::CHECK_BYTES)?)?;
+            Some(workshop.witness()?)
+        } else {
+            None
+        };
+        let plan = compile(&evidence, &baselines, &work.take(8 * MIB)?, origin)?;
+        if workshop_binding::requirement(&plan)? != origin {
+            return Err(denied("compiled plan lost its exact workshop prerequisite"));
+        }
         let layout = host_plan(&plan)?;
         let expected = layout.archive_seal();
         // From this point failures preserve partial publication and forbid another
@@ -1215,12 +1355,24 @@ impl Runtime {
             &work.take(32 * MIB)?,
         )?;
         let identity_digest = identity.seal();
+        if let Some(workshop) = &self.workshop {
+            workshop.bind(
+                &self.config.path(workshop_prerequisite::FILE_NAME),
+                &plan,
+                &work.take(64 * MIB)?,
+            )?;
+        }
         let recovery = durable::initial_recovery(&plan, &work.take(2 * MIB)?)?;
         self.seal = Some(expected);
         self.identity_digest = Some(identity_digest);
         self.original = Some(plan.clone());
         self.layout = Some(layout);
-        self.custody = Some(SharedCustody::new(archive, identity, plan.clone()));
+        self.custody = Some(SharedCustody::new_with_workshop(
+            archive,
+            identity,
+            plan.clone(),
+            self.workshop.clone(),
+        ));
         self.frontier = Some(durable::open_private_coordinator(
             &self.config.path("execution.journal"),
             &work.take(16 * MIB)?,
@@ -1306,7 +1458,7 @@ impl Runtime {
     ) -> Result<View> {
         let mut work = Work::new(c)?;
         let output = work.take(256 * MIB)?;
-        self.arm(&mut work)?;
+        self.arm_dispatch(&mut work)?;
         if let Some(custody) = &self.custody {
             custody.verify(&work.current()?)?;
         }

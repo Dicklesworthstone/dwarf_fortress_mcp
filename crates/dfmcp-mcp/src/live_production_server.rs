@@ -63,6 +63,14 @@ fn merge_recovery(old: &mut Option<Value>, latest: &Value) {
     retained["selected_parent_goal"] = Value::Null;
     retained["production_inspection_source"] = Value::Null;
     retained["production_inspection"] = Value::Null;
+    // A failed pre-plan native read has no parent recovery yet. Keep its exact
+    // caller-held source checkpoint, while withdrawing any earlier completion.
+    if latest["workshop_prerequisite"].is_object() {
+        retained["workshop_prerequisite"] = latest["workshop_prerequisite"].clone();
+    }
+    if retained["workshop_prerequisite"].is_object() {
+        retained["workshop_prerequisite"]["last_qualified"] = Value::Null;
+    }
     if latest.get("clock").is_some() {
         retained["clock"] = latest["clock"].clone();
     }
@@ -694,7 +702,7 @@ pub fn fortress_query(
     })
 }
 #[tool(
-    description = "Compile one original labor and finite-order plan, kind=existing_labor for one finite order using observed already-enabled eligible workers without a labor assignment, kind=existing_labor_portfolio for one to four orders using the same qualified current workers, or kind=portfolio to assign labor before one to four distinct furniture orders; every order may select observed_inventory_minimum or observed_inventory_increase with item_type and increase_stack_units (1..1000000). Increase seals a server-qualified complete original inventory baseline before preparation; clients cannot supply or renew that baseline; kind=step with original_plan_digest prepares the next eligible original step. After all original effects settle, kind=run prepares an independently authorized clock for the original retained-order or inventory goal. After Wait observes True original labor and explicitly selected inventory, kind=inventory_run prepares an independent stability clock even after order retirement. Both name original_paired_seal, game_ticks and wall_millis; portfolio clock requests also require the exact original order_step_id. Planning never unpauses."
+    description = "Compile one original labor and finite-order plan, kind=existing_labor for one finite order using observed already-enabled eligible workers without a labor assignment, kind=existing_labor_portfolio for one to four orders using the same qualified current workers, or kind=portfolio to assign labor before one to four distinct furniture orders; every order may select observed_inventory_minimum or observed_inventory_increase with item_type and increase_stack_units (1..1000000). Increase seals a server-qualified complete original inventory baseline before preparation; clients cannot supply or renew that baseline; kind=step with original_plan_digest prepares the next eligible original step. After all original effects settle, kind=run prepares an independently authorized clock for the original retained-order or inventory goal. After Wait observes True original labor and explicitly selected inventory, kind=inventory_run prepares an independent stability clock even after order retirement. Both name original_paired_seal, game_ticks and wall_millis; portfolio clock requests also require the exact original order_step_id. When an original workshop prerequisite is configured, the plan retains its exact identity and each native order boundary rereads its completion. Planning never unpauses."
 )]
 pub fn fortress_plan(session_id: String, request: String) -> String {
     with_session(session_id, "fortress.plan", None, || plan_action(&request))
@@ -776,7 +784,7 @@ pub fn run_stdio() {
     let server = ServerBuilder::new("dfmcp-live-combined-production-dev", env!("CARGO_PKG_VERSION"))
         .tool(FortressOpenSession).tool(FortressObserve).tool(FortressQuery).tool(FortressPlan).tool(FortressCommit)
         .tool(FortressWait).tool(FortressCancel).tool(FortressCheckpoint).tool(FortressRestore).tool(FortressExplain).tool(FortressDoctor)
-        .instructions("Unadmitted development only. Observe, compile one original labor and finite-order plan, kind=existing_labor for one order using current qualified labor without assigning it, kind=existing_labor_portfolio for up to four orders using the same workers, or kind=portfolio to assign labor before up to four furniture orders, prepare and confirm each dependency-satisfied step, and reconcile uncertainty under its original key. All-applied does not prove the original goal or physical goods. Wait joins current labor with the original retained-order completion or explicitly selected inventory goal under the original stability requirement. Separately configured clock control can prepare kind=run and confirm scope=run for either objective while the exact original order remains eligible; after a True original labor/inventory sample, kind/scope=inventory_run can finish explicitly selected inventory stability after native order retirement. Portfolio clock Plan/Commit/Cancel calls require the original order_step_id; Query can select that leaf. Portfolio Wait samples one original leaf per call and proves the parent only after a coherent complete cohort. Both clock owners preserve every original deadline and exclude competing pending clocks across all leaves; no automatic advancement or repeated unpause is permitted. Unresolved runs must reconcile before paused sampling. A disappeared order leaves default completion unknown. Inventory presence does not prove order-attributed production. Parent proof is process-local and withdrawn on failure or reopening.")
+        .instructions("Unadmitted development only. Observe, compile one original labor and finite-order plan, kind=existing_labor for one order using current qualified labor without assigning it, kind=existing_labor_portfolio for up to four orders using the same workers, or kind=portfolio to assign labor before up to four furniture orders, prepare and confirm each dependency-satisfied step, and reconcile uncertainty under its original key. All-applied does not prove the original goal or physical goods. Wait joins current labor with the original retained-order completion or explicitly selected inventory goal under the original stability requirement. Separately configured clock control can prepare kind=run and confirm scope=run for either objective while the exact original order remains eligible; after a True original labor/inventory sample, kind/scope=inventory_run can finish explicitly selected inventory stability after native order retirement. Portfolio clock Plan/Commit/Cancel calls require the original order_step_id; Query can select that leaf. Portfolio Wait samples one original leaf per call and proves the parent only after a coherent complete cohort. Both clock owners preserve every original deadline and exclude competing pending clocks across all leaves; no automatic advancement or repeated unpause is permitted. Unresolved runs must reconcile before paused sampling. A disappeared order leaves default completion unknown. Inventory presence does not prove order-attributed production. Parent proof is process-local and withdrawn on failure or reopening. An optionally configured independently acknowledged Carpenter workshop is bound to the original plan and freshly checked at each order preparation and dispatch boundary. Preserve its source checkpoint even when planning fails before an original exists; historical workshop completion is not a production-goal proof.")
         .build();
     crate::run_modern_stdio(server);
 }
@@ -945,6 +953,29 @@ mod tests {
         assert_eq!(value["frontier"]["entries"][0]["phase"], "dispatch_started");
         assert!(value["frontier"]["review"].is_null());
         assert!(value["review"].is_null());
+    }
+
+    #[test]
+    fn failed_preplan_publication_retains_latest_workshop_checkpoint() {
+        let mut retained = Some(json!({"workshop_prerequisite":{
+            "origin_witness":"a".repeat(64),"source_fenced":false,
+            "last_qualified":{"status":"complete"}}}));
+        let checkpoint = json!({"origin_witness":"a".repeat(64),"tick":190,
+            "generation":9,"next_building_id":70,"fenced":true});
+        merge_recovery(
+            &mut retained,
+            &json!({"recovery":null,
+            "observation_tick_floor":190,"workshop_prerequisite":{
+            "origin_witness":"a".repeat(64),"source_fenced":true,
+            "checkpoint":checkpoint,"last_qualified":null}}),
+        );
+        merge_recovery(&mut retained, &json!({"observation_tick_floor":180}));
+        let value = retained.expect("retained workshop checkpoint");
+        assert!(value["recovery"].is_null());
+        assert!(value["workshop_prerequisite"]["last_qualified"].is_null());
+        assert_eq!(value["workshop_prerequisite"]["checkpoint"], checkpoint);
+        assert_eq!(value["workshop_prerequisite"]["source_fenced"], true);
+        assert_eq!(value["observation_tick_floor"], 190);
     }
 
     #[test]
