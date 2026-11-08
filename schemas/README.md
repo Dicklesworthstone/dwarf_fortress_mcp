@@ -26,3 +26,17 @@ exclusive deadlines, restore invalidation, complete publication and bounded
 process-local retention are documented in
 [`LAB_QUERY_BASELINES.md`](../docs/LAB_QUERY_BASELINES.md). These operations add
 neither a root tool envelope nor a native protocol, watch or durability claim.
+
+`lab_query_watches.schema.json` describes the `temporal` watch lifecycle in the
+same laboratory mode string: registration, explicit single or atomic batch
+polling, listing, cancellation and terminal release. Its closed laboratory
+condition definition is shared by `lab_condition_evaluation.schema.json`, the
+stateless `structured` preflight wrapper at current or exact retained snapshots.
+The corresponding convenience definitions are
+`query.input.schema.json#/$defs/laboratory_query_watches` and
+`query.input.schema.json#/$defs/laboratory_condition_evaluation`.
+Source qualification, explicit sampling, three-valued conditions, catalog
+discovery and complete precommit publication are documented in
+[`LAB_CONDITION_WATCHES.md`](../docs/LAB_CONDITION_WATCHES.md). These operations
+add no native protocol, detached work, implicit clock control or durable watch
+claim.

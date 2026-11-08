@@ -94,11 +94,13 @@ pub(crate) fn record(
             .and_then(Value::as_str)
             .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
             .is_some_and(|query| {
-                query["mode"] == "query_changes" && query["continuation"].is_string()
+                (query["mode"] == "query_changes" && query["continuation"].is_string())
+                    || (query["mode"] == "structured"
+                        && query["request"]["query"]["continuation"].is_string())
             })
     {
         log.mark_not_replayable(
-            "query comparison continuations are bound to the original session and cannot be replayed into a new session",
+            "query continuations are bound to the original session and cannot be replayed into a new session",
         );
     }
     if log.calls.len() >= MAX_RECORDED_CALLS {

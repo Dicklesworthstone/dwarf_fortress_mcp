@@ -26,7 +26,7 @@ fn known(value: WorldValue, tick: GameTick) -> Fact {
         value,
         tick,
         FactSource::Derived("dfmcp.lab-scenario/1".to_owned()),
-        Digest32::of_bytes(b"temporal-laboratory-fixture"),
+        Digest32::ZERO,
     )
 }
 
@@ -114,7 +114,12 @@ fn render(mut value: Value, context: &OperationContext) -> Result<String> {
     active["query_baselines"] = object
         .remove("_query_baseline_work")
         .ok_or_else(|| invariant("test baseline catalog"))?;
-    object.remove("_condition_watch_work");
+    active["query_watches"] = object
+        .remove("_query_watch_work")
+        .ok_or_else(|| invariant("test retained watch catalog"))?;
+    active["condition_watches"] = object
+        .remove("_condition_watch_work")
+        .ok_or_else(|| invariant("test active watch catalog"))?;
     Ok(AgentTurnBuilder::new("fortress.query", AgentPhase::Inspect)
         .session_id(context.session_id.to_string())
         .request_id(context.request_id.to_string())
@@ -571,6 +576,388 @@ fn final_wall_refusal_cannot_publish_a_captured_root() -> TestResult {
     fixture.context.budget.max_wall_millis = 60_000;
     assert_eq!(
         retained_work(&fixture.snapshot, &fixture.context)?,
+        json!([])
+    );
+    Ok(())
+}
+
+fn stock_condition(minimum: u64) -> Value {
+    json!({"op":"field", "entity_id":"1", "generation":1, "field":"stock",
+        "comparison":"ge", "value":{"type":"u64", "value":minimum}})
+}
+
+fn watch(key: &str, condition: Value) -> Value {
+    json!({"kind":"watch", "key":key, "condition":condition,
+        "deadline_tick":100, "poll_interval_ticks":1, "stable_observations":2})
+}
+
+fn watch_handle(value: &Value) -> TestResult<String> {
+    Ok(value["record"]["watch"]
+        .as_str()
+        .ok_or("watch handle")?
+        .to_owned())
+}
+
+#[test]
+fn watch_wrapper_accepts_only_the_lab_condition_lifecycle_and_preserves_duplicate_checks()
+-> TestResult {
+    for query in [
+        watch("stock", stock_condition(2)),
+        watch(
+            "units",
+            json!({"op":"entity_count", "scope":"observed_projection",
+            "kind":"unit", "predicate":{"op":"field", "field":"alive",
+            "comparison":"eq", "value":{"type":"bool", "value":true}},
+            "comparison":"ge", "value":4}),
+        ),
+        json!({"kind":"poll_watch", "watch":"watch:placeholder"}),
+        json!({"kind":"poll_watches"}),
+        json!({"kind":"poll_watches", "watches":["watch:placeholder"]}),
+        json!({"kind":"watches"}),
+        json!({"kind":"cancel_watch", "watch":"watch:placeholder"}),
+        json!({"kind":"release_watch", "watch":"watch:placeholder"}),
+    ] {
+        request(query)?;
+    }
+    for condition in [
+        json!({"op":"item_quantity", "scope":"observed_projection", "quantity_unit":"stack_units",
+            "predicate":{"op":"always"}, "comparison":"ge", "value":1}),
+        json!({"op":"furniture_set", "targets":[], "test":"complete"}),
+        json!({"op":"terrain_count", "areas":[], "predicate":{"op":"always"}, "comparison":"ge", "value":1}),
+        json!({"op":"entity_count", "scope":"observed_projection", "kind":"unit",
+            "predicate":{"op":"related", "entity_id":"1", "generation":1,
+                "relation":"contains", "direction":"outgoing"}, "comparison":"ge", "value":1}),
+    ] {
+        assert!(request(watch("unsupported", condition)).is_err());
+    }
+    for raw in [
+        r#"{"mode":"temporal","request":{"schema":"dfmcp.query/1","query":{"kind":"watch","key":"duplicate","condition":{"op":"paused","value":true,"value":false},"deadline_tick":100}}}"#,
+        r#"{"mode":"temporal","request":{"schema":"dfmcp.query/1","query":{"kind":"watch","key":"duplicate","condition":{"op":"field","entity_id":"1","generation":1,"field":"stock","comparison":"ge","value":{"type":"u64","value":1,"value":2}},"deadline_tick":100}}}"#,
+        r#"{"mode":"temporal","request":{"schema":"dfmcp.query/1","query":{"kind":"watches","limit":1}}}"#,
+        r#"{"mode":"temporal","request":{"schema":"dfmcp.query/1","query":{"kind":"poll_watches","watches":[],"watches":null}}}"#,
+        r#"{"mode":"temporal","request":{"schema":"dfmcp.query/1","query":{"kind":"await_watches"}}}"#,
+    ] {
+        assert!(
+            matches!(parse(raw), Err(error) if error.code == ErrorCode::InvalidRequest),
+            "{raw}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn stock_watch_samples_explicitly_and_preserves_both_baseline_and_watch_catalogs() -> TestResult {
+    let mut fixture = fixture();
+    let baseline = handle(&run(&fixture, capture("before"))?)?;
+    let created = run(&fixture, watch("stock-growth", stock_condition(2)))?;
+    let watch = watch_handle(&created)?;
+    assert_eq!(created["record"]["status"], "waiting");
+    assert_eq!(created["record"]["sample_count"], 1);
+    assert_eq!(
+        created["agent_turn"]["active_work"]["query_baselines"][0]["baseline"],
+        baseline
+    );
+    let descriptor = &created["agent_turn"]["active_work"]["condition_watches"][0];
+    assert_eq!(descriptor["watch"], watch);
+    assert!(descriptor["next_step"]["arguments"].get("query").is_none());
+    assert_eq!(
+        parse(
+            descriptor["next_step"]["arguments"]["mode"]
+                .as_str()
+                .ok_or("mode")?
+        )?
+        .ok_or("next request")?
+        .kind(),
+        "poll_watch"
+    );
+    fixture
+        .snapshot
+        .graph
+        .entities
+        .get_mut(&EntityId::new(1))
+        .ok_or("unit")?
+        .fields
+        .insert("stock".into(), known(WorldValue::U64(5), GameTick(11)));
+    update(&mut fixture)?;
+    let listed = run(&fixture, json!({"kind":"baselines"}))?;
+    assert_eq!(
+        listed["agent_turn"]["active_work"]["condition_watches"][0]["status"],
+        "waiting"
+    );
+    assert_eq!(
+        listed["agent_turn"]["active_work"]["condition_watches"][0]["needs_poll"],
+        true
+    );
+    let source = fixture.snapshot.anchor();
+    let sampled = run(&fixture, json!({"kind":"poll_watch", "watch":watch}))?;
+    assert_eq!(sampled["record"]["status"], "candidate");
+    assert_eq!(sampled["record"]["stable_observations"], 1);
+    let repeated = run(&fixture, json!({"kind":"poll_watch", "watch":watch}))?;
+    assert_eq!(repeated["record"], sampled["record"]);
+    assert_eq!(fixture.snapshot.anchor(), source);
+    update(&mut fixture)?;
+    let terminal = run(&fixture, json!({"kind":"poll_watch", "watch":watch}))?;
+    assert_eq!(terminal["record"]["status"], "satisfied");
+    assert_eq!(
+        terminal["agent_turn"]["active_work"]["condition_watches"],
+        json!([])
+    );
+    assert_eq!(
+        terminal["agent_turn"]["active_work"]["query_watches"]
+            .as_array()
+            .map(Vec::len),
+        Some(1)
+    );
+    let release =
+        terminal["agent_turn"]["active_work"]["query_watches"][0]["next_step"]["arguments"]["mode"]
+            .as_str()
+            .ok_or("release mode")?;
+    assert_eq!(
+        parse(release)?.ok_or("release request")?.kind(),
+        "release_watch"
+    );
+    assert_eq!(
+        run(&fixture, json!({"kind":"release_watch", "watch":watch}))?["released"],
+        true
+    );
+    assert_eq!(
+        retained_watch_work(&fixture.context)?["query_watches"],
+        json!([])
+    );
+    assert_eq!(
+        retained_work(&fixture.snapshot, &fixture.context)?[0]["baseline"],
+        baseline
+    );
+    Ok(())
+}
+
+#[test]
+fn source_policy_unknowns_and_failure_guards_cannot_become_stable_lab_success() -> TestResult {
+    for case in 0..6 {
+        let mut fixture = fixture();
+        let fact = fixture
+            .snapshot
+            .graph
+            .entities
+            .get_mut(&EntityId::new(1))
+            .ok_or("unit")?
+            .fields
+            .get_mut("stock")
+            .ok_or("stock")?;
+        match case {
+            0 => fact.source = FactSource::Replay,
+            1 => fact.source = FactSource::Derived("unregistered-model/1".into()),
+            2 => fact.source_digest = Digest32::of_bytes(b"untrusted-producer"),
+            3 => fact.source = FactSource::DfhackField("stock".into()),
+            4 => fact.observed_at = GameTick(99),
+            _ => fact.presence = Some(FactPresence::Redacted("private".into())),
+        }
+        fixture.snapshot.refresh_hash();
+        fixture.context.anchor = fixture.snapshot.anchor();
+        let result = run(&fixture, watch("unknown", stock_condition(1)))?;
+        assert_eq!(
+            result["record"]["status"], "blocked_unknown",
+            "case {case}: {result}"
+        );
+        assert_eq!(result["record"]["stable_observations"], 0);
+    }
+    let mut fixture = fixture();
+    let mut input = watch("guarded", json!({"op":"paused", "value":true}));
+    input["failure_condition"] = stock_condition(10);
+    let watch = watch_handle(&run(&fixture, input)?)?;
+    fixture
+        .snapshot
+        .graph
+        .entities
+        .get_mut(&EntityId::new(1))
+        .ok_or("unit")?
+        .fields
+        .get_mut("stock")
+        .ok_or("stock")?
+        .presence = Some(FactPresence::Unknown("lost".into()));
+    update(&mut fixture)?;
+    let result = run(&fixture, json!({"kind":"poll_watch", "watch":watch}))?;
+    assert_eq!(result["record"]["status"], "blocked_unknown");
+    assert_eq!(result["record"]["stable_observations"], 0);
+    assert_eq!(
+        result["record"]["evaluation"]["failure_condition"],
+        "unknown"
+    );
+    Ok(())
+}
+
+#[test]
+fn discarded_or_clipped_watch_publication_cannot_change_either_registry() -> TestResult {
+    let fixture = fixture();
+    let baseline = handle(&run(&fixture, capture("retained"))?)?;
+    let input = request(watch("atomic", stock_condition(2)))?;
+    for case in 0..4 {
+        let result = execute(
+            &fixture.snapshot,
+            &fixture.context,
+            &input,
+            64 * 1024,
+            |value| {
+                if case == 0 {
+                    return Err(exhausted("publisher rejected watch"));
+                }
+                let mut output: Value = serde_json::from_str(&render(value, &fixture.context)?)
+                    .map_err(|_| invariant("test output"))?;
+                let key = match case {
+                    1 => "query_baselines",
+                    2 => "query_watches",
+                    _ => "condition_watches",
+                };
+                output["agent_turn"]["active_work"][key] = json!([]);
+                Ok(output.to_string())
+            },
+        );
+        assert!(result.is_err());
+        assert_eq!(
+            retained_watch_work(&fixture.context)?["query_watches"],
+            json!([])
+        );
+        assert_eq!(
+            retained_work(&fixture.snapshot, &fixture.context)?[0]["baseline"],
+            baseline
+        );
+    }
+    let created = run(&fixture, watch("atomic", stock_condition(2)))?;
+    let watch = watch_handle(&created)?;
+    let input = request(json!({"kind":"cancel_watch", "watch":watch}))?;
+    assert!(
+        execute(
+            &fixture.snapshot,
+            &fixture.context,
+            &input,
+            64 * 1024,
+            |_| Err(exhausted("cancel refused"))
+        )
+        .is_err()
+    );
+    assert_eq!(
+        run(&fixture, json!({"kind":"poll_watch", "watch":watch}))?["record"]["status"],
+        "waiting"
+    );
+    run(&fixture, json!({"kind":"cancel_watch", "watch":watch}))?;
+    let input = request(json!({"kind":"release_watch", "watch":watch}))?;
+    assert!(
+        execute(
+            &fixture.snapshot,
+            &fixture.context,
+            &input,
+            64 * 1024,
+            |_| Err(exhausted("release refused"))
+        )
+        .is_err()
+    );
+    assert_eq!(
+        retained_watch_work(&fixture.context)?["query_watches"][0]["status"],
+        "cancelled"
+    );
+    let input = request(json!({"kind":"release_baseline", "baseline":baseline}))?;
+    assert!(
+        execute(
+            &fixture.snapshot,
+            &fixture.context,
+            &input,
+            64 * 1024,
+            |value| {
+                let mut output: Value = serde_json::from_str(&render(value, &fixture.context)?)
+                    .map_err(|_| invariant("test output"))?;
+                output["agent_turn"]["active_work"]["query_watches"] = json!([]);
+                Ok(output.to_string())
+            }
+        )
+        .is_err()
+    );
+    assert_eq!(
+        retained_work(&fixture.snapshot, &fixture.context)?[0]["baseline"],
+        baseline
+    );
+    Ok(())
+}
+
+#[test]
+fn batched_watch_publication_is_all_or_none_and_unchanged_sources_are_not_resampled() -> TestResult
+{
+    let mut fixture = fixture();
+    let first = watch_handle(&run(
+        &fixture,
+        watch("first", json!({"op":"tick_at_least", "value":11})),
+    )?)?;
+    let second = watch_handle(&run(
+        &fixture,
+        watch("second", json!({"op":"tick_at_least", "value":11})),
+    )?)?;
+    let prior = retained_watch_work(&fixture.context)?;
+    update(&mut fixture)?;
+    let query = json!({"kind":"poll_watches", "watches":[first,second]});
+    let input = request(query.clone())?;
+    assert!(
+        execute(
+            &fixture.snapshot,
+            &fixture.context,
+            &input,
+            64 * 1024,
+            |_| Err(exhausted("batch publication refused"))
+        )
+        .is_err()
+    );
+    let unchanged = retained_watch_work(&fixture.context)?;
+    for (before, after) in prior["query_watches"]
+        .as_array()
+        .ok_or("prior")?
+        .iter()
+        .zip(unchanged["query_watches"].as_array().ok_or("after")?)
+    {
+        assert_eq!(before["evidence_digest"], after["evidence_digest"]);
+        assert_eq!(after["status"], "waiting");
+    }
+    let sampled = run(&fixture, query.clone())?;
+    assert_eq!(sampled["sampled"], 2);
+    assert_eq!(sampled["atomic_watch_publication"], true);
+    assert_eq!(sampled["records"].as_array().map(Vec::len), Some(2));
+    assert_eq!(run(&fixture, query.clone())?["sampled"], 0);
+    update(&mut fixture)?;
+    let finished = run(&fixture, query)?;
+    assert_eq!(finished["all_satisfied"], true);
+    assert_eq!(
+        finished["agent_turn"]["active_work"]["condition_watches"],
+        json!([])
+    );
+    assert_eq!(
+        finished["agent_turn"]["active_work"]["query_watches"]
+            .as_array()
+            .map(Vec::len),
+        Some(2)
+    );
+    Ok(())
+}
+
+#[test]
+fn watch_session_cleanup_and_epoch_changes_preserve_other_owners() -> TestResult {
+    let first = fixture();
+    let mut second = fixture();
+    let private = watch_handle(&run(&first, watch("private", stock_condition(2)))?)?;
+    let other = watch_handle(&run(&second, watch("other", stock_condition(2)))?)?;
+    assert!(run(&second, json!({"kind":"poll_watch", "watch":private})).is_err());
+    let old_context = first.context.clone();
+    drop(first);
+    assert_eq!(
+        retained_watch_work(&old_context)?["query_watches"],
+        json!([])
+    );
+    assert_eq!(
+        retained_watch_work(&second.context)?["query_watches"][0]["watch"],
+        other
+    );
+    second.snapshot.cursor.epoch += 1;
+    update(&mut second)?;
+    let result = run(&second, json!({"kind":"poll_watch", "watch":other}))?;
+    assert_eq!(result["record"]["status"], "invalidated");
+    assert_eq!(
+        result["agent_turn"]["active_work"]["condition_watches"],
         json!([])
     );
     Ok(())

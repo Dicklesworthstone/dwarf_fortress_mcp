@@ -1,7 +1,9 @@
-//! Session-owned, foreground query baselines over the laboratory's current world.
+//! Session-owned, foreground query baselines and condition watches over the
+//! laboratory's current world.
 //! The caller owns the session throughout execution and supplies a pure complete
 //! Agent Turn publisher. No retained state changes before that publication fits.
 
+use super::query_condition::Condition;
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
@@ -15,6 +17,8 @@ use serde_json::{Value, json};
 const MAX_REQUEST_BYTES: usize = 65_536;
 const MAX_BASELINES: usize = 8;
 const MAX_BASELINE_DESCRIPTOR_BYTES: usize = 2_048;
+const MAX_WATCHES: usize = 8;
+const MAX_WATCH_DESCRIPTOR_BYTES: usize = 4_096;
 
 #[derive(Deserialize)]
 struct Selector {
@@ -82,6 +86,33 @@ enum Query {
     ReleaseBaseline {
         baseline: String,
     },
+    Watch {
+        key: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        label: Option<String>,
+        condition: Condition,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        failure_condition: Option<Condition>,
+        deadline_tick: u64,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        poll_interval_ticks: Option<u64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        stable_observations: Option<u32>,
+    },
+    PollWatch {
+        watch: String,
+    },
+    PollWatches {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        watches: Option<Vec<String>>,
+    },
+    Watches {},
+    CancelWatch {
+        watch: String,
+    },
+    ReleaseWatch {
+        watch: String,
+    },
 }
 
 impl Request {
@@ -91,7 +122,25 @@ impl Request {
             Query::Changes { .. } => "changes",
             Query::Baselines {} => "baselines",
             Query::ReleaseBaseline { .. } => "release_baseline",
+            Query::Watch { .. } => "watch",
+            Query::PollWatch { .. } => "poll_watch",
+            Query::PollWatches { .. } => "poll_watches",
+            Query::Watches {} => "watches",
+            Query::CancelWatch { .. } => "cancel_watch",
+            Query::ReleaseWatch { .. } => "release_watch",
         }
+    }
+
+    fn is_watch(&self) -> bool {
+        matches!(
+            self.request.query,
+            Query::Watch { .. }
+                | Query::PollWatch { .. }
+                | Query::PollWatches { .. }
+                | Query::Watches {}
+                | Query::CancelWatch { .. }
+                | Query::ReleaseWatch { .. }
+        )
     }
 }
 
@@ -109,7 +158,9 @@ fn invariant(message: &str) -> DfmcpError {
 
 /// Decode the original bytes at the wrapper, envelope and operation boundaries;
 /// a Value round trip must not conceal duplicate fields on a mutating request.
-/// Historical selectors and all watch/refresh operations are deliberately absent.
+/// Historical selectors and observation-refresh operations are absent. The
+/// condition grammar is decoded directly, so duplicate nested fields cannot
+/// disappear before the engine validates a stateful definition.
 pub(super) fn parse(raw: &str) -> Result<Option<Request>> {
     if raw.len() > MAX_REQUEST_BYTES {
         return Err(exhausted(
@@ -169,6 +220,23 @@ fn remaining(current: &OperationContext, started: Instant) -> Result<OperationCo
 
 type Catalog = BTreeMap<String, Value>;
 
+fn decode_catalog(value: &Value) -> Result<Catalog> {
+    let records = value
+        .as_array()
+        .filter(|records| records.len() <= MAX_BASELINES)
+        .ok_or_else(|| invariant("baseline engine returned an invalid catalog"))?;
+    let mut result = Catalog::new();
+    for record in records {
+        let handle = record["baseline"]
+            .as_str()
+            .ok_or_else(|| invariant("baseline metadata has no handle"))?;
+        if result.insert(handle.to_owned(), record.clone()).is_some() {
+            return Err(invariant("baseline catalog repeats a retained handle"));
+        }
+    }
+    Ok(result)
+}
+
 fn catalog(snapshot: &WorldSnapshot, current: &OperationContext) -> Result<Catalog> {
     let mut result = Catalog::new();
     super::semantic_query::execute_laboratory_baseline_with_publisher(
@@ -176,18 +244,7 @@ fn catalog(snapshot: &WorldSnapshot, current: &OperationContext) -> Result<Catal
         current,
         &json!({"schema":"dfmcp.query/1","query":{"kind":"baselines"}}),
         |value| {
-            let records = value["baselines"]
-                .as_array()
-                .filter(|records| records.len() <= MAX_BASELINES)
-                .ok_or_else(|| invariant("baseline engine returned an invalid catalog"))?;
-            for record in records {
-                let handle = record["baseline"]
-                    .as_str()
-                    .ok_or_else(|| invariant("baseline metadata has no handle"))?;
-                if result.insert(handle.to_owned(), record.clone()).is_some() {
-                    return Err(invariant("baseline catalog repeats a retained handle"));
-                }
-            }
+            result = decode_catalog(&value["baselines"])?;
             Ok(String::new())
         },
     )?;
@@ -234,6 +291,134 @@ fn work(catalog: &Catalog, session: SessionId) -> Result<Value> {
     Ok(json!(records))
 }
 
+#[derive(Clone)]
+struct WatchWork {
+    records: Value,
+    active: Value,
+}
+
+impl WatchWork {
+    fn empty() -> Self {
+        Self {
+            records: json!([]),
+            active: json!([]),
+        }
+    }
+
+    fn from_catalog(records: &Value, active: &Value, session: SessionId) -> Result<Self> {
+        fn descriptors(input: &Value, session: SessionId, active: bool) -> Result<Value> {
+            let records = input
+                .as_array()
+                .filter(|rows| rows.len() <= MAX_WATCHES)
+                .ok_or_else(|| invariant("watch engine returned an invalid bounded catalog"))?;
+            let mut seen = std::collections::BTreeSet::new();
+            let mut output = Vec::with_capacity(records.len());
+            for value in records {
+                let handle = value["watch"]
+                    .as_str()
+                    .ok_or_else(|| invariant("watch descriptor has no handle"))?;
+                if !seen.insert(handle) {
+                    return Err(invariant("watch catalog repeats a retained handle"));
+                }
+                let terminal = value["terminal"]
+                    .as_bool()
+                    .ok_or_else(|| invariant("watch descriptor has no terminal state"))?;
+                if active && terminal {
+                    return Err(invariant("active watch catalog contains terminal work"));
+                }
+                let mut record = value.clone();
+                record["kind"] = json!("foreground_observation_watch");
+                record["game_effect"] = json!("none");
+                record["durable"] = json!(false);
+                record["mutation_authority"] = json!(false);
+                record["next_step"] = next_step(
+                    session,
+                    json!({
+                        "kind":if terminal { "release_watch" } else { "poll_watch" },
+                        "watch":handle,
+                    }),
+                );
+                if !terminal {
+                    record["cancel_step"] =
+                        next_step(session, json!({"kind":"cancel_watch", "watch":handle}));
+                }
+                if record.to_string().len() > MAX_WATCH_DESCRIPTOR_BYTES {
+                    return Err(invariant("watch descriptor exceeds its publication bound"));
+                }
+                output.push(record);
+            }
+            Ok(json!(output))
+        }
+        let retained = records
+            .as_array()
+            .ok_or_else(|| invariant("watch catalog is not an array"))?;
+        let running = active
+            .as_array()
+            .ok_or_else(|| invariant("active watch catalog is not an array"))?;
+        let expected: std::collections::BTreeSet<_> = retained
+            .iter()
+            .filter(|record| record["terminal"] == false)
+            .map(|record| record["watch"].as_str())
+            .collect();
+        let actual: std::collections::BTreeSet<_> = running
+            .iter()
+            .map(|record| record["watch"].as_str())
+            .collect();
+        if expected != actual {
+            return Err(invariant(
+                "watch catalogs disagree about active retained work",
+            ));
+        }
+        for record in running {
+            let summary = retained
+                .iter()
+                .find(|summary| summary["watch"] == record["watch"])
+                .ok_or_else(|| invariant("active watch is absent from retained catalog"))?;
+            if summary.as_object().is_none_or(|fields| {
+                fields
+                    .iter()
+                    .any(|(key, value)| record.get(key) != Some(value))
+            }) {
+                return Err(invariant(
+                    "watch catalogs disagree about a retained summary",
+                ));
+            }
+        }
+        Ok(Self {
+            records: descriptors(records, session, false)?,
+            active: descriptors(active, session, true)?,
+        })
+    }
+}
+
+fn watch_catalog(current: &OperationContext) -> Result<WatchWork> {
+    let catalog = super::semantic_query::laboratory_watch_work(current)?;
+    WatchWork::from_catalog(
+        &catalog["records"],
+        &catalog["active_work"],
+        current.session_id,
+    )
+}
+
+/// Reconstruct both retained and active watch work without sampling. Call while
+/// owning the laboratory session and outside either temporal engine publisher.
+pub(super) fn retained_watch_work(current: &OperationContext) -> Result<Value> {
+    let started = Instant::now();
+    let work = watch_catalog(&remaining(current, started)?)?;
+    remaining(current, started)?;
+    Ok(json!({"query_watches":work.records, "condition_watches":work.active}))
+}
+
+/// Read retained descriptors under current authority without acquiring rows or
+/// rescanning the source. The caller supplies the owned current session anchor.
+pub(super) fn retained_baseline_work(current: &OperationContext) -> Result<Value> {
+    let started = Instant::now();
+    let catalog = super::semantic_query::laboratory_baseline_work(&remaining(current, started)?)?;
+    let result = work(&decode_catalog(&catalog)?, current.session_id)?;
+    remaining(current, started)?;
+    Ok(result)
+}
+
 /// Reconstruct retained query work from the session's own store, never from a
 /// presentation cache. This does not sample, advance, release or renew a baseline.
 pub(super) fn retained_work(snapshot: &WorldSnapshot, current: &OperationContext) -> Result<Value> {
@@ -272,6 +457,7 @@ fn decorate(
     current: &OperationContext,
     source_work: &Value,
     baseline_work: Value,
+    watch_work: WatchWork,
 ) -> Value {
     payload["ok"] = json!(true);
     payload["mode"] = json!("temporal");
@@ -286,6 +472,8 @@ fn decorate(
     payload["durable"] = json!(false);
     payload["mutation_authority"] = json!(false);
     payload["_query_baseline_work"] = baseline_work;
+    payload["_query_watch_work"] = watch_work.records;
+    payload["_condition_watch_work"] = watch_work.active;
     payload
 }
 
@@ -310,6 +498,9 @@ fn check_publication(encoded: &str, expected: &Value, current: &OperationContext
         || actual["agent_turn"]["anchor"] != super::anchor_json(&current.anchor)
         || actual["agent_turn"]["active_work"]["query_baselines"]
             != expected["_query_baseline_work"]
+        || actual["agent_turn"]["active_work"]["query_watches"] != expected["_query_watch_work"]
+        || actual["agent_turn"]["active_work"]["condition_watches"]
+            != expected["_condition_watch_work"]
     {
         return Err(invariant(
             "temporal publisher refused or changed required session state",
@@ -330,8 +521,8 @@ fn check_publication(encoded: &str, expected: &Value, current: &OperationContext
 
 /// `result_bytes` is the remaining allowance after the caller has reserved its
 /// complete laboratory Agent Turn, including pending game work. The publisher
-/// runs before the existing baseline engine changes its root. It must not lock
-/// the session or query this engine recursively.
+/// runs before the selected temporal engine changes its root. It must not lock
+/// the session or query either temporal engine recursively.
 pub(super) fn execute<F>(
     snapshot: &WorldSnapshot,
     current: &OperationContext,
@@ -346,14 +537,28 @@ where
     let source_work = super::query_budget::admit_sources(&[snapshot], current)?;
     let before = catalog(snapshot, &remaining(current, started)?)?;
     let baseline_work = work(&before, current.session_id)?;
-    let reserve = decorate(json!({}), current, &source_work, baseline_work)
-        .to_string()
-        .len()
-        .saturating_add(if request.kind() == "capture" {
-            MAX_BASELINE_DESCRIPTOR_BYTES
-        } else {
-            0
-        });
+    // The watch engine supplies and bounds both candidate watch catalogs in its
+    // own output. Baseline operations instead read that catalog once, outside
+    // History's publisher, and reserve it without acquiring WATCHES recursively.
+    let watches = if request.is_watch() {
+        WatchWork::empty()
+    } else {
+        watch_catalog(&remaining(current, started)?)?
+    };
+    let reserve = decorate(
+        json!({}),
+        current,
+        &source_work,
+        baseline_work,
+        watches.clone(),
+    )
+    .to_string()
+    .len()
+    .saturating_add(if request.kind() == "capture" {
+        MAX_BASELINE_DESCRIPTOR_BYTES
+    } else {
+        0
+    });
     let mut context = remaining(current, started)?;
     // Acquisition reuses the semantic query engine, which rechecks the complete
     // canonical source on each bounded page. Reserve output separately so an
@@ -371,31 +576,55 @@ where
     );
     let input = serde_json::to_value(&request.request)
         .map_err(|_| invariant("typed temporal request cannot be encoded"))?;
-    super::semantic_query::execute_laboratory_baseline_with_publisher(
-        snapshot,
-        &context,
-        &input,
-        |value| {
-            let candidate = candidate_catalog(&before, &value)?;
-            let payload = decorate(
-                value,
-                current,
-                &source_work,
-                work(&candidate, current.session_id)?,
-            );
-            if payload.to_string().len() > result_bytes {
-                return Err(exhausted(
-                    "complete temporal result exceeds its reserved byte budget",
-                ));
-            }
-            let encoded = publish(payload.clone())?;
-            check_publication(&encoded, &payload, current)?;
-            // No fallible work after the engine commits its candidate root. The
-            // deadline includes source admission, acquisition and full rendering.
-            remaining(current, started)?;
-            Ok(encoded)
-        },
-    )
+    let publication = |value: Value| {
+        let candidate = if request.is_watch() {
+            before.clone()
+        } else {
+            candidate_catalog(&before, &value)?
+        };
+        let watch_work = if request.is_watch() {
+            WatchWork::from_catalog(
+                &value["_query_watch_work"],
+                &value["_condition_watch_work"],
+                current.session_id,
+            )?
+        } else {
+            watches
+        };
+        let payload = decorate(
+            value,
+            current,
+            &source_work,
+            work(&candidate, current.session_id)?,
+            watch_work,
+        );
+        if payload.to_string().len() > result_bytes {
+            return Err(exhausted(
+                "complete temporal result exceeds its reserved byte budget",
+            ));
+        }
+        let encoded = publish(payload.clone())?;
+        check_publication(&encoded, &payload, current)?;
+        // No fallible work after the engine commits its candidate root. The
+        // deadline includes source admission, acquisition and full rendering.
+        remaining(current, started)?;
+        Ok(encoded)
+    };
+    if request.is_watch() {
+        super::semantic_query::execute_laboratory_watch_with_publisher(
+            snapshot,
+            &context,
+            &input,
+            publication,
+        )
+    } else {
+        super::semantic_query::execute_laboratory_baseline_with_publisher(
+            snapshot,
+            &context,
+            &input,
+            publication,
+        )
+    }
 }
 
 #[cfg(test)]

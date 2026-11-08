@@ -101,6 +101,13 @@ fn compact_turn(turn: &mut Value) {
 /// `architecture/agent_turn_contract.json` (`required_sections`).
 const PULSE_OMITS: [&str; 3] = ["briefing", "affordances", "references"];
 
+fn retained_query_catalog(key: &str) -> bool {
+    matches!(
+        key,
+        "query_baselines" | "query_watches" | "condition_watches"
+    )
+}
+
 /// Shape a response to its observation profile before budgeting. Profiles are
 /// semantic contracts: a pulse is the cheapest safe heartbeat, so it carries
 /// identity, continuity, changes, attention, active work, recommendations and
@@ -157,7 +164,9 @@ pub(crate) fn shape_for_profile(response: &str, profile: &str) -> String {
         }
         // Only active work that exists is listed.
         if let Some(work) = turn.get_mut("active_work").and_then(Value::as_object_mut) {
-            work.retain(|_, v| !v.as_array().is_some_and(Vec::is_empty));
+            work.retain(|key, v| {
+                retained_query_catalog(key) || !v.as_array().is_some_and(Vec::is_empty)
+            });
         }
         // Attention and recommendations keep what to act on, not boilerplate.
         if let Some(items) = turn.get_mut("attention").and_then(Value::as_array_mut) {
@@ -256,8 +265,13 @@ fn arrays(value: &Value, path: &mut Vec<String>, out: &mut Vec<(String, usize)>,
                 [parent, name] if parent == "world" => {
                     matches!(name.as_str(), "dwarves" | "active_work")
                 }
-                [turn, work, _] if !skip_turn && turn == "agent_turn" && work == "active_work" => {
-                    true
+                [turn, work, name]
+                    if !skip_turn && turn == "agent_turn" && work == "active_work" =>
+                {
+                    // These bounded owner catalogs carry explicit completeness.
+                    // Keep every handle or refuse; shortening them would hide
+                    // retained work while still reporting an available catalog.
+                    !retained_query_catalog(name)
                 }
                 [turn, name] if !skip_turn && turn == "agent_turn" && name == "recommendations" => {
                     true
@@ -617,6 +631,39 @@ mod tests {
         let parsed: Value = serde_json::from_str(&fit(&small, 1_500)).unwrap_or(Value::Null);
         assert_eq!(parsed["x"], 1);
         assert_eq!(parsed["output_budget"]["tier"], "full");
+    }
+
+    #[test]
+    fn retained_query_catalogs_remain_complete_at_every_fitting_tier()
+    -> Result<(), serde_json::Error> {
+        let records: Vec<_> = (0..8)
+            .map(|id| {
+                json!({
+                    "watch":format!("watch:{id}"), "label":"x".repeat(500),
+                    "next_step":{"tool":"fortress.query","arguments":{"mode":"retained"}},
+                })
+            })
+            .collect();
+        for key in ["query_baselines", "query_watches", "condition_watches"] {
+            let mut payload: Value = serde_json::from_str(&big_response())?;
+            payload["agent_turn"]["active_work"] = json!({
+                "query_work_coverage":{"status":"available"},
+            });
+            payload["agent_turn"]["active_work"][key] = json!(records);
+            for budget in [20_000, 4_000, 2_000, 1_000, 500, 200] {
+                let fitted: Value = serde_json::from_str(&fit(&payload.to_string(), budget))?;
+                if fitted["output_budget"]["tier"] != "refused" {
+                    assert_eq!(fitted["agent_turn"]["active_work"][key], json!(records));
+                } else {
+                    assert_eq!(fitted["ok"], false);
+                }
+            }
+            payload["agent_turn"]["active_work"][key] = json!([]);
+            let pulse: Value =
+                serde_json::from_str(&shape_for_profile(&payload.to_string(), "pulse"))?;
+            assert_eq!(pulse["agent_turn"]["active_work"][key], json!([]));
+        }
+        Ok(())
     }
 }
 

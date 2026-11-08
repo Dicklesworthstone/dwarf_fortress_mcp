@@ -26,7 +26,7 @@ fn payload(view: &TemporalResponseProjection) -> Value {
         "session_id":view.session_id,"anchor":view.anchor,"current_anchor":view.anchor,
         "kind":"baselines","baselines":[],"truncated":false,"continuation":null,
         "_query_baseline_work":[{"kind":"query_baseline","baseline":"qb1:fixture","status":"retained"}],
-        "_condition_watch_work":[]})
+        "_query_watch_work":[], "_condition_watch_work":[]})
 }
 
 fn decoded(raw: String) -> Result<Value> {
@@ -156,7 +156,7 @@ fn a_reserved_result_and_complete_catalog_fit_with_all_required_context() -> Res
 }
 
 #[test]
-fn changed_anchor_foreign_session_and_unrepresented_watch_work_refuse() {
+fn changed_anchor_foreign_session_and_malformed_work_refuse() {
     let view = projection(16_384);
     for case in 0..5 {
         let mut value = payload(&view);
@@ -165,10 +165,65 @@ fn changed_anchor_foreign_session_and_unrepresented_watch_work_refuse() {
             1 => value["current_anchor"]["sequence"] = json!(999),
             2 => value["session_id"] = json!("other"),
             3 => value["_query_baseline_work"] = json!({}),
-            _ => value["_condition_watch_work"] = json!([{"watch":"must-not-be-hidden"}]),
+            _ => value["_condition_watch_work"] = json!({"watch":"malformed"}),
         }
         assert!(
             matches!(view.finish(value),Err(error) if error.code==ErrorCode::InternalInvariantViolation)
+        );
+    }
+}
+
+#[test]
+fn watch_packet_preserves_game_obligations_and_both_exact_watch_catalogs() -> Result<()> {
+    let mut view = projection(16_384);
+    view.active_work["obligations"] = json!([{"action_id":"game-action", "status":"waiting"}]);
+    let mut input = payload(&view);
+    input["kind"] = json!("poll_watches");
+    input["records"] = json!([{"watch":"watch:active", "status":"candidate"}]);
+    input["_query_watch_work"] = json!([
+        {"watch":"watch:active", "terminal":false},
+        {"watch":"watch:terminal", "terminal":true},
+    ]);
+    input["_condition_watch_work"] = json!([{"watch":"watch:active", "terminal":false}]);
+    let output = decoded(view.finish(input.clone())?)?;
+    let work = &output["agent_turn"]["active_work"];
+    assert_eq!(work["obligations"], view.active_work["obligations"]);
+    assert_eq!(work["query_watches"], input["_query_watch_work"]);
+    assert_eq!(work["condition_watches"], input["_condition_watch_work"]);
+    assert_eq!(work["query_baselines"], input["_query_baseline_work"]);
+    assert!(output.get("_query_watch_work").is_none());
+    assert!(output.get("_condition_watch_work").is_none());
+    assert_eq!(output["agent_turn"]["continuity"]["status"], "partial");
+    assert_eq!(
+        output["agent_turn"]["coverage"]["query_temporal_coverage"]["status"],
+        "explicit_observation_samples_only"
+    );
+    assert_eq!(
+        output["agent_turn"]["coverage"]["query_temporal_coverage"]["eligible_as_mutation_evidence"],
+        false
+    );
+    let help: Value = serde_json::from_str(
+        output["query_help"]["arguments"]["mode"]
+            .as_str()
+            .ok_or_else(|| invariant("watch help"))?,
+    )
+    .map_err(|_| invariant("help JSON"))?;
+    assert_eq!(help["request"]["query"]["kind"], "watches");
+    Ok(())
+}
+
+#[test]
+fn full_watch_catalog_overflow_is_refused_without_clipping_terminal_or_active_work() {
+    let view = projection(8192);
+    let mut input = payload(&view);
+    input["kind"] = json!("watch");
+    input["_query_watch_work"] = json!([{"watch":"retained", "label":"x".repeat(8192)}]);
+    assert!(matches!(view.finish(input), Err(error) if error.code == ErrorCode::BudgetExceeded));
+    for key in ["_query_watch_work", "_condition_watch_work"] {
+        let mut input = payload(&view);
+        input[key] = json!(vec![json!({"watch":"retained"}); 9]);
+        assert!(
+            matches!(view.finish(input), Err(error) if error.code == ErrorCode::InternalInvariantViolation)
         );
     }
 }

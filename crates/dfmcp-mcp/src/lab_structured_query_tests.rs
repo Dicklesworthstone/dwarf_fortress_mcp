@@ -455,6 +455,7 @@ fn lab_structured_events_reach_the_facade_and_resume_exact_retained_history() ->
                 },
             );
         }
+        snapshot.cursor = snapshot.cursor.checked_next().ok_or("cursor exhausted")?;
         snapshot.refresh_hash();
         guard.adapter.inject_snapshot(snapshot.clone())?;
         snapshot
@@ -613,7 +614,7 @@ fn history_scenario_produces_queryable_events_through_the_normal_public_workflow
 #[test]
 fn lab_structured_closed_wrapper_refuses_stateful_modes_and_keeps_legacy_queries() -> TestResult {
     let _serial = crate::test_serial();
-    let (session_id, source) = open_fixture()?;
+    let (session_id, _) = open_fixture()?;
     for request in [
         json!({"mode": "structured", "request": {"schema": "dfmcp.query/1", "query": {"kind": "watch"}}}),
         json!({"mode": "structured", "request": {"schema": "dfmcp.query/2", "query": {"kind": "entities"}}}),
@@ -628,6 +629,33 @@ fn lab_structured_closed_wrapper_refuses_stateful_modes_and_keeps_legacy_queries
     ] {
         expect_refusal(&query(&session_id, request)?, "invalid_request");
     }
+    // The adversarial projection fixture keeps a concealed backing value to
+    // exercise redaction. Canonical observation correctly refuses that encoding;
+    // legacy compatibility is checked separately against a consistent source.
+    expect_refusal(
+        &query(
+            &session_id,
+            json!({"mode":"observation",
+            "completeness_profile":"research-full", "section":"entities", "limit":1}),
+        )?,
+        "invalid_request",
+    );
+    let source = {
+        let session = resolve_session(Some(session_id.clone()))?;
+        let mut guard = session.lock().map_err(|_| "session poisoned")?;
+        let mut source = guard.adapter.snapshot().clone();
+        for entity in source.graph.entities.values_mut() {
+            entity
+                .fields
+                .get_mut("concealed")
+                .ok_or("concealed field missing")?
+                .value = WorldValue::Null;
+        }
+        source.cursor = source.cursor.checked_next().ok_or("cursor exhausted")?;
+        source.refresh_hash();
+        guard.adapter.inject_snapshot(source.clone())?;
+        source
+    };
     for raw in [
         "entities".to_owned(),
         json!({"mode":"entities", "kind":"unit", "limit":1}).to_string(),
@@ -807,6 +835,7 @@ fn lab_spatial_entities_resume_the_exact_source_and_recheck_current_authority() 
             }
             entity.fields.insert("position".to_owned(), position);
         }
+        source.cursor = source.cursor.checked_next().ok_or("cursor exhausted")?;
         source.refresh_hash();
         guard.adapter.inject_snapshot(source.clone())?;
         source

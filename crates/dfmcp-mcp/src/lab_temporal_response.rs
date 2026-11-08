@@ -1,4 +1,4 @@
-//! Pure full-packet publication for laboratory query-baseline transactions.
+//! Pure full-packet publication for laboratory baseline and watch transactions.
 //! All session facts are supplied while the caller owns its session. Rendering
 //! acquires no lock, reads no source and updates no presentation cache.
 
@@ -38,8 +38,8 @@ impl TemporalResponseProjection {
     }
 
     /// Reserve the complete current game-work packet and largest comparison
-    /// metadata before the baseline engine fills a page. The helper separately
-    /// reserves the complete candidate baseline catalog, including a new capture.
+    /// metadata before the temporal engine fills a response. The helper and
+    /// engine separately account for the complete candidate retained catalogs.
     pub(super) fn result_byte_budget(&self) -> Result<usize> {
         if !self.active_work.is_object() || !self.anchor.is_object() {
             return Err(invariant(
@@ -54,6 +54,7 @@ impl TemporalResponseProjection {
             "target_result_digest":"x".repeat(64),
             "truncated":true, "continuation":"x".repeat(128),
             "_query_baseline_work":[],
+            "_query_watch_work":[], "_condition_watch_work":[],
         });
         let reserve = self
             .render(sample)?
@@ -71,7 +72,7 @@ impl TemporalResponseProjection {
     }
 
     /// Return the complete success or refuse it. No row/field clipping or other
-    /// fallible publication step is permitted after the baseline root changes.
+    /// fallible publication step is permitted after a retained root changes.
     pub(super) fn finish(&self, payload: Value) -> Result<String> {
         if !payload.is_object()
             || payload["anchor"] != self.anchor
@@ -82,14 +83,6 @@ impl TemporalResponseProjection {
         {
             return Err(invariant(
                 "temporal result differs from its complete session anchor",
-            ));
-        }
-        if payload
-            .get("_condition_watch_work")
-            .is_some_and(|work| work.as_array().is_none_or(|work| !work.is_empty()))
-        {
-            return Err(invariant(
-                "laboratory baseline publication cannot omit condition-watch work",
             ));
         }
         let output = self.render(payload)?;
@@ -114,13 +107,38 @@ impl TemporalResponseProjection {
             return Err(invariant("current laboratory game work is not an object"));
         }
         active_work["query_baselines"] = baseline_work;
-        if let Some(object) = payload.as_object_mut() {
-            object.remove("_condition_watch_work");
+        for (internal, public) in [
+            ("_query_watch_work", "query_watches"),
+            ("_condition_watch_work", "condition_watches"),
+        ] {
+            let records = payload
+                .as_object_mut()
+                .and_then(|object| object.remove(internal))
+                .filter(|work| work.as_array().is_some_and(|rows| rows.len() <= 8))
+                .ok_or_else(|| {
+                    invariant("temporal publication requires both bounded watch catalogs")
+                })?;
+            active_work[public] = records;
         }
         let comparison = payload["kind"] == "changes";
+        let watch_query = matches!(
+            payload["kind"].as_str(),
+            Some(
+                "watch"
+                    | "poll_watch"
+                    | "poll_watches"
+                    | "watches"
+                    | "cancel_watch"
+                    | "release_watch"
+            )
+        );
+        let sampling = matches!(
+            payload["kind"].as_str(),
+            Some("watch" | "poll_watch" | "poll_watches")
+        );
         let interval = comparison && payload["anchor_advanced"] == true;
         let truncated = payload["truncated"] == true;
-        let continuity = if interval || truncated {
+        let continuity = if interval || truncated || sampling {
             ContinuityStatus::Partial
         } else {
             ContinuityStatus::Heartbeat
@@ -148,9 +166,16 @@ impl TemporalResponseProjection {
                 "schema":"dfmcp.query/1", "query":{"kind":"baselines"}
             }}).to_string()
         }});
+        let watch_list = json!({"tool":"fortress.query","arguments":{
+            "session_id":self.session_id,
+            "mode":json!({"mode":"temporal","request":{
+                "schema":"dfmcp.query/1", "query":{"kind":"watches"}
+            }}).to_string()
+        }});
+        let help = if watch_query { &watch_list } else { &list };
         let maximum = self.maximum_bytes()?;
         payload["request_id"] = json!(self.request_id);
-        payload["query_help"] = list.clone();
+        payload["query_help"] = help.clone();
         payload["query_budget"] = json!({
             "maximum_response_bytes":maximum,
             "max_output_tokens":self.budget.max_output_tokens,
@@ -167,13 +192,16 @@ impl TemporalResponseProjection {
         });
         let coverage = json!({
             "status":"partial",
-            "complete_domains":["laboratory.source_anchor","laboratory.session_query_baseline_catalog"],
+            "complete_domains":["laboratory.source_anchor","laboratory.session_query_baseline_catalog",
+                "laboratory.session_query_watch_catalog"],
             "partial_domains":[{"domain":"laboratory.selected_endpoint_projection",
-                "reason":"only selected canonical endpoint rows are compared; unselected facts and intermediate history are not established"}],
+                "reason":"only selected canonical endpoint rows are compared; unselected facts and intermediate history are not established"},
+                {"domain":"laboratory.condition_watch_samples",
+                "reason":"only explicit foreground samples evaluate retained predicates; ordinary queries and observations do not sample watches"}],
             "omitted_domains":["live_dwarf_fortress_state"],
             "absence_proof_scope":[], "continuation":payload["continuation"],
             "query_coverage":payload["coverage"],
-            "query_temporal_coverage":{"status":"endpoint_comparison_only",
+            "query_temporal_coverage":{"status":if watch_query { "explicit_observation_samples_only" } else { "endpoint_comparison_only" },
                 "intermediate_observations_retained":false,
                 "continuous_between_observations":false,
                 "eligible_as_mutation_evidence":false},
@@ -191,6 +219,8 @@ impl TemporalResponseProjection {
                 "query_execution":"foreground_only", "query_game_effect":"none",
                 "baseline_storage":"bounded_process_local", "baselines_durable":false,
                 "baseline_mutation_authority":false, "live_game_qualification":false,
+                "watch_storage":"bounded_process_local", "watches_durable":false,
+                "watch_sampling":"explicit_foreground_calls", "watch_mutation_authority":false,
             }))
             .changes(changes)
             .active_work(active_work)
@@ -205,23 +235,34 @@ impl TemporalResponseProjection {
                 "estimated_cost":{"actions":null,"bridge_bytes":null,
                     "wall_millis":null,"game_ticks":null},
                 "arguments":list["arguments"],
+            }), json!({
+                "affordance_id":"query-condition-watches", "tool":"fortress.query",
+                "intent_family":"query", "risk":"read_only",
+                "reversibility":"not_applicable", "enabled":true,
+                "disabled_reason":null, "known_preconditions":[],
+                "unverified_preconditions":[],
+                "checkpoint_policy":"registered_policy",
+                "confirmation_policy":"registered_policy",
+                "estimated_cost":{"actions":null,"bridge_bytes":0,
+                    "wall_millis":null,"game_ticks":0},
+                "arguments":watch_list["arguments"],
             })])
             .uncertainty(vec![
                 uncertainty(
                     "query-temporal-history",
                     "unknown",
-                    "Retained selections compare endpoints; intermediate changes and continuous truth are not observed.",
-                    "Endpoint equality does not establish an unchanged interval or mutation success.",
+                    "Retained selections compare endpoints and watches sample explicit observations; intermediate changes and continuous truth are not observed.",
+                    "Endpoint equality or sampled predicate satisfaction does not establish an unchanged interval or mutation success.",
                     Some("fortress.query"),
-                    list["arguments"].clone(),
+                    help["arguments"].clone(),
                 ),
                 uncertainty(
                     "query-baseline-future-availability",
                     "unknown",
-                    "Baseline availability after process restart or session disposal is not retained; restore invalidates the prior epoch.",
-                    "These bounded process-local selections do not provide durable monitoring or cross-epoch history.",
+                    "Baseline and watch availability after process restart or session disposal is not retained; restore changes the observation epoch.",
+                    "These bounded process-local records do not provide durable monitoring; a poll invalidates unfinished watches after an incompatible epoch change.",
                     Some("fortress.query"),
-                    list["arguments"].clone(),
+                    help["arguments"].clone(),
                 ),
             ])
             .coverage(coverage)

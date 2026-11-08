@@ -1687,6 +1687,10 @@ impl ResponsePresentation {
         let succeeded = is_ok(&result);
         let query_budget = result["query_budget"].clone();
         let mode = result["mode"].clone();
+        let query_work = result
+            .get("query_work")
+            .filter(|work| work.is_object())
+            .cloned();
         let presentation = if succeeded { self } else { failure };
         let rendered = presentation.render(
             result,
@@ -1706,6 +1710,9 @@ impl ResponsePresentation {
         }
         refusal["query_budget"] = query_budget;
         refusal["mode"] = mode;
+        if let Some(query_work) = query_work {
+            refusal["query_work"] = query_work;
+        }
         let rendered = failure.render(
             refusal,
             "fortress.query",
@@ -1766,6 +1773,22 @@ impl ResponsePresentation {
             .attention(ranked)
             .active_work({
                 let mut work = active_work(state);
+                if payload["query_work"].is_object() {
+                    let catalog = &payload["query_work"];
+                    work["query_work_coverage"] = json!({
+                        "status": catalog["status"],
+                        "anchor": catalog["anchor"],
+                        "code": catalog["code"],
+                        "reason": catalog["reason"],
+                        "sampling": "explicit_foreground_poll_only",
+                        "absence_proven": false,
+                    });
+                    if catalog["status"] == "available" {
+                        for key in ["query_baselines", "query_watches", "condition_watches"] {
+                            work[key] = catalog[key].clone();
+                        }
+                    }
+                }
                 if has_drain_observation(operation, &payload)
                     && payload["drain_progress"]["quiescent"] != true
                 {
@@ -1882,7 +1905,7 @@ pub fn fortress_observe(session_id: Option<String>) -> String {
 }
 
 #[tool(
-    description = "Run a bounded laboratory query with explicit coverage, uncertainty, affordances, and next-step guidance. JSON {\"mode\":\"structured\",\"request\":{\"schema\":\"dfmcp.query/1\",\"query\":{\"kind\":\"entities|inspect|traverse|dependencies|aggregate|search|events\",...}},\"at\"?:state_hash} runs typed field projections, filters, bound continuations, generation-aware inspection, graph dependency analysis, exact integer/fixed aggregates, lexical search, or bounded retained-event windows on the current or exact retained world. The closed temporal wrapper {mode:temporal,request:{schema:dfmcp.query/1,query:{kind:capture|changes|baselines|release_baseline,...}}} owns up to eight foreground selected baselines per session; capture uses key, select and max_game_ticks, changes uses baseline with optional limit/continuation, release_baseline uses baseline. Complete results and current active work are published atomically before private baseline changes; restart loses baselines and restore invalidates their epoch. The closed query_changes wrapper takes before (exact retained hash), optional after (default current), select (entities with kinds/where/fields/order), optional limit and continuation. It reports generation-aware entered_result, left_result and changed_in_result rows between complete endpoint selections, with jointly charged source budgets and current-anchor-bound pages. It does not establish intermediate history. Structured results never authorize effects; historical reads recheck current Query authority. The complete page and Agent Turn must fit without dropping rows. Current mode \"civilian_recovery\" reports the world-owned stable-clear interval and exact roster; it accepts no historical at selector or caller clearance. Other mode: \"summary\" (default), \"entities\", or JSON: {\"mode\":\"observation\",\"completeness_profile\":\"control-minimum|operations|spatial|historical|research-full\",\"section\":\"entities|relations|chunks|events\",\"limit\"?,\"offset\"?} (bounded profile records with distinct source/projected anchors and explicit omissions), {\"mode\":\"entities\",\"kind\"?,\"limit\"?,\"offset\"?}, {\"mode\":\"terrain\",\"min\":[x,y,z],\"max\":[x,y,z]}, {\"mode\":\"search\",\"text\":...,\"limit\"?}, {\"mode\":\"path\",\"from\":[x,y,z],\"to\":[x,y,z]} (walkability route over observed terrain; unproven absence is reported as unknown); entities accept \"where\": {\"field\",\"op\": eq|ne|lt|le|gt|ge,\"value\"} or {\"all\"|\"any\":[...]} or {\"not\":{...}} (unknown facts never match); add \"at\":<state_hash> to read an earlier retained world version exactly; {\"mode\":\"changes\",\"since\":<state_hash>} lists observed changes from that version to now (each session retains its last 32 versions)."
+    description = "Run a bounded laboratory query with explicit coverage, uncertainty, affordances, and next-step guidance. JSON {\"mode\":\"structured\",\"request\":{\"schema\":\"dfmcp.query/1\",\"query\":{\"kind\":\"entities|inspect|traverse|dependencies|aggregate|search|events\",...}},\"at\"?:state_hash} runs typed field projections, filters, bound continuations, generation-aware inspection, graph dependency analysis, exact integer/fixed aggregates, lexical search, or bounded retained-event windows on the current or exact retained world. The closed temporal wrapper {mode:temporal,request:{schema:dfmcp.query/1,query:{kind:capture|changes|baselines|release_baseline|watch|poll_watch|poll_watches|watches|cancel_watch|release_watch,...}}} owns up to eight foreground selected baselines per session; capture uses key, select and max_game_ticks, changes uses baseline with optional limit/continuation, release_baseline uses baseline. Foreground watches use key, condition, optional failure_condition, deadline_tick, optional poll_interval_ticks and stable_observations; poll_watches evaluates one to eight selected handles (or all when omitted) at the same current snapshot with atomic publication. Field/generation, observed-projection entity counts, pause/tick and Boolean conditions use registered laboratory evidence. Polling never advances game time or acquires native observations. Structured condition_evaluation preflights the same predicates without retaining a watch, including exact historical at sources. Complete results and current active work are published atomically before private baseline/watch changes; restart loses handles, and explicit polling invalidates nonterminal watches after restore. The closed query_changes wrapper takes before (exact retained hash), optional after (default current), select (entities with kinds/where/fields/order), optional limit and continuation. It reports generation-aware entered_result, left_result and changed_in_result rows between complete endpoint selections, with jointly charged source budgets and current-anchor-bound pages. It does not establish intermediate history. Structured results never authorize effects; historical reads recheck current Query authority. The complete page and Agent Turn must fit without dropping rows. Current mode \"civilian_recovery\" reports the world-owned stable-clear interval and exact roster; it accepts no historical at selector or caller clearance. Other mode: \"summary\" (default), \"entities\", or JSON: {\"mode\":\"observation\",\"completeness_profile\":\"control-minimum|operations|spatial|historical|research-full\",\"section\":\"entities|relations|chunks|events\",\"limit\"?,\"offset\"?} (bounded profile records with distinct source/projected anchors and explicit omissions), {\"mode\":\"entities\",\"kind\"?,\"limit\"?,\"offset\"?}, {\"mode\":\"terrain\",\"min\":[x,y,z],\"max\":[x,y,z]}, {\"mode\":\"search\",\"text\":...,\"limit\"?}, {\"mode\":\"path\",\"from\":[x,y,z],\"to\":[x,y,z]} (walkability route over observed terrain; unproven absence is reported as unknown); entities accept \"where\": {\"field\",\"op\": eq|ne|lt|le|gt|ge,\"value\"} or {\"all\"|\"any\":[...]} or {\"not\":{...}} (unknown facts never match); add \"at\":<state_hash> to read an earlier retained world version exactly; {\"mode\":\"changes\",\"since\":<state_hash>} lists observed changes from that version to now (each session retains its last 32 versions)."
 )]
 pub fn fortress_query(session_id: Option<String>, mode: Option<String>) -> String {
     let started = std::time::Instant::now();
@@ -2236,6 +2259,12 @@ mod projected_query_publication_tests {
             (128, 0, Duration::ZERO, false),
         ] {
             let mut page = result.clone();
+            page["query_work"] = json!({
+                "status":"available", "anchor":result["current_anchor"],
+                "query_baselines":[{"baseline":"qb1:retained", "status":"retained"}],
+                "query_watches":[{"watch":"watch:retained", "terminal":false}],
+                "condition_watches":[{"watch":"watch:retained", "terminal":false}],
+            });
             page["query_budget"]["max_output_tokens"] = json!(tokens);
             page["query_budget"]["maximum_response_bytes"] = json!(tokens * 4);
             page["query_budget"]["max_wall_millis"] = json!(wall_millis);
@@ -2259,6 +2288,18 @@ mod projected_query_publication_tests {
                 assert_eq!(refusal["agent_turn"]["changes"], json!([]));
                 assert_eq!(refusal["agent_turn"]["turn_id"], "presentation-turn-47");
                 assert_eq!(refusal["query_budget"]["max_output_tokens"], tokens);
+                assert_eq!(
+                    refusal["agent_turn"]["active_work"]["query_baselines"][0]["baseline"],
+                    "qb1:retained"
+                );
+                assert_eq!(
+                    refusal["agent_turn"]["active_work"]["query_watches"][0]["watch"],
+                    "watch:retained"
+                );
+                assert_eq!(
+                    refusal["agent_turn"]["active_work"]["condition_watches"][0]["watch"],
+                    "watch:retained"
+                );
                 assert_eq!(
                     refusal["agent_turn"]["active_work"]["pending_plans"][0]["plan_digest"],
                     "retained-reviewed-plan"

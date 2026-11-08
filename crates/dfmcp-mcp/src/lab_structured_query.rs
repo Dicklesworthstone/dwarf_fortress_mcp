@@ -28,8 +28,10 @@ use dfmcp_core::{
     Capability, DfmcpError, ErrorCode, OperationContext, Result, RiskTier, StateAnchor,
 };
 use dfmcp_world::WorldSnapshot;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+
+use super::query_condition::Condition;
 
 const MAX_REQUEST_BYTES: usize = 65_536;
 
@@ -50,6 +52,35 @@ pub(super) struct Request {
     mode: Mode,
     request: Value,
     pub(super) at: Option<String>,
+}
+
+// Decode preflight from the original bytes with the same closed condition
+// grammar as retained watches. A Value round trip would hide duplicate keys.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ConditionRequest {
+    mode: Mode,
+    request: ConditionEnvelope,
+    at: Option<String>,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct ConditionEnvelope {
+    schema: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    expected_anchor: Option<Value>,
+    query: ConditionQuery,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+enum ConditionQuery {
+    ConditionEvaluation {
+        condition: Condition,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        failure_condition: Option<Condition>,
+    },
 }
 
 impl Request {
@@ -85,7 +116,7 @@ pub(super) fn parse(raw: &str) -> Result<Option<Request>> {
     if selector.mode != "structured" {
         return Ok(None);
     }
-    let request: Request = serde_json::from_str(raw)
+    let mut request: Request = serde_json::from_str(raw)
         .map_err(|error| invalid(format!("invalid structured laboratory query: {error}")))?;
     let Mode::Structured = request.mode;
     let envelope = request
@@ -122,11 +153,20 @@ pub(super) fn parse(raw: &str) -> Result<Option<Request>> {
                 | "spatial_entities"
                 | "related_entities"
                 | "ranked_entities"
+                | "condition_evaluation"
         )
     ) {
         return Err(invalid(
-            "structured laboratory queries support only entities, inspect, traverse, dependencies, aggregate, search, events, spatial_entities, related_entities, and ranked_entities",
+            "structured laboratory queries support only entities, inspect, traverse, dependencies, aggregate, search, events, spatial_entities, related_entities, ranked_entities, and condition_evaluation",
         ));
+    }
+    if request.request["query"]["kind"] == "condition_evaluation" {
+        let parsed: ConditionRequest = serde_json::from_str(raw)
+            .map_err(|error| invalid(format!("invalid laboratory condition preflight: {error}")))?;
+        let Mode::Structured = parsed.mode;
+        request.at = parsed.at;
+        request.request = serde_json::to_value(parsed.request)
+            .map_err(|_| invalid("laboratory condition preflight cannot be encoded"))?;
     }
     Ok(Some(request))
 }
@@ -156,6 +196,11 @@ pub(super) fn execute(
         Some("ranked_entities") => {
             ranked_entity_query::execute(snapshot, &source_context, &request.request)?
         }
+        Some("condition_evaluation") => super::semantic_query::evaluate_laboratory_condition(
+            snapshot,
+            &source_context,
+            &request.request,
+        )?,
         _ => core_query::execute(snapshot, &source_context, &request.request)?,
     };
     if started.elapsed() >= Duration::from_millis(current.budget.max_wall_millis) {

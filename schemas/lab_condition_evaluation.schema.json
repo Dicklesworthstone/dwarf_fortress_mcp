@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dwarf-fortress-mcp.org/schemas/0.1.0/lab_condition_evaluation.schema.json",
+  "title": "Laboratory condition preflight at an exact selected observation",
+  "description": "Decoded mode-string request for source-qualified condition truth before registering a watch. Current session authority authorizes an optional retained exact snapshot. No watch is allocated, sampled or completed and no game time advances.",
+  "$comment": "The strict Rust condition grammar is shared with laboratory watches. Runtime rejects duplicate wrapper/envelope/condition fields from original bytes and enforces exact retained lineage, current authority, full-source/output budgets, bounded condition work and complete evidence publication. True here is one predicate observation, never stability, goal completion or mutation permission.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "mode",
+    "request"
+  ],
+  "properties": {
+    "mode": {
+      "const": "structured"
+    },
+    "at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[0-9a-f]{64}$",
+      "minLength": 64,
+      "maxLength": 64
+    },
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "query"
+      ],
+      "properties": {
+        "schema": {
+          "const": "dfmcp.query/1"
+        },
+        "expected_anchor": {
+          "anyOf": [
+            {
+              "$ref": "urn:dfmcp:query:1#/$defs/anchor"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "query": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "condition"
+          ],
+          "properties": {
+            "kind": {
+              "const": "condition_evaluation"
+            },
+            "condition": {
+              "$ref": "./lab_query_watches.schema.json#/$defs/condition"
+            },
+            "failure_condition": {
+              "anyOf": [
+                {
+                  "$ref": "./lab_query_watches.schema.json#/$defs/condition"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,13 +1,19 @@
 {
   "$id": "https://dwarf-fortress-mcp.org/schemas/0.1.0/query.input.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$comment": "The root remains the phase-zero design envelope. The laboratory_query_changes and laboratory_query_baselines definitions describe decoded mode-string values accepted by the default laboratory fortress_query tool; they are not alternative top-level tool envelopes.",
+  "$comment": "The root remains the phase-zero design envelope. The laboratory_query_changes, laboratory_query_baselines, laboratory_query_watches and laboratory_condition_evaluation definitions describe decoded mode-string values accepted by the default laboratory fortress_query tool; they are not alternative top-level tool envelopes.",
   "$defs": {
     "laboratory_query_changes": {
       "$ref": "./lab_query_comparison.schema.json"
     },
     "laboratory_query_baselines": {
       "$ref": "./lab_query_baselines.schema.json"
+    },
+    "laboratory_query_watches": {
+      "$ref": "./lab_query_watches.schema.json"
+    },
+    "laboratory_condition_evaluation": {
+      "$ref": "./lab_condition_evaluation.schema.json"
     }
   },
   "allOf": [

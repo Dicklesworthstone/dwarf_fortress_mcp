@@ -121,8 +121,9 @@ Baselines belong to one session and remain process-local even when the world
 itself uses the laboratory's durable storage. Process restart loses these
 selected rows and changes the handle incarnation. Disposing the owning session
 reclaims its query allocations; it does not affect another session's catalogue.
-This feature adds no close-session tool, durable monitoring, condition watch,
-background sampler or independent simulation loop.
+Baseline operations add no close-session tool, durable monitoring, background
+sampler or independent simulation loop. The same temporal wrapper separately
+supports [explicit foreground condition watches](LAB_CONDITION_WATCHES.md).
 
 The laboratory call log still records successful temporal operations. After a
 successful capture, its exported transcript is marked `replayable: false` with
@@ -164,7 +165,9 @@ optional `expected_anchor`, and `query`. Capture selections accept only the
 existing `entities` kind, `kinds`, typed `where`, `fields` and `order`; capture
 owns its pagination. Unknown and duplicate wrapper, envelope, operation and
 selection fields are rejected from the original request bytes. Historical
-`at` selectors and watch operations are outside this wrapper.
+`at` selectors remain outside this wrapper. The distinct
+[condition-watch lifecycle](LAB_CONDITION_WATCHES.md) shares this wrapper and
+publishes its retained catalogs alongside the baseline catalog.
 
 | Bound | Ceiling |
 | --- | ---: |

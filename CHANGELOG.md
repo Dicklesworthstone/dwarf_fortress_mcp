@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased — Expose laboratory watch workflows and stateless preflight
+
+- Add closed watch registration, listing, single/coherent batch polling,
+  cancellation and release to the existing temporal query wrapper.
+- Add current/exact-history condition preflight using the same source-qualified
+  evaluator, without allocating a watch or counting a stability sample.
+- Publish complete candidate watch/baseline catalogs together with pending game
+  work before retained state changes; preserve unknowns, grants and epoch fences.
+- Recover query handles through observations and handoffs without sampling;
+  keep all reported catalog entries intact under response fitting.
+- Add shared typed grammar, two schemas, usage guidance, six helper, two renderer,
+  six public watch, four public preflight and one output-fitting regression.
+  Add two projected-page catalog/interleaving regressions; preserve the concurrent
+  complete-page fitter and retained work through late refusals. Consumed
+  structured cursors are explicitly session-bound in replay logs.
+- Pass all62 selected public tests and54 component tests on the final merged
+  source, plus150 earlier unchanged watch-policy cases and9 refresh cases.
+  Final source checking passes; transport/full-qualification limits are explicit.
+
 ## Unreleased — Fit laboratory entity pages through the complete Agent Turn
 
 - Choose whole entity pages against the exact laboratory wrapper, captured
@@ -42,8 +61,8 @@
   disposal and expose restore invalidation. Mark process-local handles and
   consumed comparison cursors nonreplayable instead of reporting false divergence.
 - Add 26 baseline helper/renderer/public-facade regressions and schema/usage docs.
-  Schema/static checks pass. Rust verification is blocked by recorded memory/disk
-  failures; zero new Rust tests executed in this session.
+  Schema/static checks and subsequent helper/renderer component execution pass.
+  All11 public baseline flows now pass; precise execution scope is recorded in status.
 
 ## Unreleased — Page selected entity fields within the complete output budget
 
@@ -90,7 +109,8 @@
 - Preserve whole comparison rows and cursors through Agent Turn publication;
   refuse overflow without exposing an unpublished comparison summary.
 - Add request schema, usage guidance and focused helper/public-facade regression
-  coverage. Rust execution remains resource-blocked; see status.
+  coverage. All13 comparison helpers and6 public workflows now pass; precise
+  execution scope is recorded in status.
 
 ## Unreleased — Complete original Tree harvesting in one bounded MCP session
 

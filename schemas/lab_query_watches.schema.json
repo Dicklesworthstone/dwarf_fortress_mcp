@@ -1,0 +1,500 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dwarf-fortress-mcp.org/schemas/0.1.0/lab_query_watches.schema.json",
+  "title": "Foreground laboratory condition watches",
+  "description": "Decoded mode-string request for session-owned laboratory predicates. Registration and explicit polls sample only the current reference world; no game time, native observation, mutation authority or background work is acquired. Baseline lifecycle requests share the same temporal wrapper and have a separate schema.",
+  "$comment": "Runtime rejects duplicate fields from original bytes and enforces UTF-8 byte limits, a 64-node shared success/failure tree, depth 8, full-source and complete-response budgets, current authority, bounded deadline/cadence, generation identity and atomic publication. Only registered laboratory facts can establish field truth; the caller cannot choose an evidence policy.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "mode",
+    "request"
+  ],
+  "properties": {
+    "mode": {
+      "const": "temporal"
+    },
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "query"
+      ],
+      "properties": {
+        "schema": {
+          "const": "dfmcp.query/1"
+        },
+        "expected_anchor": {
+          "anyOf": [
+            {
+              "$ref": "urn:dfmcp:query:1#/$defs/anchor"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "query": {
+          "$ref": "#/$defs/watch_operation"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "watch_operation": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "key",
+            "condition",
+            "deadline_tick"
+          ],
+          "properties": {
+            "kind": {
+              "const": "watch"
+            },
+            "key": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[^\\u0000]+$"
+            },
+            "label": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256,
+                  "pattern": "^[^\\u0000]+$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "condition": {
+              "$ref": "#/$defs/condition"
+            },
+            "failure_condition": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/condition"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "deadline_tick": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615
+            },
+            "poll_interval_ticks": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 1,
+              "maximum": 1000000
+            },
+            "stable_observations": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 1,
+              "maximum": 64
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "watch"
+          ],
+          "properties": {
+            "kind": {
+              "const": "poll_watch"
+            },
+            "watch": {
+              "$ref": "urn:dfmcp:query:1#/$defs/watch_handle"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "watch"
+          ],
+          "properties": {
+            "kind": {
+              "const": "cancel_watch"
+            },
+            "watch": {
+              "$ref": "urn:dfmcp:query:1#/$defs/watch_handle"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "watch"
+          ],
+          "properties": {
+            "kind": {
+              "const": "release_watch"
+            },
+            "watch": {
+              "$ref": "urn:dfmcp:query:1#/$defs/watch_handle"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "const": "watches"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "const": "poll_watches"
+            },
+            "watches": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "minItems": 1,
+              "maxItems": 8,
+              "uniqueItems": true,
+              "items": {
+                "$ref": "urn:dfmcp:query:1#/$defs/watch_handle"
+              },
+              "description": "Omit or use null to select all retained session watches. Explicit selections contain one to eight unique owned handles."
+            }
+          }
+        }
+      ]
+    },
+    "condition": {
+      "description": "Laboratory source-qualified three-valued predicates; unknown inputs remain unknown, and exact generation mismatches invalidate a watch.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "op",
+            "entity_id",
+            "generation",
+            "field",
+            "comparison",
+            "value"
+          ],
+          "properties": {
+            "op": {
+              "const": "field"
+            },
+            "entity_id": {
+              "$ref": "urn:dfmcp:query:1#/$defs/entity_id"
+            },
+            "generation": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295
+            },
+            "field": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[^\\u0000]+$"
+            },
+            "comparison": {
+              "enum": [
+                "eq",
+                "ne",
+                "lt",
+                "le",
+                "gt",
+                "ge"
+              ]
+            },
+            "value": {
+              "$ref": "urn:dfmcp:query:1#/$defs/watch_literal"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "op",
+            "value"
+          ],
+          "properties": {
+            "op": {
+              "const": "paused"
+            },
+            "value": {
+              "type": "boolean"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "op",
+            "value"
+          ],
+          "properties": {
+            "op": {
+              "const": "tick_at_least"
+            },
+            "value": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "op",
+            "scope",
+            "kind",
+            "predicate",
+            "comparison",
+            "value"
+          ],
+          "properties": {
+            "op": {
+              "const": "entity_count"
+            },
+            "scope": {
+              "const": "observed_projection"
+            },
+            "kind": {
+              "enum": [
+                "unit",
+                "job",
+                "building",
+                "item",
+                "tile_feature",
+                "announcement"
+              ]
+            },
+            "predicate": {
+              "$ref": "#/$defs/count_predicate"
+            },
+            "comparison": {
+              "enum": [
+                "eq",
+                "ne",
+                "lt",
+                "le",
+                "gt",
+                "ge"
+              ]
+            },
+            "value": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "op",
+            "args"
+          ],
+          "properties": {
+            "op": {
+              "const": "all"
+            },
+            "args": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 64,
+              "items": {
+                "$ref": "#/$defs/condition"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "op",
+            "args"
+          ],
+          "properties": {
+            "op": {
+              "const": "any"
+            },
+            "args": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 64,
+              "items": {
+                "$ref": "#/$defs/condition"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "op",
+            "arg"
+          ],
+          "properties": {
+            "op": {
+              "const": "not"
+            },
+            "arg": {
+              "$ref": "#/$defs/condition"
+            }
+          }
+        }
+      ]
+    },
+    "count_predicate": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "op"
+          ],
+          "properties": {
+            "op": {
+              "const": "always"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "op",
+            "field",
+            "comparison",
+            "value"
+          ],
+          "properties": {
+            "op": {
+              "const": "field"
+            },
+            "field": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[^\\u0000]+$"
+            },
+            "comparison": {
+              "enum": [
+                "eq",
+                "ne",
+                "lt",
+                "le",
+                "gt",
+                "ge"
+              ]
+            },
+            "value": {
+              "$ref": "urn:dfmcp:query:1#/$defs/watch_literal"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "op",
+            "args"
+          ],
+          "properties": {
+            "op": {
+              "const": "all"
+            },
+            "args": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 64,
+              "items": {
+                "$ref": "#/$defs/count_predicate"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "op",
+            "args"
+          ],
+          "properties": {
+            "op": {
+              "const": "any"
+            },
+            "args": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 64,
+              "items": {
+                "$ref": "#/$defs/count_predicate"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "op",
+            "arg"
+          ],
+          "properties": {
+            "op": {
+              "const": "not"
+            },
+            "arg": {
+              "$ref": "#/$defs/count_predicate"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

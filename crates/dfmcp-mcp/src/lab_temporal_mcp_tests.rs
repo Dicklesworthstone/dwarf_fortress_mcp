@@ -34,7 +34,7 @@ fn open(scenario: &str) -> TestResult<TestSession> {
             ("plan".to_owned(), "reversible".to_owned()),
             ("configure_labor".to_owned(), "reversible".to_owned()),
             ("control_clock".to_owned(), "reversible".to_owned()),
-            ("checkpoint".to_owned(), "reversible".to_owned()),
+            ("checkpoint".to_owned(), "guarded".to_owned()),
             ("restore".to_owned(), "guarded".to_owned()),
         ]),
         Some(60_000),

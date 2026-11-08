@@ -59,6 +59,9 @@ pub(crate) mod production_source;
 #[path = "lab_structured_query.rs"]
 pub(crate) mod structured_query;
 
+#[path = "lab_query_condition.rs"]
+mod query_condition;
+
 #[path = "lab_query_budget.rs"]
 pub(crate) mod query_budget;
 
@@ -93,8 +96,16 @@ mod temporal_handler;
 mod temporal_mcp_tests;
 
 #[cfg(test)]
+#[path = "lab_temporal_watch_mcp_tests.rs"]
+mod temporal_watch_mcp_tests;
+
+#[cfg(test)]
 #[path = "lab_structured_query_tests.rs"]
 mod structured_query_tests;
+
+#[cfg(test)]
+#[path = "lab_condition_mcp_tests.rs"]
+mod condition_mcp_tests;
 
 #[cfg(test)]
 #[path = "lab_query_budget_mcp_tests.rs"]
@@ -2984,6 +2995,7 @@ pub fn fortress_observe(session_id: Option<String>) -> String {
                         payload["world_alerts"] = json!(world_alerts(guard));
                         payload["civilian_recovery"] = guard.civilian_recovery.projection();
                         payload["objectives"] = objectives_json(guard);
+                        payload["query_work"] = query_work_json(&ctx);
                         payload.to_string()
                     }
                     ObservationPayload::Delta(_) | ObservationPayload::Heartbeat(_) => {
@@ -3008,7 +3020,7 @@ pub fn fortress_observe(session_id: Option<String>) -> String {
 /// `{"mode":"entities","kind":"unit","limit":25,"offset":0}` /
 /// `{"mode":"terrain","min":[x,y,z],"max":[x,y,z]}`.
 #[tool(
-    description = "Run a bounded laboratory query. The closed structured wrapper {\"mode\":\"structured\",\"request\":{\"schema\":\"dfmcp.query/1\",\"query\":{...}},\"at\"?:state_hash} exposes stateless typed queries under current Query authority. The closed temporal wrapper {mode:temporal,request:{schema:dfmcp.query/1,query:{kind:capture|changes|baselines|release_baseline,...}}} owns up to eight foreground selected baselines per session; capture uses key, select and max_game_ticks, changes uses baseline with optional limit/continuation, release_baseline uses baseline. Complete results and current active work are published atomically before private baseline changes; restart loses baselines and restore invalidates their epoch. The closed query_changes wrapper takes before (exact retained hash), after (optional, defaults to current), select (complete entities selection), limit and continuation; it reports selected endpoint differences without proving intermediate history or mutation evidence. Other mode: \"summary\" (default), \"entities\", or a JSON object {\"mode\":\"entities\",\"kind\":\"unit\",\"limit\":25,\"offset\":0} or {\"mode\":\"terrain\",\"min\":[x,y,z],\"max\":[x,y,z]}. Full DfQL is not implemented."
+    description = "Run a bounded laboratory query. The closed structured wrapper {\"mode\":\"structured\",\"request\":{\"schema\":\"dfmcp.query/1\",\"query\":{...}},\"at\"?:state_hash} exposes stateless typed queries under current Query authority. The closed temporal wrapper {mode:temporal,request:{schema:dfmcp.query/1,query:{kind:capture|changes|baselines|release_baseline|watch|poll_watch|poll_watches|watches|cancel_watch|release_watch,...}}} owns up to eight foreground selected baselines per session; capture uses key, select and max_game_ticks, changes uses baseline with optional limit/continuation, release_baseline uses baseline. Foreground watches use key, condition, optional failure_condition, deadline_tick, optional poll_interval_ticks and stable_observations; poll_watches evaluates one to eight selected handles (or all when omitted) at the same current snapshot with atomic publication. Field/generation, observed-projection entity counts, pause/tick and Boolean conditions use registered laboratory evidence. Polling never advances game time or acquires native observations. Structured condition_evaluation preflights the same predicates without retaining a watch, including exact historical at sources. Complete results and current active work are published atomically before private baseline/watch changes; restart loses handles, and explicit polling invalidates nonterminal watches after restore. The closed query_changes wrapper takes before (exact retained hash), after (optional, defaults to current), select (complete entities selection), limit and continuation; it reports selected endpoint differences without proving intermediate history or mutation evidence. Other mode: \"summary\" (default), \"entities\", or a JSON object {\"mode\":\"entities\",\"kind\":\"unit\",\"limit\":25,\"offset\":0} or {\"mode\":\"terrain\",\"min\":[x,y,z],\"max\":[x,y,z]}. Full DfQL is not implemented."
 )]
 pub fn fortress_query(session_id: Option<String>, mode: Option<String>) -> String {
     match query_publication(session_id, mode, std::time::Instant::now(), false) {
@@ -3053,6 +3065,7 @@ impl PreparedEntityQuery {
             |error| query_budget::response_payload(Err(error), &self.current, true),
             |guard| {
                 let current = context_for(guard, self.current.request_id.get());
+                let mut query_work = None;
                 let result = authorize_entry(&current, Capability::Query, RiskTier::ReadOnly)
                     .and_then(|()| {
                         if current.anchor != self.current.anchor {
@@ -3081,17 +3094,37 @@ impl PreparedEntityQuery {
                                 "retained query source changed before page execution",
                             ));
                         }
-                        structured_query::execute_projected(
-                            source, &current, &self.request, started, fits,
-                        )
+                        // Baselines and watches can change without moving the
+                        // world anchor. Capture their current catalog only after
+                        // reacquiring this owner, then reuse it for every pure
+                        // fit and the final payload. Renderers must not reenter
+                        // either retained-state store while this lock is held.
+                        let work = query_work_json(&current);
+                        let result = structured_query::execute_projected(
+                            source,
+                            &current,
+                            &self.request,
+                            started,
+                            &|page| {
+                                let mut complete = page.clone();
+                                complete["query_work"] = work.clone();
+                                fits(&complete)
+                            },
+                        );
+                        query_work = Some(work);
+                        result
                     });
-                query_budget::response_payload(result, &current, true)
+                let mut payload = query_budget::response_payload(result, &current, true);
+                if let Some(work) = query_work {
+                    payload["query_work"] = work;
+                }
+                payload
             },
         )
     }
 }
 
-/// Baselines own private query state, not game or durable-world progress. Keep
+/// Baselines and watches own private query state, not durable-world progress. Keep
 /// the same admission/owner/world/session fences without starting persistence
 /// or retaining another world version after their accepted publication.
 fn with_query_session<T>(
@@ -3177,9 +3210,9 @@ fn query_publication(
                         let mut remaining = ctx.clone();
                         remaining.budget.max_wall_millis -= spent_millis as u64;
                         let response = temporal_handler::execute(guard, &remaining, request)?;
-                        if request.kind() == "capture" {
+                        if matches!(request.kind(), "capture" | "watch") {
                             guard.replay.mark_not_replayable(
-                                "query baselines use process-local session handles that cannot be replayed into a new session",
+                                "query baselines and watches use process-local session handles that cannot be replayed into a new session",
                             );
                         }
                         return Ok(QueryPublication::Published(response));
@@ -3784,6 +3817,7 @@ pub(crate) fn handoff_json(session: &LabSession) -> serde_json::Value {
         "open_actions": session.open_actions.iter().copied().map(action_view).collect::<Vec<_>>(),
         "untracked_work": untracked_work_json(session),
         "last_plan_actions": session.last_plan_actions.iter().copied().map(action_view).collect::<Vec<_>>(),
+        "query_work": query_work_json(&read_context(session)),
         "mcp_tasks": crate::task_service::session_handles(&session.session_id.to_string()),
         "mcp_task_coverage": crate::task_service::session_handle_coverage(&session.session_id.to_string()),
         "committed_plan_digests": session.commit_receipts.keys().collect::<Vec<_>>(),
@@ -3791,6 +3825,50 @@ pub(crate) fn handoff_json(session: &LabSession) -> serde_json::Value {
         "authority": "reading this packet grants nothing; every commit and cancel re-checks the session's negotiated grants",
         "epistemic_note": "action states are the last recorded receipts; fortress.wait re-evaluates them against a fresh observation",
     })
+}
+
+/// Query resources remain discoverable without sampling a watch or acquiring
+/// world facts. Query authority is independent of the observation/handoff grant;
+/// an unavailable catalog must never look like a proven empty work registry.
+fn query_work_json(context: &OperationContext) -> serde_json::Value {
+    let started = std::time::Instant::now();
+    let collect = || -> Result<serde_json::Value> {
+        let baselines = temporal_query::retained_baseline_work(context)?;
+        let watches = temporal_query::retained_watch_work(context)?;
+        let value = json!({
+            "status": "available",
+            "anchor": anchor_json(&context.anchor),
+            "storage": "bounded_process_local",
+            "sampling": "explicit_foreground_poll_only",
+            "query_baselines": baselines,
+            "query_watches": watches["query_watches"],
+            "condition_watches": watches["condition_watches"],
+        });
+        let maximum = context
+            .budget
+            .max_bytes
+            .min(u64::from(context.budget.max_output_tokens).saturating_mul(4));
+        if value.to_string().len() as u64 > maximum
+            || started.elapsed() >= std::time::Duration::from_millis(context.budget.max_wall_millis)
+        {
+            return Err(DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                "complete query work catalog exceeds its publication allowance",
+            ));
+        }
+        authorize_entry(context, Capability::Query, RiskTier::ReadOnly)?;
+        Ok(value)
+    };
+    match collect() {
+        Ok(value) => value,
+        Err(error) => json!({
+            "status": "unavailable",
+            "anchor": anchor_json(&context.anchor),
+            "code": error.code.as_str(),
+            "reason": error.message,
+            "absence_proven": false,
+        }),
+    }
 }
 
 /// Exclusive spatial leases for every step that excavates or builds. Retained

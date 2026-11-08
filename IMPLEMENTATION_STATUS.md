@@ -1,5 +1,73 @@
 # Implementation Status
 
+## Unreleased — Use laboratory condition preflight and foreground watches
+
+The default `fortress.query` now exposes `watch`, `poll_watch`, atomic
+`poll_watches`, `watches`, `cancel_watch` and `release_watch` through its closed
+`mode:"temporal"` wrapper. A private source policy qualifies registered
+laboratory scenario/effect facts while preserving Unknown for assertions,
+replay, arbitrary derivations, missing/redacted/conflicting values and future
+facts. Field thresholds, projected population counts, pause/tick conditions,
+Boolean combinations and failure guards share the existing watch evaluator.
+The previously published engine checkpoint is `022ede46`.
+
+`mode:"structured"` with `kind:"condition_evaluation"` runs that same evaluator
+without allocating a handle or contributing a watch sample. It accepts the
+current world or an exact retained `at` hash, keeps source and current anchors
+separate, and checks current Query authority before historical source selection.
+The strict original-byte condition grammar is shared with watch registration.
+True preflight is one predicate observation, not stable completion or permission
+to dispatch effects.
+
+Watch transactions publish complete results and exact candidate catalogs before
+changing any retained state. Baselines, pending plans, actions and game
+obligations remain visible. Ordinary observations and handoffs reconstruct
+baseline/watch metadata without scanning or sampling the source; missing Query
+authority reports an unavailable catalog rather than an empty one. Output
+fitting preserves every reported catalog entry, including explicit empty
+catalogs in pulse responses. Restart discards private handles, restore fences
+unfinished watches at the next explicit poll, and registration marks raw-handle
+transcripts nonreplayable. No clock advancement, native refresh or tool is added.
+
+The concurrent projected-page implementation in `ac556891` is preserved.
+Deferred entity queries now capture current query catalogs after reacquiring
+the session, then use the same immutable value for every fit and the final
+response. Registration/release between preparation and execution is reflected
+without requiring a world-anchor change. Late refusals retain these catalogs;
+consumed structured continuations explicitly disable cross-session replay.
+
+**Final merged public execution passes 62/62**, zero failures: comparison6,
+baseline11, watch6, condition preflight4, structured query13, public query
+budget3, projected pages/catalogs8, late publication2 and output budgeting9.
+This includes real laboratory labor changes, ordinary-default budgets, current
+and historical source selection, grant/restore fences, atomic batch rollback,
+private-work interleaving and complete-packet refusal. Previously unexecuted
+fixtures now obey canonical cursor progression and guarded checkpoint authority;
+invalid redacted backing data remains rejected. No validator was weakened.
+
+**Final merged component execution passes 54/54**: comparison13, temporal
+helper16, renderer7, query budget9 and output budgeting9. Earlier unchanged
+watch-engine groups passed150/150 (138 native-policy plus12 laboratory), and
+watch integration/refresh passed9/9. The selected public source and tests also
+pass `cargo check --tests`. These group totals include overlapping output-budget
+tests; they are separate runs, not a claim of that many distinct test cases.
+
+The exact-source assembly retains actual core/world/intent/adapter/lab crates
+and production server/facade function bodies, and all11 registry package
+identities match the unchanged lock. All1,110 input identities were rechecked
+against final repository bytes with zero mismatches. The successful lean public
+assembly omits unrelated test registrations, FastMCP macros/transport and the
+Asupersync runtime, with explicit uninstalled-task/unreachable-resource seams.
+Broad attempts were SIGKILLed under shared memory pressure. This proves the
+selected laboratory workflows, not installed task supervision, full workspace
+qualification, native DFHack operation or live transport.
+
+Five JSON schemas validate; watch requests accept10/reject15 targeted cases,
+and preflight accepts3/rejects4. `scripts/verify.sh` passes its initial contracts
+and stops at bead coverage because `br` is unavailable. Full qualification is
+not claimed. Owning bead: `df-lab-structured-query-f7q.3`; requests, lifecycle and
+sampling limits are documented in `docs/LAB_CONDITION_WATCHES.md`.
+
 ## Unreleased — Publish complete laboratory entity pages within their Agent Turn
 
 The default laboratory facade now includes its complete wrapper, coverage,
@@ -139,8 +207,9 @@ or unsupported wrappers. Added regressions comprise ten helper, five renderer
 and eleven public-facade cases, including a real labor loop, handle recovery,
 paging, cleanup, current grants, pending-plan preservation, publication rollback,
 restore, large-source/small-output behavior, replay and expired admission.
-Their Rust compilation/execution remains blocked as detailed below; no pass is
-claimed. See `docs/LAB_QUERY_BASELINES.md` for requests and lifecycle limits.
+Subsequent execution passes all11 public baseline flows and the helper/renderer
+component groups. Public source checking also passes; precise execution scope
+is recorded in the latest entry above. See `docs/LAB_QUERY_BASELINES.md` for requests and limits.
 
 ## Unreleased — Borrow and budget projected entity pages
 
