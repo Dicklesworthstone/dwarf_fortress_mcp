@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased — Recover original clock workflows after review or source loss
+
+- Replace ineffective Tree clock waits with authorized local retirement for
+  unattempted intervals and inspection for terminal or unreconcilable outcomes.
+- Offer clock confirmation only for a current, unfenced Prepared review; retain
+  original-key reconciliation and authorized safety stop for dispatched runs.
+- Recognize Workshop's real `intent_recorded` journal state, including recovery
+  without retirement authority. Preserve original custody and goal evidence.
+- Add five Tree regressions, correct the Workshop state fixtures, and exercise
+  the matching static and mutation gates. Rust execution is recorded in status.
+
 ## Unreleased — Compare exact retained laboratory selections
 
 - Add `query_changes` to the existing laboratory query tool: compare complete

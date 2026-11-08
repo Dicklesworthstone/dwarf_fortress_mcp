@@ -71,7 +71,15 @@ def check(root: Path = ROOT) -> dict:
         M + "src/tree_harvest_server/presentation.rs": ["constCHUNK_BYTES:usize=24_000;", "ResultMeta::empty()", "CoreResult::Final(FinalCoreResult::ToolsCall{", ".encode()", "ENVELOPE_BYTES", ".len()+4096+", "\"dfmcp.tree-native-capture/1\"", "Digest32::of_bytes(chunk)", "overflow_packet(", "withdraw_unpublished_review("],
         M + "src/tree_harvest_server/runtime.rs": ["modclock;", "modclock_runtime_tests;", "self.withdraw();", "acks.latest()", "work.reserve(&current,32*1024*1024)", "journal::open_private(", "c.authorize(Capability::Query,RiskTier::ReadOnly,&[],Some(area))?;", "nonce(c,self.scope)?", "nonce(&work.reserve(&current,32)?,config.scope)?", "c.budget.max_bytes<32", "self.clock_allows_goal_sample(work,c)?;", "source.require_progress_at_or_after("],
         M + "src/tree_harvest_server/clock.rs": ["modclock_config_tests;", "DFMCP_ALLOW_UNADMITTED_TREE_CLOCK", "DFMCP_RUN_ALLOW_CLOCK", "DFMCP_RUN_TOKEN", "Target::new(origin)?", "origin.require_capacity(ifmatches!(action,Action::Plan(_)){3}else{2})?;", "CLOCK_ORIGIN_BYTES+6*VIEW_BYTES+GUARD_BYTES+OPERATION_BYTES+CONNECT_BYTES+TREE_LOCAL_BYTES", "clock.prepare_guarded(", "clock.commit_guarded(", "journal.begin_sample(", "journal.consume_uncredited(", "journal.sample(", "before.require_capacity(1)?;", "owner.fence_advancement();"],
-        M + "src/tree_harvest_server/clock_presentation.rs": ["modtests;", "args[\"scope\"]=json!(\"clock\");", "turn[\"briefing\"][\"clock_advanced\"]=Value::Null;", "\"current_pause_proven\"", "\"harvest_goal_proven\""],
+        M + "src/tree_harvest_server/clock_presentation.rs": [
+            "modtests;", "args[\"scope\"]=json!(\"clock\");", "turn[\"briefing\"][\"clock_advanced\"]=Value::Null;",
+            "\"current_pause_proven\"", "\"harvest_goal_proven\"",
+            "letunattempted=matches!(run_state,Some(\"intent_recorded\"|\"prepared\"));",
+            "letreconcilable=matches!(run_state,Some(\"dispatch_started\"|\"tracking\"|\"cancel_requested\"));",
+            "run_state==Some(\"prepared\")", "elseifunsettled&&run_state==Some(\"terminal\")",
+            "elseifunsettled&&unattempted", "elseifunsettled&&reconcilable",
+            "ifreconcilable&&clock[\"unresolved\"]==true",
+        ],
         M + "src/tree_harvest_server/clock_runtime_tests.rs": ["tree_clock_runtime_peer.py", "Command::new(\"python3\")"],
         M + "src/bin/dfmcp-tree-harvest-v1-21-dev-server.rs": ["dfmcp_mcp::tree_harvest_server::run_stdio();", "std::process::ExitCode::FAILURE"],
     }

@@ -1,5 +1,6 @@
 //! Behavioral projections for one construction goal and its separate run owner.
 use super::*;
+use dfmcp_adapter::bounded_run::journal::RunState;
 
 fn original() -> Value {
     json!({"key":"original-carpenter","plan_digest":"a".repeat(64),
@@ -202,10 +203,13 @@ fn clock_confirmation_uses_its_own_seal_and_reports_its_real_tick_allowance() ->
 
 #[test]
 fn lost_review_retires_unattempted_clock_only_with_current_control_authority() -> Result<()> {
-    for state in ["intent", "prepared"] {
+    for state in [RunState::Intent, RunState::Prepared] {
         for fenced in [false, true] {
             let mut result = ready();
-            result["clock"]["active_run"] = run(state, "prepared");
+            result["clock"]["active_run"] = run(state.as_str(), "prepared");
+            if state == RunState::Intent {
+                result["clock"]["active_run"]["native_phase"] = Value::Null;
+            }
             result["clock"]["active_run"]["review_seal"] = Value::Null;
             result["clock"]["pending"] = json!(true);
             result["clock"]["new_run_available"] = json!(false);
@@ -235,15 +239,10 @@ fn lost_review_retires_unattempted_clock_only_with_current_control_authority() -
                 let unavailable = shown("fortress.query", result.clone(), retained(&result), 1200)?;
                 assert_ne!(next(&unavailable)["tool"], "fortress_commit");
                 assert_ne!(next(&unavailable)["tool"], "fortress_cancel");
-                if state == "prepared" {
-                    assert_eq!(next(&unavailable)["tool"], "fortress_explain");
-                    assert!(next(&unavailable)["reason"].as_str().is_some_and(|reason| {
-                        reason.contains("Recovery cannot restore dispatch permission")
-                    }));
-                } else {
-                    assert_eq!(next(&unavailable)["tool"], "fortress_wait");
-                    assert_eq!(next(&unavailable)["arguments"]["scope"], "clock");
-                }
+                assert_eq!(next(&unavailable)["tool"], "fortress_explain");
+                assert!(next(&unavailable)["reason"].as_str().is_some_and(|reason| {
+                    reason.contains("Recovery cannot restore dispatch permission")
+                }));
             }
             result["mode"] = json!("offline");
             let offline = shown("fortress.query", result.clone(), retained(&result), 1200)?;

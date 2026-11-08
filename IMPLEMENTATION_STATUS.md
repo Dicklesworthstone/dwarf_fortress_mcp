@@ -1,5 +1,26 @@
 # Implementation Status
 
+## Unreleased — Make original clock recovery actions match retained state
+
+Tree and Workshop Agent Turns now distinguish an unattempted interval whose
+process-local review was lost from a dispatched interval requiring original-key
+reconciliation. Current Control authority can retire the former locally; absent
+that authority, terminal source loss, or no active interval leads to inspection.
+Tree confirmations require a current unfenced Prepared review, and safety-stop
+guidance is restricted to potentially dispatched active intervals. Workshop
+uses the real `intent_recorded` wire state. These changes preserve both custody
+families, independent authority and the original goal deadline; they do not
+restore review permission or turn clock settlement into goal-completion proof.
+
+Beads `df-tree-clock-8q4` and `dfmcp-reality-wiring-proof-4bf.14.6` remain open for
+their broader qualification requirements. Five new Tree presentation cases and
+the corrected Workshop regression are registered. Current Tree and Workshop
+static gates pass, along with all three Tree and nine Workshop inventory/mutation
+tests, including six new Tree mutations. Scoped formatting and diff checks pass.
+Rust presentation execution is pending at this checkpoint: the full MCP check
+was killed in an unchanged dependency; a smaller exact-source run is underway.
+No whole-workspace, native-game or production-admission claim is made.
+
 ## Unreleased — Compare selected retained laboratory endpoints
 
 The default `fortress.query` now accepts the closed `query_changes` wrapper.

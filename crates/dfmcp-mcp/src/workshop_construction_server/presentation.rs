@@ -133,7 +133,7 @@ fn next_step(
                     "The retained run has a terminal unresolved outcome. Inspect its original source-loss or unknown-result evidence; another wait cannot restore continuity or prove a pause.",
                 );
             }
-            if matches!(state, Some("intent" | "prepared"))
+            if matches!(state, Some("intent_recorded" | "prepared"))
                 && result["mode"] == "control"
                 && clock["cancel_available"] == true
             {
@@ -143,11 +143,11 @@ fn next_step(
                     "Retire the retained unattempted run under current clock authority. Its earlier review cannot be restored, and local retirement does not unpause the game.",
                 );
             }
-            if state == Some("prepared") {
+            if matches!(state, Some("intent_recorded" | "prepared")) {
                 return (
                     "fortress_explain",
                     args,
-                    "The original run remains prepared, but no current review or clock-retirement authority is available. Recovery cannot restore dispatch permission; inspect and preserve its original custody instead of repeating waits.",
+                    "The original run was never dispatched, but no current review or clock-retirement authority is available. Recovery cannot restore dispatch permission; inspect and preserve its original custody instead of repeating waits.",
                 );
             }
             return (

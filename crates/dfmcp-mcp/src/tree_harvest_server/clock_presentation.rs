@@ -1,7 +1,7 @@
 //! Bounded Agent Turn guidance for the original Tree's separately reviewed clock.
 use super::*;
 
-fn summary(clock: &Value, verified: bool) -> Value {
+fn summary(clock: &Value, verified: bool, commit_available: bool) -> Value {
     if !clock.is_object() {
         return Value::Null;
     }
@@ -46,7 +46,7 @@ fn summary(clock: &Value, verified: bool) -> Value {
                 active[key] = value.clone();
             }
         }
-        active["review_seal"] = if verified && clock["commit_available"] == true {
+        active["review_seal"] = if commit_available {
             run["review_seal"].clone()
         } else {
             Value::Null
@@ -54,7 +54,7 @@ fn summary(clock: &Value, verified: bool) -> Value {
         out["active_run"] = active;
     }
     out["verified_for_current_call"] = json!(verified);
-    out["commit_available"] = json!(verified && clock["commit_available"] == true);
+    out["commit_available"] = json!(commit_available);
     out["new_run_available"] = json!(verified && clock["new_run_available"] == true);
     out["current_pause_proven"] = json!(false);
     out["harvest_goal_proven"] = json!(false);
@@ -79,7 +79,24 @@ pub(super) fn augment(
     if !clock.is_object() {
         return;
     }
-    let retained = summary(clock, verified);
+    let run_state = clock["active_run"]["state"].as_str();
+    let unsettled = clock["unresolved"] == true || clock["pending"] == true;
+    let unattempted = matches!(run_state, Some("intent_recorded" | "prepared"));
+    let reconcilable = matches!(
+        run_state,
+        Some("dispatch_started" | "tracking" | "cancel_requested")
+    );
+    let commit_available = verified
+        && result["mode"] == "control"
+        && clock["commit_available"] == true
+        && clock["pending"] == true
+        && clock["unresolved"] == false
+        && clock["advancement_fenced"] != true
+        && run_state == Some("prepared")
+        && clock["active_run"]["review_seal"]
+            .as_str()
+            .is_some_and(|seal| !seal.is_empty());
+    let retained = summary(clock, verified, commit_available);
     turn["briefing"]["clock"] = retained.clone();
     turn["active_work"]["clock"] = retained.clone();
     // A run receipt is historical time exposure. The Tree owner supplies the
@@ -106,10 +123,7 @@ pub(super) fn augment(
     let mut args = json!({"session_id":session.to_string()});
     let mut confirmation = false;
     let mut ticks = 0;
-    let (id, tool, reason, risk) = if result["mode"] == "control"
-        && clock["commit_available"] == true
-        && clock["active_run"]["review_seal"].is_string()
-    {
+    let (id, tool, reason, risk) = if commit_available {
         args["scope"] = json!("clock");
         args["review_seal"] = clock["active_run"]["review_seal"].clone();
         args["confirmed"] = json!(true);
@@ -128,12 +142,45 @@ pub(super) fn augment(
             "Review and confirm this exact bounded clock interval under the original Tree deadline.",
             "guarded",
         )
-    } else if clock["unresolved"] == true || clock["pending"] == true {
+    } else if unsettled && run_state == Some("terminal") {
+        (
+            "inspect_terminal_tree_clock",
+            "fortress_explain",
+            "The retained clock has a terminal unresolved outcome. Inspect its original source-loss evidence; another wait or safety-stop request cannot restore continuity or prove a pause.",
+            "read_only",
+        )
+    } else if unsettled
+        && unattempted
+        && result["mode"] == "control"
+        && clock["cancel_available"] == true
+    {
+        args["scope"] = json!("clock");
+        (
+            "retire_unattempted_tree_clock",
+            "fortress_cancel",
+            "Retire the retained unattempted clock interval under current clock authority. Its earlier review cannot be restored; local retirement does not unpause the game.",
+            "guarded",
+        )
+    } else if unsettled && unattempted {
+        (
+            "inspect_unattempted_tree_clock",
+            "fortress_explain",
+            "The original clock interval was never dispatched and has no current review or retirement authority. Preserve its custody; recovery cannot restore dispatch permission and repeated waits cannot commit it.",
+            "read_only",
+        )
+    } else if unsettled && reconcilable {
         args["scope"] = json!("clock");
         (
             "reconcile_original_tree_clock",
             "fortress_wait",
             "Reconcile the original clock key once; after it settles, obtain a fresh original Tree progress sample.",
+            "read_only",
+        )
+    } else if unsettled {
+        (
+            "inspect_blocked_tree_clock",
+            "fortress_explain",
+            "The retained clock is blocked without a reconcilable active interval. Inspect its original source and custody; repeated waits cannot clear this blocker or authorize another run.",
             "read_only",
         )
     } else if result["mode"] == "control"
@@ -202,7 +249,11 @@ pub(super) fn augment(
     next["grants_authority"] = json!(false);
     next["confidence"]["evidence"] = json!([reference.clone()]);
     turn["recommendations"] = json!([next]);
-    if clock["unresolved"] == true && clock["cancel_available"] == true {
+    if reconcilable
+        && clock["unresolved"] == true
+        && result["mode"] == "control"
+        && clock["cancel_available"] == true
+    {
         let mut stop = recommendation(
             "stop_original_tree_clock",
             "fortress_cancel",
