@@ -24,6 +24,15 @@ pub(crate) struct InventoryBaselines {
 }
 
 impl InventoryBaselines {
+    /// Accept an adapter-qualified objective without acquiring another census.
+    /// The value's constructor is private to the adapter; request JSON cannot
+    /// provide a baseline, source witness or allocation frontier.
+    pub(crate) fn from_qualified(value: ObservedInventoryIncreaseObjective) -> Self {
+        Self {
+            values: BTreeMap::from([(value.item_type().to_owned(), value)]),
+        }
+    }
+
     /// Recovery and repetition use only the exact retained original. No source
     /// is consulted and no baseline is silently renewed.
     pub(crate) fn from_original(plan: &PreparedPlan) -> Result<Self> {

@@ -1,6 +1,22 @@
 use super::*;
 
 #[test]
+fn stock_target_dispatch_budget_fits_with_workshop_and_native_frontier() {
+    let source = 33 * MIB
+        + dfmcp_adapter::semantic_work_orders::INVENTORY_BASELINE_PROJECTION_BYTES
+        + dfmcp_adapter::semantic_work_orders::INVENTORY_BASELINE_QUALIFY_BYTES
+        + orders::native::STOCK_TARGET_QUEUE_BYTES;
+    assert_eq!(stock_target::CHECK_BYTES, source);
+    // Six reads cover both semantic observation and native preparation, with
+    // the existing-worker reread. No second whole public budget is created.
+    let custody = WORKSHOP_CUSTODY_DISPATCH_BYTES + 6 * source;
+    let output = 256 * MIB;
+    let public = 8 * 1024 * MIB - 512 * MIB - 128 * 1024;
+    assert!(custody < (public - output) / 2);
+    assert!(custody + MAX_FRONTIER_BYTES + output + 8 * MIB < public);
+}
+
+#[test]
 fn prepaid_work_cannot_be_reused_or_renew_the_operation_deadline() -> Result<()> {
     let c = OperationContext {
         session_id: SessionId::new(1),
@@ -120,6 +136,39 @@ fn machine_host_contract_preserves_bounded_development_scope() -> Result<()> {
         json!(["original.plan", "original.citizens", "execution.journal"])
     );
     assert_eq!(host["tool_names"].as_array().map(Vec::len), Some(11));
+    let target = &host["stock_target"];
+    assert_eq!(target["plan_census_bytes"], stock_target::CENSUS_BYTES);
+    assert_eq!(
+        target["read_qualification_bytes"],
+        stock_target::CHECK_BYTES
+    );
+    assert_eq!(
+        target["dispatch_custody_max_bytes"],
+        WORKSHOP_CUSTODY_DISPATCH_BYTES + 6 * stock_target::CHECK_BYTES
+    );
+    assert_eq!(target["maximum_fresh_checks_per_prepare"], 6);
+    for flag in [
+        "fresh_plan_census_required",
+        "exact_original_census_required_before_insertion",
+        "strict_policy_rebuilt_from_original_archive",
+        "consumed_tick_reaches_frontier_recovery_floor",
+        "recovered_target_restores_authority_tick_floor",
+        "fresh_native_queue_read_after_each_census",
+        "fresh_queue_must_match_native_original_observation",
+    ] {
+        assert_eq!(target[flag], true, "stock target {flag}");
+    }
+    for flag in [
+        "advisory_capture_reused",
+        "client_amount_or_baseline",
+        "additional_private_sidecar",
+        "offline_needs_native_credential",
+        "recovery_restores_confirmation",
+        "no_work_worker_prerequisite_checked",
+        "revalidation_failure_is_durable_source_fence",
+    ] {
+        assert_eq!(target[flag], false, "stock target {flag}");
+    }
     let choices = &host["workforce_choices"];
     assert_eq!(choices["schema"], "dfmcp.combined-workforce-choices/1");
     assert_eq!(choices["options_max"], super::choices::MAX_CHOICES);

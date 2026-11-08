@@ -42,6 +42,7 @@ pub(super) fn compact(view: &Value) -> Value {
         "selected_order_goal":compact_goal(&view["selected_order_goal"]),
         "portfolio":compact_portfolio(&view["portfolio"]),
         "workshop_prerequisite":workshop_summary(&view["workshop_prerequisite"],false),
+        "stock_target":stock_target_summary(&view["stock_target"]),
         "selected_parent_goal":null,
         "production_inspection_source":null,"production_inspection":null,
         "current_parent_goal":null,
@@ -61,6 +62,38 @@ pub(super) fn compact(view: &Value) -> Value {
             workshop_floor(&r["workshop_prerequisite_floor"]);
     }
     compacted
+}
+
+/// A retained census describes why the finite amount was chosen. It never
+/// becomes a current count, a renewed plan or an insertion permit on Query.
+fn stock_target_summary(value: &Value) -> Value {
+    if !value.is_object() {
+        return Value::Null;
+    }
+    json!({"schema":"dfmcp.stock-target/1","status":bounded(&value["status"],32),
+        "recipe":bounded(&value["recipe"],32),"item_type":bounded(&value["item_type"],16),
+        "baseline_stack_units":value["baseline_stack_units"].as_u64(),
+        "target_stack_units":value["target_stack_units"].as_u64(),
+        "deficit_stack_units":value["deficit_stack_units"].as_u64(),
+        "amount":value["amount"].as_u64(),"max_order_amount":value["max_order_amount"].as_u64(),
+        "baseline_anchor":compact_anchor(&value["baseline_anchor"]),
+        "source_digest":digest(&value["source_digest"]),
+        "source_generation":value["source_generation"].as_u64(),
+        "source_counters":value["source_counters"].as_array().filter(|rows|rows.len()==3)
+            .map(|rows|rows.iter().map(Value::as_u64).collect::<Vec<_>>()),
+        "assessment_witness":digest(&value["assessment_witness"]),
+        "consumed_tick_floor":value["consumed_tick_floor"].as_u64(),
+        "revalidation_failed":value["revalidation_failed"] == true,
+        "last_check_witness":null,
+        "work_required":value["work_required"].as_bool(),
+        "mutation_planned":value["mutation_planned"].as_bool(),
+        "worker_prerequisite_checked":value["worker_prerequisite_checked"].as_bool(),
+        "satisfied_at_anchor":value["status"]=="already_satisfied" && value["satisfied_at_anchor"]==true,
+        "empty_queue_required_before_insertion":value["status"]=="planned",
+        "exact_original_census_required_before_insertion":value["status"]=="planned",
+        "fresh_for_current_call":false,"current_inventory_proven":false,
+        "continuous_maintenance":false,"native_recipe_feasibility_proven":false,
+        "production_attribution":"unknown","inventory_semantics":"all_observed_type_stack_units"})
 }
 
 fn workshop_floor(value: &Value) -> Value {
@@ -593,6 +626,8 @@ fn encode(
         _ => AgentPhase::Inspect,
     };
     let view = retained.unwrap_or(&Value::Null);
+    let stock_target = stock_target_summary(&view["stock_target"]);
+    let stock_target_failed = stock_target["revalidation_failed"] == true;
     let workshop_fenced = view["workshop_prerequisite"]["source_fenced"] == true;
     let portfolio = view["portfolio"]["schema"] == "dfmcp.production-portfolio/1";
     let clock_reconciliation_needed = CLOCK_OWNERS
@@ -618,7 +653,7 @@ fn encode(
         .as_array()
         .cloned()
         .unwrap_or_default();
-    let workshop_blocks_review = workshop_fenced
+    let workshop_blocks_review = (workshop_fenced || stock_target_failed)
         && !(view["review"]["family"] == "workforce/1.17"
             && labor_step(view, &view["review"]["step_id"]));
     let review = if verified && !uncertain && !workshop_blocks_review {
@@ -1028,6 +1063,7 @@ fn encode(
         ))
     } else if view["frontier"]["next_ready"].is_u64()
         && view["original_plan"]["plan_digest"].is_string()
+        && !stock_target_failed
         && (!workshop_fenced || labor_step(view, &view["frontier"]["next_ready"]))
     {
         Some((
@@ -1124,6 +1160,16 @@ fn encode(
             false,
             json!({}),
         ))
+    } else if stock_target["status"] == "already_satisfied"
+        && view["original_plan"].is_null()
+        && mode != Some("offline")
+    {
+        Some((
+            "fortress_observe",
+            "The observed stock target already held and no order was planned. Acquire a new observation before considering a later production goal.",
+            false,
+            json!({}),
+        ))
     } else if preplan_capture_needed {
         Some((
             "fortress_observe",
@@ -1148,7 +1194,7 @@ fn encode(
     {
         Some((
             "fortress_plan",
-            "Compile kind=existing_labor for one finite order or kind=existing_labor_portfolio for up to four distinct recipes using observed eligible workers whose selected labor is already enabled. Each order retains the original deadline and rechecks current labor without assigning it.",
+            "Compile kind=stock_target to calculate one finite inventory deficit, kind=existing_labor for an explicit amount, or kind=existing_labor_portfolio for up to four recipes using observed eligible workers whose selected labor is already enabled. Each order retains the original deadline and rechecks current labor without assigning it.",
             false,
             json!({}),
         ))
@@ -1365,6 +1411,13 @@ fn encode(
             "finding":"Source continuity for the original workshop prerequisite is fenced; earlier completion is historical only.",
             "resolution":"Preserve the original association and consumed recovery floors. Further order dispatch is withheld; inspect source continuity and reconcile any already attempted effect under its original key."}));
     }
+    if stock_target_failed {
+        uncertainty.push(json!({"scope":"original_stock_target_dispatch_basis",
+            "epistemic_status":"unknown","state":"revalidation_failed",
+            "assessment_witness":stock_target["assessment_witness"],
+            "finding":"The original inventory basis or empty-queue requirement was not re-established. The sealed amount has not been resized.",
+            "resolution":"Retain the exact original recovery reference and reconcile any attempted effect. Inspect the failed source or authority check; changing the target or amount requires a new original, never a replacement key for uncertain work."}));
+    }
     for owner in CLOCK_OWNERS {
         let clock = owner.view(view);
         let reconciliation = clock_reconciliation(clock);
@@ -1450,6 +1503,13 @@ fn encode(
     if result.get("workshop_prerequisite").is_some() {
         result["workshop_prerequisite"] = workshop.clone();
     }
+    if result.get("stock_target").is_some() {
+        result["stock_target"] = stock_target.clone();
+    }
+    if result["retained_reference"]["stock_target"].is_object() {
+        result["retained_reference"]["stock_target"] =
+            stock_target_summary(&result["retained_reference"]["stock_target"]);
+    }
     if result["retained_reference"]["workshop_prerequisite"].is_object() {
         result["retained_reference"]["workshop_prerequisite"] = workshop_summary(
             &result["retained_reference"]["workshop_prerequisite"],
@@ -1499,6 +1559,7 @@ fn encode(
             "preplan_production_inspection_available":preplan_inspection_available,
             "observed_production_conditions":if diagnosis_seen {Some(&inspection["summary"])} else {None},
             "parent_goal_observation_fenced":parent_fenced,
+            "stock_target":stock_target,
             "workshop_prerequisite":if workshop.is_object() {Some(json!({
                 "scope":"original_workshop_dispatch_prerequisite","origin_witness":workshop["origin_witness"],
                 "association_digest":workshop["association_digest"],"source_fenced":workshop["source_fenced"],
@@ -1516,6 +1577,7 @@ fn encode(
         .active_work(json!({"pending_plans":pending_plans,"actions":actions,"clock":clock_views[0],
             "inventory_clock":clock_views[1],
             "workshop_prerequisite":workshop,
+            "stock_target":stock_target,
             "workshop_prerequisite_floor":workshop_floor(&view["recovery"]["workshop_prerequisite_floor"]),
             "production_inspection_source":if inspection_available {Some(inspection_source)} else {None},
             "obligations":if selected_goal.is_null() {vec![]} else {vec![selected_goal]},
@@ -1628,6 +1690,10 @@ mod inventory_clock_tests;
 #[cfg(test)]
 #[path = "live_production_presentation_preplan_tests.rs"]
 mod preplan_tests;
+
+#[cfg(test)]
+#[path = "live_production_presentation_stock_target_tests.rs"]
+mod stock_target_tests;
 
 #[cfg(test)]
 mod tests {

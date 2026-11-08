@@ -102,6 +102,17 @@ impl ExistingLaborRequest {
         c: &OperationContext,
         origin: Option<Digest32>,
     ) -> Result<PreparedPlan> {
+        self.compile_with_stock_target(evidence, requirement, baselines, c, origin, None)
+    }
+    pub(super) fn compile_with_stock_target(
+        &self,
+        evidence: &PredicateEvidence<'_>,
+        requirement: &ExistingLaborRequirement,
+        baselines: &InventoryBaselines,
+        c: &OperationContext,
+        origin: Option<Digest32>,
+        stock_target: Option<&super::stock_target_binding::StockTargetBinding>,
+    ) -> Result<PreparedPlan> {
         self.validate()?;
         let units = self.unit_ids()?;
         if evidence.snapshot().anchor() != c.anchor
@@ -154,6 +165,14 @@ impl ExistingLaborRequest {
         if let Some(objective) = &self.objective {
             objective.append_identity(&mut bytes, baselines, c.anchor)?;
         }
+        super::stock_target_binding::append_identity(
+            &mut bytes,
+            stock_target,
+            requirement,
+            GameTick(self.deadline_tick),
+            self.poll_interval_ticks,
+            self.stable_samples,
+        )?;
         super::workshop_binding::append_identity(&mut bytes, origin)?;
         let digest = Digest32::of_bytes(&bytes);
         let id = IntentId::new(u128::from_be_bytes(
@@ -191,13 +210,16 @@ impl ExistingLaborRequest {
             id,
             anchor: c.anchor,
             summary: super::workshop_binding::summary(
-                format!(
-                    "Use existing {} on {} citizens for {} finite {} order units",
-                    self.labor,
-                    units.len(),
-                    self.amount,
-                    native.as_str()
-                ),
+                super::stock_target_binding::summary(
+                    format!(
+                        "Use existing {} on {} citizens for {} finite {} order units",
+                        self.labor,
+                        units.len(),
+                        self.amount,
+                        native.as_str()
+                    ),
+                    stock_target,
+                )?,
                 origin,
             )?,
             terminal_condition: Predicate::All(vec![prerequisite, goal.clone()]),
@@ -228,6 +250,11 @@ impl ExistingLaborRequest {
         if ExistingLaborRequirement::from_plan(&plan)?.as_ref() != Some(requirement) {
             return Err(denied(
                 "compiled existing-labor prerequisite did not retain its exact seal",
+            ));
+        }
+        if super::stock_target_binding::requirement(&plan)?.as_ref() != stock_target {
+            return Err(denied(
+                "compiled stock target did not retain its exact original binding",
             ));
         }
         Ok(plan)

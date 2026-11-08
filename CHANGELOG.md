@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased — Plan and execute native stock targets through MCP
+
+- Add a reachable `kind="stock_target"` request to the combined production
+  server. Read a fresh complete census and derive one finite furniture order
+  from the requested minimum using already-enabled, eligible workers.
+- Return an explicit already-satisfied no-work result; refuse an oversized
+  deficit or conflicting production instead of overordering or silently capping.
+- Bind stock sizing to the original archive, deadline, worker predicate and
+  optional Workshop prerequisite. Recheck the exact census and a fresh empty
+  native manager queue at preparation and after the durable dispatch marker.
+- Preserve the original amount and target through goal sampling, lost-reply
+  reconciliation and Offline recovery. Expose sizing and blockers in the
+  existing Agent Turn, without restoring confirmation or current proof.
+- Add compiler, identity, public routing, budget and publication regressions,
+  plus actual Runtime/TCP scenarios for planning, dispatch races and recovery.
+  Evidence and current qualification limits are recorded in Implementation Status.
+
 ## Unreleased — Qualified native stock-target sizing
 
 - Derive one bounded furniture deficit from a complete independently qualified

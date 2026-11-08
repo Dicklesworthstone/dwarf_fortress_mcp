@@ -1,5 +1,73 @@
 # Implementation Status
 
+## Unreleased — Reach and retain native stock-target production through MCP
+
+The combined `serve-gameplay-dev labor-order` owner now accepts the closed
+`kind="stock_target"` request for `df-native-stock-target-3m9`. It acquires a fresh
+complete independently qualified census, derives one bounded furniture deficit,
+and compiles a single original order using selected workers whose labor is
+already enabled and eligible. It does not reuse an advisory inventory page or
+accept a client amount/baseline. A met minimum returns an explicit no-work stock
+observation without an original plan, frontier, archive or native preparation;
+this count-only outcome explicitly does not qualify labor. An oversized deficit
+or conflicting native production refuses before publishing an original.
+
+The original archive seals the typed baseline, terminal target, chosen order
+limit, whole-census assessment witness, existing-worker predicate and original
+timing. The optional original Workshop prerequisite remains independently bound
+and freshly qualified. The compact stock marker fits the existing 256-byte
+summary bound even with the full Workshop marker. Manual request identity bytes
+are unchanged, and recovery reconstructs the stock guard from sealed original
+bytes without adding a sidecar or restoring a review.
+
+Before possible insertion, each protected native evidence edge repeats the
+complete original census check and then acquires an independent fresh native
+queue capture. The queue must be empty and exactly match the original native
+observation, including its sequence and allocator. This also covers the guard
+after the durable `DispatchStarted` marker and the additional external workforce
+reads; a historical queue supplied by the underlying owner is insufficient.
+Changed source, inventory, jobs, queue, tick or authority cannot resize or
+redispatch the original. Decoded ticks survive later refusal and enter the
+externally retained recovery floor. The latest in-process check-failure flag is
+diagnostic, not an independently durable source fence.
+
+Plan reserves 177 MiB for the complete census; each dispatch revalidation
+reserves 182 MiB including a fresh queue read and separate post-read policy
+allowance. Six checks and the prior Workshop bound fit a 3,140 MiB custody
+reservation inside the unchanged 8 GiB public default. No public tool, native
+protocol, background maintenance, autonomous clock or production admission is
+added. Goal sampling and the existing separately reviewed clocks retain the
+same sealed target, cadence, stability and deadline after insertion or retirement.
+Counts include all observed matching item-type stack units, regardless of
+material/usability, and do not attribute production to the inserted order.
+
+Executed current-source focused verification: the exact-source component
+harness passes **16/16** tests with zero failures or ignored tests, including two
+actual Runtime/TCP campaigns containing **15 scenarios**. They exercise fresh
+sizing instead of the advisory count, equal/above-target no-op, over-limit
+refusal, incomplete/wrong-generation/unpaused captures, conflicting jobs,
+optional Workshop composition, stock/job/queue changes before preparation,
+stock/queue changes after checksum-verified native `DispatchStarted`, and a
+lost insertion reply followed by Offline and read-only original-key recovery.
+The positive path keeps the same target through two advancing goal samples.
+
+The harness executes repository Runtime, adapters, native TCP codecs, private
+journals and pure presentation. It excludes MCP transport/tool macros,
+Asupersync supervision and the admission entry point; it is component evidence.
+The complete host component suite then passed **409/409**, with zero failures
+or ignored tests. The actual repository `cargo check -p dfmcp-mcp --tests
+--locked --offline --jobs1` passed for the real library and all test registrations
+on rustc 1.102.0-nightly (f5cedb83a, 2026-11-07), after invalidating stale adapter
+and laboratory check artifacts; no source workaround was needed. The executed
+component snapshot verified 506 exact MCP copies, 20 exact excerpts, 893 linked
+resources, 596 dependency inputs and 11 unchanged locked external identities;
+five declared glue files exclude the transport/supervision boundary.
+
+The separate actual-repository adapter foundation passed 18 stock-target and
+six inventory-baseline tests. These results do not claim execution of the full
+MCP transport or a live DFHack/game, whole-workspace qualification, or production
+admission. The bead remains in progress for broader qualification.
+
 ## Unreleased — Derive finite native furniture deficits from qualified stock
 
 Added `InventoryBaselineProjection::stock_target` and immutable

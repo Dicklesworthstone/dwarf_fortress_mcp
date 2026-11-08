@@ -6,8 +6,9 @@ The native furniture path can calculate a finite order from independently
 qualified current inventory. The reusable adapter entry is
 `InventoryBaselineProjection::stock_target`. This is an explicitly bounded
 stock-sizing policy, not a background stock-maintenance service or a native
-recipe-feasibility proof. Combined MCP integration is a separate functional increment; its public flow
-is tracked in [COMBINED_PRODUCTION_MCP.md](COMBINED_PRODUCTION_MCP.md).
+recipe-feasibility proof. The combined MCP consumer exposes `kind="stock_target"` through the existing
+Plan tool; see [COMBINED_PRODUCTION_MCP.md](COMBINED_PRODUCTION_MCP.md) for the
+complete request, no-work result, native guards and recovery flow.
 
 ## Qualified sizing
 

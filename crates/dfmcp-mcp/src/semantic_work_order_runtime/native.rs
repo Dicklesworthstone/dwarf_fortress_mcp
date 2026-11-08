@@ -529,7 +529,49 @@ pub type NativeEvidence = CitizenWorkforceEvidenceOwner<CitizenFactory, CitizenA
 pub struct NativeShell {
     config: Arc<Config>,
 }
+
+pub(crate) const STOCK_TARGET_QUEUE_BYTES: u64 = 5 * MIB;
+
 impl NativeShell {
+    /// A fresh read-only queue check for a sealed stock-target dispatch. The
+    /// semantic guard's input can be the original native plan capture, so it
+    /// cannot establish that no other order appeared after DispatchStarted.
+    /// No effect journal, preparation or mutation transport is exposed here.
+    pub(crate) fn stock_target_queue(
+        &self,
+        c: &OperationContext,
+        consumed_tick: &mut GameTick,
+    ) -> Result<WorkOrderObservation> {
+        let mut work = Work::new(c)?;
+        if c.budget.max_bytes < STOCK_TARGET_QUEUE_BYTES {
+            return Err(exhausted(
+                "stock-target queue read exceeds its reserved allowance",
+            ));
+        }
+        let policy = work.reserve(MIB)?;
+        super::inventory_baseline::authorize_observe(c, *consumed_tick)?;
+        self.config.current()?;
+        let connect = work.reserve(2 * MIB)?;
+        let mut source = WorkOrderRpcClient::connect(
+            self.config.endpoint,
+            token(ORDER_TOKEN)?,
+            nonce(&connect, b"stock-target-queue"),
+            Config::timeout(&connect),
+        )?;
+        self.config.sources.native_manifest(source.manifest())?;
+        self.config.current()?;
+        let read = work.reserve(2 * MIB)?;
+        super::inventory_baseline::authorize_observe(&read, *consumed_tick)?;
+        let observation = source.read_orders(Config::timeout(&read))?;
+        // A later environment/pin/authority refusal must not erase decoded time.
+        *consumed_tick = (*consumed_tick).max(GameTick(observation.tick()));
+        super::inventory_baseline::authorize_observe(&work.narrow(&policy)?, *consumed_tick)?;
+        self.config.current()?;
+        self.config.sources.native_manifest(source.manifest())?;
+        work.current()?;
+        Ok(observation)
+    }
+
     /// Additional fixed portfolio slots share only independently pinned native
     /// sources. Each original order retains its own private clock journal.
     pub(crate) fn open_portfolio_clock(

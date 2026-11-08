@@ -1,12 +1,17 @@
 {
   "schema": "dfmcp.native-stock-target.v1",
   "owner_bead": "df-native-stock-target-3m9",
-  "status": "implemented_unadmitted_adapter",
+  "status": "implemented_unadmitted_development_only",
   "adapter_entry": "InventoryBaselineProjection::stock_target",
   "assessment_type": "StockTargetAssessment",
   "source_protocol": "operations/1.3",
   "count_domain": "complete observed Item type_key and stack_size",
-  "recipes": ["wooden_bed", "wooden_door", "wooden_table", "wooden_chair"],
+  "recipes": [
+    "wooden_bed",
+    "wooden_door",
+    "wooden_table",
+    "wooden_chair"
+  ],
   "target_min": 1,
   "target_max": 1000000,
   "order_amount_min": 1,
@@ -14,16 +19,27 @@
   "deficit": "max(requested minimum - independently qualified observed stack units, 0)",
   "already_satisfied": "typed assessment without action or growth objective",
   "oversized_deficit": "refuse complete proposal without clamping",
-  "positive_deficit_jobs_refused": ["matching furniture job", "CustomReaction", "nonempty reaction"],
+  "positive_deficit_jobs_refused": [
+    "matching furniture job",
+    "CustomReaction",
+    "nonempty reaction"
+  ],
   "suspended_or_repeating_jobs_ignored": false,
   "future_output_credited_as_inventory": false,
   "requires_complete_census": true,
   "requires_exact_paused_original_tick": true,
   "unknown_inventory_means_zero": false,
   "canonical_assessment_binds": [
-    "recipe", "requested target", "maximum order amount", "qualified count",
-    "deficit", "original anchor", "operations source digest", "native generation",
-    "job/building/item allocation counters", "item row count"
+    "recipe",
+    "requested target",
+    "maximum order amount",
+    "qualified count",
+    "deficit",
+    "original anchor",
+    "operations source digest",
+    "native generation",
+    "job/building/item allocation counters",
+    "item row count"
   ],
   "revalidation": "fresh independently qualified exact original complete census and assessment",
   "revalidation_resizes_amount": false,
@@ -42,5 +58,45 @@
     "crates/dfmcp-adapter/src/semantic_work_orders/stock_target.rs",
     "crates/dfmcp-adapter/src/semantic_work_orders/stock_target_tests.rs",
     "docs/NATIVE_STOCK_TARGET.md"
-  ]
+  ],
+  "mcp_consumer": {
+    "profile": "serve-gameplay-dev labor-order",
+    "request_kind": "stock_target",
+    "source_paths": [
+      "crates/dfmcp-mcp/src/live_production_runtime/stock_target.rs",
+      "crates/dfmcp-mcp/src/live_production_runtime/stock_target_binding.rs",
+      "crates/dfmcp-mcp/src/live_production_runtime/stock_target_request.rs",
+      "crates/dfmcp-mcp/src/live_production_runtime/stock_target_binding_tests.rs",
+      "crates/dfmcp-mcp/src/live_production_runtime/stock_target_request_tests.rs",
+      "crates/dfmcp-mcp/src/live_production_runtime/stock_target_tests.rs",
+      "crates/dfmcp-mcp/src/live_production_presentation_stock_target_tests.rs",
+      "tests/stdio/combined_stock_target_runtime_peer.py"
+    ],
+    "selected_labor": "already enabled and eligible; no assignment action",
+    "no_work_worker_prerequisite_checked": false,
+    "fresh_plan_census_required": true,
+    "advisory_capture_reused": false,
+    "client_amount_or_baseline": false,
+    "empty_native_queue_required_at": [
+      "prepare",
+      "commit_after_dispatch_started",
+      "existing_worker_external_read_revalidation"
+    ],
+    "exact_original_census_required_before_insertion": true,
+    "strict_policy_rebuilt_from_original_archive": true,
+    "additional_private_sidecar": false,
+    "offline_needs_native_credential": false,
+    "recovery_restores_confirmation": false,
+    "consumed_tick_reaches_frontier_recovery_floor": true,
+    "recovered_target_restores_authority_tick_floor": true,
+    "read_qualification_bytes": 190840832,
+    "dispatch_custody_max_bytes": 3292528640,
+    "maximum_fresh_checks_per_prepare": 6,
+    "revalidation_failure_is_durable_source_fence": false,
+    "legacy_manual_request_identity_unchanged": true,
+    "single_finite_order_only": true,
+    "plan_census_bytes": 185597952,
+    "fresh_native_queue_read_after_each_census": true,
+    "fresh_queue_must_match_native_original_observation": true
+  }
 }

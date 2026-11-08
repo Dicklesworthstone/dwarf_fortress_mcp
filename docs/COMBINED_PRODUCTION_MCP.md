@@ -9,6 +9,8 @@ An explicit `kind="existing_labor"` request instead inserts one finite order
 using already enabled workers, with no labor assignment step.
 `kind="existing_labor_portfolio"` retains up to four distinct orders under the
 same observed worker prerequisite, also without assigning labor.
+`kind="stock_target"` derives one finite furniture amount from a fresh complete
+inventory census and uses already enabled workers when production is needed.
 The source is explicitly unadmitted development work. Current executed checks,
 qualification and real-game evidence belong in `IMPLEMENTATION_STATUS.md`.
 The private custody implementation supports Linux x86_64/aarch64; unsupported
@@ -462,6 +464,130 @@ current parent proof, and requires a fresh Wait for current evidence. Existing
 assignment, single existing-labor and assignment-portfolio request identities
 remain unchanged. For several goals using the same existing workers, use the
 explicit existing-labor portfolio described below.
+
+## Plan a finite stock target from current inventory
+
+Use `kind="stock_target"` when the desired result is an observed minimum stock
+and the server should calculate the finite insertion amount:
+
+```json
+{
+  "kind": "stock_target",
+  "expected_observation": "<latest observation.seal>",
+  "units": ["<observed canonical citizen ID>"],
+  "labor": "CARPENTER",
+  "recipe": "wooden_bed",
+  "minimum_stack_units": 7,
+  "max_order_amount": 10,
+  "deadline_tick": 12000,
+  "poll_interval_ticks": 10,
+  "stable_samples": 2
+}
+```
+
+Use actual observed citizen IDs and labor keys. The request is closed and
+bounded to 4,096 bytes. Its minimum is 1–1,000,000 stack units; the optional
+`max_order_amount` is 1–100 and defaults to 100. Recipe, selected-citizen,
+future-deadline, cadence and stability bounds are the same as the existing
+finite-order path. Clients cannot supply an `amount`, a baseline, a source
+witness, an `enabled` flag, an order condition or a native selector.
+
+Plan obtains its own complete operations/1.3 census at the exact paused citizen
+tick under independently checked source pins and current read authority. It
+does not reuse a previously displayed advisory inventory page. If the census
+contains four BED stack units in this example, the one original order has
+amount three. The original typed baseline and increase retain the requested
+terminal target of seven. The request does not mean "produce seven more".
+
+The successful response includes `stock_target`, with the qualified baseline,
+requested target, calculated deficit, finite amount, chosen limit, canonical
+anchor, source digest/generation/counters and immutable assessment witness.
+The following outcomes are distinct:
+
+- **Already satisfied:** `status="already_satisfied"`, `amount=0`,
+  `work_required=false` and `mutation_planned=false`. No original plan, keys,
+  archive, frontier or native preparation/insertion is created. The result
+  establishes only the stock minimum at its reported source anchor. Since no
+  work is needed, existing labor is not qualified and
+  `worker_prerequisite_checked=false`; this is not a complete labor/production
+  goal proof. Observe again before a later goal.
+- **Within the limit:** `status="planned"` and the exact positive deficit is
+  sealed into one StepId-zero order. Current selected labor and citizen
+  eligibility are independently established before original publication, and
+  `worker_prerequisite_checked=true`. There is no labor assignment action.
+- **Above the limit:** Plan refuses the complete proposal before original
+  publication. It never silently caps the amount or treats a partial order as
+  satisfying the requested target.
+
+For a positive deficit, a matching native furniture job blocks planning even
+when suspended or repeating. CustomReaction and nonempty-reaction jobs also
+block because their output is unknown to this bounded policy. Future output
+is not credited as inventory. A met target needs no insertion and can return
+its no-work observation despite outstanding jobs.
+
+### Recheck the original amount before native insertion
+
+After a positive Plan, use the ordinary `kind="step"` preparation and confirm
+its exact current `paired_seal`. Every protected order-evidence boundary obtains
+a new complete inventory census, including the refresh after the durable
+`DispatchStarted` marker and the additional checks after existing-worker reads.
+The new capture must equal the exact original operations digest and paused tick.
+The assessment and typed baseline must also agree with the sealed original.
+
+This is a conservative whole-census witness: unrelated changes to the captured
+jobs, buildings, items, attachments or allocator counters can also refuse the
+original. The server never recounts into a replacement amount, changes the
+target, renews the deadline or substitutes another key. The original must be
+retained for reconciliation when any effect may have been attempted.
+
+The protected native manager-order queue must be empty before preparation and
+insertion. After each fresh inventory census, an independent ReadOrders capture
+must equal the original native queue witness, including its sequence and
+allocator. A queue inserted and then removed cannot silently restore that
+witness. This check occurs at those real native boundaries, not during the
+initial stock-sizing Plan. Protocol 1.10 exposes complete membership but no
+recipe or remaining quantities for arbitrary existing rows; therefore even an
+unrelated-looking row blocks this first bounded stock-target mode. The server
+neither assumes that it is harmless nor subtracts its possible future output.
+Existing manual-amount request modes preserve their prior queue behavior.
+
+The optional original Workshop prerequisite composes with these checks. Its
+exact donor identity remains part of the original, and fresh completion is
+required independently of stock sizing. Worker evidence, inventory evidence,
+Workshop evidence and the native queue retain their separate source pins.
+
+### Keep the target through progress and recovery
+
+The stock-target identity domain binds the complete original inventory basis,
+worker prerequisite, selected maximum and temporal requirements before deriving
+the intent and step key. A strict versioned marker in `original.plan` identifies
+the policy; the existing archive seal covers it. Recovery rebuilds the required
+guard from that original, not from optional presentation fields. It needs no
+new sidecar or credentials to recover the stock target Offline. The externally
+retained frontier authority floor also constrains the reconstructed owner.
+
+Before insertion, failed reads preserve consumed native ticks and withdraw the
+last check. `revalidation_failed` describes the latest attempted check in the
+retained process; it is not an independently durable source fence or a claim of
+complete source continuity across reopening. A recovered owner still needs the
+exact original census at every possible future insertion boundary. An uncertain
+original insertion can only reconcile under its original key, without another
+insertion or a newly sized plan. Reopening restores no local review permit.
+
+After insertion settles, ordinary Wait observes the sealed inventory-increase
+objective and current labor under the original cadence, stability and deadline.
+The target remains seven in the example, including after native order
+retirement. Configured order and inventory clocks retain their existing separate
+review and authority requirements. Goal sampling may observe changed inventory;
+the strict original-census guard protects insertion, not later progress reads.
+
+Counts mean all observed stack units of the exact furniture type. They do not
+establish wood material, usability, ownership, availability for furnishing,
+recipe inputs, workshop access or causal output from this order. An existing
+stone table can contribute to a TABLE minimum even when the selected finite
+recipe is wooden_table. This is one finite stock goal, with no recurring
+maintenance, automatic order renewal or background time advancement.
+See [NATIVE_STOCK_TARGET.md](NATIVE_STOCK_TARGET.md) for the qualified adapter.
 
 ## Inspect observed production conditions and declared inventory
 
@@ -1339,7 +1465,14 @@ delegation can reserve up to 2 GiB for repeated boundary checks. This distinctio
 lets a bounded Wait pay for reconciliation, history initialization and fresh
 parent sampling from one unchanged public allowance. Owners without the optional
 prerequisite keep the existing 512 MiB custody ceiling, and the native frontier
-ceiling remains 2 GiB.
+ceiling remains 2 GiB. Stock-target planning reserves 177 MiB for one complete
+census, projection and qualification before native contact. Each fresh dispatch
+check reserves 182 MiB for that census and a subsequent independent native queue
+read. The queue must still match the original native observation and be empty.
+A stock-target dispatch reserves up to 3,140 MiB of parent custody, covering six
+such checks plus the existing 2 GiB prerequisite ceiling, within the unchanged
+8 GiB default public allowance. Read-only goal and Offline custody retain their
+earlier ceilings.
 These are logical work charges, not native frame sizes or eager allocations;
 the immutable association itself remains at most 64 KiB.
 
