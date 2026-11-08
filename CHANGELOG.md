@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased — Add durable clock ownership for the original workshop
+
+- Bind independently reviewed finite Run/1.13 intervals to the exact original
+  Carpenter placement and a separately frozen absolute deadline.
+- Recheck fresh original InProgress evidence after synchronized intent and
+  dispatch markers, preserving separate named-fortress/NIL authority, source
+  floors, one-use review, complete history and query-only recovery.
+- Add 20 adapter regression cases. The actual 53-case workshop suite passed
+  before the final zero-identity and pending-sampling refinements; the frozen
+  rerun was killed during compilation. Static source checks and all eight
+  inventory negatives pass; no final-source or live qualification is claimed.
+
 ## Unreleased — Hand off an original workshop to production
 
 - Add a read-only adapter import of exact independently acknowledged Workshop

@@ -1,5 +1,33 @@
 # Implementation Status
 
+## Unreleased — Bind finite clock intervals to the original Carpenter workshop
+
+Added the reusable `workshop_construction::clock` owner for the first-fortress
+production prerequisite (`dfmcp-reality-wiring-proof-4bf.14.6`). Each separately
+reviewed Run/1.13 interval is bound to the full original Workshop/1.20 Placed
+receipt, source, workshop custody, run custody and an immutable operator-selected
+absolute horizon. Named-fortress and native NIL grants remain independent. Fresh
+original InProgress evidence is required after both durable intent and dispatch
+markers; completion, absence and unknown continuity cannot authorize more time.
+Wrong or withdrawn review, lost replies and recovered history never restore
+unpause permission. Complete history is bounded to 64 intervals, and pending or
+terminal-unknown work blocks goal sampling and new intervals.
+
+Executed the actual workspace adapter `workshop_construction` suite: **53 tests
+passed, 0 failed or ignored**, including 20 new clock cases and all 33 existing
+workshop/material cases. This pass preceded two final conservative refinements:
+rejecting a zero workshop journal identity and forbidding goal sampling while a
+Prepared interval remains pending. The frozen-source rerun was SIGKILLed during
+the adapter test build without a Rust diagnostic, so it is not a final-source
+pass. The exact source passed rustfmt parsing and the workshop static contract
+plus all eight inventory negatives. The actual MCP library check was separately
+SIGKILLed in unchanged Asupersync 0.5.0 before an MCP compile verdict.
+
+These are source/component results. The MCP workshop clock integration, complete
+qualification and untouched-game workshop/furniture-output evidence remain
+separate; no native protocol, production registry or admission floor changed.
+See [WORKSHOP_CLOCK.md](docs/WORKSHOP_CLOCK.md) for the exact contract.
+
 ## Unreleased — Original workshop prerequisite adapter
 
 `WorkshopJournal::production_origin` now imports one exact original Placed

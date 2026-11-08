@@ -24,6 +24,7 @@ SOURCES = [
     "crates/dfmcp-adapter/src/build_placement/rpc/codec.rs", "crates/dfmcp-adapter/src/build_placement/rpc/link.rs",
     *[ADAPTER + name for name in ("mod.rs", "acknowledgement.rs", "journal.rs", "journal_tests.rs", "rpc.rs", "rpc_tests.rs", "tests.rs")],
     ADAPTER + "production_origin.rs", ADAPTER + "production_origin_tests.rs",
+    ADAPTER + "clock.rs", ADAPTER + "clock/tests.rs",
     ADAPTER + "tree_material.rs", ADAPTER + "tree_material_tests.rs",
     *[TREE + name for name in ("mod.rs", "journal.rs", "material_origin.rs", "rpc.rs", "tests.rs", "journal_tests.rs")],
     "tests/native/tree_harvest/vectors.json",
@@ -35,6 +36,7 @@ SOURCES = [
     "scripts/read_stable_repository_file.py", "scripts/test_workshop_native.py",
     "scripts/test_workshop_source_inventory.py", "scripts/check_workshop_construction.py", "scripts/verify.sh",
     "scripts/qualify_local.sh", "docs/WORKSHOP_CONSTRUCTION_MCP.md", "docs/TREE_HARVEST_MCP.md",
+    "docs/WORKSHOP_CLOCK.md",
 ]
 
 
@@ -112,6 +114,7 @@ def check(root: Path = ROOT) -> dict:
         raise ValueError("independent worker guards lack individual mutants")
     actual_counts = {
         "adapter_rust_cases": sum(text[ADAPTER + name].count("#[test]") for name in ("tests.rs", "journal_tests.rs", "rpc_tests.rs")),
+        "clock_adapter_rust_cases": text[ADAPTER + "clock/tests.rs"].count("#[test]"),
         "tree_material_adapter_rust_cases": text[ADAPTER + "tree_material_tests.rs"].count("#[test]"),
         "production_origin_adapter_rust_cases": text[ADAPTER + "production_origin_tests.rs"].count("#[test]"),
         "mcp_unit_cases": text[MCP + "workshop_construction_server/tests.rs"].count("#[test]"),

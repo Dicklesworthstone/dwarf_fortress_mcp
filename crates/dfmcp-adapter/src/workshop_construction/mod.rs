@@ -10,6 +10,7 @@
 //! Bead: dfmcp-reality-wiring-proof-4bf.14.
 
 pub mod acknowledgement;
+pub mod clock;
 pub mod journal;
 pub mod rpc;
 pub use journal::production_origin;

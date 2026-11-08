@@ -256,6 +256,8 @@
     "crates/dfmcp-adapter/src/workshop_construction/tests.rs",
     "crates/dfmcp-adapter/src/workshop_construction/production_origin.rs",
     "crates/dfmcp-adapter/src/workshop_construction/production_origin_tests.rs",
+    "crates/dfmcp-adapter/src/workshop_construction/clock.rs",
+    "crates/dfmcp-adapter/src/workshop_construction/clock/tests.rs",
     "crates/dfmcp-adapter/src/workshop_construction/tree_material.rs",
     "crates/dfmcp-adapter/src/workshop_construction/tree_material_tests.rs",
     "crates/dfmcp-adapter/src/tree_harvest/mod.rs",
@@ -289,7 +291,8 @@
     "scripts/verify.sh",
     "scripts/qualify_local.sh",
     "docs/WORKSHOP_CONSTRUCTION_MCP.md",
-    "docs/TREE_HARVEST_MCP.md"
+    "docs/TREE_HARVEST_MCP.md",
+    "docs/WORKSHOP_CLOCK.md"
   ],
   "upstream_api_inspection": {
     "dfhack_revision": "0bf381cc1615656acf756e6e67573fffca715125",
@@ -391,7 +394,8 @@
     "tree_material_adapter_rust_cases": 10,
     "tree_material_mcp_unit_cases": 3,
     "tree_material_python_stdio_cases": 5,
-    "production_origin_adapter_rust_cases": 16
+    "production_origin_adapter_rust_cases": 16,
+    "clock_adapter_rust_cases": 20
   },
   "shared_native_engine": {
     "source": "bridge/common/one_attempt_native.h",
@@ -506,5 +510,21 @@
     "association_reopen_mode": "Offline",
     "combined_host_integration": "tracked separately from this embedding API",
     "manager_material_or_causal_production_proof": false
+  },
+  "clock_adapter": {
+    "module": "workshop_construction::clock",
+    "native_profile": "run/1.13",
+    "original_profile": "workshop/1.20",
+    "target": "exact workshop journal identity, source binding, canonical Placed receipt and separately frozen absolute deadline",
+    "independent_named_and_nil_authority": true,
+    "native_generations_independently_pinned": true,
+    "maximum_intervals": 64,
+    "maximum_ticks_per_interval": 1200,
+    "maximum_native_wall_millis": 60000,
+    "guard_after_durable_intent_and_dispatch": true,
+    "fresh_original_required": "InProgress at the selected paused clock tick",
+    "recovery_restores_control": false,
+    "run_receipt_proves_workshop_completion": false,
+    "native_protocols_unchanged": true
   }
 }
