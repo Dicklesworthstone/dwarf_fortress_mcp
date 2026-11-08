@@ -25,10 +25,13 @@ mod construction;
 mod counts;
 #[path = "query_condition_evaluation.rs"]
 mod inspection;
+#[path = "query_watch_laboratory.rs"]
+pub(super) mod laboratory;
 #[path = "query_watch_replay.rs"]
 mod replay;
 #[path = "query_watch_shelter.rs"]
 mod shelter;
+use laboratory::SourcePolicy;
 pub(super) use replay::Replay as HistoricalWatchReplay;
 
 pub(super) fn extend_count_schema(schema: Value) -> Result<Value> {
@@ -249,6 +252,7 @@ impl Status {
 #[derive(Clone)]
 struct Watch {
     handle: String,
+    source_policy: SourcePolicy,
     definition: Definition,
     created_at: StateAnchor,
     last_seen: StateAnchor,
@@ -518,6 +522,7 @@ fn compare(actual: &WorldValue, operation: Comparison, expected: &Literal) -> Tr
 struct Probe {
     facts: Vec<Value>,
     invalid_generation: bool,
+    source_policy: SourcePolicy,
 }
 
 impl Probe {
@@ -642,32 +647,19 @@ impl Probe {
                             reason = Some("field_not_observed");
                             Truth::Unknown
                         }
-                        Some(fact) => {
-                            let known = match &fact.presence {
-                                None => true,
-                                Some(FactPresence::Known(value)) => value == &fact.value,
-                                _ => false,
-                            };
-                            if !known {
-                                reason = Some("field_not_consistently_known");
+                        Some(fact) => match self.source_policy.fact_value(fact, snapshot.tick) {
+                            Err(cause) => {
+                                reason = Some(cause);
                                 Truth::Unknown
-                            } else if !matches!(&fact.source, FactSource::DfhackField(_)) {
-                                reason = Some("source_is_not_an_observed_dfhack_field");
-                                Truth::Unknown
-                            } else if fact.source_digest == Digest32::ZERO {
-                                reason = Some("source_digest_not_established");
-                                Truth::Unknown
-                            } else if fact.observed_at != snapshot.tick {
-                                reason = Some("field_is_not_observed_at_this_game_tick");
-                                Truth::Unknown
-                            } else {
-                                let truth = compare(&fact.value, *comparison, value);
+                            }
+                            Ok(actual) => {
+                                let truth = compare(actual, *comparison, value);
                                 if truth == Truth::Unknown {
                                     reason = Some("incompatible_value_type_or_scale");
                                 }
                                 truth
                             }
-                        }
+                        },
                     },
                 };
                 self.facts
@@ -684,7 +676,7 @@ impl Probe {
 
 impl Watch {
     fn seal(&mut self) -> Result<()> {
-        self.evidence_digest = digest(&json!({"domain":"dfmcp-condition-watch-evidence-v1",
+        self.evidence_digest = digest(&json!({"domain":self.source_policy.evidence_domain(),
             "watch":self.handle,"prior_digest":self.evidence_digest.to_string(),
             "anchor":anchor(self.last_seen),"status":self.status.text(),
             "streak":self.streak,"samples":self.samples,"evaluation":self.evaluation}))?;
@@ -739,7 +731,10 @@ impl Watch {
         if gap {
             self.streak = 0;
         }
-        let mut probe = Probe::default();
+        let mut probe = Probe {
+            source_policy: self.source_policy,
+            ..Probe::default()
+        };
         let truth = probe.evaluate_bounded(&self.definition.condition, snapshot, budget)?;
         let failure_truth = match &self.definition.failure_condition {
             Some(condition) => probe.evaluate_bounded(condition, snapshot, budget)?,
@@ -820,6 +815,10 @@ impl Watch {
             result["recovery"] = json!(recovery);
             result["fresh_observation_required"] = json!(awaiting);
             result["historical_outcome"] = json!(historical);
+        }
+        if self.source_policy == SourcePolicy::LaboratoryReference {
+            result["evidence_policy"] = json!("laboratory_reference/1");
+            result["durable"] = json!(false);
         }
         result
     }
@@ -906,13 +905,30 @@ where
 fn publish_work<F>(
     store: &Store,
     context: &OperationContext,
-    mut value: Value,
+    value: Value,
     publish: F,
 ) -> Result<String>
 where
     F: FnOnce(Value) -> Result<String>,
 {
+    publish_work_for_policy(store, context, value, SourcePolicy::Native, publish)
+}
+
+fn publish_work_for_policy<F>(
+    store: &Store,
+    context: &OperationContext,
+    mut value: Value,
+    policy: SourcePolicy,
+    publish: F,
+) -> Result<String>
+where
+    F: FnOnce(Value) -> Result<String>,
+{
+    policy.check_session(store, context.session_id)?;
     value["_condition_watch_work"] = json!(active_work(store, context));
+    if policy == SourcePolicy::LaboratoryReference {
+        return laboratory::publish(store, context, value, publish);
+    }
     durability::publish(store, context, value, |value| {
         publish_plain(context, value, publish)
     })
@@ -949,8 +965,30 @@ fn execute_in<F>(
 where
     F: FnOnce(Value) -> Result<String>,
 {
+    execute_in_policy(
+        storage,
+        snapshot,
+        context,
+        input,
+        SourcePolicy::Native,
+        publish,
+    )
+}
+
+fn execute_in_policy<F>(
+    storage: &Mutex<Store>,
+    snapshot: &WorldSnapshot,
+    context: &OperationContext,
+    input: &Value,
+    policy: SourcePolicy,
+    publish: F,
+) -> Result<String>
+where
+    F: FnOnce(Value) -> Result<String>,
+{
     let mut evaluation_budget = counts::EvaluationBudget::new(context.budget.max_wall_millis);
     authorize(snapshot, context)?;
+    policy.validate_snapshot(snapshot)?;
     validate_input(input)?;
     if input["query"]["kind"] == "watches"
         && input["query"]
@@ -975,6 +1013,7 @@ where
         ));
     }
     let mut store = lock(storage)?;
+    policy.check_session(&store, context.session_id)?;
     match envelope.query {
         Request::Watch {
             key,
@@ -995,6 +1034,7 @@ where
                 stable_observations: stable_observations.unwrap_or(2),
             };
             validate_definition(&definition)?;
+            policy.validate_definition(&definition)?;
             if let Some((_, prior)) = store.entries.iter().find(|((session, _), watch)| {
                 *session == context.session_id && watch.definition.key == definition.key
             }) {
@@ -1007,7 +1047,7 @@ where
                 let mut value = payload(context, "watch");
                 value["record"] = prior.detail(context.anchor);
                 value["replayed"] = json!(true);
-                return publish_work(&store, context, value, publish);
+                return publish_work_for_policy(&store, context, value, policy, publish);
             }
             if deadline_tick <= context.anchor.tick.0
                 || deadline_tick
@@ -1033,11 +1073,12 @@ where
                 .checked_add(1)
                 .ok_or_else(|| bounded("watch identity space exhausted"))?;
             let identity = digest(
-                &json!({"domain":"dfmcp-condition-watch-v1","session":context.session_id.to_string(),
+                &json!({"domain":policy.identity_domain(),"session":context.session_id.to_string(),
                 "serial":serial,"anchor":anchor(context.anchor),"definition":definition}),
             )?;
             let mut watch = Watch {
                 handle: format!("watch:{identity}"),
+                source_policy: policy,
                 definition,
                 created_at: context.anchor,
                 last_seen: context.anchor,
@@ -1061,7 +1102,7 @@ where
                 entries: store.entries.clone(),
             };
             candidate.entries.insert(key, watch);
-            let encoded = publish_work(&candidate, context, value, |value| {
+            let encoded = publish_work_for_policy(&candidate, context, value, policy, |value| {
                 let encoded = publish(value)?;
                 evaluation_budget.check()?;
                 Ok(encoded)
@@ -1080,7 +1121,7 @@ where
                     .collect::<Vec<_>>()
             );
             value["maximum_per_session"] = json!(MAX_PER_SESSION);
-            publish_work(&store, context, value, publish)
+            publish_work_for_policy(&store, context, value, policy, publish)
         }
         Request::PollWatch { watch }
         | Request::CancelWatch { watch }
@@ -1124,7 +1165,7 @@ where
                 }
                 value["record"] = record.detail(context.anchor);
             }
-            let encoded = publish_work(&candidate, context, value, |value| {
+            let encoded = publish_work_for_policy(&candidate, context, value, policy, |value| {
                 let encoded = publish(value)?;
                 evaluation_budget.check()?;
                 Ok(encoded)

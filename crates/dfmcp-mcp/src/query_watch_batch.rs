@@ -23,6 +23,7 @@ enum BatchRequest {
 
 pub(crate) struct Prepared {
     session: SessionId,
+    source_policy: SourcePolicy,
     basis: StateAnchor,
     selected: Vec<String>,
     registry: Digest32,
@@ -133,7 +134,20 @@ fn publish<F>(
 where
     F: FnOnce(Value) -> Result<String>,
 {
-    publish_work(store, context, value, |mut value| {
+    publish_for_policy(store, context, value, SourcePolicy::Native, publisher)
+}
+
+fn publish_for_policy<F>(
+    store: &Store,
+    context: &OperationContext,
+    value: Value,
+    policy: SourcePolicy,
+    publisher: F,
+) -> Result<String>
+where
+    F: FnOnce(Value) -> Result<String>,
+{
+    publish_work_for_policy(store, context, value, policy, |mut value| {
         // The existing checkpoint covers the complete candidate set once. Its
         // persistence metadata, not the request name, determines durability.
         if value["watch_persistence"]["durable"] == true {
@@ -164,9 +178,31 @@ fn prepare_in<F>(
 where
     F: FnOnce(Value) -> Result<String>,
 {
+    prepare_in_policy(
+        watches,
+        snapshot,
+        context,
+        input,
+        SourcePolicy::Native,
+        preview,
+    )
+}
+
+pub(super) fn prepare_in_policy<F>(
+    watches: &Mutex<Store>,
+    snapshot: &WorldSnapshot,
+    context: &OperationContext,
+    input: &Value,
+    policy: SourcePolicy,
+    preview: F,
+) -> Result<Prepared>
+where
+    F: FnOnce(Value) -> Result<String>,
+{
     let started = Instant::now();
     check(context, started)?;
     authorize(snapshot, context)?;
+    policy.validate_snapshot(snapshot)?;
     validate_input(input)?;
     let request: BatchEnvelope = serde_json::from_value(input.clone())
         .map_err(|_| invalid("invalid watch batch envelope"))?;
@@ -187,7 +223,13 @@ where
         BatchRequest::PollWatches { watches } => (false, watches),
         BatchRequest::AwaitWatches { watches } => (true, watches),
     };
+    if awaiting && policy == SourcePolicy::LaboratoryReference {
+        return Err(invalid(
+            "laboratory watch batches only poll the current reference snapshot",
+        ));
+    }
     let store = lock(watches)?;
+    policy.check_session(&store, context.session_id)?;
     let mut selected = match selection {
         Some(handles) => {
             if handles.is_empty() || handles.len() > MAX_PER_SESSION {
@@ -224,6 +266,7 @@ where
     }
     let prepared = Prepared {
         session: context.session_id,
+        source_policy: policy,
         basis: context.anchor,
         selected,
         registry: registry(&store, context.session_id)?,
@@ -234,7 +277,7 @@ where
     // I/O. No watch is advanced here. A later state may still require more space;
     // final rendering remains authoritative and precedes any watch publication.
     let value = output(&store, &store, context, &prepared)?;
-    publish(&store, context, value, |value| {
+    publish_for_policy(&store, context, value, policy, |value| {
         let result = preview(value)?;
         check(context, started)?;
         Ok(result)
@@ -261,7 +304,7 @@ where
         publisher,
     )
 }
-fn complete_in<F>(
+pub(super) fn complete_in<F>(
     watches: &Mutex<Store>,
     snapshot: &WorldSnapshot,
     context: &OperationContext,
@@ -275,6 +318,7 @@ where
     let started = Instant::now();
     check(context, started)?;
     authorize(snapshot, context)?;
+    prepared.source_policy.validate_snapshot(snapshot)?;
     let mut evaluation_budget = counts::EvaluationBudget::new(context.budget.max_wall_millis);
     if context.session_id != prepared.session
         || context.anchor.fortress_id != prepared.basis.fortress_id
@@ -290,6 +334,9 @@ where
         context.authorize(Capability::Observe, RiskTier::ReadOnly, &[], None)?;
     }
     let mut store = lock(watches)?;
+    prepared
+        .source_policy
+        .check_session(&store, context.session_id)?;
     if registry(&store, context.session_id)? != prepared.registry {
         return Err(failure(
             ErrorCode::Conflict,
@@ -309,12 +356,18 @@ where
         watch.advance_bounded(snapshot, false, &mut evaluation_budget)?;
     }
     let value = output(&store, &candidate, context, &prepared)?;
-    let encoded = publish(&candidate, context, value, |value| {
-        check(context, started)?;
-        let encoded = publisher(value)?;
-        check(context, started)?;
-        Ok(encoded)
-    })?;
+    let encoded = publish_for_policy(
+        &candidate,
+        context,
+        value,
+        prepared.source_policy,
+        |value| {
+            check(context, started)?;
+            let encoded = publisher(value)?;
+            check(context, started)?;
+            Ok(encoded)
+        },
+    )?;
     // A durable checkpoint has now synced. Never perform a fallible check after
     // this point that could hide an acknowledged candidate-set publication.
     *store = candidate;

@@ -1,4 +1,4 @@
-use super::super::{anchor_json, semantic_query};
+use super::super::semantic_query::{self, anchor_json};
 #[path = "watch_refresh.rs"]
 mod watch_refresh;
 use super::*;
@@ -72,7 +72,7 @@ fn view(context: &OperationContext) -> QueryResponseProjection {
     QueryResponseProjection {
         session_id: context.session_id.to_string(),
         request_id: context.request_id.to_string(),
-        anchor: super::super::anchor_json(context.anchor),
+        anchor: anchor_json(context.anchor),
         briefing: json!({"read_only":true,"runtime_admitted":false,"mutation_admissible":false}),
         attention: vec![json!({"finding":"retain source warning","severity":"high"})],
         affordances: Vec::new(),
@@ -180,7 +180,7 @@ fn actual_dispatch_refresh_and_packet_complete_a_watch_without_game_effects() ->
     assert_eq!(result["observation_refresh"]["read_calls"], 1);
     assert_eq!(
         result["agent_turn"]["continuity"]["basis"],
-        super::super::anchor_json(ctx.anchor)
+        anchor_json(ctx.anchor)
     );
     assert_eq!(
         result["agent_turn"]["active_work"]["obligations"],
@@ -327,8 +327,8 @@ fn refresh_reset_and_historical_terminals_preserve_temporal_truth() -> Result<()
         &request(json!({"kind":"poll_watch","watch":watch})),
         |mut value| {
             value["kind"] = json!("await_watch");
-            value["observation_refresh"] = json!({"basis":super::super::anchor_json(ctx.anchor),
-                "target":super::super::anchor_json(next.anchor),"reset":true,"read_calls":1});
+            value["observation_refresh"] = json!({"basis":anchor_json(ctx.anchor),
+                "target":anchor_json(next.anchor),"reset":true,"read_calls":1});
             projection.finish(value)
         },
     )?;

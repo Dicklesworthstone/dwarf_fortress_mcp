@@ -113,6 +113,7 @@ where
     let configuration = digest(&json!({"domain":"dfmcp-watch-registration-set/1",
         "definitions":definitions.values().collect::<Vec<_>>()}))?;
     let mut store = lock(storage)?;
+    SourcePolicy::Native.check_session(&store, context.session_id)?;
     work.check()?;
     let existing: BTreeMap<_, _> = store
         .entries
@@ -175,6 +176,7 @@ where
                 let handle = format!("watch:{identity}");
                 let mut watch = Watch {
                     handle: handle.clone(),
+                    source_policy: SourcePolicy::Native,
                     definition,
                     created_at: context.anchor,
                     last_seen: context.anchor,

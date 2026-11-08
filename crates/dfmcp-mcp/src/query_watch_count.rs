@@ -165,6 +165,24 @@ fn row_truth_bound(
     relations: &relationships::Bindings,
     budget: &mut EvaluationBudget,
 ) -> Result<Truth> {
+    row_truth_with_policy(
+        predicate,
+        entity,
+        snapshot,
+        relations,
+        budget,
+        SourcePolicy::Native,
+    )
+}
+
+fn row_truth_with_policy(
+    predicate: &Predicate,
+    entity: &EntityRecord,
+    snapshot: &WorldSnapshot,
+    relations: &relationships::Bindings,
+    budget: &mut EvaluationBudget,
+    policy: SourcePolicy,
+) -> Result<Truth> {
     budget.charge()?;
     Ok(match predicate {
         Predicate::Always {} => Truth::True,
@@ -178,28 +196,20 @@ fn row_truth_bound(
             field,
             comparison,
             value,
-        } => match entity.fields.get(field) {
-            Some(fact)
-                if matches!(&fact.source, FactSource::DfhackField(_))
-                    && fact.source_digest != Digest32::ZERO
-                    && fact.observed_at == snapshot.tick
-                    && match &fact.presence {
-                        None => true,
-                        Some(FactPresence::Known(known)) => known == &fact.value,
-                        _ => false,
-                    } =>
-            {
-                compare(&fact.value, *comparison, value)
-            }
-            _ => Truth::Unknown,
-        },
-        Predicate::Not { arg } => row_truth_bound(arg, entity, snapshot, relations, budget)?.not(),
+        } => entity
+            .fields
+            .get(field)
+            .and_then(|fact| policy.fact_value(fact, snapshot.tick).ok())
+            .map_or(Truth::Unknown, |actual| compare(actual, *comparison, value)),
+        Predicate::Not { arg } => {
+            row_truth_with_policy(arg, entity, snapshot, relations, budget, policy)?.not()
+        }
         Predicate::All { args } | Predicate::Any { args } => {
             let all = matches!(predicate, Predicate::All { .. });
             let mut decisive = false;
             let mut unknown = false;
             for arg in args {
-                match row_truth_bound(arg, entity, snapshot, relations, budget)? {
+                match row_truth_with_policy(arg, entity, snapshot, relations, budget, policy)? {
                     Truth::False if all => decisive = true,
                     Truth::True if !all => decisive = true,
                     Truth::Unknown => unknown = true,
@@ -282,7 +292,14 @@ pub(super) fn evaluate(
             continue;
         }
         population += 1;
-        match row_truth_bound(predicate, entity, snapshot, &relations, budget)? {
+        match row_truth_with_policy(
+            predicate,
+            entity,
+            snapshot,
+            &relations,
+            budget,
+            probe.source_policy,
+        )? {
             Truth::True => {
                 matched += 1;
                 if matching_examples.len() < 2 {

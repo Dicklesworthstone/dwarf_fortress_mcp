@@ -7,8 +7,8 @@ mod checkpoint;
 mod session_release;
 
 use super::{
-    Definition, MAX_PER_SESSION, MAX_TOTAL, Status, Store, WATCHES, Watch, active_work, anchor,
-    authorize, bounded, digest, failure, validate_definition, validate_handle,
+    Definition, MAX_PER_SESSION, MAX_TOTAL, SourcePolicy, Status, Store, WATCHES, Watch,
+    active_work, anchor, authorize, bounded, digest, failure, validate_definition, validate_handle,
 };
 use dfmcp_adapter::operations_journal::PrivateJournalFile;
 use dfmcp_core::{
@@ -279,6 +279,18 @@ fn journals() -> Result<std::sync::MutexGuard<'static, BTreeMap<SessionId, Entry
         )
     })
 }
+
+/// Laboratory monitors are process-local and cannot inherit native checkpoint
+/// custody, including an attached native journal whose current set is empty.
+pub(super) fn require_unattached(session: SessionId) -> Result<()> {
+    if journals()?.contains_key(&session) {
+        return Err(failure(
+            ErrorCode::Conflict,
+            "laboratory watches do not support native watch durability",
+        ));
+    }
+    Ok(())
+}
 fn binding(archive: Digest32, fortress: FortressId) -> Digest32 {
     let mut bytes = b"dfmcp-watch-observation-binding/1\0spatial/1.8\0".to_vec();
     bytes.extend_from_slice(archive.as_bytes());
@@ -297,6 +309,7 @@ where
     F: FnOnce(Value) -> Result<String>,
 {
     context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
+    SourcePolicy::Native.check_session(store, context.session_id)?;
     if context.anchor.fortress_id != entry.fortress {
         return Err(corrupt("watch request names another fortress"));
     }
@@ -385,6 +398,7 @@ fn recover_watch(
     )?;
     let mut watch = Watch {
         handle: format!("watch:{identity}"),
+        source_policy: SourcePolicy::Native,
         definition: saved.definition.clone(),
         created_at: saved.created_at.decode()?,
         last_seen: saved.last_seen.decode()?,

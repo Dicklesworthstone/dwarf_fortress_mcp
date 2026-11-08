@@ -396,6 +396,27 @@ fn describe(baseline: &Baseline, current: StateAnchor) -> Value {
         } else if current.tick.0 >= baseline.expires_at { "expired" } else { "retained" }})
 }
 
+/// Discover retained ownership without reading rows, hashing a world, or
+/// materializing a selection. The enclosing session supplies current authority.
+pub(super) fn retained_work(context: &OperationContext) -> Result<Value> {
+    let started = std::time::Instant::now();
+    context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
+    let records = lock(&HISTORY)?
+        .entries
+        .iter()
+        .filter(|((owner, _), _)| *owner == context.session_id)
+        .map(|(_, baseline)| describe(baseline, context.anchor))
+        .collect::<Vec<_>>();
+    if records.len() > MAX_PER_SESSION {
+        return Err(invariant("baseline catalog exceeds its session bound"));
+    }
+    context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
+    if started.elapsed() >= std::time::Duration::from_millis(context.budget.max_wall_millis) {
+        return Err(exhausted("baseline catalog exceeded its wall-time budget"));
+    }
+    Ok(json!(records))
+}
+
 fn cursor(offset: usize, identity: Digest32) -> Result<String> {
     let digest = Digest32::of_bytes(&encode(&json!({"domain":"dfmcp-query-changes-page/1",
         "identity":identity.to_string(), "offset":offset}))?);

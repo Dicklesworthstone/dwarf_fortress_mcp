@@ -76,6 +76,7 @@ impl Replay {
             "basis":anchor(first),"definition":definition}))?;
         let watch = Watch {
             handle: format!("replay:{identity}"),
+            source_policy: SourcePolicy::Native,
             definition,
             created_at: first,
             last_seen: first,

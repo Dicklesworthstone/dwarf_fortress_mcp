@@ -241,15 +241,21 @@ fn equal_complete_endpoint_anchors_charge_one_source_without_trusting_unhashed_b
         },
     );
     source.refresh_hash();
+    let source_bytes = source.canonical_bytes().len() as u64;
     let mut c = context(&source);
     c.budget.max_entities = 3;
-    c.budget.max_bytes = source.canonical_bytes().len() as u64;
+    // Conservative preflight reserves record working space beyond canonical
+    // bytes. The large unselected event leaves room for that overhead while
+    // keeping a second complete source outside both byte and record budgets.
+    c.budget.max_bytes = source_bytes + source_bytes / 2;
+    assert!(c.budget.max_bytes > source_bytes);
+    assert!(c.budget.max_bytes < source_bytes * 2);
     let ask = request(&input(&source, &source))?;
     let result = execute(&source, &source, &c, &ask)?;
     assert_eq!(
         result["source_work"],
         json!({"records":3,
-        "canonical_bytes":source.canonical_bytes().len()})
+        "canonical_bytes":source_bytes})
     );
     assert_eq!(result["change_count"], 0);
     let mut forged = source.clone();

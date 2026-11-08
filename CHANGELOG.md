@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased — Add laboratory evidence to the foreground watch engine
+
+- Reuse the bounded predicate evaluator, cadence/stability state machine and
+  atomic candidate store with an immutable laboratory evidence policy.
+- Support registered laboratory fields, projected population counts, pause/tick
+  predicates and Boolean/failure conditions; keep unsupported native evidence
+  families and native durability outside this path.
+- Add coherent current-snapshot batch polling and complete retained/active work
+  catalogs, with publication/authority/deadline checks before any root changes.
+- Preserve native identity/evidence/checkpoint bytes and pass all 138 native
+  watch regressions. Record precise new-suite/public-path evidence in status.
+- Repair shared anchor serialization across module contexts and execute the
+  previously blocked comparison, baseline, response and query-budget tests.
+
 ## Unreleased — Retain selected laboratory query baselines
 
 - Add capture, catalog, changes and release through the existing query tool,

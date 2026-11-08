@@ -1,6 +1,7 @@
 //! One explicitly authorized observation for a foreground condition wait.
 //! The injected reader executes at most once and cannot receive mutation intent.
 
+use super::semantic_query::anchor_json;
 use dfmcp_adapter::{
     InterestSet, ObservationFrame, ObservationPayload, ObservationRequest, Projection,
 };
@@ -77,8 +78,8 @@ where
             "condition wait observation evidence exceeds its bounds",
         ));
     }
-    let summary = json!({"kind":kind,"basis":super::anchor_json(context.anchor),
-        "target":super::anchor_json(target),"reset":target.cursor.epoch!=context.anchor.cursor.epoch,
+    let summary = json!({"kind":kind,"basis":anchor_json(context.anchor),
+        "target":anchor_json(target),"reset":target.cursor.epoch!=context.anchor.cursor.epoch,
         "read_calls":1,"advanced_game":false,"warnings":frame.warnings,
         "evidence":frame.evidence.iter().map(|evidence|evidence.digest.to_string()).collect::<Vec<_>>()});
     Ok(RefreshedObservation {
@@ -178,10 +179,7 @@ mod tests {
         assert_eq!(result.anchor, snapshot(2, 1).anchor());
         assert_eq!(result.summary["read_calls"], 1);
         assert_eq!(result.summary["advanced_game"], false);
-        assert_eq!(
-            result.summary["basis"],
-            super::super::anchor_json(ctx.anchor)
-        );
+        assert_eq!(result.summary["basis"], anchor_json(ctx.anchor));
         Ok(())
     }
 

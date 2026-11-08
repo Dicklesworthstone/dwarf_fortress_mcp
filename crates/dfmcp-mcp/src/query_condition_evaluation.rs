@@ -24,8 +24,18 @@ pub(super) fn query(
     context: &OperationContext,
     input: &Value,
 ) -> Result<Value> {
+    query_with_policy(snapshot, context, input, SourcePolicy::Native)
+}
+
+pub(super) fn query_with_policy(
+    snapshot: &WorldSnapshot,
+    context: &OperationContext,
+    input: &Value,
+    policy: SourcePolicy,
+) -> Result<Value> {
     let mut budget = counts::EvaluationBudget::new(context.budget.max_wall_millis);
     authorize(snapshot, context)?;
+    policy.validate_snapshot(snapshot)?;
     validate_input(input)?;
     let parsed: Input = serde_json::from_value(input.clone())
         .map_err(|_| invalid("invalid condition_evaluation request"))?;
@@ -58,9 +68,13 @@ pub(super) fn query(
         stable_observations: 1,
     };
     validate_definition(&definition)?;
-    let predicate_digest = digest(&json!({"domain":"dfmcp-condition-inspection-predicate/1",
+    policy.validate_definition(&definition)?;
+    let predicate_digest = digest(&json!({"domain":policy.inspection_predicate_domain(),
         "condition":definition.condition,"failure_condition":definition.failure_condition}))?;
-    let mut probe = Probe::default();
+    let mut probe = Probe {
+        source_policy: policy,
+        ..Probe::default()
+    };
     let condition = probe.evaluate_bounded(&definition.condition, snapshot, &mut budget)?;
     let failure_condition = match &definition.failure_condition {
         Some(condition) => probe.evaluate_bounded(condition, snapshot, &mut budget)?,
@@ -85,9 +99,9 @@ pub(super) fn query(
         "eligible_success_sample":status=="condition_met",
         "facts":probe.facts,"stability_evaluated":false,"deadline_evaluated":false,
         "watch_completion_proven":false,"continuous_between_observations":false});
-    let evidence = digest(&json!({"domain":"dfmcp-condition-inspection-evidence/1",
+    let evidence = digest(&json!({"domain":policy.inspection_evidence_domain(),
         "anchor":anchor(context.anchor),"predicate_digest":predicate_digest.to_string(),"evaluation":evaluation}))?;
-    let result = json!({"schema":"dfmcp.query.result/1","kind":"condition_evaluation",
+    let mut result = json!({"schema":"dfmcp.query.result/1","kind":"condition_evaluation",
         "anchor":anchor(context.anchor),"predicate_digest":predicate_digest.to_string(),
         "evaluation":evaluation,"evidence_digest":evidence.to_string(),
         "native_captures":0,"watch_registered":false,"watch_evaluated":false,
@@ -95,6 +109,9 @@ pub(super) fn query(
         "coverage":{"domain":"explicit_predicates_at_selected_observation","absence_proven":false,
             "continuous_between_observations":false,"mutation_success_proven":false},
         "interpretation":"Predicate evidence at one selected capture, not a retained watch sample, stable goal completion, native job readiness or permission to act."});
+    if policy == SourcePolicy::LaboratoryReference {
+        result["evidence_policy"] = json!("laboratory_reference/1");
+    }
     let maximum = context
         .budget
         .max_bytes

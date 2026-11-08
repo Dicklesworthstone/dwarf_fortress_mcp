@@ -29,6 +29,43 @@ use dfmcp_core::{
 use dfmcp_world::WorldSnapshot;
 use serde_json::{Value, json};
 
+/// Keep anchor serialization independent of the server embedding this module.
+pub(crate) fn anchor_json(anchor: StateAnchor) -> Value {
+    core_query::anchor_json(anchor)
+}
+
+/// Laboratory ownership chooses the evidence policy, never a caller argument.
+/// Publication accepts the complete candidate before any watch state changes.
+pub(super) fn execute_laboratory_watch_with_publisher<F>(
+    snapshot: &WorldSnapshot,
+    context: &OperationContext,
+    input: &Value,
+    publish: F,
+) -> Result<String>
+where
+    F: FnOnce(Value) -> Result<String>,
+{
+    query_watch::laboratory::execute(snapshot, context, input, publish)
+}
+
+/// Stateless preflight uses exactly the laboratory watch predicate evaluator.
+pub(super) fn evaluate_laboratory_condition(
+    snapshot: &WorldSnapshot,
+    context: &OperationContext,
+    input: &Value,
+) -> Result<Value> {
+    query_watch::laboratory::condition_query(snapshot, context, input)
+}
+
+/// Bounded metadata only; neither method scans or samples the source world.
+pub(super) fn laboratory_watch_work(context: &OperationContext) -> Result<Value> {
+    query_watch::laboratory::retained_work(context)
+}
+
+pub(super) fn laboratory_baseline_work(context: &OperationContext) -> Result<Value> {
+    query_history::retained_work(context)
+}
+
 pub(crate) fn extend_watch_count_schema(schema: Value) -> Result<Value> {
     dominance_query::extend_schema(query_watch::extend_count_schema(schema)?)
 }
@@ -273,8 +310,7 @@ where
     query_watch::with_active_work(context, value, publish)
 }
 
-/// Laboratory baseline sessions have no condition-watch registry to project.
-/// Their owner reserves the complete Agent Turn and retained baseline catalog
+/// The laboratory owner reserves the complete Agent Turn and retained work
 /// separately, then narrows only the output-token allowance. Preserve source
 /// byte and record budgets during the baseline engine's complete acquisition.
 /// This entry point shares the existing baseline store and publication commit

@@ -1,5 +1,40 @@
 # Implementation Status
 
+## Unreleased — Laboratory condition monitoring engine
+
+The shared foreground watch engine now has a private, immutable laboratory
+reference evidence policy. Registered scenario/effect facts remain eligible at
+later ticks; arbitrary derived values, assertions, replay, native fields,
+future facts and unavailable values cannot become laboratory proof. Exact
+snapshot hashes and canonical record identities are checked. Native handles,
+evidence digests and checkpoint formats retain their original domains.
+
+Field thresholds, projected entity counts, pause/tick conditions, Boolean
+combinations and failure guards use the existing bounded evaluator and watch
+state machine. Laboratory batch polling evaluates selected watches at one exact
+snapshot and accepts the complete result and candidate catalogs before changing
+any retained state. Native-only relationship, quantity, terrain, shelter and
+furniture predicates remain outside this reference policy. Laboratory watches
+are process-local, explicitly polled and cannot inherit native journal custody.
+Metadata-only baseline/watch catalogs support subsequent public discovery.
+
+Owning bead: `df-lab-structured-query-f7q.3`. Public lifecycle, preflight and
+observation/handoff integration is being completed in the next checkpoint.
+Actual-source component checking passes on the pinned latest nightly and the
+unchanged registry lock. All 138 native watch/count/batch/durability/replay/
+condition regressions pass. The new laboratory suite also passes 12/12 after correcting a fixture to
+use a valid native shelter ID before testing laboratory rejection. Comparison
+13/13, temporal helper
+16/16, renderer 7/7, query budget 7/7 and watch integration 9/9 pass in the same
+component binary. These executions include real core/world/intent/adapter/lab
+crates but exclude FastMCP registration, Asupersync transport and live gameplay.
+
+The shared watch refresh path now uses canonical semantic anchor serialization,
+which compiles in both laboratory and native module contexts. The comparison
+single-source budget regression now admits conservative work overhead while
+remaining strictly below two canonical source charges; production budget
+validators are unchanged.
+
 ## Unreleased — Own selected laboratory baselines transactionally
 
 The default query tool now accepts the closed `mode:"temporal"` wrapper for
