@@ -194,7 +194,10 @@ is 1–1,000,000 ticks and stability is 1–64 observations. Explicit release re
 retention capacity. Records are process-local, including when the laboratory
 world itself uses durable storage. Session disposal reclaims that session's
 private allocations. A transcript containing process-local watch identities
-cannot recreate those handles in another session.
+cannot recreate those handles in another session. Laboratory handles include a
+private process incarnation, so restarting the session and serial counters does
+not let an old handle name a newly registered watch. This scope is not an
+authority token; native durable-watch identities retain their existing format.
 
 ## Inspect a condition before retaining it
 

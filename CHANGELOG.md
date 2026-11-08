@@ -10,13 +10,17 @@
   work before retained state changes; preserve unknowns, grants and epoch fences.
 - Recover query handles through observations and handoffs without sampling;
   keep all reported catalog entries intact under response fitting.
+- Bind laboratory watch handles to a private process incarnation so restarted
+  session/serial counters cannot alias stale handles; preserve native durable
+  identity bytes and same-key registration replay.
 - Add shared typed grammar, two schemas, usage guidance, six helper, two renderer,
   six public watch, four public preflight and one output-fitting regression.
   Add two projected-page catalog/interleaving regressions; preserve the concurrent
   complete-page fitter and retained work through late refusals. Consumed
   structured cursors are explicitly session-bound in replay logs.
-- Pass all62 selected public tests and54 component tests on the final merged
-  source, plus150 earlier unchanged watch-policy cases and9 refresh cases.
+- Pass all62 selected public tests and54 component tests at the feature
+  checkpoint, plus9 refresh cases. The incarnation follow-up passes all152
+  native/laboratory watch tests and reruns all6 public watch flows successfully.
   Final source checking passes; transport/full-qualification limits are explicit.
 
 ## Unreleased — Fit laboratory entity pages through the complete Agent Turn

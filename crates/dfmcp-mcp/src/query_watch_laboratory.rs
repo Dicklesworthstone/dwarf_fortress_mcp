@@ -8,6 +8,19 @@
 use super::*;
 use dfmcp_core::GameTick;
 use dfmcp_world::{Fact, PredicateEvidence, laboratory_fact_value};
+use std::hash::{BuildHasher, Hasher};
+
+// Laboratory session IDs and watch serials restart with the process. Binding
+// their handles to this private incarnation prevents an old handle from naming
+// a newly registered watch. This is not an authority token or a secret grant.
+static INCARNATION: LazyLock<(u64, u64)> = LazyLock::new(|| {
+    let scope = || {
+        let mut hash = std::collections::hash_map::RandomState::new().build_hasher();
+        hash.write(b"dfmcp-laboratory-watch-store-v1");
+        hash.finish()
+    };
+    (scope(), scope())
+});
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) enum SourcePolicy {
@@ -110,6 +123,39 @@ impl SourcePolicy {
             Self::Native => "dfmcp-condition-watch-v1",
             Self::LaboratoryReference => "dfmcp-laboratory-condition-watch/1",
         }
+    }
+
+    pub(super) fn identity(
+        self,
+        context: &OperationContext,
+        serial: u64,
+        definition: &Definition,
+    ) -> Result<Digest32> {
+        let incarnation = match self {
+            Self::Native => (0, 0),
+            Self::LaboratoryReference => *INCARNATION,
+        };
+        self.identity_with_incarnation(context, serial, definition, incarnation)
+    }
+
+    // Explicit incarnation input keeps the identity calculation pure and lets
+    // tests simulate restarts without replacing a process-global random value.
+    fn identity_with_incarnation(
+        self,
+        context: &OperationContext,
+        serial: u64,
+        definition: &Definition,
+        incarnation: (u64, u64),
+    ) -> Result<Digest32> {
+        let mut value = json!({"domain":self.identity_domain(),
+            "session":context.session_id.to_string(), "serial":serial,
+            "anchor":anchor(context.anchor), "definition":definition});
+        if self == Self::LaboratoryReference {
+            value["incarnation"] = json!(incarnation);
+        }
+        // Native identity bytes stay exactly as they were, including the lack
+        // of an incarnation field, so durable native recovery is unchanged.
+        digest(&value)
     }
 
     pub(super) const fn evidence_domain(self) -> &'static str {

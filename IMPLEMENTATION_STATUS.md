@@ -29,6 +29,12 @@ catalogs in pulse responses. Restart discards private handles, restore fences
 unfinished watches at the next explicit poll, and registration marks raw-handle
 transcripts nonreplayable. No clock advancement, native refresh or tool is added.
 
+Laboratory watch handles bind a private process incarnation, preventing stale
+handles from aliasing newly registered work when session and serial counters
+restart. Same-key replay remains idempotent within the process. Native identity
+inputs and durable formats remain byte-compatible and do not initialize the
+laboratory random scope.
+
 The concurrent projected-page implementation in `ac556891` is preserved.
 Deferred entity queries now capture current query catalogs after reacquiring
 the session, then use the same immutable value for every fit and the final
@@ -36,7 +42,7 @@ response. Registration/release between preparation and execution is reflected
 without requiring a world-anchor change. Late refusals retain these catalogs;
 consumed structured continuations explicitly disable cross-session replay.
 
-**Final merged public execution passes 62/62**, zero failures: comparison6,
+**Public feature checkpoint `7150767` passes 62/62**, zero failures: comparison6,
 baseline11, watch6, condition preflight4, structured query13, public query
 budget3, projected pages/catalogs8, late publication2 and output budgeting9.
 This includes real laboratory labor changes, ordinary-default budgets, current
@@ -46,11 +52,15 @@ fixtures now obey canonical cursor progression and guarded checkpoint authority;
 invalid redacted backing data remains rejected. No validator was weakened.
 
 **Final merged component execution passes 54/54**: comparison13, temporal
-helper16, renderer7, query budget9 and output budgeting9. Earlier unchanged
-watch-engine groups passed150/150 (138 native-policy plus12 laboratory), and
-watch integration/refresh passed9/9. The selected public source and tests also
-pass `cargo check --tests`. These group totals include overlapping output-budget
-tests; they are separate runs, not a claim of that many distinct test cases.
+helper16, renderer7, query budget9 and output budgeting9. The subsequent
+process-incarnation fix passes the complete watch-engine namespace152/152
+(138 native-policy plus14 laboratory), including deterministic simulated
+restarts, unchanged native identity bytes, production registration and key
+replay. All six public watch flows pass again after fresh compilation of the
+selected public graph. Earlier watch integration/refresh passed9/9. The selected
+public source and tests also pass `cargo check --tests`. These group totals
+include overlapping output-budget tests; they are separate runs, not a claim of
+that many distinct test cases.
 
 The exact-source assembly retains actual core/world/intent/adapter/lab crates
 and production server/facade function bodies, and all11 registry package

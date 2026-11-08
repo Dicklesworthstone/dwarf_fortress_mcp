@@ -1072,10 +1072,7 @@ where
                 .serial
                 .checked_add(1)
                 .ok_or_else(|| bounded("watch identity space exhausted"))?;
-            let identity = digest(
-                &json!({"domain":policy.identity_domain(),"session":context.session_id.to_string(),
-                "serial":serial,"anchor":anchor(context.anchor),"definition":definition}),
-            )?;
+            let identity = policy.identity(context, serial, &definition)?;
             let mut watch = Watch {
                 handle: format!("watch:{identity}"),
                 source_policy: policy,

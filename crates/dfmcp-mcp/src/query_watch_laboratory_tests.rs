@@ -117,6 +117,105 @@ fn inspection(snapshot: &WorldSnapshot, condition: Value, failure: Option<Value>
 }
 
 #[test]
+fn laboratory_watch_identity_changes_across_incarnations_but_native_bytes_do_not() -> Result<()> {
+    let snapshot = world(1, 0);
+    let current = context(&snapshot, 1);
+    let definition = Definition {
+        key: "restart-owned".to_owned(),
+        label: "restart-owned".to_owned(),
+        condition: Condition::Paused { value: true },
+        failure_condition: None,
+        deadline_tick: 100,
+        poll_interval_ticks: 1,
+        stable_observations: 2,
+    };
+    let first = (11, 17);
+    let laboratory = SourcePolicy::LaboratoryReference;
+    let expected = laboratory.identity_with_incarnation(&current, 1, &definition, first)?;
+    assert_eq!(
+        laboratory.identity_with_incarnation(&current, 1, &definition, first)?,
+        expected
+    );
+    let prior_native = digest(&json!({"domain":"dfmcp-condition-watch-v1",
+        "session":current.session_id.to_string(), "serial":1,
+        "anchor":anchor(current.anchor), "definition":definition}))?;
+    for incarnation in [first, (13, 17), (11, 19)] {
+        assert_eq!(
+            SourcePolicy::Native.identity_with_incarnation(
+                &current,
+                1,
+                &definition,
+                incarnation
+            )?,
+            prior_native
+        );
+        if incarnation != first {
+            assert_ne!(
+                laboratory.identity_with_incarnation(&current, 1, &definition, incarnation)?,
+                expected
+            );
+        }
+    }
+    assert_eq!(
+        SourcePolicy::Native.identity(&current, 1, &definition)?,
+        prior_native
+    );
+    assert_ne!(expected, prior_native);
+    Ok(())
+}
+
+#[test]
+fn laboratory_registration_uses_process_incarnation_and_keeps_key_replay_idempotent() -> Result<()>
+{
+    let snapshot = world(1, 0);
+    let owner = 93_013;
+    let current = context(&snapshot, owner);
+    let store = Mutex::new(Store::default());
+    let created = run(&store, &snapshot, owner, create("restart-owned"))?;
+    let definition: Definition = serde_json::from_value(created["record"]["definition"].clone())
+        .map_err(|_| invalid("fixture watch definition missing"))?;
+    let identity = SourcePolicy::LaboratoryReference.identity_with_incarnation(
+        &current,
+        1,
+        &definition,
+        *INCARNATION,
+    )?;
+    assert_eq!(handle(&created)?, format!("watch:{identity}"));
+    let repeated = run(&store, &snapshot, owner, create("restart-owned"))?;
+    assert_eq!(repeated["replayed"], true);
+    assert_eq!(repeated["record"], created["record"]);
+    assert_eq!(lock(&store)?.serial, 1);
+
+    let previous = (INCARNATION.0 ^ 1, INCARNATION.1);
+    let old_identity = SourcePolicy::LaboratoryReference.identity_with_incarnation(
+        &current,
+        1,
+        &definition,
+        previous,
+    )?;
+    assert_ne!(old_identity, identity);
+    assert!(
+        run(
+            &store,
+            &snapshot,
+            owner,
+            json!({"kind":"poll_watch", "watch":format!("watch:{old_identity}")}),
+        )
+        .is_err()
+    );
+    assert_eq!(
+        run(
+            &store,
+            &snapshot,
+            owner,
+            json!({"kind":"poll_watch", "watch":handle(&created)?})
+        )?["record"],
+        created["record"]
+    );
+    Ok(())
+}
+
+#[test]
 fn registered_lab_sources_keep_unchanged_facts_eligible_at_later_ticks() -> Result<()> {
     for producer in ["dfmcp.lab-scenario/1", "dfmcp.reference-effects/1"] {
         let mut snapshot = world(20, 19);
