@@ -1,5 +1,41 @@
 # Implementation Status
 
+## Unreleased — Original-bound Tree clock adapter
+
+The new Tree clock addresses a functional gap in first-fortress supply: the
+Tree MCP could designate and sample, but advancing the paused game required
+manual coordination with a separate generic Run server. The adapter now binds
+finite Run/1.13 intervals to the exact acknowledged Tree/1.21 original and its
+existing deadline. Same-session MCP wiring is the next increment.
+
+`TreeClockOrigin` reconstructs the canonical original and phase-two receipt
+from private journal bytes, checks the independent ACK before and after that
+read, and retains consumed floors, capacity, continuity and historical supply.
+Mutable public journal caches do not define authority. The stable clock target
+binds that origin; appended sample heads cannot replace its original identity.
+Capacity admission covers three complete sample/frame/byte slots before prepare
+and two before commit, within the existing 16-sample/40-frame/16-MiB Tree bounds.
+It is a verified snapshot admission, not a claimed durable space reservation.
+
+The guarded clock uses existing durable Run Intent and DispatchStarted markers,
+requires fresh original unfinished root/felling evidence at both native edges,
+and permits one unpause attempt per original run. Current and opening authority
+remain independently required for named-fortress scoped Tree reads and the
+native NIL clock. Recover/Offline restore no review; safety stop remains
+separately authorized after the goal deadline. Neither elapsed time nor a Run
+receipt establishes supply or causal wood provenance. The Tree RPC progress
+floor retains a decoded stale reply and fences it before goal credit.
+
+Executed actual repository `cargo +nightly test --locked --offline
+-p dfmcp-adapter --lib tree_harvest --jobs1 -- --test-threads=1`:
+**43/43 passed**, zero failures and zero ignored, comprising 20 new clock,
+eight origin/capacity, one native TCP floor regression and 14 existing Tree
+cases. Compilation took 43.70 seconds and execution 6.48 seconds on the current
+latest-nightly toolchain. No native protocol, public tool or production admission
+was added. This is adapter component evidence; current host/runtime, full MCP
+transport, live DFHack/game and whole-workspace qualification remain separate.
+The new child bead under the first-fortress prerequisite work stays in progress.
+
 ## Unreleased — Reach and retain native stock-target production through MCP
 
 The combined `serve-gameplay-dev labor-order` owner now accepts the closed

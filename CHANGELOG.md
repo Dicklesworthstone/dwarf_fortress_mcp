@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased — Bind bounded game time to the original Tree goal
+
+- Add a Tree-specific guarded clock adapter over the existing Run/1.13 owner.
+  Bind the exact acknowledged Tree original and receipt, and inherit its existing
+  deadline instead of allowing a replacement horizon.
+- Verify original custody from private bytes and independent ACK; admit complete
+  sample/frame/byte capacity before each interval and recheck fresh original
+  root/felling evidence after durable Run Intent and DispatchStarted.
+- Preserve separately scoped authority, one-attempt unpause, query-only recovery
+  and independently authorized safety stop. Reject progress older than the
+  consumed clock floor before it can establish Tree supply.
+- Actual repository Tree tests pass 43/43, including 29 new clock, custody and
+  native TCP cases. Same-session MCP integration follows as a separate increment.
+
 ## Unreleased — Plan and execute native stock targets through MCP
 
 - Add a reachable `kind="stock_target"` request to the combined production

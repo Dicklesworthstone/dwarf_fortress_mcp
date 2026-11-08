@@ -385,3 +385,29 @@ fn tree_actual_tcp_same_connection_permit_and_cleared_or_cross_connection_refusa
     }
     Ok(())
 }
+
+#[test]
+fn tree_actual_tcp_consumed_clock_floor_rejects_stale_supply_and_preserves_the_capture() -> Result<()> {
+    let cap = capture()?;
+    let c = context()?;
+    for current in [false, true] {
+        let tick = cap.tick + if current { 10 } else { 0 };
+        let mut raw = vector("progress_supply")?;
+        raw[24..32].copy_from_slice(&tick.to_be_bytes());
+        let peer = start_peer(vec![vec![Step::observed(6, raw)]], cap.generation)?;
+        let mut rpc = connect(&peer, &c, cap.generation)?;
+        rpc.require_progress_at_or_after(cap.tick + 10);
+        rpc.require_progress_at_or_after(cap.tick);
+        let result = rpc.progress(&plan()?, &c);
+        assert_eq!(result.is_ok(), current);
+        assert_eq!(rpc.consumed_progress.as_ref().map(|p| p.tick), Some(tick));
+        if !current {
+            assert_eq!(result.err().map(|e| e.code), Some(ErrorCode::StaleAnchor));
+            // A lower later context cannot revive the consumed connection.
+            assert!(rpc.observe(cap.root, &c).is_err());
+        }
+        drop(rpc);
+        assert_eq!(peer.finish()?, [6]);
+    }
+    Ok(())
+}

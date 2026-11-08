@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 //! Closed tree/1.21 evidence. A root coordinate is a predicate, never a plant ID.
+pub mod clock;
 pub mod journal;
 pub mod rpc;
 #[cfg(test)]

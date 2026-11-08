@@ -18,6 +18,9 @@ use std::time::{Duration, Instant};
 #[path = "material_origin.rs"]
 mod material_origin;
 pub use material_origin::TreeMaterialOrigin;
+#[path = "journal/clock_origin.rs"]
+mod clock_origin;
+pub use clock_origin::{CLOCK_ORIGIN_BYTES, TreeClockOrigin};
 #[cfg(all(test, target_os = "linux"))]
 #[path = "journal_tests.rs"]
 pub(crate) mod journal_tests;

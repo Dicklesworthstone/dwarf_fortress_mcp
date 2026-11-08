@@ -144,6 +144,7 @@ pub struct TreeRpc {
     methods: [i16; 7],
     permission: Permission,
     pub consumed_progress: Option<Progress>,
+    progress_tick_floor: u64,
     prepared: Option<Plan>,
     prepare_attempted: bool,
     fenced: bool,
@@ -201,6 +202,7 @@ impl TreeRpc {
             methods,
             permission,
             consumed_progress: None,
+            progress_tick_floor: 0,
             prepared: None,
             prepare_attempted: false,
             fenced: false,
@@ -212,6 +214,11 @@ impl TreeRpc {
     }
     pub fn binding(&self) -> &Binding {
         &self.binding
+    }
+    /// Narrow fresh progress to an independently consumed clock frontier.
+    /// This cannot grant authority, renew an original goal or lower the floor.
+    pub fn require_progress_at_or_after(&mut self, tick: u64) {
+        self.progress_tick_floor = self.progress_tick_floor.max(tick);
     }
     pub fn fence(&mut self) {
         self.prepared = None;
@@ -445,6 +452,15 @@ impl TreeRpc {
             "tree progress payload/envelope generation differs",
         )?;
         self.consumed_progress = Some(progress.clone());
+        if progress.tick < self.progress_tick_floor {
+            self.fence();
+            return Err(error(
+                ErrorCode::StaleAnchor,
+                "tree progress predates the independently consumed clock floor",
+            )
+            .with_detail("consumed_tree_tick", progress.tick.to_string()));
+        }
+        self.progress_tick_floor = self.progress_tick_floor.max(progress.tick);
         let mut actual = c.clone();
         actual.anchor.tick = dfmcp_core::GameTick(progress.tick.max(c.anchor.tick.get()));
         if let Err(e) = authorize(&actual, &self.binding, None) {

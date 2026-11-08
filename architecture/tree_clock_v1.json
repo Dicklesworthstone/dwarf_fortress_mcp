@@ -1,0 +1,85 @@
+{
+  "schema": "dfmcp.tree-clock/1",
+  "status": "adapter_implemented_host_in_progress_unadmitted",
+  "obligation": "one exact acknowledged original Tree designation under its existing deadline",
+  "tree_protocol": "tree-harvest/1.21",
+  "clock_protocol": "run/1.13",
+  "source_paths": [
+    "crates/dfmcp-adapter/src/tree_harvest/clock.rs",
+    "crates/dfmcp-adapter/src/tree_harvest/clock/tests.rs",
+    "crates/dfmcp-adapter/src/tree_harvest/journal/clock_origin.rs",
+    "crates/dfmcp-adapter/src/tree_harvest/journal/clock_origin_tests.rs",
+    "crates/dfmcp-adapter/src/tree_harvest/journal.rs",
+    "crates/dfmcp-adapter/src/tree_harvest/mod.rs",
+    "crates/dfmcp-adapter/src/tree_harvest/rpc.rs",
+    "crates/dfmcp-adapter/src/tree_harvest/rpc_tests.rs"
+  ],
+  "original_descriptor": {
+    "owner": "existing Tree journal and independent ACK",
+    "mutable_view_fields_define_authority": false,
+    "native_contact": false,
+    "work_bytes": 67108864,
+    "binds": [
+      "tree_journal_id",
+      "source_binding",
+      "canonical_original_bytes",
+      "phase_two_designation_receipt",
+      "original_deadline_tick"
+    ]
+  },
+  "authority": {
+    "tree_reads": "named fortress and original full-map read scope",
+    "clock": "separate named-fortress and native NIL Query/Plan/ControlClock grants",
+    "opening_and_current_grants_checked": true,
+    "designation_grants_imply_clock_permission": false
+  },
+  "run_bounds": {
+    "game_ticks_max": 1200,
+    "wall_millis_max": 60000,
+    "deadline": "inherited original; cannot renew",
+    "retained_runs_max": 64,
+    "operation_work_bytes": 100663296,
+    "view_work_bytes": 8388608,
+    "unpause_attempts_per_original_run_max": 1
+  },
+  "tree_capacity": {
+    "samples_max": 16,
+    "frames_max": 40,
+    "journal_bytes_max": 16777216,
+    "prepare_requires_sample_slots": 3,
+    "commit_requires_sample_slots": 2,
+    "accounts_for_frames_and_bytes": true,
+    "admission_is_durable_reservation": false,
+    "host_must_recheck_verified_capacity_at_each_boundary": true
+  },
+  "fresh_guards": [
+    "after_durable_run_intent",
+    "after_durable_run_dispatch_started"
+  ],
+  "readiness": {
+    "same_original_source_and_root_required": true,
+    "paused_at_exact_run_tick_required": true,
+    "monotone_sequence_and_item_floor_required": true,
+    "matching_root_or_absent_root_with_outstanding_felling_jobs": true,
+    "unknown_or_changed_root_refuses": true,
+    "already_observed_supply_refuses_more_time": true,
+    "quiescent_absent_root_without_wood_refuses": true,
+    "worker_equipment_or_scheduling_proven": false
+  },
+  "progress_floor": {
+    "monotone_caller_floor": true,
+    "decoded_stale_progress_retained_before_refusal": true,
+    "refusal_fences_connection": true,
+    "clock_receipt_proves_wood": false
+  },
+  "recovery": {
+    "exact_run_journal_id_and_external_head_required": true,
+    "offline_needs_native_credentials": false,
+    "restores_review": false,
+    "uncertain_unpause_can_retry": false,
+    "safety_stop_requires_independent_current_clock_authority": true
+  },
+  "new_native_protocol": false,
+  "new_public_tool": false,
+  "production_admission_added": false
+}
