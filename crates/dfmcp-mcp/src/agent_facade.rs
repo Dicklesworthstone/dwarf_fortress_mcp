@@ -1954,7 +1954,7 @@ pub fn fortress_query(session_id: Option<String>, mode: Option<String>) -> Strin
 }
 
 #[tool(
-    description = "Compile an intent into a sealed plan without effects and keep it visible as active work. Without actions it compiles pause/resume (paused_target). actions is a JSON array of steps {\"action\":{\"kind\":...},\"depends_on\":[step indices]} with kinds: pause{paused}, designate_dig{min,max,mode: mine|channel|up_stair|down_stair|up_down_stair|ramp|remove_construction}, build{building e.g. workshop:Still|furniture:Bed|farm_plot, location, min, max, materials?}, place_furniture{furniture: bed|door|table|chair, item: exact canonical item ID, location} (allocates a manufactured laboratory item and proves installation), set_labor{units,labor,enabled}, create_work_order{name,job_token,amount}, configure_stockpile{stockpile,accepts,max_bins?,max_barrels?,max_wheelbarrows?}, assign_squad{units,squad}, set_burrow_membership{units,burrow,assigned}, set_standing_order{key,value}. Coordinates are [x,y,z]; entity IDs are decimal strings. Postconditions, game-time obligations and compensations are sealed from the reference action model and returned per step. Instead of actions, blueprint is an objective the planner decomposes. For observed civilian protection use actions={\"workflow\":\"civilian_protection_v1\",\"burrow\":\"3001\",\"civilians\":[\"1001\"]} while paused. After the world-owned civilian_recovery query reports a stable complete clear interval, blueprint={\"template\":\"civilian_release\",\"burrow\":\"3001\"} seals a separately reviewed release of the complete current civilian roster. Every release effect checks current threats and exact generations; changed observations require a fresh review, and restart/restore resets clearance. For item-backed furnished rooms use {\"template\":\"provisioned_room\",\"layout\":{\"template\":\"bedroom_cluster\",\"origin\":[x,y,z],\"rooms\":n,\"room_size\":[w,h]}} or a dining_hall layout with origin,width,height. It reuses eligible exact furniture, manufactures missing items from finite WOOD, excavates, then installs them; the final goal proves every original terrain region and exact installed item. Optional prerequisites reuse the production setup grammar. In shared-workforce laboratory worlds, prerequisites.workforce=complete_project_v1 also staffs required mining and construction; assign_labor=true permits qualified labor enables and false requires observed enabled workers. For access from an observed entrance, wrap that complete request as {\"template\":\"connected_room\",\"room\":{\"template\":\"provisioned_room\",\"layout\":{...}},\"access\":{\"entry\":[x,y,z],\"region\":{\"min\":[x,y,z],\"max\":[x,y,z]}}}. The default connected_room_v1 excavates safe same-level connectors and proves current floor access around building occupancy. Set planner=connected_room_stairs_v1 explicitly for a multi-level domain: it reuses paired laboratory stairs or excavates ordinary rock outside room floor masks as UpDownStair shafts, and proves current entrance-to-furnishing access across levels. Both generations are bounded to 1024 cells and preserve their exact access model through continue_goal; native directional stairs and hauling are not proved. Existing abstract blueprint forms remain: {\"template\":\"bedroom_cluster\",\"origin\":[x,y,z],\"rooms\":n,\"room_size\":[w,h]} (a bed per room), {\"template\":\"dining_hall\",\"origin\",\"width\",\"height\"} (table and chair), {\"template\":\"workshop_hub\",\"origin\",\"bays\"}, {\"template\":\"stockpile_vault\",\"origin\",\"width\",\"height\",\"category\"}, {\"template\":\"production\",\"quotas\":[{\"item\":\"DRINK|FOOD|BED|DOOR|TABLE|CHAIR\",\"minimum\":n}]} (work orders sized against observed stock by the production compiler; optional orders:\"dependency_preserving_v1\" adds source-bound unique order names, explicit per-batch material conditions and named predecessor completion conditions alongside the action DAG, preserved through replay and continuation), or {\"template\":\"continue_goal\",\"plan_digest\":\"retained original goal digest\"} (a new reviewed pursuit of a retained production, provisioned-room or connected-room request; preserves all original quotas or room slots, setup options and connected entrance/domain, keeps valid installed furnishings, and plans missing work including access repair; requires current Observe/Plan authority and proven quiet earlier lineage work; original historical action outcomes remain unchanged)."
+    description = "Compare two to four same-objective alternatives with blueprint JSON {\"template\":\"compare_candidates\",\"version\":1,\"horizon_ticks\":1000,\"candidates\":[{\"key\":\"a\",\"blueprint\":{...}},{\"key\":\"b\",\"blueprint\":{...}}]}. Alternatives use exactly one blueprint, actions, or paused_target source; each may have its own summary. Comparisons are stateless conditional laboratory forecasts that preserve pending work. Pass an emitted select_candidate blueprint unchanged to prepare the chosen source under current authority, then use fortress.commit. Candidate wrappers cannot be combined with outer summary/actions/paused_target. Compile an intent into a sealed plan without effects and keep it visible as active work. Without actions it compiles pause/resume (paused_target). actions is a JSON array of steps {\"action\":{\"kind\":...},\"depends_on\":[step indices]} with kinds: pause{paused}, designate_dig{min,max,mode: mine|channel|up_stair|down_stair|up_down_stair|ramp|remove_construction}, build{building e.g. workshop:Still|furniture:Bed|farm_plot, location, min, max, materials?}, place_furniture{furniture: bed|door|table|chair, item: exact canonical item ID, location} (allocates a manufactured laboratory item and proves installation), set_labor{units,labor,enabled}, create_work_order{name,job_token,amount}, configure_stockpile{stockpile,accepts,max_bins?,max_barrels?,max_wheelbarrows?}, assign_squad{units,squad}, set_burrow_membership{units,burrow,assigned}, set_standing_order{key,value}. Coordinates are [x,y,z]; entity IDs are decimal strings. Postconditions, game-time obligations and compensations are sealed from the reference action model and returned per step. Instead of actions, blueprint is an objective the planner decomposes. For observed civilian protection use actions={\"workflow\":\"civilian_protection_v1\",\"burrow\":\"3001\",\"civilians\":[\"1001\"]} while paused. After the world-owned civilian_recovery query reports a stable complete clear interval, blueprint={\"template\":\"civilian_release\",\"burrow\":\"3001\"} seals a separately reviewed release of the complete current civilian roster. Every release effect checks current threats and exact generations; changed observations require a fresh review, and restart/restore resets clearance. For item-backed furnished rooms use {\"template\":\"provisioned_room\",\"layout\":{\"template\":\"bedroom_cluster\",\"origin\":[x,y,z],\"rooms\":n,\"room_size\":[w,h]}} or a dining_hall layout with origin,width,height. It reuses eligible exact furniture, manufactures missing items from finite WOOD, excavates, then installs them; the final goal proves every original terrain region and exact installed item. Optional prerequisites reuse the production setup grammar. In shared-workforce laboratory worlds, prerequisites.workforce=complete_project_v1 also staffs required mining and construction; assign_labor=true permits qualified labor enables and false requires observed enabled workers. For access from an observed entrance, wrap that complete request as {\"template\":\"connected_room\",\"room\":{\"template\":\"provisioned_room\",\"layout\":{...}},\"access\":{\"entry\":[x,y,z],\"region\":{\"min\":[x,y,z],\"max\":[x,y,z]}}}. The default connected_room_v1 excavates safe same-level connectors and proves current floor access around building occupancy. Set planner=connected_room_stairs_v1 explicitly for a multi-level domain: it reuses paired laboratory stairs or excavates ordinary rock outside room floor masks as UpDownStair shafts, and proves current entrance-to-furnishing access across levels. Both generations are bounded to 1024 cells and preserve their exact access model through continue_goal; native directional stairs and hauling are not proved. Existing abstract blueprint forms remain: {\"template\":\"bedroom_cluster\",\"origin\":[x,y,z],\"rooms\":n,\"room_size\":[w,h]} (a bed per room), {\"template\":\"dining_hall\",\"origin\",\"width\",\"height\"} (table and chair), {\"template\":\"workshop_hub\",\"origin\",\"bays\"}, {\"template\":\"stockpile_vault\",\"origin\",\"width\",\"height\",\"category\"}, {\"template\":\"production\",\"quotas\":[{\"item\":\"DRINK|FOOD|BED|DOOR|TABLE|CHAIR\",\"minimum\":n}]} (work orders sized against observed stock by the production compiler; optional orders:\"dependency_preserving_v1\" adds source-bound unique order names, explicit per-batch material conditions and named predecessor completion conditions alongside the action DAG, preserved through replay and continuation), or {\"template\":\"continue_goal\",\"plan_digest\":\"retained original goal digest\"} (a new reviewed pursuit of a retained production, provisioned-room or connected-room request; preserves all original quotas or room slots, setup options and connected entrance/domain, keeps valid installed furnishings, and plans missing work including access repair; requires current Observe/Plan authority and proven quiet earlier lineage work; original historical action outcomes remain unchanged)."
 )]
 pub fn fortress_plan(
     session_id: Option<String>,
@@ -1963,21 +1963,37 @@ pub fn fortress_plan(
     actions: Option<String>,
     blueprint: Option<String>,
 ) -> String {
+    let started = std::time::Instant::now();
     let recorded = json!({"summary": summary, "paused_target": paused_target, "actions": actions, "blueprint": blueprint});
-    let response = project_response(
-        crate::server::plan_request(
-            session_id.clone(),
-            summary,
-            paused_target,
-            actions,
-            blueprint,
-            None,
+    let response = match crate::server::plan_request_publication(
+        session_id.clone(),
+        summary,
+        paused_target,
+        actions,
+        blueprint,
+        None,
+        started,
+    ) {
+        crate::server::PlanPublication::Pending(raw) => project_response(
+            raw,
+            "fortress.plan",
+            AgentPhase::Propose,
+            ObservationProfile::Tactical,
+            session_id.as_deref(),
         ),
-        "fortress.plan",
-        AgentPhase::Propose,
-        ObservationProfile::Tactical,
-        session_id.as_deref(),
-    );
+        crate::server::PlanPublication::Published(raw) => {
+            // Selection was published atomically with the pending replacement.
+            // Refresh presentation hints only; never refit or refuse these bytes.
+            // A comparison must not clear a previously prepared plan's hints.
+            if let Ok(mut payload) = serde_json::from_str::<Value>(&raw)
+                && payload["kind"] == "select_candidate"
+            {
+                let resolved = payload["session_id"].as_str().map(str::to_owned);
+                let _ = presentation_state("fortress.plan", &mut payload, resolved.as_ref());
+            }
+            raw
+        }
+    };
     crate::replay::record("fortress.plan", session_id.as_deref(), recorded, &response);
     response
 }

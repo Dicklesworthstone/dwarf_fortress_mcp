@@ -1,35 +1,70 @@
 # Implementation Status
 
-## Unreleased — Compare bounded laboratory plan alternatives
+## Unreleased — Compare and select laboratory plan alternatives
 
-Candidate planning now has a source-present core for evaluating two to four alternatives against
-one original objective and reserve frontier on discarded reference-world forks. The comparison
-uses the real plan compiler and static planner, reports unavailable predictions explicitly, and
-ranks only complete comparable predictions by risk, checkpoint requirement, completion tick,
-action count, and stable candidate key. It does not replace the caller's pending plan or advance
-the canonical world.
+The existing `fortress.plan` blueprint string now accepts closed version-one
+`compare_candidates` and `select_candidate` requests. Two to four alternatives
+are compiled by the ordinary PlanSource/compiler/planner against one exact
+source. Successfully compiled alternatives must share the same normalized
+original terminal predicate and optional reserve frontier. Discarded forecasts
+report original-goal truth, verified actions, physical quiescence, completion
+frontiers and explicit unavailable evidence. Only complete comparable predictions
+can justify a deterministic recommendation by risk, checkpoint burden, completion
+tick, action count and key. No tool, dependency, or ordinary plan signature was added.
 
-A shared forecast budget charges source admission, copied canonical records and bytes, candidate
-actions, simulated ticks, slices, action polls, and one wall deadline across the whole comparison.
-This accounting does not claim to measure the complete adapter heap. Forecasts advance physical
-world jobs and the selected candidate's action chain; they do not dispatch other retained plans'
-deferred actions. Predictions are conditional laboratory evidence, never commit authority.
+One request-owned budget covers source admission, canonical fork records/bytes,
+compiled actions, simulated ticks, slices, action polls and the original public
+entry deadline. Source admission and current catalog reads receive only remaining
+wall time. Forks run sequentially and never advance the canonical world. Canonical
+source bytes are not a full adapter heap measurement. Forecasts evolve physical
+world jobs and dispatch only the candidate's own deferred chain; other retained
+plans' deferred dispatch is explicitly outside this conditional model.
 
-Closed version-one comparison and selection wrappers use the existing plan blueprint field.
-Selection binds a canonical candidate source to its exact anchor and content digest, then
-recompiles and prepares it under current authority. The digest is an integrity label, not proof
-that a prior comparison ran. Public routing and complete-response publication follow in the next
-implementation increment.
+Comparison preserves the pending plan and all retained query state. Selection
+checks the exact current anchor and canonical candidate contents, recompiles with
+a fresh identity and prepares an ordinary plan under current authority. The digest
+is an integrity label, not proof of an earlier comparison or effect authorization.
+Selection still needs normal commit and its registered revalidation/effect policy.
 
-Development evidence before the execution environment became unavailable: the isolated lean
-server harness compiled the mounted core and ran 34 selected tests, with 31 passing and three
-failing. All 21 forecast tests passed; 10 of 13 comparison tests passed. The three failures exposed
-a decimal FortressId versus hexadecimal selection-parser mismatch. Its canonical decimal-u64
-correction and negative cases were applied, but the corrected run did not complete. The core was
-recovered from recorded patches after the outage and verified against uploaded GitHub blobs;
-post-rustfmt byte identity and executable validation of recovered files are not established.
-This is partial development evidence, not full transport, runtime, native, or workspace
-qualification. Owning bead: `df-lab-plan-comparison-c9r`.
+The session/world owner remains held through complete Agent Turn publication.
+Current pending plans, owned actions/obligations, objectives and all three query
+catalogs remain visible. Nonfinal recovered obligations are also included, even
+when a verified historical goal still owns unknown physical work. Their retained
+proof/work anchors are not refreshed; coverage explicitly distinguishes complete
+catalogs from partial current-game evidence. The entire packet must fit the current
+byte/token allowance and deadline before selection replaces pending state. Refusals
+preserve the prior plan, and the facade returns accepted bytes unchanged.
+
+The initial 31/34 core run exposed a decimal FortressId selection-parser mismatch.
+The canonical decimal-u64 correction and negative cases are now executed and pass.
+After an execution outage, recovered core sources were compared with the surviving
+formatted originals: four were byte-identical and the fifth differed only in its
+clarified model-assumptions string. The final integrated source has now passed:
+
+- **13/13 comparison core tests**, including all three previously failing selection cases.
+- **6/6 new bounded-forecast tests** and **15/15 existing forecast/reserve/provisions tests**.
+- **9/9 actual public facade workflows**, including default-budget compare/select/commit/goal proof,
+  retained query work, source/authority/aggregate-budget refusals, publication rollback,
+  equivalent labor ranking, and recovered-work visibility without resampling.
+- **21/21 affected baseline/watch/condition public regressions** after the shared projection extraction.
+- **6 valid / 36 invalid schema cases**, plus the documented production example.
+- Changed Rust formatting and `git diff --check`.
+
+All **64 selected Rust tests passed** in the exact-source isolated laboratory
+harness using nightly-2026-11-08 and the existing locked dependencies. All **1,117
+source identities** matched the repository with zero mismatches. Source inventory:
+`b47c5328f56c78769422221c4a27e0519d1f8bcdb71b09a11b5fbaad2a2bc69f`.
+Harness receipt: `dc2b655edfb04494757d61df59b1c5cd3110185daeedbfac602e58a43d5f5ccf`.
+This evidence excludes FastMCP registration/macros, Asupersync transport, installed
+task supervision, live DFHack and full repository qualification. Those boundaries
+remain open; no qualification gate was weakened. The final `scripts/verify.sh`
+run passed its preceding integrity, source, repository, agent, bridge, admission
+and dependency contracts, then stopped at bead coverage because the `br` executable
+is unavailable. The gate was left intact.
+
+Inputs, selection flow and model limits: `docs/LAB_PLAN_COMPARISON.md`.
+Decoded-wrapper schema: `schemas/lab_plan_comparison.schema.json`, linked additively
+from the existing plan design schema. Owning bead: `df-lab-plan-comparison-c9r`.
 
 ## Unreleased — Use laboratory condition preflight and foreground watches
 

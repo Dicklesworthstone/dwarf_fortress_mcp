@@ -402,6 +402,26 @@ actions or proof are reused as authority. See `docs/PRODUCTION_GOAL_CONTINUATION
 refusals, source-seal binding and explicit commit workflow; furnished-room
 continuations are detailed in `docs/ROOM_GOAL_CONTINUATION.md`.
 
+The laboratory `blueprint` JSON string additionally accepts closed version-one
+`compare_candidates` and `select_candidate` requests. Comparison evaluates two
+to four ordinary sources against the same normalized original terminal condition
+and reserve frontier, sharing one source, fork, action, simulated-tick, polling,
+and wall-time budget. Results separate unavailable models from complete
+predictions and use an explicit deterministic ranking policy. Forecast forks
+advance physical world jobs and the candidate's own deferred chain; other
+retained plans' deferred actions are outside the model. Predictions remain
+conditional and grant no effect authority.
+
+Comparison preserves the pending plan and exposes current game work, baselines,
+and watches. Each prepared candidate includes a source-bound selection request.
+Selection checks the exact current anchor and candidate contents, recompiles an
+ordinary plan under current Observe/Query/Plan authority, and accepts the entire
+Agent Turn before replacing pending state. A publication refusal preserves the
+prior plan. Selection still requires ordinary `fortress.commit`; it does not
+commit or advance the canonical world. See
+[LAB_PLAN_COMPARISON.md](docs/LAB_PLAN_COMPARISON.md) for inputs, ranking, budgets,
+model assumptions, and the explicit validation limits.
+
 ### `fortress.commit`
 
 Requires exact plan ID/digest, expected anchor, and confirmation seal when policy requires.

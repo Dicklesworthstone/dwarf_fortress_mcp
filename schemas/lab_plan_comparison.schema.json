@@ -1,0 +1,205 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dwarf-fortress-mcp.org/schemas/0.1.0/lab_plan_comparison.schema.json",
+  "title": "Decoded laboratory fortress.plan candidate blueprint request",
+  "$comment": "This describes the decoded JSON string in the existing blueprint argument. Candidate wrappers cannot be combined with outer summary, actions or paused_target arguments. The server additionally rejects all duplicate JSON object keys, duplicate candidate keys, requests above 128 KiB, summaries above 4096 UTF-8 bytes, and source programs outside their existing semantic bounds. Current authority, exact source identity, equal normalized original goals and reserve frontiers, the common horizon and aggregate budgets remain runtime checks. A candidate digest is an integrity label, not authority. See docs/LAB_PLAN_COMPARISON.md for the complete compare, select and ordinary commit workflow.",
+  "$defs": {
+    "anchor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "fortress_id",
+        "game_tick",
+        "epoch",
+        "sequence",
+        "state_hash"
+      ],
+      "properties": {
+        "fortress_id": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,19})$",
+          "$comment": "Runtime additionally requires canonical decimal u64 without overflow, matching the existing laboratory anchor."
+        },
+        "game_tick": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        },
+        "epoch": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        },
+        "state_hash": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key"
+      ],
+      "properties": {
+        "key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "summary": {
+          "type": "string",
+          "maxLength": 4096
+        },
+        "actions": {
+          "oneOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            },
+            {
+              "type": "object"
+            }
+          ]
+        },
+        "blueprint": {
+          "type": "object"
+        },
+        "paused_target": {
+          "type": "boolean"
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "actions"
+          ],
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "blueprint"
+                ]
+              },
+              {
+                "required": [
+                  "paused_target"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "required": [
+            "blueprint"
+          ],
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "actions"
+                ]
+              },
+              {
+                "required": [
+                  "paused_target"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "required": [
+            "paused_target"
+          ],
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "actions"
+                ]
+              },
+              {
+                "required": [
+                  "blueprint"
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    }
+  },
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "template",
+        "version",
+        "horizon_ticks",
+        "candidates"
+      ],
+      "properties": {
+        "template": {
+          "const": "compare_candidates"
+        },
+        "version": {
+          "const": 1
+        },
+        "horizon_ticks": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 18446744073709551615
+        },
+        "candidates": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 4,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/candidate"
+          }
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "template",
+        "version",
+        "expected_anchor",
+        "candidate",
+        "candidate_digest"
+      ],
+      "properties": {
+        "template": {
+          "const": "select_candidate"
+        },
+        "version": {
+          "const": 1
+        },
+        "expected_anchor": {
+          "$ref": "#/$defs/anchor"
+        },
+        "candidate": {
+          "$ref": "#/$defs/candidate"
+        },
+        "candidate_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    }
+  ]
+}

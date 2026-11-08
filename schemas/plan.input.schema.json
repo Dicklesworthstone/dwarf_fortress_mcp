@@ -6,5 +6,11 @@
       "$ref": "./dfmcp.schema.json#/$defs/PlanInput"
     }
   ],
-  "title": "fortress.plan input"
+  "title": "fortress.plan input",
+  "$comment": "The root remains the phase-zero design envelope. The laboratory_plan_comparison definition describes decoded blueprint-string values accepted by the default laboratory fortress_plan tool; it is not an alternative top-level tool envelope.",
+  "$defs": {
+    "laboratory_plan_comparison": {
+      "$ref": "./lab_plan_comparison.schema.json"
+    }
+  }
 }

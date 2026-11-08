@@ -39,14 +39,30 @@ impl ForecastBudget {
         horizon_ticks: u64,
     ) -> Result<Self> {
         if horizon_ticks > current.budget.max_game_ticks {
-            return Err(exhausted("forecast horizon exceeds the shared simulated-tick budget"));
+            return Err(exhausted(
+                "forecast horizon exceeds the shared simulated-tick budget",
+            ));
         }
-        let horizon_tick = current.anchor.tick.0.checked_add(horizon_ticks)
+        let horizon_tick = current
+            .anchor
+            .tick
+            .0
+            .checked_add(horizon_ticks)
             .ok_or_else(|| exhausted("forecast horizon exceeds the game-tick identity space"))?;
         let result = Self {
-            current: current.clone(), started, horizon_ticks, horizon_tick,
-            source_work: None, candidates: 0, source_forks: 0,
-            forked_records: 0, forked_bytes: 0, actions: 0, polls: 0, ticks: 0, slices: 0,
+            current: current.clone(),
+            started,
+            horizon_ticks,
+            horizon_tick,
+            source_work: None,
+            candidates: 0,
+            source_forks: 0,
+            forked_records: 0,
+            forked_bytes: 0,
+            actions: 0,
+            polls: 0,
+            ticks: 0,
+            slices: 0,
         };
         result.check(current)?;
         Ok(result)
@@ -60,18 +76,26 @@ impl ForecastBudget {
             || current.request_id != self.current.request_id
             || current.anchor != self.current.anchor
         {
-            return Err(DfmcpError::new(ErrorCode::StaleAnchor,
-                "comparison forecasts must retain one current owner, request and source anchor"));
+            return Err(DfmcpError::new(
+                ErrorCode::StaleAnchor,
+                "comparison forecasts must retain one current owner, request and source anchor",
+            ));
         }
         if current.grants != self.current.grants {
-            return Err(DfmcpError::new(ErrorCode::CapabilityDenied,
-                "comparison authority changed during forecast evaluation"));
+            return Err(DfmcpError::new(
+                ErrorCode::CapabilityDenied,
+                "comparison authority changed during forecast evaluation",
+            ));
         }
         if current.budget != self.current.budget {
-            return Err(exhausted("comparison budget changed during forecast evaluation"));
+            return Err(exhausted(
+                "comparison budget changed during forecast evaluation",
+            ));
         }
         if self.started.elapsed() >= Duration::from_millis(current.budget.max_wall_millis) {
-            return Err(exhausted("comparison forecasts exhausted their shared wall-time budget"));
+            return Err(exhausted(
+                "comparison forecasts exhausted their shared wall-time budget",
+            ));
         }
         Ok(())
     }
@@ -85,8 +109,10 @@ impl ForecastBudget {
     ) -> Result<Value> {
         self.check(current)?;
         if snapshot.anchor() != current.anchor {
-            return Err(DfmcpError::new(ErrorCode::StaleAnchor,
-                "comparison source differs from the owned current anchor"));
+            return Err(DfmcpError::new(
+                ErrorCode::StaleAnchor,
+                "comparison source differs from the owned current anchor",
+            ));
         }
         if let Some(work) = &self.source_work {
             return Ok(work.clone());
@@ -96,19 +122,27 @@ impl ForecastBudget {
         Ok(work)
     }
 
-    fn inspect_source(&self, snapshot: &WorldSnapshot, current: &OperationContext) -> Result<Value> {
+    fn inspect_source(
+        &self,
+        snapshot: &WorldSnapshot,
+        current: &OperationContext,
+    ) -> Result<Value> {
         self.check(current)?;
         let elapsed = self.started.elapsed().as_nanos().div_ceil(1_000_000);
         if elapsed >= u128::from(current.budget.max_wall_millis) {
-            return Err(exhausted("comparison source exhausted its shared wall-time budget"));
+            return Err(exhausted(
+                "comparison source exhausted its shared wall-time budget",
+            ));
         }
         let mut remaining = current.clone();
         remaining.budget.max_wall_millis -= elapsed as u64;
         let work = super::super::query_budget::admit_sources(&[snapshot], &remaining)?;
         self.check(current)?;
         if !snapshot.hash_is_valid() {
-            return Err(DfmcpError::new(ErrorCode::StaleAnchor,
-                "forecast source has an invalid canonical hash"));
+            return Err(DfmcpError::new(
+                ErrorCode::StaleAnchor,
+                "forecast source has an invalid canonical hash",
+            ));
         }
         self.check(current)?;
         Ok(work)
@@ -122,12 +156,16 @@ impl ForecastBudget {
     ) -> Result<()> {
         self.admit_source(snapshot, current)?;
         if plan.anchor != current.anchor {
-            return Err(DfmcpError::new(ErrorCode::StaleAnchor,
-                "candidate plan differs from the comparison source"));
+            return Err(DfmcpError::new(
+                ErrorCode::StaleAnchor,
+                "candidate plan differs from the comparison source",
+            ));
         }
         let actions = self.actions.saturating_add(plan.steps.len() as u64);
         if self.candidates >= MAX_CANDIDATES || actions > u64::from(current.budget.max_actions) {
-            return Err(exhausted("comparison exceeds its aggregate candidate or action-step budget"));
+            return Err(exhausted(
+                "comparison exceeds its aggregate candidate or action-step budget",
+            ));
         }
         self.candidates += 1;
         self.actions = actions;
@@ -140,25 +178,38 @@ impl ForecastBudget {
         current: &OperationContext,
     ) -> Result<()> {
         self.check(current)?;
-        let records = [snapshot.graph.entities.len(), snapshot.graph.edges.len(),
-            snapshot.graph.chunks.len(), snapshot.graph.events.len()]
-            .into_iter().fold(0_u64, |total, count| total.saturating_add(count as u64));
+        let records = [
+            snapshot.graph.entities.len(),
+            snapshot.graph.edges.len(),
+            snapshot.graph.chunks.len(),
+            snapshot.graph.events.len(),
+        ]
+        .into_iter()
+        .fold(0_u64, |total, count| total.saturating_add(count as u64));
         let forked_records = self.forked_records.saturating_add(records);
         if self.source_forks >= MAX_SOURCE_FORKS
             || forked_records > u64::from(current.budget.max_entities)
         {
-            return Err(exhausted("comparison exceeds its aggregate source-fork record budget"));
+            return Err(exhausted(
+                "comparison exceeds its aggregate source-fork record budget",
+            ));
         }
         let work = if snapshot.anchor() == self.current.anchor {
             self.admit_source(snapshot, current)?
         } else {
             self.inspect_source(snapshot, current)?
         };
-        let bytes = work["canonical_bytes"].as_u64().ok_or_else(|| DfmcpError::new(
-            ErrorCode::InternalInvariantViolation, "forecast source byte accounting is missing"))?;
+        let bytes = work["canonical_bytes"].as_u64().ok_or_else(|| {
+            DfmcpError::new(
+                ErrorCode::InternalInvariantViolation,
+                "forecast source byte accounting is missing",
+            )
+        })?;
         let forked_bytes = self.forked_bytes.saturating_add(bytes);
         if forked_bytes > current.budget.max_bytes {
-            return Err(exhausted("comparison exceeds its aggregate forked-source byte budget"));
+            return Err(exhausted(
+                "comparison exceeds its aggregate forked-source byte budget",
+            ));
         }
         self.source_forks += 1;
         self.forked_records = forked_records;
@@ -168,10 +219,14 @@ impl ForecastBudget {
 
     pub(super) fn before_advance(&mut self, ticks: u64, current: &OperationContext) -> Result<()> {
         self.check(current)?;
-        let total = self.ticks.checked_add(ticks)
+        let total = self
+            .ticks
+            .checked_add(ticks)
             .ok_or_else(|| exhausted("comparison simulated-tick counter exhausted"))?;
         if total > current.budget.max_game_ticks || self.slices >= super::MAX_FORECAST_SLICES {
-            return Err(exhausted("comparison exceeds its aggregate simulated-tick or slice budget"));
+            return Err(exhausted(
+                "comparison exceeds its aggregate simulated-tick or slice budget",
+            ));
         }
         self.slices += 1;
         Ok(())
@@ -185,16 +240,23 @@ impl ForecastBudget {
 
     pub(super) fn before_poll(&mut self, current: &OperationContext) -> Result<()> {
         self.check(current)?;
-        let maximum = u64::from(current.budget.max_actions).saturating_mul(super::MAX_FORECAST_SLICES);
+        let maximum =
+            u64::from(current.budget.max_actions).saturating_mul(super::MAX_FORECAST_SLICES);
         if self.polls >= maximum {
-            return Err(exhausted("comparison exceeds its aggregate action-poll budget"));
+            return Err(exhausted(
+                "comparison exceeds its aggregate action-poll budget",
+            ));
         }
         self.polls += 1;
         Ok(())
     }
 
-    pub(super) const fn horizon_tick(&self) -> u64 { self.horizon_tick }
-    pub(super) const fn horizon_ticks(&self) -> u64 { self.horizon_ticks }
+    pub(super) const fn horizon_tick(&self) -> u64 {
+        self.horizon_tick
+    }
+    pub(super) const fn horizon_ticks(&self) -> u64 {
+        self.horizon_ticks
+    }
 
     pub(crate) fn work_json(&self) -> Value {
         json!({

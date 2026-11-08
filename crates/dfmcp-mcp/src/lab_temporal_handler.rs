@@ -1,14 +1,12 @@
-//! Build the complete baseline response while the laboratory session is owned.
-//! The publisher is pure and runs before any retained baseline root changes.
+//! Capture current work while the laboratory session is owned.
+//! Temporal queries and candidate planning reuse this pure publication input.
 
 use super::*;
 
-pub(super) fn execute(
+pub(super) fn projection(
     session: &LabSession,
     current: &OperationContext,
-    request: &temporal_query::Request,
-) -> Result<String> {
-    let started = std::time::Instant::now();
+) -> Result<temporal_response::TemporalResponseProjection> {
     let action_ids = session
         .open_actions
         .iter()
@@ -61,7 +59,7 @@ pub(super) fn execute(
     active_work["actions"] = json!(actions);
     active_work["obligations"] = json!(obligations);
     active_work["untracked_work"] = untracked_work_json(session);
-    let projection = temporal_response::TemporalResponseProjection {
+    Ok(temporal_response::TemporalResponseProjection {
         session_id: session.session_id.to_string(),
         request_id: current.request_id.to_string(),
         anchor: anchor_json(&current.anchor),
@@ -69,7 +67,16 @@ pub(super) fn execute(
         budget: current.budget,
         active_work,
         objectives: objectives_json(session),
-    };
+    })
+}
+
+pub(super) fn execute(
+    session: &LabSession,
+    current: &OperationContext,
+    request: &temporal_query::Request,
+) -> Result<String> {
+    let started = std::time::Instant::now();
+    let projection = projection(session, current)?;
     let result_bytes = projection.result_byte_budget()?;
     let spent_millis = started.elapsed().as_nanos().div_ceil(1_000_000);
     if spent_millis >= u128::from(current.budget.max_wall_millis) {

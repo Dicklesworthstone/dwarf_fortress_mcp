@@ -57,7 +57,13 @@ pub(super) fn forecast_plan_bounded(
     budget: &mut ForecastBudget,
 ) -> Result<serde_json::Value> {
     budget.begin_candidate(adapter.snapshot(), plan, template)?;
-    let result = forecast_inner(adapter, plan, template, reserve_until_tick, Some(&mut *budget));
+    let result = forecast_inner(
+        adapter,
+        plan,
+        template,
+        reserve_until_tick,
+        Some(&mut *budget),
+    );
     // Model infeasibility can return early, but cannot outrun the request's
     // deadline or leave its current authority unchecked at the boundary.
     budget.check(template)?;
@@ -73,7 +79,12 @@ fn unavailable(reason: &DfmcpError) -> serde_json::Value {
 }
 
 fn model_failure(error: DfmcpError, bounded: bool) -> Result<serde_json::Value> {
-    if bounded && matches!(error.code, ErrorCode::BudgetExceeded | ErrorCode::CancellationRequested) {
+    if bounded
+        && matches!(
+            error.code,
+            ErrorCode::BudgetExceeded | ErrorCode::CancellationRequested
+        )
+    {
         Err(error)
     } else {
         Ok(unavailable(&error))
@@ -107,10 +118,13 @@ fn forecast_inner(
     if reserve_until_tick.is_some_and(|until| {
         until <= start.0 || until - start.0 > dfmcp_intent::effects::MAX_DEFAULT_OBLIGATION_TICKS
     }) {
-        return model_failure(DfmcpError::new(
-            dfmcp_core::ErrorCode::InvalidRequest,
-            "reserve forecast requires a future tick within one bounded game year",
-        ), budget.is_some());
+        return model_failure(
+            DfmcpError::new(
+                dfmcp_core::ErrorCode::InvalidRequest,
+                "reserve forecast requires a future tick within one bounded game year",
+            ),
+            budget.is_some(),
+        );
     }
     let prepared = match fork.prepare(plan, &context(&fork)) {
         Ok(prepared) => prepared,
@@ -168,7 +182,9 @@ fn forecast_inner(
     } else {
         MAX_FORECAST_SLICES
     };
-    let resolution_span = budget.as_deref().map_or(span, ForecastBudget::horizon_ticks);
+    let resolution_span = budget
+        .as_deref()
+        .map_or(span, ForecastBudget::horizon_ticks);
     let slice = resolution_span
         .div_ceil(work_slices)
         .max(dfmcp_intent::effects::DEFAULT_POLL_INTERVAL_TICKS);
@@ -301,7 +317,9 @@ fn forecast_inner(
                     }
                     match (goal_truth(&future), work_quiescent(&future)) {
                         (Ok(truth), Ok(quiet)) => reserve_frontier(&future, truth, quiet),
-                        (Err(error), _) | (_, Err(error)) => model_failure(error, budget.is_some())?,
+                        (Err(error), _) | (_, Err(error)) => {
+                            model_failure(error, budget.is_some())?
+                        }
                     }
                 }
                 Err(error) => model_failure(error, budget.is_some())?,

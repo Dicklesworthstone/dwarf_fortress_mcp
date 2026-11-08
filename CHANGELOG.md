@@ -1,15 +1,21 @@
 # Changelog
 
-## Unreleased — Add bounded same-objective candidate planning
+## Unreleased — Compare laboratory alternatives and select exact sources
 
-- Add the laboratory candidate-comparison core: closed two-to-four candidate requests, canonical
-  source-bound selection, exact original-goal/reserve comparison, deterministic rankings, and
-  explicit unavailable prediction rows.
-- Share source, fork, action, simulated-tick, polling, and wall-time limits across discarded
-  forecast forks while retaining existing single-plan forecast entrypoints.
-- Add 13 comparison and six bounded-forecast test groups. The pre-correction isolated execution
-  passed 31 of 34 selected tests; all three failures identified the now-corrected decimal
-  FortressId parser. The environment outage prevented its rerun. Public routing follows next.
+- Add bounded two-to-four candidate comparisons through the existing `fortress.plan`
+  blueprint field. Require the same original objective/reserve frontier and report
+  real compiler/planner forecasts, explicit unavailable evidence and deterministic rankings.
+- Share source, fork, action, simulated-tick, poll and wall-time bounds across the
+  complete request while preserving ordinary single-plan forecast behavior.
+- Bind selection to the exact source anchor and normalized candidate, prepare a
+  fresh ordinary plan, and accept the entire response before replacing pending state.
+  Preserve current plans, query catalogs and nonfinal recovered work without resampling.
+- Add schema and usage examples, 13 comparison tests, six bounded-forecast tests,
+  and nine public workflow tests. Correct canonical decimal fortress-ID selection,
+  propagate remaining wall time and qualify retained recovery coverage.
+- Validate the final integration: 64/64 selected Rust tests, six valid/36 invalid
+  schema cases, the documented example and formatting/integrity checks. Exact-source
+  laboratory execution does not establish transport, native or full release qualification.
 
 ## Unreleased — Expose laboratory watch workflows and stateless preflight
 

@@ -140,6 +140,13 @@ mod plan_forecast;
 use plan_forecast::forecast_plan;
 #[path = "lab_plan_comparison.rs"]
 mod plan_comparison;
+#[path = "lab_plan_comparison_handler.rs"]
+mod plan_comparison_handler;
+#[cfg(test)]
+#[path = "lab_plan_comparison_mcp_tests.rs"]
+mod plan_comparison_mcp_tests;
+#[path = "lab_plan_comparison_response.rs"]
+mod plan_comparison_response;
 
 #[path = "lab_progress.rs"]
 mod lab_progress;
@@ -3438,7 +3445,75 @@ pub(crate) fn plan_with_actions(
 
 /// `fortress.plan` over every request form: pause/resume, explicit semantic
 /// actions, or a blueprint objective the planner decomposes into steps.
+/// Candidate selection returns its complete packet before changing pending state.
+/// The facade must return a published packet unchanged.
+pub(crate) enum PlanPublication {
+    Pending(String),
+    Published(String),
+}
+
 pub(crate) fn plan_request(
+    session_id: Option<String>,
+    summary: Option<String>,
+    paused_target: Option<bool>,
+    actions: Option<String>,
+    blueprint: Option<String>,
+    production: Option<String>,
+) -> String {
+    match plan_request_publication(
+        session_id,
+        summary,
+        paused_target,
+        actions,
+        blueprint,
+        production,
+        std::time::Instant::now(),
+    ) {
+        PlanPublication::Pending(output) | PlanPublication::Published(output) => output,
+    }
+}
+
+pub(crate) fn plan_request_publication(
+    session_id: Option<String>,
+    summary: Option<String>,
+    paused_target: Option<bool>,
+    actions: Option<String>,
+    blueprint: Option<String>,
+    production: Option<String>,
+    started: std::time::Instant,
+) -> PlanPublication {
+    let parsed = blueprint.as_deref().map(plan_comparison::parse).transpose();
+    let request = match parsed {
+        Ok(request) => request.flatten(),
+        Err(error) => {
+            return PlanPublication::Pending(dfmcp_error_payload("fortress.plan", &error));
+        }
+    };
+    if let Some(request) = request {
+        if summary.is_some() || paused_target.is_some() || actions.is_some() || production.is_some()
+        {
+            return PlanPublication::Pending(coded_error_payload(
+                "fortress.plan",
+                ErrorCode::InvalidRequest,
+                "candidate wrappers contain their complete sources; do not combine them with outer plan fields",
+            ));
+        }
+        return match plan_comparison_handler::execute(session_id, &request, started) {
+            Ok(output) => PlanPublication::Published(output),
+            Err(error) => PlanPublication::Pending(dfmcp_error_payload("fortress.plan", &error)),
+        };
+    }
+    PlanPublication::Pending(plan_request_legacy(
+        session_id,
+        summary,
+        paused_target,
+        actions,
+        blueprint,
+        production,
+    ))
+}
+
+fn plan_request_legacy(
     session_id: Option<String>,
     summary: Option<String>,
     paused_target: Option<bool>,

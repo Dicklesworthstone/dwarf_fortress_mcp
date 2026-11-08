@@ -27,19 +27,36 @@ use super::plan_forecast::{ForecastBudget, forecast_plan_bounded};
 const MAX_REQUEST_BYTES: usize = 128 * 1024;
 const MAX_CANDIDATES: usize = 4;
 const MAX_KEY_BYTES: usize = 64;
-const POLICY: &str = "complete_predictions_then_risk_checkpoint_completion_tick_action_count_key_v1";
+const POLICY: &str =
+    "complete_predictions_then_risk_checkpoint_completion_tick_action_count_key_v1";
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct Candidate {
     key: String,
-    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
     summary: Option<String>,
-    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
     actions: Option<Value>,
-    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
     blueprint: Option<Value>,
-    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
     paused_target: Option<bool>,
 }
 
@@ -111,10 +128,15 @@ fn exhausted(message: &str) -> DfmcpError {
 /// or blueprint JSON: duplicate keys must not disappear in a Value round trip.
 pub(super) fn parse(raw: &str) -> Result<Option<Request>> {
     if raw.len() > MAX_REQUEST_BYTES {
-        return Err(exhausted("candidate request exceeds its explicit byte bound"));
+        return Err(exhausted(
+            "candidate request exceeds its explicit byte bound",
+        ));
     }
     let selected = serde_json::from_str::<Value>(raw).ok().is_some_and(|s| {
-        matches!(s["template"].as_str(), Some("compare_candidates" | "select_candidate"))
+        matches!(
+            s["template"].as_str(),
+            Some("compare_candidates" | "select_candidate")
+        )
     });
     if !selected {
         return Ok(None);
@@ -131,10 +153,14 @@ pub(super) fn parse(raw: &str) -> Result<Option<Request>> {
         } => {
             version_one(version)?;
             if horizon_ticks == 0 {
-                return Err(invalid("candidate comparison needs a nonzero common horizon_ticks"));
+                return Err(invalid(
+                    "candidate comparison needs a nonzero common horizon_ticks",
+                ));
             }
             if !(2..=MAX_CANDIDATES).contains(&candidates.len()) {
-                return Err(invalid("candidate comparison requires two to four alternatives"));
+                return Err(invalid(
+                    "candidate comparison requires two to four alternatives",
+                ));
             }
             let mut keys = BTreeSet::new();
             for candidate in &candidates {
@@ -160,7 +186,9 @@ pub(super) fn parse(raw: &str) -> Result<Option<Request>> {
                 || !lower_hex(&expected_anchor.state_hash, 64)
                 || !lower_hex(&candidate_digest, 64)
             {
-                return Err(invalid("selection requires exact canonical anchor and digest strings"));
+                return Err(invalid(
+                    "selection requires exact canonical anchor and digest strings",
+                ));
             }
             Ok(Some(Request::Select(Selection {
                 expected_anchor,
@@ -181,37 +209,63 @@ fn version_one(version: u32) -> Result<()> {
 
 fn lower_hex(value: &str, length: usize) -> bool {
     value.len() == length
-        && value.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
 fn canonical_u64(value: &str) -> bool {
     value.len() <= 20
-        && value.parse::<u64>().is_ok_and(|number| number.to_string() == value)
+        && value
+            .parse::<u64>()
+            .is_ok_and(|number| number.to_string() == value)
 }
 
 impl Candidate {
     fn validate(&self) -> Result<()> {
         if self.key.is_empty()
             || self.key.len() > MAX_KEY_BYTES
-            || !self.key.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-'))
+            || !self
+                .key
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-'))
         {
-            return Err(invalid("candidate key must contain 1..64 ASCII letters, digits, '_' or '-'"));
+            return Err(invalid(
+                "candidate key must contain 1..64 ASCII letters, digits, '_' or '-'",
+            ));
         }
-        if self.summary.as_ref().is_some_and(|s| s.len() > super::MAX_SUMMARY_BYTES) {
-            return Err(exhausted("candidate summary exceeds its explicit byte bound"));
+        if self
+            .summary
+            .as_ref()
+            .is_some_and(|s| s.len() > super::MAX_SUMMARY_BYTES)
+        {
+            return Err(exhausted(
+                "candidate summary exceeds its explicit byte bound",
+            ));
         }
-        if [self.actions.is_some(), self.blueprint.is_some(), self.paused_target.is_some()]
-            .into_iter()
-            .filter(|present| *present)
-            .count()
+        if [
+            self.actions.is_some(),
+            self.blueprint.is_some(),
+            self.paused_target.is_some(),
+        ]
+        .into_iter()
+        .filter(|present| *present)
+        .count()
             != 1
         {
-            return Err(invalid("each candidate names exactly one of actions, blueprint or paused_target"));
+            return Err(invalid(
+                "each candidate names exactly one of actions, blueprint or paused_target",
+            ));
         }
-        if self.actions.as_ref().is_some_and(|v| !v.is_array() && !v.is_object())
+        if self
+            .actions
+            .as_ref()
+            .is_some_and(|v| !v.is_array() && !v.is_object())
             || self.blueprint.as_ref().is_some_and(|v| !v.is_object())
         {
-            return Err(invalid("candidate actions must be a JSON array or workflow object; blueprint must be an object"));
+            return Err(invalid(
+                "candidate actions must be a JSON array or workflow object; blueprint must be an object",
+            ));
         }
         Ok(())
     }
@@ -224,7 +278,12 @@ impl Candidate {
         if let Some(paused_target) = self.paused_target {
             return Ok(PlanSource::Pause {
                 summary: self.summary.clone().unwrap_or_else(|| {
-                    if paused_target { "pause the simulation" } else { "unpause the simulation" }.to_owned()
+                    if paused_target {
+                        "pause the simulation"
+                    } else {
+                        "unpause the simulation"
+                    }
+                    .to_owned()
                 }),
                 paused_target,
             });
@@ -232,29 +291,43 @@ impl Candidate {
         if let Some(actions) = &self.actions {
             let raw = actions.to_string();
             return Ok(PlanSource::Actions {
-                summary: self.summary.clone().unwrap_or_else(|| super::describe_actions(&raw)),
+                summary: self
+                    .summary
+                    .clone()
+                    .unwrap_or_else(|| super::describe_actions(&raw)),
                 raw,
             });
         }
-        let blueprint = self.blueprint.as_ref().ok_or_else(|| invalid("candidate source is missing"))?;
+        let blueprint = self
+            .blueprint
+            .as_ref()
+            .ok_or_else(|| invalid("candidate source is missing"))?;
         let raw = blueprint.to_string();
         if matches!(
             blueprint["template"].as_str(),
             Some("compare_candidates" | "select_candidate" | "continue_goal" | "civilian_release")
         ) {
-            return Err(invalid("nested comparisons, selections, retained-goal continuation and civilian release are not snapshot-only candidate sources"));
+            return Err(invalid(
+                "nested comparisons, selections, retained-goal continuation and civilian release are not snapshot-only candidate sources",
+            ));
         }
         if crate::lab_world::is_production_objective(&raw) {
             let request = crate::lab_world::ProductionRequest::parse_current(&raw)?;
             return Ok(PlanSource::Production {
-                summary: self.summary.clone().unwrap_or_else(|| "meet production quotas".to_owned()),
+                summary: self
+                    .summary
+                    .clone()
+                    .unwrap_or_else(|| "meet production quotas".to_owned()),
                 raw: request.canonical_json(),
             });
         }
         let summary = self.summary.clone().unwrap_or_default();
         if super::connected_room::is_connected_room(&raw) {
             let request = super::connected_room::ConnectedRoomRequest::parse_current(&raw)?;
-            return Ok(PlanSource::ConnectedRoom { summary, raw: request.canonical_json() });
+            return Ok(PlanSource::ConnectedRoom {
+                summary,
+                raw: request.canonical_json(),
+            });
         }
         let raw = if super::room_provisioning::is_provisioned_room(&raw) {
             super::room_provisioning::ProvisionedRoomRequest::parse_current(&raw)?.canonical_json()
@@ -266,24 +339,37 @@ impl Candidate {
 
     fn normalized(&self, source: &PlanSource) -> Result<Self> {
         let mut candidate = Self {
-            key: self.key.clone(), summary: None, actions: None, blueprint: None, paused_target: None,
+            key: self.key.clone(),
+            summary: None,
+            actions: None,
+            blueprint: None,
+            paused_target: None,
         };
         match source {
-            PlanSource::Pause { summary, paused_target } => {
+            PlanSource::Pause {
+                summary,
+                paused_target,
+            } => {
                 candidate.summary = Some(summary.clone());
                 candidate.paused_target = Some(*paused_target);
             }
             PlanSource::Actions { summary, raw } => {
                 candidate.summary = Some(summary.clone());
-                candidate.actions = Some(serde_json::from_str(raw).map_err(|e| invalid(e.to_string()))?);
+                candidate.actions =
+                    Some(serde_json::from_str(raw).map_err(|e| invalid(e.to_string()))?);
             }
             PlanSource::Blueprint { summary, raw }
             | PlanSource::Production { summary, raw }
             | PlanSource::ConnectedRoom { summary, raw } => {
                 candidate.summary = Some(summary.clone());
-                candidate.blueprint = Some(serde_json::from_str(raw).map_err(|e| invalid(e.to_string()))?);
+                candidate.blueprint =
+                    Some(serde_json::from_str(raw).map_err(|e| invalid(e.to_string()))?);
             }
-            _ => return Err(invalid("candidate normalization encountered an owned-history source")),
+            _ => {
+                return Err(invalid(
+                    "candidate normalization encountered an owned-history source",
+                ));
+            }
         }
         Ok(candidate)
     }
@@ -294,14 +380,20 @@ fn authorize(snapshot: &WorldSnapshot, context: &OperationContext) -> Result<()>
         context.authorize(capability, RiskTier::ReadOnly, &[], None)?;
     }
     if snapshot.anchor() != context.anchor {
-        return Err(DfmcpError::new(ErrorCode::StaleAnchor, "candidate planning requires the exact current source anchor").retryable(true));
+        return Err(DfmcpError::new(
+            ErrorCode::StaleAnchor,
+            "candidate planning requires the exact current source anchor",
+        )
+        .retryable(true));
     }
     Ok(())
 }
 
 fn check_wall(context: &OperationContext, started: Instant) -> Result<()> {
     if started.elapsed() >= Duration::from_millis(context.budget.max_wall_millis) {
-        return Err(exhausted("candidate comparison exceeded its aggregate wall-time allowance"));
+        return Err(exhausted(
+            "candidate comparison exceeded its aggregate wall-time allowance",
+        ));
     }
     // Cancellation and grant expiry are current-context authority, including
     // the intervals between otherwise pure compilers and forecasts.
@@ -314,7 +406,10 @@ fn candidate_digest(snapshot: &WorldSnapshot, candidate: &Candidate) -> Result<S
         "anchor": super::anchor_json(&snapshot.anchor()),
         "candidate": candidate,
     });
-    Ok(Digest32::of_bytes(&serde_json::to_vec(&source).map_err(|e| invalid(e.to_string()))?).to_hex())
+    Ok(
+        Digest32::of_bytes(&serde_json::to_vec(&source).map_err(|e| invalid(e.to_string()))?)
+            .to_hex(),
+    )
 }
 
 /// Check source freshness and content identity, then return an original source
@@ -325,11 +420,18 @@ pub(super) fn selected_source(
     current: &WorldSnapshot,
     context: &OperationContext,
 ) -> Result<Option<PlanSource>> {
-    let Request::Select(selection) = request else { return Ok(None) };
+    let Request::Select(selection) = request else {
+        return Ok(None);
+    };
     authorize(current, context)?;
-    let expected = serde_json::to_value(&selection.expected_anchor).map_err(|e| invalid(e.to_string()))?;
+    let expected =
+        serde_json::to_value(&selection.expected_anchor).map_err(|e| invalid(e.to_string()))?;
     if expected != super::anchor_json(&current.anchor()) {
-        return Err(DfmcpError::new(ErrorCode::StaleAnchor, "selected candidate's exact source anchor is no longer current; compare again").retryable(true));
+        return Err(DfmcpError::new(
+            ErrorCode::StaleAnchor,
+            "selected candidate's exact source anchor is no longer current; compare again",
+        )
+        .retryable(true));
     }
     let source = selection.candidate.source()?;
     let normalized = selection.candidate.normalized(&source)?;
@@ -337,7 +439,9 @@ pub(super) fn selected_source(
         != serde_json::to_value(&normalized).map_err(|e| invalid(e.to_string()))?
         || candidate_digest(current, &normalized)? != selection.candidate_digest
     {
-        return Err(invalid("selected candidate is not the exact normalized source bound by its digest"));
+        return Err(invalid(
+            "selected candidate is not the exact normalized source bound by its digest",
+        ));
     }
     Ok(Some(source))
 }
@@ -367,7 +471,11 @@ fn unavailable(key: &str, stage: &str, error: &DfmcpError) -> Value {
     })
 }
 
-fn selection_step(snapshot: &WorldSnapshot, context: &OperationContext, candidate: &Candidate) -> Result<Value> {
+fn selection_step(
+    snapshot: &WorldSnapshot,
+    context: &OperationContext,
+    candidate: &Candidate,
+) -> Result<Value> {
     let wrapper = json!({
         "template": "select_candidate", "version": 1,
         "expected_anchor": super::anchor_json(&snapshot.anchor()),
@@ -387,12 +495,24 @@ fn selection_step(snapshot: &WorldSnapshot, context: &OperationContext, candidat
 fn compact_prediction(prediction: &Value) -> Value {
     let mut compact = serde_json::Map::new();
     for key in [
-        "available", "reason", "from_tick", "horizon_tick", "predicted_complete",
-        "predicted_completion_tick", "predicted_actions_complete",
-        "predicted_actions_completion_tick", "predicted_goal_complete", "predicted_goal_truth",
-        "predicted_physical_quiescent", "predicted_frontier_tick", "resolution_ticks",
-        "blocked_by_pause", "simulation_horizon_tick", "simulation_horizon_reached",
-        "simulation_horizon_truncated", "reserve_forecast",
+        "available",
+        "reason",
+        "from_tick",
+        "horizon_tick",
+        "predicted_complete",
+        "predicted_completion_tick",
+        "predicted_actions_complete",
+        "predicted_actions_completion_tick",
+        "predicted_goal_complete",
+        "predicted_goal_truth",
+        "predicted_physical_quiescent",
+        "predicted_frontier_tick",
+        "resolution_ticks",
+        "blocked_by_pause",
+        "simulation_horizon_tick",
+        "simulation_horizon_reached",
+        "simulation_horizon_truncated",
+        "reserve_forecast",
     ] {
         if let Some(value) = prediction.get(key) {
             compact.insert(key.to_owned(), value.clone());
@@ -430,7 +550,11 @@ pub(super) fn compare(
         "anchor": super::anchor_json(&snapshot.anchor()),
         "candidates": candidates,
     });
-    let intent_id = IntentId::new(Digest32::of_bytes(identity.to_string().as_bytes()).first_u128().max(1));
+    let intent_id = IntentId::new(
+        Digest32::of_bytes(identity.to_string().as_bytes())
+            .first_u128()
+            .max(1),
+    );
     let mut rows = Vec::with_capacity(candidates.len());
     let mut compiled = Vec::with_capacity(candidates.len());
     let mut common_goal: Option<Predicate> = None;
@@ -442,7 +566,11 @@ pub(super) fn compare(
             let normalized = candidate.normalized(&source)?;
             let reserve_until = reserve_until(&source)?;
             let (intent, _) = source.compile(intent_id, snapshot)?;
-            Ok(Compiled { candidate: normalized, intent, reserve_until })
+            Ok(Compiled {
+                candidate: normalized,
+                intent,
+                reserve_until,
+            })
         });
         let value = match result {
             Ok(value) => value,
@@ -452,16 +580,22 @@ pub(super) fn compare(
             }
         };
         let goal = value.intent.terminal_condition.normalized();
-        if common_goal.as_ref().is_some_and(|existing| existing != &goal)
+        if common_goal
+            .as_ref()
+            .is_some_and(|existing| existing != &goal)
             || common_reserve.is_some_and(|existing| existing != value.reserve_until)
         {
-            return Err(invalid("all successfully compiled candidates must have the same normalized original terminal predicate and reserve frontier"));
+            return Err(invalid(
+                "all successfully compiled candidates must have the same normalized original terminal predicate and reserve frontier",
+            ));
         }
         common_goal = Some(goal);
         common_reserve = Some(value.reserve_until);
         total_actions = total_actions.saturating_add(value.intent.requested_actions.len());
         if total_actions > context.budget.max_actions as usize {
-            return Err(exhausted("candidate compilation exceeds the aggregate action allowance"));
+            return Err(exhausted(
+                "candidate compilation exceeds the aggregate action allowance",
+            ));
         }
         compiled.push(value);
     }
@@ -492,15 +626,27 @@ pub(super) fn compare(
         let reserve = &prediction["reserve_forecast"];
         let reserve_known = candidate.reserve_until.is_none()
             || (reserve["available"] == true
-                && matches!(reserve["predicted_goal_truth"].as_str(), Some("true" | "false")));
+                && matches!(
+                    reserve["predicted_goal_truth"].as_str(),
+                    Some("true" | "false")
+                ));
         let reserve_complete = candidate.reserve_until.is_none()
             || (reserve["available"] == true && reserve["predicted_goal_truth"] == "true");
         let complete = available && prediction["predicted_complete"] == true && reserve_complete;
-        let known_goal = matches!(prediction["predicted_goal_truth"].as_str(), Some("true" | "false"));
+        let known_goal = matches!(
+            prediction["predicted_goal_truth"].as_str(),
+            Some("true" | "false")
+        );
         evidence_complete &= available && known_goal && reserve_known;
         let completion_tick = prediction["predicted_completion_tick"].as_u64();
         if complete && let Some(completion_tick) = completion_tick {
-            ranking.push((plan.max_risk, plan.requires_checkpoint, completion_tick, plan.steps.len(), candidate.candidate.key.clone()));
+            ranking.push((
+                plan.max_risk,
+                plan.requires_checkpoint,
+                completion_tick,
+                plan.steps.len(),
+                candidate.candidate.key.clone(),
+            ));
         }
         rows.push(json!({
             "key": candidate.candidate.key,
@@ -520,7 +666,9 @@ pub(super) fn compare(
     check_wall(context, started)?;
     rows.sort_by(|left, right| left["key"].as_str().cmp(&right["key"].as_str()));
     ranking.sort();
-    let recommendation = evidence_complete.then(|| ranking.first().map(|row| row.4.clone())).flatten();
+    let recommendation = evidence_complete
+        .then(|| ranking.first().map(|row| row.4.clone()))
+        .flatten();
     let reason = if !evidence_complete {
         "at least one candidate lacks a complete comparable prediction; no recommendation is justified"
     } else if recommendation.is_none() {
@@ -528,7 +676,9 @@ pub(super) fn compare(
     } else {
         "among complete predictions, minimize risk, checkpoint burden, completion tick, action count, then lexical key"
     };
-    let goal_digest = common_goal.as_ref().map(|goal| Digest32::of_bytes(&goal.canonical_bytes()).to_hex());
+    let goal_digest = common_goal
+        .as_ref()
+        .map(|goal| Digest32::of_bytes(&goal.canonical_bytes()).to_hex());
     Ok(json!({
         "ok": true,
         "schema": "dfmcp.plan-comparison/1",
@@ -539,7 +689,7 @@ pub(super) fn compare(
         "anchor": super::anchor_json(&snapshot.anchor()),
         "epistemic_state": "predicted",
         "method": "same_original_goal_on_discarded_laboratory_forks",
-        "assumptions": "no other agent acts; deterministic laboratory effects; deferred work dispatches at the common sampling cadence; predictions are not evidence",
+        "assumptions": "no other agent acts; deterministic laboratory effects; only this candidate's deferred chain dispatches at the common cadence while physical world jobs advance; other retained plans' deferred actions do not dispatch; predictions are not effect evidence",
         "horizon_ticks": comparison.horizon_ticks,
         "original_terminal_condition": common_goal.as_ref().map(|goal| format!("{goal:?}")),
         "original_terminal_digest": goal_digest,
@@ -568,22 +718,43 @@ impl<'de> Deserialize<'de> for UniqueValue {
             fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 f.write_str("JSON with distinct object keys")
             }
-            fn visit_bool<E: serde::de::Error>(self, value: bool) -> std::result::Result<Self::Value, E> {
+            fn visit_bool<E: serde::de::Error>(
+                self,
+                value: bool,
+            ) -> std::result::Result<Self::Value, E> {
                 Ok(UniqueValue(Value::Bool(value)))
             }
-            fn visit_i64<E: serde::de::Error>(self, value: i64) -> std::result::Result<Self::Value, E> {
+            fn visit_i64<E: serde::de::Error>(
+                self,
+                value: i64,
+            ) -> std::result::Result<Self::Value, E> {
                 Ok(UniqueValue(value.into()))
             }
-            fn visit_u64<E: serde::de::Error>(self, value: u64) -> std::result::Result<Self::Value, E> {
+            fn visit_u64<E: serde::de::Error>(
+                self,
+                value: u64,
+            ) -> std::result::Result<Self::Value, E> {
                 Ok(UniqueValue(value.into()))
             }
-            fn visit_f64<E: serde::de::Error>(self, value: f64) -> std::result::Result<Self::Value, E> {
-                serde_json::Number::from_f64(value).map(Value::Number).map(UniqueValue).ok_or_else(|| E::custom("nonfinite JSON number"))
+            fn visit_f64<E: serde::de::Error>(
+                self,
+                value: f64,
+            ) -> std::result::Result<Self::Value, E> {
+                serde_json::Number::from_f64(value)
+                    .map(Value::Number)
+                    .map(UniqueValue)
+                    .ok_or_else(|| E::custom("nonfinite JSON number"))
             }
-            fn visit_str<E: serde::de::Error>(self, value: &str) -> std::result::Result<Self::Value, E> {
+            fn visit_str<E: serde::de::Error>(
+                self,
+                value: &str,
+            ) -> std::result::Result<Self::Value, E> {
                 Ok(UniqueValue(Value::String(value.to_owned())))
             }
-            fn visit_string<E: serde::de::Error>(self, value: String) -> std::result::Result<Self::Value, E> {
+            fn visit_string<E: serde::de::Error>(
+                self,
+                value: String,
+            ) -> std::result::Result<Self::Value, E> {
                 Ok(UniqueValue(Value::String(value)))
             }
             fn visit_none<E: serde::de::Error>(self) -> std::result::Result<Self::Value, E> {
@@ -592,14 +763,20 @@ impl<'de> Deserialize<'de> for UniqueValue {
             fn visit_unit<E: serde::de::Error>(self) -> std::result::Result<Self::Value, E> {
                 Ok(UniqueValue(Value::Null))
             }
-            fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> std::result::Result<Self::Value, A::Error> {
+            fn visit_seq<A: SeqAccess<'de>>(
+                self,
+                mut seq: A,
+            ) -> std::result::Result<Self::Value, A::Error> {
                 let mut values = Vec::new();
                 while let Some(value) = seq.next_element::<UniqueValue>()? {
                     values.push(value.0);
                 }
                 Ok(UniqueValue(Value::Array(values)))
             }
-            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> std::result::Result<Self::Value, A::Error> {
+            fn visit_map<A: MapAccess<'de>>(
+                self,
+                mut map: A,
+            ) -> std::result::Result<Self::Value, A::Error> {
                 let mut values = serde_json::Map::new();
                 while let Some((key, value)) = map.next_entry::<String, UniqueValue>()? {
                     if values.insert(key, value.0).is_some() {
