@@ -28,6 +28,7 @@ pub mod goal_monitor;
 pub mod goal_projection;
 mod inventory_baseline;
 mod inventory_objective;
+mod stock_target;
 pub mod store;
 pub use goal_history::{
     DurableWorkOrderGoalMonitor, GoalHistoryStore, PrivateGoalHistoryStore,
@@ -45,6 +46,7 @@ pub use inventory_objective::{
     ObservedInventoryGoal, ObservedInventoryIncreaseObjective, ObservedInventoryObjective,
     RetainedOrderObjective,
 };
+pub use stock_target::StockTargetAssessment;
 use store::{Association, MAX_ASSOCIATIONS, MAX_STORE_BYTES};
 pub use store::{AssociationStore, PrivateAssociationStore, open_private_association_store};
 

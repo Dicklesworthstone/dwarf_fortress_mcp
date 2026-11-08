@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased — Qualified native stock-target sizing
+
+- Derive one bounded furniture deficit from a complete independently qualified
+  original operations census, preserving a typed no-work result when the target
+  already holds and refusing oversized or competing-production proposals.
+- Seal the original count, target, limit and source lineage for exact-census
+  revalidation; never resize a retained amount or credit future output.
+- Bound all generated inventory-projection edges before publication. Actual
+  latest-nightly adapter tests pass 18 new stock-target and six existing
+  inventory-baseline cases. Combined MCP integration follows separately.
+
 ## Unreleased — Complete workshops in one bounded MCP session
 
 - Integrate the original Carpenter clock into the existing eleven-tool Workshop

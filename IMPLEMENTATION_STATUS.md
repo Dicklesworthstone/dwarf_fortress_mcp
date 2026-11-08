@@ -1,5 +1,32 @@
 # Implementation Status
 
+## Unreleased — Derive finite native furniture deficits from qualified stock
+
+Added `InventoryBaselineProjection::stock_target` and immutable
+`StockTargetAssessment` for `df-native-stock-target-3m9`. One complete,
+independently qualified operations/1.3 Item census at the original paused tick
+now sizes a furniture deficit instead of requiring a caller-supplied count.
+A met target returns no order or growth objective; a deficit above the selected
+1–100 order limit refuses without clamping. Positive deficits also refuse
+matching native production jobs and unknown-output reactions. The complete
+source, target, bound, canonical anchor and native allocator frontier are sealed
+in deterministic assessment bytes. Fresh revalidation requires that exact
+original census and cannot resize the amount or renew the goal.
+
+The shared inventory projection now counts every generated attachment,
+job-holder, item-container and item-holder edge before graph publication,
+accepting the existing 8,192-edge bound and refusing 8,193. Existing inventory
+increase compilation and predicate bytes remain unchanged.
+
+Executed on latest nightly rustc 1.102.0-nightly (f5cedb83a, 2026-11-07), locked,
+offline and one build job: the actual repository adapter stock-target suite
+passes **18/18** and existing inventory-baseline/increase regressions pass
+**6/6**, with zero failures or ignored tests. These are actual Rust component
+results over synthetic complete captures. The combined MCP consumer is the
+next functional increment; no current-source MCP transport, native DFHack/game,
+whole-workspace qualification or production admission is claimed by this
+checkpoint. The new bead remains in progress.
+
 ## Unreleased — Finish original workshops through separately reviewed game time
 
 The Workshop/1.20 development MCP server now optionally owns finite Run/1.13

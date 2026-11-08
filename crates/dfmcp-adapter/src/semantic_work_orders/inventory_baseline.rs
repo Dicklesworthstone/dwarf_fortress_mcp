@@ -16,9 +16,11 @@ use dfmcp_world::{
 };
 
 use crate::live_operations::{LiveOperationsObservation, LiveOperationsState};
+use crate::work_orders::WorkOrderRecipe;
 
 use super::goal_projection::{MAX_GOAL_EDGES, MAX_GOAL_ENTITIES};
 use super::inventory_objective::ObservedInventoryIncreaseObjective;
+use super::stock_target::StockTargetAssessment;
 use super::{Call, error};
 
 pub const INVENTORY_BASELINE_PROJECTION_BYTES: u64 = 128 * 1024 * 1024;
@@ -60,6 +62,36 @@ impl InventoryBaselineProjection {
             return Err(error(
                 ErrorCode::BudgetExceeded,
                 "complete inventory baseline exceeds the original-goal projection bound",
+            ));
+        }
+        // Attachments are only one class of projected edge. Count every
+        // relation before validation, hashing or graph allocation so the full
+        // source cannot exceed its advertised projection allowance.
+        let edges = operations
+            .attachments
+            .len()
+            .saturating_add(
+                operations
+                    .jobs
+                    .jobs
+                    .iter()
+                    .filter(|job| job.holder_native_id.is_some())
+                    .count(),
+            )
+            .saturating_add(
+                operations
+                    .items
+                    .iter()
+                    .map(|item| {
+                        usize::from(item.container_native_id.is_some())
+                            + usize::from(item.holder_building_native_id.is_some())
+                    })
+                    .sum::<usize>(),
+            );
+        if edges > MAX_GOAL_EDGES {
+            return Err(error(
+                ErrorCode::BudgetExceeded,
+                "complete inventory baseline exceeds the total projection edge bound",
             ));
         }
         operations.validate()?;
@@ -144,6 +176,27 @@ impl InventoryBaselineProjection {
         PredicateEvidence::scoped(&self.snapshot, policy)
     }
 
+    /// Derive one finite furniture deficit from this independently qualified
+    /// complete census. A satisfied target has no order or increase objective;
+    /// an oversized deficit refuses instead of becoming a truncated order.
+    pub fn stock_target(
+        &self,
+        recipe: WorkOrderRecipe,
+        target_stack_units: u64,
+        max_order_amount: u32,
+        policy: EvidencePolicy,
+        context: &OperationContext,
+    ) -> Result<StockTargetAssessment> {
+        StockTargetAssessment::qualify(
+            self,
+            recipe,
+            target_stack_units,
+            max_order_amount,
+            policy,
+            context,
+        )
+    }
+
     /// Seal an exact qualified starting quantity, never a caller-supplied count.
     /// A missing field or incomplete domain is a refused baseline, not zero.
     pub fn increase(
@@ -203,7 +256,7 @@ impl InventoryBaselineProjection {
     }
 }
 
-fn authorize(original: StateAnchor, context: &OperationContext) -> Result<()> {
+pub(super) fn authorize(original: StateAnchor, context: &OperationContext) -> Result<()> {
     if context.anchor != original {
         return Err(error(
             ErrorCode::StaleAnchor,
