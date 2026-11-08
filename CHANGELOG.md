@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased — Combine lexical search with typed entity selection
+
+- Add optional `where` predicates to structured search, sharing the existing
+  entity/aggregate filter language and three-valued fact evaluation.
+- Search only True selections; report False and Unknown exclusions separately.
+  Missing, withheld and conflicting facts stay Unknown under negation.
+- Bind filters to ranked continuation identity and charge predicate work before
+  exclusions, pagination or empty kind selections can reduce the visible result.
+- Preserve unfiltered response shape and ordering. Add seven component and two
+  public-facade regressions, request schema and usable query documentation.
+
 ## Unreleased — Recover original clock workflows after review or source loss
 
 - Replace ineffective Tree clock waits with authorized local retirement for

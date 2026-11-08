@@ -1,5 +1,27 @@
 # Implementation Status
 
+## Unreleased — Typed predicates in structured lexical search
+
+Structured `search` now accepts the same optional `where` language as entity
+queries and aggregates. This closes the workflow gap between finding names or
+text and selecting entities by recorded state. Predicate evaluation precedes
+lexical ranking, with distinct True, False and Unknown accounting over the
+complete selected projection. Unknown facts remain excluded under negation;
+these counts do not establish unobserved-world absence. The complete predicate
+binds the existing exact-source/session continuation, and combined lexical and
+predicate work is charged before result exclusions. Existing requests without
+`where` retain their response shape, digest and ranking behavior.
+
+Owning bead: `df-lab-structured-query-f7q`. An exact-source Rust component harness
+executes **26/26 operational query tests**, including all seven new filter cases,
+using the actual core/world crates, in-place operational/core query modules and
+the unchanged locked registry versions/checksums. This does not exercise MCP
+transport or the public facade. Two public-facade tests are registered for
+pagination, retained-source reads, current authority and mutation-free Unknown
+handling; their execution remains pending. JSON Schema validation passes seven
+valid and eight invalid filter requests, and scoped formatting/diff checks pass.
+No new tool, dependency, native protocol or production admission is introduced.
+
 ## Unreleased — Make original clock recovery actions match retained state
 
 Tree and Workshop Agent Turns now distinguish an unattempted interval whose

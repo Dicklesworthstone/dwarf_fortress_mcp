@@ -238,6 +238,7 @@
         "properties": {
           "kind": {"const": "search"}, "text": {"type": "string", "minLength": 1, "maxLength": 512, "pattern": "^[^\u0000]+$"},
           "kinds": {"type": "array", "items": {"$ref": "#/$defs/entity_kind"}, "maxItems": 32, "minItems": 0}, "text_fields": {"type": "array", "items": {"$ref": "#/$defs/name"}, "maxItems": 16, "minItems": 0},
+          "where": {"anyOf": [{"$ref": "#/$defs/filter"}, {"type": "null"}], "description": "Only True predicate rows enter lexical matching. Selection counts report predicate matches, False exclusions and Unknown exclusions before lexical ranking; unavailable filter facts remain Unknown under negation. The complete predicate binds continuation and contributes to the shared work limit."},
           "include_labels": {"anyOf": [{"type": "boolean"}, {"type": "null"}]}, "match_mode": {"anyOf": [{"enum": ["all", "any"]}, {"type": "null"}]},
           "limit": {"anyOf": [{"type": "integer", "minimum": 1, "maximum": 128}, {"type": "null"}]}, "continuation": {"anyOf": [{"type": "string", "maxLength": 256}, {"type": "null"}]}
         }

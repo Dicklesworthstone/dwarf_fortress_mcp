@@ -514,3 +514,54 @@ events, kind discovery, deterministic ties and withdrawal on reindexing.
 `fortress_query` path with a canonical fixture, current grants, Agent Turn
 anchors and a later presence change. These are source regressions; Rust
 execution and exact-source qualification remain pending for this increment.
+
+## Filtered structured lexical search
+
+The stateless structured `search` query accepts the same optional typed `where`
+predicate as entity selection and aggregates. Agents can combine a name or text
+search with recorded state without downloading and filtering every hit. For
+example, search the published labels of living citizens:
+
+```json
+{
+  "schema": "dfmcp.query/1",
+  "query": {
+    "kind": "search",
+    "text": "Urist",
+    "kinds": ["unit"],
+    "where": {
+      "op": "compare", "field": "alive", "comparison": "eq",
+      "value": {"type": "bool", "value": true}
+    },
+    "limit": 4
+  }
+}
+```
+
+Use this envelope as `request` inside the laboratory's `mode: "structured"`
+wrapper, or as the existing structured live query. Only predicate True rows
+enter text matching and ranking. False and Unknown are separate exclusions;
+missing, omitted, redacted, stale, unsupported and contradictory facts do not
+become matches through negation. Text in excluded rows cannot influence scores,
+matching-field provenance, or text-availability counts.
+
+Filtered results add `selection`: `selected_entities` counts the kind-selected
+population, `matched_predicate` counts its True rows before text matching, and
+`excluded_false` / `excluded_unknown` count the other outcomes. The top-level
+`matched` still counts actual lexical hits. These counts cover the entire
+projection on every page, including rows preceding a continuation. Selection
+`complete_within_projection` means the filter was decidable for every selected
+row; it does not prove complete fortress coverage or absence. Unfiltered queries
+retain their previous response shape, ranking and query identity.
+
+Predicate validation and evaluation share the existing 4,000,000-operation
+allowance with term/field scans. The conservative charge precedes filtering,
+kind exclusions and cursor selection; a false filter cannot make an otherwise
+over-budget request admissible. The complete response, including selection
+metadata and continuation, must fit the byte/token budget. Pages retain whole
+rows in deterministic score/ID order. The existing `ls1` identity binds the
+complete predicate, session and exact source, so adding, removing or changing
+the filter invalidates an old continuation. Every page rechecks Query authority.
+
+This is bounded lexical retrieval over published canonical facts. It adds no
+native reads, effects, hidden index, semantic model or FrankenSearch dependency.

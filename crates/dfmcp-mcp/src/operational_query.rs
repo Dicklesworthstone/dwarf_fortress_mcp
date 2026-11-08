@@ -49,6 +49,8 @@ enum Query {
         text: String,
         #[serde(default)]
         kinds: Vec<String>,
+        #[serde(rename = "where")]
+        predicate: Option<Value>,
         #[serde(default)]
         text_fields: Vec<String>,
         include_labels: Option<bool>,
@@ -382,6 +384,7 @@ pub(super) fn execute(
         Query::Search {
             text,
             kinds: selected,
+            predicate,
             text_fields,
             include_labels,
             match_mode,
@@ -391,6 +394,9 @@ pub(super) fn execute(
             let spec = SearchSpec {
                 text,
                 kinds: kinds(selected)?,
+                predicate: predicate
+                    .map(super::core_query::decode_filter)
+                    .transpose()?,
                 text_fields: names(text_fields, 16)?,
                 include_labels: include_labels.unwrap_or(true),
                 match_mode: match_mode.unwrap_or(MatchMode::All),
@@ -635,6 +641,7 @@ fn aggregate(
 struct SearchSpec {
     text: String,
     kinds: BTreeSet<String>,
+    predicate: Option<Predicate>,
     text_fields: Vec<String>,
     include_labels: bool,
     match_mode: MatchMode,
@@ -738,24 +745,49 @@ fn search(
         ));
     }
     let terms: Vec<_> = terms.into_iter().collect();
-    if snapshot
-        .graph
-        .entities
-        .len()
-        .saturating_mul(spec.text_fields.len() + 1)
-        .saturating_mul(terms.len())
-        > MAX_WORK
+    // Account for filter validation and evaluation with the lexical work,
+    // before exclusions or continuation can make the apparent page cheaper.
+    let predicate_work = spec
+        .predicate
+        .as_ref()
+        .map_or(0, |predicate| predicate.complexity().saturating_mul(3));
+    if snapshot.graph.entities.len().saturating_mul(
+        (spec.text_fields.len() + 1)
+            .saturating_mul(terms.len())
+            .saturating_add(predicate_work),
+    ) > MAX_WORK
     {
-        return Err(exhausted("search exceeds its term/field scan bound"));
+        return Err(exhausted(if spec.predicate.is_some() {
+            "search exceeds its combined term/field/predicate work bound"
+        } else {
+            "search exceeds its term/field scan bound"
+        }));
     }
     let after = parse_cursor(spec.continuation.as_deref(), identity)?;
     let mut after_found = after.is_none();
     let (mut matched, mut remaining, mut scanned, mut unavailable) = (0u64, 0usize, 0usize, 0u64);
+    let (mut selected_entities, mut matched_predicate, mut excluded_false, mut excluded_unknown) =
+        (0u64, 0u64, 0u64, 0u64);
     let mut best: BTreeMap<Rank, Hit<'_>> = BTreeMap::new();
     for entity in snapshot.graph.entities.values() {
         if !spec.kinds.is_empty() && !spec.kinds.contains(&kind_name(&entity.kind)) {
             continue;
         }
+        selected_entities += 1;
+        if let Some(predicate) = &spec.predicate {
+            match evaluate_truth_for(snapshot, entity.id, predicate) {
+                PredicateTruth::True => {}
+                PredicateTruth::False => {
+                    excluded_false += 1;
+                    continue;
+                }
+                PredicateTruth::Unknown => {
+                    excluded_unknown += 1;
+                    continue;
+                }
+            }
+        }
+        matched_predicate += 1;
         let mut found = vec![false; terms.len()];
         let mut fields = Vec::new();
         let mut source_digests = Vec::new();
@@ -824,16 +856,23 @@ fn search(
             "inspect":{"kind":"inspect","entity_id":hit.entity.id.to_string(),"generation":hit.entity.generation,
                 "fields":hit.fields.iter().filter(|&&field|field!="$label").collect::<Vec<_>>()}
         })).collect();
-        finish(
-            snapshot,
-            identity,
-            json!({"kind":"search","matched":matched,"returned":count,
+        let mut result = json!({"kind":"search","matched":matched,"returned":count,
             "truncated":truncated,"continuation":continuation,"rows":rows,"terms":terms,
             "ranking":"distinct matching terms descending, then stable entity ID ascending",
             "matching":"Unicode lowercase substring terms, not stemming or semantic search",
-            "scanned_text_bytes":scanned,"unavailable_or_nontext_fields":unavailable}),
-            maximum,
-        )
+            "scanned_text_bytes":scanned,"unavailable_or_nontext_fields":unavailable});
+        if spec.predicate.is_some() {
+            result["selection"] = json!({
+                "selected_entities":selected_entities,
+                "matched_predicate":matched_predicate,
+                "excluded_false":excluded_false,
+                "excluded_unknown":excluded_unknown,
+                "predicate_evaluations":selected_entities,
+                "complete_within_projection":excluded_unknown == 0,
+                "note":"only True predicate rows are searched; matched_predicate precedes lexical matching, Unknown is not False, and neither count proves complete-world absence"
+            });
+        }
+        finish(snapshot, identity, result, maximum)
     };
     if ordered.is_empty() {
         return build(0);
@@ -1484,6 +1523,284 @@ mod tests {
         assert_ne!(old["query_digest"], new["query_digest"]);
         assert_eq!(new["selection"]["complete_within_projection"], true);
         assert_eq!(new["selection"]["excluded_unknown"], 0);
+        Ok(())
+    }
+
+    #[test]
+    fn filtered_search_selects_true_rows_before_scoring_and_reports_unknowns() -> Result<()> {
+        let (snapshot, ctx) = fixture();
+        let mut request = search_query();
+        request["query"]["kinds"] = json!(["unit"]);
+        request["query"]["where"] = boolean_filter("alive");
+        let result = execute(&snapshot, &ctx, &request)?;
+        assert_eq!(result, execute(&snapshot, &ctx, &request)?);
+        assert_eq!(result["matched"], 1);
+        assert_eq!(result["rows"][0]["entity_id"], "1");
+        assert_eq!(result["rows"][0]["matched_terms"], 2);
+        assert_eq!(result["selection"]["selected_entities"], 3);
+        assert_eq!(result["selection"]["matched_predicate"], 1);
+        assert_eq!(result["selection"]["excluded_false"], 1);
+        assert_eq!(result["selection"]["excluded_unknown"], 1);
+        assert_eq!(result["selection"]["predicate_evaluations"], 3);
+        assert_eq!(result["selection"]["complete_within_projection"], false);
+        assert_eq!(
+            result["scanned_text_bytes"],
+            "Urist".len() + "Cavern flood".len()
+        );
+        assert_eq!(result["unavailable_or_nontext_fields"], 0);
+        assert_eq!(result["coverage"]["absence_proven"], false);
+
+        // A True predicate does not itself create a lexical hit.
+        request["query"]["text"] = json!("workshop");
+        let no_hits = execute(&snapshot, &ctx, &request)?;
+        assert_eq!(no_hits["matched"], 0);
+        assert_eq!(no_hits["selection"]["matched_predicate"], 1);
+        assert_eq!(no_hits["rows"], json!([]));
+        assert!(no_hits["continuation"].is_null());
+        Ok(())
+    }
+
+    #[test]
+    fn filtered_search_negation_never_matches_unavailable_or_conflicting_facts() -> Result<()> {
+        let (source, source_ctx) = fixture();
+        for presence in [
+            None,
+            Some(FactPresence::Absent),
+            Some(FactPresence::Unknown("unread".to_owned())),
+            Some(FactPresence::Unsupported("version".to_owned())),
+            Some(FactPresence::Omitted("projection".to_owned())),
+            Some(FactPresence::Redacted("private".to_owned())),
+            Some(FactPresence::Stale(source.anchor())),
+            Some(FactPresence::Known(WorldValue::Bool(true))),
+        ] {
+            let mut snapshot = source.clone();
+            let mut ctx = source_ctx.clone();
+            let entity = snapshot
+                .graph
+                .entities
+                .get_mut(&EntityId::new(1))
+                .ok_or_else(|| invalid("missing fixture entity"))?;
+            if let Some(presence) = presence {
+                let mut unavailable = fact(WorldValue::Bool(false));
+                unavailable.presence = Some(presence);
+                entity.fields.insert("alive".to_owned(), unavailable);
+            } else {
+                entity.fields.remove("alive");
+            }
+            snapshot.refresh_hash();
+            ctx.anchor = snapshot.anchor();
+            let mut request = search_query();
+            request["query"]["kinds"] = json!(["unit"]);
+            request["query"]["where"] = json!({"op":"not","arg":boolean_filter("alive")});
+            let result = execute(&snapshot, &ctx, &request)?;
+            assert_eq!(result["matched"], 1);
+            assert_eq!(result["rows"][0]["entity_id"], "2");
+            assert_eq!(result["selection"]["matched_predicate"], 1);
+            assert_eq!(result["selection"]["excluded_false"], 0);
+            assert_eq!(result["selection"]["excluded_unknown"], 2);
+            assert_eq!(result["selection"]["complete_within_projection"], false);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn filtered_search_boolean_combinations_preserve_three_valued_logic() -> Result<()> {
+        let (mut snapshot, mut ctx) = fixture();
+        snapshot
+            .graph
+            .entities
+            .retain(|id, _| *id == EntityId::new(1));
+        // Independent expected truth tables: 0=False, 1=True, 2=Unknown.
+        let all = [[0, 0, 0], [0, 1, 2], [0, 2, 2]];
+        let any = [[0, 1, 2], [1, 1, 1], [2, 1, 2]];
+        for left in 0..3 {
+            for right in 0..3 {
+                let entity = snapshot
+                    .graph
+                    .entities
+                    .get_mut(&EntityId::new(1))
+                    .ok_or_else(|| invalid("missing fixture entity"))?;
+                for (name, state) in [("left", left), ("right", right)] {
+                    let mut value = fact(WorldValue::Bool(state == 1));
+                    if state == 2 {
+                        value.presence = Some(FactPresence::Unknown("unread".to_owned()));
+                    }
+                    entity.fields.insert(name.to_owned(), value);
+                }
+                snapshot.refresh_hash();
+                ctx.anchor = snapshot.anchor();
+                for (op, expected) in [("all", all[left][right]), ("any", any[left][right])] {
+                    let request = envelope(json!({
+                        "kind":"search","text":"Urist","where":{"op":op,
+                            "args":[boolean_filter("left"),boolean_filter("right")]}
+                    }));
+                    let result = execute(&snapshot, &ctx, &request)?;
+                    assert_eq!(result["matched"], u64::from(expected == 1));
+                    assert_eq!(
+                        result["selection"]["matched_predicate"],
+                        u64::from(expected == 1)
+                    );
+                    assert_eq!(
+                        result["selection"]["excluded_false"],
+                        u64::from(expected == 0)
+                    );
+                    assert_eq!(
+                        result["selection"]["excluded_unknown"],
+                        u64::from(expected == 2)
+                    );
+                }
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn filtered_search_keeps_ranked_pages_and_binds_every_filter_to_its_cursor() -> Result<()> {
+        let (snapshot, ctx) = fixture();
+        let mut request = search_query();
+        request["query"]["where"] = json!({"op":"not","arg":{
+            "op":"compare","field":"stock","comparison":"lt",
+            "value":{"type":"u64","value":u64::MAX}
+        }});
+        let first = execute(&snapshot, &ctx, &request)?;
+        assert_eq!(first["matched"], 2);
+        assert_eq!(first["rows"][0]["entity_id"], "1");
+        assert_eq!(first["selection"]["selected_entities"], 4);
+        assert_eq!(first["selection"]["matched_predicate"], 2);
+        assert_eq!(first["selection"]["excluded_unknown"], 2);
+        assert!(first["continuation"].is_string());
+        request["query"]["continuation"] = first["continuation"].clone();
+        request["query"]["limit"] = json!(128);
+        let next = execute(&snapshot, &ctx, &request)?;
+        assert_eq!(next["rows"][0]["entity_id"], "2");
+        assert_eq!(next["returned"], 1);
+        assert_eq!(next["selection"], first["selection"]);
+        assert_eq!(next["query_digest"], first["query_digest"]);
+        assert_eq!(next["truncated"], false);
+        for replacement in [
+            boolean_filter("alive"),
+            json!({"op":"all","args":[]}),
+            Value::Null,
+        ] {
+            let mut changed = request.clone();
+            changed["query"]["where"] = replacement;
+            assert!(matches!(execute(&snapshot, &ctx, &changed),
+                Err(error) if error.code == ErrorCode::StaleAnchor));
+        }
+        let mut without_filter = request.clone();
+        without_filter["query"]
+            .as_object_mut()
+            .ok_or_else(|| invalid("query is not an object"))?
+            .remove("where");
+        assert!(matches!(execute(&snapshot, &ctx, &without_filter),
+            Err(error) if error.code == ErrorCode::StaleAnchor));
+        // Digest integrity is not authorization: even a newly committed cursor
+        // cannot resume from a lexical hit excluded by this predicate.
+        let mut excluded_cursor = request.clone();
+        excluded_cursor["query"]["continuation"] = json!(cursor(
+            identity(&snapshot, &ctx, &request)?,
+            (Reverse(1), EntityId::new(4)),
+        ));
+        assert!(matches!(execute(&snapshot, &ctx, &excluded_cursor),
+            Err(error) if error.code == ErrorCode::CursorGap));
+        Ok(())
+    }
+
+    #[test]
+    fn filtered_search_work_is_charged_before_exclusions_or_empty_kind_selection() -> Result<()> {
+        let (mut snapshot, mut ctx) = fixture();
+        let seed = snapshot
+            .graph
+            .entities
+            .get(&EntityId::new(1))
+            .ok_or_else(|| invalid("missing fixture entity"))?
+            .clone();
+        for id in 5..=10_000 {
+            let mut entity = seed.clone();
+            entity.id = EntityId::new(id);
+            snapshot.graph.entities.insert(entity.id, entity);
+        }
+        snapshot.refresh_hash();
+        ctx.anchor = snapshot.anchor();
+        ctx.budget.max_entities = 10_000;
+        for selected in [json!(["item"]), json!(["unit"])] {
+            let request = envelope(json!({"kind":"search","text":"Urist","kinds":selected,
+                "where":{"op":"all","args":vec![boolean_filter("unobserved");140]}}));
+            assert!(matches!(execute(&snapshot, &ctx, &request),
+                Err(error) if error.code == ErrorCode::BudgetExceeded
+                    && error.message == "search exceeds its combined term/field/predicate work bound"));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn filtered_search_publication_accounts_for_selection_and_rechecks_authority() -> Result<()> {
+        let (snapshot, mut ctx) = fixture();
+        let original = snapshot.anchor();
+        let mut request = search_query();
+        request["query"]["where"] = json!({"op":"all","args":[]});
+        let one = execute(&snapshot, &ctx, &request)?;
+        let bytes = serde_json::to_vec(&one)
+            .map_err(|_| invalid("cannot encode search fixture"))?
+            .len() as u64;
+        ctx.budget.max_bytes = bytes;
+        request["query"]["limit"] = json!(128);
+        assert_eq!(execute(&snapshot, &ctx, &request)?, one);
+        ctx.budget.max_bytes -= 1;
+        assert!(matches!(execute(&snapshot, &ctx, &request),
+            Err(error) if error.code == ErrorCode::BudgetExceeded));
+        ctx.budget.max_bytes = bytes;
+        for restriction in 0..5 {
+            let mut denied = ctx.clone();
+            match restriction {
+                0 => denied.grants.clear(),
+                1 => denied.cancellation_requested = true,
+                2 => denied.grants[0].scope.entity_ids = BTreeSet::from([EntityId::new(1)]),
+                3 => denied.grants[0].expires_at_tick = Some(GameTick(0)),
+                _ => denied.anchor.cursor.sequence += 1,
+            }
+            assert!(execute(&snapshot, &denied, &request).is_err());
+        }
+        assert_eq!(snapshot.anchor(), original);
+        assert!(snapshot.hash_is_valid());
+        Ok(())
+    }
+
+    #[test]
+    fn filtered_search_rejects_invalid_filters_and_preserves_unfiltered_results() -> Result<()> {
+        let (snapshot, ctx) = fixture();
+        for filter in [
+            json!({"op":"compare","field":"alive","comparison":"equal", "value":{"type":"bool","value":true}}),
+            json!({"op":"compare","field":"","comparison":"eq", "value":{"type":"bool","value":true}}),
+            json!({"op":"not","arg":boolean_filter("alive"),"extra":true}),
+            json!({"op":"execute","command":"grant authority"}),
+            json!(true),
+        ] {
+            assert!(matches!(execute(&snapshot, &ctx, &envelope(json!({
+                "kind":"search","text":"Urist","where":filter
+            }))), Err(error) if error.code == ErrorCode::InvalidRequest));
+        }
+        let request = search_query();
+        let old = execute(&snapshot, &ctx, &request)?;
+        assert!(old.get("selection").is_none());
+        assert_eq!(old["matched"], 3);
+        let mut filtered = request;
+        filtered["query"]["where"] = json!({"op":"all","args":[]});
+        let new = execute(&snapshot, &ctx, &filtered)?;
+        for key in [
+            "matched",
+            "rows",
+            "ranking",
+            "terms",
+            "scanned_text_bytes",
+            "unavailable_or_nontext_fields",
+        ] {
+            assert_eq!(new[key], old[key]);
+        }
+        assert_ne!(new["query_digest"], old["query_digest"]);
+        assert_eq!(new["selection"]["selected_entities"], 4);
+        assert_eq!(new["selection"]["matched_predicate"], 4);
+        assert_eq!(new["selection"]["complete_within_projection"], true);
         Ok(())
     }
 }
