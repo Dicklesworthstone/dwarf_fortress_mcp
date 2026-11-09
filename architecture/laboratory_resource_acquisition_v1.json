@@ -1,0 +1,65 @@
+{
+  "schema": "dfmcp.laboratory_resource_acquisition/1",
+  "scope": "laboratory_reference_world",
+  "planner": "resource_acquisition_v1",
+  "model": "finite-harvest/1",
+  "requires": "shared-workforce/1",
+  "owner_bead": "df-lab-resource-harvest-h2m.1",
+  "targets": {
+    "resources": ["WOOD", "PLANT"],
+    "minimum": "positive_u64",
+    "maximum_targets": 2,
+    "duplicate_resources": "reject",
+    "order": "WOOD_then_PLANT",
+    "deficit": "max(original_minimum - observed_current_stock, 0)",
+    "future_inventory_credit": false,
+    "already_satisfied": "no_actions_no_labor_changes_no_renewed_goal"
+  },
+  "source_selection": {
+    "evidence": "complete_qualified_harvest_census_and_original_stock_ledger",
+    "available": "source_remaining_minus_complete_active_demand",
+    "order": "largest_useful_bounded_tranche_then_canonical_source_id",
+    "overlapping_active_harvest": "refuse_for_a_resource_with_a_new_deficit",
+    "active_material_consumers": "when_acquisition_is_needed_refuse_consumers_of_any_requested_resource_without_guessing_reserve_debt",
+    "partial_goal": "refuse",
+    "source_identity": "exact_id_and_generation",
+    "reservation": false
+  },
+  "workforce": {
+    "assign_labor_default": false,
+    "eligible": "qualified_living_unit_with_enabled_labor_or_explicitly_allowed_known_false_labor",
+    "order": "enabled_then_nonmilitary_then_unknown_military_then_military_then_canonical_id",
+    "enable": "ordinary_SetLabor_with_original_false_guard_and_compensation",
+    "harvest_dependency": "verified_labor_enable_when_required",
+    "reservation": false
+  },
+  "proof": {
+    "goal": "original_observed_stock_minima_on_original_ledger",
+    "actions": "ordinary_original_harvest_task_and_ledger_completion_predicates",
+    "deadline": "existing_shared_workforce_complete_queue_floor",
+    "forecast": "discarded_predicted_world_only",
+    "production_input": "completed_observed_stock_only",
+    "cancel": "preserve_completed_yield_stop_future_work",
+    "recovery": "original_source_and_sealed_work_without_restored_dispatch_authority"
+  },
+  "bounds": {
+    "request_bytes": 16384,
+    "canonical_entities": 65536,
+    "canonical_edges": 65536,
+    "canonical_chunks": 65536,
+    "canonical_events": 65536,
+    "sources": 1024,
+    "tasks": 4096,
+    "total_actions_including_labor_enables": 16,
+    "maximum_harvest_per_action": 100,
+    "maximum_service_horizon_ticks": 403200
+  },
+  "authority": {
+    "planning": "current_observe_query_plan_and_complete_source_budget",
+    "harvest": "ordinary_guarded_designate_and_checkpoint_policy",
+    "labor_enable": "ordinary_reversible_configure_labor",
+    "clock": "separate_current_control_clock",
+    "source_drift": "stale_commit_retains_pending_and_requires_new_explicit_plan",
+    "native_routing": "unsupported"
+  }
+}

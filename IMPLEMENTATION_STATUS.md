@@ -1,5 +1,30 @@
 # Implementation Status
 
+## Unreleased — Compile finite resource stock objectives
+
+The core `ResourceAcquisitionPlan` now compiles original WOOD/PLANT minima
+against complete qualified `finite-harvest/1` stock, source and task evidence.
+It selects bounded source tranches deterministically, preserves original
+source and ledger identities, optionally proposes explicitly permitted labor
+enables and uses the ordinary shared-workforce queue horizon and mandatory
+harvest proof. Complete source shortage, overlapping active harvest, active
+consumers of requested stock, unavailable evidence and excess action budgets
+refuse without partial allocation or future inventory credit. Already-met
+targets yield no work or staffing changes.
+
+The compiler is pure planning over the existing laboratory model. Original
+stock truth remains distinct from physical action completion. Existing action,
+archive, protocol and dependency identities are unchanged. The normal MCP
+source and complete-packet publication integration is being added separately.
+Owner: `df-lab-resource-harvest-h2m.1`.
+
+Validation: the actual `cargo test --locked --offline -p dfmcp-intent --lib`
+suite passed all 234 tests, including 13 new acquisition regressions, on latest
+nightly 1.102.0. Scoped formatting, repository integrity, 4,996 repository
+checks, the frozen Agent Turn contract and implementation-status checks passed.
+This is core execution; full MCP, release and native qualification remain
+separate.
+
 ## Unreleased — Compose spatial and relationship selection before ranking
 
 `ranked_entities` now accepts optional `spatial` with inclusive point/cuboid

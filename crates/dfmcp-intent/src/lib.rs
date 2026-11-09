@@ -19,6 +19,7 @@ mod plan;
 pub mod plan_archive;
 mod planner;
 mod provisions_planning;
+pub mod resource_acquisition;
 pub mod workforce_planning;
 
 pub use action::{
@@ -49,3 +50,7 @@ pub use obligation::{
 pub use plan::derive_step_idempotency_key;
 pub use plan::{Constraint, Intent, ObligationSpec, PlanStep, PreparedPlan, RequestedAction};
 pub use planner::{PlanPolicy, StaticPlanner};
+pub use resource_acquisition::{
+    ResourceAcquisitionAllocation, ResourceAcquisitionPlan, ResourceAcquisitionRequirement,
+    ResourceAcquisitionStaffing, ResourceStockTarget,
+};

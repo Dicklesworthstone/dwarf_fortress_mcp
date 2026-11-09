@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased — Compile original finite resource stock goals
+
+- Add bounded WOOD/PLANT target compilation from qualified observed stock and
+  complete finite harvest sources, with deterministic multiple-source allocation.
+- Propose labor enables only under explicit policy, preserving known source
+  guards, ordinary dependencies and complete shared-worker queue deadlines.
+- Keep original stock targets and mandatory physical harvest proofs separate;
+  refuse incomplete supply, active overlapping work and unbounded candidates.
+- Add conservation, provenance, workforce, action-bound, original-identity,
+  no-work and partition-equivalence regression coverage.
+
 ## Unreleased — Rank one population selected by facts, relationships and location
 
 - Add optional point/cuboid spatial selectors to ranked queries, usable alone
