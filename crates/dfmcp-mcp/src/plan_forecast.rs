@@ -3,6 +3,8 @@
 //! Predicted goal truth, action proof and physical quiescence remain distinct.
 //! No predicted snapshot becomes canonical evidence or dispatch authority.
 
+use std::collections::BTreeMap;
+
 use dfmcp_adapter::GameAdapter;
 use dfmcp_core::{ActionId, CommitState, DfmcpError, ErrorCode, OperationContext, Result};
 use dfmcp_intent::PreparedPlan;
@@ -13,6 +15,10 @@ use serde_json::json;
 #[path = "plan_forecast_budget.rs"]
 mod comparison_budget;
 pub(super) use comparison_budget::ForecastBudget;
+
+#[path = "plan_forecast_schedule.rs"]
+mod observation_schedule;
+use observation_schedule::ObservationSchedule;
 
 /// Most simulated time slices a forecast may take.
 const MAX_FORECAST_SLICES: u64 = 400;
@@ -98,6 +104,25 @@ fn check_budget(budget: &Option<&mut ForecastBudget>, current: &OperationContext
     Ok(())
 }
 
+fn before_advance(
+    slices: &mut u64,
+    budget: &mut Option<&mut ForecastBudget>,
+    ticks: u64,
+    current: &OperationContext,
+) -> Result<()> {
+    if *slices >= MAX_FORECAST_SLICES {
+        return Err(DfmcpError::new(
+            ErrorCode::BudgetExceeded,
+            "forecast observation frontiers exceed the bounded simulation-slice budget",
+        ));
+    }
+    if let Some(budget) = budget.as_deref_mut() {
+        budget.before_advance(ticks, current)?;
+    }
+    *slices += 1;
+    Ok(())
+}
+
 fn forecast_inner(
     adapter: &MemoryAdapter,
     plan: &PreparedPlan,
@@ -144,6 +169,22 @@ fn forecast_inner(
             (action.step_id, action.action_id, action.state, at)
         })
         .collect();
+    let mut schedules = BTreeMap::new();
+    for action in &receipt.actions {
+        let step = fork.action_step(action.action_id).ok_or_else(|| {
+            DfmcpError::new(
+                ErrorCode::InternalInvariantViolation,
+                "forecast action is missing its original sealed step",
+            )
+        })?;
+        if let Some(spec) = &step.obligation {
+            schedules.insert(
+                action.action_id,
+                ObservationSchedule::new(spec, action.state, start.0),
+            );
+        }
+    }
+    let mut simulation_slices = 0;
     let work_quiescent = |fork: &MemoryAdapter| -> dfmcp_core::Result<bool> {
         let mut quiet = true;
         for action in &receipt.actions {
@@ -198,6 +239,15 @@ fn forecast_inner(
         {
             check_budget(&budget, template)?;
             let mut advance = slice.min(span - elapsed);
+            for (_, action_id, state, _) in &outcomes {
+                if !state.is_terminal()
+                    && let Some(next) = schedules
+                        .get(action_id)
+                        .and_then(|schedule| schedule.next_frontier(fork.snapshot().tick.0))
+                {
+                    advance = advance.min(next - fork.snapshot().tick.0);
+                }
+            }
             if let Some(until) = reserve_until_tick
                 && until > fork.snapshot().tick.0
             {
@@ -206,8 +256,10 @@ fn forecast_inner(
                 // had already existed at the requested tick.
                 advance = advance.min(until - fork.snapshot().tick.0);
             }
-            if let Some(budget) = budget.as_deref_mut() {
-                budget.before_advance(advance, template)?;
+            if let Err(error) =
+                before_advance(&mut simulation_slices, &mut budget, advance, template)
+            {
+                return model_failure(error, budget.is_some());
             }
             if let Err(error) = fork.advance_ticks(advance) {
                 return model_failure(error, budget.is_some());
@@ -228,6 +280,9 @@ fn forecast_inner(
                     Ok(polled) => polled,
                     Err(error) => return model_failure(error, budget.is_some()),
                 };
+                if let Some(schedule) = schedules.get_mut(&outcome.1) {
+                    schedule.observed(outcome.2, polled.state, fork.snapshot().tick.0);
+                }
                 outcome.2 = polled.state;
                 if polled.state.is_terminal() {
                     outcome.3 = Some(fork.snapshot().tick.0);
@@ -282,6 +337,7 @@ fn forecast_inner(
         "predicted_frontier_tick": fork.snapshot().tick.0,
         "completion_rule": "verified action proofs, true original terminal predicate and physically quiet original work at the same predicted frontier",
         "resolution_ticks": slice,
+        "sampling_policy": "common nominal stride clipped to sealed deadlines and final stability sampling windows",
         "cadence_note": "deferred steps dispatch when a wait observes their prerequisites, so real completion also depends on how often the agent waits",
         "blocked_by_pause": blocked_by_pause,
         "steps": steps,
@@ -307,8 +363,10 @@ fn forecast_inner(
             }
             let mut future = fork.clone();
             let advance = until - future.snapshot().tick.0;
-            if let Some(budget) = budget.as_deref_mut() {
-                budget.before_advance(advance, template)?;
+            if let Err(error) =
+                before_advance(&mut simulation_slices, &mut budget, advance, template)
+            {
+                return model_failure(error, budget.is_some());
             }
             reserve = Some(match future.advance_ticks(advance) {
                 Ok(()) => {
@@ -390,6 +448,7 @@ fn forecast_inner(
         Err(error) => return model_failure(error, budget.is_some()),
     }
     check_budget(&budget, template)?;
+    forecast["simulation_slices"] = json!(simulation_slices);
     Ok(forecast)
 }
 
@@ -424,3 +483,7 @@ mod reserve_tests;
 #[cfg(test)]
 #[path = "plan_forecast_budget_tests.rs"]
 mod budget_tests;
+
+#[cfg(test)]
+#[path = "plan_forecast_deadline_tests.rs"]
+mod deadline_tests;

@@ -1,5 +1,28 @@
 # Implementation Status
 
+## Unreleased — Observe every sealed deadline in laboratory forecasts
+
+Discarded laboratory forecasts now clip their coarse simulation stride at each
+nonterminal action's original deadline and final cadence-spaced stability
+window. A long-running independent step can no longer cause another achievable
+obligation to fail merely because its shorter deadline was skipped. Deferred
+actions start their observation cadence at actual dispatch; off-cadence reads
+do not move the next eligible sample. The normal adapter still evaluates truth,
+counts stability, releases dependencies and decides terminal states.
+
+Every advance, including a later reserve fork, charges the same hard 400-slice
+allowance. Exhaustion returns explicit unavailable prediction evidence without
+publishing invented completion or mutating the source. Added regressions compare
+forecasts with actual planner/adapter execution for mixed deadlines, stability,
+deferred dispatch, genuine misses and budget exhaustion; comparison coverage
+uses the existing public plan workflow.
+
+Validation: all 28 forecast, comparison-budget, provisions-control-loop and reserve Rust regressions passed, including seven new deadline/stability/budget cases, within an 82-test temporary selected-source run on nightly 1.102.0 (2026-11-08). The assembly preserves production function bodies and exact locked path dependencies. Scoped rustfmt and git diff --check passed. Public facade test source is added; full MCP/stdio execution and current-head release qualification are not established by this component run.
+
+`df-lab-plan-comparison-c9r` remains in progress for its broader qualification
+boundaries. This is reference-model prediction, not live-game execution or
+native admission. Details: `docs/LAB_PLAN_COMPARISON.md`.
+
 ## Unreleased — Fit every selected laboratory page through the Agent Turn
 
 The existing structured `events`, `spatial_entities`, `related_entities` and

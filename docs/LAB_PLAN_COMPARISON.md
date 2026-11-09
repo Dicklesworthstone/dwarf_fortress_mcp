@@ -143,13 +143,25 @@ frontier; a transport acknowledgment or completed action alone is insufficient.
 | `horizon_tick` | The original plan's final obligation deadline, unchanged by comparison. |
 | `simulation_horizon_tick` | Source game tick plus the requested common `horizon_ticks`. |
 | `simulation_horizon_reached` / `simulation_horizon_truncated` | Whether evaluation reached its cap and whether that cap stopped incomplete work before its original deadline. |
-| `resolution_ticks` | The common bounded sampling cadence used for the candidate set. |
+| `resolution_ticks` | The common nominal maximum sampling stride for the candidate set; sealed deadlines and stability windows can require shorter advances. |
+| `sampling_policy` | The rule that inserts original obligation deadlines and final cadence-spaced stability observations into the nominal schedule. |
+| `simulation_slices` | Actual attempted model advances for this candidate, including its separate reserve forecast. |
 | `blocked_by_pause` | The forecast cannot progress its outstanding work while the modeled world remains paused. |
 
 Candidates may finish early. No candidate simulates beyond the common horizon,
 and an earlier original obligation deadline still applies. A known incomplete
 or paused result can have `available: true`; unavailable evidence is distinct
 from a known negative result.
+
+The nominal stride never skips an unfinished step's absolute deadline. Before
+that deadline, an obligation requiring several stable observations reserves a
+final window of cadence-spaced samples. Its eligible-read clock starts when the
+adapter actually dispatches the action; polling deferred work or reading between
+eligible samples does not move that clock. Only the ordinary obligation runtime
+decides whether each sample establishes the terminal and failure predicates.
+The forecast neither extends deadlines nor treats a late matching state as timely
+completion. This prevents one long step from making a shorter valid step appear
+to fail solely because the forecast chose a coarse stride.
 
 Compilation and preparation failures remain visible as `status: "unavailable"`
 rows with a `stage` and reason. A model-level refusal can instead appear in
@@ -205,6 +217,14 @@ simulated-tick costs. `actual_game_ticks_advanced` remains zero. Copied source
 bytes measure canonical snapshot work; retained adapter actions, plans,
 checkpoints and journal are not a measured heap-byte total.
 
+Deadline and stability observations consume the same slice allowance as ordinary
+advances. A single-plan forecast also has a hard 400-advance ceiling covering its
+work and reserve forks together. If the required observations cannot fit, the
+single forecast is unavailable and a comparison returns `budget_exceeded`; no
+incomplete sampling run is scored as an ordinary failed candidate. These are
+sampled conditional predictions, not a search over all possible agent polling
+schedules or proof of continuous predicate truth between observations.
+
 The wrapper rejects unknown and duplicate object fields from the original
 JSON, including duplicates inside candidate sources. Candidate keys must be
 distinct. The decoded request schema is
@@ -239,8 +259,9 @@ budget; a failed request never grants a partially prepared candidate.
 
 `lab_plan_comparison.rs` reuses ordinary `PlanSource` compilation and
 `StaticPlanner` preparation. `plan_forecast.rs` runs the existing laboratory
-model under the additive shared `ForecastBudget`; the older single-plan
-forecast entrypoints retain their semantics. `lab_plan_comparison_handler.rs`
+model under the additive shared `ForecastBudget`; `plan_forecast_schedule.rs`
+keeps deadline and stability frontiers inside the same bound for both single
+and compared forecasts. `lab_plan_comparison_handler.rs`
 owns source and pending-plan publication, while
 `lab_plan_comparison_response.rs` performs pure complete-packet rendering.
 

@@ -11,7 +11,7 @@ use dfmcp_intent::{
 };
 use dfmcp_world::{CompareOp, Fact, FactPresence, FactSource, Predicate, PredicateEvidence, Value};
 
-fn adapter_at(tick: u64) -> Result<MemoryAdapter> {
+pub(super) fn adapter_at(tick: u64) -> Result<MemoryAdapter> {
     let mut adapter = MemoryAdapter::new(scenario_snapshot(
         "starter_fortress",
         FortressId::new(746),
@@ -23,7 +23,7 @@ fn adapter_at(tick: u64) -> Result<MemoryAdapter> {
     Ok(adapter)
 }
 
-fn context(adapter: &MemoryAdapter) -> OperationContext {
+pub(super) fn context(adapter: &MemoryAdapter) -> OperationContext {
     OperationContext {
         session_id: SessionId::new(1),
         request_id: RequestId::new(1),

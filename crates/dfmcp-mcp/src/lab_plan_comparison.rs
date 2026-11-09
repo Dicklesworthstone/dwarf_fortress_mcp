@@ -508,6 +508,8 @@ fn compact_prediction(prediction: &Value) -> Value {
         "predicted_physical_quiescent",
         "predicted_frontier_tick",
         "resolution_ticks",
+        "sampling_policy",
+        "simulation_slices",
         "blocked_by_pause",
         "simulation_horizon_tick",
         "simulation_horizon_reached",

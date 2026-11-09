@@ -261,6 +261,61 @@ fn public_candidate_production_compares_at_default_budget_then_selects_commits_a
 }
 
 #[test]
+fn public_candidate_comparison_preserves_short_deadlines_beside_long_work() -> TestResult {
+    let _serial = crate::test_serial();
+    let owner = open(false, Some(8_192))?;
+    {
+        let session = resolve_session(Some(owner.id.clone()))?;
+        let mut guard = session.lock().map_err(|_| "session poisoned")?;
+        guard.budget.max_game_ticks = 200_000;
+    }
+    let pending = pause_plan(&owner)?;
+    let prior_digest = text_field(&pending, "plan_digest")?;
+    let before = snapshot(&owner)?;
+    let actions = json!([
+        {"action": {
+            "kind": "create_work_order", "name": "short proof", "job_token": "BREW_DRINK", "amount": 1,
+        }},
+        {"action": {
+            "kind": "create_work_order", "name": "long work", "job_token": "PREPARE_MEAL", "amount": 1000,
+        }},
+    ]);
+    let report = compare(
+        &owner,
+        json!([
+            {"key": "alpha", "actions": actions.clone()},
+            {"key": "zulu", "actions": actions},
+        ]),
+        200_000,
+    )?;
+    assert_eq!(report["ok"], true, "{report}");
+    assert_eq!(report["recommended_candidate"], "alpha", "{report}");
+    for key in ["alpha", "zulu"] {
+        let prediction = &candidate(&report, key)?["prediction"];
+        assert_eq!(prediction["available"], true, "{prediction}");
+        assert_eq!(prediction["predicted_complete"], true, "{prediction}");
+        // The 500-tick nominal stride exceeds the first order's sealed
+        // 200-tick deadline. Its inserted observation must preserve that
+        // action's proof before the 50,000-tick second order completes.
+        assert_eq!(prediction["resolution_ticks"], 500);
+        assert!(prediction["sampling_policy"].is_string());
+        assert!(
+            prediction["simulation_slices"]
+                .as_u64()
+                .is_some_and(|n| n <= 400)
+        );
+    }
+    assert_eq!(report["forecast_work"]["actual_game_ticks_advanced"], 0);
+    assert_eq!(snapshot(&owner)?, before);
+    assert_eq!(
+        pending_digest(&owner)?.as_deref(),
+        Some(prior_digest.as_str())
+    );
+    assert_eq!(report["pending_plan_changed"], false);
+    Ok(())
+}
+
+#[test]
 fn public_candidate_comparison_preserves_pending_plan_baseline_and_watch_catalogs() -> TestResult {
     let _serial = crate::test_serial();
     let owner = open(false, Some(8_192))?;

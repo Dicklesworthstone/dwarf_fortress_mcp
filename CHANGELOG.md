@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased — Preserve original deadlines in laboratory predictions
+
+- Schedule discarded-fork observations at each sealed action deadline and
+  final stability window while respecting eligible cadence and deferred dispatch.
+- Keep real deadline misses failed and count normal/reserve advances against
+  one hard simulation-slice limit, returning unavailable evidence on exhaustion.
+- Add planner/adapter and public comparison regressions; retain source purity,
+  original timing and the existing eleven-tool interface.
+
 ## Unreleased — Fit selected event, spatial, relation and ranked pages
 
 - Extend complete Agent Turn page fitting to the four remaining structured
