@@ -1,5 +1,38 @@
 # Implementation Status
 
+## Unreleased — Qualify needs, threats and actionable remedies
+
+The actual laboratory Observe/Wait alert path now reads registered current
+facts instead of retained compatibility values. Unknown stock, alive state,
+needs, labor, squad membership and threat facts remain explicit; complete
+totals and production targets require complete supporting evidence. Known
+empty stock and known deprivation still raise their independent hazards.
+Threats remain visible without a ledger or living population, unknown arrival
+times are not invented, and bounded threat selection names omissions.
+
+Workshop readiness is checked by typed facts, so an absent Still no longer
+suggests an irrelevant labor assignment. Labor remedies select an explicitly
+disabled qualified worker; replenished stock does not create no-op production.
+The server derives each proposed remedy through existing PlanSource lowering
+and checks the exact current anchor, risk, scopes, expiry and checkpoint authority. Incompatible
+remedies remain diagnostic attention instead of executable recommendations or
+handoff steps. Guarded military/logistics advice retains its actual checkpoint
+requirement.
+
+Agent Turn attention preserves derived/unknown confidence without an invented
+probability, anchored source evidence and distinct hostile/burrow identities.
+Pulse and compact output retain bounded evidence, risk, checkpoint and
+registered reversibility metadata.
+Regression source covers unavailable facts, typed blockers, real labor and
+military plan/commit flows, authority refusal, multiple threats/burrows and
+bounded publication.
+
+Validation: 89 selected Rust regressions passed on nightly 1.102.0 (2026-11-08), including nine needs/threat tests, all six tests of the complete remedy qualifier with actual PlanSource lowering, fourteen output-budget tests, eight projected-query tests and twenty-eight forecast tests. The temporary assembly preserves selected production function bodies and exact locked core/world/intent/adapter/lab dependencies; no task-service or authority substitutes were used. Repository integrity, Agent Turn contract, implementation-status and diff checks passed. Both the actual public-module build and its metadata-only check stopped when rustc compiling asupersync was killed by SIGKILL, before a product verdict. Public facade/stdio execution and full current-head release qualification remain unestablished. The separate bead-coverage check is blocked by missing br; the focused alert bead remains in progress for its public acceptance scope.
+
+Owner: `df-lab-alert-evidence-w5a`. This path is restricted to the laboratory
+reference world; generic exported attention and native evidence admission are
+unchanged. Details: `docs/LAB_SEMANTIC_ACTIONS.md`.
+
 ## Unreleased — Observe every sealed deadline in laboratory forecasts
 
 Discarded laboratory forecasts now clip their coarse simulation stride at each

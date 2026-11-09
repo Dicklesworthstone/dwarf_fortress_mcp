@@ -1373,7 +1373,10 @@ fn relation_event_and_metadata_changes_reach_agent_turns_and_historical_queries(
         .ok_or("metadata change absent")?;
     assert_eq!(renamed["subject"]["entity_id"], "1002");
     assert_eq!(renamed["fields_changed"], 0);
-    assert_eq!(renamed["after"]["label"], "Urist renamed without a field change");
+    assert_eq!(
+        renamed["after"]["label"],
+        "Urist renamed without a field change"
+    );
     let event = changes
         .iter()
         .find(|change| change["kind"] == "event_observed")
@@ -1407,10 +1410,22 @@ fn relation_event_and_metadata_changes_reach_agent_turns_and_historical_queries(
     let changes = removed["agent_turn"]["changes"]
         .as_array()
         .ok_or("removal changes")?;
-    assert!(changes.iter().any(|change| change["kind"] == "relation_removed"));
-    assert!(changes.iter().any(|change| change["kind"] == "event_no_longer_retained"));
+    assert!(
+        changes
+            .iter()
+            .any(|change| change["kind"] == "relation_removed")
+    );
+    assert!(
+        changes
+            .iter()
+            .any(|change| change["kind"] == "event_no_longer_retained")
+    );
     let unchanged = parsed(&fortress_observe(Some(session)))?;
-    assert!(unchanged["agent_turn"]["changes"].as_array().is_none_or(Vec::is_empty));
+    assert!(
+        unchanged["agent_turn"]["changes"]
+            .as_array()
+            .is_none_or(Vec::is_empty)
+    );
     Ok(())
 }
 
@@ -2426,6 +2441,8 @@ fn a_supply_alert_remedies_the_actual_production_blocker() -> TestResult {
     let actions = alert["remedy"]["arguments"]["actions"]
         .as_str()
         .ok_or_else(|| alert.to_string())?;
+    let labor_remedy: Value = serde_json::from_str(actions)?;
+    assert_eq!(labor_remedy[0]["action"]["units"], json!(["1003"]));
     let assigned = plan_and_commit(&session, actions)?;
     assert_eq!(assigned["ok"], true, "{assigned}");
     // With a brewer again, the next alert remedies with production.

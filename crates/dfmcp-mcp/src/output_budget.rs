@@ -37,6 +37,36 @@ fn strip_nulls(value: &mut Value) {
     }
 }
 
+/// World alerts carry one compact source witness, not an arbitrary proof dump.
+/// Preserve its complete source and epistemic class through both cheap projections;
+/// an unexpected larger proof is explicitly omitted rather than sliced.
+const MAX_COMPACT_ALERT_EVIDENCE_BYTES: usize = 512;
+
+fn alert_qualification(item: &Value) -> Option<(Value, Value)> {
+    if !item["attention_id"]
+        .as_str()
+        .is_some_and(|id| id.starts_with("world-"))
+    {
+        return None;
+    }
+    let epistemic = item["confidence"]["epistemic_state"].as_str()?;
+    if !matches!(epistemic, "unknown" | "certified_derived") {
+        return None;
+    }
+    let evidence = match item["evidence"].as_array().map(Vec::as_slice) {
+        Some([]) => json!([]),
+        Some([witness])
+            if witness["scope"] == "laboratory_reference_world"
+                && witness["source_anchor"].is_object()
+                && witness.to_string().len() <= MAX_COMPACT_ALERT_EVIDENCE_BYTES =>
+        {
+            json!([witness])
+        }
+        _ => json!([{"omitted_for_profile":true}]),
+    };
+    Some((json!({"epistemic_state":epistemic,"value":null}), evidence))
+}
+
 fn compact_turn(turn: &mut Value) {
     if let Some(affordances) = turn.get_mut("affordances").and_then(Value::as_array_mut) {
         affordances.retain(|a| a["enabled"] != false);
@@ -57,6 +87,9 @@ fn compact_turn(turn: &mut Value) {
         .and_then(Value::as_array_mut)
     {
         for item in items.iter_mut() {
+            let risk = item.get("risk").cloned();
+            let reversibility = item.get("reversibility").cloned();
+            let requires_checkpoint = item.get("requires_checkpoint").and_then(Value::as_bool);
             *item = json!({
                 "recommendation_id": item["recommendation_id"],
                 "tool": item["tool"],
@@ -64,16 +97,30 @@ fn compact_turn(turn: &mut Value) {
                 "reason": item["reason"],
                 "requires_confirmation": item["requires_confirmation"],
             });
+            if let Some(risk) = risk {
+                item["risk"] = risk;
+            }
+            if let Some(reversibility) = reversibility {
+                item["reversibility"] = reversibility;
+            }
+            if let Some(required) = requires_checkpoint {
+                item["requires_checkpoint"] = json!(required);
+            }
         }
     }
     if let Some(items) = turn.get_mut("attention").and_then(Value::as_array_mut) {
         for item in items.iter_mut() {
+            let qualification = alert_qualification(item);
             *item = json!({
                 "attention_id": item["attention_id"],
                 "severity": item["severity"],
                 "finding": item["finding"],
                 "remedy": item["remedy"],
             });
+            if let Some((confidence, evidence)) = qualification {
+                item["confidence"] = confidence;
+                item["evidence"] = evidence;
+            }
         }
     }
     if let Some(items) = turn
@@ -171,6 +218,7 @@ pub(crate) fn shape_for_profile(response: &str, profile: &str) -> String {
         // Attention and recommendations keep what to act on, not boilerplate.
         if let Some(items) = turn.get_mut("attention").and_then(Value::as_array_mut) {
             for item in items.iter_mut() {
+                let qualification = alert_qualification(item);
                 if let Some(map) = item.as_object_mut() {
                     map.retain(|key, _| {
                         matches!(
@@ -185,6 +233,10 @@ pub(crate) fn shape_for_profile(response: &str, profile: &str) -> String {
                                 | "subjects"
                         )
                     });
+                    if let Some((confidence, evidence)) = qualification {
+                        map.insert("confidence".to_owned(), confidence);
+                        map.insert("evidence".to_owned(), evidence);
+                    }
                 }
             }
         }
@@ -201,7 +253,10 @@ pub(crate) fn shape_for_profile(response: &str, profile: &str) -> String {
                                 | "tool"
                                 | "arguments"
                                 | "reason"
+                                | "risk"
+                                | "reversibility"
                                 | "requires_confirmation"
+                                | "requires_checkpoint"
                         )
                     });
                 }
@@ -662,6 +717,147 @@ mod tests {
             let pulse: Value =
                 serde_json::from_str(&shape_for_profile(&payload.to_string(), "pulse"))?;
             assert_eq!(pulse["agent_turn"]["active_work"][key], json!([]));
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod alert_projection_tests {
+    use super::*;
+
+    fn response(epistemic: &str) -> Value {
+        let anchor = json!({
+            "fortress_id":"7", "game_tick":123, "state_hash":"ab".repeat(32),
+            "cursor":{"epoch":2,"sequence":41},
+        });
+        json!({
+            "ok":true, "session_id":"s",
+            "agent_turn":{
+                "schema":"dfmcp.agent_turn/1", "operation":"fortress.observe",
+                "anchor":anchor, "continuity":{"status":"continuous"},
+                "coverage":{}, "active_work":{}, "recommendations":[],
+                "affordances":[{"enabled":false,"description":"optional detail".repeat(1000)}],
+                "attention":[{
+                    "attention_id":"world-drink_supply", "category":"fortress_needs",
+                    "severity":"high", "urgency":"before_the_next_plan",
+                    "confidence":{"epistemic_state":epistemic,"value":null},
+                    "finding":"inspect the qualified supply state", "remedy":null,
+                    "evidence":[{"source_anchor":anchor,"scope":"laboratory_reference_world",
+                        "source_scope":"cd".repeat(32)}],
+                }],
+            },
+        })
+    }
+
+    fn assert_qualification(actual: &Value, expected: &Value) {
+        assert_eq!(actual["confidence"], expected["confidence"]);
+        assert!(actual["confidence"]["value"].is_null());
+        assert_eq!(actual["evidence"], expected["evidence"]);
+        assert_eq!(actual["remedy"], expected["remedy"]);
+    }
+
+    #[test]
+    fn pulse_keeps_unknown_and_derived_alert_source_qualification() -> Result<(), serde_json::Error>
+    {
+        for epistemic in ["unknown", "certified_derived"] {
+            let original = response(epistemic);
+            let pulse = shape_for_profile(&original.to_string(), "pulse");
+            let fitted = fit(&pulse, 750);
+            let parsed: Value = serde_json::from_str(&fitted)?;
+            assert!(estimate_tokens(&fitted) <= 750);
+            assert_eq!(parsed["output_budget"]["tier"], "full");
+            assert_qualification(
+                &parsed["agent_turn"]["attention"][0],
+                &original["agent_turn"]["attention"][0],
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn output_compaction_keeps_unknown_and_derived_alert_source_qualification()
+    -> Result<(), serde_json::Error> {
+        for epistemic in ["unknown", "certified_derived"] {
+            let original = response(epistemic);
+            let fitted = fit(&original.to_string(), 750);
+            let parsed: Value = serde_json::from_str(&fitted)?;
+            assert!(estimate_tokens(&fitted) <= 750);
+            assert_eq!(parsed["output_budget"]["tier"], "compact_turn");
+            assert_qualification(
+                &parsed["agent_turn"]["attention"][0],
+                &original["agent_turn"]["attention"][0],
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn alert_projection_bounds_evidence_without_slicing_a_proof() -> Result<(), serde_json::Error> {
+        let original = response("unknown");
+        let witness = original["agent_turn"]["attention"][0]["evidence"][0].clone();
+        let mut oversized = witness.clone();
+        oversized["detail"] = json!("unbounded proof".repeat(1000));
+        for evidence in [json!([witness.clone(), witness]), json!([oversized])] {
+            let mut payload = original.clone();
+            payload["agent_turn"]["attention"][0]["evidence"] = evidence;
+            for profile in ["pulse", "briefing"] {
+                let shaped = shape_for_profile(&payload.to_string(), profile);
+                let fitted = fit(&shaped, 750);
+                let parsed: Value = serde_json::from_str(&fitted)?;
+                let alert = &parsed["agent_turn"]["attention"][0];
+                assert!(estimate_tokens(&fitted) <= 750);
+                assert_eq!(
+                    alert["confidence"],
+                    original["agent_turn"]["attention"][0]["confidence"]
+                );
+                assert_eq!(alert["evidence"], json!([{"omitted_for_profile":true}]));
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn cheap_remedy_recommendations_keep_risk_and_checkpoint_requirements()
+    -> Result<(), serde_json::Error> {
+        for (risk, required) in [("military", true), ("guarded", true), ("reversible", false)] {
+            let mut payload = response("certified_derived");
+            let remedy = json!({
+                "recommendation_id":"remedy-hostile", "tool":"fortress.plan",
+                "reason":"review the observed defense need", "risk":risk,
+                "reversibility":"not_compensable",
+                "requires_checkpoint":required, "requires_confirmation":false,
+                "arguments":{"actions":"[]"},
+            });
+            payload["agent_turn"]["recommendations"] = json!([remedy]);
+            for profile in ["pulse", "briefing"] {
+                let shaped = shape_for_profile(&payload.to_string(), profile);
+                let fitted = fit(&shaped, 750);
+                let parsed: Value = serde_json::from_str(&fitted)?;
+                let actual = &parsed["agent_turn"]["recommendations"][0];
+                assert!(estimate_tokens(&fitted) <= 750);
+                assert_eq!(actual["risk"], risk);
+                assert_eq!(actual["reversibility"], "not_compensable");
+                assert_eq!(actual["requires_checkpoint"], required);
+                assert_eq!(actual["arguments"], remedy["arguments"]);
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn older_recommendations_do_not_gain_missing_safety_fields() -> Result<(), serde_json::Error> {
+        let mut payload = response("unknown");
+        payload["agent_turn"]["recommendations"] = json!([{"tool":"fortress.wait","arguments":{}}]);
+        for profile in ["pulse", "briefing"] {
+            let shaped = shape_for_profile(&payload.to_string(), profile);
+            let fitted = fit(&shaped, 750);
+            let parsed: Value = serde_json::from_str(&fitted)?;
+            let recommendation = &parsed["agent_turn"]["recommendations"][0];
+            assert!(recommendation.is_object());
+            for field in ["risk", "reversibility", "requires_checkpoint"] {
+                assert!(recommendation.get(field).is_none(), "{recommendation}");
+            }
         }
         Ok(())
     }

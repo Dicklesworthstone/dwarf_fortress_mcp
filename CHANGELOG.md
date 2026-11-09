@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased — Ground needs and threat advice in current evidence
+
+- Qualify laboratory stock, population, need, worker and threat facts; retain
+  known hazards while exposing incomplete totals and unknown arrival times.
+- Fix false labor remedies for missing workshops, select known disabled
+  workers and avoid production suggestions for an already met stock target.
+- Check proposed remedies against actual current risk, scopes and checkpoint
+  authority before recommendations or handoff; preserve unavailable diagnostics.
+- Retain derived/unknown confidence and bounded source evidence through pulse
+  and compact output, with distinct hostile/burrow attention identities.
+- Add focused helper and public regression workflows; exact execution and
+  remaining qualification limits are recorded in implementation status.
+
 ## Unreleased — Preserve original deadlines in laboratory predictions
 
 - Schedule discarded-fork observations at each sealed action deadline and

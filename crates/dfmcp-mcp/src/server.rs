@@ -154,6 +154,9 @@ mod lab_progress;
 #[path = "civilian_recovery.rs"]
 mod civilian_recovery;
 
+#[path = "server_alert_remedies.rs"]
+mod alert_remedies;
+
 #[cfg(test)]
 #[path = "civilian_recovery_mcp_tests.rs"]
 mod civilian_recovery_mcp_tests;
@@ -304,9 +307,16 @@ fn remember_version(session: &mut LabSession) {
 /// Dynamic civilian advice uses the world's retained monitor. Pure snapshot
 /// alerts cannot establish a historical clear interval.
 fn world_alerts(session: &LabSession) -> Vec<serde_json::Value> {
-    let mut alerts = crate::lab_world::world_alerts(session.adapter.snapshot());
+    let snapshot = session.adapter.snapshot();
+    let mut alerts = crate::lab_world::world_alerts(snapshot);
     alerts.retain(|alert| alert["domain"] != "civilian_safety");
     alerts.extend(session.civilian_recovery.alerts());
+    alert_remedies::qualify(
+        snapshot,
+        &session.civilian_recovery,
+        &read_context(session),
+        &mut alerts,
+    );
     alerts
 }
 
@@ -3845,7 +3855,7 @@ pub(crate) fn handoff_json(session: &LabSession) -> serde_json::Value {
         }));
     }
     for alert in &alerts {
-        if alert["severity"] == "critical" && alert["remedy"].is_object() {
+        if alert["severity"] == "critical" && alert["remedy"]["available"] == true {
             let mut arguments = alert["remedy"]["arguments"].clone();
             arguments["session_id"] = json!(format!("{}", session.session_id));
             resume.push(json!({

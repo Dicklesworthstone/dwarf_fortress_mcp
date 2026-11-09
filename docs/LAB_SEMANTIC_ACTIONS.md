@@ -520,10 +520,35 @@ that meal; later production cannot feed an earlier meal.
 
 `fortress_observe` and `fortress_wait` return `world_alerts` and the Agent Turn
 raises them as `fortress_needs` attention: `high` when a stock lasts less than
-four rounds, `critical` when it is exhausted or dwarves are deprived. Each alert
-carries a `remedy` — the exact `fortress.plan` arguments for a work order
-sized for about four rounds. Worlds without a ledger (`empty`) have no
-metabolism. None of these rates are claims about Dwarf Fortress.
+four rounds, `critical` when it is exhausted or dwarves are deprived. Eligible
+alerts carry a `remedy` with the exact `fortress.plan` arguments for a production
+target of about four rounds. A completed workshop with no qualified enabled
+worker can instead suggest enabling an explicitly disabled labor on a known
+living dwarf. A missing or unqualified workshop cannot be fixed by assigning
+labor, so its alert names the workshop blocker without that false remedy.
+Worlds without a ledger (`empty`) have no metabolism. None of these rates are
+claims about Dwarf Fortress.
+
+Needs and threat triage use the registered laboratory fact sources, current
+snapshot tick and explicit fact presence. Assertions, replay facts, future
+facts, stale facts and unavailable compatibility values cannot establish a
+current stock, living dwarf, deprivation, workshop, labor or hostile state.
+Alerts include their source anchor and `laboratory_reference_world` scope.
+Their Agent Turn confidence is `certified_derived` or `unknown`, with no
+invented numeric probability. The whole-round exhaustion estimate is a
+laboratory derivation, separate from observed stock. Pulse responses and
+compact turns retain the alert's epistemic state and bounded source witness;
+an omitted witness is named explicitly. Owned civilian recovery alerts retain
+their census anchor and distinct burrow identity through the same projection.
+
+Unavailable stock and incomplete living rosters produce explicit unknown
+sufficiency. A known empty stock or known deprived dwarf still raises its
+independent hazard; unknown supporting facts suppress exact population,
+deprivation and exhaustion totals and prevent a guessed production target.
+`known_living_units`, `known_deprived_units` and the associated unknown counts
+distinguish established lower bounds from complete totals. A retained hunger
+or thirst flag with replenished stock reports that stock accurately and does
+not propose more production when the four-round target is already met.
 
 ### Original production quotas
 
@@ -798,9 +823,31 @@ deals 10 damage per round; with no soldiers it kills one exposed dwarf (alive
 and in no burrow, highest id first) every third round (`alive: false`,
 `cause_of_death`). At health 0 it is `slain`. `world_alerts` report the raider
 as `high` while approaching and `critical` while attacking, with a remedy that
-assigns up to four unassigned dwarves to the squad; when the session holds the
-remedy's capability (`configure_military`) it becomes the top recommendation.
-Remedies are always gated by the capability they name (`requires`).
+brings the assigned defenders to at most four using known living, unassigned
+dwarves. The assignment recommendation requires a complete defense census;
+unknown alive or squad facts remain explicit and suppress a guessed muster.
+Field absence retains the registered legacy laboratory meaning of unassigned,
+while a present unavailable squad field never establishes nonmembership.
+
+Threat alerts do not depend on the presence of a stock ledger or any living
+dwarves. Unknown arrival times remain unknown. Unknown hostility or status
+produces a threat-coverage warning, including how many creatures are known
+hostile but lack a qualified status; it cannot invent an attack or clearance.
+At most sixteen active threat rows are retained, with attacking threats first,
+then entity identity; an explicit omitted count preserves the coverage limit.
+Each retained hostile has its own attention identity so the Agent Turn's
+top-k selection can be certified even when several threats have equal rank.
+
+A concrete remedy becomes a recommendation only after the server checks its
+current Plan and effect authority, including actual risk, scopes, expiration
+and required checkpoint capability. Its advisory record retains the actual
+`risk`, `requires_checkpoint`, `available` and any `unavailable_reason`.
+Squad assignment is guarded and requires checkpoint authority; a reversible
+military grant alone is insufficient. The Agent Turn and handoff do not offer
+unavailable remedies as next actions, while attention retains their diagnostic
+arguments and reason. Pulse and compact recommendations preserve the risk and
+checkpoint requirement. Normal plan, commit, capability and evidence checks
+still decide whether a suggested action can run.
 
 ## Evaluating agent policies
 

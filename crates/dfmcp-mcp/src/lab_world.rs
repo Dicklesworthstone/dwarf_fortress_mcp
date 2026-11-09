@@ -50,6 +50,10 @@ pub(crate) use laboratory_material_view::{
 mod laboratory_provisions_view;
 pub(crate) use laboratory_provisions_view::{provisions_action_json, provisions_json};
 
+#[path = "lab_world_alerts.rs"]
+mod laboratory_alerts;
+pub(crate) use laboratory_alerts::world_alerts;
+
 #[cfg(test)]
 #[path = "laboratory_provisions_tests.rs"]
 pub(crate) mod laboratory_provisions_tests;
@@ -2427,145 +2431,6 @@ impl ProductionCompilation {
     }
 }
 
-/// Observed economy alerts: stocks that will run out soon, are exhausted, or
-/// dwarves left thirsty or hungry. Remedies require usable current inputs;
-/// unavailable ingredients retain an explicit blocker instead of a false plan.
-pub(crate) fn world_alerts(snapshot: &WorldSnapshot) -> Vec<Json> {
-    let Some(ledger) =
-        effects::stock_ledger(snapshot).and_then(|id| snapshot.graph.entities.get(&id))
-    else {
-        return Vec::new();
-    };
-    let units: Vec<&EntityRecord> = snapshot
-        .graph
-        .entities
-        .values()
-        .filter(|e| {
-            e.kind == EntityKind::Unit
-                && e.fields.get("alive").map(|f| &f.value) != Some(&Value::Bool(false))
-        })
-        .collect();
-    if units.is_empty() {
-        return Vec::new();
-    }
-    let mut alerts = Vec::new();
-    let provisions = effects::provisions_report(snapshot);
-    for (stock, interval, need, deprived, noun) in [
-        (
-            effects::STOCK_DRINK_FIELD,
-            effects::DRINK_INTERVAL_TICKS,
-            effects::NEED_DRINK_FIELD,
-            "thirsty",
-            "drink",
-        ),
-        (
-            effects::STOCK_FOOD_FIELD,
-            effects::FOOD_INTERVAL_TICKS,
-            effects::NEED_FOOD_FIELD,
-            "hungry",
-            "food",
-        ),
-    ] {
-        let held = match ledger.fields.get(stock).map(|f| &f.value) {
-            Some(Value::U64(held)) => *held,
-            _ => continue,
-        };
-        let living = units.len() as u64;
-        let ticks_left = held / living * interval;
-        let starving = units
-            .iter()
-            .filter(|u| {
-                matches!(u.fields.get(need).map(|f| &f.value), Some(Value::Text(t)) if t == deprived)
-            })
-            .count();
-        // Keep about four rounds in stock; the production compiler sizes the
-        // work orders against observed stock.
-        let (token, job) = if noun == "drink" {
-            ("DRINK", "BREW_DRINK")
-        } else {
-            ("FOOD", "PREPARE_MEAL")
-        };
-        let blocker = effects::work_order_blocker(snapshot, job);
-        let labor = effects::work_order_requirements(job).map(|(_, labor)| labor);
-        // Remedy the actual blocker first: a production plan that cannot
-        // progress would only be refused.
-        let remedy = match (&blocker, labor) {
-            (None, _) => json!({
-                "tool": "fortress.plan",
-                "arguments": {"blueprint": json!({
-                    "template": "production",
-                    "quotas": [{"item": token, "minimum": living * 4}],
-                }).to_string()},
-                "requires": "configure_production",
-            }),
-            (Some(why), Some(labor)) if !why.contains("no completed") => {
-                // Prefer a dwarf outside the militia for the missing labor.
-                let worker = units
-                    .iter()
-                    .min_by_key(|u| (u.fields.contains_key(effects::SQUAD_FIELD), u.id));
-                match worker {
-                    Some(worker) => json!({
-                        "tool": "fortress.plan",
-                        "arguments": {"actions": json!([{"action": {
-                            "kind": "set_labor",
-                            "units": [worker.id.get().to_string()],
-                            "labor": labor,
-                            "enabled": true,
-                        }}]).to_string()},
-                        "requires": "configure_labor",
-                        "then": "plan production once the labor is assigned",
-                    }),
-                    None => Json::Null,
-                }
-            }
-            _ => Json::Null,
-        };
-        let (severity, finding) = if starving > 0 {
-            (
-                "critical",
-                format!("{starving} dwarves are {deprived}: the fortress is out of {noun}"),
-            )
-        } else if held == 0 {
-            ("critical", format!("the fortress has no {noun} left"))
-        } else if ticks_left < 4 * interval {
-            (
-                "high",
-                format!(
-                    "{noun} runs out in about {ticks_left} game ticks ({held} units for {living} dwarves)"
-                ),
-            )
-        } else {
-            continue;
-        };
-        let mut alert = json!({
-            "alert": format!("{noun}_supply"),
-            "severity": severity,
-            "finding": finding,
-            "stock": held,
-            "ticks_until_exhausted": ticks_left,
-            "deprived_units": starving,
-            "production_blocked_by": blocker,
-            "remedy": remedy,
-        });
-        // This necessary input check is additive only for the explicit model.
-        // The actual quota compiler still establishes reserve/horizon demand.
-        let minimum_batches = (living * 4).saturating_sub(held).div_ceil(5);
-        if let Some((reason, readiness)) =
-            laboratory_provisions_view::alert_input_blocker(snapshot, &provisions, minimum_batches)
-        {
-            alert["finding"] = json!(format!("{finding}; {reason}"));
-            alert["capacity_blocked_by"] = json!(blocker);
-            alert["production_blocked_by"] = json!(reason);
-            alert["ingredient_readiness"] = readiness;
-            alert["remedy"] = Json::Null;
-        }
-        alerts.push(alert);
-    }
-    alerts.extend(threat_alerts(snapshot, &units));
-    alerts.extend(civilian_alert(snapshot, &units));
-    alerts
-}
-
 /// A pure snapshot can recommend protection, but never establish a stable
 /// clear interval. The server replaces these diagnostics with its owned monitor.
 fn civilian_alert(snapshot: &WorldSnapshot, _units: &[&EntityRecord]) -> Vec<Json> {
@@ -2613,74 +2478,6 @@ fn civilian_alert(snapshot: &WorldSnapshot, _units: &[&EntityRecord]) -> Vec<Jso
         };
     }
     vec![alert]
-}
-
-/// Approaching or attacking hostiles, with a squad-assignment remedy when
-/// the fortress has a squad and dwarves not yet in it.
-fn threat_alerts(snapshot: &WorldSnapshot, units: &[&EntityRecord]) -> Vec<Json> {
-    let squad = snapshot
-        .graph
-        .entities
-        .values()
-        .find(|e| e.kind == EntityKind::Squad)
-        .map(|e| e.id);
-    let soldiers = units
-        .iter()
-        .filter(|u| {
-            matches!(
-                u.fields.get(effects::SQUAD_FIELD).map(|f| &f.value),
-                Some(Value::Entity(_))
-            )
-        })
-        .count();
-    let recruits: Vec<String> = units
-        .iter()
-        .filter(|u| !u.fields.contains_key(effects::SQUAD_FIELD))
-        .take(4)
-        .map(|u| u.id.get().to_string())
-        .collect();
-    snapshot
-        .graph
-        .entities
-        .values()
-        .filter(|e| {
-            e.kind == EntityKind::Creature
-                && e.fields.get(effects::HOSTILE_FIELD).map(|f| &f.value) == Some(&Value::Bool(true))
-        })
-        .filter_map(|hostile| {
-            let status = match hostile.fields.get(effects::THREAT_STATUS_FIELD).map(|f| &f.value) {
-                Some(Value::Text(status)) if status != effects::THREAT_SLAIN => status.clone(),
-                _ => return None,
-            };
-            let arrives = match hostile.fields.get(effects::ARRIVES_AT_FIELD).map(|f| &f.value) {
-                Some(Value::U64(tick)) => *tick,
-                _ => 0,
-            };
-            let attacking = status == effects::THREAT_ATTACKING;
-            let remedy = squad.filter(|_| soldiers < 4 && !recruits.is_empty()).map(|squad| {
-                json!({
-                    "tool": "fortress.plan",
-                    "arguments": {"actions": format!(
-                        r#"[{{"action":{{"kind":"assign_squad","units":{},"squad":"{}"}}}}]"#,
-                        json!(recruits),
-                        squad.get()
-                    )},
-                    "requires": "configure_military",
-                })
-            });
-            Some(json!({
-                "alert": "hostile",
-                "severity": if attacking { "critical" } else { "high" },
-                "finding": if attacking {
-                    format!("{} is attacking; {soldiers} dwarves are in a squad", hostile.label)
-                } else {
-                    format!("{} arrives at tick {arrives}; {soldiers} dwarves are in a squad", hostile.label)
-                },
-                "subject": hostile.id.get().to_string(),
-                "remedy": remedy,
-            }))
-        })
-        .collect()
 }
 
 /// Original goal truth with the exact reference identities required for proof.

@@ -776,12 +776,18 @@ fn recommendations(
         && let Some(alerts) = payload.get("world_alerts").and_then(Value::as_array)
     {
         for alert in alerts {
-            if let Some(remedy) = alert.get("remedy").filter(|remedy| {
-                remedy["requires"]
-                    .as_str()
-                    .is_some_and(|capability| has_grant(state, capability))
-            }) {
-                out.push(recommendation(
+            if let Some(remedy) = alert
+                .get("remedy")
+                .filter(|remedy| remedy["available"] == true)
+            {
+                let Some(risk) = remedy["risk"].as_str() else {
+                    continue;
+                };
+                let reversibility = match remedy["reversibility"].as_str() {
+                    Some(value) => value,
+                    None => "unknown",
+                };
+                let mut next = recommendation(
                     format!("remedy-{}", alert["alert"].as_str().unwrap_or("need")),
                     "fortress.plan",
                     format!(
@@ -792,11 +798,13 @@ fn recommendations(
                     ),
                     "high",
                     "low",
-                    "reversible",
-                    "reversible",
-                    false,
+                    risk,
+                    reversibility,
+                    remedy["requires_confirmation"] == true,
                     remedy["arguments"].clone(),
-                ));
+                );
+                next["requires_checkpoint"] = remedy["requires_checkpoint"].clone();
+                out.push(next);
             }
         }
     }
@@ -1072,16 +1080,38 @@ fn attention(operation: &str, ok: bool, payload: &Value, state: &SessionOrientat
         .collect();
     if let Some(alerts) = payload.get("world_alerts").and_then(Value::as_array) {
         items.extend(alerts.iter().map(|alert| {
+            let kind = alert["alert"].as_str().unwrap_or("alert");
+            let subject = alert["subject"].as_str()
+                .or_else(|| alert["recovery"]["burrow"]["id"].as_str());
+            let attention_id = match subject {
+                Some(subject) => format!("world-{kind}-{subject}"),
+                None => format!("world-{kind}"),
+            };
+            let source_anchor = alert.get("source_anchor")
+                .or_else(|| alert["recovery"].get("source_anchor"));
+            let epistemic = if alert["epistemic_state"] == "unknown"
+                || alert["recovery"]["threat"] == "unknown"
+                || alert["recovery"].get("fault").is_some_and(|fault| !fault.is_null())
+            {
+                "unknown"
+            } else { "certified_derived" };
             json!({
-                "attention_id": format!("world-{}", alert["alert"].as_str().unwrap_or("alert")),
+                "attention_id": attention_id,
                 "category": "fortress_needs",
                 "severity": value_or_null(alert.get("severity")),
                 "urgency": if alert["severity"] == "critical" { "now" } else { "before_the_next_plan" },
-                "confidence": {"epistemic_state": "observed", "value": 1.0},
+                "confidence": {
+                    "epistemic_state": epistemic,
+                    "value": null,
+                },
                 "finding": value_or_null(alert.get("finding")),
                 "remedy": value_or_null(alert.get("remedy")),
                 "likely_consequence_if_ignored": "dwarves go without and the fortress declines",
-                "evidence": [],
+                "evidence": source_anchor.map(|anchor| vec![json!({
+                    "source_anchor":anchor,
+                    "scope":"laboratory_reference_world",
+                    "source_scope":value_or_null(alert["recovery"].get("source_scope")),
+                })]).unwrap_or_default(),
             })
         }));
     }
@@ -1905,7 +1935,7 @@ pub fn fortress_observe(session_id: Option<String>) -> String {
 }
 
 #[tool(
-    description = "Run a bounded laboratory query with explicit coverage, uncertainty, affordances, and next-step guidance. JSON {\"mode\":\"structured\",\"request\":{\"schema\":\"dfmcp.query/1\",\"query\":{\"kind\":\"entities|inspect|traverse|dependencies|aggregate|search|events\",...}},\"at\"?:state_hash} runs typed field projections, filters, bound continuations, generation-aware inspection, graph dependency analysis, exact integer/fixed aggregates, lexical search, or bounded retained-event windows on the current or exact retained world. The closed temporal wrapper {mode:temporal,request:{schema:dfmcp.query/1,query:{kind:capture|changes|baselines|release_baseline|watch|poll_watch|poll_watches|watches|cancel_watch|release_watch,...}}} owns up to eight foreground selected baselines per session; capture uses key, select and max_game_ticks, changes uses baseline with optional limit/continuation, release_baseline uses baseline. Foreground watches use key, condition, optional failure_condition, deadline_tick, optional poll_interval_ticks and stable_observations; poll_watches evaluates one to eight selected handles (or all when omitted) at the same current snapshot with atomic publication. Field/generation, observed-projection entity counts, pause/tick and Boolean conditions use registered laboratory evidence. Polling never advances game time or acquires native observations. Structured condition_evaluation preflights the same predicates without retaining a watch, including exact historical at sources. Complete results and current active work are published atomically before private baseline/watch changes; restart loses handles, and explicit polling invalidates nonterminal watches after restore. The closed query_changes wrapper takes before (exact retained hash), optional after (default current), select (entities with kinds/where/fields/order), optional limit and continuation. It reports generation-aware entered_result, left_result and changed_in_result rows between complete endpoint selections, with jointly charged source budgets and current-anchor-bound pages. It does not establish intermediate history. Structured results never authorize effects; historical reads recheck current Query authority. The complete page and Agent Turn must fit without dropping rows. Current mode \"civilian_recovery\" reports the world-owned stable-clear interval and exact roster; it accepts no historical at selector or caller clearance. Other mode: \"summary\" (default), \"entities\", or JSON: {\"mode\":\"observation\",\"completeness_profile\":\"control-minimum|operations|spatial|historical|research-full\",\"section\":\"entities|relations|chunks|events\",\"limit\"?,\"offset\"?} (bounded profile records with distinct source/projected anchors and explicit omissions), {\"mode\":\"entities\",\"kind\"?,\"limit\"?,\"offset\"?}, {\"mode\":\"terrain\",\"min\":[x,y,z],\"max\":[x,y,z]}, {\"mode\":\"search\",\"text\":...,\"limit\"?}, {\"mode\":\"path\",\"from\":[x,y,z],\"to\":[x,y,z]} (walkability route over observed terrain; unproven absence is reported as unknown); entities accept \"where\": {\"field\",\"op\": eq|ne|lt|le|gt|ge,\"value\"} or {\"all\"|\"any\":[...]} or {\"not\":{...}} (unknown facts never match); add \"at\":<state_hash> to read an earlier retained world version exactly; {\"mode\":\"changes\",\"since\":<state_hash>} lists observed changes from that version to now (each session retains its last 32 versions)."
+    description = "Run a bounded laboratory query with explicit coverage, uncertainty, affordances, and next-step guidance. JSON {\"mode\":\"structured\",\"request\":{\"schema\":\"dfmcp.query/1\",\"query\":{\"kind\":\"entities|inspect|traverse|dependencies|aggregate|search|events|spatial_entities|related_entities|ranked_entities|condition_evaluation\",...}},\"at\"?:state_hash} runs typed field projections, filters, bound continuations, generation-aware inspection, graph dependency analysis, exact integer/fixed aggregates, lexical search, or bounded retained-event windows on the current or exact retained world. The closed temporal wrapper {mode:temporal,request:{schema:dfmcp.query/1,query:{kind:capture|changes|baselines|release_baseline|watch|poll_watch|poll_watches|watches|cancel_watch|release_watch,...}}} owns up to eight foreground selected baselines per session; capture uses key, select and max_game_ticks, changes uses baseline with optional limit/continuation, release_baseline uses baseline. Foreground watches use key, condition, optional failure_condition, deadline_tick, optional poll_interval_ticks and stable_observations; poll_watches evaluates one to eight selected handles (or all when omitted) at the same current snapshot with atomic publication. Field/generation, observed-projection entity counts, pause/tick and Boolean conditions use registered laboratory evidence. Polling never advances game time or acquires native observations. Structured condition_evaluation preflights the same predicates without retaining a watch, including exact historical at sources. Complete results and current active work are published atomically before private baseline/watch changes; restart loses handles, and explicit polling invalidates nonterminal watches after restore. The closed query_changes wrapper takes before (exact retained hash), optional after (default current), select (entities with kinds/where/fields/order), optional limit and continuation. It reports generation-aware entered_result, left_result and changed_in_result rows between complete endpoint selections, with jointly charged source budgets and current-anchor-bound pages. It does not establish intermediate history. Structured results never authorize effects; historical reads recheck current Query authority. The complete page and Agent Turn must fit without dropping rows. Current mode \"civilian_recovery\" reports the world-owned stable-clear interval and exact roster; it accepts no historical at selector or caller clearance. Other mode: \"summary\" (default), \"entities\", or JSON: {\"mode\":\"observation\",\"completeness_profile\":\"control-minimum|operations|spatial|historical|research-full\",\"section\":\"entities|relations|chunks|events\",\"limit\"?,\"offset\"?} (bounded profile records with distinct source/projected anchors and explicit omissions), {\"mode\":\"entities\",\"kind\"?,\"limit\"?,\"offset\"?}, {\"mode\":\"terrain\",\"min\":[x,y,z],\"max\":[x,y,z]}, {\"mode\":\"search\",\"text\":...,\"limit\"?}, {\"mode\":\"path\",\"from\":[x,y,z],\"to\":[x,y,z]} (walkability route over observed terrain; unproven absence is reported as unknown); entities accept \"where\": {\"field\",\"op\": eq|ne|lt|le|gt|ge,\"value\"} or {\"all\"|\"any\":[...]} or {\"not\":{...}} (unknown facts never match); add \"at\":<state_hash> to read an earlier retained world version exactly; {\"mode\":\"changes\",\"since\":<state_hash>} lists observed changes from that version to now (each session retains its last 32 versions)."
 )]
 pub fn fortress_query(session_id: Option<String>, mode: Option<String>) -> String {
     let started = std::time::Instant::now();
@@ -2522,6 +2552,10 @@ mod tests {
 #[cfg(test)]
 #[path = "lab_actions_mcp_tests.rs"]
 mod lab_actions_tests;
+
+#[cfg(test)]
+#[path = "lab_alerts_mcp_tests.rs"]
+mod lab_alerts_tests;
 
 #[cfg(test)]
 #[path = "laboratory_workforce_mcp_tests.rs"]
