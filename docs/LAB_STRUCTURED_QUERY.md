@@ -336,11 +336,14 @@ work before canonical serialization. Its conservative estimate is distinct from
 the exact negotiated canonical-byte allowance. A one-row page cannot bypass
 source verification costs, including fields omitted from the response.
 
-For structured `entities`, the executor borrows the canonical candidates and
-renders only the requested `fields`. Large unselected values do not consume
-the projected output allowance. The complete laboratory wrapper and captured
-Agent Turn participate while the page is chosen, so `returned` can be smaller
+For structured `entities`, `spatial_entities`, `related_entities`,
+`ranked_entities` and `events`, the complete laboratory wrapper and captured
+Agent Turn participate while the page is chosen. `returned` can be smaller
 than the requested `limit` without requiring the caller to retry smaller limits.
+Entity pages render the requested `fields` and any required geometry, relation
+witnesses or ranking facts; event pages retain their selected fields and event
+metadata. Large unselected values do not consume the projected output allowance,
+while complete-source work admission still includes them.
 Rows form one ordered prefix and the continuation follows exactly that prefix.
 Neither an oversized row nor a zero-row advancing page is silently accepted.
 The final page can fit even when removing its continuation makes it smaller
@@ -372,7 +375,10 @@ facts, continuation integrity, legacy grammar, source work and complete-packet
 budgets. These source regressions do not establish live DFHack compatibility,
 game effects, production admission or full workspace qualification.
 
-`projected_entities_mcp_tests.rs` adds complete-turn pagination, retained work,
-required-row refusal, failed-query observation basis, historical authority and
-deferred-context checks. Focused pure helper and renderer execution is recorded
+`projected_entities_mcp_tests.rs` adds complete-turn pagination for entity,
+spatial, relationship, ranked and event pages, retaining query catalogs and
+pending game work. It also covers required-row refusal, failed-query observation
+basis, historical authority and deferred-context checks. Pure family regressions
+cover exact continuation replay, oversized required rows, smaller terminal
+packets, empty results and publisher errors. Focused helper and renderer execution is recorded
 separately from full public-facade execution in `IMPLEMENTATION_STATUS.md`.

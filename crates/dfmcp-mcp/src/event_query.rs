@@ -388,6 +388,20 @@ pub(super) fn execute(
     context: &OperationContext,
     input: &Value,
 ) -> Result<Value> {
+    execute_with_page_budget(snapshot, context, input, context.budget.max_bytes, &|_| {
+        Ok(true)
+    })
+}
+
+/// Fit retained events with their complete caller-owned packet. The callback
+/// checks size only; source admission, identity and authority remain unchanged.
+pub(super) fn execute_with_page_budget(
+    snapshot: &WorldSnapshot,
+    context: &OperationContext,
+    input: &Value,
+    max_output_bytes: u64,
+    fits: &dyn Fn(&Value) -> Result<bool>,
+) -> Result<Value> {
     let started = Instant::now();
     context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
     if context.anchor != snapshot.anchor() {
@@ -477,6 +491,7 @@ pub(super) fn execute(
         context
             .budget
             .max_bytes
+            .min(max_output_bytes)
             .min(u64::from(context.budget.max_output_tokens).saturating_mul(4)),
     )
     .map_err(|_| exhausted("event query byte bound cannot be represented"))?;
@@ -545,36 +560,34 @@ pub(super) fn execute(
             "note": "bounded endpoint observations; restore retains the checkpoint branch; counters do not prove complete history or confer mutation authority"
         });
     }
+    let output = super::core_query::PageBudget {
+        maximum_bytes: maximum,
+        fits,
+    };
+    let reaches_terminal = matching.len().saturating_sub(start) <= limit;
     let mut rows = Vec::new();
-    let mut result = page(&base, &rows, &matching, start, identity);
+    let mut accepted = None;
     for event in matching.iter().skip(start).take(limit) {
         if !row_fits_minimum(event, &spec.fields, maximum) {
-            if rows.is_empty() {
-                return Err(exhausted(
-                    "one complete event row exceeds the output budget; select fewer fields",
-                ));
-            }
             break;
         }
         rows.push(row(event, &spec.fields));
         let candidate = page(&base, &rows, &matching, start, identity);
-        let bytes = serde_json::to_vec(&candidate)
-            .map_err(|_| invalid("event query result cannot be encoded"))?;
-        if bytes.len() > maximum {
-            if rows.len() == 1 {
-                return Err(exhausted(
-                    "one complete event row exceeds the output budget; select fewer fields",
-                ));
-            }
+        if output.accepts(&candidate)? {
+            accepted = Some(candidate);
+        } else if !output.terminal_may_fit(&candidate, reaches_terminal)? {
             break;
         }
-        result = candidate;
+        if started.elapsed() >= Duration::from_millis(context.budget.max_wall_millis) {
+            return Err(exhausted("event query exceeded its wall-time budget"));
+        }
     }
-    if serde_json::to_vec(&result)
-        .map_err(|_| invalid("event query result cannot be encoded"))?
-        .len()
-        > maximum
-    {
+    let result = accepted.or_else(|| {
+        (start == matching.len()).then(|| page(&base, &[], &matching, start, identity))
+    }).ok_or_else(|| exhausted(
+        "one complete event row and its envelope exceed the output budget; select fewer fields or increase the response budget",
+    ))?;
+    if !output.accepts(&result)? {
         return Err(exhausted("event query metadata exceeds the output budget"));
     }
     // Publication repeats the immutable context's cancellation/authority gate

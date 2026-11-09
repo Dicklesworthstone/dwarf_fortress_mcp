@@ -477,16 +477,36 @@ fn projected_page(
     ))
 }
 
-struct PageBudget<'a> {
-    maximum_bytes: usize,
-    fits: &'a dyn Fn(&Value) -> Result<bool>,
+pub(super) struct PageBudget<'a> {
+    pub(super) maximum_bytes: usize,
+    pub(super) fits: &'a dyn Fn(&Value) -> Result<bool>,
 }
 
 impl PageBudget<'_> {
-    fn accepts(&self, page: &Value) -> Result<bool> {
+    pub(super) fn accepts(&self, page: &Value) -> Result<bool> {
         let bytes =
             serde_json::to_vec(page).map_err(|_| invalid("query page cannot be encoded"))?;
         Ok(bytes.len() <= self.maximum_bytes && (self.fits)(page)?)
+    }
+
+    /// A final page can be smaller than a preceding prefix after its cursor
+    /// disappears. Continue materializing that ordered prefix only while this
+    /// lower bound fits. It is never returned, and cannot authorize skipping a
+    /// row or publishing a shortened cursor. The caller already knows whether
+    /// the selected candidate set can reach the end within its row limit.
+    pub(super) fn terminal_may_fit(&self, page: &Value, reaches_terminal: bool) -> Result<bool> {
+        if !reaches_terminal || page["continuation"].is_null() {
+            return Ok(false);
+        }
+        let mut minimum = page.clone();
+        minimum["continuation"] = Value::Null;
+        minimum["truncated"] = json!(false);
+        if minimum["coverage"].get("page_complete").is_some() {
+            // Event coverage becomes true only for a complete first page. True
+            // is the smaller spelling; this remains a bound, never evidence.
+            minimum["coverage"]["page_complete"] = json!(true);
+        }
+        self.accepts(&minimum)
     }
 }
 
@@ -524,17 +544,7 @@ fn projected_entities(
         rows.push(entity_json(entity, fields));
         let page = projected_page(snapshot, &candidates, identity, &rows)?;
         if !output.accepts(&page)? {
-            // Dropping the terminal cursor can make the final complete page
-            // smaller than a preceding prefix of tiny rows. Keep considering
-            // that endpoint only while its minimum envelope still fits; this
-            // bounds intermediate materialization without skipping any row.
-            if !reaches_terminal {
-                break;
-            }
-            let mut terminal_minimum = page;
-            terminal_minimum["continuation"] = Value::Null;
-            terminal_minimum["truncated"] = json!(false);
-            if !output.accepts(&terminal_minimum)? {
+            if !output.terminal_may_fit(&page, reaches_terminal)? {
                 break;
             }
             work.check()?;

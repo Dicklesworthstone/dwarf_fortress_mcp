@@ -3037,7 +3037,7 @@ pub fn fortress_query(session_id: Option<String>, mode: Option<String>) -> Strin
         QueryPublication::Projected { .. } => coded_error_payload(
             "fortress.query",
             ErrorCode::InternalInvariantViolation,
-            "direct laboratory query unexpectedly deferred entity publication",
+            "direct laboratory query unexpectedly deferred page publication",
         ),
     }
 }
@@ -3047,23 +3047,23 @@ pub fn fortress_query(session_id: Option<String>, mode: Option<String>) -> Strin
 pub(crate) enum QueryPublication {
     Pending(String),
     Published(String),
-    /// A projected entity query captures presentation dependencies outside the
+    /// A projected query captures presentation dependencies outside the
     /// session/world locks, then executes once against its exact admitted source.
     /// This provisional orientation is internal and never returned by a tool.
     Projected {
         orientation: String,
-        query: Box<PreparedEntityQuery>,
+        query: Box<PreparedProjectedQuery>,
     },
 }
 
-pub(crate) struct PreparedEntityQuery {
+pub(crate) struct PreparedProjectedQuery {
     session: Arc<Mutex<LabSession>>,
     current: OperationContext,
     source: StateAnchor,
     request: structured_query::Request,
 }
 
-impl PreparedEntityQuery {
+impl PreparedProjectedQuery {
     pub(crate) fn execute(
         self,
         started: std::time::Instant,
@@ -3167,7 +3167,7 @@ fn query_publication(
     session_id: Option<String>,
     mode: Option<String>,
     started: std::time::Instant,
-    defer_entities: bool,
+    defer_pages: bool,
 ) -> QueryPublication {
     let mode = mode.map_or_else(|| "summary".to_owned(), |value| value);
     let structured = structured_query::parse(&mode);
@@ -3234,15 +3234,16 @@ fn query_publication(
                         query_comparison::execute(before, after, &ctx, request)?
                     } else if let Some(request) = structured {
                         let source = retained_resource_snapshot(guard, request.at.as_deref())?;
-                        if defer_entities && request.is_entities() {
+                        if defer_pages && request.is_projected_page() {
                             // The session's normal post-call retention and the
                             // facade's change projection also inspect this
                             // source. Bound it before releasing this first lock.
                             query_budget::admit_sources(&[source], &ctx)?;
-                            let orientation = structured_query::orientation(source.anchor(), &ctx);
+                            let orientation =
+                                structured_query::orientation(source.anchor(), &ctx, &request);
                             return Ok(QueryPublication::Projected {
                                 orientation: query_budget::response(Ok(orientation), &ctx, true),
-                                query: Box::new(PreparedEntityQuery {
+                                query: Box::new(PreparedProjectedQuery {
                                     session: Arc::clone(&session),
                                     current: ctx.clone(),
                                     source: source.anchor(),

@@ -84,8 +84,13 @@ enum ConditionQuery {
 }
 
 impl Request {
-    pub(super) fn is_entities(&self) -> bool {
-        self.request["query"]["kind"] == "entities"
+    pub(super) fn is_projected_page(&self) -> bool {
+        matches!(
+            self.request["query"]["kind"].as_str(),
+            Some(
+                "entities" | "events" | "spatial_entities" | "related_entities" | "ranked_entities"
+            )
+        )
     }
 }
 
@@ -212,14 +217,18 @@ pub(super) fn execute(
 /// Internal orientation only; no provisional page is ever published. The
 /// source is selected under current authority before the facade captures its
 /// presentation dependencies outside the laboratory's session locks.
-pub(super) fn orientation(source: StateAnchor, current: &OperationContext) -> Value {
-    json!({"ok":true, "mode":"structured", "kind":"entities",
+pub(super) fn orientation(
+    source: StateAnchor,
+    current: &OperationContext,
+    request: &Request,
+) -> Value {
+    json!({"ok":true, "mode":"structured", "kind":request.request["query"]["kind"],
         "session_id":current.session_id.to_string(), "anchor":core_query::anchor_json(source),
         "current_anchor":core_query::anchor_json(current.anchor), "game_tick":source.tick.0,
         "historical":source != current.anchor})
 }
 
-/// Fit each whole entity page after adding the exact lab wrapper and the
+/// Fit each whole selected page after adding the exact lab wrapper and the
 /// caller's immutable Agent Turn. Source admission retains its own allowance.
 pub(super) fn execute_projected(
     snapshot: &WorldSnapshot,
@@ -228,16 +237,25 @@ pub(super) fn execute_projected(
     started: Instant,
     fits: &dyn Fn(&Value) -> Result<bool>,
 ) -> Result<Value> {
-    if !request.is_entities() {
-        return Err(invalid("projected publication requires an entities query"));
-    }
+    let execute_page = match request.request["query"]["kind"].as_str() {
+        Some("entities") => core_query::execute_with_page_budget,
+        Some("events") => event_query::execute_with_page_budget,
+        Some("spatial_entities") => spatial_entity_query::execute_with_page_budget,
+        Some("related_entities") => related_entity_query::execute_with_page_budget,
+        Some("ranked_entities") => ranked_entity_query::execute_with_page_budget,
+        _ => {
+            return Err(invalid(
+                "projected publication requires a supported paged query",
+            ));
+        }
+    };
     current.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
     let mut source_context = current.clone();
     source_context.budget.max_wall_millis = remaining_wall_millis(current, started)?;
     let source_work = super::query_budget::admit_sources(&[snapshot], &source_context)?;
     source_context.budget.max_wall_millis = remaining_wall_millis(current, started)?;
     source_context.anchor = snapshot.anchor();
-    let result = core_query::execute_with_page_budget(
+    let result = execute_page(
         snapshot,
         &source_context,
         &request.request,
@@ -305,11 +323,12 @@ fn decorate(
 mod projected_tests {
     use super::*;
     use dfmcp_core::{
-        CapabilityGrant, CapabilityScope, Digest32, EntityId, FortressId, GameTick,
-        ObservationCursor, RequestId, SessionId, WorkBudget,
+        CapabilityGrant, CapabilityScope, Digest32, EdgeId, EntityId, EventId, FortressId,
+        GameTick, MapCoord, ObservationCursor, RequestId, SessionId, WorkBudget,
     };
     use dfmcp_world::{
-        EntityKind, EntityRecord, Fact, FactSource, Value as WorldValue, WorldGraph,
+        EdgeKind, EdgeRecord, EntityKind, EntityRecord, Fact, FactSource, Value as WorldValue,
+        WorldEvent, WorldEventKind, WorldGraph,
     };
     use std::collections::BTreeMap;
 
@@ -564,6 +583,283 @@ mod projected_tests {
             Err(ErrorCode::BudgetExceeded)
         );
         assert_eq!(calls.get(), 0);
+        Ok(())
+    }
+
+    fn page_family_fixture(count: u64, selected_bytes: usize) -> (WorldSnapshot, OperationContext) {
+        let (mut source, mut current) = fixture(count, 16_384);
+        for entity in source.graph.entities.values_mut() {
+            for (name, value) in [
+                ("small", WorldValue::Text("s".repeat(selected_bytes))),
+                ("position", WorldValue::Coord(MapCoord::new(1, 1, 1))),
+                ("rank", WorldValue::U64(entity.id.get())),
+            ] {
+                entity.fields.insert(
+                    name.to_owned(),
+                    Fact::known(value, source.tick, FactSource::Replay, Digest32::ZERO),
+                );
+            }
+            let edge = EdgeId::new(u128::from(entity.id.get()));
+            source.graph.edges.insert(
+                edge,
+                EdgeRecord {
+                    id: edge,
+                    revision: 1,
+                    kind: EdgeKind::Requires,
+                    from: entity.id,
+                    to: entity.id,
+                    fields: BTreeMap::new(),
+                },
+            );
+            let event = EventId::new(u128::from(entity.id.get()));
+            source.graph.events.insert(
+                event,
+                WorldEvent {
+                    id: event,
+                    tick: source.tick,
+                    kind: WorldEventKind::UnitChanged,
+                    subject: Some(entity.id),
+                    summary: "recorded change".to_owned(),
+                    fields: BTreeMap::from([(
+                        "small".to_owned(),
+                        WorldValue::Text("s".repeat(selected_bytes)),
+                    )]),
+                },
+            );
+        }
+        source.refresh_hash();
+        current.anchor = source.anchor();
+        (source, current)
+    }
+
+    fn family_request(kind: &str, limit: usize) -> Request {
+        let mut query = json!({"kind":kind, "fields":["small"], "limit":limit});
+        if kind != "events" {
+            query["kinds"] = json!(["unit"]);
+        }
+        match kind {
+            "spatial_entities" => {
+                query["region"] = json!({"min":[0,0,0],"max":[2,2,2]});
+                query["geometry"] = json!({"kind":"point","field":"position"});
+            }
+            "related_entities" => {
+                query["relation"] = json!({"edge_kinds":["requires"],"target_kinds":["unit"]});
+            }
+            "ranked_entities" => {
+                query["order_by"] =
+                    json!([{"field":"rank","numeric_type":"u64","direction":"ascending"}]);
+            }
+            _ => {}
+        }
+        Request {
+            mode: Mode::Structured,
+            at: None,
+            request: json!({"schema":"dfmcp.query/1","query":query}),
+        }
+    }
+
+    const PAGE_FAMILIES: [&str; 4] = [
+        "spatial_entities",
+        "related_entities",
+        "ranked_entities",
+        "events",
+    ];
+
+    #[test]
+    fn projected_query_families_fit_complete_packets_and_resume_without_losing_rows() -> TestResult
+    {
+        for kind in PAGE_FAMILIES {
+            let (source, mut current) = page_family_fixture(8, 1024);
+            current.budget.max_output_tokens = 32_768;
+            let one = execute_projected(
+                &source,
+                &current,
+                &family_request(kind, 1),
+                Instant::now(),
+                &|_| Ok(true),
+            )?;
+            let one = super::super::query_budget::response_payload(Ok(one), &current, true);
+            current.budget.max_output_tokens =
+                u32::try_from((packet(&one).len() + 128).div_ceil(4))?;
+            let mut selected = family_request(kind, 8);
+            assert!(selected.is_projected_page());
+            let mut ids = Vec::new();
+            for index in 0..8 {
+                let result =
+                    execute_projected(&source, &current, &selected, Instant::now(), &|page| {
+                        super::super::query_budget::lossless_page_fits(
+                            &packet(page),
+                            &page["query_budget"],
+                        )
+                    })?;
+                let complete =
+                    super::super::query_budget::response_payload(Ok(result), &current, true);
+                let encoded =
+                    super::super::query_budget::finish_response(packet(&complete), Duration::ZERO);
+                let page: Value = serde_json::from_str(&encoded)?;
+                assert_eq!(page["ok"], true, "{kind}: {page}");
+                assert!(encoded.len() <= current.budget.max_output_tokens as usize * 4);
+                let rows = page["rows"].as_array().ok_or("rows missing")?;
+                assert!(!rows.is_empty());
+                if index == 0 {
+                    assert!(rows.len() < 8, "{kind}");
+                }
+                let id_field = if kind == "events" {
+                    "event_id"
+                } else {
+                    "entity_id"
+                };
+                ids.extend(rows.iter().map(|row| row[id_field].clone()));
+                assert_eq!(
+                    page["observation_coverage"]["continuation"],
+                    page["continuation"]
+                );
+                assert_eq!(
+                    page["agent_turn"]["coverage"]["continuation"],
+                    page["continuation"]
+                );
+                assert_eq!(
+                    page["source_work"]["canonical_bytes"],
+                    source.canonical_bytes().len()
+                );
+                if page["continuation"].is_null() {
+                    break;
+                }
+                selected.request["query"]["continuation"] = page["continuation"].clone();
+            }
+            let expected = (1..=8)
+                .map(|id| {
+                    json!(if kind == "events" {
+                        EventId::new(id).to_string()
+                    } else {
+                        id.to_string()
+                    })
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(ids, expected, "{kind}");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn projected_query_families_do_not_skip_a_required_oversized_row() -> TestResult {
+        for kind in PAGE_FAMILIES {
+            let (mut source, mut current) = page_family_fixture(3, 256);
+            source
+                .graph
+                .entities
+                .get_mut(&EntityId::new(2))
+                .ok_or("entity missing")?
+                .fields
+                .insert(
+                    "small".to_owned(),
+                    Fact::known(
+                        WorldValue::Text("large".repeat(4096)),
+                        source.tick,
+                        FactSource::Replay,
+                        Digest32::ZERO,
+                    ),
+                );
+            source
+                .graph
+                .events
+                .get_mut(&EventId::new(2))
+                .ok_or("event missing")?
+                .fields
+                .insert("small".to_owned(), WorldValue::Text("large".repeat(4096)));
+            source.refresh_hash();
+            current.anchor = source.anchor();
+            current.budget.max_output_tokens = 32_768;
+            let one = execute_projected(
+                &source,
+                &current,
+                &family_request(kind, 1),
+                Instant::now(),
+                &|_| Ok(true),
+            )?;
+            let one = super::super::query_budget::response_payload(Ok(one), &current, true);
+            let maximum = packet(&one).len() + 128;
+            let fits = |page: &Value| Ok(packet(page).len() <= maximum);
+            let mut selected = family_request(kind, 3);
+            let first = execute_projected(&source, &current, &selected, Instant::now(), &fits)?;
+            assert_eq!(first["returned"], 1, "{kind}: {first}");
+            selected.request["query"]["continuation"] = first["continuation"].clone();
+            assert_eq!(
+                execute_projected(&source, &current, &selected, Instant::now(), &fits)
+                    .map_err(|error| error.code),
+                Err(ErrorCode::BudgetExceeded),
+                "{kind}"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn projected_query_families_consider_smaller_terminal_packets() -> TestResult {
+        // Complete presentations may reference one continuation in several
+        // places. Removing those references can outweigh one final small row.
+        let render = |page: &Value| {
+            json!({"page":page,
+            "resume":vec![page["continuation"].clone(); 8]})
+            .to_string()
+        };
+        for kind in PAGE_FAMILIES {
+            let (source, mut current) = page_family_fixture(2, 0);
+            current.budget.max_output_tokens = 32_768;
+            let full = execute_projected(
+                &source,
+                &current,
+                &family_request(kind, 2),
+                Instant::now(),
+                &|_| Ok(true),
+            )?;
+            let prefix = execute_projected(
+                &source,
+                &current,
+                &family_request(kind, 1),
+                Instant::now(),
+                &|_| Ok(true),
+            )?;
+            let full = super::super::query_budget::response_payload(Ok(full), &current, true);
+            let prefix = super::super::query_budget::response_payload(Ok(prefix), &current, true);
+            let maximum = render(&full).len();
+            assert!(render(&prefix).len() > maximum, "{kind}");
+            let result = execute_projected(
+                &source,
+                &current,
+                &family_request(kind, 2),
+                Instant::now(),
+                &|page| Ok(render(page).len() <= maximum),
+            )?;
+            assert_eq!(result["returned"], 2, "{kind}: {result}");
+            assert_eq!(result["truncated"], false);
+            assert!(result["continuation"].is_null());
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn projected_query_families_bound_empty_packets_and_propagate_fit_errors() -> TestResult {
+        for count in [0, 2] {
+            for kind in PAGE_FAMILIES {
+                let (source, current) = page_family_fixture(count, 0);
+                let selected = family_request(kind, 2);
+                assert_eq!(
+                    execute_projected(&source, &current, &selected, Instant::now(), &|_| Ok(false))
+                        .map_err(|error| error.code),
+                    Err(ErrorCode::BudgetExceeded),
+                    "{kind}/{count}"
+                );
+                assert_eq!(
+                    execute_projected(&source, &current, &selected, Instant::now(), &|_| Err(
+                        invalid("publication unavailable")
+                    ))
+                    .map_err(|error| error.message),
+                    Err("publication unavailable".to_owned()),
+                    "{kind}/{count}"
+                );
+            }
+        }
         Ok(())
     }
 }

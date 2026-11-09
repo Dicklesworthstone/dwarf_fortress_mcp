@@ -1,5 +1,29 @@
 # Implementation Status
 
+## Unreleased — Fit every selected laboratory page through the Agent Turn
+
+The existing structured `events`, `spatial_entities`, `related_entities` and
+`ranked_entities` queries now share the complete-packet page fitter already
+used by ordinary entity selection. They borrow canonical candidates and render
+only requested fields, then choose the largest whole-row page that fits the
+actual laboratory wrapper, current retained work and Agent Turn. An oversized
+first row refuses instead of disappearing; smaller terminal envelopes can fit
+without a continuation. Source acquisition and scan admission retain their
+independent budgets.
+
+Continuation identity remains tied to the original selection, exact source,
+current session and rows actually published. The ordinary public route uses the
+same captured presentation for fitting and final publication, preserves current
+query catalogs and authority checks. Regression source covers all four page families, exact resumption,
+large unselected fields, historical sources and final publication refusals.
+
+Validation: the eight complete-packet projected-query Rust regressions passed on nightly 1.102.0 (2026-11-08) in a temporary selected-source assembly using the unchanged production function bodies and exact locked path dependencies. Repository integrity, the frozen eleven-tool Agent Turn contract and git diff --check passed. Full MCP/stdio execution and current-head release qualification are not established by this component run.
+
+The owning laboratory bead `df-lab-structured-query-f7q` remains in progress for
+broader transport/runtime/repository qualification. This change adds no native
+read, native admission, dependency or MCP tool. Details:
+`docs/LAB_STRUCTURED_QUERY.md` and `docs/QUERY_EXECUTION.md`.
+
 ## Unreleased — Enable selected labor for a finite stock target
 
 The combined development MCP host now accepts the explicit Boolean

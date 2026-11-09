@@ -197,7 +197,10 @@ ranked row cannot fit, the prior page ends before it and the continuation
 preserves that position; no smaller later row is substituted. An oversized
 first row returns `budget_exceeded`. The semantic publisher reserves active-watch metadata against the output cap
 without replacing the original source-read byte allowance. The enclosing
-runtime still has to admit the complete Agent Turn. Historical laboratory pages explicitly select the
+runtime still has to admit the complete Agent Turn. The laboratory supplies its
+immutable complete-packet size check during row selection, so a large requested
+page becomes a smaller resumable prefix without discarding ranking facts or
+retained work. Historical laboratory pages explicitly select the
 retained source hash while current grants and the current Agent Turn anchor
 remain authoritative.
 
@@ -288,8 +291,9 @@ Whole rows fit both the byte and token budgets. A lower-bound projection pass
 refuses oversized fields before building a large typed JSON tree. If a later
 row cannot fit, the published cursor remains at the last returned row; the next
 request cannot silently skip the large row. An oversized first row returns
-`budget_exceeded`. The enclosing runtime remains responsible for the complete
-Agent Turn publication budget.
+`budget_exceeded`. The laboratory includes its complete Agent Turn and retained
+work catalogs while choosing the page. The enclosing runtime still enforces the
+final publication deadline and budget.
 
 Coverage names `named_known_geometry_in_canonical_projection`.
 `selection_complete_within_projection` means the selected geometry and relevant
@@ -398,7 +402,9 @@ checked throughout scanning and publication.
 
 Whole rows and their witnesses fit both byte and output-token budgets. If a
 later row cannot fit, the cursor remains at the last returned row; an oversized
-first row is refused. The enclosing runtime also checks the complete Agent Turn.
+first row is refused. The laboratory fits the complete Agent Turn and retained
+work catalogs during selection, without reducing the authorized source budget.
+The enclosing runtime also checks the final complete packet.
 The component regressions include an independent incidence oracle over all
 512 directed graphs on three vertices in all three directions, parallel edges,
 self-loops, full-width IDs, unavailable facts, missing endpoints, canonical
@@ -444,8 +450,10 @@ source bytes against its original session work budget; live response reservation
 does not relabel an already-published source as oversized input.
 Excluded events still consume scan work. Whole rows are paged under both byte
 and token budgets. An oversized first row is refused; an oversized later row
-leaves the cursor at the last published row. The enclosing runtime still checks
-the full Agent Turn envelope and current authority.
+leaves the cursor at the last published row. The laboratory fits the full Agent
+Turn and retained work catalogs while selecting event rows, including empty
+results. The enclosing runtime still checks the final envelope and current
+authority.
 
 Coverage is explicitly `retained_event_projection`. The retained tick extrema
 do not establish a continuous retained interval. `history_complete`,
@@ -593,3 +601,16 @@ provide an immutable complete-packet size check while the page is selected. This
 check cannot publish or advance session state. The enclosing MCP surface still
 enforces its final Agent Turn budget; an incomplete structured row or a cursor
 that advances past unpublished rows is never a successful response.
+
+The same pure size check and bounded terminal-page lookahead also serve
+`spatial_entities`, `related_entities`, `ranked_entities` and `events`.
+Their own selectors, ordering, provenance, source budgets and cursor identities
+are unchanged. Candidate rows are selected once under the original work
+allowance; fitting does not repeatedly rescan the world with smaller limits.
+Only an accepted complete prefix can be returned. A later oversized row is
+never skipped, a rejected first row never creates an advancing empty page,
+and an empty result still needs room for its complete packet. A candidate
+without its terminal cursor may be examined as a size lower bound, but that
+provisional candidate is never published as evidence or as a successful page.
+Publisher errors abort the operation rather than being treated as a reason to
+silently reduce its scope.

@@ -9,8 +9,7 @@ use dfmcp_core::{
     Capability, DfmcpError, Digest32, EntityId, ErrorCode, OperationContext, Result, RiskTier,
 };
 use dfmcp_world::{
-    EntityRecord, Predicate, PredicateTruth, Value as WorldValue, WorldSnapshot,
-    evaluate_truth_for,
+    EntityRecord, Predicate, PredicateTruth, Value as WorldValue, WorldSnapshot, evaluate_truth_for,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -140,9 +139,12 @@ fn matches_kind(selection: &Selection, entity: &EntityRecord) -> bool {
 }
 
 fn truth(snapshot: &WorldSnapshot, selection: &Selection, id: EntityId) -> PredicateTruth {
-    selection.predicate.as_ref().map_or(PredicateTruth::True, |predicate| {
-        evaluate_truth_for(snapshot, id, predicate)
-    })
+    selection
+        .predicate
+        .as_ref()
+        .map_or(PredicateTruth::True, |predicate| {
+            evaluate_truth_for(snapshot, id, predicate)
+        })
 }
 
 fn rank(
@@ -301,6 +303,18 @@ pub(super) fn execute_with_output_budget(
     input: &Value,
     max_output_bytes: u64,
 ) -> Result<Value> {
+    execute_with_page_budget(snapshot, context, input, max_output_bytes, &|_| Ok(true))
+}
+
+/// Select complete rows against a pure caller-owned packet-size check. The
+/// check cannot publish, change authority, or shrink the source-work budget.
+pub(super) fn execute_with_page_budget(
+    snapshot: &WorldSnapshot,
+    context: &OperationContext,
+    input: &Value,
+    max_output_bytes: u64,
+    fits: &dyn Fn(&Value) -> Result<bool>,
+) -> Result<Value> {
     let started = Instant::now();
     context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
     if context.anchor != snapshot.anchor() {
@@ -315,9 +329,11 @@ pub(super) fn execute_with_output_budget(
     if request.schema != "dfmcp.query/1" {
         return Err(invalid("query schema must be dfmcp.query/1"));
     }
-    if request.expected_anchor.as_ref().is_some_and(|anchor| {
-        *anchor != core_query::anchor_json(snapshot.anchor())
-    }) {
+    if request
+        .expected_anchor
+        .as_ref()
+        .is_some_and(|anchor| *anchor != core_query::anchor_json(snapshot.anchor()))
+    {
         return Err(DfmcpError::new(
             ErrorCode::StaleAnchor,
             "expected_anchor does not match the complete ranked source",
@@ -332,7 +348,9 @@ pub(super) fn execute_with_output_budget(
         continuation: raw_cursor,
     } = request.query;
     if order_by.is_empty() || order_by.len() > MAX_KEYS {
-        return Err(invalid("rank ordering requires one to three numeric fields"));
+        return Err(invalid(
+            "rank ordering requires one to three numeric fields",
+        ));
     }
     let rank_fields = core_query::bounded_names(
         order_by.iter().map(|order| order.field.clone()).collect(),
@@ -376,13 +394,16 @@ pub(super) fn execute_with_output_budget(
         .saturating_add(selection.kinds.len())
         .saturating_add(selection.fields.len())
         .saturating_add(selection.order_by.len())
-        .saturating_add(
-            (selection.order_by.len() + 2).saturating_mul(3 * levels + 1),
-        )
+        .saturating_add((selection.order_by.len() + 2).saturating_mul(3 * levels + 1))
         .saturating_add(4);
     work.charge(
         0,
-        snapshot.graph.entities.len().saturating_add(1).saturating_mul(per_entity),
+        snapshot
+            .graph
+            .entities
+            .len()
+            .saturating_add(1)
+            .saturating_mul(per_entity),
     )?;
     if !snapshot.hash_is_valid() {
         return Err(DfmcpError::new(
@@ -451,10 +472,13 @@ pub(super) fn execute_with_output_budget(
         return Err(gap());
     }
     let maximum = usize::try_from(
-        context.budget.max_bytes.min(max_output_bytes).min(
-            u64::from(context.budget.max_output_tokens).saturating_mul(4),
-        ),
-    ).map_err(|_| exhausted("rank response byte allowance cannot be represented"))?;
+        context
+            .budget
+            .max_bytes
+            .min(max_output_bytes)
+            .min(u64::from(context.budget.max_output_tokens).saturating_mul(4)),
+    )
+    .map_err(|_| exhausted("rank response byte allowance cannot be represented"))?;
     let coverage = json!({
         "domain":"known_typed_numeric_fields_in_canonical_projection",
         "selection_complete_within_projection":filter_unknown == 0 && unknown_rank == 0,
@@ -462,6 +486,12 @@ pub(super) fn execute_with_output_budget(
         "eligible_as_mutation_evidence":false,
         "note":"Ranking uses only available values of the exact declared types and scales. Unknown keys are excluded and counted, never zero-filled. Values retain their source and observation tick; ordering is not source authority or a causal priority claim."
     });
+    let output = core_query::PageBudget {
+        maximum_bytes: maximum,
+        fits,
+    };
+    let reaches_terminal = page.len() == remaining;
+    let mut accepted = None;
     let mut payload = json!({
         "schema":"dfmcp.query.result/1", "kind":"ranked_entities",
         "anchor":core_query::anchor_json(snapshot.anchor()), "query_digest":digest.to_string(),
@@ -478,30 +508,41 @@ pub(super) fn execute_with_output_budget(
     });
     for candidate in page.into_sorted_vec() {
         if !source::render_fits(
-            candidate.entity, &selection.fields, &selection.rank_fields, maximum, &mut work,
+            candidate.entity,
+            &selection.fields,
+            &selection.rank_fields,
+            maximum,
+            &mut work,
         )? {
             break;
         }
-        let mut proposed = payload.clone();
-        let rows = proposed["rows"].as_array_mut()
+        let rows = payload["rows"]
+            .as_array_mut()
             .ok_or_else(|| invalid("rank result rows are unavailable"))?;
         rows.push(row(&candidate, &selection));
         let count = rows.len();
-        proposed["returned"] = json!(count);
-        proposed["truncated"] = json!(count < remaining);
-        proposed["continuation"] = if count < remaining {
-            json!(cursor(digest, (candidate.rank.id, candidate.rank.generation)))
+        payload["returned"] = json!(count);
+        payload["truncated"] = json!(count < remaining);
+        payload["continuation"] = if count < remaining {
+            json!(cursor(
+                digest,
+                (candidate.rank.id, candidate.rank.generation)
+            ))
         } else {
             Value::Null
         };
-        if serde_json::to_vec(&proposed)
-            .map_err(|_| invalid("rank result cannot be encoded"))?.len() > maximum {
+        if output.accepts(&payload)? {
+            accepted = Some(payload.clone());
+        } else if !output.terminal_may_fit(&payload, reaches_terminal)? {
             break;
         }
-        payload = proposed;
         work.check()?;
     }
-    if (remaining > 0 && payload["returned"] == 0) || payload.to_string().len() > maximum {
+    let payload = accepted.or_else(|| (remaining == 0).then_some(payload))
+        .ok_or_else(|| exhausted(
+            "one complete ranked row and its envelope cannot fit; narrow fields or increase the response budget",
+        ))?;
+    if !output.accepts(&payload)? {
         return Err(exhausted(
             "one complete ranked row and its envelope cannot fit; narrow fields or increase the response budget",
         ));

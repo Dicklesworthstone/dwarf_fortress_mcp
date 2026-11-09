@@ -287,6 +287,18 @@ pub(super) fn execute_with_output_budget(
     input: &Value,
     max_output_bytes: u64,
 ) -> Result<Value> {
+    execute_with_page_budget(snapshot, context, input, max_output_bytes, &|_| Ok(true))
+}
+
+/// Select complete rows against a pure caller-owned packet-size check. The
+/// check cannot publish, change authority, or shrink the source-work budget.
+pub(super) fn execute_with_page_budget(
+    snapshot: &WorldSnapshot,
+    context: &OperationContext,
+    input: &Value,
+    max_output_bytes: u64,
+    fits: &dyn Fn(&Value) -> Result<bool>,
+) -> Result<Value> {
     let started = Instant::now();
     context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
     if context.anchor != snapshot.anchor() {
@@ -545,6 +557,12 @@ pub(super) fn execute_with_output_budget(
             .min(u64::from(context.budget.max_output_tokens).saturating_mul(4)),
     )
     .map_err(|_| exhausted("relation response byte allowance cannot be represented"))?;
+    let output = core_query::PageBudget {
+        maximum_bytes: maximum,
+        fits,
+    };
+    let reaches_terminal = page.len() == remaining;
+    let mut accepted = None;
     let mut payload = json!({
         "schema":"dfmcp.query.result/1", "kind":"related_entities",
         "anchor":core_query::anchor_json(snapshot.anchor()), "query_digest":digest.to_string(),
@@ -570,15 +588,14 @@ pub(super) fn execute_with_output_budget(
         if !source::render_fits(candidate.entity, &selection.fields, &[], maximum, &mut work)? {
             break;
         }
-        let mut proposed = payload.clone();
-        let rows = proposed["rows"]
+        let rows = payload["rows"]
             .as_array_mut()
             .ok_or_else(|| invalid("relation result rows are unavailable"))?;
         rows.push(row(candidate, &selection.fields));
         let count = rows.len();
-        proposed["returned"] = json!(count);
-        proposed["truncated"] = json!(count < remaining);
-        proposed["continuation"] = if count < remaining {
+        payload["returned"] = json!(count);
+        payload["truncated"] = json!(count < remaining);
+        payload["continuation"] = if count < remaining {
             json!(cursor(
                 digest,
                 (candidate.entity.id, candidate.entity.generation)
@@ -586,17 +603,18 @@ pub(super) fn execute_with_output_budget(
         } else {
             Value::Null
         };
-        if serde_json::to_vec(&proposed)
-            .map_err(|_| invalid("relation result cannot be encoded"))?
-            .len()
-            > maximum
-        {
+        if output.accepts(&payload)? {
+            accepted = Some(payload.clone());
+        } else if !output.terminal_may_fit(&payload, reaches_terminal)? {
             break;
         }
-        payload = proposed;
         work.check()?;
     }
-    if (remaining > 0 && payload["returned"] == 0) || payload.to_string().len() > maximum {
+    let payload = accepted.or_else(|| (remaining == 0).then_some(payload))
+        .ok_or_else(|| exhausted(
+            "one complete relation row and its envelope cannot fit; narrow fields or increase the response budget",
+        ))?;
+    if !output.accepts(&payload)? {
         return Err(exhausted(
             "one complete relation row and its envelope cannot fit; narrow fields or increase the response budget",
         ));

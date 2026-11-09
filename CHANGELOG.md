@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased — Fit selected event, spatial, relation and ranked pages
+
+- Extend complete Agent Turn page fitting to the four remaining structured
+  page families through the existing query tool.
+- Render only selected fields, preserve whole rows and exact continuations,
+  and refuse an oversized first row without silently skipping it.
+- Keep source work separate from output, retain current catalogs and authority,
+  and add helper/public regressions for source-pinned continuation and fitting.
+- Record the exact executed validation scope in implementation status; broader
+  transport, native and release qualification remain separate.
+
 ## Unreleased — Compose stock sizing with an explicit labor enable
 
 - Add optional `assign_labor=true` to the existing native stock-target request.

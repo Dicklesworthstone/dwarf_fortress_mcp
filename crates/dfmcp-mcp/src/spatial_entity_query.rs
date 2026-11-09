@@ -3,8 +3,8 @@ use std::collections::BTreeMap;
 use std::time::Instant;
 
 use dfmcp_core::{
-    Capability, DfmcpError, Digest32, EntityId, ErrorCode, MapCoord, MapCuboid,
-    OperationContext, Result, RiskTier,
+    Capability, DfmcpError, Digest32, EntityId, ErrorCode, MapCoord, MapCuboid, OperationContext,
+    Result, RiskTier,
 };
 use dfmcp_world::{
     EntityKind, EntityRecord, Predicate, PredicateTruth, Value as WorldValue, WorldSnapshot,
@@ -55,8 +55,13 @@ struct Region {
 #[derive(Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 enum Geometry {
-    Point { field: String },
-    Cuboid { min_field: String, max_field: String },
+    Point {
+        field: String,
+    },
+    Cuboid {
+        min_field: String,
+        max_field: String,
+    },
 }
 
 #[derive(Clone, Copy, Default, Deserialize)]
@@ -106,14 +111,20 @@ impl Geometry {
     fn fields(&self) -> Vec<String> {
         match self {
             Self::Point { field } => vec![field.clone()],
-            Self::Cuboid { min_field, max_field } => vec![min_field.clone(), max_field.clone()],
+            Self::Cuboid {
+                min_field,
+                max_field,
+            } => vec![min_field.clone(), max_field.clone()],
         }
     }
 
     fn json(&self) -> Value {
         match self {
             Self::Point { field } => json!({"kind":"point","field":field}),
-            Self::Cuboid { min_field, max_field } => {
+            Self::Cuboid {
+                min_field,
+                max_field,
+            } => {
                 json!({"kind":"cuboid","min_field":min_field,"max_field":max_field})
             }
         }
@@ -126,7 +137,9 @@ impl Geometry {
     ) -> std::result::Result<MapCuboid, &'static str> {
         let read = |name: &str| {
             let fact = entity.fields.get(name).ok_or("missing_field")?;
-            let value = fact.known_value().ok_or("unavailable_or_contradictory_field")?;
+            let value = fact
+                .known_value()
+                .ok_or("unavailable_or_contradictory_field")?;
             if fact.observed_at > snapshot.tick {
                 return Err("future_geometry");
             }
@@ -140,7 +153,10 @@ impl Geometry {
                 let point = read(field)?;
                 (point, point)
             }
-            Self::Cuboid { min_field, max_field } => (read(min_field)?, read(max_field)?),
+            Self::Cuboid {
+                min_field,
+                max_field,
+            } => (read(min_field)?, read(max_field)?),
         };
         MapCuboid::new(min, max).map_err(|_| "inverted_cuboid")
     }
@@ -160,9 +176,12 @@ impl Relation {
             Self::Within => region.contains_cuboid(geometry),
             Self::Contains => geometry.contains_cuboid(region),
             Self::Intersects => {
-                geometry.min.x <= region.max.x && geometry.max.x >= region.min.x
-                    && geometry.min.y <= region.max.y && geometry.max.y >= region.min.y
-                    && geometry.min.z <= region.max.z && geometry.max.z >= region.min.z
+                geometry.min.x <= region.max.x
+                    && geometry.max.x >= region.min.x
+                    && geometry.min.y <= region.max.y
+                    && geometry.max.y >= region.min.y
+                    && geometry.min.z <= region.max.z
+                    && geometry.max.z >= region.min.z
             }
         }
     }
@@ -239,8 +258,11 @@ fn continuation(raw: Option<&str>, identity: Digest32) -> Result<Option<Position
     if parts.len() != 5 || parts[0] != "sq1" {
         return Err(invalid("invalid spatial continuation"));
     }
-    let id = parts[2].parse::<u64>().map_err(|_| invalid("invalid spatial cursor entity"))?;
-    let generation = parts[3].parse::<u32>()
+    let id = parts[2]
+        .parse::<u64>()
+        .map_err(|_| invalid("invalid spatial cursor entity"))?;
+    let generation = parts[3]
+        .parse::<u32>()
         .map_err(|_| invalid("invalid spatial cursor generation"))?;
     if id == 0 {
         return Err(invalid("spatial cursor entity zero is reserved"));
@@ -274,6 +296,18 @@ pub(super) fn execute_with_output_budget(
     input: &Value,
     max_output_bytes: u64,
 ) -> Result<Value> {
+    execute_with_page_budget(snapshot, context, input, max_output_bytes, &|_| Ok(true))
+}
+
+/// Select complete rows against a pure caller-owned packet-size check. The
+/// check cannot publish, change authority, or shrink the source-work budget.
+pub(super) fn execute_with_page_budget(
+    snapshot: &WorldSnapshot,
+    context: &OperationContext,
+    input: &Value,
+    max_output_bytes: u64,
+    fits: &dyn Fn(&Value) -> Result<bool>,
+) -> Result<Value> {
     let started = Instant::now();
     context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
     if context.anchor != snapshot.anchor() {
@@ -288,36 +322,52 @@ pub(super) fn execute_with_output_budget(
     if request.schema != "dfmcp.query/1" {
         return Err(invalid("query schema must be dfmcp.query/1"));
     }
-    if request.expected_anchor.as_ref().is_some_and(|anchor| {
-        *anchor != super::core_query::anchor_json(snapshot.anchor())
-    }) {
+    if request
+        .expected_anchor
+        .as_ref()
+        .is_some_and(|anchor| *anchor != super::core_query::anchor_json(snapshot.anchor()))
+    {
         return Err(DfmcpError::new(
             ErrorCode::StaleAnchor,
             "expected_anchor does not match the complete spatial source",
         ));
     }
     let Query::SpatialEntities {
-        region, geometry, relation, kinds, fields, predicate, order, limit,
+        region,
+        geometry,
+        relation,
+        kinds,
+        fields,
+        predicate,
+        order,
+        limit,
         continuation: raw_cursor,
     } = request.query;
     super::core_query::bounded_names(geometry.fields(), 2)?;
     if matches!(&geometry, Geometry::Cuboid { min_field, max_field } if min_field == max_field) {
-        return Err(invalid("cuboid geometry requires two distinct coordinate fields"));
+        return Err(invalid(
+            "cuboid geometry requires two distinct coordinate fields",
+        ));
     }
     let selection = Selection {
         region: MapCuboid::new(coord(region.min), coord(region.max))?,
         geometry,
         relation: relation.unwrap_or_default(),
-        kinds: super::core_query::bounded_names(kinds, 32)?.into_iter()
+        kinds: super::core_query::bounded_names(kinds, 32)?
+            .into_iter()
             .map(|name| Ok((name.clone(), super::core_query::entity_kind(&name)?)))
             .collect::<Result<_>>()?,
         fields: super::core_query::bounded_names(fields, 32)?,
-        predicate: predicate.map(super::core_query::decode_filter).transpose()?,
+        predicate: predicate
+            .map(super::core_query::decode_filter)
+            .transpose()?,
         order: order.unwrap_or_default(),
     };
     let limit = limit.unwrap_or(4);
     if limit == 0 || limit > MAX_ROWS.min(context.budget.max_entities as usize) {
-        return Err(invalid("spatial page limit exceeds the negotiated 1..128 row allowance"));
+        return Err(invalid(
+            "spatial page limit exceeds the negotiated 1..128 row allowance",
+        ));
     }
     let mut work = source::preflight(snapshot, context, started)?;
     if !snapshot.hash_is_valid() {
@@ -339,15 +389,23 @@ pub(super) fn execute_with_output_budget(
     work.charge(
         0,
         snapshot.graph.entities.len().saturating_mul(
-            predicate_nodes.saturating_add(selection.fields.len())
-                .saturating_add(selection.kinds.len()).saturating_add(3),
+            predicate_nodes
+                .saturating_add(selection.fields.len())
+                .saturating_add(selection.kinds.len())
+                .saturating_add(3),
         ),
     )?;
     let digest = identity(snapshot, context, &selection);
     let after = continuation(raw_cursor.as_deref(), digest)?;
     let mut after_found = after.is_none();
-    let (mut selected, mut matched, mut outside, mut filter_false, mut filter_unknown, mut remaining) =
-        (0usize, 0usize, 0usize, 0usize, 0usize, 0usize);
+    let (
+        mut selected,
+        mut matched,
+        mut outside,
+        mut filter_false,
+        mut filter_unknown,
+        mut remaining,
+    ) = (0usize, 0usize, 0usize, 0usize, 0usize, 0usize);
     let mut unknown = BTreeMap::<&str, usize>::new();
     let mut page = Vec::new();
     let ordered: Box<dyn Iterator<Item = &EntityRecord> + '_> = match selection.order {
@@ -357,7 +415,10 @@ pub(super) fn execute_with_output_budget(
     for entity in ordered {
         work.check()?;
         if !selection.kinds.is_empty()
-            && !selection.kinds.iter().any(|(_, kind)| kind.as_str() == entity.kind.as_str())
+            && !selection
+                .kinds
+                .iter()
+                .any(|(_, kind)| kind.as_str() == entity.kind.as_str())
         {
             continue;
         }
@@ -373,9 +434,12 @@ pub(super) fn execute_with_output_budget(
             outside += 1;
             continue;
         }
-        match selection.predicate.as_ref().map_or(PredicateTruth::True, |predicate| {
-            evaluate_truth_for(snapshot, entity.id, predicate)
-        }) {
+        match selection
+            .predicate
+            .as_ref()
+            .map_or(PredicateTruth::True, |predicate| {
+                evaluate_truth_for(snapshot, entity.id, predicate)
+            }) {
             PredicateTruth::True => {}
             PredicateTruth::False => {
                 filter_false += 1;
@@ -408,11 +472,20 @@ pub(super) fn execute_with_output_budget(
         ));
     }
     let maximum = usize::try_from(
-        context.budget.max_bytes.min(max_output_bytes).min(
-            u64::from(context.budget.max_output_tokens).saturating_mul(4),
-        ),
-    ).map_err(|_| exhausted("spatial response budget cannot be represented"))?;
+        context
+            .budget
+            .max_bytes
+            .min(max_output_bytes)
+            .min(u64::from(context.budget.max_output_tokens).saturating_mul(4)),
+    )
+    .map_err(|_| exhausted("spatial response budget cannot be represented"))?;
     let unknown_count: usize = unknown.values().sum();
+    let output = super::core_query::PageBudget {
+        maximum_bytes: maximum,
+        fits,
+    };
+    let reaches_terminal = page.len() == remaining;
+    let mut accepted = None;
     let mut payload = json!({
         "schema":"dfmcp.query.result/1", "kind":"spatial_entities",
         "anchor":super::core_query::anchor_json(snapshot.anchor()),
@@ -440,7 +513,13 @@ pub(super) fn execute_with_output_budget(
     });
     let geometry_fields = selection.geometry.fields();
     for (entity, geometry) in page {
-        if !source::render_fits(entity, &selection.fields, &geometry_fields, maximum, &mut work)? {
+        if !source::render_fits(
+            entity,
+            &selection.fields,
+            &geometry_fields,
+            maximum,
+            &mut work,
+        )? {
             break;
         }
         let mut row = super::core_query::entity_json(entity, &selection.fields);
@@ -449,27 +528,30 @@ pub(super) fn execute_with_output_budget(
             "facts":super::core_query::entity_json(entity, &geometry_fields)["fields"],
             "eligible_as_mutation_evidence":false
         });
-        let mut candidate = payload.clone();
-        let rows = candidate["rows"].as_array_mut()
+        let rows = payload["rows"]
+            .as_array_mut()
             .ok_or_else(|| invalid("spatial result rows are unavailable"))?;
         rows.push(row);
         let count = rows.len();
-        candidate["returned"] = json!(count);
-        candidate["truncated"] = json!(count < remaining);
-        candidate["continuation"] = if count < remaining {
+        payload["returned"] = json!(count);
+        payload["truncated"] = json!(count < remaining);
+        payload["continuation"] = if count < remaining {
             json!(cursor(digest, (entity.id, entity.generation)))
         } else {
             Value::Null
         };
-        if serde_json::to_vec(&candidate)
-            .map_err(|_| invalid("spatial result cannot be encoded"))?.len() > maximum
-        {
+        if output.accepts(&payload)? {
+            accepted = Some(payload.clone());
+        } else if !output.terminal_may_fit(&payload, reaches_terminal)? {
             break;
         }
-        payload = candidate;
         work.check()?;
     }
-    if (remaining > 0 && payload["returned"] == 0) || payload.to_string().len() > maximum {
+    let payload = accepted.or_else(|| (remaining == 0).then_some(payload))
+        .ok_or_else(|| exhausted(
+            "one complete spatial row and its envelope cannot fit; narrow fields or increase the response budget",
+        ))?;
+    if !output.accepts(&payload)? {
         return Err(exhausted(
             "one complete spatial row and its envelope cannot fit; narrow fields or increase the response budget",
         ));

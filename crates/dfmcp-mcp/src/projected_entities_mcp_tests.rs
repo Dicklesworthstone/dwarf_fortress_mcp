@@ -1,9 +1,10 @@
-//! Public laboratory entity pages fit the complete Agent Turn without losing
+//! Public laboratory query pages fit the complete Agent Turn without losing
 //! rows, authority, retained work, or the observation basis of a failed query.
 
-use dfmcp_core::{Capability, Digest32, EntityId, GameTick};
+use dfmcp_core::{Capability, Digest32, EdgeId, EntityId, EventId, GameTick, MapCoord};
 use dfmcp_world::{
-    EntityKind, EntityRecord, Fact, FactSource, Value as WorldValue, WorldGraph, WorldSnapshot,
+    EdgeKind, EdgeRecord, EntityKind, EntityRecord, Fact, FactSource, Value as WorldValue,
+    WorldEvent, WorldEventKind, WorldGraph, WorldSnapshot,
 };
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
@@ -632,5 +633,249 @@ fn projected_entities_capture_query_catalogs_after_preparation_without_anchor_mo
             .snapshot(),
         &source
     );
+    Ok(())
+}
+
+fn page_family_fixture(count: u64, selected_bytes: usize) -> TestResult<(String, WorldSnapshot)> {
+    let (session, mut source) = fixture(count, selected_bytes, 16_384, true)?;
+    source.cursor = source.cursor.checked_next().ok_or("cursor exhausted")?;
+    for entity in source.graph.entities.values_mut() {
+        for (name, value) in [
+            ("position", WorldValue::Coord(MapCoord::new(1, 1, 1))),
+            ("rank", WorldValue::U64(entity.id.get())),
+        ] {
+            entity.fields.insert(
+                name.to_owned(),
+                Fact::known(value, source.tick, FactSource::Replay, Digest32::ZERO),
+            );
+        }
+        let edge = EdgeId::new(u128::from(entity.id.get()));
+        source.graph.edges.insert(
+            edge,
+            EdgeRecord {
+                id: edge,
+                revision: 1,
+                kind: EdgeKind::Requires,
+                from: entity.id,
+                to: entity.id,
+                fields: BTreeMap::new(),
+            },
+        );
+        let event = EventId::new(u128::from(entity.id.get()));
+        source.graph.events.insert(
+            event,
+            WorldEvent {
+                id: event,
+                tick: source.tick,
+                kind: WorldEventKind::UnitChanged,
+                subject: Some(entity.id),
+                summary: "recorded change".to_owned(),
+                fields: BTreeMap::from([(
+                    "small".to_owned(),
+                    WorldValue::Text("s".repeat(selected_bytes)),
+                )]),
+            },
+        );
+    }
+    source.refresh_hash();
+    crate::server::resolve_session(Some(session.clone()))?
+        .lock()
+        .map_err(|_| "session poisoned")?
+        .adapter
+        .inject_snapshot(source.clone())?;
+    Ok((session, source))
+}
+
+fn family_request(kind: &str, limit: usize) -> Value {
+    let mut query = json!({"kind":kind,"fields":["small"],"limit":limit});
+    if kind != "events" {
+        query["kinds"] = json!(["unit"]);
+    }
+    match kind {
+        "spatial_entities" => {
+            query["region"] = json!({"min":[0,0,0],"max":[2,2,2]});
+            query["geometry"] = json!({"kind":"point","field":"position"});
+        }
+        "related_entities" => {
+            query["relation"] = json!({"edge_kinds":["requires"],"target_kinds":["unit"]});
+        }
+        "ranked_entities" => {
+            query["order_by"] =
+                json!([{"field":"rank","numeric_type":"u64","direction":"ascending"}]);
+        }
+        _ => {}
+    }
+    json!({"mode":"structured","request":{"schema":"dfmcp.query/1","query":query}})
+}
+
+const PAGE_FAMILIES: [&str; 4] = [
+    "spatial_entities",
+    "related_entities",
+    "ranked_entities",
+    "events",
+];
+
+#[test]
+fn projected_page_families_facade_fit_retained_catalogs_and_resume() -> TestResult {
+    let _serial = crate::test_serial();
+    for kind in PAGE_FAMILIES {
+        let (session, source) = page_family_fixture(8, 1024)?;
+        let (_, watch) = retained_queries(&session, &source)?;
+        let plan = decode(&crate::agent_facade::fortress_plan(
+            Some(session.clone()),
+            Some("preserve original work during paged inspection".to_owned()),
+            Some(false),
+            None,
+            None,
+        ))?;
+        assert_eq!(plan["ok"], true, "{kind}: {plan}");
+        let (one_raw, one) = query(&session, &family_request(kind, 1))?;
+        assert_eq!(one["ok"], true, "{kind}: {one}");
+        let tokens = narrowed_tokens(&session, &one_raw)?;
+        let mut previous_turn = turn(&one)?;
+        let mut selected = family_request(kind, 8);
+        let mut ids = Vec::new();
+        for index in 0..8 {
+            let (raw, page) = query(&session, &selected)?;
+            assert_eq!(page["ok"], true, "{kind}: {page}");
+            assert!(raw.len() <= tokens as usize * 4);
+            assert_eq!(turn(&page)?, previous_turn + 1);
+            previous_turn = turn(&page)?;
+            let rows = page["rows"].as_array().ok_or("rows missing")?;
+            assert!(!rows.is_empty());
+            if index == 0 {
+                assert!(rows.len() < 8, "{kind}");
+            }
+            let id_field = if kind == "events" {
+                "event_id"
+            } else {
+                "entity_id"
+            };
+            ids.extend(rows.iter().map(|row| row[id_field].clone()));
+            assert_eq!(page["query_work"], one["query_work"], "{kind}");
+            for key in ["query_baselines", "query_watches", "condition_watches"] {
+                assert_eq!(
+                    page["agent_turn"]["active_work"][key],
+                    page["query_work"][key]
+                );
+            }
+            assert_eq!(
+                page["agent_turn"]["active_work"]["pending_plans"][0]["plan_digest"],
+                plan["plan_digest"]
+            );
+            assert_eq!(
+                page["observation_coverage"]["continuation"],
+                page["continuation"]
+            );
+            assert_eq!(
+                page["agent_turn"]["coverage"]["continuation"],
+                page["continuation"]
+            );
+            if page["continuation"].is_null() {
+                break;
+            }
+            selected["request"]["query"]["continuation"] = page["continuation"].clone();
+        }
+        let expected = (1..=8)
+            .map(|id| {
+                json!(if kind == "events" {
+                    EventId::new(id).to_string()
+                } else {
+                    id.to_string()
+                })
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(ids, expected, "{kind}");
+        let owner = crate::server::resolve_session(Some(session.clone()))?;
+        {
+            let mut guard = owner.lock().map_err(|_| "session poisoned")?;
+            assert_eq!(guard.adapter.snapshot(), &source);
+            guard.budget.max_output_tokens = 32_768;
+        }
+        let listed = temporal_query(&session, json!({"kind":"watches"}))?;
+        assert_eq!(listed["records"][0]["stable_observations"], 1);
+        assert_eq!(
+            listed["records"][0]["evidence_digest"],
+            watch["record"]["evidence_digest"]
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn projected_page_families_historical_pages_recheck_current_authority() -> TestResult {
+    let _serial = crate::test_serial();
+    for kind in PAGE_FAMILIES {
+        let (session, source) = page_family_fixture(3, 64)?;
+        let (_, first) = query(&session, &family_request(kind, 1))?;
+        assert_eq!(first["ok"], true, "{kind}: {first}");
+        let current = advance(&session)?;
+        let mut retained = family_request(kind, 1);
+        retained["request"]["query"]["continuation"] = first["continuation"].clone();
+        retained["at"] = json!(source.state_hash.to_string());
+        let (_, page) = query(&session, &retained)?;
+        assert_eq!(page["ok"], true, "{kind}: {page}");
+        assert_eq!(page["historical"], true);
+        assert_eq!(page["anchor"], first["anchor"]);
+        let (id_field, expected) = if kind == "events" {
+            ("event_id", EventId::new(2).to_string())
+        } else {
+            ("entity_id", "2".to_owned())
+        };
+        assert_eq!(page["rows"][0][id_field], expected);
+        assert_eq!(
+            page["agent_turn"]["anchor"]["state_hash"],
+            current.state_hash.to_string()
+        );
+        crate::server::resolve_session(Some(session.clone()))?
+            .lock()
+            .map_err(|_| "session poisoned")?
+            .grants
+            .iter_mut()
+            .find(|grant| grant.capability == Capability::Query)
+            .ok_or("Query grant missing")?
+            .expires_at_tick = Some(source.tick);
+        refused(&query(&session, &retained)?.1, "capability_denied");
+    }
+    Ok(())
+}
+
+#[test]
+fn projected_page_families_defer_and_recheck_before_any_packet_fitting() -> TestResult {
+    let _serial = crate::test_serial();
+    for kind in PAGE_FAMILIES {
+        let (session, _) = page_family_fixture(2, 0)?;
+        let owner = crate::server::resolve_session(Some(session.clone()))?;
+        let before =
+            crate::server::read_context(&*owner.lock().map_err(|_| "session poisoned")?).request_id;
+        let started = Instant::now();
+        let crate::server::QueryPublication::Projected {
+            orientation,
+            query: prepared,
+        } = crate::server::fortress_query_publication(
+            Some(session.clone()),
+            Some(family_request(kind, 2).to_string()),
+            started,
+        )
+        else {
+            return Err(format!("{kind} query was not deferred").into());
+        };
+        assert_eq!(decode(&orientation)?["kind"], kind);
+        let after_prepare =
+            crate::server::read_context(&*owner.lock().map_err(|_| "session poisoned")?).request_id;
+        assert_eq!(after_prepare.get(), before.get() + 1);
+        advance(&session)?;
+        let calls = std::cell::Cell::new(0);
+        let result = prepared.execute(started, &|_| {
+            calls.set(calls.get() + 1);
+            Ok(true)
+        });
+        refused(&result, "stale_anchor");
+        assert_eq!(calls.get(), 0);
+        assert_eq!(
+            crate::server::read_context(&*owner.lock().map_err(|_| "session poisoned")?).request_id,
+            after_prepare
+        );
+    }
     Ok(())
 }
