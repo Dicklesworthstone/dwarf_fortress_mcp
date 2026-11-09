@@ -22,6 +22,8 @@ fn fixture(planned: bool) -> (StateAnchor, Value) {
         "consumed_tick_floor":130,"revalidation_failed":false,
         "last_check_witness":"d".repeat(64),"work_required":planned,
         "mutation_planned":planned,"satisfied_at_anchor":!planned,
+        "labor_assignment_requested":false,"labor_assignment_planned":false,
+        "order_step_id":if planned {Some(0)}else{None::<u64>},
         // Presentation must withdraw caller-provided current-proof claims.
         "fresh_for_current_call":true,"current_inventory_proven":true});
     let mut view = json!({"ok":true,"anchor":anchor_value(anchor),
@@ -71,6 +73,9 @@ fn stock_target_retention_preserves_original_sizing_without_current_proof() {
             "source_generation",
             "source_counters",
             "assessment_witness",
+            "labor_assignment_requested",
+            "labor_assignment_planned",
+            "order_step_id",
         ] {
             assert_eq!(target[field], view["stock_target"][field], "{field}");
         }
@@ -158,4 +163,98 @@ fn failed_publication_keeps_stock_identity_but_no_fresh_check() {
     assert_eq!(retained["amount"], 3);
     assert_eq!(retained["current_inventory_proven"], false);
     assert!(retained["last_check_witness"].is_null());
+}
+
+#[test]
+fn assignment_stock_target_retains_two_step_identity_and_separate_confirmation() {
+    let (anchor, mut view) = fixture(true);
+    view["stock_target"]["labor_assignment_requested"] = json!(true);
+    view["stock_target"]["labor_assignment_planned"] = json!(true);
+    view["stock_target"]["order_step_id"] = json!(1);
+    view["stock_target"]["worker_prerequisite_checked"] = json!(false);
+    view["labor_control_enabled"] = json!(true);
+    view["original_plan"]["steps"] = json!([
+        {"step_id":0,"action":{"kind":"set_labor","enabled":true}},
+        {"step_id":1,"depends_on":[0],"action":{"kind":"create_work_order","amount":3}}
+    ]);
+    let retained = compact(&compact(&view));
+    assert_eq!(retained["stock_target"]["labor_assignment_requested"], true);
+    assert_eq!(retained["stock_target"]["labor_assignment_planned"], true);
+    assert_eq!(retained["stock_target"]["order_step_id"], 1);
+    assert_eq!(retained["stock_target"]["worker_prerequisite_checked"], false);
+    assert_eq!(retained["stock_target"]["current_inventory_proven"], false);
+
+    view["review"] = json!({"family":"workforce/1.17","step_id":0,
+        "paired_seal":"f".repeat(64)});
+    let result = render(anchor, &view, true);
+    assert_eq!(result["stock_target"]["labor_assignment_planned"], true);
+    assert_eq!(result["stock_target"]["order_step_id"], 1);
+    assert_eq!(result["agent_turn"]["recommendations"][0]["tool"], "fortress_commit");
+    assert_eq!(
+        result["agent_turn"]["recommendations"][0]["arguments"]["paired_seal"],
+        view["review"]["paired_seal"]
+    );
+    assert_eq!(result["original_goal_proven"], false);
+}
+
+#[test]
+fn satisfied_assignment_target_does_not_offer_a_labor_effect() {
+    let (anchor, mut view) = fixture(false);
+    view["stock_target"]["labor_assignment_requested"] = json!(true);
+    view["stock_target"]["labor_assignment_planned"] = json!(false);
+    view["stock_target"]["order_step_id"] = Value::Null;
+    view["stock_target"]["worker_prerequisite_checked"] = json!(false);
+    let result = render(anchor, &view, true);
+    assert_eq!(result["stock_target"]["labor_assignment_requested"], true);
+    assert_eq!(result["stock_target"]["labor_assignment_planned"], false);
+    assert!(result["stock_target"]["order_step_id"].is_null());
+    assert_eq!(result["stock_target"]["mutation_planned"], false);
+    assert_eq!(result["agent_turn"]["active_work"]["actions"], json!([]));
+    assert_eq!(
+        result["agent_turn"]["active_work"]["confirmations"],
+        json!([])
+    );
+    assert_eq!(
+        result["agent_turn"]["recommendations"][0]["tool"],
+        "fortress_observe"
+    );
+}
+
+#[test]
+fn assignment_stock_target_overflow_retains_intent_without_a_commit_permit() {
+    let (anchor, mut view) = fixture(true);
+    view["stock_target"]["labor_assignment_requested"] = json!(true);
+    view["stock_target"]["labor_assignment_planned"] = json!(true);
+    view["stock_target"]["order_step_id"] = json!(1);
+    view["stock_target"]["worker_prerequisite_checked"] = json!(false);
+    view["labor_control_enabled"] = json!(true);
+    view["original_plan"]["steps"] = json!([
+        {"step_id":0,"action":{"kind":"set_labor","enabled":true}},
+        {"step_id":1,"depends_on":[0],"action":{"kind":"create_work_order","amount":3}}
+    ]);
+    view["review"] = json!({"family":"workforce/1.17","step_id":0,
+        "paired_seal":"f".repeat(64)});
+    view["extra"] = json!("x".repeat(80_000));
+    let (raw, overflow) = packet(
+        "fortress.plan",
+        Some(SessionId::new(1)),
+        Some(anchor),
+        Some("control"),
+        None,
+        None,
+        view.clone(),
+        Some(&view),
+        true,
+        false,
+    );
+    assert!(overflow);
+    let result: Value = serde_json::from_str(&raw).expect("overflow packet");
+    let target = &result["retained_reference"]["stock_target"];
+    assert_eq!(target["labor_assignment_requested"], true);
+    assert_eq!(target["labor_assignment_planned"], true);
+    assert_eq!(target["order_step_id"], 1);
+    assert_eq!(target["amount"], 3);
+    assert_eq!(target["current_inventory_proven"], false);
+    assert!(result["review"].is_null());
+    assert!(result["retained_reference"]["frontier"]["review"].is_null());
 }

@@ -31,13 +31,32 @@ at stock planning or current inventory from retained metadata.
 **Evidence for this increment is source review only.** Independent review checked
 the compiler, durable layout, source guard, native predecessor, recovery and
 public routing paths. Closed-request and core identity regression source is
-included. The execution host reached zero disk space and near its shared memory
-limit, then its process service disconnected. No Rust compile, rustfmt, Rust
-tests, Python fixture execution, `verify.sh` or full qualification completed
-for these changed bytes. Historical component or live trials do not qualify
-this increment. Runtime/native-peer and presentation acceptance additions are
-the next checkpoint. The broader native manager-order activation problem remains
-unresolved and no claim of actual furniture production is added.
+included. The feature checkpoint is `5a727112`. The follow-up adds two actual
+Runtime/native-TCP-peer campaign tests covering eleven assignment scenarios,
+three bounded-presentation regressions, and explicit metadata assertions across
+original progress and recovery. Cases include met/over-met no-work, current
+labor-authority and two-action-budget refusal before archive publication,
+separately confirmed assignment and order, pre/post-dispatch inventory or queue
+drift, original-key lost-reply Offline/Reconcile, and original inventory sampling.
+Compact and overflow output preserve assignment intent and actual order StepId
+without current-proof claims or restored confirmation.
+
+The execution host reached zero disk space and near its shared memory limit,
+then its process service disconnected. No Rust compile, rustfmt, Rust tests or
+Python fixture execution completed for these changed bytes. Explicit attempts
+to start `verify.sh` and `qualify_local.sh` were rejected by the disconnected
+process service before either script executed. Historical component or live
+trials do not qualify this increment. Both machine descriptions were parsed and
+checked for matching assignment semantics, and edited source integrity was
+checked. The first checkpoint's uploaded blobs were read back exactly. Its
+published tree matched all 2,898 tracked blobs with exactly the intended fifteen
+changed files and no unexpected changes. GitHub read requests then reached
+their rate limit, so the follow-up's seven uploaded blobs and full reconstructed
+tree were checked against their Git object hashes. These checks establish
+source custody, not executable correctness.
+
+The broader native manager-order activation problem remains unresolved and no
+claim of actual furniture production is added.
 
 Owner: `df-native-stock-target-3m9`; request and recovery details:
 `docs/COMBINED_PRODUCTION_MCP.md` and `docs/NATIVE_STOCK_TARGET.md`.

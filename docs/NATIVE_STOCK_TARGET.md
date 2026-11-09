@@ -87,3 +87,27 @@ The machine contract is
 [native_stock_target_v1.json](../architecture/native_stock_target_v1.json).
 Executed checks and current-source limitations are recorded in
 `IMPLEMENTATION_STATUS.md`; test-source presence does not imply execution.
+
+## Focused acceptance source
+
+The `stock_target_request` and `stock_target_binding` test modules cover
+explicit opt-in, exact assignment/order layout, original identities, archive
+round trips, bounded deficits and rejection of weakened recovery predicates.
+The runtime suite uses the real combined Runtime and native clients against
+the existing TCP fixtures. Its assignment campaigns cover eleven cases,
+including independent step confirmation, zero work, missing current labor
+authority, action budgets, source drift after assignment and original-key
+lost-reply recovery without redispatch. Presentation tests retain assignment
+intent and actual StepId through compaction and overflow while withdrawing
+current proof and review.
+
+Run the focused suite in a working latest-nightly environment with the locked
+dependencies:
+
+```bash
+cargo +nightly test --locked --offline -p dfmcp-mcp --lib stock_target -- --nocapture
+```
+
+These are regression sources awaiting execution for this increment. They are
+not real-game production evidence; see the exact execution limits in
+`IMPLEMENTATION_STATUS.md`.

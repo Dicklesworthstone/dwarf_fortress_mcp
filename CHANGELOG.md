@@ -12,9 +12,15 @@
   exact census/queue checks before dependent insertion and original goal timing.
 - Expose assignment intent and actual order StepId through bounded Agent Turns
   and recovery; update request guidance and both machine descriptions.
-- Add closed-request and core identity regression source. Compilation and
-  execution remain pending because the execution service disconnected after
-  disk/memory exhaustion; no live or full-qualification claim is made.
+- Add six core regressions and a closed public request test, then two real
+  Runtime/native-peer campaigns with eleven assignment scenarios and three
+  bounded-presentation regressions. Cover original-key recovery, drift after
+  labor assignment, met-target no-op, capability/action-budget refusal and
+  compact/overflow retention without restored proof or confirmation.
+- Verify uploaded-source identity and the complete published tree. Compilation,
+  rustfmt and test execution remain pending because the execution service
+  disconnected after disk/memory exhaustion; neither mandatory qualification
+  script could start, and no live or full-qualification claim is made.
 
 ## Unreleased — Compare laboratory alternatives and select exact sources
 

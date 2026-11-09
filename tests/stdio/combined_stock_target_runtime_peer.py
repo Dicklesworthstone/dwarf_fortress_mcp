@@ -130,7 +130,9 @@ def seed_workshop(executable, combined, directory):
         raise
 
 
-def run_case(executable, test_name, case):
+def run_case(executable, test_name, requested_case):
+    assignment = requested_case.startswith("assignment_")
+    case = requested_case.removeprefix("assignment_")
     combined = load("stock_target_production_native_fixture", "combined_production.py")
     inspection = load("stock_target_operations_native_fixture", "combined_production_inspection.py")
     with tempfile.TemporaryDirectory(prefix="dfmcp-stock-target-runtime-") as temporary:
@@ -143,10 +145,10 @@ def run_case(executable, test_name, case):
         class StockPeer(combined.Peer):
             def __init__(self):
                 super().__init__(production)
-                self.existing_labor_ready = True
+                self.existing_labor_ready = not assignment
                 self.last_stage = None
                 self.injected_after_dispatch = False
-                self.inventory_stack = {"already": 6, "above": 9}.get(case, 2)
+                self.inventory_stack = {"already": 6, "already_denied": 6, "above": 9}.get(case, 2)
                 if case == "fresh":
                     self.after_operations_read = lambda: setattr(self, "inventory_stack", 4)
                 if case == "generation":
@@ -173,7 +175,10 @@ def run_case(executable, test_name, case):
                     for unit in capture["units"]:
                         unit["labors"] = [1, 0]
 
-                self.workforce_capture_hook = enabled_labor
+                # Assignment cases use the original disabled MINE capture and
+                # its real manual detail; the existing-worker path has no setter.
+                if not assignment:
+                    self.workforce_capture_hook = enabled_labor
 
             def external_queue(self):
                 self.order_created = True
@@ -220,14 +225,25 @@ def run_case(executable, test_name, case):
                 environment["DFMCP_COMBINED_PRODUCTION_CONFIG"] = json.dumps(parent)
                 environment["DFMCP_COMBINED_PRODUCTION_WORKSHOP_TOKEN"] = "t" * 32
             retained_path = directory / "retained.json"
-            run_child(executable, test_name, "control", case, environment,
+            run_child(executable, test_name, "control", requested_case, environment,
                       directory / "unused.json", retained_path)
             calls = [operation for _, operation in peer.calls]
-            assert not peer.workforce_applied and peer.workforce_plan is None
-            assert not any(operation in ("PrepareAssignment", "CommitAssignment", "QueryAssignment")
-                           for operation in calls)
+            no_assignment = not assignment or case in (
+                "already", "already_denied", "above", "denied", "budget")
+            if no_assignment:
+                assert not peer.workforce_applied and peer.workforce_plan is None
+                assert not any(operation in (
+                    "PrepareAssignment", "CommitAssignment", "QueryAssignment")
+                    for operation in calls)
+            else:
+                assert peer.workforce_applied and peer.workforce_plan["assigned"]
+                assert calls.count("PrepareAssignment") == calls.count("CommitAssignment") == 1
+                if "PrepareOrder" in calls:
+                    assert calls.index("CommitAssignment") < calls.index("PrepareOrder")
+                retained = json.loads(retained_path.read_text())
+                assert peer.workforce_plan["key"] == retained["original_plan"]["steps"][0]["key"]
             assert not peer.clock_commits and not peer.inventory_clock_commits
-            if case in ("fresh", "workshop", "lost"):
+            if case in ("fresh", "workshop", "lost") or (assignment and case == "positive"):
                 assert calls.count("PrepareOrder") == calls.count("CommitOrder") == 1
                 assert peer.order_plan["amount"] == (2 if case == "fresh" else 4)
                 assert peer.order_created
@@ -236,8 +252,11 @@ def run_case(executable, test_name, case):
                 assert 2 in creation_states(production)
                 assert calls.count("PrepareOrder") == 1 and "CommitOrder" not in calls
             else:
-                assert not any(operation.startswith(("Prepare", "Commit", "Cancel"))
+                assert not any(operation in ("PrepareOrder", "CommitOrder", "CancelOrder")
                                for operation in calls), calls
+                if no_assignment:
+                    assert not any(operation.startswith(("Prepare", "Commit", "Cancel"))
+                                   for operation in calls), calls
             if case == "lost":
                 retained = json.loads(retained_path.read_text())
                 reopened = combined.reopen_environment(
@@ -251,16 +270,20 @@ def run_case(executable, test_name, case):
                 # Changed live stock must never rewrite the original deficit.
                 peer.inventory_stack = 9
                 before_calls, before_files = list(peer.calls), combined.custody_files(production)
-                run_child(executable, test_name, "offline", case, offline, retained_path,
+                run_child(executable, test_name, "offline", requested_case, offline, retained_path,
                           directory / "offline.json")
                 assert before_calls == peer.calls, "Offline contacted a native source"
                 assert before_files == combined.custody_files(production), "Offline changed custody"
-                run_child(executable, test_name, "reconcile", case, reopened, retained_path,
+                run_child(executable, test_name, "reconcile", requested_case, reopened, retained_path,
                           directory / "reconciled.json")
                 after = [operation for _, operation in peer.calls]
                 assert after.count("PrepareOrder") == after.count("CommitOrder") == 1
                 assert "QueryOrder" in after[len(before_calls):]
-                assert peer.order_plan["key"].decode() == retained["original_plan"]["steps"][0]["key"]
+                order_index = int(assignment)
+                assert peer.order_plan["key"].decode() == retained["original_plan"]["steps"][order_index]["key"]
+                if assignment:
+                    assert after.count("PrepareAssignment") == after.count("CommitAssignment") == 1
+                    assert peer.workforce_plan["key"] == retained["original_plan"]["steps"][0]["key"]
             if donor is not None:
                 workshop_peer, custody, before, previous_calls, _, helper = donor
                 assert helper.snapshot(custody) == before
@@ -278,10 +301,17 @@ def run_case(executable, test_name, case):
 
 def main():
     executable, test_name, campaign = sys.argv[1:]
-    assert campaign in ("planning", "recovery")
-    cases = ("fresh", "already", "above", "cap", "generation", "unpaused",
-             "incomplete", "matching_job", "workshop") if campaign == "planning" else (
-                 "before_stock", "before_queue", "before_job", "after_stock", "after_queue", "lost")
+    cases = {
+        "planning": ("fresh", "already", "above", "cap", "generation", "unpaused",
+                     "incomplete", "matching_job", "workshop"),
+        "recovery": ("before_stock", "before_queue", "before_job",
+                     "after_stock", "after_queue", "lost"),
+        "assignment": ("assignment_positive", "assignment_already", "assignment_above",
+                       "assignment_denied", "assignment_already_denied", "assignment_budget"),
+        "assignment_recovery": ("assignment_before_stock", "assignment_before_queue",
+                                "assignment_after_stock", "assignment_after_queue",
+                                "assignment_lost"),
+    }[campaign]
     for case in cases:
         run_case(executable, test_name, case)
     print(f"combined-stock-target-campaign:{campaign}:checked")

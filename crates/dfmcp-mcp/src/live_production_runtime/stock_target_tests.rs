@@ -67,6 +67,9 @@ fn request(runtime: &Runtime, observed: &Value, case: &str) -> TestResult<StockT
     if case == "cap" {
         value["max_order_amount"] = json!(2);
     }
+    if case.starts_with("assignment_") {
+        value["assign_labor"] = json!(true);
+    }
     Ok(StockTargetRequest::parse(&value.to_string())?)
 }
 
@@ -109,6 +112,10 @@ fn assert_same_target(current: &Value, original: &Value) {
         "source_generation",
         "source_counters",
         "assessment_witness",
+        "labor_assignment_requested",
+        "labor_assignment_planned",
+        "order_step_id",
+        "worker_prerequisite_checked",
     ] {
         assert_eq!(
             current["stock_target"][field], original["stock_target"][field],
@@ -137,6 +144,9 @@ fn commit(runtime: &mut Runtime, prepared: &Value) -> TestResult<Value> {
 }
 
 fn control(case: &str) -> TestResult {
+    if let Some(behavior) = case.strip_prefix("assignment_") {
+        return assignment_control(case, behavior);
+    }
     let mut runtime = open(Mode::Control)?;
     let context = runtime.context(false)?;
     let observed = runtime
@@ -296,7 +306,168 @@ fn control(case: &str) -> TestResult {
     Ok(())
 }
 
-fn recover(phase: &str) -> TestResult {
+fn assignment_control(case: &str, behavior: &str) -> TestResult {
+    let mut runtime = open(Mode::Control)?;
+    let context = runtime.context(false)?;
+    let observed = runtime.observe(ObserveRequest::default(), &context)?.value;
+    let requested = request(&runtime, &observed, case)?;
+    assert!(requested.assign_labor);
+    assert!(!runtime.config.path("original.plan").exists());
+    // Narrow the retained owner, then ask it for a valid current context.
+    // Removing a grant only from the context would test forged-context refusal.
+    if matches!(behavior, "denied" | "already_denied") {
+        runtime.opening_labor = false;
+    }
+    let mut context = runtime.context(false)?;
+    if matches!(behavior, "denied" | "already_denied") {
+        assert!(
+            !context
+                .grants
+                .iter()
+                .any(|grant| grant.capability == Capability::ConfigureLabor)
+        );
+    }
+    if behavior == "budget" {
+        context.budget.max_actions = 1;
+    }
+    let planned = runtime.plan_stock_target(requested, &context);
+    if matches!(behavior, "denied" | "budget") {
+        assert!(
+            planned.is_err(),
+            "assignment escaped its current authority or action limit"
+        );
+        assert!(runtime.original.is_none());
+        assert!(!runtime.config.path("original.plan").exists());
+        let retained = inspect(&mut runtime)?;
+        assert!(retained["original_plan"].is_null());
+        assert!(retained["review"].is_null());
+        return output(&retained);
+    }
+    let planned = planned
+        .map_err(|cause| format!("assignment stock-target Plan: {cause}"))?
+        .value;
+    if matches!(behavior, "already" | "already_denied" | "above") {
+        assert_report(
+            &planned,
+            if behavior == "above" { 9 } else { 6 },
+            0,
+            "already_satisfied",
+        )?;
+        assert!(runtime.original.is_none());
+        assert!(planned["original_plan"].is_null());
+        assert!(planned["frontier"].is_null());
+        assert!(planned["review"].is_null());
+        assert!(!runtime.config.path("original.plan").exists());
+        assert_eq!(planned["original_goal_proven"], false);
+        assert_eq!(planned["stock_target"]["labor_assignment_requested"], true);
+        assert_eq!(planned["stock_target"]["labor_assignment_planned"], false);
+        assert!(planned["stock_target"]["order_step_id"].is_null());
+        assert_eq!(planned["stock_target"]["worker_prerequisite_checked"], false);
+        return output(&planned);
+    }
+
+    assert_report(&planned, 2, 4, "planned")?;
+    assert_eq!(planned["stock_target"]["labor_assignment_requested"], true);
+    assert_eq!(planned["stock_target"]["labor_assignment_planned"], true);
+    assert_eq!(planned["stock_target"]["order_step_id"], 1);
+    assert_eq!(planned["stock_target"]["worker_prerequisite_checked"], false);
+    assert!(text(&planned["original_plan"]["summary"])?.starts_with("Stock target/2 "));
+    assert_eq!(planned["original_plan"]["anchor"], observed["anchor"]);
+    let steps = planned["original_plan"]["steps"]
+        .as_array()
+        .ok_or("assignment steps")?;
+    assert_eq!(steps.len(), 2);
+    assert_eq!(steps[0]["step_id"], 0);
+    assert_eq!(steps[0]["depends_on"], json!([]));
+    assert_eq!(steps[0]["action"]["kind"], "set_labor");
+    assert_eq!(steps[0]["action"]["units"], json!(["43"]));
+    assert_eq!(steps[0]["action"]["labor"], "MINE");
+    assert_eq!(steps[0]["action"]["enabled"], true);
+    assert!(steps[0]["obligation"].is_null());
+    assert_eq!(steps[1]["step_id"], 1);
+    assert_eq!(steps[1]["depends_on"], json!([0]));
+    assert_eq!(steps[1]["action"]["kind"], "create_work_order");
+    assert_eq!(steps[1]["action"]["amount"], 4);
+    assert_eq!(steps[1]["obligation"]["poll_interval_ticks"], 5);
+    assert_eq!(steps[1]["obligation"]["stable_samples"], 2);
+    assert_eq!(planned["frontier"]["next_ready"], 0);
+    assert!(planned["review"].is_null());
+    let original = digest(&planned["original_plan"]["plan_digest"])?;
+
+    let labor = prepare(&mut runtime, original)?;
+    assert_eq!(labor["review"]["step_id"], 0);
+    assert_eq!(labor["review"]["idempotency_key"], steps[0]["key"]);
+    assert_same_target(&labor, &planned);
+    let assigned = commit(&mut runtime, &labor)?;
+    assert_same_target(&assigned, &planned);
+    assert_eq!(assigned["frontier"]["entries"][0]["phase"], "applied");
+    assert_eq!(assigned["frontier"]["entries"][1]["dispatch_attempted"], false);
+    assert_eq!(assigned["frontier"]["all_applied"], false);
+    assert_eq!(assigned["frontier"]["next_ready"], 1);
+    assert_eq!(assigned["original_goal_proven"], false);
+
+    if matches!(behavior, "before_stock" | "before_queue") {
+        stage("before_prepare")?;
+        assert!(prepare(&mut runtime, original).is_err());
+        let retained = inspect(&mut runtime)?;
+        assert_same_target(&retained, &planned);
+        assert_eq!(retained["frontier"]["entries"][0]["phase"], "applied");
+        assert_eq!(retained["frontier"]["entries"][1]["dispatch_attempted"], false);
+        assert_eq!(retained["stock_target"]["revalidation_failed"], true);
+        assert!(retained["review"].is_null());
+        return output(&retained);
+    }
+
+    let order = prepare(&mut runtime, original)?;
+    assert_eq!(order["review"]["step_id"], 1);
+    assert_eq!(order["review"]["idempotency_key"], steps[1]["key"]);
+    assert_same_target(&order, &planned);
+    let inserted = commit(&mut runtime, &order);
+    if matches!(behavior, "after_stock" | "after_queue" | "lost") {
+        assert!(
+            inserted.is_err(),
+            "uncertain or stale insertion reported settled"
+        );
+        let retained = inspect(&mut runtime)?;
+        assert_same_target(&retained, &planned);
+        assert_eq!(retained["frontier"]["entries"][0]["phase"], "applied");
+        assert_eq!(retained["frontier"]["needs_reconciliation"], true);
+        assert_eq!(retained["frontier"]["all_applied"], false);
+        assert!(retained["review"].is_null());
+        assert_eq!(retained["original_goal_proven"], false);
+        if behavior != "lost" {
+            assert_eq!(retained["stock_target"]["revalidation_failed"], true);
+        }
+        assert!(commit(&mut runtime, &order).is_err());
+        return output(&inspect(&mut runtime)?);
+    }
+    let inserted = inserted?;
+    assert_same_target(&inserted, &planned);
+    assert_eq!(inserted["frontier"]["all_applied"], true);
+    assert_eq!(inserted["original_goal_proven"], false);
+    for (position, name) in ["goal_first", "goal_second"].into_iter().enumerate() {
+        stage(name)?;
+        let context = runtime.context(false)?;
+        let sampled = runtime.wait(&context)?.value;
+        assert_same_target(&sampled, &planned);
+        assert_eq!(sampled["selected_inventory_goal"]["step_id"], 1);
+        assert_eq!(
+            sampled["selected_inventory_goal"]["baseline_stack_units"],
+            2
+        );
+        assert_eq!(sampled["selected_inventory_goal"]["target_stack_units"], 6);
+        assert_eq!(sampled["original_goal_proven"], position == 1);
+        assert_eq!(sampled["current_state_proven"], false);
+        assert_eq!(sampled["stock_target"]["current_inventory_proven"], false);
+        if position == 1 {
+            output(&sampled)?;
+        }
+    }
+    Ok(())
+}
+
+fn recover(phase: &str, case: &str) -> TestResult {
+    let order_index = usize::from(case.starts_with("assignment_"));
     let retained: Value = serde_json::from_str(&std::fs::read_to_string(std::env::var(INPUT)?)?)?;
     let mode = if phase == "offline" {
         Mode::Offline
@@ -330,11 +501,20 @@ fn recover(phase: &str) -> TestResult {
     assert_report(&recovered, 2, 4, "planned")?;
     assert_eq!(recovered["frontier"]["all_applied"], true);
     assert_eq!(recovered["frontier"]["needs_reconciliation"], false);
-    assert_eq!(recovered["frontier"]["entries"][0]["phase"], "applied");
     assert_eq!(
-        recovered["frontier"]["entries"][0]["idempotency_key"],
-        retained["original_plan"]["steps"][0]["key"]
+        recovered["frontier"]["entries"][order_index]["phase"],
+        "applied"
     );
+    assert_eq!(
+        recovered["frontier"]["entries"][order_index]["idempotency_key"],
+        retained["original_plan"]["steps"][order_index]["key"]
+    );
+    if order_index == 1 {
+        assert_eq!(recovered["frontier"]["entries"][0]["phase"], "applied");
+        assert!(
+            text(&recovered["original_plan"]["summary"])?.starts_with("Stock target/2 ")
+        );
+    }
     output(&recovered)
 }
 
@@ -343,7 +523,7 @@ fn campaign(kind: &str, test: &str) -> TestResult {
         let case = std::env::var(CASE)?;
         match phase.as_str() {
             "control" => control(&case)?,
-            "offline" | "reconcile" => recover(&phase)?,
+            "offline" | "reconcile" => recover(&phase, &case)?,
             _ => return Err("unknown stock-target fixture phase".into()),
         }
         println!("combined-stock-target-runtime:{phase}:{case}:checked");
@@ -386,5 +566,21 @@ fn native_stock_target_rechecks_dispatch_and_recovers_the_original_without_redis
     campaign(
         "recovery",
         "native_stock_target_rechecks_dispatch_and_recovers_the_original_without_redispatch",
+    )
+}
+
+#[test]
+fn native_stock_target_assigns_selected_labor_only_for_a_bounded_deficit() -> TestResult {
+    campaign(
+        "assignment",
+        "native_stock_target_assigns_selected_labor_only_for_a_bounded_deficit",
+    )
+}
+
+#[test]
+fn assigned_stock_target_fences_later_inventory_and_recovers_original_order() -> TestResult {
+    campaign(
+        "assignment_recovery",
+        "assigned_stock_target_fences_later_inventory_and_recovers_original_order",
     )
 }
