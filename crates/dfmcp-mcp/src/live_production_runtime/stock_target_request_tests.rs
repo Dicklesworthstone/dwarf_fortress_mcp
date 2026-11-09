@@ -1,6 +1,9 @@
 #![allow(dead_code, unused_imports)]
 include!("../semantic_workforce_runtime/fixtures.rs");
-use super::StockTargetRequest;
+use super::{StockTargetBinding, StockTargetRequest};
+use crate::semantic_work_order_runtime::{
+    inventory_baseline::InventoryBaselines, request::Objective,
+};
 use dfmcp_adapter::live_jobs::LiveJobObservation;
 use dfmcp_adapter::live_operations::{LiveItem, LiveOperationsObservation};
 use dfmcp_adapter::live_production::{ExistingLaborRequirement, ProductionLayout};
@@ -114,6 +117,7 @@ fn stock_target_closed_request_accepts_only_intent_and_observed_worker_selection
         "minimum_stack_units":7, "deadline_tick":300,
     });
     let parsed = StockTargetRequest::parse(&base.to_string())?;
+    assert!(!parsed.assign_labor);
     assert_eq!(parsed.max_order_amount, 100);
     assert_eq!(parsed.poll_interval_ticks, 10);
     assert_eq!(parsed.stable_samples, 1);
@@ -131,6 +135,9 @@ fn stock_target_closed_request_accepts_only_intent_and_observed_worker_selection
         ("max_order_amount", serde_json::json!(0)),
         ("max_order_amount", serde_json::json!(101)),
         ("max_order_amount", serde_json::json!(null)),
+        ("assign_labor", serde_json::json!(null)),
+        ("assign_labor", serde_json::json!("true")),
+        ("assign_labor", serde_json::json!(1)),
         ("recipe", serde_json::json!("wooden_stool")),
         ("units", serde_json::json!(["43", "43"])),
         ("units", serde_json::json!(["043"])),
@@ -453,6 +460,235 @@ fn stock_target_archive_retains_target_and_outer_original_workshop_requirement()
             .objective()
             .target_stack_units(),
         1_000_000
+    );
+    Ok(())
+}
+
+#[test]
+fn assigned_stock_target_seals_enable_then_exact_deficit_with_original_growth() -> Result<()> {
+    let (projection, mut c) = stock_fixture()?;
+    c.budget.max_actions = 2;
+    let evidence =
+        PredicateEvidence::scoped(&projection.snapshot, stock_policy(&projection.snapshot))?;
+    let assessment = stock_assessment(&c, 7, 100, 5, 99)?;
+    let mut request = stock_request(7, 100)?;
+    request.assign_labor = true;
+    let plan = request.compile_with_labor_assignment(&assessment, &evidence, &c, None)?;
+    let layout = ProductionLayout::from_plan(&plan)?;
+    assert_eq!(plan.steps.len(), 2);
+    assert_eq!(layout.assignment_step(), Some(StepId::ZERO));
+    assert_eq!(layout.order_steps(), [StepId::new(1)]);
+    assert_eq!(layout.existing_labor(), None);
+    assert!(matches!(&plan.steps[0].action, Action::SetLabor {
+        units, labor, enabled: true
+    } if units == &[EntityId::new(43), EntityId::new(44)] && labor == "CARPENTER"));
+    assert!(plan.steps[0].obligation.is_none());
+    assert!(plan.steps[0].depends_on.is_empty());
+    assert_eq!(plan.steps[1].depends_on, [StepId::ZERO]);
+    assert!(matches!(&plan.steps[1].action, Action::CreateWorkOrder {
+        name, amount: 2, job_token, conditions
+    } if name == "native stock-target/2 wooden_bed goal"
+        && job_token == "CONSTRUCT_BED" && conditions.is_empty()));
+    assert!(plan.required_capabilities.contains(&Capability::ConfigureLabor));
+    assert!(plan.required_capabilities.contains(&Capability::ConfigureProduction));
+    let goal = ObservedInventoryIncreaseObjective::from_selected_plan(&plan, StepId::new(1))
+        .ok_or_else(|| invalid("assigned stock target lost its original growth objective"))?;
+    assert_eq!(&goal, assessment.objective().expect("positive deficit"));
+    assert_eq!(goal.target_stack_units(), 7);
+    assert_eq!(goal.baseline_stack_units(), 5);
+    let obligation = plan.steps[1].obligation.as_ref().expect("original obligation");
+    assert_eq!(obligation.deadline_tick, GameTick(300));
+    assert_eq!(obligation.poll_interval_ticks, 5);
+    assert_eq!(obligation.stable_for_observations, 2);
+    assert!(obligation.failure.is_none());
+    let binding = super::super::stock_target_binding::requirement(&plan)?
+        .ok_or_else(|| invalid("assigned stock target binding missing"))?;
+    assert!(binding.assign_labor());
+    assert_eq!(binding.witness(), assessment.witness());
+    assert_eq!(binding.objective(), &goal);
+    assert!(plan.summary.starts_with("Stock target/2 "));
+    for step in &plan.steps {
+        assert_eq!(
+            step.idempotency_key,
+            derive_step_idempotency_key(plan.intent_id, plan.anchor, step.id, &step.action)
+        );
+        assert!(step.compensation.is_none());
+    }
+    let limits = dfmcp_adapter::live_production::archive_limits();
+    let (bytes, seal) = dfmcp_intent::plan_archive::encode(&plan, limits)?;
+    let recovered = dfmcp_intent::plan_archive::decode(&bytes, seal, limits)?;
+    assert_eq!(recovered, plan);
+    assert_eq!(
+        super::super::stock_target_binding::requirement(&recovered)?,
+        Some(binding)
+    );
+    Ok(())
+}
+
+#[test]
+fn stock_assignment_is_explicit_and_satisfied_targets_have_no_compilable_actions() -> Result<()> {
+    let (projection, mut c) = stock_fixture()?;
+    c.budget.max_actions = 2;
+    let evidence =
+        PredicateEvidence::scoped(&projection.snapshot, stock_policy(&projection.snapshot))?;
+    let assessment = stock_assessment(&c, 7, 100, 5, 99)?;
+    let request = stock_request(7, 100)?;
+    assert!(
+        request
+            .compile_with_labor_assignment(&assessment, &evidence, &c, None)
+            .is_err()
+    );
+    let mut assigned = request.clone();
+    assigned.assign_labor = true;
+    assert!(
+        assigned
+            .compile(&assessment, &evidence, &stock_workers()?, &c, None)
+            .is_err()
+    );
+    for baseline in [7, 8] {
+        let met = stock_assessment(&c, 7, 100, baseline, 99)?;
+        assert_eq!(met.amount(), None);
+        assert!(
+            assigned
+                .compile_with_labor_assignment(&met, &evidence, &c, None)
+                .is_err()
+        );
+    }
+    let mut insufficient = c.clone();
+    insufficient.budget.max_actions = 1;
+    assert!(
+        assigned
+            .compile_with_labor_assignment(&assessment, &evidence, &insufficient, None)
+            .is_err()
+    );
+    assert!(
+        assigned
+            .compile_with_labor_assignment(
+                &assessment,
+                &PredicateEvidence::untrusted(&projection.snapshot)?,
+                &c,
+                None,
+            )
+            .is_err()
+    );
+    let mut stale = c.clone();
+    stale.anchor.cursor.sequence += 1;
+    assert!(
+        assigned
+            .compile_with_labor_assignment(&assessment, &evidence, &stale, None)
+            .is_err()
+    );
+    let explicit = serde_json::json!({
+        "kind":"stock_target", "expected_observation":"11".repeat(32),
+        "units":["44","43"], "labor":"CARPENTER", "recipe":"wooden_bed",
+        "minimum_stack_units":7, "max_order_amount":100, "deadline_tick":300,
+        "poll_interval_ticks":5, "stable_samples":2, "assign_labor":true,
+    });
+    assert_eq!(StockTargetRequest::parse(&explicit.to_string())?, assigned);
+    let mut disabled = explicit;
+    disabled["enabled"] = false.into();
+    assert!(StockTargetRequest::parse(&disabled.to_string()).is_err());
+    Ok(())
+}
+
+#[test]
+fn assigned_stock_identity_preserves_legacy_and_binds_selection_census_and_timing() -> Result<()> {
+    let (projection, mut c) = stock_fixture()?;
+    c.budget.max_actions = 2;
+    let evidence =
+        PredicateEvidence::scoped(&projection.snapshot, stock_policy(&projection.snapshot))?;
+    let assessment = stock_assessment(&c, 7, 100, 5, 99)?;
+    let request = stock_request(7, 100)?;
+    let legacy = request.compile(&assessment, &evidence, &stock_workers()?, &c, None)?;
+    let mut assigned = request.clone();
+    assigned.assign_labor = true;
+    let original = assigned.compile_with_labor_assignment(&assessment, &evidence, &c, None)?;
+    let baselines =
+        InventoryBaselines::from_qualified(assessment.objective().expect("baseline").clone());
+    let manual = super::super::request::Request {
+        expected_observation: assigned.expected_observation.clone(),
+        units: assigned.units.clone(),
+        labor: assigned.labor.clone(),
+        enabled: true,
+        recipe: assigned.recipe.clone(),
+        amount: 2,
+        deadline_tick: assigned.deadline_tick,
+        poll_interval_ticks: assigned.poll_interval_ticks,
+        stable_samples: assigned.stable_samples,
+        objective: Some(Objective::ObservedInventoryIncrease {
+            item_type: "BED".into(),
+            increase_stack_units: 2,
+        }),
+    };
+    let manual_plan = manual.compile_with_inventory(&evidence, &baselines, &c)?;
+    assert_eq!(
+        manual_plan,
+        manual.compile_with_stock_target(&evidence, &baselines, &c, None, None)?
+    );
+    assert_eq!(super::super::stock_target_binding::requirement(&manual_plan)?, None);
+    assert_eq!(manual_plan.steps[0].action, original.steps[0].action);
+    assert_eq!(manual_plan.steps[1].obligation, original.steps[1].obligation);
+    assert_ne!(manual_plan.intent_id, original.intent_id);
+    assert_ne!(legacy.intent_id, original.intent_id);
+    assert!(legacy.summary.starts_with("Stock target/1 "));
+    assert!(!super::super::stock_target_binding::requirement(&legacy)?
+        .expect("legacy binding")
+        .assign_labor());
+    assert_eq!(
+        legacy,
+        request.compile(&assessment, &evidence, &stock_workers()?, &c, None)?
+    );
+    let mut reordered = assigned.clone();
+    reordered.units.reverse();
+    assert_eq!(
+        original,
+        reordered.compile_with_labor_assignment(&assessment, &evidence, &c, None)?
+    );
+    for case in 0..8 {
+        let mut changed = assigned.clone();
+        let mut current_assessment = assessment.clone();
+        let mut origin = None;
+        match case {
+            0 => changed.units = vec!["43".into()],
+            1 => changed.labor = "MINE".into(),
+            2 => changed.deadline_tick += 1,
+            3 => changed.poll_interval_ticks += 1,
+            4 => changed.stable_samples += 1,
+            5 => {
+                changed.max_order_amount = 99;
+                current_assessment = stock_assessment(&c, 7, 99, 5, 99)?;
+            }
+            6 => current_assessment = stock_assessment(&c, 7, 100, 5, 100)?,
+            _ => origin = Some(Digest32::of_bytes(b"completed original Carpenter")),
+        }
+        let other =
+            changed.compile_with_labor_assignment(&current_assessment, &evidence, &c, origin)?;
+        assert_ne!(other.intent_id, original.intent_id, "case {case}");
+        assert_ne!(other.digest, original.digest, "case {case}");
+        for index in 0..2 {
+            assert_ne!(
+                other.steps[index].idempotency_key,
+                original.steps[index].idempotency_key,
+                "case {case}, step {index}"
+            );
+        }
+        let limits = dfmcp_adapter::live_production::archive_limits();
+        let (bytes, seal) = dfmcp_intent::plan_archive::encode(&other, limits)?;
+        let recovered = dfmcp_intent::plan_archive::decode(&bytes, seal, limits)?;
+        assert_eq!(recovered, other);
+        assert_eq!(super::super::workshop_binding::requirement(&recovered)?, origin);
+        assert!(super::super::stock_target_binding::requirement(&recovered)?
+            .expect("assigned binding")
+            .assign_labor());
+        assert!(recovered.summary.len() <= 256);
+    }
+    let binding = StockTargetBinding::from_assessment_with_assignment(&assessment)?;
+    let mut disabled = manual;
+    disabled.enabled = false;
+    assert!(
+        disabled
+            .compile_with_stock_target(&evidence, &baselines, &c, None, Some(&binding))
+            .is_err()
     );
     Ok(())
 }

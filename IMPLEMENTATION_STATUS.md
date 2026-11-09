@@ -1,5 +1,47 @@
 # Implementation Status
 
+## Unreleased — Enable selected labor for a finite stock target
+
+The combined development MCP host now accepts the explicit Boolean
+`assign_labor=true` on its existing `kind="stock_target"` request. A positive
+qualified inventory deficit compiles one ordinary enabled labor action followed
+by its dependent finite furniture order. Both use the existing durable executor,
+separate native reviews/confirmations and current capability checks. Omission
+and explicit false retain the existing-worker path and its version-one identity.
+A met target creates neither action, even without ConfigureLabor authority.
+
+The new `Stock target/2` identity binds the complete enabled assignment and
+canonical citizen identity preconditions to the qualified original inventory
+assessment, finite amount, target, maximum, deadline, cadence and stability.
+The versioned order name makes loss of the required marker detectable. Recovery
+validates the two-step shape and original keys; it cannot turn this original
+into an unguarded manual-growth plan. The optional original Workshop prerequisite
+continues to compose before intent/key derivation. No native protocol or
+production admission changes.
+
+The order still requires the exact original complete census and empty manager
+queue at native preparation and post-dispatch revalidation, including after
+labor was changed. Drift refuses the order without resizing, replacing keys or
+undoing the historical assignment. Existing inventory/parent monitoring and
+independently reviewed clocks preserve their original semantics.
+Agent Turn and compact recovery expose whether assignment was requested/planned
+and the actual original order StepId, without claiming an enabled-worker proof
+at stock planning or current inventory from retained metadata.
+
+**Evidence for this increment is source review only.** Independent review checked
+the compiler, durable layout, source guard, native predecessor, recovery and
+public routing paths. Closed-request and core identity regression source is
+included. The execution host reached zero disk space and near its shared memory
+limit, then its process service disconnected. No Rust compile, rustfmt, Rust
+tests, Python fixture execution, `verify.sh` or full qualification completed
+for these changed bytes. Historical component or live trials do not qualify
+this increment. Runtime/native-peer and presentation acceptance additions are
+the next checkpoint. The broader native manager-order activation problem remains
+unresolved and no claim of actual furniture production is added.
+
+Owner: `df-native-stock-target-3m9`; request and recovery details:
+`docs/COMBINED_PRODUCTION_MCP.md` and `docs/NATIVE_STOCK_TARGET.md`.
+
 ## Unreleased — Compare and select laboratory plan alternatives
 
 The existing `fortress.plan` blueprint string now accepts closed version-one

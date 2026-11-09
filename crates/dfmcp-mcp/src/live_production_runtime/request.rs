@@ -98,6 +98,16 @@ impl Request {
         context: &OperationContext,
         origin: Option<Digest32>,
     ) -> Result<PreparedPlan> {
+        self.compile_with_stock_target(evidence, baselines, context, origin, None)
+    }
+    pub(super) fn compile_with_stock_target(
+        &self,
+        evidence: &PredicateEvidence<'_>,
+        baselines: &InventoryBaselines,
+        context: &OperationContext,
+        origin: Option<Digest32>,
+        stock_target: Option<&super::stock_target_binding::StockTargetBinding>,
+    ) -> Result<PreparedPlan> {
         self.validate()?;
         if evidence.snapshot().anchor() != context.anchor {
             return Err(invalid(
@@ -157,7 +167,10 @@ impl Request {
         }
         let (native, job) = recipe(&self.recipe)?;
         let order = Action::CreateWorkOrder {
-            name: format!("native {} goal", native.as_str()),
+            name: stock_target.map_or_else(
+                || format!("native {} goal", native.as_str()),
+                |binding| binding.order_name(),
+            ),
             job_token: job.into(),
             amount: self.amount,
             conditions: Vec::new(),
@@ -183,6 +196,20 @@ impl Request {
         if let Some(objective) = &self.objective {
             objective.append_identity(&mut bytes, baselines, context.anchor)?;
         }
+        let assignment = Action::SetLabor {
+            units: units.clone(),
+            labor: self.labor.clone(),
+            enabled: self.enabled,
+        };
+        super::stock_target_binding::append_assignment_identity(
+            &mut bytes,
+            stock_target,
+            &assignment,
+            &Predicate::All(preconditions.clone()),
+            GameTick(self.deadline_tick),
+            self.poll_interval_ticks,
+            self.stable_samples,
+        )?;
         super::workshop_binding::append_identity(&mut bytes, origin)?;
         let hash = Digest32::of_bytes(&bytes);
         let id = IntentId::new(u128::from_be_bytes(
@@ -244,16 +271,15 @@ impl Request {
         let intent = Intent {
             id,
             anchor: context.anchor,
-            summary: super::workshop_binding::summary(summary, origin)?,
+            summary: super::workshop_binding::summary(
+                super::stock_target_binding::summary(summary, stock_target)?,
+                origin,
+            )?,
             terminal_condition: Predicate::All(vec![labor_goal.clone(), order_goal.clone()]),
             constraints: vec![Constraint::MaxRisk(RiskTier::Guarded)],
             requested_actions: vec![
                 RequestedAction {
-                    action: Action::SetLabor {
-                        units,
-                        labor: self.labor.clone(),
-                        enabled: self.enabled,
-                    },
+                    action: assignment,
                     preconditions: vec![Predicate::All(preconditions)],
                     postconditions: vec![labor_goal],
                     compensation: None,
@@ -285,6 +311,13 @@ impl Request {
         plan.id = plan.expected_id();
         plan.validate_structure()?;
         dfmcp_adapter::live_production::validate_plan(&plan)?;
+        if let Some(binding) = stock_target
+            && super::stock_target_binding::requirement(&plan)?.as_ref() != Some(binding)
+        {
+            return Err(invalid(
+                "compiled stock target differs from its exact assignment and census",
+            ));
+        }
         Ok(plan)
     }
 }

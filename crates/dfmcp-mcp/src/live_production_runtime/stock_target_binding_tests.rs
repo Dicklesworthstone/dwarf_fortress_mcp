@@ -26,7 +26,7 @@ fn stock_marker_requires_exact_version_fields_numbers_witnesses_and_position() -
     assert_eq!(unchanged, b"legacy identity bytes");
     assert_eq!(summary("Legacy summary".into(), None)?, "Legacy summary");
     for malformed in [
-        marker.replace("target/1", "target/2"),
+        marker.replace("target/1", "target/3"),
         marker.replace(">=7", ">=0"),
         marker.replace(">=7", ">=1000001"),
         marker.replace(">=7", ">=07"),
@@ -171,6 +171,198 @@ fn stock_binding_rejects_action_goal_or_baseline_substitution() -> Result<()> {
             requirement(&altered).is_err(),
             "accepted altered original {case}"
         );
+    }
+    Ok(())
+}
+
+fn assigned_original() -> Result<PreparedPlan> {
+    let (projection, mut c) = stock_fixture()?;
+    c.budget.max_actions = 2;
+    let evidence =
+        PredicateEvidence::scoped(&projection.snapshot, stock_policy(&projection.snapshot))?;
+    let assessment = stock_assessment(&c, 7, 100, 5, 99)?;
+    let mut request = stock_request(7, 100)?;
+    request.assign_labor = true;
+    request.compile_with_labor_assignment(&assessment, &evidence, &c, None)
+}
+
+fn rekey_and_reseal(plan: &mut PreparedPlan) {
+    for step in &mut plan.steps {
+        step.idempotency_key =
+            derive_step_idempotency_key(plan.intent_id, plan.anchor, step.id, &step.action);
+        step.preconditions = step.preconditions.iter().map(Predicate::normalized).collect();
+        step.preconditions.sort_by_key(Predicate::canonical_bytes);
+        step.postconditions = step.postconditions.iter().map(Predicate::normalized).collect();
+        step.postconditions.sort_by_key(Predicate::canonical_bytes);
+    }
+    plan.terminal_condition = plan.terminal_condition.normalized();
+    reseal(plan);
+}
+
+fn changed_growth_source(predicate: &Predicate, generation: bool) -> Predicate {
+    let mut changed = match predicate {
+        Predicate::All(children) => Predicate::All(
+            children
+                .iter()
+                .map(|child| changed_growth_source(child, generation))
+                .collect(),
+        ),
+        other => other.clone(),
+    };
+    if let Predicate::EntityQuantityIncrease {
+        source_generation,
+        baseline_source_counters,
+        ..
+    } = &mut changed
+    {
+        if generation {
+            *source_generation += 1;
+        } else {
+            baseline_source_counters[2] += 1;
+        }
+    }
+    changed.normalized()
+}
+
+#[test]
+fn assigned_stock_marker_rejects_loss_downgrade_and_untagged_manual_adoption() -> Result<()> {
+    let original = assigned_original()?;
+    let marker = parse_summary(&original.summary)?.expect("assignment marker");
+    assert!(marker.assign_labor);
+    let binding = requirement(&original)?.expect("assigned requirement");
+    assert!(binding.assign_labor());
+    for summary in [
+        "Original manual growth goal".to_owned(),
+        original.summary.replace("target/2", "target/1"),
+        original.summary.replace("target/2", "target/3"),
+        original.summary.replace(">=7", ">=8"),
+        original.summary.replace("max=100", "max=99"),
+    ] {
+        let mut changed = original.clone();
+        changed.summary = summary;
+        rekey_and_reseal(&mut changed);
+        assert!(
+            requirement(&changed).is_err(),
+            "stock-target policy cannot be dropped, downgraded or changed by resealing"
+        );
+    }
+    let mut untagged = original.clone();
+    if let Action::CreateWorkOrder { name, .. } = &mut untagged.steps[1].action {
+        *name = "native wooden_bed goal".into();
+    }
+    rekey_and_reseal(&mut untagged);
+    assert!(requirement(&untagged).is_err());
+
+    let (projection, mut c) = stock_fixture()?;
+    c.budget.max_actions = 2;
+    let evidence =
+        PredicateEvidence::scoped(&projection.snapshot, stock_policy(&projection.snapshot))?;
+    let assessment = stock_assessment(&c, 7, 100, 5, 99)?;
+    let legacy = stock_request(7, 100)?.compile(
+        &assessment, &evidence, &stock_workers()?, &c, None,
+    )?;
+    let mut promoted = legacy;
+    promoted.summary = original.summary.clone();
+    rekey_and_reseal(&mut promoted);
+    assert!(
+        requirement(&promoted).is_err(),
+        "a version-two marker cannot grant assignment to a version-one original"
+    );
+    Ok(())
+}
+
+#[test]
+fn assigned_stock_binding_refuses_weakened_identity_labor_and_parent_truth() -> Result<()> {
+    let original = assigned_original()?;
+    for case in 0..10 {
+        let mut changed = original.clone();
+        match case {
+            0 => changed.steps[0].preconditions = vec![Predicate::Paused(true)],
+            1 => {
+                let Predicate::All(children) = &mut changed.steps[0].preconditions[0] else {
+                    panic!("complete original identity conjunction");
+                };
+                let native = children.iter_mut().find_map(|child| match child {
+                    Predicate::FieldCompare {
+                        field,
+                        value: Value::I64(value),
+                        ..
+                    } if field == "raw_unit_id" => Some(value),
+                    _ => None,
+                }).expect("original native identity");
+                *native += 1;
+            }
+            2 => changed.steps[0].postconditions = vec![Predicate::FieldCompare {
+                entity_id: dfmcp_core::EntityId::new(43),
+                field: "labor.CARPENTER".into(),
+                op: CompareOp::Eq,
+                value: Value::Bool(true),
+            }],
+            3 => {
+                changed.terminal_condition =
+                    changed.steps[1].obligation.as_ref().expect("obligation").terminal.clone();
+            }
+            4 => changed.steps[1].preconditions = vec![Predicate::True],
+            5 => changed.steps[1].depends_on.clear(),
+            6 => {
+                changed.steps[1]
+                    .obligation.as_mut().expect("obligation")
+                    .failure = Some(Predicate::False);
+            }
+            7 => {
+                changed.steps[0].compensation = Some(Action::SetLabor {
+                    units: vec![dfmcp_core::EntityId::new(43), dfmcp_core::EntityId::new(44)],
+                    labor: "CARPENTER".into(),
+                    enabled: false,
+                });
+            }
+            8 => {
+                if let Action::SetLabor { enabled, .. } = &mut changed.steps[0].action {
+                    *enabled = false;
+                }
+            }
+            _ => {
+                changed.steps[1].postconditions = vec![Predicate::Paused(true)];
+                changed.steps[1].obligation.as_mut().expect("obligation").terminal =
+                    Predicate::Paused(true);
+            }
+        }
+        rekey_and_reseal(&mut changed);
+        assert!(
+            requirement(&changed).is_err(),
+            "accepted weakened assignment stock original case {case}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn assigned_stock_binding_fences_inventory_incarnation_and_original_step_keys() -> Result<()> {
+    let original = assigned_original()?;
+    for generation in [true, false] {
+        let mut changed = original.clone();
+        changed.terminal_condition = changed_growth_source(&changed.terminal_condition, generation);
+        for step in &mut changed.steps {
+            step.postconditions = step.postconditions
+                .iter()
+                .map(|predicate| changed_growth_source(predicate, generation))
+                .collect();
+            if let Some(obligation) = &mut step.obligation {
+                obligation.terminal = changed_growth_source(&obligation.terminal, generation);
+            }
+        }
+        rekey_and_reseal(&mut changed);
+        assert!(
+            requirement(&changed).is_err(),
+            "a newer inventory source cannot replace the sealed original census"
+        );
+    }
+    for index in 0..2 {
+        let mut changed = original.clone();
+        changed.steps[index].idempotency_key =
+            Digest32::of_bytes(b"substituted original step key").to_hex();
+        reseal(&mut changed);
+        assert!(requirement(&changed).is_err(), "step {index}");
     }
     Ok(())
 }

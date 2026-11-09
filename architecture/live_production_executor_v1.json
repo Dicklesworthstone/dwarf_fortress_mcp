@@ -89,7 +89,7 @@
       "labor-order"
     ],
     "configuration_schema": "dfmcp.combined-production-development/1",
-    "request_schema": "closed legacy labor/citizens/finite furniture request; kind=existing_labor for one independently qualified current-worker order; kind=portfolio to assign labor before one to four distinct recipes; kind=existing_labor_portfolio for one to four distinct recipes using the same current workers; each leaf may select an inventory minimum or an independently qualified original inventory increase; kind=stock_target derives one finite deficit from a fresh complete census using existing enabled workers, with a typed no-work outcome and no caller amount/baseline",
+    "request_schema": "closed legacy labor/citizens/finite furniture request; kind=existing_labor for one independently qualified current-worker order; kind=portfolio to assign labor before one to four distinct recipes; kind=existing_labor_portfolio for one to four distinct recipes using the same current workers; each leaf may select an inventory minimum or an independently qualified original inventory increase; kind=stock_target derives one finite deficit from a fresh complete census using existing enabled workers by default, or explicit assign_labor=true for a separately reviewed enable and dependent order, with a typed no-work outcome and no caller amount/baseline",
     "original_steps": [
       "SetLabor",
       "CreateWorkOrder"
@@ -102,7 +102,8 @@
       "existing_labor": 1,
       "existing_labor_portfolio_min": 1,
       "existing_labor_portfolio_max": 4,
-      "stock_target": 1
+      "stock_target": 1,
+      "stock_target_with_assignment": 2
     },
     "selected_citizens_max": 32,
     "workforce_choices": {
@@ -926,7 +927,7 @@
         "crates/dfmcp-mcp/src/live_production_presentation_stock_target_tests.rs",
         "tests/stdio/combined_stock_target_runtime_peer.py"
       ],
-      "selected_labor": "already enabled and eligible; no assignment action",
+      "selected_labor": "default: already enabled and eligible; assign_labor=true: separately reviewed enable before the dependent order",
       "no_work_worker_prerequisite_checked": false,
       "fresh_plan_census_required": true,
       "advisory_capture_reused": false,
@@ -952,7 +953,27 @@
       "contract": "native_stock_target_v1.json",
       "plan_census_bytes": 185597952,
       "fresh_native_queue_read_after_each_census": true,
-      "fresh_queue_must_match_native_original_observation": true
+      "fresh_queue_must_match_native_original_observation": true,
+      "optional_assignment": {
+        "request_field": "assign_labor",
+        "default": false,
+        "enable_only": true,
+        "legacy_identity": "Stock target/1",
+        "assignment_identity": "Stock target/2",
+        "legacy_identity_bytes_changed": false,
+        "assignment_step_id": 0,
+        "dependent_order_step_id": 1,
+        "assignment_requires_current_configure_labor": true,
+        "separate_review_and_confirmation_per_step": true,
+        "already_satisfied_assigns_labor": false,
+        "already_satisfied_requires_configure_labor": false,
+        "assignment_is_enabled_worker_evidence_at_plan": false,
+        "assignment_action_and_identity_preconditions_sealed": true,
+        "fresh_original_census_and_empty_queue_after_assignment": true,
+        "recovery_validates_complete_assignment_layout": true,
+        "new_native_protocol": false,
+        "execution_evidence": "source_review_only_pending_rust_execution"
+      }
     }
   },
   "selected_work_order_goal_monitor": {

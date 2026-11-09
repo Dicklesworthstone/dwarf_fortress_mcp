@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased — Compose stock sizing with an explicit labor enable
+
+- Add optional `assign_labor=true` to the existing native stock-target request.
+  Calculate the whole finite deficit from one qualified census, then retain
+  separately reviewed labor and order steps through the existing executor.
+- Preserve the default existing-worker identity and no-work semantics; met
+  targets cause no labor or order effect, and positive assignment plans require
+  current ordinary capabilities and a two-action allowance.
+- Seal and recover the complete assignment under `Stock target/2`, retaining
+  exact census/queue checks before dependent insertion and original goal timing.
+- Expose assignment intent and actual order StepId through bounded Agent Turns
+  and recovery; update request guidance and both machine descriptions.
+- Add closed-request and core identity regression source. Compilation and
+  execution remain pending because the execution service disconnected after
+  disk/memory exhaustion; no live or full-qualification claim is made.
+
 ## Unreleased — Compare laboratory alternatives and select exact sources
 
 - Add bounded two-to-four candidate comparisons through the existing `fortress.plan`

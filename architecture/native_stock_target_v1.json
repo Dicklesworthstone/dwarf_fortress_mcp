@@ -72,7 +72,7 @@
       "crates/dfmcp-mcp/src/live_production_presentation_stock_target_tests.rs",
       "tests/stdio/combined_stock_target_runtime_peer.py"
     ],
-    "selected_labor": "already enabled and eligible; no assignment action",
+    "selected_labor": "default: already enabled and eligible; assign_labor=true: separately reviewed enable before the dependent order",
     "no_work_worker_prerequisite_checked": false,
     "fresh_plan_census_required": true,
     "advisory_capture_reused": false,
@@ -97,6 +97,26 @@
     "single_finite_order_only": true,
     "plan_census_bytes": 185597952,
     "fresh_native_queue_read_after_each_census": true,
-    "fresh_queue_must_match_native_original_observation": true
+    "fresh_queue_must_match_native_original_observation": true,
+    "optional_assignment": {
+      "request_field": "assign_labor",
+      "default": false,
+      "enable_only": true,
+      "legacy_identity": "Stock target/1",
+      "assignment_identity": "Stock target/2",
+      "legacy_identity_bytes_changed": false,
+      "assignment_step_id": 0,
+      "dependent_order_step_id": 1,
+      "assignment_requires_current_configure_labor": true,
+      "separate_review_and_confirmation_per_step": true,
+      "already_satisfied_assigns_labor": false,
+      "already_satisfied_requires_configure_labor": false,
+      "assignment_is_enabled_worker_evidence_at_plan": false,
+      "assignment_action_and_identity_preconditions_sealed": true,
+      "fresh_original_census_and_empty_queue_after_assignment": true,
+      "recovery_validates_complete_assignment_layout": true,
+      "new_native_protocol": false,
+      "execution_evidence": "source_review_only_pending_rust_execution"
+    }
   }
 }

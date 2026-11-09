@@ -57,6 +57,23 @@ The combined host therefore requires its queue to be empty before stock-target
 preparation and insertion. It does not assume that an unclassified existing
 order is unrelated, subtract expected future output, or change protocol 1.10.
 
+## Explicit labor prerequisite
+
+The combined consumer defaults to observed already-enabled workers. A closed
+`assign_labor=true` option composes the same qualified stock assessment with
+the existing reviewed labor-enable and dependent-order executor. It uses a
+separate `Stock target/2` original identity; the `Stock target/1` existing-worker
+encoding remains unchanged. The assignment action and complete original
+citizen preconditions are sealed with the inventory target, finite deficit and
+timing. Each native step requires its own review and confirmation.
+
+A met target never creates the assignment, even when requested. A positive
+target requires current labor authority through the ordinary planner. Historical
+assignment evidence releases the dependency but cannot replace current source
+checks or the inventory goal. Stock and queue drift after labor changes refuses
+the order under its original identity, without a new count or replacement key.
+The complete parent monitor still checks current labor and stock together.
+
 ## Evidence boundary
 
 The assessment itself observes no source, persists no effect, inserts no order

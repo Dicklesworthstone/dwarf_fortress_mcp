@@ -713,7 +713,7 @@ pub fn fortress_query(
     })
 }
 #[tool(
-    description = "Compile kind=stock_target with expected_observation, units, labor, recipe, minimum_stack_units and original timing to derive one finite deficit from a fresh complete inventory census using already-enabled eligible workers. Optional max_order_amount is 1..100 (default100); an already-satisfied target creates no original or effect, and an oversized deficit refuses. Insertion requires the exact original census and an empty native order queue at each protected boundary. Otherwise compile one original labor and finite-order plan, kind=existing_labor for one finite order using observed already-enabled eligible workers without a labor assignment, kind=existing_labor_portfolio for one to four orders using the same qualified current workers, or kind=portfolio to assign labor before one to four distinct furniture orders; every order may select observed_inventory_minimum or observed_inventory_increase with item_type and increase_stack_units (1..1000000). Increase seals a server-qualified complete original inventory baseline before preparation; clients cannot supply or renew that baseline; kind=step with original_plan_digest prepares the next eligible original step. After all original effects settle, kind=run prepares an independently authorized clock for the original retained-order or inventory goal. After Wait observes True original labor and explicitly selected inventory, kind=inventory_run prepares an independent stability clock even after order retirement. Both name original_paired_seal, game_ticks and wall_millis; portfolio clock requests also require the exact original order_step_id. When an original workshop prerequisite is configured, the plan retains its exact identity and each native order boundary rereads its completion. Planning never unpauses."
+    description = "Compile kind=stock_target with expected_observation, units, labor, recipe, minimum_stack_units and original timing to derive one finite deficit from a fresh complete inventory census using already-enabled eligible workers by default. Optional assign_labor=true instead plans an explicitly confirmed labor enable before the dependent order; each step requires separate review. Optional max_order_amount is 1..100 (default100); an already-satisfied target creates no original or effect, and an oversized deficit refuses. Insertion requires the exact original census and an empty native order queue at each protected boundary. Otherwise compile one original labor and finite-order plan, kind=existing_labor for one finite order using observed already-enabled eligible workers without a labor assignment, kind=existing_labor_portfolio for one to four orders using the same qualified current workers, or kind=portfolio to assign labor before one to four distinct furniture orders; every order may select observed_inventory_minimum or observed_inventory_increase with item_type and increase_stack_units (1..1000000). Increase seals a server-qualified complete original inventory baseline before preparation; clients cannot supply or renew that baseline; kind=step with original_plan_digest prepares the next eligible original step. After all original effects settle, kind=run prepares an independently authorized clock for the original retained-order or inventory goal. After Wait observes True original labor and explicitly selected inventory, kind=inventory_run prepares an independent stability clock even after order retirement. Both name original_paired_seal, game_ticks and wall_millis; portfolio clock requests also require the exact original order_step_id. When an original workshop prerequisite is configured, the plan retains its exact identity and each native order boundary rereads its completion. Planning never unpauses."
 )]
 pub fn fortress_plan(session_id: String, request: String) -> String {
     with_session(session_id, "fortress.plan", None, || plan_action(&request))
@@ -795,7 +795,7 @@ pub fn run_stdio() {
     let server = ServerBuilder::new("dfmcp-live-combined-production-dev", env!("CARGO_PKG_VERSION"))
         .tool(FortressOpenSession).tool(FortressObserve).tool(FortressQuery).tool(FortressPlan).tool(FortressCommit)
         .tool(FortressWait).tool(FortressCancel).tool(FortressCheckpoint).tool(FortressRestore).tool(FortressExplain).tool(FortressDoctor)
-        .instructions("Unadmitted development only. Observe, use kind=stock_target to size one finite stock deficit from a fresh independently qualified census using already-enabled workers, or compile one original labor and finite-order plan, kind=existing_labor for one order using current qualified labor without assigning it, kind=existing_labor_portfolio for up to four orders using the same workers, or kind=portfolio to assign labor before up to four furniture orders, prepare and confirm each dependency-satisfied step, and reconcile uncertainty under its original key. All-applied does not prove the original goal or physical goods. Wait joins current labor with the original retained-order completion or explicitly selected inventory goal under the original stability requirement. Separately configured clock control can prepare kind=run and confirm scope=run for either objective while the exact original order remains eligible; after a True original labor/inventory sample, kind/scope=inventory_run can finish explicitly selected inventory stability after native order retirement. Portfolio clock Plan/Commit/Cancel calls require the original order_step_id; Query can select that leaf. Portfolio Wait samples one original leaf per call and proves the parent only after a coherent complete cohort. Both clock owners preserve every original deadline and exclude competing pending clocks across all leaves; no automatic advancement or repeated unpause is permitted. Unresolved runs must reconcile before paused sampling. A disappeared order leaves default completion unknown. Inventory presence does not prove order-attributed production. Parent proof is process-local and withdrawn on failure or reopening. An optionally configured independently acknowledged Carpenter workshop is bound to the original plan and freshly checked at each order preparation and dispatch boundary. Preserve its source checkpoint even when planning fails before an original exists; historical workshop completion is not a production-goal proof.")
+        .instructions("Unadmitted development only. Observe, use kind=stock_target to size one finite stock deficit from a fresh independently qualified census using already-enabled workers by default, with optional assign_labor=true to review a labor enable before the dependent order; a met target creates neither effect, or compile one original labor and finite-order plan, kind=existing_labor for one order using current qualified labor without assigning it, kind=existing_labor_portfolio for up to four orders using the same workers, or kind=portfolio to assign labor before up to four furniture orders, prepare and confirm each dependency-satisfied step, and reconcile uncertainty under its original key. All-applied does not prove the original goal or physical goods. Wait joins current labor with the original retained-order completion or explicitly selected inventory goal under the original stability requirement. Separately configured clock control can prepare kind=run and confirm scope=run for either objective while the exact original order remains eligible; after a True original labor/inventory sample, kind/scope=inventory_run can finish explicitly selected inventory stability after native order retirement. Portfolio clock Plan/Commit/Cancel calls require the original order_step_id; Query can select that leaf. Portfolio Wait samples one original leaf per call and proves the parent only after a coherent complete cohort. Both clock owners preserve every original deadline and exclude competing pending clocks across all leaves; no automatic advancement or repeated unpause is permitted. Unresolved runs must reconcile before paused sampling. A disappeared order leaves default completion unknown. Inventory presence does not prove order-attributed production. Parent proof is process-local and withdrawn on failure or reopening. An optionally configured independently acknowledged Carpenter workshop is bound to the original plan and freshly checked at each order preparation and dispatch boundary. Preserve its source checkpoint even when planning fails before an original exists; historical workshop completion is not a production-goal proof.")
         .build();
     crate::run_modern_stdio(server);
 }
@@ -823,6 +823,46 @@ mod tests {
             bad[field] = value;
             assert!(super::plan_action(&bad.to_string()).is_err(), "{field}");
         }
+    }
+
+    #[test]
+    fn stock_target_labor_assignment_is_an_explicit_boolean_opt_in() {
+        let mut request = serde_json::json!({
+            "kind":"stock_target", "expected_observation":"11".repeat(32),
+            "units":["43"], "labor":"CARPENTER", "recipe":"wooden_bed",
+            "minimum_stack_units":7, "deadline_tick":300
+        });
+        for selection in [None, Some(false), Some(true)] {
+            if let Some(value) = selection {
+                request["assign_labor"] = value.into();
+            }
+            let action = super::plan_action(&request.to_string()).expect("stock target route");
+            let super::Action::PlanStockTarget(parsed) = action else {
+                panic!("stock target lost its request route");
+            };
+            assert_eq!(parsed.assign_labor, selection == Some(true));
+        }
+        for value in [
+            serde_json::Value::Null,
+            serde_json::json!(1),
+            serde_json::json!("true"),
+            serde_json::json!({"enabled":true}),
+        ] {
+            request["assign_labor"] = value;
+            assert!(super::plan_action(&request.to_string()).is_err());
+        }
+        request["assign_labor"] = true.into();
+        for field in ["enabled", "amount", "baseline_stack_units", "order_step_id"] {
+            let mut forged = request.clone();
+            forged[field] = true.into();
+            assert!(super::plan_action(&forged.to_string()).is_err(), "{field}");
+        }
+        let duplicate = request.to_string().replacen(
+            "{",
+            "{\"assign_labor\":false,",
+            1,
+        );
+        assert!(super::plan_action(&duplicate).is_err());
     }
 
     #[test]

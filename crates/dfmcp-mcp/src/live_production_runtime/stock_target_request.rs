@@ -1,7 +1,7 @@
-//! One finite stock-target request, lowered from an independently qualified
-//! original census into the existing-worker production owner.
+//! One finite stock-target request lowered from a qualified original census
+//! into an existing-worker order or an explicitly requested assignment/order.
 use super::existing_labor_request::ExistingLaborRequest;
-use super::request::recipe;
+use super::request::{Request, recipe};
 use super::stock_target_binding::StockTargetBinding;
 use crate::semantic_work_order_runtime::inventory_baseline::InventoryBaselines;
 use crate::semantic_work_order_runtime::request::Objective;
@@ -20,6 +20,10 @@ pub(crate) struct StockTargetRequest {
     pub expected_observation: String,
     pub units: Vec<String>,
     pub labor: String,
+    /// Explicitly enable this labor before the finite order; omission preserves
+    /// the existing-worker request and its original version-one identity.
+    #[serde(default)]
+    pub assign_labor: bool,
     pub recipe: String,
     pub minimum_stack_units: u64,
     #[serde(default = "maximum")]
@@ -104,6 +108,11 @@ impl StockTargetRequest {
         origin: Option<Digest32>,
     ) -> Result<PreparedPlan> {
         self.validate()?;
+        if self.assign_labor {
+            return Err(invalid(
+                "assigned stock targets require the explicit assignment compiler",
+            ));
+        }
         let (requested_recipe, _) = recipe(&self.recipe)?;
         if assessment.recipe() != requested_recipe
             || assessment.target_stack_units() != self.minimum_stack_units
@@ -131,6 +140,62 @@ impl StockTargetRequest {
             evidence,
             requirement,
             &baselines,
+            c,
+            origin,
+            Some(&binding),
+        )
+    }
+
+    /// Seal the same qualified deficit with one explicitly requested enabling
+    /// assignment. A zero deficit never enters this compiler or creates either
+    /// action. Native eligibility, strict readback and predecessor custody are
+    /// still established by the ordinary two-step production executor.
+    pub(crate) fn compile_with_labor_assignment(
+        &self,
+        assessment: &StockTargetAssessment,
+        evidence: &PredicateEvidence<'_>,
+        c: &OperationContext,
+        origin: Option<Digest32>,
+    ) -> Result<PreparedPlan> {
+        self.validate()?;
+        if !self.assign_labor {
+            return Err(invalid(
+                "stock-target assignment requires explicit assign_labor=true",
+            ));
+        }
+        let (requested_recipe, _) = recipe(&self.recipe)?;
+        if assessment.recipe() != requested_recipe
+            || assessment.target_stack_units() != self.minimum_stack_units
+            || assessment.max_order_amount() != self.max_order_amount
+            || assessment.original_anchor() != c.anchor
+        {
+            return Err(invalid(
+                "assigned stock target differs from its exact original assessment",
+            ));
+        }
+        let binding = StockTargetBinding::from_assessment_with_assignment(assessment)?;
+        let objective = binding.objective().clone();
+        let amount = assessment
+            .amount()
+            .ok_or_else(|| invalid("a satisfied stock target has no assignment or order"))?;
+        let request = Request {
+            expected_observation: self.expected_observation.clone(),
+            units: self.units.clone(),
+            labor: self.labor.clone(),
+            enabled: true,
+            recipe: self.recipe.clone(),
+            amount,
+            deadline_tick: self.deadline_tick,
+            poll_interval_ticks: self.poll_interval_ticks,
+            stable_samples: self.stable_samples,
+            objective: Some(Objective::ObservedInventoryIncrease {
+                item_type: objective.item_type().to_owned(),
+                increase_stack_units: objective.increase_stack_units(),
+            }),
+        };
+        request.compile_with_stock_target(
+            evidence,
+            &InventoryBaselines::from_qualified(objective),
             c,
             origin,
             Some(&binding),

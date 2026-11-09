@@ -154,7 +154,10 @@ impl SharedStockTarget {
             "revalidation_failed":owner.revalidation_failed,
             "last_check_witness":owner.last_checked.map(|digest|digest.to_hex()),
             "work_required":true,"mutation_planned":true,
-            "worker_prerequisite_checked":true,
+            "labor_assignment_requested":owner.binding.assign_labor(),
+            "labor_assignment_planned":owner.binding.assign_labor(),
+            "order_step_id":if owner.binding.assign_labor() {1}else{0},
+            "worker_prerequisite_checked":!owner.binding.assign_labor(),
             "empty_queue_required_before_insertion":true,
             "exact_original_census_required_before_insertion":true,
             "fresh_for_current_call":false,"current_inventory_proven":false,
@@ -237,7 +240,7 @@ impl Owner {
     }
 }
 
-fn no_work(assessment: &StockTargetAssessment) -> Value {
+fn no_work(assessment: &StockTargetAssessment, assign_labor: bool) -> Value {
     json!({"schema":"dfmcp.stock-target/1","status":"already_satisfied",
         "recipe":assessment.recipe().as_str(),"item_type":assessment.item_type(),
         "baseline_stack_units":assessment.baseline_stack_units(),
@@ -249,7 +252,8 @@ fn no_work(assessment: &StockTargetAssessment) -> Value {
         "source_counters":assessment.source_counters(),"item_rows":assessment.item_rows(),
         "assessment_witness":assessment.witness().to_hex(),
         "work_required":false,"mutation_planned":false,"satisfied_at_anchor":true,
-        "worker_prerequisite_checked":false,
+        "labor_assignment_requested":assign_labor,"labor_assignment_planned":false,
+        "order_step_id":null,"worker_prerequisite_checked":false,
         "fresh_for_current_call":false,"current_inventory_proven":false,
         "continuous_maintenance":false,"native_recipe_feasibility_proven":false,
         "production_attribution":"unknown","inventory_semantics":"all_observed_type_stack_units"})
@@ -291,7 +295,7 @@ impl Runtime {
         let basis = self
             .basis
             .as_ref()
-            .ok_or_else(|| invalid("observe existing workers before stock-target planning"))?;
+            .ok_or_else(|| invalid("observe selected workers before stock-target planning"))?;
         if request.observation()? != basis.seal {
             return Err(denied("stock target names another original observation"));
         }
@@ -318,8 +322,33 @@ impl Runtime {
             &work.take(CENSUS_BYTES)?,
         )?;
         if assessment.amount().is_none() {
-            self.stock_target_no_work = Some(no_work(&assessment));
+            self.stock_target_no_work = Some(no_work(&assessment, request.assign_labor));
             return self.view(&mut work);
+        }
+        if request.assign_labor {
+            // A positive assigned target must be runnable under current grants.
+            // Check only after no-work: a met target needs no effect authority.
+            let mut authority = work.current()?;
+            authority.anchor.tick = authority.anchor.tick.max(self.authority_tick_floor());
+            authority.authorize(
+                Capability::ConfigureLabor,
+                RiskTier::Guarded,
+                &request.unit_ids()?,
+                None,
+            )?;
+            authority.authorize(Capability::ConfigureProduction, RiskTier::Guarded, &[], None)?;
+            // The qualified assessment already owns the one inventory baseline.
+            // Reuse the ordinary assignment compiler and durable two-step owner;
+            // neither acquire a second baseline nor bypass native labor review.
+            return self.plan_compiled(
+                request.observation()?,
+                false,
+                &[],
+                &work.current()?,
+                |evidence, _, current, origin| {
+                    request.compile_with_labor_assignment(&assessment, evidence, current, origin)
+                },
+            );
         }
         self.plan_existing_workers(
             request.observation()?,

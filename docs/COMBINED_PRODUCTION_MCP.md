@@ -10,7 +10,9 @@ using already enabled workers, with no labor assignment step.
 `kind="existing_labor_portfolio"` retains up to four distinct orders under the
 same observed worker prerequisite, also without assigning labor.
 `kind="stock_target"` derives one finite furniture amount from a fresh complete
-inventory census and uses already enabled workers when production is needed.
+inventory census and uses already enabled workers by default. Explicit
+`assign_labor=true` instead retains a separately reviewed labor enable before
+the dependent order; an already-met target creates neither effect.
 The source is explicitly unadmitted development work. Current executed checks,
 qualification and real-game evidence belong in `IMPLEMENTATION_STATUS.md`.
 The private custody implementation supports Linux x86_64/aarch64; unsupported
@@ -489,7 +491,8 @@ Use actual observed citizen IDs and labor keys. The request is closed and
 bounded to 4,096 bytes. Its minimum is 1–1,000,000 stack units; the optional
 `max_order_amount` is 1–100 and defaults to 100. Recipe, selected-citizen,
 future-deadline, cadence and stability bounds are the same as the existing
-finite-order path. Clients cannot supply an `amount`, a baseline, a source
+finite-order path. Optional `assign_labor` is a Boolean and defaults to false;
+null, text and numeric substitutes are refused. Clients cannot supply an `amount`, a baseline, a source
 witness, an `enabled` flag, an order condition or a native selector.
 
 Plan obtains its own complete operations/1.3 census at the exact paused citizen
@@ -512,9 +515,11 @@ The following outcomes are distinct:
   `worker_prerequisite_checked=false`; this is not a complete labor/production
   goal proof. Observe again before a later goal.
 - **Within the limit:** `status="planned"` and the exact positive deficit is
-  sealed into one StepId-zero order. Current selected labor and citizen
-  eligibility are independently established before original publication, and
-  `worker_prerequisite_checked=true`. There is no labor assignment action.
+  sealed into one finite order. With the default `assign_labor=false`, this is
+  StepId 0. Current selected labor and citizen eligibility are independently
+  established before original publication, and `worker_prerequisite_checked=true`.
+  There is no labor assignment action. With explicit `assign_labor=true`, the
+  original instead retains the two-step assignment workflow below.
 - **Above the limit:** Plan refuses the complete proposal before original
   publication. It never silently caps the amount or treats a partial order as
   satisfying the requested target.
@@ -524,6 +529,58 @@ when suspended or repeating. CustomReaction and nonempty-reaction jobs also
 block because their output is unknown to this bounded policy. Future output
 is not credited as inventory. A met target needs no insertion and can return
 its no-work observation despite outstanding jobs.
+
+### Enable selected labor before the stock-target order
+
+When the desired worker appears in the observed labor option's
+`enable_candidates`, add `"assign_labor": true` to the stock-target request.
+The server still obtains its own qualified inventory census and calculates the
+same complete finite deficit. A positive deficit then compiles:
+
+1. StepId 0: enable exactly the requested labor for the selected canonical citizens.
+2. StepId 1: insert the original finite furniture order, dependent on the verified
+   historical result of StepId 0.
+
+This requires the ordinary current ConfigureLabor, ConfigureProduction and Plan
+authority for the generated plan. The option authorizes only planning an enable;
+it does not confirm either effect or grant a capability. Use the existing
+`kind="step"` request with the returned original digest, review and confirm the
+labor step's paired seal, then request and separately confirm the dependent
+order's review. Wait never dispatches the second step. No labor-disable option
+is accepted by this stock-target mode.
+
+The selected citizens and supported labor must come from the observed assignment
+choices. Planning binds their canonical identities; the existing workforce/1.17
+native prepare and commit paths independently recheck the exact supported change,
+eligibility, source identity and current authority. A plan is not proof that
+labor has already been enabled. For this path, `worker_prerequisite_checked=false`
+describes original stock planning; the separate workforce review and receipt
+carry the assignment evidence.
+
+The `stock_target` object adds `labor_assignment_requested`,
+`labor_assignment_planned` and the actual `order_step_id`. For an assigned
+positive target these are true, true and 1. A satisfied target retains the
+requested option but returns `labor_assignment_planned=false`,
+`order_step_id=null` and `mutation_planned=false`: it does not change labor
+merely because the caller opted in, and does not require ConfigureLabor for a
+nonexistent effect. Omission and explicit false preserve the existing
+single-order request identity.
+
+The two-step original uses the separate `Stock target/2` identity domain.
+Its exact enabled assignment and canonical citizen preconditions, original
+inventory assessment, finite amount, deadline, cadence and stability participate
+before any intent or step key is derived. Recovery checks the complete assignment
+and dependent-order shape. The existing `Stock target/1` encoding remains
+unchanged. Both modes use the same native protocols, optional original Workshop
+prerequisite, private stores, inventory-growth monitor and separately reviewed
+clocks.
+
+Enabling labor does not permit a later inventory adjustment: before the order
+can be prepared or inserted, its fresh complete operations census and empty
+manager queue must still match the original. A job or inventory change caused
+by the interval between the two reviews can therefore refuse the order while
+retaining the completed labor receipt. The owner does not resize the order,
+undo the assignment, renew the deadline or authorize a replacement key.
 
 ### Recheck the original amount before native insertion
 
@@ -559,8 +616,8 @@ Workshop evidence and the native queue retain their separate source pins.
 ### Keep the target through progress and recovery
 
 The stock-target identity domain binds the complete original inventory basis,
-worker prerequisite, selected maximum and temporal requirements before deriving
-the intent and step key. A strict versioned marker in `original.plan` identifies
+worker prerequisite or explicit enabled assignment, selected maximum and temporal
+requirements before deriving the intent and step keys. A strict versioned marker in `original.plan` identifies
 the policy; the existing archive seal covers it. Recovery rebuilds the required
 guard from that original, not from optional presentation fields. It needs no
 new sidecar or credentials to recover the stock target Offline. The externally

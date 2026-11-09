@@ -87,6 +87,9 @@ fn stock_target_summary(value: &Value) -> Value {
         "last_check_witness":null,
         "work_required":value["work_required"].as_bool(),
         "mutation_planned":value["mutation_planned"].as_bool(),
+        "labor_assignment_requested":value["labor_assignment_requested"].as_bool(),
+        "labor_assignment_planned":value["labor_assignment_planned"].as_bool(),
+        "order_step_id":value["order_step_id"].as_u64(),
         "worker_prerequisite_checked":value["worker_prerequisite_checked"].as_bool(),
         "satisfied_at_anchor":value["status"]=="already_satisfied" && value["satisfied_at_anchor"]==true,
         "empty_queue_required_before_insertion":value["status"]=="planned",
@@ -1209,7 +1212,7 @@ fn encode(
     {
         Some((
             "fortress_plan",
-            "Compile one original labor and finite-order plan against this observation.",
+            "Compile kind=stock_target with assign_labor=true to size one finite inventory deficit and review enabling the selected workers before its order, or supply an explicit amount in the original labor-and-order request. Assignment and order each require their own review and confirmation.",
             false,
             json!({}),
         ))
