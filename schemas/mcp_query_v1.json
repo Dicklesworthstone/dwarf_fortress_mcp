@@ -22,6 +22,15 @@
       {"type":"object", "additionalProperties":false, "required":["kind","field"], "properties":{"kind":{"const":"point"}, "field":{"$ref":"#/$defs/name"}}},
       {"type":"object", "additionalProperties":false, "required":["kind","min_field","max_field"], "properties":{"kind":{"const":"cuboid"}, "min_field":{"$ref":"#/$defs/name"}, "max_field":{"$ref":"#/$defs/name"}}}
     ]},
+    "spatial_selector": {
+      "type":"object", "additionalProperties":false, "required":["region","geometry"],
+      "properties":{
+        "region":{"$ref":"#/$defs/spatial_region"},
+        "geometry":{"$ref":"#/$defs/spatial_geometry"},
+        "relation":{"anyOf":[{"enum":["intersects","within","contains"]},{"type":"null"}]}
+      },
+      "description":"Select source entities using inclusive named point/cuboid geometry. Intersects is the default. Unknown, unavailable, contradictory, future, mistyped or inverted geometry remains Unknown, never outside. This selector does not restrict relationship targets."
+    },
     "entity_kind": {"oneOf": [
       {"enum": ["fortress", "unit", "item", "building", "job", "work_order", "stockpile", "zone", "burrow", "squad", "military_order", "tile_feature", "plant", "creature", "historical_figure", "civilization", "announcement", "syndrome"]},
       {"type": "string", "pattern": "^other:.+$", "maxLength": 128}
@@ -325,6 +334,10 @@
             "anyOf": [{"$ref": "#/$defs/relation_selector"}, {"type": "null"}],
             "description": "Optional positive relationship selection before ranking. Only sources with a witnessed matching edge and target enter the ranked population; unavailable endpoints remain Unknown. Returned rows retain bounded exact relation witnesses."
           },
+          "spatial": {
+            "anyOf": [{"$ref": "#/$defs/spatial_selector"}, {"type": "null"}],
+            "description": "Optional source geometry selection after source facts and positive relationships, before numeric ranking. Returned rows preserve the required geometry facts even when fields omits them; all normalized spatial rules bind continuation."
+          },
           "order_by": {
             "type": "array",
             "minItems": 1,
@@ -358,7 +371,7 @@
             ]
           }
         },
-        "description": "Select entities by one to three exact typed numeric facts, lexicographically ordered with ascending entity ID as the final tie-break. Each field may appear once. Fixed values require an exact scale. Missing, unavailable, future, over-age or mistyped ordering facts remain Unknown and are excluded separately from filter failures. The bounded heap retains at most the requested page. An optional relation selector uses one bounded source/target index and one edge scan, shared with related_entities; the index is separately reported in source_cost. Full-source admission precedes ranking; continuations bind every selector, ordering rule, session and source anchor. Ranked facts retain provenance and never authorize mutation."
+        "description": "Select entities by one to three exact typed numeric facts, lexicographically ordered with ascending entity ID as the final tie-break. Each field may appear once. Fixed values require an exact scale. Missing, unavailable, future, over-age or mistyped ordering facts remain Unknown and are excluded separately from filter failures. Optional spatial selection composes with source and relationship filters; missing geometry is counted separately from outside-region entities and unusable ordering facts. The bounded heap retains at most the requested page. An optional relation selector uses one bounded source/target index and one edge scan, shared with related_entities; the index is separately reported in source_cost. Full-source admission precedes ranking; continuations bind every selector, ordering rule, session and source anchor. Ranked facts retain provenance and never authorize mutation."
       }
     ]}
   }

@@ -498,3 +498,80 @@ fn reserved_output_preserves_source_allowance_and_still_enforces_both_caps() -> 
     ));
     Ok(())
 }
+
+#[test]
+fn reusable_selector_preserves_frozen_spatial_identity_and_default_relation() -> TestResult {
+    // These digests seal the existing sq1 selector bytes, independently of the
+    // enclosing query/session/source. Extraction must not invalidate old pages.
+    for (geometry, expected) in [
+        (
+            json!({"kind":"point","field":"position"}),
+            "d160522bfe2a565c0d14301ec0be42c8d596a2201fecd72d0ca4dc057a559087",
+        ),
+        (
+            json!({"kind":"cuboid","min_field":"footprint_min","max_field":"footprint_max"}),
+            "eb3498234eb77471f45c741173a8f761bbcf84b9b3328003b9a4446ad9aecb63",
+        ),
+    ] {
+        let input = json!({
+            "region":{"min":[-2,-2,0],"max":[2,2,0]},"geometry":geometry
+        });
+        let selection: spatial_selector::Request = serde_json::from_value(input.clone())?;
+        let selection = selection.normalize()?;
+        let mut bytes = Vec::new();
+        selection.append_identity(&mut bytes);
+        assert_eq!(Digest32::of_bytes(&bytes).to_string(), expected);
+        let mut explicit = input;
+        explicit["relation"] = json!("intersects");
+        assert_eq!(selection.json(), explicit);
+        let repeated: spatial_selector::Request = serde_json::from_value(explicit)?;
+        let mut repeated_bytes = Vec::new();
+        repeated.normalize()?.append_identity(&mut repeated_bytes);
+        assert_eq!(bytes, repeated_bytes);
+    }
+    let (snapshot, context) = fixture();
+    let mut input = request();
+    input["query"]["limit"] = json!(1);
+    let implicit = execute(&snapshot, &context, &input)?;
+    input["query"]["relation"] = json!("intersects");
+    assert_eq!(execute(&snapshot, &context, &input)?, implicit);
+    Ok(())
+}
+
+#[test]
+fn reusable_selector_obeys_caller_budget_and_preserves_match_witness() -> TestResult {
+    let (snapshot, context) = fixture();
+    let input = request();
+    let request: spatial_selector::Request = serde_json::from_value(json!({
+        "region":input["query"]["region"],"geometry":input["query"]["geometry"]
+    }))?;
+    let selector = request.normalize()?;
+    let entity = snapshot
+        .graph
+        .entities
+        .get(&EntityId::new(1))
+        .ok_or("entity")?;
+    let mut checked = 0;
+    let result = selector.evaluate(entity, &snapshot, &mut || {
+        checked += 1;
+        Err(exhausted("caller budget is exhausted"))
+    });
+    assert_eq!(checked, 1);
+    assert!(matches!(result, Err(error) if error.code == ErrorCode::BudgetExceeded));
+    let result = selector.evaluate(entity, &snapshot, &mut || {
+        checked += 1;
+        Ok(())
+    })?;
+    assert_eq!(checked, 2);
+    let Decision::Matched(geometry) = result else {
+        return Err("known in-region point was not matched".into());
+    };
+    let page = execute(&snapshot, &context, &input)?;
+    assert_eq!(
+        selector.witness(entity, geometry),
+        page["rows"][0]["geometry"]
+    );
+    assert_eq!(selector.geometry_fields(), vec!["position"]);
+    assert_eq!(selector.work_units_per_entity(), 3);
+    Ok(())
+}

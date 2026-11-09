@@ -1,5 +1,49 @@
 # Implementation Status
 
+## Unreleased — Compose spatial and relationship selection before ranking
+
+`ranked_entities` now accepts optional `spatial` with inclusive point/cuboid
+geometry, region bounds and intersects/within/contains semantics. It composes
+with typed source facts and the positive relationship selector before numeric
+top-K selection. A high-ranked entity outside the region or without the required
+relationship cannot displace an eligible candidate. Relationship targets remain
+independent of the source region, including targets with no location facts.
+
+A shared geometry evaluator preserves standalone spatial behavior and `sq1`
+identity. Ranked rows retain exact geometry facts alongside numeric facts and
+bounded relation witnesses; all required evidence participates in complete-row
+packet fitting. Unavailable geometry remains Unknown and stage-specific counts
+explain source-filter, relationship, geometry and numeric exclusions. Geometry
+work is prepaid across the complete source plus cursor revalidation; no new
+population index is introduced. Spatial continuation positions must satisfy all
+supplied selectors. Absent/null spatial selectors preserve existing plain and
+relationship-only ranked identity and output. No new tool, native projection,
+mutation authority or dependency is introduced. Owner: `df-lab-structured-query-f7q`.
+
+Validation: all 78 original-source core/ranked/relationship/spatial Rust tests
+passed on nightly 1.102.0 (2026-11-08). This includes eight new spatial-ranked
+regressions and two shared-geometry compatibility/budget regressions, in addition
+to the relationship-ranking graph oracle. Eight laboratory projected-wrapper
+tests passed across seven query forms, including both selectors together, with
+required evidence retention, exact continuation replay, oversized-row refusal,
+empty-packet refusal, terminal-envelope fitting and current authority. The
+assemblies use original query files or complete unchanged production bodies
+with exact root-locked semantic dependencies; eleven external dependency
+identities match the root lock. Positive/refusal schema checks and all three
+complete ranked documentation examples passed. Repository integrity, frozen
+Agent Turn contract, implementation-status and diff checks passed.
+
+The eight wrapper tests were rebuilt and passed again after integrating the
+concurrent finite-resource harvesting and harvesting-advice changes on main.
+`scripts/verify.sh` passed its preceding repository/static contracts, then
+stopped at bead coverage because the required `br` executable is unavailable.
+The gate was not bypassed.
+
+This is selected component and wrapper execution. Full public facade/stdio,
+transport, native compatibility and clean current-head release qualification
+remain unestablished; the owning bead stays open for that broader scope.
+Usage: `docs/QUERY_EXECUTION.md` and `docs/LAB_STRUCTURED_QUERY.md`.
+
 ## Unreleased — Recover depleted production inputs through harvest advice
 
 Low FOOD and DRINK supply can now propose a finite PLANT acquisition when

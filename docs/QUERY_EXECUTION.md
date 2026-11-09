@@ -268,6 +268,73 @@ cursor position must itself satisfy the complete selection. Omitting `relation`
 or passing null preserves the established ranked response and continuation
 identity; the standalone `rq1` relationship contract is unchanged.
 
+### Combine location, relationships and ranking
+
+Optional `spatial` restricts the ranked source population by the same inclusive
+point/cuboid rules as `spatial_entities`. It contains `region`, `geometry` and
+optional `relation` (`intersects`, `within` or `contains`). Its nested
+`spatial.relation` describes geometry; top-level `relation` continues to select
+recorded graph edges. Either selector can be supplied alone or both together.
+For example, find high-priority jobs in a workshop area that require a selected
+item, without downloading and joining independent result sets:
+
+```json
+{
+  "schema": "dfmcp.query/1",
+  "query": {
+    "kind": "ranked_entities",
+    "kinds": ["job"],
+    "where": {
+      "op": "compare", "field": "suspended", "comparison": "eq",
+      "value": {"type": "bool", "value": false}
+    },
+    "relation": {
+      "edge_kinds": ["requires"],
+      "target_kinds": ["item"],
+      "target_ids": ["100"]
+    },
+    "spatial": {
+      "region": {"min": [10, 20, 5], "max": [30, 40, 5]},
+      "geometry": {"kind": "point", "field": "position"},
+      "relation": "within"
+    },
+    "order_by": [
+      {"field": "priority", "numeric_type": "i64", "direction": "descending"}
+    ],
+    "fields": ["suspended"],
+    "limit": 4
+  }
+}
+```
+
+The fields, item and relationships must already exist in the chosen projection.
+Geometry applies to returned source entities only. An item outside the region,
+or one without any coordinate facts, can still be a valid relation target.
+The staged selection order is source kinds/`where`, optional positive relation,
+optional spatial geometry, then usable ranking keys. `spatial_matched`,
+`outside_spatial_relation` and `unknown_geometry` count the population reaching
+that stage; `unknown_geometry_reasons` records the first unusable geometry fact.
+`unknown_rank` counts only entities passing the earlier stages. Filtered-out
+entities do not create downstream geometry or ranking failures, while each
+earlier stage retains its own Unknown exclusions. These counts and the exact
+matched population cover the entire source, including rows before a cursor.
+
+Each row includes `geometry` with its bounds and the exact deciding coordinate
+facts, alongside `ranking` and any `relations` witnesses. These required facts
+remain present when `fields` omits them and count toward complete-packet fitting.
+The geometry evaluator is shared with standalone spatial queries; it adds a
+bounded coordinate check per candidate, no terrain scan and no additional
+population index. Full-source preflight and conservative work charging happen
+before any selector can shrink the result.
+
+Region bounds, geometry kind/field names and normalized spatial relation are
+bound into the ranked continuation. Its saved row must still satisfy every
+selector on the same source. Null or absent `spatial` leaves existing ranked
+identity and output unchanged, including relationship-only requests. Standalone
+`sq1` cursors preserve their established identity. Unknown geometry never proves
+outside occupancy, accessibility, collision safety or complete-world absence;
+geometry and relationship evidence remain advisory.
+
 ## Spatial entity intersection and containment
 
 The shared stateless `dfmcp.query/1` executor accepts `spatial_entities` through

@@ -6,7 +6,8 @@ use std::collections::{BTreeMap, BTreeSet, BinaryHeap};
 use std::time::Instant;
 
 use dfmcp_core::{
-    Capability, DfmcpError, Digest32, EntityId, ErrorCode, OperationContext, Result, RiskTier,
+    Capability, DfmcpError, Digest32, EntityId, ErrorCode, MapCuboid, OperationContext, Result,
+    RiskTier,
 };
 use dfmcp_world::{
     EntityRecord, Predicate, PredicateTruth, Value as WorldValue, WorldSnapshot, evaluate_truth_for,
@@ -23,6 +24,10 @@ mod source;
 #[path = "relation_selector.rs"]
 #[allow(clippy::duplicate_mod)]
 mod relation_selector;
+
+#[path = "spatial_selector.rs"]
+#[allow(clippy::duplicate_mod)]
+mod spatial_selector;
 
 const MAX_ROWS: usize = 128;
 const MAX_KEYS: usize = 3;
@@ -44,6 +49,7 @@ enum Query {
         #[serde(rename = "where")]
         predicate: Option<Value>,
         relation: Option<relation_selector::Request>,
+        spatial: Option<spatial_selector::Request>,
         #[serde(default)]
         fields: Vec<String>,
         order_by: Vec<Sort>,
@@ -81,6 +87,7 @@ struct Selection {
     kinds: BTreeSet<String>,
     predicate: Option<Predicate>,
     relation: Option<relation_selector::Selection>,
+    spatial: Option<spatial_selector::Selection>,
     fields: Vec<String>,
     order_by: Vec<Sort>,
     rank_fields: Vec<String>,
@@ -106,6 +113,7 @@ struct Rank {
 struct Candidate<'a> {
     rank: Rank,
     entity: &'a EntityRecord,
+    geometry: Option<MapCuboid>,
 }
 
 impl PartialEq for Candidate<'_> {
@@ -242,6 +250,11 @@ fn identity(
         relation.append_identity(&mut bytes);
         relation.append_predicate_identity(&mut bytes);
     }
+    if let Some(spatial) = &selection.spatial {
+        // Existing plain and relation-only rk1 identities remain unchanged.
+        append(&mut bytes, b"spatial-selector-v1");
+        spatial.append_identity(&mut bytes);
+    }
     Ok(Digest32::of_bytes(&bytes))
 }
 
@@ -300,6 +313,9 @@ fn row(
     });
     if let Some(relation) = relation {
         value["relations"] = relation.json();
+    }
+    if let (Some(spatial), Some(geometry)) = (&selection.spatial, candidate.geometry) {
+        value["geometry"] = spatial.witness(candidate.entity, geometry);
     }
     value
 }
@@ -363,6 +379,7 @@ pub(super) fn execute_with_page_budget(
         kinds,
         predicate,
         relation,
+        spatial,
         fields,
         order_by,
         limit,
@@ -396,6 +413,9 @@ pub(super) fn execute_with_page_budget(
         relation: relation
             .map(relation_selector::Request::normalize)
             .transpose()?,
+        spatial: spatial
+            .map(spatial_selector::Request::normalize)
+            .transpose()?,
         fields: core_query::bounded_names(fields, 32)?,
         order_by,
         rank_fields,
@@ -418,6 +438,12 @@ pub(super) fn execute_with_page_budget(
         .saturating_add(selection.kinds.len())
         .saturating_add(selection.fields.len())
         .saturating_add(selection.order_by.len())
+        .saturating_add(
+            selection
+                .spatial
+                .as_ref()
+                .map_or(0, |spatial| spatial.work_units_per_entity()),
+        )
         .saturating_add((selection.order_by.len() + 2).saturating_mul(3 * levels + 1))
         .saturating_add(4);
     let rank_work = snapshot
@@ -481,6 +507,14 @@ pub(super) fn execute_with_page_budget(
             {
                 return Err(gap());
             }
+            if let Some(spatial) = &selection.spatial
+                && !matches!(
+                    spatial.evaluate(entity, snapshot, &mut || work.check())?,
+                    spatial_selector::Decision::Matched(_)
+                )
+            {
+                return Err(gap());
+            }
             rank(entity, &selection.order_by, snapshot.tick.0).map_err(|_| gap())
         })
         .transpose()?;
@@ -496,6 +530,8 @@ pub(super) fn execute_with_page_budget(
             });
     let (mut matched, mut remaining, mut unknown_rank) = (0usize, 0usize, 0usize);
     let mut reasons = BTreeMap::<&str, usize>::new();
+    let (mut spatial_matched, mut outside_spatial, mut unknown_geometry) = (0usize, 0usize, 0usize);
+    let mut geometry_reasons = BTreeMap::<&str, usize>::new();
     let mut page = BinaryHeap::<Candidate<'_>>::with_capacity(limit);
     let mut peak_candidates = 0usize;
     for entity in snapshot.graph.entities.values() {
@@ -525,6 +561,25 @@ pub(super) fn execute_with_page_budget(
                 PredicateTruth::True => {}
             }
         }
+        let geometry = if let Some(spatial) = &selection.spatial {
+            match spatial.evaluate(entity, snapshot, &mut || work.check())? {
+                spatial_selector::Decision::Matched(geometry) => {
+                    spatial_matched += 1;
+                    Some(geometry)
+                }
+                spatial_selector::Decision::Outside => {
+                    outside_spatial += 1;
+                    continue;
+                }
+                spatial_selector::Decision::Unknown(reason) => {
+                    unknown_geometry += 1;
+                    *geometry_reasons.entry(reason).or_default() += 1;
+                    continue;
+                }
+            }
+        } else {
+            None
+        };
         let rank = match rank(entity, &selection.order_by, snapshot.tick.0) {
             Ok(rank) => rank,
             Err(reason) => {
@@ -539,10 +594,18 @@ pub(super) fn execute_with_page_budget(
         }
         remaining += 1;
         if page.len() < limit {
-            page.push(Candidate { rank, entity });
+            page.push(Candidate {
+                rank,
+                entity,
+                geometry,
+            });
         } else if page.peek().is_some_and(|worst| rank < worst.rank) {
             page.pop();
-            page.push(Candidate { rank, entity });
+            page.push(Candidate {
+                rank,
+                entity,
+                geometry,
+            });
         }
         peak_candidates = peak_candidates.max(page.len());
     }
@@ -631,11 +694,48 @@ pub(super) fn execute_with_page_budget(
         payload["source_cost"]["relation_source_candidates"] = json!(relations.candidates.len());
         payload["source_cost"]["relation_target_records"] = json!(snapshot.graph.entities.len());
     }
+    let mut required_fields = selection.rank_fields.clone();
+    if let Some(spatial) = &selection.spatial {
+        // Geometry is selected only after source facts and any positive
+        // relation. Unknown earlier stages retain their conservative coverage.
+        payload["spatial"] = spatial.json();
+        payload["selection"]["spatial_matched"] = json!(spatial_matched);
+        payload["selection"]["outside_spatial_relation"] = json!(outside_spatial);
+        payload["selection"]["unknown_geometry"] = json!(unknown_geometry);
+        payload["selection"]["unknown_geometry_reasons"] = json!(geometry_reasons);
+        payload["selection"]["evaluation_order"] = json!([
+            "source_kind_and_filter",
+            "positive_relation_if_requested",
+            "spatial_geometry",
+            "rank_keys"
+        ]);
+        let preceding_complete = payload["coverage"]["selection_complete_within_projection"]
+            .as_bool()
+            .unwrap_or(false);
+        payload["coverage"]["selection_complete_within_projection"] =
+            json!(preceding_complete && unknown_geometry == 0);
+        payload["coverage"]["domain"] = json!(if selection.relation.is_some() {
+            "known_typed_numeric_fields_with_positive_relations_and_geometry_in_canonical_projection"
+        } else {
+            "known_typed_numeric_fields_with_geometry_in_canonical_projection"
+        });
+        payload["coverage"]["terrain_evaluated"] = json!(false);
+        payload["coverage"]["accessibility_evaluated"] = json!(false);
+        payload["coverage"]["spatial_note"] = json!(
+            "Inclusive comparisons use only the explicitly named geometry facts. Unknown geometry is not outside the region. Facts retain their source and observation tick; no complete occupancy, walkable route or safe placement is inferred."
+        );
+        payload["source_cost"]["algorithm"] = json!(if selection.relation.is_some() {
+            "bounded_relation_semijoin_then_spatial_top_k"
+        } else {
+            "bounded_spatial_selection_then_top_k"
+        });
+        required_fields.extend(spatial.geometry_fields());
+    }
     for candidate in page.into_sorted_vec() {
         if !source::render_fits(
             candidate.entity,
             &selection.fields,
-            &selection.rank_fields,
+            &required_fields,
             maximum,
             &mut work,
         )? {
@@ -683,3 +783,7 @@ pub(super) fn execute_with_page_budget(
 #[cfg(test)]
 #[path = "ranked_entity_query_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "ranked_spatial_query_tests.rs"]
+mod spatial_tests;

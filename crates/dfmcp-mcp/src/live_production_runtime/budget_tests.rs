@@ -214,6 +214,8 @@ fn machine_host_contract_preserves_bounded_development_scope() -> Result<()> {
         "crates/dfmcp-adapter/src/workshop_construction/production_origin.rs",
         "crates/dfmcp-adapter/src/workshop_construction/production_origin_tests.rs",
         "tests/stdio/combined_workshop_runtime_peer.py",
+        "crates/dfmcp-mcp/src/spatial_entity_query.rs",
+        "crates/dfmcp-mcp/src/spatial_selector.rs",
         "crates/dfmcp-mcp/src/related_entity_query.rs",
         "crates/dfmcp-mcp/src/relation_selector.rs",
         "crates/dfmcp-mcp/src/ranked_entity_query.rs",

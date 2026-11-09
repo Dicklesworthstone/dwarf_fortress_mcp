@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased — Rank one population selected by facts, relationships and location
+
+- Add optional point/cuboid spatial selectors to ranked queries, usable alone
+  or together with independent positive relationship and source-fact filters.
+- Filter before top-K selection, preserve unknown geometry separately from
+  outside-region records, and keep relationship targets independent of location.
+- Retain mandatory geometry, numeric and relation evidence through whole-packet
+  fitting; bind all selectors and cursor eligibility to one immutable source.
+- Reuse standalone geometry semantics without changing existing spatial or
+  absent-selector ranked identities; charge the full bounded source and cursor.
+- Add combined leading-exclusion, geometry-oracle, stage-unknown, forged-cursor,
+  provenance and output-budget regressions, plus executable combined examples.
+
 ## Unreleased — Recommend finite acquisition for missing ingredients
 
 - Turn qualified FOOD/DRINK input shortages into bounded PLANT harvest

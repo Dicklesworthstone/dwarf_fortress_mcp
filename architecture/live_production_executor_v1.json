@@ -313,6 +313,7 @@
       "crates/dfmcp-mcp/src/live_production_runtime/preflight_tests.rs",
       "crates/dfmcp-mcp/src/event_query.rs",
       "crates/dfmcp-mcp/src/spatial_entity_query.rs",
+      "crates/dfmcp-mcp/src/spatial_selector.rs",
       "crates/dfmcp-mcp/src/related_entity_query.rs",
       "crates/dfmcp-mcp/src/relation_selector.rs",
       "crates/dfmcp-mcp/src/ranked_entity_query.rs",

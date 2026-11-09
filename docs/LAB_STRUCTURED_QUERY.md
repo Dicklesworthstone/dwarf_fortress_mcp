@@ -39,7 +39,7 @@ inner envelope accepts the existing schema, `query`, and optional complete
 | `events` | Inclusive retained-event windows, kind/subject selection, typed fields and chronological pages |
 | `spatial_entities` | Inclusive intersection or containment of explicitly named point/cuboid entity geometry |
 | `related_entities` | Entities with witnessed one-hop relations to targets selected by kinds, IDs and typed facts |
-| `ranked_entities` | Best bounded page under exact numeric orderings, optionally restricted by witnessed relationships |
+| `ranked_entities` | Best bounded page under exact numeric orderings, with optional relationship and spatial selectors |
 
 There is no watch, baseline, native capture, plan or effect dispatch through
 this wrapper. Existing `summary`, `entities`, `terrain`, `path`, `search`,
@@ -191,6 +191,28 @@ complete source/target scan is bounded, with a temporary O(N) relation index
 and the existing O(K) ranking heap. Every selector binds the continuation;
 requests without a relation retain their previous identity and response shape.
 See `QUERY_EXECUTION.md` for the complete composition and coverage contract.
+
+Add optional `spatial` to the same ranked request to select locations before
+ranking. It can be used with or without `relation`:
+
+```json
+{
+  "spatial": {
+    "region": {"min": [10, 20, 5], "max": [30, 40, 5]},
+    "geometry": {"kind": "point", "field": "position"},
+    "relation": "within"
+  }
+}
+```
+
+Source facts, positive relationships and geometry select one population before
+the numeric top-K is chosen. The spatial selector applies to returned entities;
+relationship targets may be elsewhere or lack geometry. Missing or unavailable
+geometry is counted as Unknown, separately from known outside-region entities.
+Required coordinate facts, ranking facts and relationship witnesses all survive
+page fitting even when omitted from `fields`. Every supplied selector binds the
+same source/session continuation. The complete combined example and staged
+coverage counters are documented in `QUERY_EXECUTION.md`.
 
 ## Spatial selection
 

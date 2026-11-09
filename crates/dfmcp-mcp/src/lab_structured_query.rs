@@ -634,7 +634,9 @@ mod projected_tests {
 
     fn family_request(kind: &str, limit: usize) -> Request {
         let query_kind = match kind {
-            "ranked_related_entities" => "ranked_entities",
+            "ranked_related_entities" | "ranked_spatial_entities" | "ranked_compound_entities" => {
+                "ranked_entities"
+            }
             other => other,
         };
         let mut query = json!({"kind":query_kind, "fields":["small"], "limit":limit});
@@ -649,12 +651,21 @@ mod projected_tests {
             "related_entities" => {
                 query["relation"] = json!({"edge_kinds":["requires"],"target_kinds":["unit"]});
             }
-            "ranked_entities" | "ranked_related_entities" => {
+            "ranked_entities"
+            | "ranked_related_entities"
+            | "ranked_spatial_entities"
+            | "ranked_compound_entities" => {
                 query["order_by"] =
                     json!([{"field":"rank","numeric_type":"u64","direction":"ascending"}]);
-                if kind == "ranked_related_entities" {
+                if matches!(kind, "ranked_related_entities" | "ranked_compound_entities") {
                     query["relation"] =
                         json!({"edge_kinds":["requires"],"target_kinds":["unit"]});
+                }
+                if matches!(kind, "ranked_spatial_entities" | "ranked_compound_entities") {
+                    query["spatial"] = json!({
+                        "region":{"min":[0,0,0],"max":[2,2,2]},
+                        "geometry":{"kind":"point","field":"position"}
+                    });
                 }
             }
             _ => {}
@@ -666,11 +677,13 @@ mod projected_tests {
         }
     }
 
-    const PAGE_FAMILIES: [&str; 5] = [
+    const PAGE_FAMILIES: [&str; 7] = [
         "spatial_entities",
         "related_entities",
         "ranked_entities",
         "ranked_related_entities",
+        "ranked_spatial_entities",
+        "ranked_compound_entities",
         "events",
     ];
 
@@ -710,10 +723,17 @@ mod projected_tests {
                 assert!(encoded.len() <= current.budget.max_output_tokens as usize * 4);
                 let rows = page["rows"].as_array().ok_or("rows missing")?;
                 assert!(!rows.is_empty());
-                if kind == "ranked_related_entities" {
+                if matches!(kind, "ranked_related_entities" | "ranked_compound_entities") {
                     for row in rows {
                         assert_eq!(row["relations"]["matched_edges"], 1);
                         assert_eq!(row["relations"]["witnesses_returned"], 1);
+                        assert_eq!(row["ranking"]["all_keys_usable"], true);
+                    }
+                }
+                if matches!(kind, "ranked_spatial_entities" | "ranked_compound_entities") {
+                    for row in rows {
+                        assert_eq!(row["geometry"]["facts"]["position"]["presence"], "known");
+                        assert_eq!(row["geometry"]["min"], json!([1, 1, 1]));
                         assert_eq!(row["ranking"]["all_keys_usable"], true);
                     }
                 }
@@ -814,11 +834,6 @@ mod projected_tests {
     fn projected_query_families_consider_smaller_terminal_packets() -> TestResult {
         // Complete presentations may reference one continuation in several
         // places. Removing those references can outweigh one final small row.
-        let render = |page: &Value| {
-            json!({"page":page,
-            "resume":vec![page["continuation"].clone(); 8]})
-            .to_string()
-        };
         for kind in PAGE_FAMILIES {
             let (source, mut current) = page_family_fixture(2, 0);
             current.budget.max_output_tokens = 32_768;
@@ -838,6 +853,21 @@ mod projected_tests {
             )?;
             let full = super::super::query_budget::response_payload(Ok(full), &current, true);
             let prefix = super::super::query_budget::response_payload(Ok(prefix), &current, true);
+            // Combined rows carry more mandatory witnesses. Construct the same
+            // terminal-smaller case from exact encoded sizes for every family.
+            assert!(prefix["continuation"].is_string());
+            let saved_per_reference = prefix["continuation"].to_string().len() - 4;
+            let references = full
+                .to_string()
+                .len()
+                .saturating_sub(prefix.to_string().len())
+                / saved_per_reference
+                + 2;
+            let render = |page: &Value| {
+                json!({"page":page,
+                    "resume":vec![page["continuation"].clone(); references]})
+                .to_string()
+            };
             let maximum = render(&full).len();
             assert!(render(&prefix).len() > maximum, "{kind}");
             let result = execute_projected(

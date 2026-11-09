@@ -3,18 +3,25 @@ use std::collections::BTreeMap;
 use std::time::Instant;
 
 use dfmcp_core::{
-    Capability, DfmcpError, Digest32, EntityId, ErrorCode, MapCoord, MapCuboid, OperationContext,
-    Result, RiskTier,
+    Capability, DfmcpError, Digest32, EntityId, ErrorCode, OperationContext, Result, RiskTier,
 };
 use dfmcp_world::{
-    EntityKind, EntityRecord, Predicate, PredicateTruth, Value as WorldValue, WorldSnapshot,
-    evaluate_truth_for,
+    EntityKind, EntityRecord, Predicate, PredicateTruth, WorldSnapshot, evaluate_truth_for,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
 
 #[path = "spatial_query_source.rs"]
 mod source;
+#[path = "spatial_selector.rs"]
+mod spatial_selector;
+
+use spatial_selector::{Decision, Geometry, Region, Relation};
+
+#[cfg(test)]
+use dfmcp_world::Value as WorldValue;
+#[cfg(test)]
+use spatial_selector::coord;
 
 const MAX_ROWS: usize = 128;
 
@@ -45,34 +52,6 @@ enum Query {
     },
 }
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Region {
-    min: [i32; 3],
-    max: [i32; 3],
-}
-
-#[derive(Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-enum Geometry {
-    Point {
-        field: String,
-    },
-    Cuboid {
-        min_field: String,
-        max_field: String,
-    },
-}
-
-#[derive(Clone, Copy, Default, Deserialize)]
-#[serde(rename_all = "snake_case")]
-enum Relation {
-    #[default]
-    Intersects,
-    Within,
-    Contains,
-}
-
 #[derive(Clone, Copy, Default, Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum Order {
@@ -82,9 +61,7 @@ enum Order {
 }
 
 struct Selection {
-    region: MapCuboid,
-    geometry: Geometry,
-    relation: Relation,
+    spatial: spatial_selector::Selection,
     kinds: Vec<(String, EntityKind)>,
     fields: Vec<String>,
     predicate: Option<Predicate>,
@@ -97,94 +74,6 @@ fn invalid(message: impl Into<String>) -> DfmcpError {
 
 fn exhausted(message: &str) -> DfmcpError {
     DfmcpError::new(ErrorCode::BudgetExceeded, message)
-}
-
-fn coord([x, y, z]: [i32; 3]) -> MapCoord {
-    MapCoord::new(x, y, z)
-}
-
-fn coordinates(value: MapCoord) -> [i32; 3] {
-    [value.x, value.y, value.z]
-}
-
-impl Geometry {
-    fn fields(&self) -> Vec<String> {
-        match self {
-            Self::Point { field } => vec![field.clone()],
-            Self::Cuboid {
-                min_field,
-                max_field,
-            } => vec![min_field.clone(), max_field.clone()],
-        }
-    }
-
-    fn json(&self) -> Value {
-        match self {
-            Self::Point { field } => json!({"kind":"point","field":field}),
-            Self::Cuboid {
-                min_field,
-                max_field,
-            } => {
-                json!({"kind":"cuboid","min_field":min_field,"max_field":max_field})
-            }
-        }
-    }
-
-    fn read(
-        &self,
-        entity: &EntityRecord,
-        snapshot: &WorldSnapshot,
-    ) -> std::result::Result<MapCuboid, &'static str> {
-        let read = |name: &str| {
-            let fact = entity.fields.get(name).ok_or("missing_field")?;
-            let value = fact
-                .known_value()
-                .ok_or("unavailable_or_contradictory_field")?;
-            if fact.observed_at > snapshot.tick {
-                return Err("future_geometry");
-            }
-            match value {
-                WorldValue::Coord(value) => Ok(*value),
-                _ => Err("non_coordinate_field"),
-            }
-        };
-        let (min, max) = match self {
-            Self::Point { field } => {
-                let point = read(field)?;
-                (point, point)
-            }
-            Self::Cuboid {
-                min_field,
-                max_field,
-            } => (read(min_field)?, read(max_field)?),
-        };
-        MapCuboid::new(min, max).map_err(|_| "inverted_cuboid")
-    }
-}
-
-impl Relation {
-    fn name(self) -> &'static str {
-        match self {
-            Self::Intersects => "intersects",
-            Self::Within => "within",
-            Self::Contains => "contains",
-        }
-    }
-
-    fn matches(self, geometry: MapCuboid, region: MapCuboid) -> bool {
-        match self {
-            Self::Within => region.contains_cuboid(geometry),
-            Self::Contains => geometry.contains_cuboid(region),
-            Self::Intersects => {
-                geometry.min.x <= region.max.x
-                    && geometry.max.x >= region.min.x
-                    && geometry.min.y <= region.max.y
-                    && geometry.max.y >= region.min.y
-                    && geometry.min.z <= region.max.z
-                    && geometry.max.z >= region.min.z
-            }
-        }
-    }
 }
 
 fn identity(
@@ -203,19 +92,7 @@ fn identity(
     bytes.extend_from_slice(&snapshot.cursor.sequence.to_be_bytes());
     bytes.extend_from_slice(&snapshot.tick.0.to_be_bytes());
     bytes.extend_from_slice(snapshot.state_hash.as_bytes());
-    for point in [selection.region.min, selection.region.max] {
-        for dimension in coordinates(point) {
-            bytes.extend_from_slice(&dimension.to_be_bytes());
-        }
-    }
-    bytes.push(match &selection.geometry {
-        Geometry::Point { .. } => 0,
-        Geometry::Cuboid { .. } => 1,
-    });
-    for field in selection.geometry.fields() {
-        string(&mut bytes, &field);
-    }
-    string(&mut bytes, selection.relation.name());
+    selection.spatial.append_identity(&mut bytes);
     bytes.extend_from_slice(&(selection.kinds.len() as u64).to_be_bytes());
     for (name, _) in &selection.kinds {
         string(&mut bytes, name);
@@ -343,16 +220,13 @@ pub(super) fn execute_with_page_budget(
         limit,
         continuation: raw_cursor,
     } = request.query;
-    super::core_query::bounded_names(geometry.fields(), 2)?;
-    if matches!(&geometry, Geometry::Cuboid { min_field, max_field } if min_field == max_field) {
-        return Err(invalid(
-            "cuboid geometry requires two distinct coordinate fields",
-        ));
-    }
     let selection = Selection {
-        region: MapCuboid::new(coord(region.min), coord(region.max))?,
-        geometry,
-        relation: relation.unwrap_or_default(),
+        spatial: spatial_selector::Request {
+            region,
+            geometry,
+            relation,
+        }
+        .normalize()?,
         kinds: super::core_query::bounded_names(kinds, 32)?
             .into_iter()
             .map(|name| Ok((name.clone(), super::core_query::entity_kind(&name)?)))
@@ -392,7 +266,7 @@ pub(super) fn execute_with_page_budget(
             predicate_nodes
                 .saturating_add(selection.fields.len())
                 .saturating_add(selection.kinds.len())
-                .saturating_add(3),
+                .saturating_add(selection.spatial.work_units_per_entity()),
         ),
     )?;
     let digest = identity(snapshot, context, &selection);
@@ -423,17 +297,20 @@ pub(super) fn execute_with_page_budget(
             continue;
         }
         selected += 1;
-        let geometry = match selection.geometry.read(entity, snapshot) {
-            Ok(geometry) => geometry,
-            Err(reason) => {
+        let geometry = match selection
+            .spatial
+            .evaluate(entity, snapshot, &mut || work.check())?
+        {
+            Decision::Matched(geometry) => geometry,
+            Decision::Unknown(reason) => {
                 *unknown.entry(reason).or_default() += 1;
                 continue;
             }
+            Decision::Outside => {
+                outside += 1;
+                continue;
+            }
         };
-        if !selection.relation.matches(geometry, selection.region) {
-            outside += 1;
-            continue;
-        }
         match selection
             .predicate
             .as_ref()
@@ -486,12 +363,13 @@ pub(super) fn execute_with_page_budget(
     };
     let reaches_terminal = page.len() == remaining;
     let mut accepted = None;
+    let spatial = selection.spatial.json();
     let mut payload = json!({
         "schema":"dfmcp.query.result/1", "kind":"spatial_entities",
         "anchor":super::core_query::anchor_json(snapshot.anchor()),
         "query_digest":digest.to_string(),
-        "region":{"min":coordinates(selection.region.min),"max":coordinates(selection.region.max)},
-        "geometry":selection.geometry.json(), "relation":selection.relation.name(),
+        "region":spatial["region"],
+        "geometry":spatial["geometry"], "relation":spatial["relation"],
         "ordering":match selection.order {
             Order::IdAscending => "entity_id_ascending",
             Order::IdDescending => "entity_id_descending"
@@ -511,7 +389,7 @@ pub(super) fn execute_with_page_budget(
         },
         "source_cost":{"bounded_bytes":work.bytes,"estimated_scan_work_units":work.work}
     });
-    let geometry_fields = selection.geometry.fields();
+    let geometry_fields = selection.spatial.geometry_fields();
     for (entity, geometry) in page {
         if !source::render_fits(
             entity,
@@ -523,11 +401,7 @@ pub(super) fn execute_with_page_budget(
             break;
         }
         let mut row = super::core_query::entity_json(entity, &selection.fields);
-        row["geometry"] = json!({
-            "min":coordinates(geometry.min), "max":coordinates(geometry.max),
-            "facts":super::core_query::entity_json(entity, &geometry_fields)["fields"],
-            "eligible_as_mutation_evidence":false
-        });
+        row["geometry"] = selection.spatial.witness(entity, geometry);
         let rows = payload["rows"]
             .as_array_mut()
             .ok_or_else(|| invalid("spatial result rows are unavailable"))?;
