@@ -76,5 +76,25 @@
     "forecast": "predicted_harvesting",
     "bounded_rows": true,
     "explicit_omissions": true
+  },
+  "input_recovery_advice": {
+    "stocks": [
+      "FOOD",
+      "DRINK"
+    ],
+    "input": "PLANT",
+    "quantity": "pending_production_input_debt + minimum_new_batches - observed_PLANT_stock",
+    "selection": "largest_useful_tranche_then_lowest_canonical_source_id",
+    "bound": "min(missing_input, source_remaining_minus_active_demand, 100)",
+    "evidence": [
+      "complete_harvest_and_provisions_censuses",
+      "same_original_ledger_and_generation",
+      "exact_source_generation",
+      "qualified_living_enabled_gatherer"
+    ],
+    "active_original_harvest": "await_observed_yield_before_more_acquisition",
+    "identical_packet_proposals": "emit_once_preserve_both_hazards_and_shared_reference",
+    "authority": "ordinary_current_Actions_PlanSource_qualifier_including_Plan_Designate_Checkpoint_scope_expiry_anchor_and_budget",
+    "production_credit": "completed_observed_inventory_only"
   }
 }

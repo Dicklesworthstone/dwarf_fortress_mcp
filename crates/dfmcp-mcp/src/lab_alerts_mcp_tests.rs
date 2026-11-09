@@ -396,3 +396,6 @@ fn public_wait_pulse_retains_unknown_alert_evidence() -> TestResult {
     assert!(item["evidence"][0]["source_anchor"]["state_hash"].is_string());
     Ok(())
 }
+
+#[path = "lab_harvest_alerts_mcp_tests.rs"]
+mod harvesting;

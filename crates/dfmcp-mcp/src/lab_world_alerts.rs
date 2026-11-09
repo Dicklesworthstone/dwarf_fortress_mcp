@@ -94,6 +94,7 @@ fn supply_alerts(snapshot: &WorldSnapshot, population: &Population<'_>) -> Vec<J
     let living = population.living.len() as u64;
     let provisions = effects::provisions_report(snapshot);
     let mut alerts = Vec::new();
+    let mut harvest_remedies = std::collections::BTreeMap::<String, String>::new();
     for (stock, interval, need, deprived, noun, token, job) in [
         (
             effects::STOCK_DRINK_FIELD,
@@ -191,16 +192,32 @@ fn supply_alerts(snapshot: &WorldSnapshot, population: &Population<'_>) -> Vec<J
             // Necessary ingredient screening does not replace quota planning,
             // which still establishes the complete reserve and capacity horizon.
             let minimum_batches = (target - held).div_ceil(5);
-            if let Some((reason, readiness)) = laboratory_provisions_view::alert_input_blocker(
+            if let Some(input) = laboratory_provisions_view::alert_input_blocker(
                 snapshot,
                 &provisions,
                 minimum_batches,
             ) {
-                alert["finding"] = json!(format!("{finding}; {reason}"));
+                alert["finding"] = json!(format!("{finding}; {}", input.reason));
                 alert["capacity_blocked_by"] = json!(blocker);
-                alert["production_blocked_by"] = json!(reason);
-                alert["ingredient_readiness"] = readiness;
-                alert["remedy"] = Json::Null;
+                alert["production_blocked_by"] = json!(input.reason);
+                alert["ingredient_readiness"] = input.readiness;
+                alert["remedy"] = input.remedy;
+                if alert["remedy"]["requires"] == "designate"
+                    && let Some(raw) = alert["remedy"]["arguments"]["actions"]
+                        .as_str()
+                        .map(str::to_owned)
+                {
+                    // Food and drink can need exactly the same acquisition.
+                    // Keep both hazards and their evidence, but publish one
+                    // executable source rather than two same-packet choices.
+                    if let Some(original) = harvest_remedies.get(&raw) {
+                        alert["ingredient_readiness"]["harvesting"]["remedy_shared_with"] =
+                            json!(original);
+                        alert["remedy"] = Json::Null;
+                    } else {
+                        harvest_remedies.insert(raw, format!("{noun}_supply"));
+                    }
+                }
             }
         }
         alerts.push(alert);

@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased — Recommend finite acquisition for missing ingredients
+
+- Turn qualified FOOD/DRINK input shortages into bounded PLANT harvest
+  proposals using exact sources, current supply, pending debt and enabled labor.
+- Retain the ordinary Plan/Designate/Checkpoint, scope, expiry and budget checks
+  before exposing an actionable recommendation.
+- Wait for active original harvests and deduplicate identical food/drink advice
+  without hiding either hazard or crediting unfinished yield.
+- Add source-selection, unavailable-evidence, authority and acquisition-to-brew
+  regression source; keep unexecuted public coverage explicit in status.
+
 ## Unreleased — Acquire finite laboratory resources
 
 - Add guarded `harvest_resource` actions for exact WOOD and PLANT sources.

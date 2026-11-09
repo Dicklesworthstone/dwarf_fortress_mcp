@@ -50,6 +50,33 @@ Cancellation stops future work and preserves completed yield and depletion. It r
 
 Food, furniture and workshop planners still require observed current inputs. A harvest forecast or pending task cannot satisfy that requirement. After acquisition, observe the ledger and prepare the existing production or construction request against the new anchor.
 
+## Low-input recovery advice
+
+When a low FOOD or DRINK reserve lacks PLANT ingredients, observation can
+propose one finite acquisition through the existing `fortress.plan` Actions
+source. The quantity covers pending ingredient debt plus the minimum new
+batches, less observed current PLANT stock, bounded by available source units
+and the 100-unit action limit. It is an acquisition proposal, not a guarantee
+that the subsequent reserve-production plan fits its complete service horizon.
+
+The proposal requires a complete qualified source/task census, the same stock
+ledger and generation as provisions, and a qualified living worker with
+`PLANT_GATHERING` enabled. It prefers the largest useful bounded tranche and
+the lowest source ID on ties. Unknown, depleted or unstaffed supply remains a
+diagnostic blocker. Existing active PLANT work yields `awaiting_harvest` until
+its output is observed. No pending work is credited as inventory.
+
+The server's ordinary remedy qualifier parses the real Actions source and
+checks current Plan authority, guarded Designate authority, Checkpoint,
+source scope, expiry, anchor and budget. A proposal without that authority is
+diagnostic rather than an executable recommendation.
+
+Identical food/drink acquisition actions appear once in an observation packet.
+The second alert retains its shortage and source evidence, identifies
+`remedy_shared_with`, and has no duplicate action. Distinct requests remain
+separate choices. After completed acquisition, the agent observes the ledger
+and replans production against current stock, pending demand and consumption.
+
 ## Bounds and evidence
 
 The complete model admits at most 65,536 canonical entities, 1,024 sources and 4,096 harvest tasks. Public requests retain their existing 16-KiB and 16-step bounds. Source scans and scheduling consume the ordinary effect advancement budget.

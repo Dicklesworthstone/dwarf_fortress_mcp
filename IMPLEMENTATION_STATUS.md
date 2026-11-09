@@ -1,5 +1,33 @@
 # Implementation Status
 
+## Unreleased — Recover depleted production inputs through harvest advice
+
+Low FOOD and DRINK supply can now propose a finite PLANT acquisition when
+current ingredients cannot cover existing production demand and the minimum
+new reserve batches. Advice requires complete qualified harvest/provisions
+censuses, the same original ledger, an enabled living gatherer and an exact
+source generation. Selection takes the largest useful bounded tranche and
+uses canonical source order to break ties. Future yield remains unavailable
+to production until observed.
+
+Active PLANT harvest work suppresses further acquisition advice. Identical
+food/drink proposals appear once while both hazards retain their evidence;
+the second names the shared remedy. Distinct requests remain distinct.
+The unchanged server remedy qualifier lowers the real Actions source and
+checks current Plan, guarded Designate, Checkpoint, scope, expiry and budget
+before publishing an actionable recommendation.
+
+Five pure recommendation regressions and two public facade regressions are
+authored, including recommendation-to-harvest-to-brewing and authority refusal.
+They remain unexecuted: the actual adapter dependency was killed during code
+generation, and the final actual `cargo check --locked --offline -p dfmcp-mcp
+--lib` stopped before compilation because pinned `ambient-authority v0.0.2`
+is absent from the host cache. No public MCP type-check or execution pass is
+claimed. The foundation's 221 actual intent tests and 17 complete witness
+module tests passed; static/source review does not expand that evidence.
+
+Owner: `df-lab-resource-harvest-h2m`.
+
 ## Unreleased — Acquire finite WOOD and PLANT in the laboratory
 
 Add the closed `harvest_resource` action and explicit
