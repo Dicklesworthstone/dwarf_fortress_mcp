@@ -145,10 +145,57 @@ current stock condition then becomes false while its verified historical
 achievement remains retained. A stock objective is not a permanent reservation.
 
 Cancellation stops future harvesting and retains completed yield and source
-depletion. A later explicit acquisition request recomputes its deficit from
-that observed stock; it does not repeat completed units. This source does not
-add `continue_goal` support. Historical goal and action evidence stays visible
-through the existing objective and recovery machinery.
+depletion. The original request can then be pursued through `continue_goal`,
+which recomputes only its deficit from actual observed stock.
+
+## Continue the original acquisition
+
+Once all work belonging to the retained goal and its related pursuits is
+physically quiet, pass this object as the `fortress.plan` `blueprint` string:
+
+```json
+{
+  "template": "continue_goal",
+  "plan_digest": "<retained resource goal digest>"
+}
+```
+
+The retained source supplies the complete original WOOD/PLANT minima, fixed
+compiler and labor-assignment policy. The public request cannot substitute
+new quotas, permissions, parent/root identities or completion claims. The
+continuation reads the current qualified source, includes previously completed
+yield in observed stock and allocates only the remaining deficit. It produces
+a new proposal for review and a separate explicit commit.
+
+Current Observe, Query and Plan authority, complete source and response budgets,
+original-goal eligibility and quiescence across the entire retained root are
+checked before publication. Commit checks current eligibility again. Active
+or unknown sibling work blocks a new pursuit; a newly prepared sibling cannot
+duplicate work once another sibling has committed. Already-satisfied original
+stock minima do not create a replacement plan. Unknown stock or broken lineage
+requires reconciliation rather than an inferred deficit.
+
+The canceled original harvest's mandatory task proof stays canceled. A child
+can establish the unchanged stock goal without rewriting that historical
+action result. When a same-root pursuit has met the stock goal, the original
+canceled pursuit does not keep offering redundant acquisition. If resources
+are subsequently consumed, a new eligible continuation evaluates the original
+minimum against the new observed stock again.
+
+Responses retain `parent_plan_digest`, `root_plan_digest` and a
+`continuation_source_digest` in `resource_acquisition.continuation`. A flat
+`dfmcp.resource-acquisition-continuation/1` archive binds the complete original
+request and lineage into the prepared seal. Repeated continuations change the
+parent while preserving the root and request; they never recursively embed
+older envelopes. The distinct durable source kind is
+`resource_acquisition_continuation`; existing archive kinds retain their bytes.
+
+Verified durable reopen preserves this lineage without restoring grants or
+dispatching old effects. Checkpoint-abandoned goals, arbitrary epoch changes
+and unverifiable history remain ineligible. If a continuation's source anchor
+changes, stale Commit keeps the reviewed proposal and returns the public
+`continue_goal` request naming its retained parent for another explicit review.
+The private archive envelope is never used as a public planning request.
 
 ## Saved sources, comparison and budgets
 
@@ -193,4 +240,5 @@ The machine contract is
 See [finite harvest semantics](LAB_RESOURCE_HARVEST.md) and
 [shared workforce](LAB_SHARED_WORKFORCE.md) for the underlying physical model.
 Exact executed validation and remaining qualification limits are recorded in
-`IMPLEMENTATION_STATUS.md` under bead `df-lab-resource-harvest-h2m.1`.
+`IMPLEMENTATION_STATUS.md` under beads `df-lab-resource-harvest-h2m.1` and
+`df-lab-resource-harvest-h2m.2`.

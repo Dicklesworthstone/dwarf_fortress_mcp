@@ -418,7 +418,7 @@ pub(crate) fn request_json(session_id: &str, parent: Digest32) -> Value {
             "session_id": session_id,
             "blueprint": json!({"template": "continue_goal", "plan_digest": parent.to_hex()}).to_string(),
         },
-        "note": "compile a new pursuit of the complete retained production or room request at current evidence, review the new seal, then explicitly commit it; original historical outcomes remain unchanged",
+        "note": "compile a new pursuit of the complete retained semantic request at current evidence, review the new seal, then explicitly commit it; original historical outcomes remain unchanged",
     })
 }
 

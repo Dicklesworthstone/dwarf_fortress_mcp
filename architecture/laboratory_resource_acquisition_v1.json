@@ -42,6 +42,23 @@
     "cancel": "preserve_completed_yield_stop_future_work",
     "recovery": "original_source_and_sealed_work_without_restored_dispatch_authority"
   },
+  "continuation": {
+    "owner_bead": "df-lab-resource-harvest-h2m.2",
+    "public_request": "continue_goal_with_retained_plan_digest_only",
+    "source_schema": "dfmcp.resource-acquisition-continuation/1",
+    "durable_source_kind": "resource_acquisition_continuation",
+    "retained": "exact_original_quotas_planner_and_assign_labor_policy",
+    "lineage": "flat_immediate_parent_and_original_root_nonzero_digests",
+    "seal": "domain_separated_complete_request_and_lineage_digest",
+    "eligibility": "current_authority_verified_lineage_false_goal_and_complete_same_root_physical_quiescence",
+    "semantic_noop": "already_met_original_stock_targets_do_not_replace_pending_work",
+    "cancelled_parent_proof": "preserved_independently_of_child_stock_success",
+    "deficit": "original_minimum_minus_current_qualified_stock_never_original_order_amount",
+    "publication": "complete_owned_source_and_response_before_pending_replacement",
+    "source_drift": "retain_pending_and_return_public_continue_goal_for_parent",
+    "checkpoint_abandonment": "ineligible",
+    "recovery": "verified_exact_world_continuity_without_restoring_grants_or_dispatch"
+  },
   "bounds": {
     "request_bytes": 16384,
     "canonical_entities": 65536,

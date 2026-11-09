@@ -1,5 +1,52 @@
 # Implementation Status
 
+## Unreleased — Continue original finite resource goals
+
+The existing `continue_goal` request now supports retained resource acquisition
+objectives. A new flat `dfmcp.resource-acquisition-continuation/1` source preserves
+the complete original WOOD/PLANT minima, fixed compiler, labor permission and
+immediate parent/root lineage. It recompiles only the current observed deficit
+under a single source seal. The distinct additive durable source kind keeps
+existing archive tags and journal bytes unchanged.
+
+Planning, handoff discovery and commit recheck current Observe/Query/Plan
+and complete-source budgets, verified observation lineage and physical
+quiescence across every retained same-root pursuit. Active or unknown sibling
+work refuses. A currently satisfied semantic stock request creates no new
+acquisition, including when an earlier canceled task's exact proof remains
+False. Child success never changes that original task history.
+
+Resource continuations use complete owned Agent Turn publication before
+pending replacement, including checked same-response step references. Source,
+authority, summary, no-op and output refusals preserve reviewed pending work.
+A stale child retains its proposal and exposes the public `continue_goal`
+request for its retained parent; private source envelopes cannot assert new
+lineage. Verified durable reopen preserves original custody and source bytes;
+checkpoint abandonment and arbitrary epoch changes remain ineligible.
+
+Validation so far: all 42 actual `dfmcp-lab` durable library tests pass, including
+three new codec, bounded-refusal and retirement/reopen/compaction cases. The
+exact-source pure assembly passes 16 tests: ten new strict continuation,
+lineage/seal, residual, original-policy and semantic-truth cases plus all six
+existing acquisition source tests. The selected public assembly passes all
+26 workflows: eight new continuation cases, eight existing acquisition cases
+and ten existing comparison/selection regressions. Those tests execute real
+adapter effects, durable reopen and restore. All 85 original production modules,
+selected tests and assembled server/facade bodies were identity-audited with
+zero mismatches. Transport registration/stdio and installed ambient Task service
+remain outside this assembly; it does not establish full MCP runtime qualification.
+
+The default continuation response fits in 16,156 of 16,384 bytes, retaining
+all 2,538 bytes of step proof and all 557 bytes of lineage. The newly duplicated
+top-level lineage was removed; full lineage remains at
+`resource_acquisition.continuation`. Supported static `scripts/verify.sh`
+passes 402 unittest cases in 34 groups and its native component, mutation,
+UBSan, source, bead and syntax gates; that invocation explicitly skips Rust
+qualification. The owning bead is `df-lab-resource-harvest-h2m.2`. Existing
+full MCP transport compilation and clean-checkout qualification limits remain
+recorded below. This feature does not extend native admission or restore
+dispatch authority.
+
 ## Unreleased — Plan original resource stock objectives through MCP
 
 The existing `fortress.plan` blueprint argument now accepts the closed

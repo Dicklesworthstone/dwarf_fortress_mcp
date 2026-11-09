@@ -380,8 +380,10 @@ a new reviewed Plan; unknown supply, overlapping harvests, consuming work,
 insufficient finite sources and action/output bounds refuse explicitly.
 Candidate comparison and selection use the same source. See
 `docs/LAB_RESOURCE_ACQUISITION.md` for the request, analysis and acquire-then-
-observe-then-produce workflow. This adds no native route or `continue_goal`
-family.
+observe-then-produce workflow. `continue_goal` preserves the original resource
+minima and labor policy after canceled or interrupted work is proven quiet;
+completed yield contributes only through observed stock. This adds no native
+route.
 
 Furniture quotas share a finite WOOD supply and completed carpenter workshops.
 The planner accounts for existing orders, assigns up to six output jobs jointly,
@@ -404,9 +406,11 @@ deterministic routing policy and reference-model limits.
 
 The laboratory `blueprint` JSON string also accepts the closed
 `{"template":"continue_goal","plan_digest":"<retained goal digest>"}` form.
-It compiles a new reviewed plan from complete original production quotas or
-furnished-room requests, preserving setup options and any connected-room
-entrance/domain under current Observe/Plan authority. Valid installed furniture
+It compiles a new reviewed plan from complete original production quotas,
+resource stock targets or furnished-room requests, preserving setup options,
+resource labor policy and any connected-room entrance/domain under current
+Observe/Plan authority. Resource continuations also require current Query
+authority and the complete bounded source and output. Valid installed furniture
 is retained; a connected continuation can repair access with excavation alone.
 Original and same-root work must
 be proven quiet, and commit repeats the check before effects. Parent/root

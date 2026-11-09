@@ -36,6 +36,10 @@ pub(super) struct Objective {
 }
 
 impl Objective {
+    pub(super) fn is_resource_acquisition(&self) -> bool {
+        self.source.is_resource_acquisition()
+    }
+
     pub(super) fn committed(
         plan: &PreparedPlan,
         source: PlanSource,
@@ -215,7 +219,8 @@ fn source_summary(source: &PlanSource) -> &str {
         | PlanSource::RoomContinuation { summary, .. }
         | PlanSource::CivilianRelease { summary, .. }
         | PlanSource::ConnectedRoom { summary, .. }
-        | PlanSource::ConnectedRoomContinuation { summary, .. } => summary,
+        | PlanSource::ConnectedRoomContinuation { summary, .. }
+        | PlanSource::ResourceAcquisitionContinuation { summary, .. } => summary,
     }
 }
 
@@ -231,7 +236,8 @@ fn source_json(source: &PlanSource) -> Value {
         | PlanSource::RoomContinuation { raw, .. }
         | PlanSource::CivilianRelease { raw, .. }
         | PlanSource::ConnectedRoom { raw, .. }
-        | PlanSource::ConnectedRoomContinuation { raw, .. } => json!({
+        | PlanSource::ConnectedRoomContinuation { raw, .. }
+        | PlanSource::ResourceAcquisitionContinuation { raw, .. } => json!({
             "kind": match source {
                 PlanSource::Actions { .. } => "actions",
                 PlanSource::Blueprint { .. } => "blueprint",
@@ -240,6 +246,7 @@ fn source_json(source: &PlanSource) -> Value {
                 PlanSource::CivilianRelease { .. } => "civilian_release",
                 PlanSource::ConnectedRoom { .. } => "connected_room",
                 PlanSource::ConnectedRoomContinuation { .. } => "connected_room_continuation",
+                PlanSource::ResourceAcquisitionContinuation { .. } => "resource_acquisition_continuation",
                 _ => "production",
             },
             "request": serde_json::from_str::<Value>(raw).unwrap_or_else(|_| Value::String(raw.clone())),
@@ -276,6 +283,12 @@ pub(super) fn continuation_source(
             "restore abandoned pursuit of this original goal; explicitly request a new goal in the current epoch",
         ));
     }
+    if objective.source.is_resource_acquisition() {
+        // The public proposal, handoff discovery and commit-time revalidation
+        // inspect the same complete finite resource and lineage domains.
+        authorize_entry(&context, Capability::Query, RiskTier::ReadOnly)?;
+        query_budget::admit_sources(&[session.adapter.snapshot()], &context)?;
+    }
     if let Some(reason) = &objective.verification_error {
         return Err(DfmcpError::new(ErrorCode::CorruptLedger, reason.clone()));
     }
@@ -296,6 +309,21 @@ pub(super) fn continuation_source(
         PlanSource::ProductionContinuation { raw, .. } => GoalContinuation::Production(
             goal_continuation::ProductionContinuation::parse(raw)?.next(parent)?,
         ),
+        PlanSource::Blueprint { raw, .. } if resource_acquisition::is_request(raw) => {
+            GoalContinuation::ResourceAcquisition(
+                resource_acquisition_continuation::ResourceAcquisitionContinuation::new(
+                    parent,
+                    parent,
+                    resource_acquisition::ResourceAcquisitionRequest::parse(raw)?,
+                )?,
+            )
+        }
+        PlanSource::ResourceAcquisitionContinuation { raw, .. } => {
+            GoalContinuation::ResourceAcquisition(
+                resource_acquisition_continuation::ResourceAcquisitionContinuation::parse(raw)?
+                    .next(parent)?,
+            )
+        }
         PlanSource::Blueprint { raw, .. } if room_provisioning::is_provisioned_room(raw) => {
             GoalContinuation::Room(room_continuation::RoomContinuation::new(
                 parent,
@@ -319,7 +347,7 @@ pub(super) fn continuation_source(
         _ => {
             return Err(DfmcpError::new(
                 ErrorCode::InvalidIntent,
-                "continue_goal supports retained production and provisioned-room objectives; legacy action, pause and abstract room sources do not establish a resumable request",
+                "continue_goal supports retained production, resource acquisition and provisioned-room objectives; legacy action, pause and abstract room sources do not establish a resumable request",
             ));
         }
     };
@@ -361,15 +389,45 @@ pub(super) fn continuation_source(
                     ),
                 ));
             }
-            if continuation.is_room() && other.current_truth(session)? == PredicateTruth::True {
+            if continuation.requires_semantic_sibling_check() {
+                match other.current_truth(session)? {
+                    PredicateTruth::True => {
+                        return Err(DfmcpError::new(
+                            ErrorCode::InvalidIntent,
+                            format!(
+                                "the retained semantic request is already satisfied by pursuit {}; historical exact goal proofs remain unchanged",
+                                other.plan_digest.to_hex()
+                            ),
+                        ));
+                    }
+                    PredicateTruth::Unknown
+                        if matches!(continuation, GoalContinuation::ResourceAcquisition(_)) =>
+                    {
+                        return Err(DfmcpError::new(
+                            ErrorCode::PreconditionsFailed,
+                            "an earlier resource pursuit has unknown original-goal evidence; reconcile it before acquiring more material",
+                        ));
+                    }
+                    PredicateTruth::False | PredicateTruth::Unknown => {}
+                }
+            }
+        }
+    }
+    if let GoalContinuation::ResourceAcquisition(source) = &continuation {
+        match source.stock_goal_truth(session.adapter.snapshot())? {
+            PredicateTruth::True => {
                 return Err(DfmcpError::new(
                     ErrorCode::InvalidIntent,
-                    format!(
-                        "the retained room request is already satisfied by pursuit {}; historical exact goal proofs remain unchanged",
-                        other.plan_digest.to_hex()
-                    ),
+                    "the complete original resource stock minima already hold; no new acquisition is needed and historical exact harvest proofs remain unchanged",
                 ));
             }
+            PredicateTruth::Unknown => {
+                return Err(DfmcpError::new(
+                    ErrorCode::PreconditionsFailed,
+                    "the complete original resource stock minima are unknown; reconcile current qualified stock before continuing",
+                ));
+            }
+            PredicateTruth::False => {}
         }
     }
     Ok(continuation.into_source(summary.map_or_else(

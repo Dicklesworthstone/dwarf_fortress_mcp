@@ -280,6 +280,9 @@ In `starter_fortress_resources`, a
 WOOD and PLANT stock minima and selects finite harvest sources automatically.
 It can propose explicitly permitted labor enables, retains the original stock
 goal, and shares the ordinary comparison, commit, wait and cancellation paths.
+After cancellation or recovery, `continue_goal` retains the exact original
+targets and labor policy and plans only the observed remainder once related
+work is quiet.
 Complete acquisition and observe its actual yield before using the inputs in
 production, workshop or room plans.
 

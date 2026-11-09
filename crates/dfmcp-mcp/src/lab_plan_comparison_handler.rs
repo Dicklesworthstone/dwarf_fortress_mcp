@@ -130,6 +130,80 @@ pub(super) fn execute_resource_acquisition(
     )
 }
 
+/// A resource continuation must hold the same owner through current lineage,
+/// complete source admission and response publication. Other retained goal
+/// families keep their established intake path without inheriting new authority.
+pub(super) fn execute_resource_continuation(
+    session_id: Option<String>,
+    summary: Option<String>,
+    parent: Digest32,
+    started: Instant,
+) -> Result<Option<String>> {
+    if summary
+        .as_ref()
+        .is_some_and(|summary| summary.len() > MAX_SUMMARY_BYTES)
+    {
+        return Err(DfmcpError::new(
+            ErrorCode::BudgetExceeded,
+            "resource continuation summary exceeds its explicit byte bound",
+        ));
+    }
+    let session = resolve_session(session_id)?;
+    let _admission = LAB_ADMISSION.read().map_err(|_| {
+        DfmcpError::new(
+            ErrorCode::InternalInvariantViolation,
+            "laboratory admission lock poisoned",
+        )
+    })?;
+    ensure_durable_owner(&session)?;
+    with_session_view(
+        &session,
+        || {
+            Err(DfmcpError::new(
+                ErrorCode::InternalInvariantViolation,
+                "resource continuation session poisoned",
+            ))
+        },
+        |session| {
+            if !session.objectives.iter().any(|objective| {
+                objective.plan_digest == parent && objective.is_resource_acquisition()
+            }) {
+                return Ok(None);
+            }
+            let (rid, current) = next_context(session)?;
+            check(&current, started)?;
+            let source_work = query_budget::admit_sources(
+                &[session.adapter.snapshot()],
+                &remaining(&current, started)?,
+            )?;
+            let source = objectives::continuation_source(session, parent, summary, None)?;
+            if !matches!(source, PlanSource::ResourceAcquisitionContinuation { .. }) {
+                return Err(DfmcpError::new(
+                    ErrorCode::InternalInvariantViolation,
+                    "resource continuation did not retain its original source family",
+                ));
+            }
+            let (mut payload, pending) = prepare_source(
+                session,
+                source,
+                rid,
+                &current,
+                source_work,
+                "resource_acquisition_continuation",
+                started,
+            )?;
+            let forecast = pending.source.forecast(
+                &session.adapter,
+                &pending.plan,
+                &remaining(&current, started)?,
+            );
+            payload["forecast"] = plan_comparison::compact_prediction(&forecast);
+            publish_owned(session, &current, started, payload, Some(pending)).map(Some)
+        },
+        false,
+    )
+}
+
 fn prepare_source(
     session: &LabSession,
     source: PlanSource,
@@ -149,7 +223,7 @@ fn prepare_source(
     let acquisition = source.is_resource_acquisition();
     let result = json!({
         "kind": kind,
-        "schema": if kind == "resource_acquisition" { "dfmcp.resource-acquisition/1" } else { "dfmcp.plan-comparison/1" },
+        "schema": if acquisition { "dfmcp.resource-acquisition/1" } else { "dfmcp.plan-comparison/1" },
         "version": 1,
         "plan_id": plan.id.to_string(),
         "plan_digest": digest,

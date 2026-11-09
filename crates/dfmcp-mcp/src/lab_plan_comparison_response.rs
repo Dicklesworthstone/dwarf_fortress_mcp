@@ -50,7 +50,10 @@ pub(super) fn finish(
     query_work: Value,
     selected_pending: Option<Value>,
 ) -> Result<String> {
-    let acquisition = payload["kind"] == "resource_acquisition";
+    let acquisition = matches!(
+        payload["kind"].as_str(),
+        Some("resource_acquisition" | "resource_acquisition_continuation")
+    );
     let selecting = payload["kind"] == "select_candidate" || acquisition;
     if !payload.is_object()
         || payload["ok"] != true

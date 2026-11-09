@@ -139,6 +139,12 @@ pub enum DurablePlanSource {
         summary: String,
         raw: String,
     },
+    /// A separately reviewed finite-resource pursuit retaining its original
+    /// stock request and flat lineage. Reopening restores no dispatch authority.
+    ResourceAcquisitionContinuation {
+        summary: String,
+        raw: String,
+    },
     /// A separately reviewed residual room pursuit. The original layout and
     /// flat lineage stay distinct from historical exact placement proofs.
     RoomContinuation {
@@ -173,6 +179,9 @@ impl DurablePlanSource {
             Self::Production { summary, raw } => ("production", summary, raw),
             Self::ProductionContinuation { summary, raw } => {
                 ("production_continuation", summary, raw)
+            }
+            Self::ResourceAcquisitionContinuation { summary, raw } => {
+                ("resource_acquisition_continuation", summary, raw)
             }
             Self::RoomContinuation { summary, raw } => ("room_continuation", summary, raw),
             Self::CivilianRelease { summary, raw } => ("civilian_release", summary, raw),
@@ -478,6 +487,10 @@ fn parse_plan(
             raw: unhex_payload(payload, MAX_PLAN_REQUEST_BYTES)?,
         },
         "production_continuation" => DurablePlanSource::ProductionContinuation {
+            summary,
+            raw: unhex_payload(payload, MAX_PLAN_REQUEST_BYTES)?,
+        },
+        "resource_acquisition_continuation" => DurablePlanSource::ResourceAcquisitionContinuation {
             summary,
             raw: unhex_payload(payload, MAX_PLAN_REQUEST_BYTES)?,
         },
@@ -2555,6 +2568,10 @@ mod objective_tests;
 #[cfg(test)]
 #[path = "durable_custody_tests.rs"]
 mod custody_tests;
+
+#[cfg(test)]
+#[path = "durable_resource_acquisition_tests.rs"]
+mod resource_acquisition_tests;
 
 #[cfg(test)]
 mod tests {

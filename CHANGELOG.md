@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased — Continue original resource acquisition goals
+
+- Extend `continue_goal` to original WOOD/PLANT stock targets, retaining the
+  exact fixed request, labor permission and parent/root lineage.
+- Recompute only observed residual stock after complete same-root work is quiet;
+  refuse active or unknown siblings and suppress already-satisfied acquisitions.
+- Keep canceled original task proof unchanged when a child meets the stock goal.
+- Reuse complete atomic source/response publication and ordinary effect authority;
+  return public parent-based continuation guidance after source drift.
+- Persist the flat source through the additive `resource_acquisition_continuation`
+  archive kind, with strict nested parsing and retirement/reopen coverage.
+
 ## Unreleased — Plan resource acquisition through the existing MCP loop
 
 - Add the strict, versioned `resource_acquisition` blueprint for absolute WOOD

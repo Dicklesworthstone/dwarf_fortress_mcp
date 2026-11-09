@@ -58,7 +58,12 @@ pub(crate) mod production_source;
 
 #[path = "resource_acquisition.rs"]
 mod resource_acquisition;
+#[path = "resource_acquisition_continuation.rs"]
+mod resource_acquisition_continuation;
 
+#[cfg(test)]
+#[path = "resource_acquisition_continuation_mcp_tests.rs"]
+mod resource_acquisition_continuation_mcp_tests;
 #[cfg(test)]
 #[path = "resource_acquisition_mcp_tests.rs"]
 mod resource_acquisition_mcp_tests;
@@ -1754,6 +1759,11 @@ enum PlanSource {
         summary: String,
         raw: String,
     },
+    /// A reviewed residual pursuit of the original finite WOOD/PLANT minima.
+    ResourceAcquisitionContinuation {
+        summary: String,
+        raw: String,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1761,6 +1771,7 @@ enum GoalContinuation {
     Production(goal_continuation::ProductionContinuation),
     Room(room_continuation::RoomContinuation),
     ConnectedRoom(connected_room_continuation::ConnectedRoomContinuation),
+    ResourceAcquisition(resource_acquisition_continuation::ResourceAcquisitionContinuation),
 }
 
 impl GoalContinuation {
@@ -1769,6 +1780,7 @@ impl GoalContinuation {
             Self::Production(source) => source.parent,
             Self::Room(source) => source.parent,
             Self::ConnectedRoom(source) => source.parent,
+            Self::ResourceAcquisition(source) => source.parent,
         }
     }
 
@@ -1777,11 +1789,15 @@ impl GoalContinuation {
             Self::Production(source) => source.root,
             Self::Room(source) => source.root,
             Self::ConnectedRoom(source) => source.root,
+            Self::ResourceAcquisition(source) => source.root,
         }
     }
 
-    fn is_room(&self) -> bool {
-        matches!(self, Self::Room(_) | Self::ConnectedRoom(_))
+    fn requires_semantic_sibling_check(&self) -> bool {
+        matches!(
+            self,
+            Self::Room(_) | Self::ConnectedRoom(_) | Self::ResourceAcquisition(_)
+        )
     }
 
     fn lineage_json(&self) -> serde_json::Value {
@@ -1789,6 +1805,7 @@ impl GoalContinuation {
             Self::Production(source) => source.lineage_json(),
             Self::Room(source) => source.lineage_json(),
             Self::ConnectedRoom(source) => source.lineage_json(),
+            Self::ResourceAcquisition(source) => source.lineage_json(),
         }
     }
 
@@ -1797,6 +1814,9 @@ impl GoalContinuation {
             (Self::Production(left), Self::Production(right)) => left.same_original_request(right),
             (Self::Room(left), Self::Room(right)) => left.same_original_request(right),
             (Self::ConnectedRoom(left), Self::ConnectedRoom(right)) => {
+                left.same_original_request(right)
+            }
+            (Self::ResourceAcquisition(left), Self::ResourceAcquisition(right)) => {
                 left.same_original_request(right)
             }
             _ => false,
@@ -1817,28 +1837,47 @@ impl GoalContinuation {
                 summary,
                 raw: source.canonical_json(),
             },
+            Self::ResourceAcquisition(source) => PlanSource::ResourceAcquisitionContinuation {
+                summary,
+                raw: source.canonical_json(),
+            },
         }
     }
 }
 
 impl PlanSource {
     fn is_resource_acquisition(&self) -> bool {
-        matches!(self, Self::Blueprint { raw, .. } if resource_acquisition::is_request(raw))
+        matches!(self, Self::ResourceAcquisitionContinuation { .. })
+            || matches!(self, Self::Blueprint { raw, .. } if resource_acquisition::is_request(raw))
     }
 
     fn resource_replan_step(&self, session_id: SessionId) -> Option<serde_json::Value> {
         if !self.is_resource_acquisition() {
             return None;
         }
-        let Self::Blueprint { summary, raw } = self else {
-            return None;
+        let (summary, blueprint) = match self {
+            Self::Blueprint { summary, raw } => (summary, raw.clone()),
+            Self::ResourceAcquisitionContinuation { summary, raw } => {
+                let source =
+                    resource_acquisition_continuation::ResourceAcquisitionContinuation::parse(raw)
+                        .ok()?;
+                (
+                    summary,
+                    json!({
+                        "template": "continue_goal",
+                        "plan_digest": source.parent.to_hex(),
+                    })
+                    .to_string(),
+                )
+            }
+            _ => return None,
         };
         Some(json!({
             "tool": "fortress.plan",
             "arguments": {
                 "session_id": session_id.to_string(),
                 "summary": summary,
-                "blueprint": raw,
+                "blueprint": blueprint,
             },
         }))
     }
@@ -1885,6 +1924,12 @@ impl PlanSource {
                 summary: summary.clone(),
                 raw: raw.clone(),
             },
+            Self::ResourceAcquisitionContinuation { summary, raw } => {
+                D::ResourceAcquisitionContinuation {
+                    summary: summary.clone(),
+                    raw: raw.clone(),
+                }
+            }
         }
     }
 
@@ -1927,6 +1972,12 @@ impl PlanSource {
                 summary: summary.clone(),
                 raw: raw.clone(),
             },
+            D::ResourceAcquisitionContinuation { summary, raw } => {
+                Self::ResourceAcquisitionContinuation {
+                    summary: summary.clone(),
+                    raw: raw.clone(),
+                }
+            }
         }
     }
 
@@ -1974,6 +2025,10 @@ impl PlanSource {
                 connected_room_continuation::ConnectedRoomContinuation::parse(raw)
                     .map(|source| Some(GoalContinuation::ConnectedRoom(source)))
             }
+            Self::ResourceAcquisitionContinuation { raw, .. } => {
+                resource_acquisition_continuation::ResourceAcquisitionContinuation::parse(raw)
+                    .map(|source| Some(GoalContinuation::ResourceAcquisition(source)))
+            }
             _ => Ok(None),
         }
     }
@@ -1984,8 +2039,11 @@ impl PlanSource {
             | Self::ProductionContinuation { .. }
             | Self::RoomContinuation { .. }
             | Self::ConnectedRoom { .. }
-            | Self::ConnectedRoomContinuation { .. } => true,
-            Self::Blueprint { raw, .. } => room_provisioning::is_provisioned_room(raw),
+            | Self::ConnectedRoomContinuation { .. }
+            | Self::ResourceAcquisitionContinuation { .. } => true,
+            Self::Blueprint { raw, .. } => {
+                room_provisioning::is_provisioned_room(raw) || resource_acquisition::is_request(raw)
+            }
             _ => false,
         }
     }
@@ -2042,6 +2100,11 @@ impl PlanSource {
             }
             Self::ConnectedRoomContinuation { summary, raw } => {
                 connected_room_continuation::ConnectedRoomContinuation::parse(raw)?
+                    .compile(id, snapshot, summary)
+                    .map(|(intent, analysis)| (intent, Some(analysis)))
+            }
+            Self::ResourceAcquisitionContinuation { summary, raw } => {
+                resource_acquisition_continuation::ResourceAcquisitionContinuation::parse(raw)?
                     .compile(id, snapshot, summary)
                     .map(|(intent, analysis)| (intent, Some(analysis)))
             }
@@ -3573,6 +3636,36 @@ pub(crate) fn plan_request_publication(
             Ok(output) => PlanPublication::Published(output),
             Err(error) => PlanPublication::Pending(dfmcp_error_payload("fortress.plan", &error)),
         };
+    }
+    if let Some(raw) = blueprint
+        .as_deref()
+        .filter(|raw| goal_continuation::is_request(raw))
+    {
+        if actions.is_some() || production.is_some() || paused_target.is_some() {
+            return PlanPublication::Pending(coded_error_payload(
+                "fortress.plan",
+                ErrorCode::InvalidRequest,
+                "continue_goal contains its retained objective; do not combine it with actions, production or a pause target",
+            ));
+        }
+        let parent = match goal_continuation::parse_request(raw) {
+            Ok(parent) => parent,
+            Err(error) => {
+                return PlanPublication::Pending(dfmcp_error_payload("fortress.plan", &error));
+            }
+        };
+        match plan_comparison_handler::execute_resource_continuation(
+            session_id.clone(),
+            summary.clone(),
+            parent,
+            started,
+        ) {
+            Ok(Some(output)) => return PlanPublication::Published(output),
+            Ok(None) => {}
+            Err(error) => {
+                return PlanPublication::Pending(dfmcp_error_payload("fortress.plan", &error));
+            }
+        }
     }
     let parsed = blueprint.as_deref().map(plan_comparison::parse).transpose();
     let request = match parsed {

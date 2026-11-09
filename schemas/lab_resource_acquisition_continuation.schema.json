@@ -1,0 +1,29 @@
+{
+  "$id": "https://dwarf-fortress-mcp.org/schemas/0.1.0/lab_resource_acquisition_continuation.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Retained laboratory resource acquisition continuation source",
+  "description": "Private flat archived source. Public planning uses the existing continue_goal blueprint with only a retained plan_digest; callers cannot submit this envelope as replacement lineage.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "planner", "parent_plan_digest", "root_plan_digest", "resource_acquisition"],
+  "properties": {
+    "schema": {"const": "dfmcp.resource-acquisition-continuation/1"},
+    "planner": {"const": "resource_acquisition_v1"},
+    "parent_plan_digest": {"$ref": "#/$defs/plan_digest"},
+    "root_plan_digest": {"$ref": "#/$defs/plan_digest"},
+    "resource_acquisition": {
+      "allOf": [
+        {"$ref": "./lab_resource_acquisition.schema.json"},
+        {"required": ["planner"]}
+      ]
+    }
+  },
+  "$defs": {
+    "plan_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{64}$",
+      "not": {"const": "0000000000000000000000000000000000000000000000000000000000000000"}
+    }
+  },
+  "$comment": "Runtime parsing also rejects duplicate keys at every retained-request level, NUL, unknown generations and requests over 16384 UTF-8 bytes. Canonical source retains explicit assign_labor and planner. Neither this source nor a durable reopen carries current authority."
+}

@@ -7,14 +7,14 @@ use std::collections::BTreeMap;
 use dfmcp_core::{DfmcpError, Digest32, ErrorCode, IntentId, Result, RiskTier};
 use dfmcp_intent::{
     Constraint, HarvestResource, Intent, ResourceAcquisitionPlan, ResourceStockTarget,
-    StaticPlanner,
+    StaticPlanner, effects,
 };
-use dfmcp_world::WorldSnapshot;
+use dfmcp_world::{CompareOp, Predicate, PredicateEvidence, PredicateTruth, WorldSnapshot};
 use serde::{Deserialize, Deserializer};
 use serde_json::{Value, json};
 
 pub(super) const PLANNER: &str = "resource_acquisition_v1";
-const MAX_REQUEST_BYTES: usize = 16 * 1024;
+pub(super) const MAX_REQUEST_BYTES: usize = 16 * 1024;
 
 fn invalid(message: impl Into<String>) -> DfmcpError {
     DfmcpError::new(ErrorCode::InvalidRequest, message)
@@ -41,6 +41,36 @@ pub(super) struct ResourceAcquisitionRequest {
     assign_labor: bool,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Quota {
+    resource: String,
+    minimum: u64,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Request {
+    template: String,
+    #[serde(default, deserialize_with = "present")]
+    planner: Option<String>,
+    quotas: Vec<Quota>,
+    #[serde(default)]
+    assign_labor: bool,
+}
+
+/// Nested retained sources must consume this typed grammar directly. A Value
+/// round trip would erase duplicate keys before their original bytes are checked.
+impl<'de> Deserialize<'de> for ResourceAcquisitionRequest {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Self::from_request(Request::deserialize(deserializer)?, false)
+            .map_err(serde::de::Error::custom)
+    }
+}
+
 impl ResourceAcquisitionRequest {
     pub(super) fn parse_current(raw: &str) -> Result<Self> {
         Self::parse_generation(raw, true)
@@ -53,22 +83,6 @@ impl ResourceAcquisitionRequest {
     }
 
     fn parse_generation(raw: &str, current: bool) -> Result<Self> {
-        #[derive(Deserialize)]
-        #[serde(deny_unknown_fields)]
-        struct Quota {
-            resource: String,
-            minimum: u64,
-        }
-        #[derive(Deserialize)]
-        #[serde(deny_unknown_fields)]
-        struct Request {
-            template: String,
-            #[serde(default, deserialize_with = "present")]
-            planner: Option<String>,
-            quotas: Vec<Quota>,
-            #[serde(default)]
-            assign_labor: bool,
-        }
         if raw.len() > MAX_REQUEST_BYTES || raw.contains('\0') {
             return Err(invalid(
                 "resource acquisition exceeds its 16-KiB non-NUL request bound",
@@ -76,6 +90,10 @@ impl ResourceAcquisitionRequest {
         }
         let request: Request = serde_json::from_str(raw)
             .map_err(|error| invalid(format!("invalid resource acquisition request: {error}")))?;
+        Self::from_request(request, current)
+    }
+
+    fn from_request(request: Request, current: bool) -> Result<Self> {
         if request.template != "resource_acquisition" {
             return Err(invalid(
                 "resource acquisition requires template=resource_acquisition",
@@ -132,6 +150,71 @@ impl ResourceAcquisitionRequest {
         snapshot: &WorldSnapshot,
         summary: &str,
     ) -> Result<(Intent, Value)> {
+        self.compile_sealed(
+            id,
+            snapshot,
+            summary,
+            self.source_digest(),
+            "resource acquisition source",
+        )
+    }
+
+    pub(super) fn source_digest(&self) -> Digest32 {
+        let mut source_bytes = b"dfmcp-resource-acquisition-source/1\0".to_vec();
+        source_bytes.extend_from_slice(self.canonical_json().as_bytes());
+        Digest32::of_bytes(&source_bytes)
+    }
+
+    /// Current semantic stock truth is independent of an earlier pursuit's
+    /// exact task completion. The existing harvest census validates the ledger
+    /// and complete original custody before any quota can be reported true.
+    pub(super) fn stock_goal_truth(&self, snapshot: &WorldSnapshot) -> Result<PredicateTruth> {
+        use dfmcp_intent::resource_acquisition::MAX_RESOURCE_ACQUISITION_ENTITIES;
+
+        if snapshot.graph.entities.len() > MAX_RESOURCE_ACQUISITION_ENTITIES
+            || snapshot.graph.edges.len() > MAX_RESOURCE_ACQUISITION_ENTITIES
+            || snapshot.graph.chunks.len() > MAX_RESOURCE_ACQUISITION_ENTITIES
+            || snapshot.graph.events.len() > MAX_RESOURCE_ACQUISITION_ENTITIES
+        {
+            return Err(DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                "resource goal truth exceeds its bounded complete-source inspection",
+            ));
+        }
+        let evidence = PredicateEvidence::laboratory(snapshot)?;
+        let report = effects::harvest_report(evidence.snapshot())?.ok_or_else(|| {
+            DfmcpError::new(
+                ErrorCode::PreconditionsFailed,
+                "resource goal truth requires the original qualified finite-harvest ledger",
+            )
+        })?;
+        evidence.evaluate(&Predicate::All(
+            self.quotas
+                .iter()
+                .map(|(resource, minimum)| Predicate::FieldCompare {
+                    entity_id: report.ledger,
+                    field: match resource {
+                        HarvestResource::Wood => effects::STOCK_WOOD_FIELD,
+                        HarvestResource::Plant => effects::STOCK_PLANT_FIELD,
+                    }
+                    .to_owned(),
+                    op: CompareOp::Ge,
+                    value: dfmcp_world::Value::U64(*minimum),
+                })
+                .collect(),
+        ))
+    }
+
+    /// Both root and continuation sources use the same lowering. Their complete
+    /// source digests select a single seal, never a nested pair of summary seals.
+    pub(super) fn compile_sealed(
+        &self,
+        id: IntentId,
+        snapshot: &WorldSnapshot,
+        summary: &str,
+        source_digest: Digest32,
+        seal_label: &str,
+    ) -> Result<(Intent, Value)> {
         let targets = self
             .quotas
             .iter()
@@ -147,18 +230,12 @@ impl ResourceAcquisitionRequest {
                 "the original resource stock targets are already satisfied; no acquisition plan or effect is needed",
             ));
         }
-        let mut source_bytes = b"dfmcp-resource-acquisition-source/1\0".to_vec();
-        source_bytes.extend_from_slice(self.canonical_json().as_bytes());
-        let source_digest = Digest32::of_bytes(&source_bytes);
         let summary = if summary.is_empty() {
             "acquire original resource stock minima"
         } else {
             summary
         };
-        let sealed_summary = format!(
-            "{summary} [resource acquisition source {}]",
-            source_digest.to_hex()
-        );
+        let sealed_summary = format!("{summary} [{seal_label} {}]", source_digest.to_hex());
         if sealed_summary.len() > StaticPlanner::default().policy.max_string_bytes
             || sealed_summary.chars().any(char::is_control)
         {
