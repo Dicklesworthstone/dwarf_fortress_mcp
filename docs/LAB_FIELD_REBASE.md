@@ -41,10 +41,11 @@ must carry eligible laboratory provenance, and values and predicate literals
 must be bounded scalars.
 
 Every reference effect first validates the optional shared-workforce,
-construction-material and provisions models. Consequently this first
+construction-material, provisions and finite-harvest models. Consequently this
 refinement requires a complete bounded census proving the absence of those
 model declarations and task-history markers on **both entities and edges**.
-Production markers are conservatively refused even for unrelated recipes.
+A retained harvest-task identity also prevents refinement when its fields are
+missing. Production markers are conservatively refused even for unrelated recipes.
 Opt-in model worlds continue through explicit source replay and review. The
 absence census is part of the certificate; an incomplete scan cannot produce
 an accepted field proof.

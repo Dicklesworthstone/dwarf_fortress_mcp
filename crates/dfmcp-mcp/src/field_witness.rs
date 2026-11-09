@@ -18,11 +18,11 @@ const MAX_OPERATIONS: usize = 262_144;
 const MAX_BYTES: usize = 1_048_576;
 const MAX_RECORDS: usize = 4_096;
 
-// apply_effect validates all three optional models before every action. Their
+// apply_effect validates the optional laboratory models before every action. Their
 // absence is a complete-domain read, including misplaced declarations/stamps
 // on edges. Reject every production marker conservatively, even a non-food
 // recipe, rather than infer which retained task histories may be ignored.
-const MODEL_FIELDS: [&str; 16] = [
+const MODEL_FIELDS: [&str; 27] = [
     effects::LABORATORY_WORKFORCE_MODEL_FIELD,
     effects::LABORATORY_WORKFORCE_TASK_MODEL_FIELD,
     effects::LABORATORY_CONSTRUCTION_MATERIAL_MODEL_FIELD,
@@ -39,6 +39,17 @@ const MODEL_FIELDS: [&str; 16] = [
     effects::PROVISIONS_LEDGER_GENERATION_FIELD,
     effects::PROVISIONS_CONSUMED_FIELD,
     effects::WORK_ORDER_PRODUCTION_MODEL_FIELD,
+    effects::LABORATORY_HARVEST_MODEL_FIELD,
+    effects::HARVEST_SOURCE_MODEL_FIELD,
+    effects::HARVEST_TASK_MODEL_FIELD,
+    effects::HARVEST_RESOURCE_FIELD,
+    effects::HARVEST_INITIAL_FIELD,
+    effects::HARVEST_REMAINING_FIELD,
+    effects::HARVEST_YIELDED_FIELD,
+    effects::HARVEST_SOURCE_FIELD,
+    effects::HARVEST_SOURCE_GENERATION_FIELD,
+    effects::HARVEST_LEDGER_FIELD,
+    effects::HARVEST_LEDGER_GENERATION_FIELD,
 ];
 
 type Check<T> = std::result::Result<T, &'static str>;
@@ -245,6 +256,14 @@ fn model_free(snapshot: &WorldSnapshot, budget: WorkBudget, meter: &mut Meter) -
     if records > MAX_RECORDS.min(budget.max_entities as usize) {
         return Err("complete model-absence census exceeds the entity budget");
     }
+    // Harvest task identity alone is retained model history, even if every
+    // field was lost. It cannot establish a model-free input to apply_effect.
+    for record in snapshot.graph.entities.values() {
+        meter.charge(1, 16)?;
+        if matches!(&record.kind, EntityKind::Other(kind) if kind == effects::HARVEST_TASK_KIND) {
+            return Err("field refinement requires absence of retained harvest task identities");
+        }
+    }
     for fields in snapshot
         .graph
         .entities
@@ -392,7 +411,8 @@ impl FieldWitness {
             description: json!({
                 "domain":"laboratory_model_free_setters/1", "identities":identities,
                 "fields":fields, "pause":reads.pause,
-                "model_absence":{"coverage":"complete_entities_and_edges", "fields":MODEL_FIELDS},
+                "model_absence":{"coverage":"complete_entities_and_edges", "fields":MODEL_FIELDS,
+                    "entity_kinds":[effects::HARVEST_TASK_KIND]},
                 "bounds":{"identities":MAX_IDENTITIES, "fields":MAX_FIELDS,
                     "records_per_version":MAX_RECORDS.min(budget.max_entities as usize),
                     "operations":MAX_OPERATIONS, "bytes":meter.max_bytes},

@@ -31,6 +31,8 @@ mod civilian_release_tests;
 mod effect_drain_tests;
 #[cfg(test)]
 mod furniture_lifecycle_tests;
+#[cfg(test)]
+mod harvest_lifecycle_tests;
 
 use dfmcp_world::{Predicate, PredicateEvidence, WorldGraph, WorldSnapshot, execute_bounded_query};
 
@@ -314,6 +316,7 @@ impl MemoryAdapter {
                     && matches!(
                         &action.step.action,
                         Action::DesignateDig { .. }
+                            | Action::HarvestResource { .. }
                             | Action::Build { .. }
                             | Action::PlaceFurniture { .. }
                             | Action::CreateWorkOrder { .. }
@@ -1680,6 +1683,11 @@ fn validate_terminal_action_identity(
             &step.action,
         )?;
         effects::validate_provisions_completion(
+            snapshot,
+            effects::created_entity_id(&step.idempotency_key, 0),
+            &step.action,
+        )?;
+        effects::validate_harvest_completion(
             snapshot,
             effects::created_entity_id(&step.idempotency_key, 0),
             &step.action,

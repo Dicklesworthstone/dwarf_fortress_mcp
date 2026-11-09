@@ -15,8 +15,8 @@ use dfmcp_core::{
 };
 use dfmcp_intent::effects;
 use dfmcp_intent::{
-    Action, BuildingKind, DigMode, FurnitureKind, MaterialSelector, PreparedPlan, RequestedAction,
-    WorkOrderCondition,
+    Action, BuildingKind, DigMode, FurnitureKind, HarvestResource, MaterialSelector, PreparedPlan,
+    RequestedAction, WorkOrderCondition,
 };
 use dfmcp_world::terrain::{region_tiles, uniform_chunk, validate_region};
 use dfmcp_world::{
@@ -49,6 +49,14 @@ pub(crate) use laboratory_material_view::{
 #[path = "laboratory_provisions_view.rs"]
 mod laboratory_provisions_view;
 pub(crate) use laboratory_provisions_view::{provisions_action_json, provisions_json};
+
+#[path = "laboratory_harvest.rs"]
+mod laboratory_harvest;
+pub(crate) use laboratory_harvest::{harvest_action_json, harvest_json};
+
+#[cfg(test)]
+#[path = "laboratory_harvest_tests.rs"]
+mod laboratory_harvest_tests;
 
 #[path = "lab_world_alerts.rs"]
 mod laboratory_alerts;
@@ -90,7 +98,7 @@ const MAX_NAME_BYTES: usize = 128;
 const MAX_LIST_ITEMS: usize = 64;
 
 /// Built-in laboratory scenarios.
-pub(crate) const SCENARIOS: [&str; 8] = [
+pub(crate) const SCENARIOS: [&str; 9] = [
     "empty",
     "starter_fortress",
     "besieged_fortress",
@@ -99,6 +107,7 @@ pub(crate) const SCENARIOS: [&str; 8] = [
     "starter_fortress_provisions",
     "starter_fortress_multilevel",
     "starter_fortress_history",
+    "starter_fortress_resources",
 ];
 
 /// Starter-fortress entity identities.
@@ -170,6 +179,7 @@ pub(crate) fn scenario_snapshot(
             provisions_starter_graph(fortress_id)?
         }
         "starter_fortress_multilevel" => multilevel_starter_graph(fortress_id)?,
+        "starter_fortress_resources" => laboratory_harvest::starter_graph(fortress_id)?,
         "besieged_fortress" => {
             let mut graph = starter_graph()?;
             graph.entities.insert(
@@ -547,6 +557,12 @@ enum ActionSpec {
         item: String,
         location: [i32; 3],
     },
+    HarvestResource {
+        source: String,
+        source_generation: u64,
+        resource: String,
+        amount: u32,
+    },
     SetLabor {
         units: Vec<String>,
         labor: String,
@@ -702,6 +718,35 @@ fn action(spec: ActionSpec) -> Result<Action> {
             item: entity(&item)?,
             location: coord(location),
         },
+        ActionSpec::HarvestResource {
+            source,
+            source_generation,
+            resource,
+            amount,
+        } => {
+            let source = entity(&source)?;
+            if source_generation == 0
+                || source_generation > u64::from(u32::MAX)
+                || source == EntityId::NIL
+                || amount == 0
+                || amount > effects::MAX_HARVEST_AMOUNT
+            {
+                return Err(invalid(format!(
+                    "harvesting requires a positive source generation and amount 1..={}",
+                    effects::MAX_HARVEST_AMOUNT,
+                )));
+            }
+            Action::HarvestResource {
+                source,
+                source_generation,
+                resource: match resource.as_str() {
+                    "WOOD" => HarvestResource::Wood,
+                    "PLANT" => HarvestResource::Plant,
+                    _ => return Err(invalid("harvest resource must be WOOD or PLANT")),
+                },
+                amount,
+            }
+        }
         ActionSpec::SetLabor {
             units,
             labor,
@@ -1044,6 +1089,7 @@ pub(crate) const fn action_kind(action: &Action) -> &'static str {
         Action::DesignateDig { .. } => "designate_dig",
         Action::Build { .. } => "build",
         Action::PlaceFurniture { .. } => "place_furniture",
+        Action::HarvestResource { .. } => "harvest_resource",
         Action::SetLabor { .. } => "set_labor",
         Action::CreateWorkOrder { .. } => "create_work_order",
         Action::ConfigureStockpile { .. } => "configure_stockpile",
@@ -2489,8 +2535,8 @@ pub(crate) fn plan_goal_truth(
     snapshot: &WorldSnapshot,
     plan: &PreparedPlan,
 ) -> Result<dfmcp_world::PredicateTruth> {
-    let truth =
-        dfmcp_world::PredicateEvidence::laboratory(snapshot)?.evaluate(&plan.terminal_condition)?;
+    let evidence = dfmcp_world::PredicateEvidence::laboratory(snapshot)?;
+    let truth = evidence.evaluate(&plan.terminal_condition)?;
     if truth == dfmcp_world::PredicateTruth::True {
         let provisions = effects::provisions_report(snapshot)?;
         for step in &plan.steps {
@@ -2501,6 +2547,16 @@ pub(crate) fn plan_goal_truth(
                 // Validate retained identity without conflating stock truth
                 // with the independent action proof and quiescence checks.
                 effects::validate_provisions_identity(snapshot, original_order, &step.action)?;
+            }
+            if matches!(step.action, Action::HarvestResource { .. }) {
+                // The planner adds the original ledger identity to the step's
+                // mandatory proof after the raw-action goal is constructed.
+                let bound_truth =
+                    evidence.evaluate(&Predicate::All(step.postconditions.clone()).normalized())?;
+                if bound_truth != dfmcp_world::PredicateTruth::True {
+                    return Ok(bound_truth);
+                }
+                effects::validate_harvest_completion(snapshot, original_order, &step.action)?;
             }
             if matches!(step.action, Action::Build { .. }) {
                 effects::validate_construction_material_completion(
@@ -2544,6 +2600,7 @@ pub(crate) fn plan_steps_json(plan: &PreparedPlan) -> Json {
                         | Action::Build { .. }
                         | Action::PlaceFurniture { .. }
                         | Action::CreateWorkOrder { .. }
+                        | Action::HarvestResource { .. }
                 )
                 .then(|| effects::created_entity_id(&step.idempotency_key, 0).get().to_string());
                 let mut row = json!({
@@ -2569,6 +2626,13 @@ pub(crate) fn plan_steps_json(plan: &PreparedPlan) -> Json {
                     row["furniture"] = json!(kind.item_token());
                     row["source_item"] = json!(item.get().to_string());
                     row["location"] = json!([location.x, location.y, location.z]);
+                }
+                if let Action::HarvestResource { source, source_generation, resource, amount } = &step.action {
+                    row["source_entity_id"] = json!(source.to_string());
+                    row["source_generation"] = json!(source_generation);
+                    row["resource"] = json!(resource.as_str());
+                    row["amount"] = json!(amount);
+                    row["required_labor"] = json!(resource.labor());
                 }
                 row
             })
@@ -2709,6 +2773,19 @@ pub(crate) fn briefing(snapshot: &WorldSnapshot) -> Json {
         Ok(None) => {}
         Err(error) => {
             view["provisions"] = json!({
+                "available": false,
+                "epistemic_state": "unknown",
+                "evidence_scope": "laboratory_reference_world",
+                "source_anchor": crate::observation_projection::anchor_json(&snapshot.anchor()),
+                "reason": {"code": error.code.as_str(), "message": error.message},
+            });
+        }
+    }
+    match harvest_json(snapshot) {
+        Ok(Some(report)) => view["harvesting"] = report,
+        Ok(None) => {}
+        Err(error) => {
+            view["harvesting"] = json!({
                 "available": false,
                 "epistemic_state": "unknown",
                 "evidence_scope": "laboratory_reference_world",

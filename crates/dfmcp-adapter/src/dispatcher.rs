@@ -686,6 +686,11 @@ impl MutationDispatcher {
             effects::created_entity_id(&step.idempotency_key, 0),
             &step.action,
         )?;
+        effects::validate_harvest_completion(
+            snapshot,
+            effects::created_entity_id(&step.idempotency_key, 0),
+            &step.action,
+        )?;
         Ok(action_receipt(
             plan,
             step,
@@ -722,6 +727,11 @@ impl MutationDispatcher {
                 &step.action,
             )?;
             effects::validate_provisions_completion(
+                snapshot,
+                effects::created_entity_id(&step.idempotency_key, 0),
+                &step.action,
+            )?;
+            effects::validate_harvest_completion(
                 snapshot,
                 effects::created_entity_id(&step.idempotency_key, 0),
                 &step.action,

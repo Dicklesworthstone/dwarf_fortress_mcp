@@ -15,12 +15,14 @@ pub const LABORATORY_WORKFORCE_MODEL: &str = "shared-workforce/1";
 /// Persisted on each registered activity created under the selected model.
 pub const LABORATORY_WORKFORCE_TASK_MODEL_FIELD: &str = "laboratory_workforce_task_model";
 
-const FAMILIES: [(Option<&str>, &str); 5] = [
+const FAMILIES: [(Option<&str>, &str); 7] = [
     (None, "MINING"),
     (None, "CONSTRUCTION"),
     (Some("workshop:Still"), "BREW"),
     (Some("workshop:Kitchen"), "COOK"),
     (Some("workshop:Carpenters"), "CARPENTRY"),
+    (None, "WOODCUTTING"),
+    (None, "PLANT_GATHERING"),
 ];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -61,7 +63,10 @@ fn order_family(job: &str) -> Option<usize> {
 
 pub(super) fn registered_action(action: &Action) -> bool {
     match action {
-        Action::DesignateDig { .. } | Action::Build { .. } | Action::PlaceFurniture { .. } => true,
+        Action::DesignateDig { .. }
+        | Action::Build { .. }
+        | Action::PlaceFurniture { .. }
+        | Action::HarvestResource { .. } => true,
         Action::CreateWorkOrder { job_token, .. } => order_family(job_token).is_some(),
         _ => false,
     }
@@ -70,7 +75,9 @@ pub(super) fn registered_action(action: &Action) -> bool {
 fn registered_record(record: &EntityRecord, tick: GameTick) -> bool {
     match &record.kind {
         EntityKind::Building => true,
-        EntityKind::Other(kind) if kind == DIG_DESIGNATION_KIND => true,
+        EntityKind::Other(kind) if kind == DIG_DESIGNATION_KIND || kind == HARVEST_TASK_KIND => {
+            true
+        }
         EntityKind::WorkOrder => field_text(record, "job_token", tick)
             .and_then(order_family)
             .is_some(),
@@ -195,6 +202,7 @@ pub(super) fn clear_stamped_blocker(snapshot: &mut WorldSnapshot, id: EntityId) 
 enum Activity {
     Dig,
     Building,
+    Harvest,
     Order(usize),
 }
 
@@ -218,8 +226,16 @@ impl Capacity {
                 "shared workforce exceeds its explicit canonical entity bound",
             ));
         }
-        budget
-            .charge(snapshot.graph.entities.len() as u64 * (2 * FAMILIES.len() as u64 + 4) + 1)?;
+        let harvest_enabled = snapshot
+            .graph
+            .entities
+            .get(&fortress_settings_entity_id(snapshot.fortress_id))
+            .is_some_and(|record| {
+                field_text(record, LABORATORY_HARVEST_MODEL_FIELD, snapshot.tick)
+                    == Some(LABORATORY_HARVEST_MODEL)
+            });
+        let family_count = if harvest_enabled { FAMILIES.len() } else { 5 };
+        budget.charge(snapshot.graph.entities.len() as u64 * (2 * family_count as u64 + 4) + 1)?;
         let mut capacity = Self {
             workers: Vec::new(),
             eligible: std::array::from_fn(|_| Vec::new()),
@@ -234,12 +250,13 @@ impl Capacity {
             if record.kind == EntityKind::Unit
                 && field_value(record, "alive", snapshot.tick) == Some(&Value::Bool(true))
             {
-                let eligible = FAMILIES.map(|(_, labor)| {
-                    field_value(
-                        record,
-                        &format!("{LABOR_FIELD_PREFIX}{labor}"),
-                        snapshot.tick,
-                    ) == Some(&Value::Bool(true))
+                let eligible: [bool; FAMILIES.len()] = std::array::from_fn(|index| {
+                    index < family_count
+                        && field_value(
+                            record,
+                            &format!("{LABOR_FIELD_PREFIX}{}", FAMILIES[index].1),
+                            snapshot.tick,
+                        ) == Some(&Value::Bool(true))
                 });
                 if eligible.iter().any(|value| *value) {
                     for (family, enabled) in eligible.into_iter().enumerate() {
@@ -253,7 +270,7 @@ impl Capacity {
                 && field_text(record, CONSTRUCTION_STAGE_FIELD, snapshot.tick)
                     == Some(STAGE_COMPLETE)
             {
-                for (family, (workshop, _)) in FAMILIES.iter().enumerate() {
+                for (family, (workshop, _)) in FAMILIES[..family_count].iter().enumerate() {
                     if workshop.is_some()
                         && field_text(record, "building_kind", snapshot.tick) == *workshop
                     {
@@ -270,6 +287,7 @@ pub(super) struct Selection {
     pub(super) ready: Vec<usize>,
     pub(super) buildings: BTreeSet<EntityId>,
     pub(super) digs: BTreeSet<EntityId>,
+    pub(super) harvests: BTreeSet<EntityId>,
     pub(super) blockers: BTreeMap<EntityId, Option<String>>,
     assignments: Vec<LaboratoryWorkforceAssignment>,
     blocked: Vec<LaboratoryWorkforceBlocker>,
@@ -335,13 +353,19 @@ pub(super) fn select(
 ) -> Result<Selection> {
     let capacity = Capacity::capture(snapshot, budget)?;
     budget.charge(
-        (timeline.orders.len() + timeline.buildings.len() + timeline.digs.len()) as u64 * 5 + 1,
+        (timeline.orders.len()
+            + timeline.buildings.len()
+            + timeline.digs.len()
+            + timeline.harvests.len()) as u64
+            * 5
+            + 1,
     )?;
     let mut candidates = Vec::new();
     let mut selection = Selection {
         ready: Vec::new(),
         buildings: BTreeSet::new(),
         digs: BTreeSet::new(),
+        harvests: BTreeSet::new(),
         blockers: BTreeMap::new(),
         assignments: Vec::new(),
         blocked: Vec::new(),
@@ -368,6 +392,38 @@ pub(super) fn select(
                 partial: field_u64(entity(snapshot, *id)?, "progress_ticks", snapshot.tick)?,
             });
             selection.active_activities += 1;
+        }
+    }
+    for id in &timeline.harvests {
+        if !active_order(snapshot, *id)? {
+            continue;
+        }
+        budget.charge(48)?;
+        let record = entity(snapshot, *id)?;
+        let family = match field_text(record, HARVEST_RESOURCE_FIELD, snapshot.tick) {
+            Some("WOOD") => 5,
+            Some("PLANT") => 6,
+            _ => {
+                return Err(precondition(
+                    "harvest workforce requires a registered resource",
+                ));
+            }
+        };
+        selection.active_activities += 1;
+        if let Some(reason) = harvest::blocker(snapshot, *id)? {
+            selection.blockers.insert(*id, Some(reason.clone()));
+            selection.blocked.push(LaboratoryWorkforceBlocker {
+                work: *id,
+                labor: FAMILIES[family].1,
+                reason,
+            });
+        } else {
+            candidates.push(Candidate {
+                id: *id,
+                activity: Activity::Harvest,
+                family,
+                partial: field_u64(record, "work_ticks", snapshot.tick)?,
+            });
         }
     }
     for (index, order) in timeline.orders.iter().enumerate() {
@@ -442,6 +498,9 @@ pub(super) fn select(
                 Activity::Building => {
                     selection.buildings.insert(candidate.id);
                 }
+                Activity::Harvest => {
+                    selection.harvests.insert(candidate.id);
+                }
                 Activity::Order(index) => selection.ready.push(index),
             }
             selection.blockers.insert(candidate.id, None);
@@ -499,7 +558,12 @@ fn remaining_ticks(
     budget: &mut EffectAdvanceBudget,
 ) -> Result<u64> {
     budget.charge(
-        (timeline.orders.len() + timeline.buildings.len() + timeline.digs.len()) as u64 * 5 + 1,
+        (timeline.orders.len()
+            + timeline.buildings.len()
+            + timeline.digs.len()
+            + timeline.harvests.len()) as u64
+            * 5
+            + 1,
     )?;
     let mut total = 0u64;
     let mut add = |remaining: u64| -> Result<()> {
@@ -534,6 +598,17 @@ fn remaining_ticks(
                 .ok_or_else(|| {
                     precondition("staffed construction has noncanonical progress counters")
                 })?)?;
+        }
+    }
+    for id in &timeline.harvests {
+        if active_order(snapshot, *id)? {
+            let record = entity(snapshot, *id)?;
+            add(field_u64(record, AMOUNT_REMAINING_FIELD, snapshot.tick)?
+                .checked_mul(HARVEST_TICKS_PER_UNIT)
+                .and_then(|ticks| {
+                    ticks.checked_sub(field_u64(record, "work_ticks", snapshot.tick).ok()?)
+                })
+                .ok_or_else(|| advance_budget_error("remaining harvest service overflowed"))?)?;
         }
     }
     for order in &timeline.orders {

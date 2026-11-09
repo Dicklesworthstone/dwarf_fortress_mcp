@@ -1,0 +1,80 @@
+{
+  "schema": "dfmcp.laboratory_harvest/1",
+  "scope": "laboratory_reference_world",
+  "model": {
+    "field": "laboratory_harvest_model",
+    "value": "finite-harvest/1",
+    "requires": "shared-workforce/1",
+    "scenario": "starter_fortress_resources"
+  },
+  "action": {
+    "kind": "harvest_resource",
+    "resources": [
+      "WOOD",
+      "PLANT"
+    ],
+    "minimum_amount": 1,
+    "maximum_amount": 100,
+    "capability": "designate",
+    "risk": "guarded",
+    "checkpoint": "ordinary_guarded_policy",
+    "compensation": "none",
+    "canonical_archive_tag": 11,
+    "native_routing": "unsupported"
+  },
+  "identity": [
+    "original_source_id_and_generation",
+    "resource",
+    "finite_amount",
+    "original_stock_ledger_id_and_generation",
+    "original_step_key",
+    "sealed_proof_and_deadline"
+  ],
+  "source": {
+    "kind": "plant",
+    "model_field": "harvest_source_model",
+    "resource_field": "harvest_resource",
+    "initial_field": "harvest_initial",
+    "remaining_field": "harvest_remaining",
+    "harvested_field": "harvest_yielded",
+    "invariant": "initial = remaining + harvested; harvested agrees with retained task history"
+  },
+  "work": {
+    "task_kind": "harvest_task",
+    "ticks_per_completed_unit": 50,
+    "labor": {
+      "WOOD": "WOODCUTTING",
+      "PLANT": "PLANT_GATHERING"
+    },
+    "workshop_required": false,
+    "worker_pool": "shared_with_registered_laboratory_jobs",
+    "settlement": "source_debit_and_stock_credit_with_task_progress",
+    "blocked_time": "no_service_credit",
+    "cancel": "stop_future_work_preserve_completed_yield"
+  },
+  "planning": {
+    "active_demand": "counts_against_source_supply",
+    "same_plan_demand": "jointly_bounded",
+    "inventory_credit": "only_completed_observed_work",
+    "production_composition": "observe_acquired_inputs_then_prepare_existing_production_source"
+  },
+  "bounds": {
+    "canonical_entities": 65536,
+    "sources": 1024,
+    "tasks": 4096,
+    "public_steps": 16,
+    "public_request_bytes": 16384
+  },
+  "recovery": {
+    "original_generation_checks": true,
+    "mandatory_step_postconditions": true,
+    "unknown_history": "unresolved",
+    "lost_handles": "no_redispatch_authority"
+  },
+  "presentation": {
+    "current": "harvesting",
+    "forecast": "predicted_harvesting",
+    "bounded_rows": true,
+    "explicit_omissions": true
+  }
+}

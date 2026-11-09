@@ -1,5 +1,6 @@
 //! Closed lossless schema. Tags are archive-specific, not native enum ordinals.
 use super::*;
+use crate::HarvestResource;
 
 impl<F: FnMut() -> Result<()>> Writer<'_, F> {
     fn coord(&mut self, value: MapCoord) -> Result<()> {
@@ -174,6 +175,21 @@ impl<F: FnMut() -> Result<()>> Writer<'_, F> {
                 })?;
                 self.u64(item.get())?;
                 self.coord(*location)?;
+            }
+            Action::HarvestResource {
+                source,
+                source_generation,
+                resource,
+                amount,
+            } => {
+                self.byte(11)?;
+                self.u64(source.get())?;
+                self.u64(*source_generation)?;
+                self.byte(match resource {
+                    HarvestResource::Wood => 0,
+                    HarvestResource::Plant => 1,
+                })?;
+                self.u32(*amount)?;
             }
         }
         Ok(())
@@ -600,6 +616,16 @@ impl<F: FnMut() -> Result<()>> Reader<'_, '_, F> {
                 },
                 item: EntityId::new(self.u64()?),
                 location: self.coord()?,
+            },
+            11 => Action::HarvestResource {
+                source: EntityId::new(self.u64()?),
+                source_generation: self.u64()?,
+                resource: match self.byte()? {
+                    0 => HarvestResource::Wood,
+                    1 => HarvestResource::Plant,
+                    _ => return Err(invalid("unknown archived harvest resource")),
+                },
+                amount: self.u32()?,
             },
             _ => return Err(invalid("unknown archived action")),
         })

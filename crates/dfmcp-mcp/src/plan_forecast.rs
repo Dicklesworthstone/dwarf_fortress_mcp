@@ -448,6 +448,21 @@ fn forecast_inner(
         Err(error) => return model_failure(error, budget.is_some()),
     }
     check_budget(&budget, template)?;
+    match crate::lab_world::harvest_json(fork.snapshot()) {
+        Ok(Some(mut harvesting)) => {
+            harvesting["epistemic_state"] = json!("predicted");
+            harvesting["evidence_scope"] = json!("discarded_laboratory_forecast");
+            if let Some(fields) = harvesting.as_object_mut()
+                && let Some(anchor) = fields.remove("source_anchor")
+            {
+                fields.insert("predicted_anchor".to_owned(), anchor);
+            }
+            forecast["predicted_harvesting"] = harvesting;
+        }
+        Ok(None) => {}
+        Err(error) => return model_failure(error, budget.is_some()),
+    }
+    check_budget(&budget, template)?;
     forecast["simulation_slices"] = json!(simulation_slices);
     Ok(forecast)
 }

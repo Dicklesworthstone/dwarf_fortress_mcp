@@ -34,6 +34,7 @@ pub(super) fn effect_identity_absent(step: &PlanStep, snapshot: &WorldSnapshot) 
             | Action::Build { .. }
             | Action::PlaceFurniture { .. }
             | Action::CreateWorkOrder { .. }
+            | Action::HarvestResource { .. }
     ) || !snapshot
         .graph
         .entities

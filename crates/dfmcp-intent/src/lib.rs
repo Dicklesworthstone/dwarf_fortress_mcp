@@ -9,6 +9,7 @@ mod construction_planning;
 pub mod effect_quiescence;
 pub mod effects;
 pub mod execution;
+mod harvest_planning;
 pub mod labor;
 pub mod labor_execution;
 pub mod labor_observation;
@@ -21,7 +22,8 @@ mod provisions_planning;
 pub mod workforce_planning;
 
 pub use action::{
-    Action, ActionScope, BuildingKind, DigMode, FurnitureKind, MaterialSelector, WorkOrderCondition,
+    Action, ActionScope, BuildingKind, DigMode, FurnitureKind, HarvestResource, MaterialSelector,
+    WorkOrderCondition,
 };
 pub use alert_fsm::{
     AlertDecision, AlertObservation, AlertRecoveryPolicy, CivilianAlertFsm, ThreatAssessment,

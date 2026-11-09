@@ -346,6 +346,77 @@ fn model_declarations_and_misplaced_task_markers_are_domain_reads() -> TestResul
 }
 
 #[test]
+fn harvest_history_that_refuses_effects_cannot_certify_model_free_refinement() -> TestResult {
+    let base = world();
+    let old = prepare(&base, requested(labor("MINE")))?;
+    // These are the implicit harvest reads, independently of the refinement's
+    // MODEL_FIELDS inventory. A new producer field must not evade the proof.
+    for marker in [
+        effects::LABORATORY_HARVEST_MODEL_FIELD,
+        effects::HARVEST_SOURCE_MODEL_FIELD,
+        effects::HARVEST_TASK_MODEL_FIELD,
+        effects::HARVEST_RESOURCE_FIELD,
+        effects::HARVEST_INITIAL_FIELD,
+        effects::HARVEST_REMAINING_FIELD,
+        effects::HARVEST_YIELDED_FIELD,
+        effects::HARVEST_SOURCE_FIELD,
+        effects::HARVEST_SOURCE_GENERATION_FIELD,
+        effects::HARVEST_LEDGER_FIELD,
+        effects::HARVEST_LEDGER_GENERATION_FIELD,
+    ] {
+        for on_edge in [false, true] {
+            let mut now = concurrent(&base)?;
+            let fields = if on_edge {
+                &mut now
+                    .graph
+                    .edges
+                    .entry(dfmcp_core::EdgeId::new(3))
+                    .or_insert(dfmcp_world::EdgeRecord {
+                        id: dfmcp_core::EdgeId::new(3),
+                        revision: 1,
+                        kind: dfmcp_world::EdgeKind::AssignedTo,
+                        from: UNIT,
+                        to: BURROW,
+                        fields: BTreeMap::new(),
+                    })
+                    .fields
+            } else {
+                &mut now.graph.entities.get_mut(&BURROW).ok_or("burrow")?.fields
+            };
+            fields.insert(marker.into(), fact(Value::Null));
+            now.refresh_hash();
+            let mut effect_shadow = now.clone();
+            assert!(
+                effects::apply_effect(&mut effect_shadow, &labor("MINE"), "new-setter").is_err()
+            );
+            assert_eq!(effect_shadow, now);
+            assert!(
+                FieldWitness::prove(&old, &base, &now, WorkBudget::default()).is_err(),
+                "harvest marker {marker}, edge {on_edge}"
+            );
+        }
+    }
+    let mut now = concurrent(&base)?;
+    now.graph.entities.insert(
+        EntityId::new(3),
+        EntityRecord {
+            id: EntityId::new(3),
+            generation: 1,
+            revision: 1,
+            kind: EntityKind::Other(effects::HARVEST_TASK_KIND.into()),
+            label: "retained harvest identity with missing history".into(),
+            fields: BTreeMap::new(),
+        },
+    );
+    now.refresh_hash();
+    let mut effect_shadow = now.clone();
+    assert!(effects::apply_effect(&mut effect_shadow, &labor("MINE"), "new-setter").is_err());
+    assert_eq!(effect_shadow, now);
+    assert!(FieldWitness::prove(&old, &base, &now, WorkBudget::default()).is_err());
+    Ok(())
+}
+
+#[test]
 fn unsupported_domains_actions_and_temporal_reads_remain_conservative() -> TestResult {
     let base = world();
     let original = prepare(&base, requested(labor("MINE")))?;

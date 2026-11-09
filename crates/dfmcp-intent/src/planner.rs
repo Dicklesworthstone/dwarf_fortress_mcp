@@ -178,6 +178,8 @@ impl StaticPlanner {
             snapshot,
             &intent.requested_actions,
         )?;
+        let harvest =
+            crate::harvest_planning::HarvestPlanning::capture(snapshot, &intent.requested_actions)?;
         let workforce = if intent
             .requested_actions
             .iter()
@@ -225,6 +227,9 @@ impl StaticPlanner {
             }
             if let Some(provisions) = &provisions {
                 provisions.bind(snapshot, &mut normalized, &idempotency_key)?;
+            }
+            if let Some(harvest) = &harvest {
+                harvest.bind(snapshot, &mut normalized, &idempotency_key)?;
             }
             if let Some(workforce) = &workforce
                 && normalized.action.naturally_temporal()
@@ -663,6 +668,21 @@ fn validate_action(action: &Action, policy: &PlanPolicy, context: &OperationCont
     match action {
         Action::Pause { .. } => {}
         Action::DesignateDig { .. } | Action::PlaceFurniture { .. } => {}
+        Action::HarvestResource {
+            source_generation,
+            amount,
+            ..
+        } => {
+            if *source_generation == 0
+                || u32::try_from(*source_generation).is_err()
+                || !(1..=crate::effects::MAX_HARVEST_AMOUNT).contains(amount)
+            {
+                return Err(DfmcpError::new(
+                    ErrorCode::InvalidIntent,
+                    "harvest requires an original positive generation and amount in 1..=100",
+                ));
+            }
+        }
         Action::Build {
             kind,
             location,
@@ -768,6 +788,7 @@ fn validate_action_shape(action: &Action, policy: &PlanPolicy) -> Result<()> {
         Action::Pause { .. }
         | Action::DesignateDig { .. }
         | Action::PlaceFurniture { .. }
+        | Action::HarvestResource { .. }
         | Action::SetStandingOrder { .. } => Some(0),
     }
     .ok_or_else(|| {

@@ -11,6 +11,9 @@
   "$defs": {
     "laboratory_plan_comparison": {
       "$ref": "./lab_plan_comparison.schema.json"
+    },
+    "laboratory_harvest_action": {
+      "$ref": "./lab_harvest_action.schema.json"
     }
   }
 }

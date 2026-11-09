@@ -117,6 +117,10 @@ fn service_ticks(action: &Action) -> Result<Option<u64>> {
             .map(Some)
             .ok_or_else(horizon_error),
         Action::Build { .. } | Action::PlaceFurniture { .. } => Ok(Some(effects::BUILD_TICKS)),
+        Action::HarvestResource { amount, .. } => u64::from(*amount)
+            .checked_mul(effects::HARVEST_TICKS_PER_UNIT)
+            .map(Some)
+            .ok_or_else(horizon_error),
         Action::CreateWorkOrder { amount, .. } => u64::from(*amount)
             .checked_mul(effects::WORK_ORDER_TICKS_PER_UNIT)
             .map(Some)

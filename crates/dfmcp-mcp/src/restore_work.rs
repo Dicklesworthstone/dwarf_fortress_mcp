@@ -75,6 +75,7 @@ enum WorkKind {
     Dig,
     Construction,
     Production,
+    Harvest,
 }
 
 impl WorkKind {
@@ -82,6 +83,7 @@ impl WorkKind {
         match &entity.kind {
             EntityKind::WorkOrder => Some(Self::Production),
             EntityKind::Other(kind) if kind == effects::DIG_DESIGNATION_KIND => Some(Self::Dig),
+            EntityKind::Other(kind) if kind == effects::HARVEST_TASK_KIND => Some(Self::Harvest),
             // Without a retained originating action, omitted construction
             // metadata cannot prove that a building was never temporal work.
             EntityKind::Building => Some(Self::Construction),
@@ -94,13 +96,14 @@ impl WorkKind {
             Self::Dig => "dig_designation",
             Self::Construction => "construction",
             Self::Production => "work_order",
+            Self::Harvest => "harvest_resource",
         }
     }
 
     fn lifecycle(self) -> &'static str {
         match self {
             Self::Construction => effects::CONSTRUCTION_STAGE_FIELD,
-            Self::Dig | Self::Production => effects::STATUS_FIELD,
+            Self::Dig | Self::Production | Self::Harvest => effects::STATUS_FIELD,
         }
     }
 
@@ -112,7 +115,7 @@ impl WorkKind {
                     effects::STAGE_PLANNED | effects::STAGE_UNDER_CONSTRUCTION
                 )
             }
-            Self::Dig | Self::Production => value == effects::STATUS_ACTIVE,
+            Self::Dig | Self::Production | Self::Harvest => value == effects::STATUS_ACTIVE,
         }
     }
 
@@ -120,7 +123,7 @@ impl WorkKind {
         let (minimum, maximum) = match self {
             Self::Dig => ("area_min", "area_max"),
             Self::Construction => ("footprint_min", "footprint_max"),
-            Self::Production => return WorkScope::NonSpatial,
+            Self::Production | Self::Harvest => return WorkScope::NonSpatial,
         };
         match (field(entity, minimum, tick), field(entity, maximum, tick)) {
             (Some(Value::Coord(min)), Some(Value::Coord(max))) => MapCuboid::new(*min, *max)
@@ -157,6 +160,19 @@ pub(super) fn inspect_untracked_work(
         ));
     }
     let _observation = PredicateEvidence::laboratory(snapshot)?;
+    let harvest_error = if snapshot.graph.entities.iter().any(|(id, entity)| {
+        !known_work_entities.contains(id) && matches!(WorkKind::of(entity), Some(WorkKind::Harvest))
+    }) {
+        match effects::harvest_report(snapshot) {
+            Ok(Some(_)) => None,
+            Ok(None) => {
+                Some("untracked harvest work lacks its registered resource model".to_owned())
+            }
+            Err(error) => Some(format!("{}: {}", error.code.as_str(), error.message)),
+        }
+    } else {
+        None
+    };
     let mut work = Vec::new();
     for (id, entity) in &snapshot.graph.entities {
         if known_work_entities.contains(id) {
@@ -174,13 +190,22 @@ pub(super) fn inspect_untracked_work(
             WorkScope::UnknownSpatial
         };
         let lifecycle = field(entity, kind.lifecycle(), snapshot.tick);
+        let invalid_harvest = matches!(kind, WorkKind::Harvest)
+            .then_some(harvest_error.as_ref())
+            .flatten();
         if identity_valid
+            && invalid_harvest.is_none()
             && matches!(lifecycle, Some(Value::Text(value))
                 if value == effects::STATUS_COMPLETE || value == effects::STATUS_CANCELLED)
         {
             continue;
         }
-        let state = if !identity_valid {
+        let state = if let Some(reason) = invalid_harvest {
+            EffectWorkState::Unknown {
+                entity_id: Some(*id),
+                reason: reason.clone(),
+            }
+        } else if !identity_valid {
             EffectWorkState::Unknown {
                 entity_id: Some(*id),
                 reason: "untracked work has an invalid canonical entity identity".to_owned(),

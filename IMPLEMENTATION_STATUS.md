@@ -1,5 +1,38 @@
 # Implementation Status
 
+## Unreleased — Acquire finite WOOD and PLANT in the laboratory
+
+Add the closed `harvest_resource` action and explicit
+`starter_fortress_resources` scenario. Agents can acquire finite qualified
+WOOD and PLANT sources, observe inventory, and use existing construction,
+furniture and food-production paths. Original source/ledger generations,
+mandatory proof, shared workers, bounded causal service, cancellation and
+durable work identity remain explicit. No native routing is added.
+
+Planning counts active demand without crediting future supply. Each completed
+unit atomically depletes the source and credits stock. The complete source and
+task census validates conservation, including records claiming completion.
+Public status and forecasts retain bounded source/task rows and original
+identity; recovery does not restore lost dispatch authority.
+
+Validation: all 221 actual `dfmcp-intent` library tests passed on the
+latest nightly, including nine new harvest regressions. The actual production
+adapter library compiled in an earlier focused attempt and the explicit native
+refusal integration case passed. Final dispatcher, laboratory and selected MCP
+test runs were blocked by compiler SIGKILL; their authored regressions are not
+reported as passing. The required `verify.sh` passed repository integrity,
+4,961 repository checks and the static interface/dependency contracts before
+stopping at the missing `br` executable. `qualify_local.sh` refused the dirty
+development checkout. No full runtime, release or native qualification is
+claimed. The field-rebase absence census also recognizes harvest markers and
+retained task identities, so unavailable model history cannot certify a
+model-free rebase. All 17 tests in the complete verbatim witness modules
+passed against the actual core/world/intent crates; that component run excludes
+the server, facade and async runtime. See `docs/LAB_RESOURCE_HARVEST.md` for
+the exact contract.
+
+Owner: `df-lab-resource-harvest-h2m`.
+
 ## Unreleased — Rank entities within witnessed relationships
 
 `ranked_entities` now accepts the same positive one-hop `relation` selector as

@@ -36,6 +36,8 @@ mod carpentry;
 mod construction_materials;
 #[path = "effects_furniture.rs"]
 mod furniture;
+#[path = "effects_harvest.rs"]
+mod harvest;
 #[path = "effects_provisions.rs"]
 mod provisions;
 #[path = "effects_workforce.rs"]
@@ -58,6 +60,16 @@ pub use provisions::{
     PROVISIONS_LEDGER_FIELD, PROVISIONS_LEDGER_GENERATION_FIELD, ProvisionsOrder, ProvisionsReport,
     STOCK_PLANT_FIELD, provisions_completion_predicates, provisions_input_cost, provisions_model,
     provisions_report, validate_provisions_completion, validate_provisions_identity,
+};
+
+pub use harvest::{
+    HARVEST_INITIAL_FIELD, HARVEST_LEDGER_FIELD, HARVEST_LEDGER_GENERATION_FIELD,
+    HARVEST_REMAINING_FIELD, HARVEST_RESOURCE_FIELD, HARVEST_SOURCE_FIELD,
+    HARVEST_SOURCE_GENERATION_FIELD, HARVEST_SOURCE_MODEL_FIELD, HARVEST_TASK_KIND,
+    HARVEST_TASK_MODEL_FIELD, HARVEST_TICKS_PER_UNIT, HARVEST_YIELDED_FIELD, HarvestReport,
+    HarvestSource, HarvestTask, LABORATORY_HARVEST_MODEL, LABORATORY_HARVEST_MODEL_FIELD,
+    MAX_HARVEST_AMOUNT, MAX_HARVEST_SOURCES, MAX_HARVEST_TASKS, harvest_completion_predicates,
+    harvest_model, harvest_report, validate_harvest_completion, validate_harvest_identity,
 };
 
 pub use workforce::{
@@ -498,6 +510,7 @@ pub fn default_postconditions(
 ) -> Vec<Predicate> {
     match action {
         Action::Pause { paused } => vec![Predicate::Paused(*paused)],
+        Action::HarvestResource { .. } => harvest_completion_predicates(action, idempotency_key),
         Action::DesignateDig { area, mode } => vec![Predicate::RegionTerrain {
             area: *area,
             tile_code: dig_target_tile_code(*mode),
@@ -602,6 +615,10 @@ pub fn default_obligation(
                 .saturating_add(100)
         }
         Action::Build { .. } | Action::PlaceFurniture { .. } => BUILD_TICKS.saturating_mul(4),
+        Action::HarvestResource { amount, .. } => HARVEST_TICKS_PER_UNIT
+            .saturating_mul(u64::from(*amount))
+            .saturating_mul(2)
+            .saturating_add(100),
         Action::CreateWorkOrder { amount, .. } => WORK_ORDER_TICKS_PER_UNIT
             .saturating_mul(u64::from(*amount))
             .saturating_mul(2)
@@ -813,6 +830,7 @@ pub fn apply_effect(
     let staffed = laboratory_workforce_model(snapshot)?.is_some();
     construction_material_model(snapshot)?;
     provisions_model(snapshot)?;
+    harvest_model(snapshot)?;
     let mut changed = apply_effect_inner(snapshot, action, idempotency_key)?;
     if staffed && workforce::registered_action(action) {
         changed |= workforce::stamp(snapshot, created_entity_id(idempotency_key, 0))?;
@@ -826,6 +844,7 @@ fn apply_effect_inner(
     idempotency_key: &str,
 ) -> Result<bool> {
     match action {
+        Action::HarvestResource { .. } => harvest::dispatch(snapshot, action, idempotency_key),
         Action::Pause { paused } => {
             let changed = snapshot.paused != *paused;
             snapshot.paused = *paused;
@@ -1113,6 +1132,9 @@ fn cancel_effect_inner(
     action: &Action,
     idempotency_key: &str,
 ) -> Result<bool> {
+    if let Some(changed) = harvest::cancel(snapshot, action, idempotency_key)? {
+        return Ok(changed);
+    }
     if let Some(changed) = provisions::cancel(snapshot, action, idempotency_key)? {
         return Ok(changed);
     }
@@ -1182,7 +1204,11 @@ fn require_progress_selectors(snapshot: &WorldSnapshot) -> Result<()> {
             {
                 Some((CONSTRUCTION_STAGE_FIELD, true))
             }
-            EntityKind::Other(kind) if kind == DIG_DESIGNATION_KIND => Some((STATUS_FIELD, false)),
+            EntityKind::Other(kind)
+                if kind == DIG_DESIGNATION_KIND || kind == HARVEST_TASK_KIND =>
+            {
+                Some((STATUS_FIELD, false))
+            }
             _ => None,
         };
         if let Some((field, construction)) = lifecycle {
@@ -1416,6 +1442,7 @@ struct EffectTimeline {
     orders: Vec<TimelineOrder>,
     buildings: Vec<EntityId>,
     digs: BTreeMap<EntityId, TimelineDig>,
+    harvests: Vec<EntityId>,
     hostiles: Vec<EntityId>,
     ledger: Option<EntityId>,
     entity_count: u64,
@@ -1466,6 +1493,7 @@ impl EffectTimeline {
         let staffed = laboratory_workforce_model(snapshot)?.is_some();
         construction_materials::validate_model(snapshot, budget)?;
         let provisions = provisions::validate_model(snapshot, budget)?;
+        let harvest = harvest::capture(snapshot, budget)?;
         require_progress_selectors(snapshot)?;
         // Count complete requested footprints before allocating even the first
         // cache. This also refuses oversized overlapping regions before terrain
@@ -1493,6 +1521,12 @@ impl EffectTimeline {
             orders: Vec::new(),
             buildings: Vec::new(),
             digs: BTreeMap::new(),
+            harvests: harvest
+                .into_iter()
+                .flat_map(|report| report.tasks)
+                .filter(|task| task.status == STATUS_ACTIVE)
+                .map(|task| task.task)
+                .collect(),
             hostiles: Vec::new(),
             ledger: stock_ledger(snapshot),
             entity_count,
@@ -1708,8 +1742,11 @@ impl EffectTimeline {
         budget: &mut EffectAdvanceBudget,
     ) -> Result<TimelineInterval> {
         budget.charge(
-            (self.orders.len() + self.buildings.len() + self.digs.len() + self.hostiles.len())
-                as u64
+            (self.orders.len()
+                + self.buildings.len()
+                + self.digs.len()
+                + self.harvests.len()
+                + self.hostiles.len()) as u64
                 + 1,
         )?;
         let mut delta = remaining;
@@ -1759,6 +1796,16 @@ impl EffectTimeline {
             } else {
                 DIG_TICKS_PER_TILE - work
             });
+        }
+        for id in &self.harvests {
+            if active_order(snapshot, *id)?
+                && workforce
+                    .as_ref()
+                    .is_some_and(|selection| selection.harvests.contains(id))
+            {
+                let work = field_u64(entity(snapshot, *id)?, "work_ticks", snapshot.tick)?;
+                delta = delta.min(HARVEST_TICKS_PER_UNIT - work);
+            }
         }
         if let Some(ledger) = self.ledger {
             let metabolism = field_u64(
@@ -1950,6 +1997,11 @@ fn advance_timeline(
             interval.workforce.as_ref().map(|selection| &selection.digs),
             budget,
         )?;
+        if let Some(selection) = &interval.workforce {
+            for id in &selection.harvests {
+                changed |= harvest::advance(snapshot, *id, delta, budget)?;
+            }
+        }
         for index in interval.ready {
             changed |= advance_ready_work_order(
                 snapshot,

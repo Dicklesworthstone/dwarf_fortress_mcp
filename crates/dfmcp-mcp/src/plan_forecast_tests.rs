@@ -379,3 +379,98 @@ fn mixed_furniture_forecast_and_actual_execution_prove_the_same_original_goal() 
     );
     Ok(())
 }
+
+#[test]
+fn finite_harvest_forecast_matches_observed_yield_without_mutating_its_source() -> Result<()> {
+    let mut adapter = MemoryAdapter::new(scenario_snapshot(
+        "starter_fortress_resources",
+        FortressId::new(746),
+        false,
+    )?);
+    let mut current = context(&adapter);
+    for capability in [Capability::Designate, Capability::Checkpoint] {
+        current.grants.push(CapabilityGrant {
+            capability,
+            max_risk: RiskTier::Guarded,
+            scope: CapabilityScope {
+                fortress_id: Some(adapter.snapshot().fortress_id),
+                ..CapabilityScope::default()
+            },
+            expires_at_tick: None,
+            remaining_uses: None,
+        });
+    }
+    let intent = Intent {
+        id: IntentId::new(746),
+        anchor: adapter.snapshot().anchor(),
+        summary: "forecast one original finite wood harvest".to_owned(),
+        terminal_condition: Predicate::FieldCompare {
+            entity_id: starter::STOCK_LEDGER,
+            field: effects::STOCK_WOOD_FIELD.to_owned(),
+            op: CompareOp::Ge,
+            value: Value::U64(starter::OPENING_WOOD + 3),
+        },
+        constraints: vec![Constraint::MaxRisk(RiskTier::Guarded)],
+        requested_actions: parse_steps(
+            &serde_json::json!([{"action": {
+                "kind": "harvest_resource", "source": "8001",
+                "source_generation": 1, "resource": "WOOD", "amount": 3,
+            }}])
+            .to_string(),
+        )?,
+    };
+    let plan =
+        StaticPlanner::default().prepare_laboratory(adapter.snapshot(), &intent, &current)?;
+    let original = adapter.snapshot().clone();
+    let forecast = forecast_plan(&adapter, &plan, &current);
+    assert_eq!(forecast["available"], true, "{forecast}");
+    assert_eq!(forecast["predicted_complete"], true, "{forecast}");
+    assert_eq!(forecast["predicted_goal_truth"], "true");
+    assert_eq!(forecast["predicted_physical_quiescent"], true);
+    let harvesting = &forecast["predicted_harvesting"];
+    assert_eq!(harvesting["epistemic_state"], "predicted");
+    assert_eq!(
+        harvesting["evidence_scope"],
+        "discarded_laboratory_forecast"
+    );
+    assert!(harvesting["source_anchor"].is_null());
+    assert!(harvesting["predicted_anchor"].is_object());
+    assert_eq!(harvesting["sources"][0]["remaining_units"], 29);
+    assert_eq!(harvesting["sources"][0]["harvested_units"], 3);
+    assert_eq!(harvesting["tasks"][0]["harvested_units"], 3);
+    assert_eq!(harvesting["tasks"][0]["amount_remaining"], 0);
+    assert_eq!(adapter.snapshot(), &original);
+
+    let prepared = adapter.prepare(&plan, &current)?;
+    let receipt = adapter.commit(&plan, &prepared, &current)?;
+    let completion = forecast["predicted_completion_tick"]
+        .as_u64()
+        .ok_or_else(|| {
+            DfmcpError::new(
+                ErrorCode::InternalInvariantViolation,
+                "harvest forecast completion missing",
+            )
+        })?;
+    adapter.advance_ticks(completion - original.tick.0)?;
+    current.anchor = adapter.snapshot().anchor();
+    for action in receipt.actions {
+        assert_eq!(
+            adapter.poll_action(action.action_id, &current)?.state,
+            CommitState::Verified
+        );
+        assert!(adapter.action_work_state(action.action_id)?.is_quiescent());
+    }
+    assert_eq!(
+        crate::lab_world::plan_goal_truth(adapter.snapshot(), &plan)?,
+        PredicateTruth::True
+    );
+    let observed = crate::lab_world::harvest_json(adapter.snapshot())?.ok_or_else(|| {
+        DfmcpError::new(
+            ErrorCode::InternalInvariantViolation,
+            "observed harvest report missing",
+        )
+    })?;
+    assert_eq!(observed["sources"], harvesting["sources"]);
+    assert_eq!(observed["tasks"], harvesting["tasks"]);
+    Ok(())
+}

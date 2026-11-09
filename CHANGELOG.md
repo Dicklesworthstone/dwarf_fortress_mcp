@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased — Acquire finite laboratory resources
+
+- Add guarded `harvest_resource` actions for exact WOOD and PLANT sources.
+- Share finite workers and causal service with existing jobs; conserve source
+  units, inventory, partial work and completed yield across cancellation.
+- Bind original source and ledger identity through planning, proof, archives
+  and recovery; reject unsupported native routing.
+- Expose the opt-in resource scenario, strict request grammar, source/task
+  progress and separately labeled forecasts through the existing tool set.
+- Add resource-to-food/furniture, scheduling, conservation, request and recovery
+  regressions. Exact executed evidence is tracked in `IMPLEMENTATION_STATUS.md`.
+
 ## Unreleased — Combine relationship selection with exact numeric ranking
 
 - Add optional positive relationship selectors to `ranked_entities`, including

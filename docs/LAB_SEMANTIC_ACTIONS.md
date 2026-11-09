@@ -38,6 +38,12 @@ at one game year), and an exact inverse compensation where the action fully
 determines it (labor, burrow membership, pause). Explicit caller choices win;
 everything is sealed into the plan digest.
 
+Finite input acquisition is available in `starter_fortress_resources` through
+`harvest_resource` actions. Observed finite WOOD and PLANT sources feed the
+existing economy only after completed shared-worker service. See
+[finite resource harvesting](LAB_RESOURCE_HARVEST.md) for request, conservation,
+progress, cancellation and recovery semantics.
+
 ## Agent workflow
 
 ```text

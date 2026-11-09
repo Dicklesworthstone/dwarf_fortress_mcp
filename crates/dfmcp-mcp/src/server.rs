@@ -496,6 +496,15 @@ fn observe_carried(session: &mut LabSession) -> Result<()> {
                     true,
                 )?;
                 step.work_anchor = Some(snapshot.anchor());
+                if step.state == "dispatched"
+                    && matches!(work.action, Action::HarvestResource { .. })
+                {
+                    dfmcp_intent::effects::validate_harvest_identity(
+                        snapshot,
+                        dfmcp_intent::effects::created_entity_id(&work.idempotency_key, 0),
+                        &work.action,
+                    )?;
+                }
             }
             if step.state != "dispatched" {
                 continue;
@@ -517,6 +526,15 @@ fn observe_carried(session: &mut LabSession) -> Result<()> {
             } else if evidence.establishes(&step.proof)? {
                 step.state = "verified".to_owned();
                 step.proof_anchor = Some(snapshot.anchor());
+            }
+            if step.state == "verified"
+                && let Some(work) = &step.work_step
+            {
+                dfmcp_intent::effects::validate_harvest_completion(
+                    snapshot,
+                    dfmcp_intent::effects::created_entity_id(&work.idempotency_key, 0),
+                    &work.action,
+                )?;
             }
         }
         Ok(next)
@@ -2884,7 +2902,7 @@ pub(crate) fn open_session_in_scenario(
         .iter()
         .map(|c| c.capability.as_str())
         .collect();
-    let (untracked, goal_status, workforce, construction_materials, provisions) =
+    let (untracked, goal_status, workforce, construction_materials, provisions, harvesting) =
         with_session_admitted(
             &session,
             || {
@@ -2892,6 +2910,7 @@ pub(crate) fn open_session_in_scenario(
                     json!({"state": "unknown", "quiescent": false, "items": null,
             "reason": "session observation unavailable"}),
                     serde_json::Value::Null,
+                    None,
                     None,
                     None,
                     None,
@@ -2904,6 +2923,7 @@ pub(crate) fn open_session_in_scenario(
                     session_workforce_json(guard),
                     session_construction_material_json(guard),
                     session_provisions_json(guard),
+                    session_harvest_json(guard),
                 )
             },
         );
@@ -2965,6 +2985,9 @@ pub(crate) fn open_session_in_scenario(
     }
     if let Some(provisions) = provisions {
         payload["provisions"] = provisions;
+    }
+    if let Some(harvesting) = harvesting {
+        payload["harvesting"] = harvesting;
     }
     payload.to_string()
 }
@@ -4167,6 +4190,19 @@ fn action_work_json(session: &LabSession, action_id: ActionId) -> serde_json::Va
                 });
             }
         }
+        match crate::lab_world::harvest_action_json(adapter.snapshot(), entity_id) {
+            Ok(Some(harvesting)) => view["harvesting"] = harvesting,
+            Ok(None) => {}
+            Err(error) => {
+                view["harvesting"] = json!({
+                    "available": false,
+                    "epistemic_state": "unknown",
+                    "reason": error.message,
+                    "code": error.code.as_str(),
+                    "source_anchor": anchor_json(&adapter.snapshot().anchor()),
+                });
+            }
+        }
     }
     view
 }
@@ -4252,6 +4288,7 @@ fn untracked_work(session: &LabSession) -> Result<Vec<restore_work::UntrackedWor
                     | Action::Build { .. }
                     | Action::PlaceFurniture { .. }
                     | Action::CreateWorkOrder { .. }
+                    | Action::HarvestResource { .. }
             )
         {
             known.insert(dfmcp_intent::effects::created_entity_id(
@@ -4313,6 +4350,23 @@ fn session_construction_material_json(session: &LabSession) -> Option<serde_json
     }
     match crate::lab_world::construction_material_json(session.adapter.snapshot()) {
         Ok(materials) => materials,
+        Err(error) => Some(json!({
+            "available": false,
+            "epistemic_state": "unknown",
+            "reason": error.message,
+            "code": error.code.as_str(),
+            "source_anchor": anchor_json(&session.adapter.snapshot().anchor()),
+        })),
+    }
+}
+
+fn session_harvest_json(session: &LabSession) -> Option<serde_json::Value> {
+    let ctx = context_for(session, session.next_request_id);
+    if authorize_entry(&ctx, Capability::Observe, RiskTier::ReadOnly).is_err() {
+        return None;
+    }
+    match crate::lab_world::harvest_json(session.adapter.snapshot()) {
+        Ok(harvesting) => harvesting,
         Err(error) => Some(json!({
             "available": false,
             "epistemic_state": "unknown",

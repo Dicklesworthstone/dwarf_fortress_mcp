@@ -67,6 +67,7 @@ pub fn inspect_effect_work(
     }
     let (kind, lifecycle) = match action {
         Action::DesignateDig { .. } => (effects::DIG_DESIGNATION_KIND, effects::STATUS_FIELD),
+        Action::HarvestResource { .. } => (effects::HARVEST_TASK_KIND, effects::STATUS_FIELD),
         Action::Build { .. } | Action::PlaceFurniture { .. } => {
             ("building", effects::CONSTRUCTION_STAGE_FIELD)
         }
@@ -105,6 +106,9 @@ pub fn inspect_effect_work(
     // Verify immutable effect parameters before interpreting or authorizing a
     // stop of this record. A matching lifecycle word alone is not ownership.
     let identity_matches = match action {
+        Action::HarvestResource { .. } => {
+            effects::validate_harvest_identity(snapshot, entity_id, action).is_ok()
+        }
         Action::DesignateDig { area, mode } => {
             field(entity, "area_min", snapshot.tick) == Some(&Value::Coord(area.min))
                 && field(entity, "area_max", snapshot.tick) == Some(&Value::Coord(area.max))

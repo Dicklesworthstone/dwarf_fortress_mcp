@@ -21,6 +21,15 @@ required capabilities, postcondition template, and completion mode.
 | `checkpoint.restore` | guarded | `restore` | fortress epoch | temporal | new epoch full snapshot matches checkpoint identity |
 | `extension.invoke` | registry-defined | registry-defined | registry-defined | registry-defined | extension-specific verifier |
 
+## Laboratory finite acquisition
+
+The additional closed `resource.harvest` action is guarded and requires `designate`
+plus ordinary checkpoint policy. It binds one exact WOOD or PLANT source and
+finite amount under `finite-harvest/1`, uses the shared worker pool, and proves
+source depletion and observed stock credit through original task/ledger identity.
+It has no compensation or native route. Contract: `docs/LAB_RESOURCE_HARVEST.md`
+and `architecture/laboratory_harvest_v1.json`.
+
 ## Normalization rules
 
 - Cuboids normalize coordinate ordering and reject overflow or empty ranges.

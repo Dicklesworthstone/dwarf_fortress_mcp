@@ -57,6 +57,31 @@ impl FurnitureKind {
     }
 }
 
+/// Closed finite ecological resources supported by the reference laboratory.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum HarvestResource {
+    Wood,
+    Plant,
+}
+
+impl HarvestResource {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Wood => "WOOD",
+            Self::Plant => "PLANT",
+        }
+    }
+
+    #[must_use]
+    pub const fn labor(self) -> &'static str {
+        match self {
+            Self::Wood => "WOODCUTTING",
+            Self::Plant => "PLANT_GATHERING",
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct MaterialSelector {
     pub required_tokens: BTreeSet<String>,
@@ -138,6 +163,14 @@ pub enum Action {
         item: EntityId,
         location: MapCoord,
     },
+    /// Acquire a finite quantity from this exact observed ecological source.
+    /// Source identity and generation are original action semantics, not labels.
+    HarvestResource {
+        source: EntityId,
+        source_generation: u64,
+        resource: HarvestResource,
+        amount: u32,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
@@ -156,6 +189,7 @@ impl Action {
             | Self::ConfigureStockpile { .. }
             | Self::SetBurrowMembership { .. } => RiskTier::Reversible,
             Self::DesignateDig { .. }
+            | Self::HarvestResource { .. }
             | Self::Build { .. }
             | Self::PlaceFurniture { .. }
             | Self::AssignSquad { .. }
@@ -168,7 +202,7 @@ impl Action {
     pub const fn capability(&self) -> Capability {
         match self {
             Self::Pause { .. } => Capability::ControlClock,
-            Self::DesignateDig { .. } => Capability::Designate,
+            Self::DesignateDig { .. } | Self::HarvestResource { .. } => Capability::Designate,
             Self::Build { .. } | Self::PlaceFurniture { .. } => Capability::Construct,
             Self::SetLabor { .. } => Capability::ConfigureLabor,
             Self::CreateWorkOrder { .. } => Capability::ConfigureProduction,
@@ -206,6 +240,10 @@ impl Action {
                     max: *location,
                 }),
             },
+            Self::HarvestResource { source, .. } => ActionScope {
+                entity_ids: vec![*source],
+                map_area: None,
+            },
             Self::SetLabor { units, .. } => ActionScope {
                 entity_ids: units.clone(),
                 map_area: None,
@@ -242,6 +280,7 @@ impl Action {
         matches!(
             self,
             Self::DesignateDig { .. }
+                | Self::HarvestResource { .. }
                 | Self::Build { .. }
                 | Self::PlaceFurniture { .. }
                 | Self::CreateWorkOrder { .. }
@@ -421,6 +460,21 @@ impl Action {
                 });
                 put_u64(output, item.get());
                 put_coord(output, *location);
+            }
+            Self::HarvestResource {
+                source,
+                source_generation,
+                resource,
+                amount,
+            } => {
+                output.push(11);
+                put_u64(output, source.get());
+                put_u64(output, *source_generation);
+                output.push(match resource {
+                    HarvestResource::Wood => 0,
+                    HarvestResource::Plant => 1,
+                });
+                put_u32(output, *amount);
             }
         }
     }

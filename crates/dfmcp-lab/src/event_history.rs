@@ -566,6 +566,9 @@ fn kind(entity: &EntityRecord) -> WorldEventKind {
         EntityKind::Other(ref name) if name == effects::DIG_DESIGNATION_KIND => {
             WorldEventKind::ConstructionChanged
         }
+        EntityKind::Other(ref name) if name == effects::HARVEST_TASK_KIND => {
+            WorldEventKind::JobChanged
+        }
         _ => WorldEventKind::Other("laboratory_entity_changed".to_owned()),
     }
 }

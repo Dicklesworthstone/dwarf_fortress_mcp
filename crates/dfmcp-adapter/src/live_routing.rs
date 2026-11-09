@@ -443,6 +443,9 @@ pub fn route_step(step: &PlanStep) -> StepRoute {
         Action::PlaceFurniture { .. } => refuse(
             "item-backed furniture/1 placement uses laboratory canonical item custody; it has no reviewed native identity resolution or live family",
         ),
+        Action::HarvestResource { .. } => refuse(
+            "finite-harvest/1 uses laboratory resource identities and yield; it has no reviewed native identity resolution or live family",
+        ),
         Action::Extension {
             namespace, name, ..
         } => refuse(format!(

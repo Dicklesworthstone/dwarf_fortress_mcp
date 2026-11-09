@@ -1,0 +1,41 @@
+{
+  "$id": "https://dwarf-fortress-mcp.org/schemas/0.1.0/lab_harvest_action.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Finite laboratory harvest action",
+  "description": "Decoded action object inside the existing fortress.plan actions-string step array. Requires finite-harvest/1.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "source",
+    "source_generation",
+    "resource",
+    "amount"
+  ],
+  "properties": {
+    "kind": {
+      "const": "harvest_resource"
+    },
+    "source": {
+      "type": "string",
+      "pattern": "^[1-9][0-9]{0,19}$",
+      "$comment": "The runtime additionally enforces the canonical u64 range."
+    },
+    "source_generation": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 4294967295
+    },
+    "resource": {
+      "enum": [
+        "WOOD",
+        "PLANT"
+      ]
+    },
+    "amount": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100
+    }
+  }
+}
