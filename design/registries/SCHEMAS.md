@@ -7,6 +7,7 @@
 | `dfmcp.tool.observe.input` | `0.1.0` | additive optional fields | JSON | `schemas/observe.input.schema.json` |
 | `dfmcp.tool.query.input` | `0.1.0` | additive optional fields | JSON | `schemas/query.input.schema.json` |
 | `dfmcp.tool.plan.input` | `0.1.0` | action-registry negotiated | JSON | `schemas/plan.input.schema.json` |
+| `dfmcp.resource-acquisition` | `1` | closed laboratory blueprint; fixed `resource_acquisition_v1` source | canonical JSON request and domain-separated source seal | `schemas/lab_resource_acquisition.schema.json` |
 | `dfmcp.tool.commit.input` | `0.1.0` | frozen mutation identity | JSON | `schemas/commit.input.schema.json` |
 | `dfmcp.tool.wait.input` | `0.1.0` | additive optional fields | JSON | `schemas/wait.input.schema.json` |
 | `dfmcp.tool.cancel.input` | `0.1.0` | additive optional fields | JSON | `schemas/cancel.input.schema.json` |

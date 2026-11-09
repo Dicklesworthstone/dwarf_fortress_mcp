@@ -44,13 +44,18 @@ pub(super) fn projection(
         .pending
         .iter()
         .map(|pending| {
+            let fresh_plan = (pending.plan.anchor != current.anchor)
+                .then(|| pending.source.resource_replan_step(session.session_id))
+                .flatten();
             json!({
-                "plan_digest":pending.digest, "state":"prepared",
+                "plan_digest":pending.digest,
+                "state":if fresh_plan.is_some() {"review_required"} else {"prepared"},
                 "anchor":anchor_json(&pending.plan.anchor),
                 "expires_at_tick":pending.plan.expires_at_tick.0,
                 "steps":crate::lab_world::plan_steps_json(&pending.plan),
-                "minimum_safe_next_step":{"tool":"fortress.commit","arguments":{
-                    "session_id":session.session_id.to_string(),"plan_digest":pending.digest}},
+                "minimum_safe_next_step":fresh_plan.unwrap_or_else(|| json!({
+                    "tool":"fortress.commit","arguments":{
+                    "session_id":session.session_id.to_string(),"plan_digest":pending.digest}})),
             })
         })
         .collect::<Vec<_>>();

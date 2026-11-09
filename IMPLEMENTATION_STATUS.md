@@ -1,5 +1,69 @@
 # Implementation Status
 
+## Unreleased — Plan original resource stock objectives through MCP
+
+The existing `fortress.plan` blueprint argument now accepts the closed
+`resource_acquisition` request. It installs and retains the fixed
+`resource_acquisition_v1` compiler, canonical original WOOD/PLANT minima and
+explicit optional labor-assignment policy. A domain-separated request digest
+participates in the ordinary plan seal, including unused assignment permission.
+Existing Blueprint archive identities are reused without a new action, tool,
+dependency or protocol generation.
+
+Current Observe, Query and Plan authority and the complete bounded source are
+admitted before compilation. The original request, current stock and deficits,
+exact source generations and amounts, staffing choices, service horizon,
+mandatory harvest proof and discarded prediction are published before pending
+work changes. Refused authority, source, action or output budgets and already-met
+targets leave the previously reviewed pending plan intact. Commit retains the
+ordinary guarded Designate, Checkpoint and any ConfigureLabor requirements.
+Resource proposals keep full top-level action proof once, with a checked
+same-response pointer, count and digest in the pending catalog. Existing
+non-resource catalog representations are unchanged.
+
+Candidate comparison and selection preserve the same source. Durable recovery
+reconstructs the original compiler against its sealed snapshot; changed-anchor
+commit refuses automatic witness rebase or source replay and returns the exact
+original request for a fresh explicit Plan/review. Recovery, recommendations and
+pending catalogs retain that next step through later Observe/Wait and owned
+query/comparison responses. The cache is bound to the pending digest and canonical
+session identity, stale Commit is unavailable, and a successful replacement
+clears the hint. Cancellation keeps physically
+completed yield, and a new acquisition sizes only the observed residual.
+Production still requires observed inputs after acquisition; neither prepared
+work nor a forecast supplies inventory. No `continue_goal` acquisition extension,
+native route or live admission is introduced.
+
+Validation: the actual intent suite passed 234 tests, including 13 new
+acquisition regressions. An exact-source harness with real core/world/intent
+and root-locked serde dependencies passed all 14 tests: six new request,
+compiler, source-seal and replay cases plus eight existing observation-projection
+regressions, with no stubs. A separate publication/economy assembly retains
+26 original MCP files and four complete original fragments, identity-audited
+with zero mismatches or stubs. It caught and fixed a 19,668-byte default response:
+the two-resource packet now fits in 14,755 of 16,384 allowed bytes while keeping
+all 5,082 bytes of complete step proof. Its real acquisition-to-production chain
+ends with 22 beds and zero wood; current acquisition truth becomes false while
+the production goal is true. Original source/ledger generation fences and a
+600-token output refusal also passed.
+
+The selected server/facade assembly passed all 18 public workflow tests: eight
+new resource cases and ten existing comparison/selection regressions. Its
+84 original production modules and exact test bodies are identity-audited;
+only transport registration/stdio entry points and unrelated test registrations
+are excluded. The ambient Task service is explicitly uninstalled with
+fail-closed nonexecuted methods; resource-link and admission helpers retain
+their real bodies. These checks exercise the actual laboratory session,
+publication, authority, commit, wait, cancellation and source-replay handlers.
+They do not execute MCP transport or installed task supervision.
+
+Actual MCP compilation and metadata checking were killed by SIGKILL in pinned
+`asupersync` before reaching this crate, including a single-job, debug-free
+attempt after moving this task's toolchain and dependency cache off memory-backed
+storage. No full MCP, native or clean current-head release pass is claimed.
+Owner: `df-lab-resource-harvest-h2m.1`; usage and bounds:
+`docs/LAB_RESOURCE_ACQUISITION.md`.
+
 ## Unreleased — Compile finite resource stock objectives
 
 The core `ResourceAcquisitionPlan` now compiles original WOOD/PLANT minima
@@ -14,8 +78,8 @@ targets yield no work or staffing changes.
 
 The compiler is pure planning over the existing laboratory model. Original
 stock truth remains distinct from physical action completion. Existing action,
-archive, protocol and dependency identities are unchanged. The normal MCP
-source and complete-packet publication integration is being added separately.
+archive, protocol and dependency identities are unchanged. The MCP source and
+complete-packet publication integration are described separately above.
 Owner: `df-lab-resource-harvest-h2m.1`.
 
 Validation: the actual `cargo test --locked --offline -p dfmcp-intent --lib`

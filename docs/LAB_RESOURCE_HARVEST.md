@@ -4,6 +4,12 @@ The `starter_fortress_resources` scenario extends the finite workforce, construc
 
 This is a deterministic reference economy. Resource units and timing are laboratory rules; the action has no native DFHack route or admission.
 
+For an original WOOD/PLANT stock target, use the
+[`resource_acquisition` blueprint](LAB_RESOURCE_ACQUISITION.md). It calculates
+current deficits, allocates multiple finite sources and optionally proposes
+explicitly permitted labor enables through these same actions. The direct
+action form below remains available for an intentionally selected source.
+
 ## Request
 
 Pass this array as the existing `fortress.plan` actions string:

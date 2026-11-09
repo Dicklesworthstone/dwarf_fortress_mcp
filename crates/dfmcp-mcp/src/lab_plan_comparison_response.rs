@@ -5,11 +5,43 @@ use super::temporal_response::TemporalResponseProjection;
 use crate::agent_turn::{
     AgentPhase, AgentTurnBuilder, ContinuityStatus, ObservationProfile, recommendation, uncertainty,
 };
-use dfmcp_core::{DfmcpError, ErrorCode, Result};
+use dfmcp_core::{DfmcpError, ErrorCode, Result, SessionId};
+use dfmcp_intent::PreparedPlan;
 use serde_json::{Value, json};
 
 fn invariant(message: &str) -> DfmcpError {
     DfmcpError::new(ErrorCode::InternalInvariantViolation, message)
+}
+
+/// Resource plans carry their complete proof once in the same response. The
+/// catalog names that exact array rather than duplicating every predicate.
+pub(super) fn pending_plan_entry(
+    plan: &PreparedPlan,
+    session_id: SessionId,
+    resource_acquisition: bool,
+) -> Value {
+    let digest = plan.digest.to_string();
+    let mut pending = json!({
+        "plan_digest": digest,
+        "state": "prepared",
+        "anchor": crate::observation_projection::anchor_json(&plan.anchor),
+        "expires_at_tick": plan.expires_at_tick.0,
+        "minimum_safe_next_step": {"tool": "fortress.commit", "arguments": {
+            "session_id": session_id.to_string(), "plan_digest": digest,
+        }},
+    });
+    if resource_acquisition {
+        pending["step_count"] = json!(plan.steps.len());
+        pending["steps_reference"] = json!({
+            "scope": "same_response",
+            "json_pointer": "/steps",
+            "plan_digest": digest,
+            "complete": true,
+        });
+    } else {
+        pending["steps"] = crate::lab_world::plan_steps_json(plan);
+    }
+    pending
 }
 
 pub(super) fn finish(
@@ -18,7 +50,8 @@ pub(super) fn finish(
     query_work: Value,
     selected_pending: Option<Value>,
 ) -> Result<String> {
-    let selecting = payload["kind"] == "select_candidate";
+    let acquisition = payload["kind"] == "resource_acquisition";
+    let selecting = payload["kind"] == "select_candidate" || acquisition;
     if !payload.is_object()
         || payload["ok"] != true
         || payload["anchor"] != projection.anchor
@@ -59,13 +92,37 @@ pub(super) fn finish(
         active_work[name] = records.clone();
     }
     if let Some(pending) = selected_pending {
+        if let Some(reference) = pending.get("steps_reference") {
+            let steps = payload["steps"].as_array();
+            if reference["scope"] != "same_response"
+                || reference["json_pointer"] != "/steps"
+                || reference["complete"] != true
+                || reference["plan_digest"] != payload["plan_digest"]
+                || pending["plan_digest"] != payload["plan_digest"]
+                || steps
+                    .is_none_or(|rows| pending["step_count"].as_u64() != Some(rows.len() as u64))
+                || !payload["resource_acquisition"].is_object()
+            {
+                return Err(invariant(
+                    "resource pending catalog must reference its complete matching plan steps in this response",
+                ));
+            }
+        }
         active_work["pending_plans"] = json!([pending]);
     }
     let recommendations = if selecting {
         let mut next = recommendation(
-            "commit-selected-candidate",
+            if acquisition {
+                "commit-resource-acquisition"
+            } else {
+                "commit-selected-candidate"
+            },
             "fortress.commit",
-            "The selected source has a newly prepared ordinary plan.",
+            if acquisition {
+                "The original resource minima have a newly prepared finite acquisition plan."
+            } else {
+                "The selected source has a newly prepared ordinary plan."
+            },
             "Pursue the selected original objective after current-state revalidation.",
             "Obtain observed effect and obligation evidence.",
             payload["max_risk"].as_str().unwrap_or("unknown"),

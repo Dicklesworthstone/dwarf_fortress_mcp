@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased — Plan resource acquisition through the existing MCP loop
+
+- Add the strict, versioned `resource_acquisition` blueprint for absolute WOOD
+  and PLANT stock minima, with explicit optional labor setup.
+- Publish original targets, current deficits, exact source allocations, worker
+  choices, ordinary proof obligations and a separately labeled discarded forecast.
+- Admit current source/authority budgets and the complete Agent Turn before
+  changing a pending plan; preserve reviewed work on refusal or no-op requests.
+- Keep complete action proof once per resource proposal, with a checked catalog
+  reference, so a two-resource review fits the default response allowance.
+- Support candidate comparison, selection and durable original-source replay;
+  require a fresh reviewed allocation when the source anchor changes, retaining
+  that exact next step through later observations and query/comparison catalogs.
+- Add public workflow regressions for authority, cancellation and residual work,
+  original identity, and acquisition of observed inputs for furniture production.
+
 ## Unreleased — Compile original finite resource stock goals
 
 - Add bounded WOOD/PLANT target compilation from qualified observed stock and

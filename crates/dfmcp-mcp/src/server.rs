@@ -56,6 +56,13 @@ use objectives::{Objective, objective_history_roots};
 #[path = "production_source.rs"]
 pub(crate) mod production_source;
 
+#[path = "resource_acquisition.rs"]
+mod resource_acquisition;
+
+#[cfg(test)]
+#[path = "resource_acquisition_mcp_tests.rs"]
+mod resource_acquisition_mcp_tests;
+
 #[path = "lab_structured_query.rs"]
 pub(crate) mod structured_query;
 
@@ -1815,6 +1822,27 @@ impl GoalContinuation {
 }
 
 impl PlanSource {
+    fn is_resource_acquisition(&self) -> bool {
+        matches!(self, Self::Blueprint { raw, .. } if resource_acquisition::is_request(raw))
+    }
+
+    fn resource_replan_step(&self, session_id: SessionId) -> Option<serde_json::Value> {
+        if !self.is_resource_acquisition() {
+            return None;
+        }
+        let Self::Blueprint { summary, raw } = self else {
+            return None;
+        };
+        Some(json!({
+            "tool": "fortress.plan",
+            "arguments": {
+                "session_id": session_id.to_string(),
+                "summary": summary,
+                "blueprint": raw,
+            },
+        }))
+    }
+
     fn durable(&self) -> dfmcp_lab::durable::DurablePlanSource {
         use dfmcp_lab::durable::DurablePlanSource as D;
         match self {
@@ -2018,6 +2046,11 @@ impl PlanSource {
                     .map(|(intent, analysis)| (intent, Some(analysis)))
             }
             Self::Blueprint { summary, raw } => {
+                if resource_acquisition::is_request(raw) {
+                    return resource_acquisition::ResourceAcquisitionRequest::parse(raw)?
+                        .compile(id, snapshot, summary)
+                        .map(|(intent, analysis)| (intent, Some(analysis)));
+                }
                 if room_provisioning::is_provisioned_room(raw) {
                     return room_provisioning::ProvisionedRoomRequest::parse(raw)?
                         .compile(id, snapshot, summary)
@@ -3516,6 +3549,31 @@ pub(crate) fn plan_request_publication(
     production: Option<String>,
     started: std::time::Instant,
 ) -> PlanPublication {
+    if blueprint
+        .as_deref()
+        .is_some_and(resource_acquisition::is_request)
+    {
+        if actions.is_some() || production.is_some() || paused_target.is_some() {
+            return PlanPublication::Pending(coded_error_payload(
+                "fortress.plan",
+                ErrorCode::InvalidRequest,
+                "resource acquisition contains its complete objective; do not combine it with actions, production or a pause target",
+            ));
+        }
+        let Some(raw) = blueprint else {
+            return PlanPublication::Pending(coded_error_payload(
+                "fortress.plan",
+                ErrorCode::InternalInvariantViolation,
+                "resource acquisition source disappeared before planning",
+            ));
+        };
+        return match plan_comparison_handler::execute_resource_acquisition(
+            session_id, summary, &raw, started,
+        ) {
+            Ok(output) => PlanPublication::Published(output),
+            Err(error) => PlanPublication::Pending(dfmcp_error_payload("fortress.plan", &error)),
+        };
+    }
     let parsed = blueprint.as_deref().map(plan_comparison::parse).transpose();
     let request = match parsed {
         Ok(request) => request.flatten(),
@@ -3702,7 +3760,14 @@ fn plan_request_legacy(
                         }
                     }
                     (_, _, Some(raw)) => {
-                        let raw = if room_provisioning::is_provisioned_room(&raw) {
+                        let raw = if resource_acquisition::is_request(&raw) {
+                            match resource_acquisition::ResourceAcquisitionRequest::parse_current(
+                                &raw,
+                            ) {
+                                Ok(request) => request.canonical_json(),
+                                Err(error) => return dfmcp_error_payload("fortress.plan", &error),
+                            }
+                        } else if room_provisioning::is_provisioned_room(&raw) {
                             match room_provisioning::ProvisionedRoomRequest::parse_current(&raw) {
                                 Ok(request) => request.canonical_json(),
                                 Err(error) => return dfmcp_error_payload("fortress.plan", &error),
@@ -3720,6 +3785,13 @@ fn plan_request_legacy(
                 }
             };
             let snapshot = guard.adapter.snapshot();
+            if source.is_resource_acquisition() {
+                let admitted = authorize_entry(&ctx, Capability::Observe, RiskTier::ReadOnly)
+                    .and_then(|()| query_budget::admit_sources(&[snapshot], &ctx));
+                if let Err(error) = admitted {
+                    return dfmcp_error_payload("fortress.plan", &error);
+                }
+            }
             let (intent, production_analysis) = match source.compile(IntentId::new(rid), snapshot) {
                 Ok(compiled) => compiled,
                 Err(error) => return dfmcp_error_payload("fortress.plan", &error),
@@ -3742,8 +3814,9 @@ fn plan_request_legacy(
                         "steps": crate::lab_world::plan_steps_json(&plan),
                         "forecast": source.forecast(&guard.adapter, &plan, &ctx),
                         "live_routing": live_routing_json(&plan),
-                        "production": if matches!(&source, PlanSource::CivilianRelease { .. }) { None } else { production_analysis.as_ref() },
+                        "production": if matches!(&source, PlanSource::CivilianRelease { .. }) || source.is_resource_acquisition() { None } else { production_analysis.as_ref() },
                         "civilian_release": if matches!(&source, PlanSource::CivilianRelease { .. }) { production_analysis.as_ref() } else { None },
+                        "resource_acquisition": if source.is_resource_acquisition() { production_analysis.as_ref() } else { None },
                         "continuation": source.continuation_json(),
                         "note": "sealed plan; commit it with fortress_commit before expiry",
                     });
@@ -4458,6 +4531,12 @@ fn rebase_by_witness(
     session: &mut LabSession,
     stale: &PendingPlan,
 ) -> std::result::Result<(PreparedPlan, serde_json::Value), serde_json::Value> {
+    if stale.source.is_resource_acquisition() {
+        return Err(json!({
+            "accepted": false,
+            "reason": "resource acquisition reads complete finite supply, active demand, stock and workforce domains; review a fresh source allocation",
+        }));
+    }
     if matches!(stale.source, PlanSource::CivilianRelease { .. }) {
         return Err(
             json!({"accepted":false, "reason":"civilian release requires a newly reviewed current owned clearance"}),
@@ -4543,6 +4622,28 @@ fn rebase_by_witness(
 }
 
 fn replay_stale_plan(session: &mut LabSession, stale: PendingPlan) -> String {
+    if let Some(next_step) = stale.source.resource_replan_step(session.session_id) {
+        let from_digest = stale.digest.clone();
+        session.pending = Some(stale);
+        let error = DfmcpError::new(
+            ErrorCode::StaleAnchor,
+            "resource acquisition observation changed; request and review a fresh allocation from the complete original stock objective before committing",
+        );
+        let mut payload = serde_json::from_str::<serde_json::Value>(&dfmcp_error_payload(
+            "fortress.commit",
+            &error,
+        ))
+        .unwrap_or_else(|_| json!({"ok": false}));
+        payload["session_id"] = json!(session.session_id.to_string());
+        payload["rebase"] = json!({
+            "method": "fresh_resource_acquisition_required",
+            "from_digest": from_digest,
+            "pending_plan_preserved": true,
+            "game_effect": "none",
+        });
+        payload["next_step"] = next_step;
+        return payload.to_string();
+    }
     if matches!(stale.source, PlanSource::CivilianRelease { .. }) {
         session.pending = Some(stale);
         return coded_error_payload(

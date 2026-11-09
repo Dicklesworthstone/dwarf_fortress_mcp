@@ -368,6 +368,21 @@ The discarded-fork forecast requires Verified actions, a True original goal and
 physically quiet work together before `predicted_complete` is true. See
 `docs/PRODUCTION_RESERVE_PLANNING.md` for inputs, reports and limits.
 
+In the explicit resource laboratory, the closed `resource_acquisition`
+blueprint accepts one or two WOOD/PLANT `quotas` with absolute `minimum` stock
+targets and optional `assign_labor`. It installs fixed compiler
+`resource_acquisition_v1`, allocates complete qualified finite sources, and
+seals ordinary guarded harvests plus explicitly permitted labor enables.
+Current Observe/Query/Plan and full source budgets precede compilation;
+complete publication precedes pending-plan replacement. Original stock truth,
+action proof and physical completion remain separate. Stale commits require
+a new reviewed Plan; unknown supply, overlapping harvests, consuming work,
+insufficient finite sources and action/output bounds refuse explicitly.
+Candidate comparison and selection use the same source. See
+`docs/LAB_RESOURCE_ACQUISITION.md` for the request, analysis and acquire-then-
+observe-then-produce workflow. This adds no native route or `continue_goal`
+family.
+
 Furniture quotas share a finite WOOD supply and completed carpenter workshops.
 The planner accounts for existing orders, assigns up to six output jobs jointly,
 and serializes work sharing a selected citizen or workshop. Each completed

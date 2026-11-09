@@ -14,6 +14,9 @@
     },
     "laboratory_harvest_action": {
       "$ref": "./lab_harvest_action.schema.json"
+    },
+    "laboratory_resource_acquisition": {
+      "$ref": "./lab_resource_acquisition.schema.json"
     }
   }
 }

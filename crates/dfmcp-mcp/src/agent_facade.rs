@@ -48,6 +48,8 @@ struct SessionOrientation {
     adapter: Option<String>,
     compatibility: Option<String>,
     pending_plan_digest: Option<String>,
+    /// An exact fresh-Plan affordance, retained only for its unchanged digest.
+    pending_resource_review: Option<(String, Value)>,
     /// Capabilities the pending plan needs to be committed.
     pending_plan_capabilities: Vec<String>,
     /// Sealed per-step summaries of the pending plan (obligations, entities).
@@ -90,6 +92,7 @@ impl SessionOrientation {
                 .and_then(Value::as_str)
                 .map(str::to_owned),
             pending_plan_digest: None,
+            pending_resource_review: None,
             pending_plan_capabilities: Vec::new(),
             pending_plan_steps: Vec::new(),
             pending_forecast: Value::Null,
@@ -103,6 +106,13 @@ impl SessionOrientation {
             last_checkpoint_id: None,
             turn_sequence: 0,
         }
+    }
+
+    fn resource_review_step(&self) -> Option<&Value> {
+        self.pending_resource_review
+            .as_ref()
+            .filter(|(digest, _)| self.pending_plan_digest.as_ref() == Some(digest))
+            .map(|(_, next_step)| next_step)
     }
 
     fn advance_turn(&mut self) -> u64 {
@@ -225,6 +235,7 @@ fn update_orientation(operation: &str, payload: &Value, state: &mut SessionOrien
 
     match operation {
         "fortress.plan" => {
+            state.pending_resource_review = None;
             state.pending_plan_digest = payload
                 .get("plan_digest")
                 .and_then(Value::as_str)
@@ -246,6 +257,7 @@ fn update_orientation(operation: &str, payload: &Value, state: &mut SessionOrien
         }
         "fortress.commit" => {
             state.pending_plan_digest = None;
+            state.pending_resource_review = None;
             let sealed_steps = std::mem::take(&mut state.pending_plan_steps);
             let forecast = std::mem::replace(&mut state.pending_forecast, Value::Null);
             state.pending_plan_capabilities.clear();
@@ -391,6 +403,7 @@ fn update_orientation(operation: &str, payload: &Value, state: &mut SessionOrien
         }
         "fortress.restore" => {
             state.pending_plan_digest = None;
+            state.pending_resource_review = None;
             state.pending_plan_capabilities.clear();
             state.pending_plan_steps.clear();
             state.plan_actions.clear();
@@ -550,14 +563,15 @@ fn wait_ticks(state: &SessionOrientation) -> u64 {
 }
 
 fn active_work(state: &SessionOrientation) -> Value {
+    let review = state.resource_review_step();
     let pending_plans = match state.pending_plan_digest.as_ref() {
         Some(digest) => vec![json!({
             "plan_digest": digest,
-            "state": "prepared",
-            "minimum_safe_next_step": {
+            "state": if review.is_some() { "review_required" } else { "prepared" },
+            "minimum_safe_next_step": review.cloned().unwrap_or_else(|| json!({
                 "tool": "fortress.commit",
                 "arguments": {"plan_digest": digest},
-            },
+            })),
         })],
         None => Vec::new(),
     };
@@ -678,10 +692,12 @@ fn affordances(state: &SessionOrientation) -> Vec<Value> {
     ];
 
     if let Some(digest) = state.pending_plan_digest.as_ref() {
-        let commit_granted = state
-            .pending_plan_capabilities
-            .iter()
-            .all(|capability| has_grant(state, capability));
+        let review_required = state.resource_review_step().is_some();
+        let commit_granted = !review_required
+            && state
+                .pending_plan_capabilities
+                .iter()
+                .all(|capability| has_grant(state, capability));
         result.push(affordance(
             "commit-pending-plan",
             "fortress.commit",
@@ -689,7 +705,12 @@ fn affordances(state: &SessionOrientation) -> Vec<Value> {
             "reversible",
             true,
             commit_granted,
-            (!commit_granted).then_some("the session lacks a capability the sealed plan requires"),
+            if review_required {
+                Some("the original resource objective requires a newly reviewed allocation")
+            } else {
+                (!commit_granted)
+                    .then_some("the session lacks a capability the sealed plan requires")
+            },
             json!({"plan_digest": digest}),
         ));
     } else if let Some(paused) = state.paused {
@@ -762,6 +783,20 @@ fn error_code(payload: &Value) -> &str {
     }
 }
 
+/// This server-owned refusal retains the old proposal and the exact original
+/// source. Observing again cannot make its stale allocation commit-ready.
+fn resource_replan_step(payload: &Value) -> Option<&Value> {
+    let next = payload.get("next_step")?;
+    (!is_ok(payload)
+        && error_code(payload) == "stale_anchor"
+        && payload["rebase"]["method"] == "fresh_resource_acquisition_required"
+        && payload["rebase"]["pending_plan_preserved"] == true
+        && payload["rebase"]["from_digest"].is_string()
+        && next["tool"] == "fortress.plan"
+        && next["arguments"]["blueprint"].is_string())
+    .then_some(next)
+}
+
 /// A fortress need with a concrete remedy outranks routine next steps when
 /// the session holds the authority to plan it; otherwise it stays attention.
 fn recommendations(
@@ -818,6 +853,21 @@ fn routine_recommendations(
     payload: &Value,
     state: &SessionOrientation,
 ) -> Vec<Value> {
+    if let Some(next) =
+        resource_replan_step(payload).or_else(|| ok.then(|| state.resource_review_step()).flatten())
+    {
+        return vec![recommendation(
+            "review-resource-acquisition",
+            "fortress.plan",
+            "the original resource stock objective needs a fresh allocation at the current anchor",
+            "preserve the complete original stock objective",
+            "inspect current finite supply, demand and workforce before committing",
+            "read_only",
+            "not_applicable",
+            false,
+            next["arguments"].clone(),
+        )];
+    }
     if !ok {
         if let Some(consent) = payload.get("clock_consent") {
             return vec![recommendation(
@@ -1387,6 +1437,9 @@ fn uncertainties(state: &SessionOrientation) -> Vec<Value> {
 }
 
 fn recovery_class(payload: &Value) -> RecoveryClass {
+    if resource_replan_step(payload).is_some() {
+        return RecoveryClass::RebaseRequired;
+    }
     match error_code(payload) {
         "cursor_gap" | "stale_anchor" => RecoveryClass::RefreshAndRetry,
         "invalid_plan" | "conflict" => RecoveryClass::RebaseRequired,
@@ -1404,6 +1457,7 @@ fn attach_recovery(payload: &mut Value) {
         return;
     }
     let class = recovery_class(payload);
+    let resource_arguments = resource_replan_step(payload).map(|next| next["arguments"].clone());
     let (tool, reason) = match class {
         RecoveryClass::RefreshAndRetry => (
             Some("fortress.observe"),
@@ -1426,7 +1480,12 @@ fn attach_recovery(payload: &mut Value) {
     if let Some(error) = payload.get_mut("error").and_then(Value::as_object_mut) {
         error.insert(
             "recovery".to_owned(),
-            recovery_guidance(class, tool, reason, json!({})),
+            recovery_guidance(
+                class,
+                tool,
+                reason,
+                resource_arguments.unwrap_or_else(|| json!({})),
+            ),
         );
     }
 }
@@ -1552,6 +1611,12 @@ fn presentation_state(
                 || has_wait_observation(operation, payload)
             {
                 update_orientation(operation, payload, existing);
+            } else if let Some(next) = resource_replan_step(payload) {
+                if let Some(digest) = payload["rebase"]["from_digest"].as_str()
+                    && existing.pending_plan_digest.as_deref() == Some(digest)
+                {
+                    existing.pending_resource_review = Some((digest.to_owned(), next.clone()));
+                }
             } else if let Some(rebased) = payload.get("rebased_plan") {
                 record_surprise(
                     existing,
@@ -1574,6 +1639,7 @@ fn presentation_state(
                     .get("plan_digest")
                     .and_then(Value::as_str)
                     .map(str::to_owned);
+                existing.pending_resource_review = None;
                 existing.pending_plan_capabilities =
                     string_array(rebased.get("required_capabilities"));
                 existing.pending_plan_steps = rebased
@@ -1984,7 +2050,7 @@ pub fn fortress_query(session_id: Option<String>, mode: Option<String>) -> Strin
 }
 
 #[tool(
-    description = "Compare two to four same-objective alternatives with blueprint JSON {\"template\":\"compare_candidates\",\"version\":1,\"horizon_ticks\":1000,\"candidates\":[{\"key\":\"a\",\"blueprint\":{...}},{\"key\":\"b\",\"blueprint\":{...}}]}. Alternatives use exactly one blueprint, actions, or paused_target source; each may have its own summary. Comparisons are stateless conditional laboratory forecasts that preserve pending work. Pass an emitted select_candidate blueprint unchanged to prepare the chosen source under current authority, then use fortress.commit. Candidate wrappers cannot be combined with outer summary/actions/paused_target. Compile an intent into a sealed plan without effects and keep it visible as active work. Without actions it compiles pause/resume (paused_target). actions is a JSON array of steps {\"action\":{\"kind\":...},\"depends_on\":[step indices]} with kinds: pause{paused}, designate_dig{min,max,mode: mine|channel|up_stair|down_stair|up_down_stair|ramp|remove_construction}, build{building e.g. workshop:Still|furniture:Bed|farm_plot, location, min, max, materials?}, place_furniture{furniture: bed|door|table|chair, item: exact canonical item ID, location} (allocates a manufactured laboratory item and proves installation), harvest_resource{source: exact canonical source ID, source_generation, resource: WOOD|PLANT, amount: 1..100} (finite-harvest/1 laboratory sources only; requires guarded designate and checkpoint, consumes shared worker time and credits supply only on completed units), set_labor{units,labor,enabled}, create_work_order{name,job_token,amount}, configure_stockpile{stockpile,accepts,max_bins?,max_barrels?,max_wheelbarrows?}, assign_squad{units,squad}, set_burrow_membership{units,burrow,assigned}, set_standing_order{key,value}. Coordinates are [x,y,z]; entity IDs are decimal strings. Postconditions, game-time obligations and compensations are sealed from the reference action model and returned per step. Instead of actions, blueprint is an objective the planner decomposes. For observed civilian protection use actions={\"workflow\":\"civilian_protection_v1\",\"burrow\":\"3001\",\"civilians\":[\"1001\"]} while paused. After the world-owned civilian_recovery query reports a stable complete clear interval, blueprint={\"template\":\"civilian_release\",\"burrow\":\"3001\"} seals a separately reviewed release of the complete current civilian roster. Every release effect checks current threats and exact generations; changed observations require a fresh review, and restart/restore resets clearance. For item-backed furnished rooms use {\"template\":\"provisioned_room\",\"layout\":{\"template\":\"bedroom_cluster\",\"origin\":[x,y,z],\"rooms\":n,\"room_size\":[w,h]}} or a dining_hall layout with origin,width,height. It reuses eligible exact furniture, manufactures missing items from finite WOOD, excavates, then installs them; the final goal proves every original terrain region and exact installed item. Optional prerequisites reuse the production setup grammar. In shared-workforce laboratory worlds, prerequisites.workforce=complete_project_v1 also staffs required mining and construction; assign_labor=true permits qualified labor enables and false requires observed enabled workers. For access from an observed entrance, wrap that complete request as {\"template\":\"connected_room\",\"room\":{\"template\":\"provisioned_room\",\"layout\":{...}},\"access\":{\"entry\":[x,y,z],\"region\":{\"min\":[x,y,z],\"max\":[x,y,z]}}}. The default connected_room_v1 excavates safe same-level connectors and proves current floor access around building occupancy. Set planner=connected_room_stairs_v1 explicitly for a multi-level domain: it reuses paired laboratory stairs or excavates ordinary rock outside room floor masks as UpDownStair shafts, and proves current entrance-to-furnishing access across levels. Both generations are bounded to 1024 cells and preserve their exact access model through continue_goal; native directional stairs and hauling are not proved. Existing abstract blueprint forms remain: {\"template\":\"bedroom_cluster\",\"origin\":[x,y,z],\"rooms\":n,\"room_size\":[w,h]} (a bed per room), {\"template\":\"dining_hall\",\"origin\",\"width\",\"height\"} (table and chair), {\"template\":\"workshop_hub\",\"origin\",\"bays\"}, {\"template\":\"stockpile_vault\",\"origin\",\"width\",\"height\",\"category\"}, {\"template\":\"production\",\"quotas\":[{\"item\":\"DRINK|FOOD|BED|DOOR|TABLE|CHAIR\",\"minimum\":n}]} (work orders sized against observed stock by the production compiler; optional orders:\"dependency_preserving_v1\" adds source-bound unique order names, explicit per-batch material conditions and named predecessor completion conditions alongside the action DAG, preserved through replay and continuation), or {\"template\":\"continue_goal\",\"plan_digest\":\"retained original goal digest\"} (a new reviewed pursuit of a retained production, provisioned-room or connected-room request; preserves all original quotas or room slots, setup options and connected entrance/domain, keeps valid installed furnishings, and plans missing work including access repair; requires current Observe/Plan authority and proven quiet earlier lineage work; original historical action outcomes remain unchanged)."
+    description = "Compare two to four same-objective alternatives with blueprint JSON {\"template\":\"compare_candidates\",\"version\":1,\"horizon_ticks\":1000,\"candidates\":[{\"key\":\"a\",\"blueprint\":{...}},{\"key\":\"b\",\"blueprint\":{...}}]}. Alternatives use exactly one blueprint, actions, or paused_target source; each may have its own summary. Comparisons are stateless conditional laboratory forecasts that preserve pending work. Pass an emitted select_candidate blueprint unchanged to prepare the chosen source under current authority, then use fortress.commit. Candidate wrappers cannot be combined with outer summary/actions/paused_target. Compile an intent into a sealed plan without effects and keep it visible as active work. Without actions it compiles pause/resume (paused_target). actions is a JSON array of steps {\"action\":{\"kind\":...},\"depends_on\":[step indices]} with kinds: pause{paused}, designate_dig{min,max,mode: mine|channel|up_stair|down_stair|up_down_stair|ramp|remove_construction}, build{building e.g. workshop:Still|furniture:Bed|farm_plot, location, min, max, materials?}, place_furniture{furniture: bed|door|table|chair, item: exact canonical item ID, location} (allocates a manufactured laboratory item and proves installation), harvest_resource{source: exact canonical source ID, source_generation, resource: WOOD|PLANT, amount: 1..100} (finite-harvest/1 laboratory sources only; requires guarded designate and checkpoint, consumes shared worker time and credits supply only on completed units), set_labor{units,labor,enabled}, create_work_order{name,job_token,amount}, configure_stockpile{stockpile,accepts,max_bins?,max_barrels?,max_wheelbarrows?}, assign_squad{units,squad}, set_burrow_membership{units,burrow,assigned}, set_standing_order{key,value}. Coordinates are [x,y,z]; entity IDs are decimal strings. Postconditions, game-time obligations and compensations are sealed from the reference action model and returned per step. Instead of actions, blueprint is an objective the planner decomposes. For finite laboratory raw-material stock goals, template resource_acquisition accepts one or two distinct quotas with resource WOOD|PLANT and positive minimum, optional assign_labor (default false), and fixed planner resource_acquisition_v1. It allocates complete source-qualified deficits into bounded harvest actions, optionally enables observed disabled labor, and retains the original stock objective. Pending harvest is never inventory; observe completed inputs before planning production. Existing active harvest or material-consuming work can require observation or explicit drain first. A changed anchor requires a fresh Plan/review of the original request; no automatic continue_goal is supported for acquisition. For observed civilian protection use actions={\"workflow\":\"civilian_protection_v1\",\"burrow\":\"3001\",\"civilians\":[\"1001\"]} while paused. After the world-owned civilian_recovery query reports a stable complete clear interval, blueprint={\"template\":\"civilian_release\",\"burrow\":\"3001\"} seals a separately reviewed release of the complete current civilian roster. Every release effect checks current threats and exact generations; changed observations require a fresh review, and restart/restore resets clearance. For item-backed furnished rooms use {\"template\":\"provisioned_room\",\"layout\":{\"template\":\"bedroom_cluster\",\"origin\":[x,y,z],\"rooms\":n,\"room_size\":[w,h]}} or a dining_hall layout with origin,width,height. It reuses eligible exact furniture, manufactures missing items from finite WOOD, excavates, then installs them; the final goal proves every original terrain region and exact installed item. Optional prerequisites reuse the production setup grammar. In shared-workforce laboratory worlds, prerequisites.workforce=complete_project_v1 also staffs required mining and construction; assign_labor=true permits qualified labor enables and false requires observed enabled workers. For access from an observed entrance, wrap that complete request as {\"template\":\"connected_room\",\"room\":{\"template\":\"provisioned_room\",\"layout\":{...}},\"access\":{\"entry\":[x,y,z],\"region\":{\"min\":[x,y,z],\"max\":[x,y,z]}}}. The default connected_room_v1 excavates safe same-level connectors and proves current floor access around building occupancy. Set planner=connected_room_stairs_v1 explicitly for a multi-level domain: it reuses paired laboratory stairs or excavates ordinary rock outside room floor masks as UpDownStair shafts, and proves current entrance-to-furnishing access across levels. Both generations are bounded to 1024 cells and preserve their exact access model through continue_goal; native directional stairs and hauling are not proved. Existing abstract blueprint forms remain: {\"template\":\"bedroom_cluster\",\"origin\":[x,y,z],\"rooms\":n,\"room_size\":[w,h]} (a bed per room), {\"template\":\"dining_hall\",\"origin\",\"width\",\"height\"} (table and chair), {\"template\":\"workshop_hub\",\"origin\",\"bays\"}, {\"template\":\"stockpile_vault\",\"origin\",\"width\",\"height\",\"category\"}, {\"template\":\"production\",\"quotas\":[{\"item\":\"DRINK|FOOD|BED|DOOR|TABLE|CHAIR\",\"minimum\":n}]} (work orders sized against observed stock by the production compiler; optional orders:\"dependency_preserving_v1\" adds source-bound unique order names, explicit per-batch material conditions and named predecessor completion conditions alongside the action DAG, preserved through replay and continuation), or {\"template\":\"continue_goal\",\"plan_digest\":\"retained original goal digest\"} (a new reviewed pursuit of a retained production, provisioned-room or connected-room request; preserves all original quotas or room slots, setup options and connected entrance/domain, keeps valid installed furnishings, and plans missing work including access repair; requires current Observe/Plan authority and proven quiet earlier lineage work; original historical action outcomes remain unchanged)."
 )]
 pub fn fortress_plan(
     session_id: Option<String>,
@@ -2016,7 +2082,10 @@ pub fn fortress_plan(
             // Refresh presentation hints only; never refit or refuse these bytes.
             // A comparison must not clear a previously prepared plan's hints.
             if let Ok(mut payload) = serde_json::from_str::<Value>(&raw)
-                && payload["kind"] == "select_candidate"
+                && matches!(
+                    payload["kind"].as_str(),
+                    Some("select_candidate" | "resource_acquisition")
+                )
             {
                 let resolved = payload["session_id"].as_str().map(str::to_owned);
                 let _ = presentation_state("fortress.plan", &mut payload, resolved.as_ref());

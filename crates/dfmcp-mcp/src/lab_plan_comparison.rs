@@ -329,7 +329,10 @@ impl Candidate {
                 raw: request.canonical_json(),
             });
         }
-        let raw = if super::room_provisioning::is_provisioned_room(&raw) {
+        let raw = if super::resource_acquisition::is_request(&raw) {
+            super::resource_acquisition::ResourceAcquisitionRequest::parse_current(&raw)?
+                .canonical_json()
+        } else if super::room_provisioning::is_provisioned_room(&raw) {
             super::room_provisioning::ProvisionedRoomRequest::parse_current(&raw)?.canonical_json()
         } else {
             raw
@@ -492,9 +495,10 @@ fn selection_step(
 /// Keep every decision-bearing outcome, including a separately requested reserve
 /// frontier. Large per-step/model diagnostics belong to the selected ordinary
 /// plan; they do not need to be repeated for every alternative.
-fn compact_prediction(prediction: &Value) -> Value {
+pub(super) fn compact_prediction(prediction: &Value) -> Value {
     let mut compact = serde_json::Map::new();
     for key in [
+        "epistemic_state",
         "available",
         "reason",
         "from_tick",

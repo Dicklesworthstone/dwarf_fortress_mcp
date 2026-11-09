@@ -1,0 +1,56 @@
+{
+  "$id": "https://dwarf-fortress-mcp.org/schemas/0.1.0/lab_resource_acquisition.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Laboratory resource acquisition stock objective",
+  "description": "Decoded fortress.plan blueprint JSON string. Requires finite-harvest/1 and shared-workforce/1. Public intake installs the fixed planner when omitted; retained source must contain it.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["template", "quotas"],
+  "properties": {
+    "template": {"const": "resource_acquisition"},
+    "planner": {"const": "resource_acquisition_v1"},
+    "assign_labor": {"type": "boolean", "default": false},
+    "quotas": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 2,
+      "items": {"$ref": "#/$defs/quota"},
+      "allOf": [
+        {
+          "contains": {
+            "type": "object",
+            "required": ["resource"],
+            "properties": {"resource": {"const": "WOOD"}}
+          },
+          "minContains": 0,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": ["resource"],
+            "properties": {"resource": {"const": "PLANT"}}
+          },
+          "minContains": 0,
+          "maxContains": 1
+        }
+      ]
+    }
+  },
+  "$defs": {
+    "quota": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["resource", "minimum"],
+      "properties": {
+        "resource": {"enum": ["WOOD", "PLANT"]},
+        "minimum": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 18446744073709551615
+        }
+      }
+    }
+  },
+  "$comment": "The parser also rejects duplicate JSON keys, NUL, non-u64 integer spelling, and requests over 16384 UTF-8 bytes. Actual deficits must fit finite qualified sources and 16 ordinary actions including labor enables. No pending or forecast harvest counts as stock."
+}

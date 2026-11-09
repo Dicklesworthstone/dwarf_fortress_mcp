@@ -67,6 +67,121 @@ pub(super) fn execute(
     )
 }
 
+/// New stock-objective intake shares complete publication with candidate
+/// selection. A refused response leaves the previously reviewed plan intact.
+pub(super) fn execute_resource_acquisition(
+    session_id: Option<String>,
+    summary: Option<String>,
+    raw: &str,
+    started: Instant,
+) -> Result<String> {
+    let request = resource_acquisition::ResourceAcquisitionRequest::parse_current(raw)?;
+    let summary = summary.unwrap_or_default();
+    if summary.len() > MAX_SUMMARY_BYTES {
+        return Err(DfmcpError::new(
+            ErrorCode::BudgetExceeded,
+            "resource acquisition summary exceeds its explicit byte bound",
+        ));
+    }
+    let source = PlanSource::Blueprint {
+        summary,
+        raw: request.canonical_json(),
+    };
+    let session = resolve_session(session_id)?;
+    let _admission = LAB_ADMISSION.read().map_err(|_| {
+        DfmcpError::new(
+            ErrorCode::InternalInvariantViolation,
+            "laboratory admission lock poisoned",
+        )
+    })?;
+    ensure_durable_owner(&session)?;
+    with_session_view(
+        &session,
+        || {
+            Err(DfmcpError::new(
+                ErrorCode::InternalInvariantViolation,
+                "resource acquisition session poisoned",
+            ))
+        },
+        |session| {
+            let (rid, current) = next_context(session)?;
+            check(&current, started)?;
+            let snapshot = session.adapter.snapshot();
+            let source_work =
+                query_budget::admit_sources(&[snapshot], &remaining(&current, started)?)?;
+            let (mut payload, pending) = prepare_source(
+                session,
+                source,
+                rid,
+                &current,
+                source_work,
+                "resource_acquisition",
+                started,
+            )?;
+            let forecast = pending.source.forecast(
+                &session.adapter,
+                &pending.plan,
+                &remaining(&current, started)?,
+            );
+            payload["forecast"] = plan_comparison::compact_prediction(&forecast);
+            publish_owned(session, &current, started, payload, Some(pending))
+        },
+        false,
+    )
+}
+
+fn prepare_source(
+    session: &LabSession,
+    source: PlanSource,
+    rid: u128,
+    current: &OperationContext,
+    source_work: serde_json::Value,
+    kind: &str,
+    started: Instant,
+) -> Result<(serde_json::Value, PendingPlan)> {
+    check(current, started)?;
+    let snapshot = session.adapter.snapshot();
+    let (intent, analysis) = source.compile(IntentId::new(rid), snapshot)?;
+    check(current, started)?;
+    let plan = StaticPlanner::default().prepare_laboratory(snapshot, &intent, current)?;
+    check(current, started)?;
+    let digest = plan.digest.to_string();
+    let acquisition = source.is_resource_acquisition();
+    let result = json!({
+        "kind": kind,
+        "schema": if kind == "resource_acquisition" { "dfmcp.resource-acquisition/1" } else { "dfmcp.plan-comparison/1" },
+        "version": 1,
+        "plan_id": plan.id.to_string(),
+        "plan_digest": digest,
+        "terminal_condition": format!("{:?}", intent.terminal_condition),
+        "max_risk": plan.max_risk.as_str(),
+        "required_capabilities": plan.required_capabilities.iter()
+            .map(|capability| capability.as_str()).collect::<Vec<_>>(),
+        "requires_checkpoint": plan.requires_checkpoint,
+        "expires_at_tick": plan.expires_at_tick.0,
+        "steps": crate::lab_world::plan_steps_json(&plan),
+        "production": if acquisition { None } else { analysis.as_ref() },
+        "resource_acquisition": if acquisition { analysis.as_ref() } else { None },
+        "live_routing": live_routing_json(&plan),
+        "source_work": source_work,
+        "forecast": null,
+        "effect_evidence": false,
+        "pending_plan_changed": true,
+        "next_step": {"tool": "fortress.commit", "arguments": {
+            "session_id": session.session_id.to_string(), "plan_digest": digest,
+        }},
+        "note": "freshly prepared ordinary plan; commit still revalidates current authority, source and registered effect policy",
+    });
+    Ok((
+        result,
+        PendingPlan {
+            plan,
+            digest,
+            source,
+        },
+    ))
+}
+
 fn execute_owned(
     session: &mut LabSession,
     request: &plan_comparison::Request,
@@ -75,7 +190,7 @@ fn execute_owned(
     let (rid, current) = next_context(session)?;
     check(&current, started)?;
     let mut selected = None;
-    let mut payload = match request {
+    let payload = match request {
         plan_comparison::Request::Compare(_) => plan_comparison::compare(
             &session.adapter,
             &current,
@@ -94,49 +209,34 @@ fn execute_owned(
                         "selected candidate did not yield a plan source",
                     )
                 })?;
-            check(&current, started)?;
-            let (intent, production) = source.compile(IntentId::new(rid), snapshot)?;
-            check(&current, started)?;
-            let plan = StaticPlanner::default().prepare_laboratory(snapshot, &intent, &current)?;
-            check(&current, started)?;
-            let digest = plan.digest.to_string();
-            let result = json!({
-                "kind": "select_candidate",
-                "schema": "dfmcp.plan-comparison/1",
-                "version": 1,
-                "plan_id": plan.id.to_string(),
-                "plan_digest": digest,
-                "terminal_condition": format!("{:?}", intent.terminal_condition),
-                "max_risk": plan.max_risk.as_str(),
-                "required_capabilities": plan.required_capabilities.iter()
-                    .map(|capability| capability.as_str()).collect::<Vec<_>>(),
-                "requires_checkpoint": plan.requires_checkpoint,
-                "expires_at_tick": plan.expires_at_tick.0,
-                "steps": crate::lab_world::plan_steps_json(&plan),
-                "production": production,
-                "live_routing": live_routing_json(&plan),
-                "source_work": source_work,
-                "forecast": null,
-                "effect_evidence": false,
-                "pending_plan_changed": true,
-                "next_step": {"tool": "fortress.commit", "arguments": {
-                    "session_id": session.session_id.to_string(), "plan_digest": digest,
-                }},
-                "note": "freshly prepared ordinary plan; commit still revalidates current authority, source and registered effect policy",
-            });
-            selected = Some(PendingPlan {
-                plan,
-                digest,
+            let (result, pending) = prepare_source(
+                session,
                 source,
-            });
+                rid,
+                &current,
+                source_work,
+                "select_candidate",
+                started,
+            )?;
+            selected = Some(pending);
             result
         }
     };
+    publish_owned(session, &current, started, payload, selected)
+}
+
+fn publish_owned(
+    session: &mut LabSession,
+    current: &OperationContext,
+    started: Instant,
+    mut payload: serde_json::Value,
+    selected: Option<PendingPlan>,
+) -> Result<String> {
     payload["ok"] = json!(true);
     payload["session_id"] = json!(session.session_id.to_string());
     payload["anchor"] = anchor_json(&current.anchor);
-    check(&current, started)?;
-    let mut projection = temporal_handler::projection(session, &current)?;
+    check(current, started)?;
+    let mut projection = temporal_handler::projection(session, current)?;
     // Recovered work has no live action handle. Keep its retained descriptors
     // visible without sampling or rewriting historical proof during comparison.
     // A terminal goal can still own active or unknown physical work.
@@ -148,24 +248,19 @@ fn execute_owned(
             .map(CarriedStep::to_json)
             .collect::<Vec<_>>()
     );
-    let query_work = complete_query_work(&current, started)?;
+    let query_work = complete_query_work(current, started)?;
     let selected_pending = selected.as_ref().map(|pending| {
-        json!({
-            "plan_digest": pending.digest,
-            "state": "prepared",
-            "anchor": anchor_json(&pending.plan.anchor),
-            "expires_at_tick": pending.plan.expires_at_tick.0,
-            "steps": crate::lab_world::plan_steps_json(&pending.plan),
-            "minimum_safe_next_step": {"tool": "fortress.commit", "arguments": {
-                "session_id": session.session_id.to_string(), "plan_digest": pending.digest,
-            }},
-        })
+        plan_comparison_response::pending_plan_entry(
+            &pending.plan,
+            session.session_id,
+            pending.source.is_resource_acquisition(),
+        )
     });
     let output =
         plan_comparison_response::finish(&projection, payload, query_work, selected_pending)?;
     // The session and shared-world owner remain held through this final check.
     // Nothing fallible may replace the accepted packet after pending changes.
-    check(&current, started)?;
+    check(current, started)?;
     if let Some(pending) = selected {
         session.pending = Some(pending);
     }

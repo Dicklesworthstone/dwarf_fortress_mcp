@@ -275,6 +275,14 @@ explicitly authorized labor and workshop setup. See the
 [furniture production walkthrough](docs/CARPENTRY_PRODUCTION.md) and
 [production reserve planning](docs/PRODUCTION_RESERVE_PLANNING.md).
 
+In `starter_fortress_resources`, a
+[resource acquisition goal](docs/LAB_RESOURCE_ACQUISITION.md) accepts
+WOOD and PLANT stock minima and selects finite harvest sources automatically.
+It can propose explicitly permitted labor enables, retains the original stock
+goal, and shares the ordinary comparison, commit, wait and cancellation paths.
+Complete acquisition and observe its actual yield before using the inputs in
+production, workshop or room plans.
+
 The [original Carpenter workshop workflow](docs/WORKSHOP_CONSTRUCTION_MCP.md)
 documents the separate unadmitted workshop/1.20 native, safe-Rust and registered
 eleven-tool development consumer. Focused execution and an actual-SDK diagnostic
