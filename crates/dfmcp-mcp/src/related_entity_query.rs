@@ -1,16 +1,19 @@
 //! Positive, witnessed relationship selection over one exact canonical source.
 //! Missing relations never become negative evidence about the complete world.
 
-use std::collections::{BTreeMap, BTreeSet};
+#[cfg(test)]
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::time::Instant;
 
+#[cfg(test)]
+use dfmcp_core::EdgeId;
 use dfmcp_core::{
-    Capability, DfmcpError, Digest32, EdgeId, EntityId, ErrorCode, OperationContext, Result,
-    RiskTier,
+    Capability, DfmcpError, Digest32, EntityId, ErrorCode, OperationContext, Result, RiskTier,
 };
-use dfmcp_world::{
-    EdgeRecord, EntityRecord, Predicate, PredicateTruth, WorldSnapshot, evaluate_truth_for,
-};
+#[cfg(test)]
+use dfmcp_world::{EdgeRecord, EntityRecord};
+use dfmcp_world::{Predicate, WorldSnapshot};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -20,8 +23,13 @@ use super::core_query;
 #[allow(clippy::duplicate_mod)]
 mod source;
 
+#[path = "relation_selector.rs"]
+#[allow(clippy::duplicate_mod)]
+mod relation_selector;
+
+use relation_selector::{Candidate, kinds};
+
 const MAX_ROWS: usize = 128;
-const MAX_WITNESSES: usize = 4;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -39,45 +47,13 @@ enum Query {
         kinds: Vec<String>,
         #[serde(rename = "where")]
         predicate: Option<Value>,
-        relation: RelationRequest,
+        relation: relation_selector::Request,
         #[serde(default)]
         fields: Vec<String>,
         order: Option<Order>,
         limit: Option<usize>,
         continuation: Option<String>,
     },
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct RelationRequest {
-    edge_kinds: Vec<String>,
-    direction: Option<Direction>,
-    #[serde(default)]
-    target_kinds: Vec<String>,
-    #[serde(default)]
-    target_ids: Vec<String>,
-    #[serde(rename = "where")]
-    predicate: Option<Value>,
-}
-
-#[derive(Clone, Copy, Default, Deserialize)]
-#[serde(rename_all = "snake_case")]
-enum Direction {
-    #[default]
-    Outgoing,
-    Incoming,
-    Undirected,
-}
-
-impl Direction {
-    fn name(self) -> &'static str {
-        match self {
-            Self::Outgoing => "outgoing",
-            Self::Incoming => "incoming",
-            Self::Undirected => "undirected",
-        }
-    }
 }
 
 #[derive(Clone, Copy, Default, Deserialize)]
@@ -91,21 +67,9 @@ enum Order {
 struct Selection {
     kinds: BTreeSet<String>,
     predicate: Option<Predicate>,
-    edge_kinds: BTreeSet<String>,
-    direction: Direction,
-    target_kinds: BTreeSet<String>,
-    target_ids: BTreeSet<EntityId>,
-    target_predicate: Option<Predicate>,
+    relation: relation_selector::Selection,
     fields: Vec<String>,
     order: Order,
-}
-
-struct Candidate<'a> {
-    entity: &'a EntityRecord,
-    matches: usize,
-    unknown_targets: usize,
-    missing_targets: usize,
-    witnesses: Vec<(&'a EdgeRecord, &'a EntityRecord)>,
 }
 
 fn invalid(message: impl Into<String>) -> DfmcpError {
@@ -114,23 +78,6 @@ fn invalid(message: impl Into<String>) -> DfmcpError {
 
 fn exhausted(message: &str) -> DfmcpError {
     DfmcpError::new(ErrorCode::BudgetExceeded, message)
-}
-
-fn kinds(names: Vec<String>) -> Result<BTreeSet<String>> {
-    core_query::bounded_names(names, 32)?
-        .into_iter()
-        .map(|name| Ok(core_query::entity_kind(&name)?.as_str().to_owned()))
-        .collect()
-}
-
-fn matches_kind(kinds: &BTreeSet<String>, entity: &EntityRecord) -> bool {
-    kinds.is_empty() || kinds.contains(entity.kind.as_str())
-}
-
-fn truth(snapshot: &WorldSnapshot, id: EntityId, predicate: Option<&Predicate>) -> PredicateTruth {
-    predicate.map_or(PredicateTruth::True, |predicate| {
-        evaluate_truth_for(snapshot, id, predicate)
-    })
 }
 
 fn identity(
@@ -160,23 +107,13 @@ fn identity(
     bytes.extend_from_slice(&snapshot.cursor.sequence.to_be_bytes());
     bytes.extend_from_slice(&snapshot.tick.0.to_be_bytes());
     bytes.extend_from_slice(snapshot.state_hash.as_bytes());
-    for names in [
-        &selection.kinds,
-        &selection.edge_kinds,
-        &selection.target_kinds,
-    ] {
-        bytes.extend_from_slice(&(names.len() as u64).to_be_bytes());
-        for name in names {
-            string(&mut bytes, name);
-        }
+    bytes.extend_from_slice(&(selection.kinds.len() as u64).to_be_bytes());
+    for name in &selection.kinds {
+        string(&mut bytes, name);
     }
-    bytes.extend_from_slice(&(selection.target_ids.len() as u64).to_be_bytes());
-    for id in &selection.target_ids {
-        bytes.extend_from_slice(&id.get().to_be_bytes());
-    }
-    string(&mut bytes, selection.direction.name());
+    selection.relation.append_identity(&mut bytes);
     predicate(&mut bytes, selection.predicate.as_ref());
-    predicate(&mut bytes, selection.target_predicate.as_ref());
+    selection.relation.append_predicate_identity(&mut bytes);
     bytes.extend_from_slice(&(selection.fields.len() as u64).to_be_bytes());
     for field in &selection.fields {
         string(&mut bytes, field);
@@ -220,51 +157,9 @@ fn continuation(raw: Option<&str>, identity: Digest32) -> Result<Option<Position
     Ok(Some(position))
 }
 
-fn record_edge<'a>(
-    subject: EntityId,
-    target: EntityId,
-    edge: &'a EdgeRecord,
-    selection: &Selection,
-    targets: &BTreeMap<EntityId, (&'a EntityRecord, PredicateTruth)>,
-    candidates: &mut BTreeMap<EntityId, Candidate<'a>>,
-) {
-    let Some(candidate) = candidates.get_mut(&subject) else {
-        return;
-    };
-    if !selection.target_ids.is_empty() && !selection.target_ids.contains(&target) {
-        return;
-    }
-    match targets.get(&target) {
-        Some((entity, PredicateTruth::True)) => {
-            candidate.matches += 1;
-            if candidate.witnesses.len() < MAX_WITNESSES {
-                candidate.witnesses.push((edge, entity));
-            }
-        }
-        Some((_, PredicateTruth::False)) => {}
-        Some((_, PredicateTruth::Unknown)) => candidate.unknown_targets += 1,
-        None => candidate.missing_targets += 1,
-    }
-}
-
 fn row(candidate: &Candidate<'_>, fields: &[String]) -> Value {
     let mut row = core_query::entity_json(candidate.entity, fields);
-    row["relations"] = json!({
-        "matched_edges":candidate.matches,
-        "witnesses_returned":candidate.witnesses.len(),
-        "witnesses_omitted":candidate.matches.saturating_sub(candidate.witnesses.len()),
-        "unknown_target_filters":candidate.unknown_targets,
-        "missing_target_records":candidate.missing_targets,
-        "witnesses":candidate.witnesses.iter().map(|(edge,target)| json!({
-            "edge_id":edge.id.to_string(), "edge_revision":edge.revision,
-            "edge_kind":edge.kind.as_str(),
-            "from":edge.from.to_string(), "to":edge.to.to_string(),
-            "target":{"entity_id":target.id.to_string(), "generation":target.generation,
-                "revision":target.revision},
-            "endpoint_identity_basis":"source_snapshot"
-        })).collect::<Vec<_>>(),
-        "eligible_as_mutation_evidence":false
-    });
+    row["relations"] = candidate.evidence.json();
     row
 }
 
@@ -332,29 +227,10 @@ pub(super) fn execute_with_page_budget(
         limit,
         continuation: raw_cursor,
     } = request.query;
-    let edge_kinds = core_query::bounded_names(relation.edge_kinds, 32)?;
-    if edge_kinds.is_empty() {
-        return Err(invalid(
-            "relation selection requires at least one explicit edge kind",
-        ));
-    }
     let selection = Selection {
         kinds: kinds(source_kinds)?,
         predicate: predicate.map(core_query::decode_filter).transpose()?,
-        edge_kinds: edge_kinds
-            .into_iter()
-            .map(|name| Ok(core_query::edge_kind(&name)?.as_str().to_owned()))
-            .collect::<Result<_>>()?,
-        direction: relation.direction.unwrap_or_default(),
-        target_kinds: kinds(relation.target_kinds)?,
-        target_ids: core_query::bounded_names(relation.target_ids, 64)?
-            .into_iter()
-            .map(|id| core_query::entity_id(&id))
-            .collect::<Result<_>>()?,
-        target_predicate: relation
-            .predicate
-            .map(core_query::decode_filter)
-            .transpose()?,
+        relation: relation.normalize()?,
         fields: core_query::bounded_names(fields, 32)?,
         order: order.unwrap_or_default(),
     };
@@ -369,15 +245,8 @@ pub(super) fn execute_with_page_budget(
         .predicate
         .as_ref()
         .map_or(0, Predicate::complexity)
-        .saturating_add(
-            selection
-                .target_predicate
-                .as_ref()
-                .map_or(0, Predicate::complexity),
-        )
+        .saturating_add(selection.relation.entity_work())
         .saturating_add(selection.kinds.len())
-        .saturating_add(selection.target_kinds.len())
-        .saturating_add(selection.target_ids.len())
         .saturating_add(selection.fields.len())
         .saturating_add(4);
     work.charge(
@@ -392,7 +261,7 @@ pub(super) fn execute_with_page_budget(
                     .graph
                     .edges
                     .len()
-                    .saturating_mul(selection.edge_kinds.len().saturating_add(4)),
+                    .saturating_mul(selection.relation.edge_work()),
             ),
     )?;
     if !snapshot.hash_is_valid() {
@@ -403,115 +272,34 @@ pub(super) fn execute_with_page_budget(
     }
     let digest = identity(snapshot, context, &selection);
     let after = continuation(raw_cursor.as_deref(), digest)?;
-    let mut targets = BTreeMap::new();
-    let mut candidates = BTreeMap::new();
-    let (mut selected, mut filter_false, mut filter_unknown) = (0usize, 0usize, 0usize);
-    for entity in snapshot.graph.entities.values() {
-        work.check()?;
-        let target = if matches_kind(&selection.target_kinds, entity)
-            && (selection.target_ids.is_empty() || selection.target_ids.contains(&entity.id))
-        {
-            truth(snapshot, entity.id, selection.target_predicate.as_ref())
-        } else {
-            PredicateTruth::False
-        };
-        targets.insert(entity.id, (entity, target));
-        if !matches_kind(&selection.kinds, entity) {
-            continue;
-        }
-        selected += 1;
-        match truth(snapshot, entity.id, selection.predicate.as_ref()) {
-            PredicateTruth::False => {
-                filter_false += 1;
-                continue;
-            }
-            PredicateTruth::Unknown => {
-                filter_unknown += 1;
-                continue;
-            }
-            PredicateTruth::True => {}
-        }
-        candidates.insert(
-            entity.id,
-            Candidate {
-                entity,
-                matches: 0,
-                unknown_targets: 0,
-                missing_targets: 0,
-                witnesses: Vec::new(),
-            },
-        );
-    }
-    let mut selected_edges = 0usize;
-    for (id, edge) in &snapshot.graph.edges {
-        work.check()?;
-        if *id == EdgeId::NIL || *id != edge.id {
-            return Err(DfmcpError::new(
-                ErrorCode::InternalInvariantViolation,
-                "relation-query edge identity is inconsistent",
-            ));
-        }
-        if !selection.edge_kinds.contains(edge.kind.as_str()) {
-            continue;
-        }
-        selected_edges += 1;
-        match selection.direction {
-            Direction::Outgoing => record_edge(
-                edge.from,
-                edge.to,
-                edge,
-                &selection,
-                &targets,
-                &mut candidates,
-            ),
-            Direction::Incoming => record_edge(
-                edge.to,
-                edge.from,
-                edge,
-                &selection,
-                &targets,
-                &mut candidates,
-            ),
-            Direction::Undirected => {
-                record_edge(
-                    edge.from,
-                    edge.to,
-                    edge,
-                    &selection,
-                    &targets,
-                    &mut candidates,
-                );
-                if edge.from != edge.to {
-                    record_edge(
-                        edge.to,
-                        edge.from,
-                        edge,
-                        &selection,
-                        &targets,
-                        &mut candidates,
-                    );
-                }
-            }
-        }
-    }
+    let relation_selector::Prepared {
+        candidates,
+        selected,
+        filter_false,
+        filter_unknown,
+        selected_edges,
+    } = relation_selector::prepare(
+        snapshot,
+        &selection.kinds,
+        selection.predicate.as_ref(),
+        &selection.relation,
+        &work,
+    )?;
     let matched = candidates
         .values()
-        .filter(|candidate| candidate.matches > 0)
+        .filter(|candidate| candidate.evidence.matches > 0)
         .count();
     let unknown_relation = candidates
         .values()
-        .filter(|candidate| {
-            candidate.matches == 0
-                && (candidate.unknown_targets > 0 || candidate.missing_targets > 0)
-        })
+        .filter(|candidate| candidate.evidence.unknown())
         .count();
     let missing_targets: usize = candidates
         .values()
-        .map(|candidate| candidate.missing_targets)
+        .map(|candidate| candidate.evidence.missing_targets)
         .sum();
     let unknown_targets: usize = candidates
         .values()
-        .map(|candidate| candidate.unknown_targets)
+        .map(|candidate| candidate.evidence.unknown_targets)
         .sum();
     let no_observed_match = candidates
         .len()
@@ -526,7 +314,7 @@ pub(super) fn execute_with_page_budget(
     };
     for candidate in ordered {
         work.check()?;
-        if candidate.matches == 0 {
+        if candidate.evidence.matches == 0 {
             continue;
         }
         if after == Some((candidate.entity.id, candidate.entity.generation)) {
@@ -567,10 +355,7 @@ pub(super) fn execute_with_page_budget(
         "schema":"dfmcp.query.result/1", "kind":"related_entities",
         "anchor":core_query::anchor_json(snapshot.anchor()), "query_digest":digest.to_string(),
         "ordering":match selection.order { Order::IdAscending => "entity_id_ascending", Order::IdDescending => "entity_id_descending" },
-        "relation":{"direction":selection.direction.name(), "edge_kinds":selection.edge_kinds,
-            "target_kinds":selection.target_kinds,
-            "target_ids":selection.target_ids.iter().map(ToString::to_string).collect::<Vec<_>>(),
-            "witnesses_per_row_limit":MAX_WITNESSES},
+        "relation":selection.relation.json(),
         "matched":matched, "returned":0, "rows":[], "truncated":false, "continuation":null,
         "selection":{"kind_selected":selected, "excluded_filter_false":filter_false,
             "excluded_filter_unknown":filter_unknown, "unknown_relation":unknown_relation,

@@ -20,6 +20,10 @@ use super::core_query;
 #[allow(clippy::duplicate_mod)]
 mod source;
 
+#[path = "relation_selector.rs"]
+#[allow(clippy::duplicate_mod)]
+mod relation_selector;
+
 const MAX_ROWS: usize = 128;
 const MAX_KEYS: usize = 3;
 
@@ -39,6 +43,7 @@ enum Query {
         kinds: Vec<String>,
         #[serde(rename = "where")]
         predicate: Option<Value>,
+        relation: Option<relation_selector::Request>,
         #[serde(default)]
         fields: Vec<String>,
         order_by: Vec<Sort>,
@@ -75,6 +80,7 @@ struct Sort {
 struct Selection {
     kinds: BTreeSet<String>,
     predicate: Option<Predicate>,
+    relation: Option<relation_selector::Selection>,
     fields: Vec<String>,
     order_by: Vec<Sort>,
     rank_fields: Vec<String>,
@@ -229,6 +235,13 @@ fn identity(
         &serde_json::to_vec(&selection.order_by)
             .map_err(|_| invalid("rank ordering cannot be encoded"))?,
     );
+    if let Some(relation) = &selection.relation {
+        // Leave all established unfiltered rk1 bytes unchanged. A relation is
+        // a separately tagged selection, not a capability or retained source.
+        append(&mut bytes, b"positive-relation-v1");
+        relation.append_identity(&mut bytes);
+        relation.append_predicate_identity(&mut bytes);
+    }
     Ok(Digest32::of_bytes(&bytes))
 }
 
@@ -265,7 +278,11 @@ fn continuation(raw: Option<&str>, identity: Digest32) -> Result<Option<Position
     Ok(Some(position))
 }
 
-fn row(candidate: &Candidate<'_>, selection: &Selection) -> Value {
+fn row(
+    candidate: &Candidate<'_>,
+    selection: &Selection,
+    relation: Option<&relation_selector::Evidence<'_>>,
+) -> Value {
     let mut value = core_query::entity_json(candidate.entity, &selection.fields);
     let facts: BTreeMap<_, _> = selection
         .rank_fields
@@ -281,6 +298,9 @@ fn row(candidate: &Candidate<'_>, selection: &Selection) -> Value {
     value["ranking"] = json!({
         "facts":facts, "all_keys_usable":true, "eligible_as_mutation_evidence":false
     });
+    if let Some(relation) = relation {
+        value["relations"] = relation.json();
+    }
     value
 }
 
@@ -342,6 +362,7 @@ pub(super) fn execute_with_page_budget(
     let Query::RankedEntities {
         kinds,
         predicate,
+        relation,
         fields,
         order_by,
         limit,
@@ -372,6 +393,9 @@ pub(super) fn execute_with_page_budget(
             .map(|name| Ok(core_query::entity_kind(&name)?.as_str().to_owned()))
             .collect::<Result<_>>()?,
         predicate: predicate.map(core_query::decode_filter).transpose()?,
+        relation: relation
+            .map(relation_selector::Request::normalize)
+            .transpose()?,
         fields: core_query::bounded_names(fields, 32)?,
         order_by,
         rank_fields,
@@ -396,15 +420,27 @@ pub(super) fn execute_with_page_budget(
         .saturating_add(selection.order_by.len())
         .saturating_add((selection.order_by.len() + 2).saturating_mul(3 * levels + 1))
         .saturating_add(4);
-    work.charge(
-        0,
+    let rank_work = snapshot
+        .graph
+        .entities
+        .len()
+        .saturating_add(1)
+        .saturating_mul(per_entity);
+    let relation_work = selection.relation.as_ref().map_or(0, |relation| {
         snapshot
             .graph
             .entities
             .len()
-            .saturating_add(1)
-            .saturating_mul(per_entity),
-    )?;
+            .saturating_mul(relation.entity_work().saturating_add(4))
+            .saturating_add(
+                snapshot
+                    .graph
+                    .edges
+                    .len()
+                    .saturating_mul(relation.edge_work()),
+            )
+    });
+    work.charge(0, rank_work.saturating_add(relation_work))?;
     if !snapshot.hash_is_valid() {
         return Err(DfmcpError::new(
             ErrorCode::InternalInvariantViolation,
@@ -413,39 +449,81 @@ pub(super) fn execute_with_page_budget(
     }
     let digest = identity(snapshot, context, &selection)?;
     let after = continuation(raw_cursor.as_deref(), digest)?;
+    let relations = selection
+        .relation
+        .as_ref()
+        .map(|relation| {
+            relation_selector::prepare(
+                snapshot,
+                &selection.kinds,
+                selection.predicate.as_ref(),
+                relation,
+                &work,
+            )
+        })
+        .transpose()?;
     let after_rank = after
         .map(|(id, generation)| {
             let entity = snapshot.graph.entities.get(&id).ok_or_else(gap)?;
             if entity.generation != generation
-                || !matches_kind(&selection, entity)
-                || truth(snapshot, &selection, id) != PredicateTruth::True
+                || relations.as_ref().map_or_else(
+                    || {
+                        !matches_kind(&selection, entity)
+                            || truth(snapshot, &selection, id) != PredicateTruth::True
+                    },
+                    |relations| {
+                        !relations
+                            .candidates
+                            .get(&id)
+                            .is_some_and(|candidate| candidate.evidence.matches > 0)
+                    },
+                )
             {
                 return Err(gap());
             }
             rank(entity, &selection.order_by, snapshot.tick.0).map_err(|_| gap())
         })
         .transpose()?;
-    let (mut selected, mut filter_false, mut filter_unknown) = (0usize, 0usize, 0usize);
+    let (mut selected, mut filter_false, mut filter_unknown) =
+        relations
+            .as_ref()
+            .map_or((0usize, 0usize, 0usize), |relations| {
+                (
+                    relations.selected,
+                    relations.filter_false,
+                    relations.filter_unknown,
+                )
+            });
     let (mut matched, mut remaining, mut unknown_rank) = (0usize, 0usize, 0usize);
     let mut reasons = BTreeMap::<&str, usize>::new();
     let mut page = BinaryHeap::<Candidate<'_>>::with_capacity(limit);
     let mut peak_candidates = 0usize;
     for entity in snapshot.graph.entities.values() {
         work.check()?;
-        if !matches_kind(&selection, entity) {
-            continue;
-        }
-        selected += 1;
-        match truth(snapshot, &selection, entity.id) {
-            PredicateTruth::False => {
-                filter_false += 1;
+        if let Some(relations) = &relations {
+            if !relations
+                .candidates
+                .get(&entity.id)
+                .is_some_and(|candidate| candidate.evidence.matches > 0)
+            {
                 continue;
             }
-            PredicateTruth::Unknown => {
-                filter_unknown += 1;
+        } else {
+            if !matches_kind(&selection, entity) {
                 continue;
             }
-            PredicateTruth::True => {}
+            selected += 1;
+            match truth(snapshot, &selection, entity.id) {
+                PredicateTruth::False => {
+                    filter_false += 1;
+                    continue;
+                }
+                PredicateTruth::Unknown => {
+                    filter_unknown += 1;
+                    continue;
+                }
+                PredicateTruth::True => {}
+            }
         }
         let rank = match rank(entity, &selection.order_by, snapshot.tick.0) {
             Ok(rank) => rank,
@@ -506,6 +584,53 @@ pub(super) fn execute_with_page_budget(
             "algorithm":"bounded_top_k", "maximum_retained_candidates":peak_candidates,
             "page_candidate_limit":limit}
     });
+    if let (Some(relation), Some(relations)) = (&selection.relation, &relations) {
+        let relation_matched = relations
+            .candidates
+            .values()
+            .filter(|candidate| candidate.evidence.matches > 0)
+            .count();
+        let unknown_relation = relations
+            .candidates
+            .values()
+            .filter(|candidate| candidate.evidence.unknown())
+            .count();
+        let missing_targets: usize = relations
+            .candidates
+            .values()
+            .map(|candidate| candidate.evidence.missing_targets)
+            .sum();
+        let unknown_targets: usize = relations
+            .candidates
+            .values()
+            .map(|candidate| candidate.evidence.unknown_targets)
+            .sum();
+        payload["relation"] = relation.json();
+        payload["selection"]["relation_matched"] = json!(relation_matched);
+        payload["selection"]["unknown_relation"] = json!(unknown_relation);
+        payload["selection"]["no_observed_match"] = json!(
+            relations
+                .candidates
+                .len()
+                .saturating_sub(relation_matched)
+                .saturating_sub(unknown_relation)
+        );
+        payload["selection"]["missing_target_records"] = json!(missing_targets);
+        payload["selection"]["unknown_target_filters"] = json!(unknown_targets);
+        payload["selection"]["selected_edges"] = json!(relations.selected_edges);
+        payload["coverage"]["domain"] =
+            json!("known_typed_numeric_fields_with_positive_relations_in_canonical_projection");
+        payload["coverage"]["selection_complete_within_projection"] =
+            json!(filter_unknown == 0 && unknown_relation == 0 && unknown_rank == 0);
+        payload["coverage"]["relation_domain_complete"] = json!(false);
+        payload["coverage"]["edge_source_authenticity"] = json!("not_established");
+        payload["coverage"]["relation_note"] = json!(
+            "Only witnessed positive relations enter ranking. No observed match is not complete-world absence; missing target records and unavailable target facts remain Unknown."
+        );
+        payload["source_cost"]["algorithm"] = json!("bounded_relation_semijoin_then_top_k");
+        payload["source_cost"]["relation_source_candidates"] = json!(relations.candidates.len());
+        payload["source_cost"]["relation_target_records"] = json!(snapshot.graph.entities.len());
+    }
     for candidate in page.into_sorted_vec() {
         if !source::render_fits(
             candidate.entity,
@@ -519,7 +644,11 @@ pub(super) fn execute_with_page_budget(
         let rows = payload["rows"]
             .as_array_mut()
             .ok_or_else(|| invalid("rank result rows are unavailable"))?;
-        rows.push(row(&candidate, &selection));
+        let relation = relations
+            .as_ref()
+            .and_then(|relations| relations.candidates.get(&candidate.entity.id))
+            .map(|candidate| &candidate.evidence);
+        rows.push(row(&candidate, &selection, relation));
         let count = rows.len();
         payload["returned"] = json!(count);
         payload["truncated"] = json!(count < remaining);

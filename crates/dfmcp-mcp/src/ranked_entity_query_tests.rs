@@ -603,3 +603,6 @@ fn reserved_output_keeps_complete_source_admission_independent() -> TestResult {
     ));
     Ok(())
 }
+
+#[path = "ranked_relation_query_tests.rs"]
+mod relations;

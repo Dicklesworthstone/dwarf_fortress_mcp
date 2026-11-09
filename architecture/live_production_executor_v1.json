@@ -314,6 +314,7 @@
       "crates/dfmcp-mcp/src/event_query.rs",
       "crates/dfmcp-mcp/src/spatial_entity_query.rs",
       "crates/dfmcp-mcp/src/related_entity_query.rs",
+      "crates/dfmcp-mcp/src/relation_selector.rs",
       "crates/dfmcp-mcp/src/ranked_entity_query.rs",
       "tests/stdio/combined_production_preflight.py",
       "tests/stdio/combined_production_runtime_peer.py",

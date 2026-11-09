@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased — Combine relationship selection with exact numeric ranking
+
+- Add optional positive relationship selectors to `ranked_entities`, including
+  independent typed target filters, canonical target IDs and all three directions.
+- Reuse one bounded relation matcher; keep whole-source work admission and the
+  existing bounded ranking heap, with explicit index-cost accounting.
+- Preserve exact edge/endpoint witnesses alongside ranked facts through complete
+  laboratory page fitting; distinguish unknown endpoints from unobserved matches.
+- Bind all selectors into continuation identity while preserving existing
+  unfiltered ranked and standalone relationship query behavior.
+- Add exhaustive graph/ranking, unavailable-fact, cursor, authority and packet
+  regressions; update the query schema and executable usage guides.
+
 ## Unreleased — Ground needs and threat advice in current evidence
 
 - Qualify laboratory stock, population, need, worker and threat facts; retain

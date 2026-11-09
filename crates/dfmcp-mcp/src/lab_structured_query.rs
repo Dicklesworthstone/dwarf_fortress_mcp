@@ -633,7 +633,11 @@ mod projected_tests {
     }
 
     fn family_request(kind: &str, limit: usize) -> Request {
-        let mut query = json!({"kind":kind, "fields":["small"], "limit":limit});
+        let query_kind = match kind {
+            "ranked_related_entities" => "ranked_entities",
+            other => other,
+        };
+        let mut query = json!({"kind":query_kind, "fields":["small"], "limit":limit});
         if kind != "events" {
             query["kinds"] = json!(["unit"]);
         }
@@ -645,9 +649,13 @@ mod projected_tests {
             "related_entities" => {
                 query["relation"] = json!({"edge_kinds":["requires"],"target_kinds":["unit"]});
             }
-            "ranked_entities" => {
+            "ranked_entities" | "ranked_related_entities" => {
                 query["order_by"] =
                     json!([{"field":"rank","numeric_type":"u64","direction":"ascending"}]);
+                if kind == "ranked_related_entities" {
+                    query["relation"] =
+                        json!({"edge_kinds":["requires"],"target_kinds":["unit"]});
+                }
             }
             _ => {}
         }
@@ -658,10 +666,11 @@ mod projected_tests {
         }
     }
 
-    const PAGE_FAMILIES: [&str; 4] = [
+    const PAGE_FAMILIES: [&str; 5] = [
         "spatial_entities",
         "related_entities",
         "ranked_entities",
+        "ranked_related_entities",
         "events",
     ];
 
@@ -701,6 +710,13 @@ mod projected_tests {
                 assert!(encoded.len() <= current.budget.max_output_tokens as usize * 4);
                 let rows = page["rows"].as_array().ok_or("rows missing")?;
                 assert!(!rows.is_empty());
+                if kind == "ranked_related_entities" {
+                    for row in rows {
+                        assert_eq!(row["relations"]["matched_edges"], 1);
+                        assert_eq!(row["relations"]["witnesses_returned"], 1);
+                        assert_eq!(row["ranking"]["all_keys_usable"], true);
+                    }
+                }
                 if index == 0 {
                     assert!(rows.len() < 8, "{kind}");
                 }

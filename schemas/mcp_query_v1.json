@@ -321,6 +321,10 @@
             },
             "maxItems": 32
           },
+          "relation": {
+            "anyOf": [{"$ref": "#/$defs/relation_selector"}, {"type": "null"}],
+            "description": "Optional positive relationship selection before ranking. Only sources with a witnessed matching edge and target enter the ranked population; unavailable endpoints remain Unknown. Returned rows retain bounded exact relation witnesses."
+          },
           "order_by": {
             "type": "array",
             "minItems": 1,
@@ -354,7 +358,7 @@
             ]
           }
         },
-        "description": "Select entities by one to three exact typed numeric facts, lexicographically ordered with ascending entity ID as the final tie-break. Each field may appear once. Fixed values require an exact scale. Missing, unavailable, future, over-age or mistyped ordering facts remain Unknown and are excluded separately from filter failures. The bounded heap retains at most the requested page. Full-source admission precedes ranking; continuations bind every selector, ordering rule, session and source anchor. Ranked facts retain provenance and never authorize mutation."
+        "description": "Select entities by one to three exact typed numeric facts, lexicographically ordered with ascending entity ID as the final tie-break. Each field may appear once. Fixed values require an exact scale. Missing, unavailable, future, over-age or mistyped ordering facts remain Unknown and are excluded separately from filter failures. The bounded heap retains at most the requested page. An optional relation selector uses one bounded source/target index and one edge scan, shared with related_entities; the index is separately reported in source_cost. Full-source admission precedes ranking; continuations bind every selector, ordering rule, session and source anchor. Ranked facts retain provenance and never authorize mutation."
       }
     ]}
   }

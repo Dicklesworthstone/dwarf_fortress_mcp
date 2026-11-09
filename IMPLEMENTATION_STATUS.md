@@ -1,5 +1,39 @@
 # Implementation Status
 
+## Unreleased — Rank entities within witnessed relationships
+
+`ranked_entities` now accepts the same positive one-hop `relation` selector as
+`related_entities`. Source facts, target kinds/IDs and an independent target
+filter can select one population for exact numeric ranking in a single query.
+Each returned row retains ranking facts and up to four exact edge/endpoint
+witnesses, with explicit additional-witness and unknown-endpoint counts.
+Unavailable target facts remain Unknown; a witnessed positive match is required.
+
+A shared matcher evaluates source and target filters once per entity and scans
+edges once. Its bounded temporary relation index is reported separately from
+the existing top-K heap. Whole-source admission precedes filtering, and complete
+laboratory packet fitting includes the relationship witnesses. Normalized
+selectors bind continuation identity and cursor eligibility; requests without
+relations and standalone relationship cursors preserve their existing identity.
+The existing eleven-tool surface, read authority and native projection are
+unchanged. Owner: `df-lab-structured-query-f7q`.
+
+Validation: 54 original-source core/ranked/relationship Rust regressions passed,
+including nine new composition tests and an independent oracle over every
+512 directed three-vertex graph, all three directions and two page widths.
+Eight actual laboratory projected-wrapper regressions passed with relationship
+ranking included, covering complete-packet fitting, continuation replay,
+oversized required rows, terminal envelopes and current authority. The query
+assembly uses original module files; the wrapper assembly preserves complete
+selected production bodies and exact locked core/world/intent/adapter/lab
+dependencies. Eleven external dependency versions/sources/checksums match the
+root lock. Schema positive/refusal checks and repository static checks accompany
+this increment. These are selected component executions; full MCP transport,
+public facade/stdio, native admission and current-head release qualification
+remain separate and unestablished by this run. The owning bead remains open.
+
+Details and examples: `docs/QUERY_EXECUTION.md`, `docs/LAB_STRUCTURED_QUERY.md`.
+
 ## Unreleased — Qualify needs, threats and actionable remedies
 
 The actual laboratory Observe/Wait alert path now reads registered current

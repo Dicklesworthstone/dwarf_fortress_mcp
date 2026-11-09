@@ -39,7 +39,7 @@ inner envelope accepts the existing schema, `query`, and optional complete
 | `events` | Inclusive retained-event windows, kind/subject selection, typed fields and chronological pages |
 | `spatial_entities` | Inclusive intersection or containment of explicitly named point/cuboid entity geometry |
 | `related_entities` | Entities with witnessed one-hop relations to targets selected by kinds, IDs and typed facts |
-| `ranked_entities` | Best bounded page under one to three exact numeric field orderings, with fact provenance |
+| `ranked_entities` | Best bounded page under exact numeric orderings, optionally restricted by witnessed relationships |
 
 There is no watch, baseline, native capture, plan or effect dispatch through
 this wrapper. Existing `summary`, `entities`, `terrain`, `path`, `search`,
@@ -166,6 +166,31 @@ kinds and fields, all ordering rules and the last returned ID and generation.
 The page width may change. Pagination never skips a row that does not fit;
 narrow the field projection or increase the output budget. Exact retained
 sources and current authority follow the rules below.
+
+Rank a relationship-selected population in the same request by adding `relation`
+to `ranked_entities`. For example, to rank citizens assigned to squad `100`,
+combine the stress ordering above with:
+
+```json
+{
+  "relation": {
+    "edge_kinds": ["assigned_to"],
+    "target_kinds": ["squad"],
+    "target_ids": ["100"]
+  }
+}
+```
+
+The selector has the same closed grammar as `related_entities`, including its
+independent target `where`. Source filters run before relation selection and
+numeric ranking. Missing endpoints or unavailable target facts remain Unknown;
+a positive witness is required to enter the ranked population. Each returned
+row keeps both its numeric facts and up to four exact relationship witnesses.
+Relation exclusions and ranking exclusions are counted separately. The
+complete source/target scan is bounded, with a temporary O(N) relation index
+and the existing O(K) ranking heap. Every selector binds the continuation;
+requests without a relation retain their previous identity and response shape.
+See `QUERY_EXECUTION.md` for the complete composition and coverage contract.
 
 ## Spatial selection
 

@@ -204,6 +204,70 @@ retained work. Historical laboratory pages explicitly select the
 retained source hash while current grants and the current Agent Turn anchor
 remain authoritative.
 
+### Rank within an observed relationship
+
+Add optional `relation` to `ranked_entities` to rank only entities that have a
+recorded positive relationship to selected targets. It uses the same closed
+selector as `related_entities`: edge kinds, direction, target kinds/IDs and an
+independent typed target `where`. For example, select the highest-priority jobs
+requiring an item whose recorded eligibility is known true:
+
+```json
+{
+  "schema": "dfmcp.query/1",
+  "query": {
+    "kind": "ranked_entities",
+    "kinds": ["job"],
+    "relation": {
+      "edge_kinds": ["requires"],
+      "target_kinds": ["item"],
+      "where": {
+        "op": "compare", "field": "eligible", "comparison": "eq",
+        "value": {"type": "bool", "value": true}
+      }
+    },
+    "order_by": [
+      {"field": "priority", "numeric_type": "i64", "direction": "descending"}
+    ],
+    "fields": ["suspended"],
+    "limit": 4
+  }
+}
+```
+
+These names must be present in the canonical projection. Source `where` runs
+first; the positive relationship selector runs next; usable numeric ordering
+facts determine the final ranked population. Each stage retains its own
+exclusions. `selection.relation_matched` counts source-filter matches with a
+positive witness before ranking. `unknown_relation` and `no_observed_match`
+separate undecidable endpoints from the lack of a recorded match. Missing-target
+and unknown-target counts describe oriented edge incidences after source
+filtering, including uncertain additional edges on a positively selected row.
+`unknown_rank` applies only to relation matches. One positive witness suffices
+even when other endpoints are unknown.
+
+Rows keep the existing `ranking` facts and add the same bounded `relations`
+evidence as standalone relationship queries: at most four exact edge revisions
+and target generations, with explicit omitted counts. Complete-packet page
+fitting includes both forms of evidence. A required row that cannot fit is
+refused rather than skipped. Ranking does not turn an unobserved relation into
+negative evidence or authorize mutation.
+
+Source and target predicates are each evaluated at most once per entity, and
+the shared matcher scans edges once. Its temporary source/target index uses
+O(N) records bounded by complete-source admission; the ranking heap still
+retains at most K candidates. `source_cost` reports the relation index sizes
+separately from `maximum_retained_candidates`. Relation work shares the same
+prepaid work and wall allowances. Narrow targets, filters or pages cannot hide
+source costs.
+
+The normalized relation selector participates in `rk1` identity, including
+its target predicate. Reordered or duplicate set members are equivalent, but
+adding, removing or changing the relation invalidates an existing cursor. A
+cursor position must itself satisfy the complete selection. Omitting `relation`
+or passing null preserves the established ranked response and continuation
+identity; the standalone `rq1` relationship contract is unchanged.
+
 ## Spatial entity intersection and containment
 
 The shared stateless `dfmcp.query/1` executor accepts `spatial_entities` through
