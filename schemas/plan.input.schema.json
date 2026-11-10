@@ -17,6 +17,9 @@
     },
     "laboratory_resource_acquisition": {
       "$ref": "./lab_resource_acquisition.schema.json"
+    },
+    "laboratory_resource_production": {
+      "$ref": "./lab_resource_production.schema.json"
     }
   }
 }

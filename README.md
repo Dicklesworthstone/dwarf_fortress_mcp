@@ -286,6 +286,14 @@ work is quiet.
 Complete acquisition and observe its actual yield before using the inputs in
 production, workshop or room plans.
 
+Production requests can also opt into the
+[resource-aware production workflow](docs/LAB_RESOURCE_PRODUCTION.md) with
+`"acquire_resources":{"assign_labor":false}`. It retains the original output
+quotas, proposes finite WOOD/PLANT acquisition when needed, and uses
+`continue_goal` to propose production from newly observed stock. Every stage
+has a separate review and commit; food/drink sizing includes consumption during
+the gathering delay.
+
 The [original Carpenter workshop workflow](docs/WORKSHOP_CONSTRUCTION_MCP.md)
 documents the separate unadmitted workshop/1.20 native, safe-Rust and registered
 eleven-tool development consumer. Focused execution and an actual-SDK diagnostic

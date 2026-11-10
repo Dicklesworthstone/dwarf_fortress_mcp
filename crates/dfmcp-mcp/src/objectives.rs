@@ -20,6 +20,9 @@ pub(super) struct Objective {
     sealed_state_hash: Digest32,
     sealed_anchor: Option<StateAnchor>,
     plan: Option<PreparedPlan>,
+    /// Exact original source custody for semantic production output checks.
+    /// Reconstructed from the archived seal; never a new durable wire field.
+    resource_output_ledger: Option<crate::lab_world::ProductionGoalLedger>,
     /// Current process-local continuity, separate from the immutable plan seal.
     /// Only live commit or exact durable recovery can establish this frontier.
     active_observation_anchor: Option<StateAnchor>,
@@ -55,18 +58,33 @@ impl Objective {
                 "the original resource-aware production goal has no verified active custody",
             ));
         }
+        let original_ledger = self.bound_resource_output_ledger()?;
         match &self.source {
             PlanSource::Production { raw, .. } => crate::lab_world::ProductionRequest::parse(raw)?
-                .semantic_goal_truth(session.adapter.snapshot()),
+                .semantic_goal_truth_in_ledger(session.adapter.snapshot(), original_ledger),
             PlanSource::ProductionContinuation { raw, .. } => {
                 goal_continuation::ProductionContinuation::parse(raw)?
-                    .semantic_goal_truth(session.adapter.snapshot())
+                    .semantic_goal_truth_in_ledger(session.adapter.snapshot(), original_ledger)
             }
             _ => Err(DfmcpError::new(
                 ErrorCode::InvalidIntent,
                 "current production output truth requires its complete original production request",
             )),
         }
+    }
+
+    fn bound_resource_output_ledger(&self) -> Result<crate::lab_world::ProductionGoalLedger> {
+        let original = self.resource_output_ledger.ok_or_else(|| DfmcpError::new(
+            ErrorCode::PreconditionsFailed,
+            "the retained resource-aware production goal lacks its verified original stock ledger custody",
+        ))?;
+        original.validate_plan(self.plan.as_ref().ok_or_else(|| {
+            DfmcpError::new(
+                ErrorCode::CorruptLedger,
+                "the original resource-aware production plan is unavailable",
+            )
+        })?)?;
+        Ok(original)
     }
 
     pub(super) fn committed(
@@ -82,6 +100,7 @@ impl Objective {
             sealed_state_hash: plan.anchor.state_hash,
             sealed_anchor: Some(plan.anchor),
             plan: Some(plan.clone()),
+            resource_output_ledger: None,
             active_observation_anchor: Some(plan.anchor),
             original_handles_live: true,
             retired_never_dispatched: BTreeMap::new(),
@@ -115,6 +134,10 @@ impl Objective {
                 "the original sealed goal is unavailable",
             )
         })?;
+        if self.is_resource_aware_production() {
+            self.bound_resource_output_ledger()?
+                .validate_current(session.adapter.snapshot())?;
+        }
         crate::lab_world::plan_goal_truth(session.adapter.snapshot(), plan)
     }
 
@@ -404,6 +427,7 @@ pub(super) fn continuation_source(
     {
         source.validate_resource_goal_evidence(
             original,
+            objective.bound_resource_output_ledger()?,
             active,
             session.adapter.snapshot(),
             &context,
@@ -658,11 +682,40 @@ pub(super) fn objective_evictions(session: &LabSession, digest: Digest32) -> Res
     ))
 }
 
+/// Establish retained semantic-output custody before leases, durable admission
+/// or adapter dispatch. Only the exact immutable sealed version is eligible;
+/// a post-dispatch current ledger can never stand in for this source.
+pub(super) fn prepare_resource_output_ledger(
+    session: &LabSession,
+    plan: &PreparedPlan,
+    source: &PlanSource,
+) -> Result<Option<crate::lab_world::ProductionGoalLedger>> {
+    if !source.is_resource_aware_production() {
+        return Ok(None);
+    }
+    let sealed = if session.adapter.snapshot().anchor() == plan.anchor {
+        Some(session.adapter.snapshot())
+    } else {
+        session.history.get(&plan.anchor.state_hash)
+    }
+    .filter(|snapshot| snapshot.anchor() == plan.anchor)
+    .ok_or_else(|| {
+        DfmcpError::new(
+            ErrorCode::StaleAnchor,
+            "the exact sealed production source is unavailable for original stock ledger custody",
+        )
+    })?;
+    let original = crate::lab_world::ProductionGoalLedger::capture(sealed)?;
+    original.validate_plan(plan)?;
+    Ok(Some(original))
+}
+
 pub(super) fn install_objective(
     session: &mut LabSession,
     plan: &PreparedPlan,
     source: PlanSource,
     evicted: &[Digest32],
+    resource_output_ledger: Option<crate::lab_world::ProductionGoalLedger>,
 ) {
     session
         .objectives
@@ -672,9 +725,16 @@ pub(super) fn install_objective(
         .iter()
         .any(|objective| objective.plan_digest == plan.digest)
     {
-        session
-            .objectives
-            .push(Objective::committed(plan, source, session.session_id));
+        let mut objective = Objective::committed(plan, source, session.session_id);
+        objective.resource_output_ledger = resource_output_ledger;
+        // The public commit owner validates this before admitting any effect.
+        // Internal or recovered callers that omit it remain visibly unknown.
+        if objective.is_resource_aware_production()
+            && let Err(error) = objective.bound_resource_output_ledger()
+        {
+            objective.verification_error = Some(error.message);
+        }
+        session.objectives.push(objective);
     }
 }
 
@@ -770,6 +830,7 @@ pub(super) fn recover_objective(
         sealed_state_hash: retained.sealed_state_hash,
         sealed_anchor: None,
         plan: None,
+        resource_output_ledger: None,
         active_observation_anchor: None,
         original_handles_live: false,
         retired_never_dispatched: BTreeMap::new(),
@@ -816,6 +877,11 @@ pub(super) fn recover_objective(
                 "the original goal source does not reproduce its sealed plan digest",
             ));
         }
+        if objective.is_resource_aware_production() {
+            let original = crate::lab_world::ProductionGoalLedger::capture(&sealed)?;
+            original.validate_plan(&plan)?;
+            objective.resource_output_ledger = Some(original);
+        }
         if !retained.retired_never_dispatched.is_empty()
             && store
                 .commit(retained.fortress_id, retained.plan_digest)
@@ -836,6 +902,12 @@ pub(super) fn recover_objective(
         }
         if let Some(anchor) = retained.first_satisfied_anchor {
             let proof = store.load_snapshot(anchor.state_hash)?;
+            if objective.is_resource_aware_production() {
+                objective.resource_output_ledger.ok_or_else(|| DfmcpError::new(
+                    ErrorCode::CorruptLedger,
+                    "the historical resource-aware goal lacks its original stock ledger custody",
+                ))?.validate_current(&proof)?;
+            }
             if proof.anchor() != anchor
                 || anchor.fortress_id != retained.fortress_id
                 || crate::lab_world::plan_goal_truth(&proof, &plan)? != PredicateTruth::True

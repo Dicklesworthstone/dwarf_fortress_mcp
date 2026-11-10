@@ -62,6 +62,9 @@ mod resource_acquisition;
 mod resource_acquisition_continuation;
 
 #[cfg(test)]
+#[path = "production_resource_mcp_tests.rs"]
+mod production_resource_mcp_tests;
+#[cfg(test)]
 #[path = "resource_acquisition_continuation_mcp_tests.rs"]
 mod resource_acquisition_continuation_mcp_tests;
 #[cfg(test)]
@@ -5171,6 +5174,17 @@ pub fn fortress_commit(session_id: Option<String>, plan_digest: String) -> Strin
                     }
                 }
             }
+            let resource_output_ledger = match objectives::prepare_resource_output_ledger(
+                guard,
+                &pending.plan,
+                &pending.source,
+            ) {
+                Ok(ledger) => ledger,
+                Err(error) => {
+                    guard.pending = Some(pending);
+                    return dfmcp_error_payload("fortress.commit", &error);
+                }
+            };
             let evicted_objectives =
                 match objectives::objective_evictions(guard, pending.plan.digest) {
                     Ok(evicted) => evicted,
@@ -5260,6 +5274,7 @@ pub fn fortress_commit(session_id: Option<String>, plan_digest: String) -> Strin
                             &pending.plan,
                             pending.source.clone(),
                             &evicted_objectives,
+                            resource_output_ledger,
                         );
                     }
                     match guard.adapter.commit(&pending.plan, &prepared, &commit_ctx) {
@@ -5275,6 +5290,7 @@ pub fn fortress_commit(session_id: Option<String>, plan_digest: String) -> Strin
                                     &pending.plan,
                                     pending.source.clone(),
                                     &evicted_objectives,
+                                    resource_output_ledger,
                                 );
                             }
                             guard.last_action =

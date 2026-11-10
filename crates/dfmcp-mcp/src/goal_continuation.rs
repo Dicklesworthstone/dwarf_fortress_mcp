@@ -5,7 +5,9 @@
 //! before using it. Recovery can reproduce a seal without consulting a mutable
 //! parent book because every continuation retains the complete original request.
 
-use crate::lab_world::{MAX_ACTIONS_JSON_BYTES, ProductionPlanner, ProductionRequest, parse_steps};
+use crate::lab_world::{
+    MAX_ACTIONS_JSON_BYTES, ProductionGoalLedger, ProductionPlanner, ProductionRequest, parse_steps,
+};
 use dfmcp_core::{
     Capability, DfmcpError, Digest32, ErrorCode, IntentId, OperationContext, Result, RiskTier,
     StateAnchor,
@@ -262,8 +264,13 @@ impl ProductionContinuation {
     /// Current qualified output stocks are independent of any canceled
     /// predecessor's exact harvest-action proof. This never changes that proof
     /// or makes a retained historical achievement current again.
-    pub(crate) fn semantic_goal_truth(&self, snapshot: &WorldSnapshot) -> Result<PredicateTruth> {
-        self.request.semantic_goal_truth(snapshot)
+    pub(crate) fn semantic_goal_truth_in_ledger(
+        &self,
+        snapshot: &WorldSnapshot,
+        original: ProductionGoalLedger,
+    ) -> Result<PredicateTruth> {
+        self.request
+            .semantic_goal_truth_in_ledger(snapshot, original)
     }
 
     /// A resource stage can finish or be canceled before the original output
@@ -272,6 +279,7 @@ impl ProductionContinuation {
     pub(crate) fn validate_resource_goal_evidence(
         &self,
         original: &PreparedPlan,
+        original_ledger: ProductionGoalLedger,
         active: StateAnchor,
         snapshot: &WorldSnapshot,
         context: &OperationContext,
@@ -283,8 +291,12 @@ impl ProductionContinuation {
             ));
         }
         validate_goal_lineage(original, active, snapshot, context)?;
+        original_ledger.validate_plan(original)?;
         context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
-        validate_truth_and_work(self.semantic_goal_truth(snapshot)?, work_quiescent)
+        validate_truth_and_work(
+            self.semantic_goal_truth_in_ledger(snapshot, original_ledger)?,
+            work_quiescent,
+        )
     }
 
     pub(crate) fn canonical_json(&self) -> String {
@@ -504,3 +516,6 @@ mod tests;
 #[path = "goal_reserve_continuation_tests.rs"]
 mod reserve_tests;
 
+#[cfg(test)]
+#[path = "goal_resource_continuation_tests.rs"]
+mod resource_tests;

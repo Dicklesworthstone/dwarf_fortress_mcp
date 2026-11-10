@@ -405,6 +405,67 @@ fn satisfied_original_outputs_do_not_acquire_unneeded_or_unknown_ingredients() -
 }
 
 #[test]
+fn retained_output_truth_rejects_replacement_ledger_in_both_material_stages() -> Result<()> {
+    let snapshot = source()?;
+    for minimum in [2, 22] {
+        let request = beds(minimum)?;
+        let compilation = request.compile(&snapshot)?;
+        let mut intent = intent(&snapshot, &compilation, 99850)?;
+        compilation.apply_capacity_horizon(&mut intent)?;
+        let original =
+            StaticPlanner::default().prepare_laboratory(&snapshot, &intent, &context(&snapshot))?;
+        let ledger = ProductionGoalLedger::capture(&snapshot)?;
+        ledger.validate_plan(&original)?;
+        assert_eq!(
+            minimum == 22,
+            original
+                .steps
+                .iter()
+                .any(|step| matches!(step.action, Action::HarvestResource { .. }))
+        );
+        for replacement_id in [starter::STOCK_LEDGER, EntityId::new(990_001)] {
+            let mut changed = snapshot.clone();
+            let mut replacement = changed
+                .graph
+                .entities
+                .remove(&starter::STOCK_LEDGER)
+                .ok_or_else(|| invalid("original fixture ledger missing"))?;
+            replacement.id = replacement_id;
+            replacement.generation += 1;
+            replacement.fields.insert(
+                effects::STOCK_BED_FIELD.to_owned(),
+                lab_fact(Value::U64(u64::from(minimum))),
+            );
+            changed.graph.entities.insert(replacement_id, replacement);
+            changed.cursor = changed
+                .cursor
+                .checked_next()
+                .ok_or_else(|| invalid("fixture cursor overflow"))?;
+            changed.refresh_hash();
+            assert_eq!(
+                request.semantic_goal_truth(&changed)?,
+                PredicateTruth::True,
+                "a new explicit request can inspect the current unique ledger"
+            );
+            assert_eq!(
+                request
+                    .semantic_goal_truth_in_ledger(&changed, ledger)
+                    .err()
+                    .map(|error| error.code),
+                Some(ErrorCode::PreconditionsFailed),
+                "a retained original cannot silently adopt a replacement ledger"
+            );
+            let replacement_binding = ProductionGoalLedger::capture(&changed)?;
+            assert!(
+                replacement_binding.validate_plan(&original).is_err(),
+                "post-source identity cannot replace original custody"
+            );
+        }
+    }
+    Ok(())
+}
+
+#[test]
 fn unknown_or_asserted_material_and_output_never_become_zero_or_satisfaction() -> Result<()> {
     for field in [effects::STOCK_WOOD_FIELD, effects::STOCK_BED_FIELD] {
         let mut snapshot = source()?;
@@ -464,15 +525,20 @@ fn plant_demand_includes_consumption_through_harvest_and_full_production() -> Re
     let workflow = &compiled.analysis["resource_workflow"];
     assert_eq!(workflow["stage"], "acquire_resources");
     assert_eq!(workflow["requirements"][0]["resource"], "PLANT");
-    assert_eq!(workflow["requirements"][0]["required_stock"], 23);
-    assert_eq!(workflow["requirements"][0]["deficit"], 3);
+    // The fixed point includes both sealed service allowances, rather than
+    // assuming immediate review at the earliest possible physical completion.
+    // Twenty-six brewing and four cooking batches need thirty plants after
+    // budgeting four drink and two meal boundaries through the combined span.
+    assert_eq!(workflow["requirements"][0]["required_stock"], 30);
+    assert_eq!(workflow["requirements"][0]["deficit"], 10);
     let harvest_ticks = workflow["harvest_horizon_ticks"]
         .as_u64()
         .ok_or_else(|| invalid("harvest horizon missing"))?;
     let production_ticks = workflow["production_horizon_ticks"]
         .as_u64()
         .ok_or_else(|| invalid("production horizon missing"))?;
-    assert!(harvest_ticks > 0);
+    assert_eq!(harvest_ticks, 1120);
+    assert_eq!(production_ticks, 3140);
     assert_eq!(
         workflow["planning_horizon_ticks"],
         harvest_ticks + production_ticks
@@ -481,17 +547,47 @@ fn plant_demand_includes_consumption_through_harvest_and_full_production() -> Re
         compiled.analysis["consumption"]["planner"],
         "resource_aware_v1"
     );
-    assert!(
-        workflow["fixed_point_rounds"]
-            .as_u64()
-            .is_some_and(|rounds| rounds > 1)
-    );
+    assert_eq!(workflow["fixed_point_rounds"], 4);
     assert!(parse_steps(&compiled.actions)?.iter().all(|step| matches!(
         step.action,
         Action::HarvestResource {
             resource: HarvestResource::Plant,
+            amount: 10,
             ..
         }
     )));
+    let combined_deadline = snapshot.tick.0 + harvest_ticks + production_ticks;
+    let harvest_deadline = snapshot.tick.0 + harvest_ticks;
+    let harvested = execute(snapshot.clone(), &compiled, 99848)?;
+    assert_eq!(stock(&harvested, effects::STOCK_PLANT_FIELD)?, 30);
+    assert_eq!(
+        request.semantic_goal_truth(&harvested)?,
+        PredicateTruth::False
+    );
+
+    // Delay the foreground continuation until the original harvest allowance
+    // expires. The complete reserve must still be funded by observed inputs.
+    let mut adapter = MemoryAdapter::new(harvested);
+    adapter.advance_ticks(harvest_deadline - adapter.snapshot().tick.0)?;
+    assert_eq!(stock(adapter.snapshot(), effects::STOCK_DRINK_FIELD)?, 33);
+    let production = request.compile(adapter.snapshot())?;
+    assert_eq!(
+        production.analysis["resource_workflow"]["stage"],
+        "production"
+    );
+    assert_eq!(
+        production.analysis["resource_workflow"]["requirements"][0]["required_stock"],
+        30
+    );
+    let completed = execute(adapter.snapshot().clone(), &production, 99849)?;
+    assert_eq!(stock(&completed, effects::STOCK_PLANT_FIELD)?, 0);
+    let mut adapter = MemoryAdapter::new(completed);
+    adapter.advance_ticks(combined_deadline - adapter.snapshot().tick.0)?;
+    assert_eq!(
+        request.semantic_goal_truth(adapter.snapshot())?,
+        PredicateTruth::True
+    );
+    assert_eq!(stock(adapter.snapshot(), effects::STOCK_DRINK_FIELD)?, 142);
+    assert_eq!(stock(adapter.snapshot(), effects::STOCK_FOOD_FIELD)?, 66);
     Ok(())
 }

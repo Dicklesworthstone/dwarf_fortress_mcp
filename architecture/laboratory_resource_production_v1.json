@@ -1,0 +1,67 @@
+{
+  "schema": "dfmcp.laboratory_resource_production/1",
+  "owner_bead": "df-lab-resource-harvest-h2m.3",
+  "scope": "laboratory_reference_world",
+  "planner": "resource_aware_v1",
+  "request": {
+    "template": "production",
+    "opt_in": "acquire_resources_object",
+    "outputs": ["DRINK", "FOOD", "BED", "DOOR", "TABLE", "CHAIR"],
+    "resources": ["WOOD", "PLANT"],
+    "harvest_labor_permission": "acquire_resources.assign_labor_default_false",
+    "production_setup_permission": "original_prerequisites_unchanged",
+    "reserve_until_tick": "rejected_in_this_generation",
+    "old_sources": "unchanged_generation_bytes_and_lowering"
+  },
+  "compilation": {
+    "input": "complete_current_qualified_source",
+    "diagnostic_schedule": "typed_recipe_and_setup_requirements_without_synthetic_inventory",
+    "wood_demand": "pending_consumption_plus_deduplicated_workshop_setup_plus_new_recipe_inputs",
+    "plant_demand": "pending_consumption_plus_all_new_food_and_drink_inputs",
+    "reserve": "bounded_monotone_consumption_fixed_point_through_acquisition_and_production",
+    "short_supply_stage": "ordinary_finite_resource_acquisition_actions_only",
+    "funded_stage": "ordinary_strict_production_and_explicit_setup_actions_only",
+    "stage_deadline": "current_stage_work_only_not_combined_predicted_horizon",
+    "no_work": "already_met_original_output_quotas_do_not_replace_pending_work",
+    "source_reservation": false,
+    "predicted_input_credit": false,
+    "background_stage_dispatch": false
+  },
+  "continuation": {
+    "public_request": "continue_goal_with_retained_plan_digest_only",
+    "source_schema": "dfmcp.production-continuation/4",
+    "durable_source_kind": "production_continuation",
+    "retained": "complete_original_quotas_compiler_acquisition_permission_production_setup_and_order_policy",
+    "seal": "domain_separated_flat_source_and_parent_root_digest",
+    "eligibility": "current_authority_verified_lineage_false_semantic_output_goal_and_complete_same_root_quiescence",
+    "residual": "new_stage_from_current_observed_stock",
+    "historical_proof": "canceled_original_harvest_proof_unchanged_by_child_success",
+    "recovery": "verified_original_source_and_world_continuity_without_restoring_grants",
+    "restore": "abandons_original_pursuits"
+  },
+  "publication": {
+    "authority": "current_observe_query_plan_and_complete_source_budget",
+    "pending_state": "replace_only_after_complete_owned_agent_turn_fits",
+    "step_proof": "complete_top_level_steps_with_checked_same_response_catalog_reference",
+    "stale_commit": "retain_pending_and_return_explicit_original_plan_or_public_parent_continuation",
+    "candidate_comparison": "same_original_output_goal_and_discarded_stage_forecast"
+  },
+  "proof": {
+    "goal": "complete_original_output_stock_predicate",
+    "actions": "ordinary_original_harvest_or_production_completion_proof",
+    "semantic_truth": "current_output_truth_separate_from_canceled_historical_task_proof",
+    "original_stock_ledger": "id_generation_and_source_anchor_captured_before_effects_and_reconstructed_from_archived_seal",
+    "replacement_ledger": "unknown_current_goal_no_new_historical_achievement_and_no_continuation",
+    "completion": "observed_goal_truth_and_original_action_proof_and_physical_quiescence",
+    "native_mutation_admission": false
+  },
+  "bounds": {
+    "request_bytes": 16384,
+    "submitted_quotas": 64,
+    "output_types": 6,
+    "workshop_sites": 3,
+    "fixed_point_rounds": 64,
+    "stage_actions_including_labor": 16,
+    "maximum_game_time_horizon": 403200
+  }
+}

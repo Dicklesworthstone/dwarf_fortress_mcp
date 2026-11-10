@@ -148,15 +148,8 @@ fn execute_original_source(
             let snapshot = session.adapter.snapshot();
             let source_work =
                 query_budget::admit_sources(&[snapshot], &remaining(&current, started)?)?;
-            let (mut payload, pending) = prepare_source(
-                session,
-                source,
-                rid,
-                &current,
-                source_work,
-                kind,
-                started,
-            )?;
+            let (mut payload, pending) =
+                prepare_source(session, source, rid, &current, source_work, kind, started)?;
             let forecast = pending.source.forecast(
                 &session.adapter,
                 &pending.plan,
@@ -229,15 +222,8 @@ pub(super) fn execute_resource_continuation(
             } else {
                 "resource_acquisition_continuation"
             };
-            let (mut payload, pending) = prepare_source(
-                session,
-                source,
-                rid,
-                &current,
-                source_work,
-                kind,
-                started,
-            )?;
+            let (mut payload, pending) =
+                prepare_source(session, source, rid, &current, source_work, kind, started)?;
             let forecast = pending.source.forecast(
                 &session.adapter,
                 &pending.plan,

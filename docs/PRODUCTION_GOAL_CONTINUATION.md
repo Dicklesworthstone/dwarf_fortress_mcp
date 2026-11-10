@@ -1,5 +1,11 @@
 # Continue a retained original production goal
 
+Production with `acquire_resources` uses the same public request and the
+new `/4` continuation generation to move from finite acquisition to production.
+Its complete original quotas and acquisition policy remain fixed; see the
+[resource-aware workflow](LAB_RESOURCE_PRODUCTION.md). Historical generations
+described below keep their existing behavior.
+
 The same public `continue_goal` request also resumes retained item-backed rooms.
 See [room goal continuation](ROOM_GOAL_CONTINUATION.md) for its exact installation
 retention and separate child-goal proof. The production semantics below remain

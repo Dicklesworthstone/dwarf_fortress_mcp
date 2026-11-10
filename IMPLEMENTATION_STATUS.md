@@ -23,6 +23,15 @@ proof. Active, unknown or abandoned sibling work and unverified recovery lineage
 remain ineligible. Combining acquisition with `reserve_until_tick` is explicitly
 refused; this does not widen the existing satisfied-goal reserve admission.
 
+Original stock-ledger custody is established from the exact sealed snapshot
+before effect admission. Its ID, generation and source anchor remain bound to
+current exact and semantic output truth, continuation eligibility and first
+achievement. Durable recovery reconstructs the binding from already archived
+source bytes; it adds no durable field or changes to existing source formats.
+A different ledger or a changed generation cannot create a new achievement or
+make a retained goal currently true, including a funded production parent that
+never needed harvesting. Prior verified historical achievement stays separate.
+
 Initial planning, continuation, comparison, selection and commit use the
 complete source and current authority. Owned Agent Turn publication fits the
 complete response before changing pending custody and retains action proof once
@@ -31,15 +40,19 @@ reviewed plan and returns a public initial or parent-based Plan request for fres
 review. No forecast, prepared order or incomplete harvest becomes observed stock.
 
 Validation checkpoint: the actual `dfmcp-intent` library suite passes all 234
-tests on latest nightly 1.102.0. New compiler and source-seal regressions are present. Selected exact-source
-verification also stopped in unchanged adapter compilation with SIGKILL before
-reaching the new source; no new selected test pass is claimed at this checkpoint.
-Continuation and public workflow validation continue separately. Actual full MCP `cargo check --locked --offline -p
-dfmcp-mcp --lib`, with one build job and debug/incremental disabled, was killed by
-SIGKILL in unchanged pinned `asupersync` before reaching this crate. Full MCP
-transport, installed Task supervision, clean-head release qualification and live
-admission are not established by this checkpoint. Owning bead:
-`df-lab-resource-harvest-h2m.3`.
+tests on latest nightly 1.102.0. The new source includes 12 compiler regressions,
+eight continuation cases, 12 public workflows and an additional exact source-seal
+test. Selected execution remains in progress; no new selected test pass is
+claimed at this checkpoint. Full and selected checks were killed in unchanged
+pinned `asupersync` and the original adapter respectively before completing MCP
+compilation. A serialized lower-memory compiler run is being evaluated.
+
+The required repository verification has passed its source, machine-contract,
+dependency and bead checks and is still running the remaining gates. Clean local
+release qualification refused the dirty development checkout. Full MCP transport,
+installed Task supervision, clean-head release qualification and live admission
+remain unestablished. Owning bead: `df-lab-resource-harvest-h2m.3`; usage and
+bounds: `docs/LAB_RESOURCE_PRODUCTION.md`.
 
 ## Unreleased — Continue original finite resource goals
 

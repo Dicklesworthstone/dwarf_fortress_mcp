@@ -1207,7 +1207,8 @@ fn admitted_continuation_exclusion_cannot_escape_into_a_new_seal_after_anchor_ch
         assert_eq!(plan.anchor, guard.adapter.snapshot().anchor());
         // This is the real objective installation used by durable admission
         // before dispatch. No live action handles or effect receipt exist yet.
-        objectives::install_objective(guard, &plan, source.clone(), &[]);
+        let original_ledger = objectives::prepare_resource_output_ledger(guard, &plan, &source)?;
+        objectives::install_objective(guard, &plan, source.clone(), &[], original_ledger);
         for step in &plan.steps {
             assert!(guard.adapter.step_receipt(plan.id, step.id).is_none());
         }

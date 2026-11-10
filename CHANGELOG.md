@@ -11,6 +11,9 @@
   production only from observed yield through an explicit `continue_goal`.
 - Retain original policy and parent/root custody in flat production continuation
   generation 4, including canceled-work proof and same-root exclusion.
+- Bind output truth to the original stock ledger ID and generation before any
+  effect; reconstruct that binding from the sealed snapshot on durable reopen
+  so replacement counts cannot create success, achievement or continuation.
 - Admit current complete-source budgets and publish the entire review before
   replacing pending work; require a fresh explicit review after source drift.
 - Preserve historical production generations and the existing native boundary.

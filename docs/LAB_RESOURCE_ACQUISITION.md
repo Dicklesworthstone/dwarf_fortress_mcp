@@ -1,5 +1,10 @@
 # Plan finite resource stock goals
 
+For a final production objective whose inputs are short, the
+[resource-aware production workflow](LAB_RESOURCE_PRODUCTION.md) retains the
+output quotas across acquisition and production stages. The standalone stock
+goal described below remains useful when raw stock itself is the objective.
+
 The `resource_acquisition` blueprint turns original WOOD and PLANT stock
 minima into a bounded, reviewable harvest plan. It uses the existing finite
 harvest actions and the ordinary plan, commit, wait and proof loop. Agents no

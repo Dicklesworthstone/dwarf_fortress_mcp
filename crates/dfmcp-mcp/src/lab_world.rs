@@ -35,6 +35,7 @@ mod production_consumption;
 
 #[path = "production_resources.rs"]
 mod production_resources;
+pub(crate) use production_resources::ProductionGoalLedger;
 
 #[path = "production_staffing.rs"]
 mod production_staffing;
@@ -1485,6 +1486,16 @@ impl ProductionRequest {
         snapshot: &WorldSnapshot,
     ) -> Result<dfmcp_world::PredicateTruth> {
         production_resources::semantic_goal_truth(self, snapshot)
+    }
+
+    /// A retained goal keeps the ledger identity qualified at its exact sealed
+    /// source, even when canceled action proof is no longer a completion route.
+    pub(crate) fn semantic_goal_truth_in_ledger(
+        &self,
+        snapshot: &WorldSnapshot,
+        original: ProductionGoalLedger,
+    ) -> Result<dfmcp_world::PredicateTruth> {
+        production_resources::semantic_goal_truth_in_ledger(self, snapshot, original)
     }
 
     pub(crate) const fn reserve_until_tick(&self) -> Option<u64> {

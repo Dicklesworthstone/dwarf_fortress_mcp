@@ -9,6 +9,51 @@ use dfmcp_world::{PredicateEvidence, PredicateTruth};
 
 const MAX_RESOURCE_ROUNDS: u32 = 64;
 
+/// Qualified at the exact source of a retained plan, never inferred from a
+/// post-dispatch world. This is transient custody: durable recovery reconstructs
+/// it from the already archived source without changing any sealed format.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ProductionGoalLedger {
+    anchor: dfmcp_core::StateAnchor,
+    entity: EntityId,
+    generation: u32,
+}
+
+impl ProductionGoalLedger {
+    pub(crate) fn capture(snapshot: &WorldSnapshot) -> Result<Self> {
+        inspect_bound(snapshot)?;
+        PredicateEvidence::laboratory(snapshot)?;
+        let ledger = unique_ledger(snapshot)?;
+        Ok(Self {
+            anchor: snapshot.anchor(),
+            entity: ledger.id,
+            generation: ledger.generation,
+        })
+    }
+
+    pub(crate) fn validate_plan(&self, plan: &PreparedPlan) -> Result<()> {
+        if self.anchor != plan.anchor {
+            return Err(production_setup_refusal(
+                "production ledger custody does not belong to the exact original sealed source",
+            ));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn validate_current(&self, snapshot: &WorldSnapshot) -> Result<()> {
+        let current = Self::capture(snapshot)?;
+        if current.anchor.fortress_id != self.anchor.fortress_id
+            || current.entity != self.entity
+            || current.generation != self.generation
+        {
+            return Err(production_setup_refusal(
+                "the original production stock ledger identity or generation was replaced; reconcile custody before reporting its output goal or continuing it",
+            ));
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct ResourceRequirement {
     resource: HarvestResource,
@@ -46,6 +91,34 @@ pub(super) fn semantic_goal_truth(
 ) -> Result<PredicateTruth> {
     inspect_bound(snapshot)?;
     let evidence = PredicateEvidence::laboratory(snapshot)?;
+    let ledger = unique_ledger(snapshot)?;
+    let terms = request
+        .quotas
+        .iter()
+        .map(|(item, minimum)| {
+            Ok(Predicate::FieldCompare {
+                entity_id: ledger.id,
+                field: production_stock_field(item)
+                    .ok_or_else(|| invalid("production goal escaped its closed output model"))?
+                    .to_owned(),
+                op: CompareOp::Ge,
+                value: Value::U64(u64::from(*minimum)),
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    evidence.evaluate(&Predicate::All(terms).normalized())
+}
+
+pub(super) fn semantic_goal_truth_in_ledger(
+    request: &ProductionRequest,
+    snapshot: &WorldSnapshot,
+    original: ProductionGoalLedger,
+) -> Result<PredicateTruth> {
+    original.validate_current(snapshot)?;
+    semantic_goal_truth(request, snapshot)
+}
+
+fn unique_ledger(snapshot: &WorldSnapshot) -> Result<&EntityRecord> {
     let mut ledgers = snapshot.graph.entities.iter().filter(|(_, record)| {
         record.kind == EntityKind::Other(effects::STOCK_LEDGER_KIND.to_owned())
     });
@@ -61,21 +134,7 @@ pub(super) fn semantic_goal_truth(
             "production goal requires one unambiguous original stock ledger",
         ));
     }
-    let terms = request
-        .quotas
-        .iter()
-        .map(|(item, minimum)| {
-            Ok(Predicate::FieldCompare {
-                entity_id: *id,
-                field: production_stock_field(item)
-                    .ok_or_else(|| invalid("production goal escaped its closed output model"))?
-                    .to_owned(),
-                op: CompareOp::Ge,
-                value: Value::U64(u64::from(*minimum)),
-            })
-        })
-        .collect::<Result<Vec<_>>>()?;
-    evidence.evaluate(&Predicate::All(terms).normalized())
+    Ok(ledger)
 }
 
 /// Read typed model balances, actual deduplicated workshop cost and qualified
@@ -255,7 +314,7 @@ pub(super) fn compile(
     let policy = request.acquire_resources.ok_or_else(|| {
         invalid("resource-aware production requires its original acquisition permission")
     })?;
-    if semantic_goal_truth(request, snapshot)? == PredicateTruth::True {
+    if request.semantic_goal_truth(snapshot)? == PredicateTruth::True {
         return Err(DfmcpError::new(
             ErrorCode::InvalidIntent,
             "observed stock already meets every original production quota; nothing to produce or acquire",
