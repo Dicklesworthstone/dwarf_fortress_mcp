@@ -39,20 +39,50 @@ through checked same-response references. Changed-source commit preserves the
 reviewed plan and returns a public initial or parent-based Plan request for fresh
 review. No forecast, prepared order or incomplete harvest becomes observed stock.
 
-Validation checkpoint: the actual `dfmcp-intent` library suite passes all 234
-tests on latest nightly 1.102.0. The new source includes 12 compiler regressions,
-eight continuation cases, 12 public workflows and an additional exact source-seal
-test. Selected execution remains in progress; no new selected test pass is
-claimed at this checkpoint. Full and selected checks were killed in unchanged
-pinned `asupersync` and the original adapter respectively before completing MCP
-compilation. A serialized lower-memory compiler run is being evaluated.
+The ordinary 4,096-token public workflow now executes acquisition, explicit
+continuation and production to 22 BED / 0 WOOD. Complete acquisition and funded
+continuation reviews occupy 12,585 and 16,165 bytes respectively, below the
+16,384-byte allowance. The latter retains all 1,643 bytes of step proof and all
+538 bytes of lineage. A measured 17,368-byte overflow was fixed by consolidating
+repeated material budgets, provenance, horizons and assumptions; no step proof,
+source request, staffing row, allocation or lineage was truncated. The full-delay
+consumption regression executes through the 4,260-tick combined horizon and
+retains 142 DRINK / 66 FOOD / 0 PLANT at its end.
 
-The required repository verification has passed its source, machine-contract,
-dependency and bead checks and is still running the remaining gates. Clean local
-release qualification refused the dirty development checkout. Full MCP transport,
-installed Task supervision, clean-head release qualification and live admission
-remain unestablished. Owning bead: `df-lab-resource-harvest-h2m.3`; usage and
-bounds: `docs/LAB_RESOURCE_PRODUCTION.md`.
+Validation: all 102 unique selected repository tests pass: 33 new cases and 69
+existing regressions. The batches cover 12 new public workflows, 12 compiler
+cases, eight new continuation cases, 11 production source/seal cases, 12 existing
+workload cases, 11 consumption cases, ten acquisition-continuation source cases,
+eight public acquisition cases, eight public acquisition-continuation cases and
+ten comparison cases. Every batch passes before/after source audits against the
+same 1,152 original input hashes. Packet measurement is a separate scratch
+capture and is not counted among the 102 repository tests. The actual unchanged
+`dfmcp-intent` library suite also passes all 234 tests.
+
+The selected assembly executes the real production compiler, objectives,
+continuations and public server/facade with the full original core, world,
+intent, adapter and lab dependencies. Production function bodies are preserved;
+only FastMCP registration/transport launchers, unrelated test registrations and
+the installed ambient Task service are outside this execution boundary. It does
+not establish full MCP runtime or transport qualification. The successful runs
+use latest nightly 1.102.0 with one Cargo job, disabled debug/incremental output
+and serialized compiler frontend/backend work.
+
+Normal `scripts/verify.sh` passes all preceding source, machine-contract,
+dependency, bead, native component/mutation/UBSan and script gates, including
+402 Python unittest cases in 34 groups and 5,016 repository checks. It then stops
+at formatting differences in 51 files unchanged during this session; edited
+Rust files pass scoped formatting. The initial full MCP check was killed in
+unchanged pinned `asupersync`. A final serialized `cargo check --locked --offline
+-p dfmcp-mcp --lib` stopped in the unchanged `curve25519-dalek-derive` linker with
+SIGBUS while the shared workspace disk was at 100%, before checking this crate.
+Neither full check is claimed as passing. Normal clean-release qualification
+also refused the dirty development checkout; no current-head release receipt,
+installed Task qualification, native route or live admission is claimed.
+
+Owning bead: `df-lab-resource-harvest-h2m.3`; usage and bounds:
+`docs/LAB_RESOURCE_PRODUCTION.md`. Functional implementation and selected
+execution are complete; full MCP/runtime qualification remains open.
 
 ## Unreleased — Continue original finite resource goals
 

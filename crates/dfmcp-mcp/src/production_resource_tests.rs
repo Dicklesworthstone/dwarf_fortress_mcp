@@ -540,14 +540,14 @@ fn plant_demand_includes_consumption_through_harvest_and_full_production() -> Re
     assert_eq!(harvest_ticks, 1120);
     assert_eq!(production_ticks, 3140);
     assert_eq!(
-        workflow["planning_horizon_ticks"],
+        compiled.analysis["consumption"]["planning_horizon_ticks"],
         harvest_ticks + production_ticks
     );
     assert_eq!(
         compiled.analysis["consumption"]["planner"],
         "resource_aware_v1"
     );
-    assert_eq!(workflow["fixed_point_rounds"], 4);
+    assert_eq!(compiled.analysis["consumption"]["fixed_point_rounds"], 4);
     assert!(parse_steps(&compiled.actions)?.iter().all(|step| matches!(
         step.action,
         Action::HarvestResource {

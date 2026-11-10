@@ -16,6 +16,12 @@
   so replacement counts cannot create success, achievement or continuation.
 - Admit current complete-source budgets and publish the entire review before
   replacing pending work; require a fresh explicit review after source drift.
+- Fit complete acquisition and production-continuation reviews in the default
+  response budget by consolidating duplicate analysis, retaining original
+  request, staffing, allocations, step proof and lineage.
+- Exercise the full public workflow, delayed population consumption, recovery,
+  cancellation and historical source compatibility in 102 selected regressions;
+  record full-build and qualification limits separately in implementation status.
 - Preserve historical production generations and the existing native boundary.
   Future `reserve_until_tick` requests remain a separate unsupported combination.
 

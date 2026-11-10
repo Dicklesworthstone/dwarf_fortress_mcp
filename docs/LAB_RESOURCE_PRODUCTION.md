@@ -173,6 +173,11 @@ The analysis, current work and query catalogs must fit before pending state is
 replaced. Output, source, authority, no-work and deadline refusals preserve the
 previous pending plan. Full step proof appears once in top-level `steps`; the
 pending catalog uses a checked same-response `steps_reference` and count.
+The complete component material budget appears at
+`production.resource_workflow.requirements`; source provenance, combined
+horizon, iteration count and consumption assumptions appear at
+`production.consumption`. This generation keeps those values once so the
+ordinary continuation can retain its complete review within the default budget.
 
 Candidate comparison and selection use the same fixed source compiler. Their
 forecasts execute only the current reviewed stage on discarded worlds. A

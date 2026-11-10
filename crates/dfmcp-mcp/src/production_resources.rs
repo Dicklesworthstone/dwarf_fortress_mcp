@@ -381,13 +381,10 @@ pub(super) fn compile(
         }
         let workflow = workflow_report(
             request,
-            snapshot,
             &candidate,
             acquisition.as_ref(),
             harvest_ticks,
             production_ticks,
-            horizon,
-            round,
         )?;
         let mut compiled = match acquisition {
             Some(acquisition) => {
@@ -435,7 +432,11 @@ pub(super) fn compile(
         )?;
         compiled.analysis["consumption"]["planner"] = json!("resource_aware_v1");
         compiled.analysis["consumption"]["method"] =
-            json!("monotone_reserve_through_acquisition_and_production_horizons");
+            json!("monotone_reserve_through_harvest_and_production");
+        compiled.analysis["consumption"]["assumptions"] = json!(
+            "Assumes reference yields, observed population, persistent workers/workshops and no new competing work/population. Includes queued service and both stage deadlines; observations release and verify work on time. Delay or interference needs fresh planning."
+        );
+        compact_resource_analysis(&mut compiled.analysis)?;
         compiled.analysis["resource_workflow"] = workflow;
         return Ok(compiled);
     }
@@ -444,16 +445,47 @@ pub(super) fn compile(
     ))
 }
 
-#[allow(clippy::too_many_arguments)]
+/// Keep a single complete material budget and consumption explanation in this
+/// new generation. Exact component amounts remain in resource requirements;
+/// recipe/construction model identities, staffing, source binding and every
+/// action proof remain intact. Historical production reports are unchanged.
+fn compact_resource_analysis(analysis: &mut Json) -> Result<()> {
+    let report = analysis
+        .as_object_mut()
+        .ok_or_else(|| invalid("resource-aware production lost its complete analysis"))?;
+    let food_drink = if report.get("provisions_model").is_some_and(Json::is_string) {
+        "5 FOOD/DRINK per PLANT"
+    } else {
+        "5 FOOD/DRINK without modeled inputs"
+    };
+    report.insert(
+        "model".to_owned(),
+        json!(format!(
+            "{food_drink}; 1 BED/DOOR/TABLE/CHAIR per WOOD; finite staffed workshops."
+        )),
+    );
+    // These repeat current stock, pending demand, setup wood and shortages
+    // already retained in the typed complete resource requirements.
+    report.remove("materials");
+    report.remove("shortages");
+    if let Some(construction) = report.get_mut("construction_materials") {
+        let construction = construction
+            .as_object_mut()
+            .ok_or_else(|| invalid("resource-aware construction report is not an object"))?;
+        construction.remove("new_workshop_wood");
+        construction.remove("missing_workshop_wood");
+        construction.remove("reservation_is_model_only");
+        construction.remove("existing_workshops_are_reused");
+    }
+    Ok(())
+}
+
 fn workflow_report(
     request: &ProductionRequest,
-    snapshot: &WorldSnapshot,
     candidate: &ProductionCandidate,
     acquisition: Option<&ResourceAcquisitionPlan>,
     harvest_ticks: u64,
     production_ticks: u64,
-    horizon: u64,
-    rounds: u32,
 ) -> Result<Json> {
     let original: Json = serde_json::from_str(&request.canonical_json()).map_err(|error| {
         invalid(format!(
@@ -465,8 +497,6 @@ fn workflow_report(
         "planner": "resource_aware_v1",
         "stage": if acquisition.is_some() { "acquire_resources" } else { "production" },
         "original_request": original,
-        "source_state_hash": snapshot.state_hash.to_hex(),
-        "source_tick": snapshot.tick.0,
         "requirements": candidate.resource_requirements.iter().map(|row| json!({
             "resource": row.resource.as_str(),
             "required_stock": row.required_stock,
@@ -476,13 +506,9 @@ fn workflow_report(
             "existing_demand_units": row.existing_demand_units,
             "workshop_units": row.workshop_units,
         })).collect::<Vec<_>>(),
-        "original_production_funded": candidate.material_feasible,
-        "production_requirements_validated": true,
+        "reservation_is_model_only": true,
         "harvest_horizon_ticks": harvest_ticks,
         "production_horizon_ticks": production_ticks,
-        "planning_horizon_ticks": horizon,
-        "fixed_point_rounds": rounds,
-        "maximum_rounds": MAX_RESOURCE_ROUNDS,
         "allocations": acquisition.map(|plan| plan.allocations.iter().map(|row| json!({
             "resource": row.resource.as_str(),
             "source_entity_id": row.source.get().to_string(),
@@ -498,15 +524,11 @@ fn workflow_report(
             "action_index": row.action_index,
         })).collect::<Vec<_>>()).unwrap_or_default(),
         "next_stage": if acquisition.is_some() {
-            "After observed harvest completion, explicitly plan continue_goal for the original handle, review the fresh source-bound plan and commit it. Production is recomputed from observed stock."
+            "After harvesting is quiet, request continue_goal, review observed supply, then commit the new stage."
         } else {
-            "Observe and verify every original output quota after production."
+            "Observe actions and verify all original output quotas."
         },
         "automatic_continuation": false,
-        "future_output_counted_as_stock": false,
-        "original_terminal_quotas_preserved": true,
-        "completion_guaranteed": false,
-        "forecast_assumptions": "Conservative reference service through sequential harvest and production horizons; current workers, workshops and population persist, foreground observations release dependencies by their deadlines, and no new competing work arrives. Additional delay or interference requires fresh continuation analysis.",
     }))
 }
 

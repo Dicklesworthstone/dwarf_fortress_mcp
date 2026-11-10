@@ -733,7 +733,12 @@ fn compared_resource_production_selects_original_source_without_forecasting_next
     assert_eq!(rows.len(), 2);
     for row in rows {
         assert_eq!(row["status"], "evaluated", "{row}");
-        assert_eq!(row["prediction"]["predicted_complete"], true, "{row}");
+        assert_eq!(
+            row["prediction"]["predicted_actions_complete"], true,
+            "{row}"
+        );
+        assert_eq!(row["prediction"]["predicted_goal_complete"], false, "{row}");
+        assert_eq!(row["prediction"]["predicted_complete"], false, "{row}");
         assert_eq!(row["prediction"]["predicted_goal_truth"], "false", "{row}");
         assert!(row.get("plan_digest").is_none());
     }
