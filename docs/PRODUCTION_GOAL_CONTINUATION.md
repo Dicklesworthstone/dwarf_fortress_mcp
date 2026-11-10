@@ -3,7 +3,11 @@
 Production with `acquire_resources` uses the same public request and the
 new `/4` continuation generation to move from finite acquisition to production.
 Its complete original quotas and acquisition policy remain fixed; see the
-[resource-aware workflow](LAB_RESOURCE_PRODUCTION.md). Historical generations
+[resource-aware workflow](LAB_RESOURCE_PRODUCTION.md). Combining acquisition
+with an explicit future reserve selects the additive `/5` source, preserving
+the same absolute tick and allowing a still-satisfied present stock goal to
+continue only when its remaining reserve has a qualified deficit. See
+[resource production reserves](LAB_RESOURCE_PRODUCTION_RESERVES.md). Historical generations
 described below keep their existing behavior.
 
 The same public `continue_goal` request also resumes retained item-backed rooms.

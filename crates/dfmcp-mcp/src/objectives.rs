@@ -9,6 +9,13 @@ use super::*;
 use dfmcp_lab::durable::{DurableLabStore, DurableObjective, MAX_OBJECTIVES_PER_FORTRESS};
 use serde_json::Value;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ResourceReserveStatus {
+    WorkRequired,
+    FundedFromCurrentStock,
+    Expired,
+}
+
 #[derive(Clone, Debug)]
 pub(super) struct Objective {
     pub(super) plan_digest: Digest32,
@@ -45,6 +52,55 @@ impl Objective {
 
     pub(super) fn is_resource_aware_production(&self) -> bool {
         self.source.is_resource_aware_production()
+    }
+
+    fn resource_reserve_source(&self) -> Result<Option<goal_continuation::ProductionContinuation>> {
+        let source = match &self.source {
+            PlanSource::Production { raw, .. } => {
+                let request = crate::lab_world::ProductionRequest::parse(raw)?;
+                if request.planner() != Some(crate::lab_world::ProductionPlanner::ResourceReserveV1)
+                {
+                    return Ok(None);
+                }
+                goal_continuation::ProductionContinuation::new(
+                    self.plan_digest,
+                    self.plan_digest,
+                    request,
+                )?
+            }
+            PlanSource::ProductionContinuation { raw, .. } => {
+                goal_continuation::ProductionContinuation::parse(raw)?
+            }
+            _ => return Ok(None),
+        };
+        Ok(source.is_resource_reserve().then_some(source))
+    }
+
+    fn resource_reserve_status(
+        &self,
+        session: &LabSession,
+        source: &goal_continuation::ProductionContinuation,
+    ) -> Result<ResourceReserveStatus> {
+        // Preserve the original stock-ledger identity and current read grants.
+        // This report never replaces the lineage, quiescence and plan checks at
+        // continuation intake or grants authority to predicted future stock.
+        self.current_resource_output_truth(session)?;
+        let until = source.reserve_until_tick().ok_or_else(|| {
+            DfmcpError::new(
+                ErrorCode::CorruptLedger,
+                "the retained resource reserve has no original absolute horizon",
+            )
+        })?;
+        if until <= session.adapter.snapshot().tick.0 {
+            return Ok(ResourceReserveStatus::Expired);
+        }
+        Ok(
+            if source.resource_reserve_work_required(session.adapter.snapshot())? {
+                ResourceReserveStatus::WorkRequired
+            } else {
+                ResourceReserveStatus::FundedFromCurrentStock
+            },
+        )
     }
 
     fn current_resource_output_truth(&self, session: &LabSession) -> Result<PredicateTruth> {
@@ -164,6 +220,43 @@ impl Objective {
         } else {
             truth
         };
+        let reserve_source = self.resource_reserve_source().ok().flatten();
+        let reserve_status = reserve_source
+            .as_ref()
+            .map(|source| self.resource_reserve_status(session, source));
+        if let (Some(source), Some(status)) = (&reserve_source, &reserve_status) {
+            let until = source.reserve_until_tick();
+            let (name, epistemic, work_required) = match status {
+                Ok(ResourceReserveStatus::WorkRequired) => {
+                    ("work_required", "predicted", Some(true))
+                }
+                Ok(ResourceReserveStatus::FundedFromCurrentStock) => {
+                    ("funded_from_current_stock", "predicted", Some(false))
+                }
+                Ok(ResourceReserveStatus::Expired) => ("expired", "observed", None),
+                Err(_) => ("unknown", "unknown", None),
+            };
+            let mut reserve = json!({
+                "planner": "resource_reserve_v1",
+                "reserve_until_tick": until,
+                "remaining_horizon_ticks": until.map(|tick| tick.saturating_sub(session.adapter.snapshot().tick.0)),
+                "status": name,
+                "epistemic": epistemic,
+                "work_required": work_required,
+                "new_request_required": matches!(status, Ok(ResourceReserveStatus::Expired)),
+                "continuous_maintenance_proven": false,
+                "historical_action_proof_rewritten": false,
+            });
+            if let Err(error) = status {
+                reserve["error"] = json!({"code": error.code.as_str(), "message": error.message});
+            }
+            result["resource_reserve"] = reserve;
+        }
+        let continuation_needed = match &reserve_status {
+            Some(Ok(ResourceReserveStatus::WorkRequired)) => true,
+            Some(_) => false,
+            None => continuation_truth == PredicateTruth::False,
+        };
         let historical = self
             .first_satisfied_anchor
             .filter(|_| self.historical_proof_verified);
@@ -220,17 +313,15 @@ impl Objective {
                 }))
                 .collect::<Vec<_>>()
         );
-        result["pursuit_active"] =
-            json!(!abandoned && truth != PredicateTruth::True && quiet != Some(true));
-        result["needs_replan"] =
-            json!(!abandoned && continuation_truth == PredicateTruth::False && quiet == Some(true));
+        result["pursuit_active"] = json!(
+            !abandoned
+                && (truth != PredicateTruth::True || reserve_source.is_some())
+                && quiet != Some(true)
+        );
+        result["needs_replan"] = json!(!abandoned && continuation_needed && quiet == Some(true));
         result["replacement_work_dispatched"] = json!(false);
         result["blind_retry_allowed"] = json!(false);
-        if !abandoned
-            && continuation_truth == PredicateTruth::False
-            && quiet == Some(true)
-            && self.source.can_continue()
-        {
+        if !abandoned && continuation_needed && quiet == Some(true) && self.source.can_continue() {
             // An affordance carries no new authority. Reuse the exact intake
             // gate so active/unknown sibling pursuits are not offered duplicate
             // work; commit repeats the check even if this proposal was possible.
@@ -449,6 +540,12 @@ pub(super) fn continuation_source(
             quiet,
         )?;
     }
+    let reserve_work_required = match &continuation {
+        GoalContinuation::Production(source) if source.is_resource_reserve() => {
+            source.resource_reserve_work_required(session.adapter.snapshot())?
+        }
+        _ => false,
+    };
     for other in &session.objectives {
         if other.plan_digest == parent || Some(other.plan_digest) == exclude_candidate {
             continue;
@@ -466,7 +563,7 @@ pub(super) fn continuation_source(
             }
             if continuation.requires_semantic_sibling_check() {
                 match other.current_truth(session)? {
-                    PredicateTruth::True => {
+                    PredicateTruth::True if !reserve_work_required => {
                         return Err(DfmcpError::new(
                             ErrorCode::InvalidIntent,
                             format!(
@@ -483,7 +580,7 @@ pub(super) fn continuation_source(
                             "an earlier resource pursuit has unknown original-goal evidence; reconcile it before acquiring more material",
                         ));
                     }
-                    PredicateTruth::False | PredicateTruth::Unknown => {}
+                    PredicateTruth::True | PredicateTruth::False | PredicateTruth::Unknown => {}
                 }
             }
         }
@@ -661,6 +758,18 @@ pub(super) fn objective_evictions(session: &LabSession, digest: Digest32) -> Res
             || !goal_work_quiescent(session, objective).unwrap_or(false)
         {
             continue;
+        }
+        match objective.resource_reserve_source() {
+            Ok(Some(source)) => match objective.resource_reserve_status(session, &source) {
+                Ok(
+                    ResourceReserveStatus::FundedFromCurrentStock | ResourceReserveStatus::Expired,
+                ) => {}
+                // A presently true quota can still have unfinished future
+                // reserve work. Missing qualification never frees that intent.
+                Ok(ResourceReserveStatus::WorkRequired) | Err(_) => continue,
+            },
+            Ok(None) => {}
+            Err(_) => continue,
         }
         if session.durable_scenario.is_some()
             && with_durable_store(|store| {

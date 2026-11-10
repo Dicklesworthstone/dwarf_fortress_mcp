@@ -29,7 +29,8 @@ pub(crate) fn compile(
         Some(
             planner @ (ProductionPlanner::ConsumptionAwareV1
             | ProductionPlanner::ConsumptionReserveV1
-            | ProductionPlanner::ResourceAwareV1),
+            | ProductionPlanner::ResourceAwareV1
+            | ProductionPlanner::ResourceReserveV1),
         ) => {
             let digest = source_digest(request);
             let sealed = format!("{summary} [production source {}]", digest.to_hex());

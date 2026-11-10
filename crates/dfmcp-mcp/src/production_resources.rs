@@ -311,17 +311,101 @@ pub(super) fn compile(
     request: &ProductionRequest,
     snapshot: &WorldSnapshot,
 ) -> Result<ProductionCompilation> {
+    compile_program(request, snapshot, None)
+}
+
+/// An explicit absolute reserve is a separate compiler generation. Its stock
+/// target can require work even while the original current-stock goal holds.
+/// It budgets both reviewed stages but never extends either stage's deadline
+/// or credits a predicted harvest as inventory for an executable order.
+pub(super) fn compile_reserve(
+    request: &ProductionRequest,
+    snapshot: &WorldSnapshot,
+) -> Result<ProductionCompilation> {
+    let reserve = reserve_horizon(request, snapshot)?;
+    compile_program(request, snapshot, Some(reserve))
+}
+
+fn reserve_horizon(
+    request: &ProductionRequest,
+    snapshot: &WorldSnapshot,
+) -> Result<(GameTick, u64)> {
+    if request.acquire_resources.is_none() {
+        return Err(invalid(
+            "resource reserve planning requires its original acquisition permission",
+        ));
+    }
+    let until = request
+        .reserve_until_tick
+        .ok_or_else(|| invalid("resource reserve planning requires reserve_until_tick"))?;
+    let ticks = until
+        .checked_sub(snapshot.tick.0)
+        .filter(|ticks| *ticks > 0)
+        .ok_or_else(|| {
+            invalid("reserve_until_tick must be strictly after the current source game tick; an expired original resource reserve cannot be extended by replay")
+        })?;
+    if ticks > effects::MAX_DEFAULT_OBLIGATION_TICKS {
+        return Err(bounded(
+            "reserve_until_tick exceeds the bounded one-game-year planning horizon",
+        ));
+    }
+    Ok((GameTick(until), ticks))
+}
+
+/// Bounded continuation discovery for a currently satisfied original quota.
+/// This checks only whether observed outputs fund the unchanged explicit
+/// reserve. It does not certify source availability, work feasibility, custody,
+/// quiescence or authorization; the ordinary compiler and owner validate those
+/// before a new stage can be reviewed or committed.
+pub(super) fn reserve_work_required(
+    request: &ProductionRequest,
+    snapshot: &WorldSnapshot,
+) -> Result<bool> {
+    let (_, ticks) = reserve_horizon(request, snapshot)?;
+    inspect_bound(snapshot)?;
+    PredicateEvidence::laboratory(snapshot)?;
+    let ledger = unique_ledger(snapshot)?;
+    let model = production_consumption::ConsumptionModel::capture(snapshot)?;
+    let targets = production_consumption::reserve_targets(request, &model, ticks, &request.quotas)?;
+    let mut required = false;
+    for (item, target) in targets {
+        let field = production_stock_field(&item)
+            .ok_or_else(|| invalid("resource reserve escaped its closed output model"))?;
+        let Some(Value::U64(stock)) = production_fact(ledger, field, snapshot.tick) else {
+            return Err(production_setup_refusal(format!(
+                "resource reserve requires qualified current {field}; unknown output cannot establish remaining reserve demand",
+            )));
+        };
+        required |= *stock < u64::from(target);
+    }
+    Ok(required)
+}
+
+fn compile_program(
+    request: &ProductionRequest,
+    snapshot: &WorldSnapshot,
+    reserve: Option<(GameTick, u64)>,
+) -> Result<ProductionCompilation> {
     let policy = request.acquire_resources.ok_or_else(|| {
         invalid("resource-aware production requires its original acquisition permission")
     })?;
-    if request.semantic_goal_truth(snapshot)? == PredicateTruth::True {
+    let original_truth = request.semantic_goal_truth(snapshot)?;
+    if reserve.is_none() && original_truth == PredicateTruth::True {
         return Err(DfmcpError::new(
             ErrorCode::InvalidIntent,
             "observed stock already meets every original production quota; nothing to produce or acquire",
         ));
     }
     let model = production_consumption::ConsumptionModel::capture(snapshot)?;
-    let mut targets = request.quotas.clone();
+    // Seed the explicit horizon before candidate lowering: otherwise the
+    // ordinary no-work result would suppress required future reserve work.
+    // Historical resource_aware_v1 retains its original target sequence.
+    let mut targets = match reserve {
+        Some((_, ticks)) => {
+            production_consumption::reserve_targets(request, &model, ticks, &request.quotas)?
+        }
+        None => request.quotas.clone(),
+    };
     for round in 1..=MAX_RESOURCE_ROUNDS {
         let candidate = request.compile_candidate(snapshot, &targets, true, true)?;
         let production_ticks = production_horizon(&candidate)?;
@@ -358,9 +442,10 @@ pub(super) fn compile(
             })
             .transpose()?
             .unwrap_or(0);
-        let horizon = production_ticks.checked_add(harvest_ticks)
+        let work_horizon = production_ticks.checked_add(harvest_ticks)
             .filter(|ticks| *ticks <= effects::MAX_DEFAULT_OBLIGATION_TICKS)
             .ok_or_else(|| bounded("combined acquisition and production exceed the bounded one-year planning horizon"))?;
+        let horizon = reserve.map_or(work_horizon, |(_, ticks)| ticks.max(work_horizon));
         let mut next = targets.clone();
         for (item, minimum) in &request.quotas {
             let target = model
@@ -379,13 +464,18 @@ pub(super) fn compile(
             targets = next;
             continue;
         }
-        let workflow = workflow_report(
+        let mut workflow = workflow_report(
             request,
             &candidate,
             acquisition.as_ref(),
             harvest_ticks,
             production_ticks,
         )?;
+        let stage_horizon = if acquisition.is_some() {
+            harvest_ticks
+        } else {
+            production_ticks
+        };
         let mut compiled = match acquisition {
             Some(acquisition) => {
                 if acquisition.requested_actions.is_empty() {
@@ -436,7 +526,40 @@ pub(super) fn compile(
         compiled.analysis["consumption"]["assumptions"] = json!(
             "Assumes reference yields, observed population, persistent workers/workshops and no new competing work/population. Includes queued service and both stage deadlines; observations release and verify work on time. Delay or interference needs fresh planning."
         );
+        if let Some((until, reserve_ticks)) = reserve {
+            // The ordinary production marker admits funded orders. The
+            // acquisition binder uses a distinct closed marker for harvests;
+            // neither path changes the original output-stock predicate.
+            if original_truth == PredicateTruth::True {
+                compiled.satisfied_goal_reserve_until = Some(until);
+            }
+            let work_end = snapshot.tick.checked_add(work_horizon).ok_or_else(|| {
+                bounded("staged production work horizon overflows the game clock")
+            })?;
+            let stage_end = snapshot
+                .tick
+                .checked_add(stage_horizon)
+                .ok_or_else(|| bounded("production stage horizon overflows the game clock"))?;
+            let report = &mut compiled.analysis["consumption"];
+            report["planner"] = json!("resource_reserve_v1");
+            report["method"] =
+                json!("monotone_reserve_through_harvest_production_and_explicit_horizon");
+            report["reserve_until_tick"] = json!(until.0);
+            report["reserve_horizon_ticks"] = json!(reserve_ticks);
+            report["work_completion_horizon_ticks"] = json!(work_horizon);
+            report["work_completion_horizon_tick"] = json!(work_end.0);
+            report["stage_work_horizon_ticks"] = json!(stage_horizon);
+            report["stage_work_horizon_tick"] = json!(stage_end.0);
+            report["requested_tick_is_action_deadline"] = json!(false);
+            report["continuous_maintenance_proven"] = json!(false);
+            report["reserve_stock_is_planning_target"] = json!(true);
+            workflow["schema"] = json!("dfmcp.production-resource-workflow/2");
+            workflow["planner"] = json!("resource_reserve_v1");
+        }
         compact_resource_analysis(&mut compiled.analysis)?;
+        if reserve.is_some() {
+            compact_reserve_analysis(&mut compiled.analysis, &mut workflow)?;
+        }
         compiled.analysis["resource_workflow"] = workflow;
         return Ok(compiled);
     }
@@ -477,6 +600,76 @@ fn compact_resource_analysis(analysis: &mut Json) -> Result<()> {
         construction.remove("reservation_is_model_only");
         construction.remove("existing_workshops_are_reused");
     }
+    Ok(())
+}
+
+/// Version 2 shares the same complete source, quantity, allocation and staffing
+/// evidence without repeating derivable metadata. Relative horizons follow
+/// from source_tick and the absolute horizon; the combined work duration is
+/// the sum of the two workflow stage durations. The actual current deadline
+/// remains in every sealed obligation. Version 1 reports are never changed.
+fn compact_reserve_analysis(analysis: &mut Json, workflow: &mut Json) -> Result<()> {
+    let report = analysis
+        .as_object_mut()
+        .ok_or_else(|| invalid("resource reserve lost its complete analysis"))?;
+    let consumption = report
+        .get_mut("consumption")
+        .and_then(Json::as_object_mut)
+        .ok_or_else(|| invalid("resource reserve lost its consumption report"))?;
+    for field in [
+        "planner",
+        "method",
+        "drink_interval_ticks",
+        "food_interval_ticks",
+        "planning_horizon_ticks",
+        "maximum_rounds",
+        "original_terminal_quotas_preserved",
+        "completion_guaranteed",
+        "reserve_horizon_ticks",
+        "work_completion_horizon_ticks",
+        "work_completion_horizon_tick",
+        "stage_work_horizon_ticks",
+        "stage_work_horizon_tick",
+        "reserve_stock_is_planning_target",
+    ] {
+        consumption.remove(field);
+    }
+    consumption.insert(
+        "assumptions".to_owned(),
+        json!("Reference yields and unchanged population/workforce; timely reviewed stages without new competing work."),
+    );
+    let rows = report
+        .get_mut("requirements")
+        .and_then(Json::as_array_mut)
+        .ok_or_else(|| invalid("resource reserve lost its complete quantity report"))?;
+    for row in rows {
+        let row = row
+            .as_object_mut()
+            .ok_or_else(|| invalid("resource reserve quantity row is not an object"))?;
+        // The allowance is exactly planning_stock_target - minimum_stock.
+        // Keep both operands and independently predicted consumption intact.
+        row.remove("consumption_allowance");
+        // The original request and closed recipe catalog already distinguish
+        // PLANT inputs from output goals. No quantity row is omitted.
+        row.remove("role");
+        row.remove("input_budget_includes_output_reserves");
+    }
+    let ingredients = if report.get("provisions_model").is_some_and(Json::is_string) {
+        "per PLANT"
+    } else {
+        "without inputs"
+    };
+    report.insert(
+        "model".to_owned(),
+        json!(format!(
+            "5 FOOD/DRINK {ingredients}; 1 carpentry output per WOOD; staffed workshops."
+        )),
+    );
+    workflow["next_stage"] = match workflow["stage"].as_str() {
+        Some("acquire_resources") => json!("Review continue_goal after harvesting is quiet."),
+        Some("production") => json!("Verify original output quotas."),
+        _ => return Err(invalid("resource reserve lost its closed stage identity")),
+    };
     Ok(())
 }
 
@@ -535,3 +728,7 @@ fn workflow_report(
 #[cfg(test)]
 #[path = "production_resource_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "production_resource_reserve_tests.rs"]
+mod reserve_tests;

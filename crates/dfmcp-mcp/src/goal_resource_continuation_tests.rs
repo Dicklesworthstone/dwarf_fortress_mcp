@@ -537,3 +537,6 @@ fn funded_parent_continuation_cannot_adopt_a_replacement_stock_ledger() -> Resul
     }
     Ok(())
 }
+
+#[path = "goal_resource_reserve_continuation_tests.rs"]
+mod resource_reserve;

@@ -294,6 +294,13 @@ quotas, proposes finite WOOD/PLANT acquisition when needed, and uses
 has a separate review and commit; food/drink sizing includes consumption during
 the gathering delay.
 
+Add `reserve_until_tick` to fund those same quotas through an explicit future
+tick using the [resource-reserve workflow](docs/LAB_RESOURCE_PRODUCTION_RESERVES.md).
+It retains the original absolute tick across acquisition, production,
+cancellation and recovery. Current stock minima and future reserve demand stay
+separate, so gathering can lead into production while the present minima still
+hold; already funded reserves cause no new work.
+
 The [original Carpenter workshop workflow](docs/WORKSHOP_CONSTRUCTION_MCP.md)
 documents the separate unadmitted workshop/1.20 native, safe-Rust and registered
 eleven-tool development consumer. Focused execution and an actual-SDK diagnostic

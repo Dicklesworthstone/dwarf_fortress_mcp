@@ -1,5 +1,52 @@
 # Implementation Status
 
+## Unreleased — Fund explicit future reserves through finite resource stages
+
+The existing production blueprint now composes `acquire_resources` with an
+absolute `reserve_until_tick`, selecting the additive `resource_reserve_v1`
+compiler and flat production continuation `/5`. It seeds qualified future
+consumption demand before the no-work check and solves the bounded monotone
+target through the later of the explicit tick and combined acquisition plus
+production work. Only the currently funded stage is executable: finite harvest
+first when necessary, then a separately reviewed production plan using observed
+yield. Original quotas, absolute tick, independent labor/setup permissions,
+original ledger identity/generation and parent/root custody remain sealed.
+
+Current stock minima may be True while the remaining reserve is unfunded.
+The distinct harvest reserve admission permits that acquisition without
+widening the old production-only marker. Goal observation and continuation
+retain this distinction, refuse expired horizons without renewing them, and
+preserve unfinished goal custody when future demand or its qualification is
+missing. Same-root physical quiescence and current authority are checked again
+before commit. Historical action proof and original `/1`–`/4` source semantics
+remain unchanged.
+
+Workflow report `/2` retains the complete original request, every material and
+quantity row, allocations, staffing, source binding and stage durations. It
+removes duplicated explanatory and derivable fields only in the new generation;
+actual sealed action deadlines remain independent of the requested future tick.
+The forecast runs the current stage only and reports the absolute reserve
+endpoint separately. No continuous-maintenance or completion guarantee is made.
+
+The source checkpoint includes 26 focused regression tests across the real
+planner, compiler, continuation codec and public facade. All 19 changed Rust
+files were parsed/formatted by latest-nightly rustfmt, the request schema
+passed four positive and eight negative vectors, and `git diff --check` passed.
+Three independent source reviews checked generation isolation, admission,
+custody and current-True continuation. Full MCP test compilation was attempted
+with exact locked dependencies and serialized compilation; the host killed
+`asupersync` during code generation before project tests ran. The earlier
+intent test build was also killed under memory pressure. Selected production
+module execution is pending at this checkpoint; no Rust test pass or default
+public-packet fit is claimed here. The repository verifier is still running;
+the clean-source release qualifier refused the dirty development worktree.
+This adds laboratory functionality only, with no native protocol, live
+mutation, compatibility registry or admission change.
+
+Usage and exact semantics:
+[`docs/LAB_RESOURCE_PRODUCTION_RESERVES.md`](docs/LAB_RESOURCE_PRODUCTION_RESERVES.md).
+Owner: `df-lab-resource-harvest-h2m.4`.
+
 ## Unreleased — Admit finite harvesting for explicit laboratory production reserves
 
 A distinct typed `LaboratoryResourceProductionReserveUntil` constraint permits

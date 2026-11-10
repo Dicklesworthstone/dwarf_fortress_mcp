@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased — Gather finite inputs for explicit future production reserves
+
+- Combine `acquire_resources` and `reserve_until_tick` under the new fixed
+  `resource_reserve_v1` compiler, preserving older request generations.
+- Budget consumption through the later of the absolute reserve horizon and
+  complete gathering plus production work; keep actual stage deadlines bounded
+  to their own work.
+- Compile only the current stage, using observed inputs before any production.
+  Continue through the flat `/5` source with unchanged quotas, horizon,
+  permissions, ledger generation and lineage.
+- Keep future reserve work discoverable when present minima already hold.
+  Protect unfinished or unknown reserve goals from capacity eviction, and
+  reject expired horizons and active same-root work before effects.
+- Preserve complete review rows and source binding in workflow report `/2`,
+  compacting only duplicated or derivable metadata in the new generation.
+- Add compiler, codec, public lifecycle and core admission regressions, the
+  request schema and the laboratory contract/usage guide. Latest-nightly
+  rustfmt and 12 schema vectors passed. Full MCP compilation was killed in
+  `asupersync` under memory pressure; no runtime or release qualification is
+  claimed by this source checkpoint.
+- Track implementation and remaining execution evidence in
+  `df-lab-resource-harvest-h2m.4`.
+
 ## Unreleased — Bound reserve acquisition admission separately from production
 
 - Add a distinct laboratory-only typed admission for finite harvest and its

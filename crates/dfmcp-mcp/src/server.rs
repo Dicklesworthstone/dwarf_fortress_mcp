@@ -3765,7 +3765,8 @@ fn is_resource_aware_production_request(raw: &str) -> bool {
         && serde_json::from_str::<serde_json::Value>(raw).is_ok_and(|request| {
             request["template"] == "production"
                 && (request.get("acquire_resources").is_some()
-                    || request["planner"] == "resource_aware_v1")
+                    || request["planner"] == "resource_aware_v1"
+                    || request["planner"] == "resource_reserve_v1")
         })
 }
 

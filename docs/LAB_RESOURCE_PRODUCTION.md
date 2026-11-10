@@ -123,10 +123,11 @@ The existing `orders: "dependency_preserving_v1"` and explicit workshop sites
 remain part of the original source. Unused permissions and sites are sealed too;
 equivalent action arrays do not erase differences in the original request.
 
-`resource_aware_v1` deliberately rejects `reserve_until_tick`. Its consumption
-allowance accounts for the complete staged work horizon; requesting an
-independent future reserve continues to use the existing
-`consumption_reserve_v1` workflow with observed inputs. Historical production
+`resource_aware_v1` deliberately rejects `reserve_until_tick`. To combine finite
+acquisition with an explicit future tick, submit both fields without naming
+the older compiler. New intake selects the additive
+[`resource_reserve_v1` workflow](LAB_RESOURCE_PRODUCTION_RESERVES.md), retaining
+the same absolute tick through continuation `/5`. Historical production
 requests without `acquire_resources` keep their existing compiler selection,
 source bytes and strict shortage behavior.
 

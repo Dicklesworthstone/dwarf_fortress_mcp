@@ -138,7 +138,7 @@ fn resource_policy_pins_closed_generation_and_preserves_historical_sources() -> 
         r#"{"template":"production","quotas":[{"item":"BED","minimum":22}],"acquire_resources":{"ignore_stock":true}}"#,
         r#"{"template":"production","quotas":[{"item":"BED","minimum":22}],"acquire_resources":{"assign_labor":false,"assign_labor":true}}"#,
         r#"{"template":"production","quotas":[{"item":"BED","minimum":22}],"acquire_resources":{},"planner":"consumption_aware_v1"}"#,
-        r#"{"template":"production","quotas":[{"item":"BED","minimum":22}],"acquire_resources":{},"reserve_until_tick":1000}"#,
+        r#"{"template":"production","quotas":[{"item":"BED","minimum":22}],"acquire_resources":{},"planner":"resource_aware_v1","reserve_until_tick":1000}"#,
         r#"{"template":"production","quotas":[{"item":"BED","minimum":22}],"planner":"resource_aware_v1"}"#,
     ] {
         assert!(ProductionRequest::parse_current(raw).is_err(), "{raw}");

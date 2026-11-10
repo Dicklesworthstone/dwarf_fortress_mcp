@@ -21,6 +21,7 @@ const LEGACY_SOURCE_SCHEMA: &str = "dfmcp.production-continuation/1";
 const SOURCE_SCHEMA: &str = "dfmcp.production-continuation/2";
 const RESERVE_SOURCE_SCHEMA: &str = "dfmcp.production-continuation/3";
 const RESOURCE_SOURCE_SCHEMA: &str = "dfmcp.production-continuation/4";
+const RESOURCE_RESERVE_SOURCE_SCHEMA: &str = "dfmcp.production-continuation/5";
 
 /// Archive parsing selects the historical algorithm; new planning selects one
 /// fixed generation without editing the original retained quota/setup request.
@@ -30,6 +31,7 @@ enum SourceVersion {
     ConsumptionAwareV1,
     ConsumptionReserveV1,
     ResourceAwareV1,
+    ResourceReserveV1,
 }
 
 impl SourceVersion {
@@ -39,6 +41,7 @@ impl SourceVersion {
             Self::ConsumptionAwareV1 => SOURCE_SCHEMA,
             Self::ConsumptionReserveV1 => RESERVE_SOURCE_SCHEMA,
             Self::ResourceAwareV1 => RESOURCE_SOURCE_SCHEMA,
+            Self::ResourceReserveV1 => RESOURCE_RESERVE_SOURCE_SCHEMA,
         }
     }
 
@@ -48,6 +51,7 @@ impl SourceVersion {
             Self::ConsumptionAwareV1 => b"dfmcp-production-continuation-source/2\0",
             Self::ConsumptionReserveV1 => b"dfmcp-production-continuation-source/3\0",
             Self::ResourceAwareV1 => b"dfmcp-production-continuation-source/4\0",
+            Self::ResourceReserveV1 => b"dfmcp-production-continuation-source/5\0",
         }
     }
 }
@@ -160,7 +164,11 @@ impl ProductionContinuation {
         request: ProductionRequest,
     ) -> Result<Self> {
         let version = if request.is_resource_aware() {
-            SourceVersion::ResourceAwareV1
+            if request.reserve_until_tick().is_some() {
+                SourceVersion::ResourceReserveV1
+            } else {
+                SourceVersion::ResourceAwareV1
+            }
         } else if request.reserve_until_tick().is_some() {
             SourceVersion::ConsumptionReserveV1
         } else {
@@ -183,7 +191,12 @@ impl ProductionContinuation {
         let reserve_planner = request.planner() == Some(ProductionPlanner::ConsumptionReserveV1);
         let reserve_horizon = request.reserve_until_tick().is_some();
         let resource_planner = request.planner() == Some(ProductionPlanner::ResourceAwareV1);
+        let resource_reserve_planner =
+            request.planner() == Some(ProductionPlanner::ResourceReserveV1);
         let valid_reserve = match version {
+            SourceVersion::ResourceReserveV1 => {
+                resource_reserve_planner && request.is_resource_aware() && reserve_horizon
+            }
             SourceVersion::ResourceAwareV1 => {
                 resource_planner && request.is_resource_aware() && !reserve_horizon
             }
@@ -194,6 +207,7 @@ impl ProductionContinuation {
                 !reserve_planner
                     && !reserve_horizon
                     && !resource_planner
+                    && !resource_reserve_planner
                     && !request.is_resource_aware()
             }
         };
@@ -231,6 +245,7 @@ impl ProductionContinuation {
             SOURCE_SCHEMA => SourceVersion::ConsumptionAwareV1,
             RESERVE_SOURCE_SCHEMA => SourceVersion::ConsumptionReserveV1,
             RESOURCE_SOURCE_SCHEMA => SourceVersion::ResourceAwareV1,
+            RESOURCE_RESERVE_SOURCE_SCHEMA => SourceVersion::ResourceReserveV1,
             _ => return Err(invalid("unknown retained goal continuation schema")),
         };
         let request = source.production;
@@ -258,7 +273,21 @@ impl ProductionContinuation {
     }
 
     pub(crate) fn is_resource_aware(&self) -> bool {
-        self.version == SourceVersion::ResourceAwareV1 && self.request.is_resource_aware()
+        matches!(
+            self.version,
+            SourceVersion::ResourceAwareV1 | SourceVersion::ResourceReserveV1
+        ) && self.request.is_resource_aware()
+    }
+
+    pub(crate) const fn is_resource_reserve(&self) -> bool {
+        matches!(self.version, SourceVersion::ResourceReserveV1)
+    }
+
+    pub(crate) fn resource_reserve_work_required(&self, snapshot: &WorldSnapshot) -> Result<bool> {
+        if !self.is_resource_reserve() {
+            return Ok(false);
+        }
+        self.request.resource_reserve_work_required(snapshot)
     }
 
     /// Current qualified output stocks are independent of any canceled
@@ -293,10 +322,17 @@ impl ProductionContinuation {
         validate_goal_lineage(original, active, snapshot, context)?;
         original_ledger.validate_plan(original)?;
         context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
-        validate_truth_and_work(
-            self.semantic_goal_truth_in_ledger(snapshot, original_ledger)?,
-            work_quiescent,
-        )
+        let truth = self.semantic_goal_truth_in_ledger(snapshot, original_ledger)?;
+        // The new generation retains an explicit future objective even while
+        // instantaneous minima hold. Only qualified remaining reserve demand
+        // can motivate a separate review; earlier generations remain false-only.
+        if self.is_resource_reserve() {
+            let reserve_needed = self.resource_reserve_work_required(snapshot)?;
+            if truth == PredicateTruth::True && reserve_needed {
+                return validate_truth_and_work(PredicateTruth::False, work_quiescent);
+            }
+        }
+        validate_truth_and_work(truth, work_quiescent)
     }
 
     pub(crate) fn canonical_json(&self) -> String {
@@ -334,12 +370,20 @@ impl ProductionContinuation {
             lineage["reserve_until_tick"] = json!(self.request.reserve_until_tick());
             lineage["original_absolute_horizon_preserved"] = json!(true);
             lineage["continuous_maintenance_proven"] = json!(false);
-        } else if self.version == SourceVersion::ResourceAwareV1 {
-            lineage["source_schema"] = json!(RESOURCE_SOURCE_SCHEMA);
-            lineage["planner"] = json!("resource_aware_v1");
+        } else if matches!(
+            self.version,
+            SourceVersion::ResourceAwareV1 | SourceVersion::ResourceReserveV1
+        ) {
+            lineage["source_schema"] = json!(self.version.schema());
+            lineage["planner"] = json!(self.request.planner().map(ProductionPlanner::as_str));
             lineage["original_resource_policy_preserved"] = json!(true);
             lineage["requires_observed_inputs_for_production"] = json!(true);
             lineage["next_stage_dispatched"] = json!(false);
+            if self.is_resource_reserve() {
+                lineage["reserve_until_tick"] = json!(self.request.reserve_until_tick());
+                lineage["original_absolute_horizon_preserved"] = json!(true);
+                lineage["continuous_maintenance_proven"] = json!(false);
+            }
         }
         lineage
     }
@@ -383,7 +427,9 @@ impl ProductionContinuation {
                 .clone()
                 .with_planner(ProductionPlanner::ConsumptionReserveV1)
                 .compile(snapshot)?,
-            SourceVersion::ResourceAwareV1 => self.request.compile(snapshot)?,
+            SourceVersion::ResourceAwareV1 | SourceVersion::ResourceReserveV1 => {
+                self.request.compile(snapshot)?
+            }
         };
         let requested_actions = parse_steps(&compiled.actions)?;
         let max_risk = requested_actions

@@ -1,0 +1,56 @@
+{
+  "schema": "dfmcp.laboratory_resource_production_reserve/1",
+  "owner_bead": "df-lab-resource-harvest-h2m.4",
+  "scope": "laboratory_reference_world",
+  "planner": "resource_reserve_v1",
+  "request": {
+    "template": "production",
+    "required": ["quotas", "acquire_resources", "reserve_until_tick"],
+    "source_generation": "explicit_on_archive_and_automatically_selected_on_new_intake",
+    "original_goal": "unchanged_output_stock_minima",
+    "horizon": "absolute_future_game_tick_at_most_403200_ticks_from_current_source",
+    "labor_permissions": "separate_original_harvest_and_production_setup_policies",
+    "old_sources": "unchanged_canonical_bytes_compiler_and_admission"
+  },
+  "compilation": {
+    "seed": "original_minima_plus_qualified_population_consumption_through_explicit_horizon",
+    "fixed_point": "monotone_targets_through_maximum_of_explicit_horizon_and_acquisition_plus_production",
+    "unfunded_stage": "finite_harvest_and_explicitly_permitted_harvest_labor_only",
+    "funded_stage": "strict_observed_input_production_and_original_permitted_setup_only",
+    "inputs": "typed_recipe_demand_existing_debt_and_deduplicated_workshop_cost",
+    "future_input_credit": false,
+    "action_deadline": "actual_current_stage_work_only",
+    "satisfied_goal_acquisition": "distinct_LaboratoryResourceProductionReserveUntil_constraint",
+    "satisfied_goal_production": "unchanged_LaboratoryProductionReserveUntil_constraint",
+    "no_work": "all_remaining_reserve_stock_already_funded"
+  },
+  "continuation": {
+    "source_schema": "dfmcp.production-continuation/5",
+    "digest_domain": "dfmcp-production-continuation-source/5",
+    "retained": "complete_original_request_absolute_tick_permissions_parent_and_root",
+    "eligibility": "qualified_original_ledger_current_authority_verified_lineage_and_complete_same_root_quiescence",
+    "true_current_minima": "eligible_only_with_observed_deficit_for_remaining_explicit_reserve",
+    "unknown_current_stock": "refuse",
+    "expired_horizon": "refuse_without_renewing",
+    "recovery": "exact_archived_source_and_verified_active_lineage_without_restoring_authority",
+    "restore": "abandon_old_pursuits",
+    "automatic_dispatch": false
+  },
+  "reporting": {
+    "workflow_schema": "dfmcp.production-resource-workflow/2",
+    "current_stock_truth": "separate_from_remaining_predicted_reserve_demand",
+    "forecast": "current_stage_only_with_separate_absolute_tick_endpoint",
+    "continuous_maintenance_proven": false,
+    "future_completion_guaranteed": false,
+    "publication": "complete_owned_agent_turn_before_pending_replacement"
+  },
+  "bounds": {
+    "request_bytes": 16384,
+    "fixed_point_rounds": 64,
+    "maximum_game_time_horizon": 403200,
+    "source_entities": 65536,
+    "stage_actions_including_labor": 16
+  },
+  "native_protocol_change": false,
+  "live_admission_change": false
+}

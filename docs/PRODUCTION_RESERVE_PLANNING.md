@@ -3,8 +3,11 @@
 To acquire missing finite inputs while retaining an ordinary output goal, use
 the opt-in [resource-aware production workflow](LAB_RESOURCE_PRODUCTION.md).
 It includes gathering delay in consumption sizing and requires a newly
-reviewed production stage after actual yield is observed. Its fixed generation
-does not accept the independent `reserve_until_tick` option described below.
+reviewed production stage after actual yield is observed. To combine acquisition
+with `reserve_until_tick`, new intake selects the additive
+[resource-reserve compiler](LAB_RESOURCE_PRODUCTION_RESERVES.md). It retains the
+original absolute tick through separately reviewed acquisition and production;
+historical source generations keep their semantics.
 
 The deterministic laboratory compiles original DRINK, FOOD, BED, DOOR, TABLE
 and CHAIR quotas into

@@ -221,7 +221,7 @@ pub(super) fn compile_reserve(
     ))
 }
 
-fn reserve_targets(
+pub(super) fn reserve_targets(
     request: &ProductionRequest,
     model: &ConsumptionModel,
     horizon: u64,

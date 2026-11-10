@@ -651,6 +651,7 @@ fn resource_production_refuses_unknown_inputs_invalid_policy_and_satisfied_origi
     let before = effects_before(&session)?;
     let mut reserve = beds(22);
     reserve["reserve_until_tick"] = json!(2_401);
+    reserve["planner"] = json!("resource_aware_v1");
     let mut unknown_policy = beds(22);
     unknown_policy["acquire_resources"]["automatic_commit"] = json!(true);
     for invalid in [
@@ -1080,3 +1081,6 @@ fn restored_resource_production_goal_cannot_be_continued_after_durable_reopen() 
     assert_eq!(effects_before(&second)?, before);
     Ok(())
 }
+
+#[path = "production_resource_reserve_mcp_tests.rs"]
+mod resource_reserve;

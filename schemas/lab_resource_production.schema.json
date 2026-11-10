@@ -2,13 +2,14 @@
   "$id": "https://dwarf-fortress-mcp.org/schemas/0.1.0/lab_resource_production.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Laboratory production with reviewed finite resource acquisition",
-  "description": "Decoded fortress.plan blueprint string. Retains the original output quotas while proposing either acquisition or production from current observed input stock. Intake installs resource_aware_v1; archived sources must name it.",
+  "description": "Decoded fortress.plan blueprint string. Retains original output quotas while proposing acquisition or production from observed inputs. Intake selects resource_aware_v1, or resource_reserve_v1 when reserve_until_tick is supplied. Archives retain the exact compiler.",
   "type": "object",
   "additionalProperties": false,
   "required": ["template", "quotas", "acquire_resources"],
   "properties": {
     "template": {"const": "production"},
-    "planner": {"const": "resource_aware_v1"},
+    "planner": {"enum": ["resource_aware_v1", "resource_reserve_v1"]},
+    "reserve_until_tick": {"type": "integer", "minimum": 1, "maximum": 18446744073709551615},
     "quotas": {
       "type": "array",
       "minItems": 1,
@@ -56,6 +57,13 @@
       }
     }
   },
+  "allOf": [
+    {
+      "if": {"required": ["reserve_until_tick"]},
+      "then": {"properties": {"planner": {"const": "resource_reserve_v1"}}},
+      "else": {"properties": {"planner": {"const": "resource_aware_v1"}}}
+    }
+  ],
   "$defs": {
     "coordinate": {
       "type": "array",
@@ -64,5 +72,5 @@
       "items": {"type": "integer", "minimum": -2147483648, "maximum": 2147483647}
     }
   },
-  "$comment": "The Rust parser also checks original duplicate keys, exact integer representations, the 16384-byte request bound, canonical compiler selection, site geometry and closed semantics. Repeated quota tokens use their largest minimum. Only qualified current stock funds production. reserve_until_tick is deliberately unsupported by resource_aware_v1. Every stage needs separate review and commit; continue_goal names a retained parent only."
+  "$comment": "The Rust parser additionally checks duplicate keys, exact integers, the 16384-byte bound, compiler identity and geometry. Compilation requires a future reserve tick within one reference year. resource_aware_v1 still rejects horizons; resource_reserve_v1 requires one and retains it through continuation /5. Only observed inputs fund production. Each stage needs separate review and commit."
 }

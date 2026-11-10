@@ -1186,6 +1186,7 @@ pub(crate) enum ProductionPlanner {
     ConsumptionAwareV1,
     ConsumptionReserveV1,
     ResourceAwareV1,
+    ResourceReserveV1,
 }
 
 impl ProductionPlanner {
@@ -1194,6 +1195,7 @@ impl ProductionPlanner {
             Self::ConsumptionAwareV1 => "consumption_aware_v1",
             Self::ConsumptionReserveV1 => "consumption_reserve_v1",
             Self::ResourceAwareV1 => "resource_aware_v1",
+            Self::ResourceReserveV1 => "resource_reserve_v1",
         }
     }
 }
@@ -1315,20 +1317,24 @@ impl ProductionRequest {
             return Err(invalid("production objective requires template=production"));
         }
         let resource_aware = objective.acquire_resources.is_some()
-            || objective.planner == Some(ProductionPlanner::ResourceAwareV1);
+            || matches!(
+                objective.planner,
+                Some(ProductionPlanner::ResourceAwareV1 | ProductionPlanner::ResourceReserveV1)
+            );
         let planner = if resource_aware {
-            if objective.reserve_until_tick.is_some() {
-                return Err(invalid(
-                    "resource_aware_v1 does not accept reserve_until_tick; acquisition cannot widen the explicit reserve admission policy",
-                ));
-            }
-            match (objective.acquire_resources, objective.planner, current) {
-                (Some(_), Some(ProductionPlanner::ResourceAwareV1), _) | (Some(_), None, true) => {
-                    Some(ProductionPlanner::ResourceAwareV1)
-                }
+            match (
+                objective.acquire_resources,
+                objective.reserve_until_tick,
+                objective.planner,
+                current,
+            ) {
+                (Some(_), None, Some(ProductionPlanner::ResourceAwareV1), _)
+                | (Some(_), None, None, true) => Some(ProductionPlanner::ResourceAwareV1),
+                (Some(_), Some(_), Some(ProductionPlanner::ResourceReserveV1), _)
+                | (Some(_), Some(_), None, true) => Some(ProductionPlanner::ResourceReserveV1),
                 _ => {
                     return Err(invalid(
-                        "acquire_resources requires its exact resource_aware_v1 compiler; archived sources must retain both fields",
+                        "acquire_resources requires resource_aware_v1 without a reserve horizon or resource_reserve_v1 with reserve_until_tick; archived sources must retain the exact compiler and policy",
                     ));
                 }
             }
@@ -1476,7 +1482,20 @@ impl ProductionRequest {
     }
 
     pub(crate) fn is_resource_aware(&self) -> bool {
-        self.planner == Some(ProductionPlanner::ResourceAwareV1) && self.acquire_resources.is_some()
+        matches!(
+            self.planner,
+            Some(ProductionPlanner::ResourceAwareV1 | ProductionPlanner::ResourceReserveV1)
+        ) && self.acquire_resources.is_some()
+    }
+
+    /// Only the additive reserve generation may pursue a still-satisfied
+    /// original quota when qualified stock cannot fund its remaining horizon.
+    /// This motivates a new review; it supplies neither future stock nor authority.
+    pub(crate) fn resource_reserve_work_required(&self, snapshot: &WorldSnapshot) -> Result<bool> {
+        if self.planner != Some(ProductionPlanner::ResourceReserveV1) {
+            return Ok(false);
+        }
+        production_resources::reserve_work_required(self, snapshot)
     }
 
     /// Original output stock truth is independent of any earlier acquisition's
@@ -1549,14 +1568,22 @@ impl ProductionRequest {
     /// Work-order completion and the original stock goal remain separate.
     pub(crate) fn compile(&self, snapshot: &WorldSnapshot) -> Result<ProductionCompilation> {
         if self.acquire_resources.is_some()
-            != (self.planner == Some(ProductionPlanner::ResourceAwareV1))
+            != matches!(
+                self.planner,
+                Some(ProductionPlanner::ResourceAwareV1 | ProductionPlanner::ResourceReserveV1)
+            )
         {
             return Err(invalid(
                 "resource acquisition policy and compiler generation must agree",
             ));
         }
         if self.reserve_until_tick.is_some()
-            != (self.planner == Some(ProductionPlanner::ConsumptionReserveV1))
+            != matches!(
+                self.planner,
+                Some(
+                    ProductionPlanner::ConsumptionReserveV1 | ProductionPlanner::ResourceReserveV1
+                )
+            )
         {
             return Err(invalid(
                 "production reserve horizon and compiler generation must agree",
@@ -1576,6 +1603,9 @@ impl ProductionRequest {
             }
             Some(ProductionPlanner::ResourceAwareV1) => {
                 production_resources::compile(self, snapshot)
+            }
+            Some(ProductionPlanner::ResourceReserveV1) => {
+                production_resources::compile_reserve(self, snapshot)
             }
         }
     }
@@ -2619,12 +2649,12 @@ impl ProductionCompilation {
                 || proposed.terminal_condition != self.terminal
                 || proposed.requested_actions != parse_steps(&self.actions)?
                 || self.consumption_horizon.is_some()
-                || self.satisfied_goal_reserve_until.is_some()
                 || self.setup_workforce.is_some()
                 || proposed.constraints.iter().any(|constraint| {
                     matches!(
                         constraint,
                         dfmcp_intent::Constraint::LaboratoryProductionReserveUntil(_)
+                            | dfmcp_intent::Constraint::LaboratoryResourceProductionReserveUntil(_)
                     )
                 })
             {
@@ -2636,6 +2666,11 @@ impl ProductionCompilation {
             // explicit obligation. Ordinary preparation adds mandatory harvest
             // identity/conservation proof and the shared-workforce deadline.
             proposed.requested_actions = acquisition.requested_actions.clone();
+            if let Some(until) = self.satisfied_goal_reserve_until {
+                proposed.constraints.push(
+                    dfmcp_intent::Constraint::LaboratoryResourceProductionReserveUntil(until),
+                );
+            }
             *intent = proposed;
             return Ok(());
         }
@@ -2650,6 +2685,7 @@ impl ProductionCompilation {
             matches!(
                 constraint,
                 dfmcp_intent::Constraint::LaboratoryProductionReserveUntil(_)
+                    | dfmcp_intent::Constraint::LaboratoryResourceProductionReserveUntil(_)
             )
         }) {
             return Err(invalid(

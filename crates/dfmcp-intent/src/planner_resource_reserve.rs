@@ -31,9 +31,11 @@ pub(super) fn horizon(
     let Some(until) = horizon else {
         return Ok(None);
     };
-    if intent.constraints.iter().any(|constraint| {
-        matches!(constraint, Constraint::LaboratoryProductionReserveUntil(_))
-    }) {
+    if intent
+        .constraints
+        .iter()
+        .any(|constraint| matches!(constraint, Constraint::LaboratoryProductionReserveUntil(_)))
+    {
         return Err(invalid(
             "production and acquisition reserve admissions cannot be combined",
         ));

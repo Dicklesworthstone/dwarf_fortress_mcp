@@ -20,11 +20,8 @@ fn context(snapshot: &WorldSnapshot) -> OperationContext {
 }
 
 fn intent(snapshot: &WorldSnapshot) -> Result<Intent> {
-    let acquisition = ResourceAcquisitionPlan::compile(
-        snapshot,
-        &[target(HarvestResource::Plant, 3)],
-        true,
-    )?;
+    let acquisition =
+        ResourceAcquisitionPlan::compile(snapshot, &[target(HarvestResource::Plant, 3)], true)?;
     Ok(Intent {
         id: IntentId::new(8_272),
         anchor: snapshot.anchor(),
@@ -48,15 +45,17 @@ fn reserve_harvest_keeps_original_goal_and_mandatory_finite_proof() -> Result<()
     let snapshot = world(30);
     let before = snapshot.canonical_bytes();
     let intent = intent(&snapshot)?;
-    let plan = StaticPlanner::default().prepare_laboratory(&snapshot, &intent, &context(&snapshot))?;
+    let plan =
+        StaticPlanner::default().prepare_laboratory(&snapshot, &intent, &context(&snapshot))?;
     assert_eq!(snapshot.canonical_bytes(), before);
     assert_eq!(plan.terminal_condition, intent.terminal_condition);
     assert!(plan.requires_checkpoint);
     assert!(plan.required_capabilities.contains(&Capability::Designate));
     assert!(plan.required_capabilities.contains(&Capability::Checkpoint));
-    assert!(plan.summary.ends_with(
-        "[laboratory resource production reserve until 12000]"
-    ));
+    assert!(
+        plan.summary
+            .ends_with("[laboratory resource production reserve until 12000]")
+    );
     let evidence = dfmcp_world::PredicateEvidence::laboratory(&snapshot)?;
     assert!(evidence.establishes(&plan.terminal_condition)?);
     for step in &plan.steps {
@@ -65,7 +64,10 @@ fn reserve_harvest_keeps_original_goal_and_mandatory_finite_proof() -> Result<()
             .as_ref()
             .ok_or_else(|| refused("missing harvest proof"))?;
         assert!(obligation.deadline_tick.0 < 12_000);
-        assert_ne!(evidence.evaluate(&obligation.terminal)?, PredicateTruth::True);
+        assert_ne!(
+            evidence.evaluate(&obligation.terminal)?,
+            PredicateTruth::True
+        );
     }
     let (bytes, seal) = crate::plan_archive::encode(&plan, Default::default())?;
     assert_eq!(
@@ -84,18 +86,30 @@ fn old_reserve_generic_planning_and_summary_lookalikes_cannot_admit_harvest() ->
     assert!(planner.prepare(&snapshot, &original, &context).is_err());
     let mut old = original.clone();
     old.constraints[1] = Constraint::LaboratoryProductionReserveUntil(GameTick(12_000));
-    assert!(planner.prepare_laboratory(&snapshot, &old, &context).is_err());
+    assert!(
+        planner
+            .prepare_laboratory(&snapshot, &old, &context)
+            .is_err()
+    );
     let mut lookalike = original.clone();
     lookalike.constraints.pop();
     lookalike.summary = "[laboratory resource production reserve until 12000]".to_owned();
-    assert!(planner.prepare_laboratory(&snapshot, &lookalike, &context).is_err());
+    assert!(
+        planner
+            .prepare_laboratory(&snapshot, &lookalike, &context)
+            .is_err()
+    );
     for extra in [
         Constraint::LaboratoryProductionReserveUntil(GameTick(12_000)),
         Constraint::LaboratoryResourceProductionReserveUntil(GameTick(12_000)),
     ] {
         let mut duplicate = original.clone();
         duplicate.constraints.push(extra);
-        assert!(planner.prepare_laboratory(&snapshot, &duplicate, &context).is_err());
+        assert!(
+            planner
+                .prepare_laboratory(&snapshot, &duplicate, &context)
+                .is_err()
+        );
     }
     Ok(())
 }
@@ -132,9 +146,11 @@ fn reserve_harvest_rejects_mixed_effects_unrelated_labor_and_setup_without_harve
         let mut extra = mixed.requested_actions[0].clone();
         extra.action = action;
         mixed.requested_actions.push(extra);
-        assert!(StaticPlanner::default()
-            .prepare_laboratory(&snapshot, &mixed, &context(&snapshot))
-            .is_err());
+        assert!(
+            StaticPlanner::default()
+                .prepare_laboratory(&snapshot, &mixed, &context(&snapshot))
+                .is_err()
+        );
     }
     let mut setup = original;
     setup.requested_actions[0].action = Action::SetLabor {
@@ -142,9 +158,11 @@ fn reserve_harvest_rejects_mixed_effects_unrelated_labor_and_setup_without_harve
         labor: "PLANT_GATHERING".to_owned(),
         enabled: true,
     };
-    assert!(StaticPlanner::default()
-        .prepare_laboratory(&snapshot, &setup, &context(&snapshot))
-        .is_err());
+    assert!(
+        StaticPlanner::default()
+            .prepare_laboratory(&snapshot, &setup, &context(&snapshot))
+            .is_err()
+    );
     Ok(())
 }
 
@@ -162,9 +180,11 @@ fn reserve_harvest_accepts_only_qualified_original_stock_and_finite_horizon() ->
         let mut invalid = original.clone();
         invalid.constraints[1] =
             Constraint::LaboratoryResourceProductionReserveUntil(GameTick(until));
-        assert!(planner
-            .prepare_laboratory(&snapshot, &invalid, &context(&snapshot))
-            .is_err());
+        assert!(
+            planner
+                .prepare_laboratory(&snapshot, &invalid, &context(&snapshot))
+                .is_err()
+        );
     }
     for terminal in [
         Predicate::True,
@@ -178,9 +198,11 @@ fn reserve_harvest_accepts_only_qualified_original_stock_and_finite_horizon() ->
     ] {
         let mut invalid = original.clone();
         invalid.terminal_condition = terminal;
-        assert!(planner
-            .prepare_laboratory(&snapshot, &invalid, &context(&snapshot))
-            .is_err());
+        assert!(
+            planner
+                .prepare_laboratory(&snapshot, &invalid, &context(&snapshot))
+                .is_err()
+        );
     }
     let mut unavailable = snapshot.clone();
     let fact = unavailable
@@ -193,9 +215,11 @@ fn reserve_harvest_accepts_only_qualified_original_stock_and_finite_horizon() ->
     unavailable.refresh_hash();
     let mut invalid = original;
     invalid.anchor = unavailable.anchor();
-    assert!(planner
-        .prepare_laboratory(&unavailable, &invalid, &context(&unavailable))
-        .is_err());
+    assert!(
+        planner
+            .prepare_laboratory(&unavailable, &invalid, &context(&unavailable))
+            .is_err()
+    );
     Ok(())
 }
 
@@ -212,21 +236,38 @@ fn reserve_harvest_preserves_labor_source_generation_budget_and_authority_checks
     let planner = StaticPlanner::default();
     let valid = planner.prepare_laboratory(&snapshot, &original, &context(&snapshot))?;
     assert_eq!(valid.steps.len(), 2);
-    assert!(valid.required_capabilities.contains(&Capability::ConfigureLabor));
+    assert!(
+        valid
+            .required_capabilities
+            .contains(&Capability::ConfigureLabor)
+    );
     let mut no_authority = context(&snapshot);
     no_authority.grants.clear();
-    assert!(planner.prepare_laboratory(&snapshot, &original, &no_authority).is_err());
+    assert!(
+        planner
+            .prepare_laboratory(&snapshot, &original, &no_authority)
+            .is_err()
+    );
     let mut too_small = context(&snapshot);
     too_small.budget.max_actions = 1;
-    assert!(planner.prepare_laboratory(&snapshot, &original, &too_small).is_err());
+    assert!(
+        planner
+            .prepare_laboratory(&snapshot, &original, &too_small)
+            .is_err()
+    );
     let mut changed = original;
     for requested in &mut changed.requested_actions {
-        if let Action::HarvestResource { source_generation, .. } = &mut requested.action {
+        if let Action::HarvestResource {
+            source_generation, ..
+        } = &mut requested.action
+        {
             *source_generation += 1;
         }
     }
-    assert!(planner
-        .prepare_laboratory(&snapshot, &changed, &context(&snapshot))
-        .is_err());
+    assert!(
+        planner
+            .prepare_laboratory(&snapshot, &changed, &context(&snapshot))
+            .is_err()
+    );
     Ok(())
 }
