@@ -157,6 +157,16 @@ response's `/current_anchor` under explicit `anchor_encoding` metadata. The
 original reserve tick, historical anchors that differ from the current source,
 current stock truth and predicted future-reserve status remain distinct.
 
+The default 4,096-token allowance uses the shared publisher's compact prior-goal
+briefing when necessary. It keeps current truth, remaining reserve demand,
+quiescence and continuation guidance visible while linking earlier original
+requests and historical proof anchors through each goal's `details` resource.
+The new stage still contains every step and its complete rendered proof, the
+unchanged reserve tick, original permissions and parent/root lineage. Read
+`objective_projection.complete_goal_evidence` before treating a projected
+briefing as forensic evidence. Further pressure on mandatory plan or active-work
+data remains a refusal; no partial candidate replaces the existing review.
+
 See [finite-resource production](LAB_RESOURCE_PRODUCTION.md),
 [production reserves](PRODUCTION_RESERVE_PLANNING.md), and
 [goal continuation](PRODUCTION_GOAL_CONTINUATION.md). The machine contract is

@@ -59,6 +59,9 @@ continuity metadata immutable.
 | `plan-{plan_digest}~{object_digest}` | Exact original prepared-plan manifest |
 | `plan-{plan_digest}~{object_digest}~steps~{offset}` | Bounded readable projections of original steps and proof requirements |
 | `plan-{plan_digest}~{object_digest}~archive~{offset}` | Lossless bounded pages of the original typed plan archive |
+| `goal-{plan_digest}` | Resolve one retained original goal to its exact source-pinned manifest |
+| `goal-{plan_digest}~{source_digest}` | Original source identity, sealed anchor and retained historical achievement/restore custody |
+| `goal-{plan_digest}~{source_digest}~source~{offset}` | Lossless bounded original request, summary and terminal-condition source pages |
 
 `df://doctor/{session_id}` returns the session's diagnostic bundle under its
 negotiated `doctor` capability. State pages require `observe`, as do the existing
@@ -181,8 +184,9 @@ plan, rebase an old plan, rewrite expiry, or regenerate idempotency keys.
 The archive contains every original `PreparedPlan` field, including the full
 typed actions, preconditions, postconditions, compensation, dependency and
 obligation contracts. `source_kind` classifies the compiler request; this
-resource does not export the separate original `PlanSource` request or replace
-the original-goal history in handoff. Readable manifests and step pages do not
+resource does not export the separate original `PlanSource` request. The goal
+resource below supplies that request and its retained historical custody without
+requiring a complete handoff. Readable manifests and step pages do not
 replace this complete typed contract.
 
 The catalog has at most 25 rows per page. Its continuation binds the entire
@@ -212,6 +216,71 @@ fields are indivisible;
 a metadata or source-budget refusal does not return a partial trusted object.
 All addresses require lowercase 64-digit hashes and canonical decimal offsets,
 with no query strings, extra segments, signs or leading zeroes.
+
+## Inspecting one retained original goal
+
+Compact plan responses can link an earlier objective to
+`df://session/{session_id}/goal-{plan_digest}`. This discovery read resolves
+only a committed original still retained by the objective book. An uncommitted
+pending plan, collected goal or unknown digest returns `stale_anchor`; the
+consumer never invents an original request from an action receipt.
+
+The `dfmcp.lab-goal-manifest/1` response supplies a `canonical_uri` that also
+names `source_digest`. Follow that pinned detail URI and its `source.uri`
+instead of substituting another discovery result midway through a download.
+The source digest covers the exact original request text, summary, owner,
+original world seal, readable terminal condition and the distinct typed-plan
+object digest. Another source or typed-plan representation under the same
+semantic plan digest cannot satisfy an older pinned reference.
+
+The manifest exposes `sealed_anchor`, `first_satisfied_anchor`,
+`recorded_first_satisfied_anchor`, `historical_achievement`,
+`restore_abandoned_anchor` and pending abandonment publication separately.
+Only eligible verified retained proof populates `first_satisfied_anchor`;
+an unverifiable recorded claim remains explicitly unverifiable. The history
+scope is the original sealed terminal condition. A resource-acquisition stage's
+achievement does not establish its parent room or production project's success.
+Current goal truth, semantic project truth and physical quiescence are not
+evaluated by this resource, and no continuation or effect authority is granted.
+
+The source pin identifies the immutable original, **not** a frozen history
+report. Achievement and abandonment custody may change after ordinary tools
+publish progress. Each manifest reports the current authorized anchor and
+retained history under one owner-fenced immutable read. Exact source pages
+remain the same across world progress, restore and verified durable recovery,
+while surrounding anchor and authority metadata can change. Private zero-TTL
+cache hints still apply. Pages do not pin retention.
+
+`source.uri` starts a `dfmcp.lab-goal-source-page/1` traversal. Decode each
+`data_hex` slice at its `offset`, follow `next`, verify the assembled byte
+length and SHA-256 against the manifest, then decode the UTF-8 JSON artifact.
+The artifact uses `schema: "dfmcp.original-goal-source/1"` and contains the
+complete summary, original source and readable terminal condition, including
+when those fields cannot fit in a compact tool response. For a JSON-backed
+compiler source, `original_source.request_json` preserves the original UTF-8
+request exactly, including whitespace; parse that string to inspect its
+request object. Pause sources carry `paused_target` instead. The readable
+terminal condition remains a sealed requirement, with the exact typed plan
+separately available through the manifest's plan/archive links. Unavailable
+verified plan custody is explicit and never reconstructed from the current world.
+
+All goal routes require current whole-fortress Observe and Query authority
+before inspecting even digest existence. Source admission checks borrowed raw
+string lengths before cloning or hashing, validates the complete typed archive
+with its existing node/depth/step limits, and charges retained-record scanning,
+original input, archive and complete escaped source-object bytes. Inspection
+does not parse arbitrary raw request nesting. A small page cannot bypass this
+complete-source allowance. Source work is capped by the negotiated byte budget
+and 16 MiB; one elapsed-time limit covers the entire read.
+
+Pages start with at most 4,096 source bytes and shrink to fit the complete
+escaped resource result, maximum numeric request ID reserve, negotiated byte
+and token budgets and 60,000-byte transport ceiling. Manifest metadata is
+indivisible. Very small budgets refuse explicitly. A malformed address,
+capability denial, missing exact original or budget refusal includes a structured
+resource error and Agent Turn; unauthorized errors disclose no current anchor
+or goal existence. Successful and failed inspections preserve semantic request
+IDs, pending plans, replay, proof history and durable files.
 
 ## Bounds, retention, and refusals
 
@@ -264,13 +333,21 @@ registering them without that design would introduce ambient authority.
 
 Session `state` pages now provide the canonical entity/relation/chunk/event
 consumer path. Session `plans` now supplies exact original prepared-plan discovery and archive
-retrieval. Session `anchor`, `handoff`, and task evidence provide useful views of
+retrieval. Session `goal` detail/source pages provide independently bounded
+original requests and historical custody. Session `anchor`, `handoff`, and task evidence provide useful views of
 identity and active work, but do not claim implementation of
 every planned independently addressable receipt, checkpoint or cognition
 resource. Knowledge and memory URIs still have no registered resource consumer.
 The `.11` roadmap bead consequently remains open.
 
 ## Verification
+
+The goal-resource tests exercise the actual public planning/commit facade and
+registered session resource handler, including lossless default-budget source
+reassembly, exact pins, current grants, complete-work/output/deadline bounds,
+restore/restart and side-effect-free durable inspection. Execution results are
+recorded separately in the implementation status; the older qualification
+receipt below does not cover this new consumer.
 
 The original-plan resource slice adds focused tests for exact codec round trips,
 immutable traversal, catalog gaps, current capability scopes and expiry, source

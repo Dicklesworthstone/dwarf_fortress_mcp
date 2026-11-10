@@ -34,6 +34,7 @@ use crate::server::{
 };
 use dfmcp_core::{Capability, Digest32, EntityId, RiskTier, SessionId, StateAnchor};
 
+pub(crate) mod goals;
 pub(crate) mod plans;
 pub(crate) mod state;
 
@@ -788,7 +789,9 @@ const SESSION_VIEW_DESCRIPTION: &str = "Session views: summary (bounded snapshot
      (pending and retained original plan catalog), plans-{catalog_digest}~{offset} \
      (catalog continuation), plan-{plan_digest}~{object_digest} (exact original plan manifest), \
      plan-{plan_digest}~{object_digest}~archive~{offset} (lossless typed archive byte page; \
-     plan views require current whole-fortress observe and query)";
+     plan views require current whole-fortress observe and query), goal-{plan_digest} \
+     (retained original goal source and historical custody, with exact source pages; \
+     requires current whole-fortress observe and query)";
 
 impl ResourceHandler for SessionViewResource {
     fn definition(&self) -> Resource {
@@ -845,6 +848,7 @@ impl ResourceHandler for SessionViewResource {
             plan if plan.starts_with("plan-") || plan.starts_with("plans-") => {
                 plans::read(raw, uri, plan)
             }
+            goal if goal.starts_with("goal-") => goals::read(raw, uri, goal),
             page if page.starts_with("tasks-") => {
                 let offset = page[6..].parse::<usize>().map_err(|_| {
                     McpError::invalid_params("task page offset must be a nonnegative integer")

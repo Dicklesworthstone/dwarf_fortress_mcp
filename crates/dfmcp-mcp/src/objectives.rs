@@ -59,6 +59,45 @@ impl Objective {
         super::plan_resources::source_kind(&self.source)
     }
 
+    /// Export only borrowed original source and retained history. In
+    /// particular, resource inspection never calls `projection`, evaluates a
+    /// predicate, checks continuation eligibility, or certifies achievement.
+    pub(super) fn resource_goal<'a>(
+        &'a self,
+        session: &LabSession,
+    ) -> super::plan_resources::GoalEntry<'a> {
+        let (request_json, paused_target) = match &self.source {
+            PlanSource::Pause { paused_target, .. } => (None, Some(*paused_target)),
+            PlanSource::Actions { raw, .. }
+            | PlanSource::Blueprint { raw, .. }
+            | PlanSource::Production { raw, .. }
+            | PlanSource::ProductionContinuation { raw, .. }
+            | PlanSource::RoomContinuation { raw, .. }
+            | PlanSource::CivilianRelease { raw, .. }
+            | PlanSource::ConnectedRoom { raw, .. }
+            | PlanSource::ConnectedRoomContinuation { raw, .. }
+            | PlanSource::ResourceAcquisitionContinuation { raw, .. } => (Some(raw.as_str()), None),
+        };
+        super::plan_resources::GoalEntry {
+            digest: self.plan_digest,
+            plan: self.resource_plan(),
+            source_kind: self.resource_source_kind(),
+            summary: source_summary(&self.source),
+            request_json,
+            paused_target,
+            owner_session_id: self.owner_session_id,
+            owned_by_current_session: self.originating_process
+                && self.owner_session_id == session.session_id,
+            sealed_state_hash: self.sealed_state_hash,
+            sealed_anchor: self.sealed_anchor,
+            first_satisfied_anchor: self.first_satisfied_anchor,
+            historical_proof_verified: self.historical_proof_verified,
+            restore_abandoned_anchor: self.restore_abandoned_anchor,
+            abandonment_publication_pending: session.objective_restore.contains(&self.plan_digest),
+            verification_error: self.verification_error.as_deref(),
+        }
+    }
+
     pub(super) fn is_resource_acquisition(&self) -> bool {
         self.source.is_resource_acquisition()
     }

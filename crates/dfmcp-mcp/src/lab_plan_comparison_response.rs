@@ -208,7 +208,7 @@ pub(super) fn finish(
         "max_actions": projection.budget.max_actions,
         "maximum_response_bytes": maximum,
     });
-    let output = AgentTurnBuilder::new(
+    let turn = AgentTurnBuilder::new(
         "fortress.plan",
         if selecting { AgentPhase::Propose } else { AgentPhase::Compare },
     )
@@ -265,7 +265,19 @@ pub(super) fn finish(
             "state_hash": projection.anchor["state_hash"],
             "anchor": projection.anchor,
         })])
-        .attach(payload);
+        .build();
+    payload["agent_turn"] = turn;
+    let output = payload.to_string();
+    if output.len() <= maximum {
+        return Ok(output);
+    }
+    // The original request and proof of every *previous* objective are forensic
+    // detail, not part of this new plan's action program. Project only those
+    // historical artifacts when a complete review exceeds the response budget;
+    // never clip the candidate, its proof, active work, current goal truth,
+    // uncertainty, or actionable continuation guidance.
+    compact_objective_briefing(&mut payload)?;
+    let output = payload.to_string();
     if output.len() > maximum {
         return Err(DfmcpError::new(
             ErrorCode::BudgetExceeded,
@@ -273,6 +285,119 @@ pub(super) fn finish(
         ));
     }
     Ok(output)
+}
+
+/// Keep every retained objective and every current control/evidence state.
+/// Only the named archived artifacts move behind the retained-goal resource
+/// consumer. Unknown fields are retained so new safety metadata cannot be
+/// silently lost by an old presentation allowlist.
+fn compact_objective_briefing(payload: &mut Value) -> Result<()> {
+    const HISTORICAL_ARTIFACTS: [&str; 5] = [
+        "original_source",
+        "terminal_condition",
+        "sealed_anchor",
+        "first_satisfied_anchor",
+        "recorded_first_satisfied_anchor",
+    ];
+    let anchor = payload["anchor"].clone();
+    let session = payload["session_id"]
+        .as_str()
+        .ok_or_else(|| invariant("objective briefing requires its owned session"))?
+        .to_owned();
+    let rows = payload["agent_turn"]["briefing"]["objectives"]
+        .as_array_mut()
+        .ok_or_else(|| invariant("objective briefing requires its complete retained catalog"))?;
+    let mut projected = false;
+    let current_anchor_reference = json!({"$ref": "/current_anchor"});
+    let mut removed_anchor_references = 0_u64;
+    for row in rows.iter_mut() {
+        let Some(object) = row.as_object_mut() else {
+            return Err(invariant("objective briefing contains a malformed record"));
+        };
+        let Some(digest) = object
+            .get("plan_digest")
+            .and_then(Value::as_str)
+            .filter(|digest| {
+                digest.len() == 64
+                    && digest
+                        .bytes()
+                        .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+            })
+        else {
+            // An unavailable/unidentified record has no safe drill-down. Keep
+            // its complete uncertainty instead of pretending it is retrievable.
+            continue;
+        };
+        let details = format!("df://session/{session}/goal-{digest}");
+        let mut row_projected = false;
+        for field in HISTORICAL_ARTIFACTS {
+            if let Some(removed) = object.remove(field) {
+                // Only these declared anchor slots participate in the upstream
+                // current-anchor codec. Source/predicate values stay literal.
+                if matches!(
+                    field,
+                    "sealed_anchor" | "first_satisfied_anchor" | "recorded_first_satisfied_anchor"
+                ) && removed == current_anchor_reference
+                {
+                    removed_anchor_references =
+                        removed_anchor_references.checked_add(1).ok_or_else(|| {
+                            invariant("objective anchor reference count overflowed")
+                        })?;
+                }
+                row_projected = true;
+            }
+        }
+        // A current source may be shared only after exact equality. Historical
+        // or unavailable anchors stay explicit and can never be relabeled as
+        // current merely to make a response fit.
+        if object.get("observed_anchor") == Some(&anchor) {
+            object.remove("observed_anchor");
+            object.insert("observed_anchor_reference".to_owned(), json!("/anchor"));
+            row_projected = true;
+        }
+        for field in ["semantic_output_goal", "semantic_room_goal"] {
+            if let Some(goal) = object.get_mut(field).and_then(Value::as_object_mut)
+                && goal.get("observed_anchor") == Some(&anchor)
+            {
+                goal.remove("observed_anchor");
+                goal.insert("observed_anchor_reference".to_owned(), json!("/anchor"));
+                row_projected = true;
+            }
+        }
+        if row_projected {
+            object.insert("details".to_owned(), json!(details));
+            projected = true;
+        }
+    }
+    let count = rows.len();
+    if removed_anchor_references > 0 {
+        let remaining = payload["anchor_encoding"]["reference_count"]
+            .as_u64()
+            .and_then(|count| count.checked_sub(removed_anchor_references))
+            .ok_or_else(|| invariant("objective projection lost its current-anchor reference count"))?;
+        payload["anchor_encoding"]["reference_count"] = json!(remaining);
+    }
+    if projected {
+        payload["agent_turn"]["briefing"]["objective_projection"] = json!({
+            "schema": "dfmcp.objective-briefing/1",
+            "records": count,
+            "complete_record_membership": true,
+            "complete_goal_evidence": false,
+            "omitted_artifact_fields": HISTORICAL_ARTIFACTS,
+            "shared_observed_anchor": {"scope": "same_response", "json_pointer": "/anchor",
+                "reference_field": "observed_anchor_reference"},
+            "details_field": "details",
+            "details_scope": "retained original source and historical proof; current truth is not reevaluated",
+        });
+        payload["agent_turn"]["coverage"]["partial_domains"]
+            .as_array_mut()
+            .ok_or_else(|| invariant("objective briefing requires explicit partial coverage"))?
+            .push(json!({
+                "domain": "laboratory.original_goal_evidence",
+                "reason": "all current goal statuses retained; archived source and proof anchors require each goal's detail resource",
+            }));
+    }
+    Ok(())
 }
 
 #[cfg(test)]

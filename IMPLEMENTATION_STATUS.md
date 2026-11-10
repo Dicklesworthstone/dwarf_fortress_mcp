@@ -1,5 +1,51 @@
 # Implementation Status
 
+## Unreleased — Inspect exact original goals without repeating their full history
+
+The existing session resource template now serves retained original-goal
+manifests and lossless source pages. Discovery by plan digest returns links
+pinned to the complete original request, original owner and anchor, and exact
+typed plan object. Pages preserve UTF-8 and original request whitespace; old
+pins refuse collected or replaced custody. Historical achievement, recorded
+claims and restore abandonment stay separate from current goal/project truth,
+which these reads explicitly do not evaluate.
+
+The consumer requires current whole-fortress Observe and Query authority before
+goal lookup. It bounds retained records, steps, complete raw/archive/source
+bytes, serialization, wall time and escaped response size. Immutable session
+inspection does not dispatch, refresh proof, consume request IDs, replace a
+pending plan or publish durable state.
+
+Complete plan publication retains its existing representation when it fits.
+Only an oversized packet moves five named historical fields behind per-goal
+detail resources. All current goal rows, truth/uncertainty, continuation
+guidance, active work and complete new plan proof remain in the packet.
+Unknown fields are preserved, and a still-oversized packet refuses before
+pending-plan replacement. The fallback composes with the incoming current-
+anchor codec: removing a declared historical reference checked-decrements its
+published reference count; literal source/predicate data is never counted.
+
+Five registered-handler/public-facade goal regressions plus canonical-address
+grammar are authored, covering exact source reconstruction, replacement,
+authority, budgets, recovery and immutable state. The publisher retains the
+four incoming tests and adds six history/merge regressions; the public reserve
+check preserves exact proof and current goal distinctions independently of the
+selected presentation. These MCP tests have not executed. Ordinary and
+alternative-backend full builds were killed in pinned asupersync before project
+compilation; the execution environment subsequently became unavailable.
+Reviewed files were recovered from complete recorded creation/edit inputs and
+immutable upstream source, then verified by GitHub blob readback. Some recovered
+files have pre-Rustfmt whitespace; no current-tree formatting, full MCP or
+release qualification is inferred from earlier checks.
+
+Separately, the complete actual intent and laboratory suites passed 544 tests
+under ordinary LLVM (397 intent + 147 lab, zero failed or ignored), including
+all seven canonical-kind regressions. The earlier aggregate verifier passed
+5,064 repository checks and initial source/native/dependency contracts before
+missing br; that run predates the later merges/recovery. The normal qualifier
+refused the dirty development checkout. No native/live admission changes.
+Owners: dfmcp-reality-wiring-proof-4bf.11 and df-lab-resource-harvest-h2m.4/.5.
+
 ## Unreleased — Fit complete resource-reserve continuation into the default review budget
 
 Version-two resource reviews now share repeated complete current anchors under
@@ -111,11 +157,15 @@ combat, including source preservation on refusal. The complete actual locked,
 offline `dfmcp-intent` suite passes **397 tests**: 252 unit and 145 integration,
 zero failed or ignored, on latest nightly. Two additional real MemoryAdapter
 integration regressions cover committed work, receipts, transcript and clock
-preservation on repeated refusal plus normal/custom-kind progress. Their lab
-execution is not yet established: the first combined intent/lab build was
-SIGKILLed compiling the production adapter before reaching tests. Scoped
-formatting and whitespace checks pass. Full MCP/release qualification and
-native/live admission are unchanged. Owner: `df-predicate-evidence-authority-r7m`.
+preservation on repeated refusal plus normal/custom-kind progress. After the
+initial adapter-build memory kill, the complete actual `dfmcp-lab` suite passed
+147 tests (108 unit + 39 integration), including both new adapter cases.
+Together the changed crates pass 544 tests, zero failed or ignored, with
+ordinary LLVM. The requested warning-denied Clippy run stopped at six existing
+too-many-arguments diagnostics in unchanged adapter modules. Scoped formatting
+and whitespace checks passed for the committed core files. Full MCP/release
+qualification and native/live admission remain unestablished. Owner:
+`df-predicate-evidence-authority-r7m`.
 
 ## Unreleased — Preserve original project truth in compact observations
 

@@ -216,6 +216,26 @@ fn resource_reserve_default_budget_keeps_complete_review_and_refusals_preserve_p
     exact_review(&session, &production)?;
     assert_reserve_lineage(&production, &root, &root, 6_001);
     assert!(production.to_string().len() <= 4 * 4_096);
+    let briefing = &production["agent_turn"]["briefing"];
+    if let Some(projection) = briefing.get("objective_projection") {
+        assert_eq!(projection["schema"], "dfmcp.objective-briefing/1");
+        assert_eq!(projection["records"], 1);
+        assert_eq!(projection["complete_goal_evidence"], false);
+    }
+    let prior = &briefing["objectives"][0];
+    let original = goal(&session, &root)?;
+    for field in [
+        "plan_digest",
+        "predicate_truth",
+        "historical_achievement",
+        "physical_quiescent",
+        "needs_replan",
+        "resource_reserve",
+        "continuation_request",
+        "blind_retry_allowed",
+    ] {
+        assert_eq!(prior[field], original[field], "prior goal {field}");
+    }
     let retained = pending(&session)?;
     let budget = owned(&session, |session| Ok(session.budget))?;
     for source_bound in [true, false] {

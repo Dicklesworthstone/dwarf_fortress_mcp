@@ -2,7 +2,7 @@
 //! objective proof, dispatch, request identity or durable postlude runs here.
 
 use super::{LabSession, PlanSource};
-use dfmcp_core::Digest32;
+use dfmcp_core::{Digest32, SessionId, StateAnchor};
 use dfmcp_intent::PreparedPlan;
 
 pub(crate) struct Entry<'a> {
@@ -10,6 +10,38 @@ pub(crate) struct Entry<'a> {
     pub plan: Option<&'a PreparedPlan>,
     pub retention: &'static str,
     pub source_kind: &'static str,
+}
+
+/// Borrowed original-goal custody. These fields are retained evidence, not a
+/// fresh evaluation of the goal or a permission to resume its old actions.
+pub(crate) struct GoalEntry<'a> {
+    pub digest: Digest32,
+    pub plan: Option<&'a PreparedPlan>,
+    pub source_kind: &'static str,
+    pub summary: &'a str,
+    pub request_json: Option<&'a str>,
+    pub paused_target: Option<bool>,
+    pub owner_session_id: SessionId,
+    pub owned_by_current_session: bool,
+    pub sealed_state_hash: Digest32,
+    pub sealed_anchor: Option<StateAnchor>,
+    pub first_satisfied_anchor: Option<StateAnchor>,
+    pub historical_proof_verified: bool,
+    pub restore_abandoned_anchor: Option<StateAnchor>,
+    pub abandonment_publication_pending: bool,
+    pub verification_error: Option<&'a str>,
+}
+
+pub(crate) fn goal_count(session: &LabSession) -> usize {
+    session.objectives.len()
+}
+
+pub(crate) fn goal(session: &LabSession, digest: Digest32) -> Option<GoalEntry<'_>> {
+    session
+        .objectives
+        .iter()
+        .find(|objective| objective.plan_digest == digest)
+        .map(|objective| objective.resource_goal(session))
 }
 
 pub(crate) fn count(session: &LabSession) -> usize {
@@ -48,3 +80,7 @@ pub(super) fn source_kind(source: &PlanSource) -> &'static str {
         PlanSource::ResourceAcquisitionContinuation { .. } => "resource_acquisition_continuation",
     }
 }
+
+#[cfg(test)]
+#[path = "resources/goals/session_tests.rs"]
+mod goal_resource_tests;

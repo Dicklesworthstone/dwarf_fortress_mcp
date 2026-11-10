@@ -249,6 +249,29 @@ Turn must fit before a selected pending plan is installed. No row is dropped
 and no later renderer clips an already accepted selection. A budget, deadline,
 source or authority refusal leaves the earlier pending plan intact.
 
+When archived details of earlier objectives would exhaust the response budget,
+the shared publisher uses an explicit `dfmcp.objective-briefing/1` projection.
+Every retained objective stays in the briefing with its current goal truth,
+semantic room/output truth, future-reserve state, historical-achievement class,
+physical quiescence, continuation or refusal guidance, and other safety fields.
+The full original request, original terminal predicate and historical proof
+anchors move behind that row's `details` resource. Read the returned
+`goal-{plan_digest}` resolver and follow its pinned manifest/source pages for
+those retained artifacts. The detail read does not re-evaluate current truth or
+grant effect authority.
+
+An `observed_anchor_reference: "/anchor"` shares the response's exact complete
+anchor only after equality is established. Missing, unknown and different
+historical anchors are never relabeled as current. Existing
+`anchor_encoding.reference_count` counts only the declared current-anchor
+references retained in the packet; source and predicate literals never
+participate. The projection records its complete membership and incomplete
+forensic evidence explicitly. The selected plan's complete `steps`, original
+source analysis, lineage, forecasts and every active-work/query catalog remain
+intact. If these required fields still do not fit, publication refuses before
+changing the pending plan. A larger allowance continues to return the original
+full briefing when it fits.
+
 Use `invalid_request` to correct ambiguous sources, unequal goals or a modified
 selection. On `stale_anchor`, obtain a new comparison. On `capability_denied`,
 obtain the required current grants through the normal session policy. On

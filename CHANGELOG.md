@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased — Read exact original goals through bounded resource pages
+
+- Expose retained original requests, requirements and historical custody through
+  capability-checked manifests and source-pinned, lossless pages.
+- Fit larger retained histories by moving only named historical artifacts
+  behind per-goal detail links, preserving complete new proof and current truth.
+- Preserve concurrent shared-proof/current-anchor work and correct reference
+  counts when historical fields move out of a packet.
+- Add six goal-resource cases and six publication/history regressions; retain
+  incoming tests. MCP execution remains unestablished after dependency memory
+  kills and loss of the execution environment.
+- Complete ordinary-LLVM intent/lab execution: 544 tests passed, including all
+  seven new canonical-kind cases. Recover reviewed source through GitHub with
+  explicit formatting and full-qualification limits.
+
 ## Unreleased — Fit complete future-reserve reviews within the normal budget
 
 - Share exactly equal current anchors in declared work/history fields with

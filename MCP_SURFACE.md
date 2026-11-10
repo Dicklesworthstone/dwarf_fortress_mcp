@@ -712,6 +712,9 @@ df://session/{id}/plans-{catalog_digest}~{offset}
 df://session/{id}/plan-{plan_digest}~{object_digest}
 df://session/{id}/plan-{plan_digest}~{object_digest}~steps~{offset}
 df://session/{id}/plan-{plan_digest}~{object_digest}~archive~{offset}
+df://session/{id}/goal-{plan_digest}
+df://session/{id}/goal-{plan_digest}~{source_digest}
+df://session/{id}/goal-{plan_digest}~{source_digest}~source~{offset}
 df://fortress/{id}/anchor
 df://fortress/{id}/entity/{entity}
 df://fortress/{id}/map/chunk/{x}/{y}/{z}
@@ -755,6 +758,19 @@ sealed requirements and predicted IDs from current evidence. Archive bytes
 retain original steps, predicates, obligations and idempotency keys without
 granting commit authority. Source work, output and elapsed-time bounds apply to
 every read. See the resource consumer document for reconstruction and retention.
+
+One retained committed original can also be inspected through `goal-{plan_digest}`.
+It resolves to a source-pinned manifest and lossless paged original request,
+summary and terminal condition. Exact source identity includes the typed-plan
+object digest, preventing substitution under a repeated semantic digest.
+Current whole-fortress Observe and Query grants precede existence checks;
+source work, elapsed time and complete escaped output remain bounded. The
+manifest keeps sealed, historical achievement and restore-abandonment anchors
+distinct. Its current predicate/project truth is explicitly unevaluated, and
+reading never certifies proof or writes custody. A stable original source pin
+does not freeze subsequent historical progress; every read reports its current
+authorized anchor and retained history. These links make prior-goal details
+retrievable when a bounded plan response omits the complete original request.
 
 The advertised `df://fortress/...`, knowledge and memory families remain
 unimplemented resource targets pending explicit session authority binding.
