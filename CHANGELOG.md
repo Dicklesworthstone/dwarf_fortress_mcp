@@ -16,10 +16,14 @@
 - Preserve complete review rows and source binding in workflow report `/2`,
   compacting only duplicated or derivable metadata in the new generation.
 - Add compiler, codec, public lifecycle and core admission regressions, the
-  request schema and the laboratory contract/usage guide. Latest-nightly
-  rustfmt and 12 schema vectors passed. Full MCP compilation was killed in
-  `asupersync` under memory pressure; no runtime or release qualification is
-  claimed by this source checkpoint.
+  request schema and the laboratory contract/usage guide. Selected execution
+  passed 111 production/continuation tests and eight core admission tests,
+  including all 19 new compiler/codec/core cases. Production source identity
+  and exact locked external dependencies were checked before and after.
+- Latest-nightly rustfmt and 12 schema vectors passed. The seven new public
+  facade tests remain unexecuted: both full test compilation and metadata-only
+  type checking were killed in `asupersync`. No full workspace, release,
+  native or live qualification is claimed.
 - Track implementation and remaining execution evidence in
   `df-lab-resource-harvest-h2m.4`.
 

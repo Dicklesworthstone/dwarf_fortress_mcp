@@ -28,20 +28,37 @@ actual sealed action deadlines remain independent of the requested future tick.
 The forecast runs the current stage only and reports the absolute reserve
 endpoint separately. No continuous-maintenance or completion guarantee is made.
 
-The source checkpoint includes 26 focused regression tests across the real
-planner, compiler, continuation codec and public facade. All 19 changed Rust
-files were parsed/formatted by latest-nightly rustfmt, the request schema
-passed four positive and eight negative vectors, and `git diff --check` passed.
-Three independent source reviews checked generation isolation, admission,
-custody and current-True continuation. Full MCP test compilation was attempted
-with exact locked dependencies and serialized compilation; the host killed
-`asupersync` during code generation before project tests ran. The earlier
-intent test build was also killed under memory pressure. Selected production
-module execution is pending at this checkpoint; no Rust test pass or default
-public-packet fit is claimed here. The repository verifier is still running;
-the clean-source release qualifier refused the dirty development worktree.
-This adds laboratory functionality only, with no native protocol, live
-mutation, compatibility registry or admission change.
+Executed validation on production sources matching `c5842bb`:
+
+- 111 selected production/compiler/continuation tests passed, including all
+  nine new compiler and five new continuation cases; zero failed or ignored.
+- Eight selected core admission tests passed, including all five new
+  harvest-reserve cases and three existing production-reserve cases; zero
+  failed or ignored.
+- The selected assembly retained every production module byte and disabled
+  unrelated test registrations only. Before/after audits matched all 506
+  original/assembled source records. Its eleven external dependencies matched
+  the exact versions and checksums in the repository lockfile.
+- Latest-nightly rustfmt parsed/formatted all 19 changed Rust files, the
+  request schema passed four positive and eight negative vectors, and
+  `git diff --check` passed.
+
+These 119 passing tests provide selected Rust execution evidence, not full MCP
+or workspace qualification. Seven new public-facade lifecycle/budget tests are
+present but unexecuted. The full locked MCP test build and a subsequent
+metadata-only `cargo check --locked --offline -p dfmcp-mcp --tests` were both
+killed in pinned `asupersync` before reaching the MCP crate; neither produced
+a project source diagnostic or a full type-check result. The earlier intent
+test build also encountered a host memory kill. No measured default-budget
+public packet fit is claimed.
+
+`scripts/verify.sh` passed the initial repository integrity, source/status,
+agent/native contract, dependency and bead checks, then was explicitly stopped
+with exit 130 during Python contract tests to prioritize functional execution
+under host memory pressure. It did not complete. The clean-source release
+qualifier refused the dirty development worktree. This adds laboratory
+functionality only, with no native protocol, live mutation, compatibility
+registry or admission change.
 
 Usage and exact semantics:
 [`docs/LAB_RESOURCE_PRODUCTION_RESERVES.md`](docs/LAB_RESOURCE_PRODUCTION_RESERVES.md).
