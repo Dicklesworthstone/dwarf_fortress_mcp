@@ -1,5 +1,27 @@
 # Implementation Status
 
+## Unreleased — Preserve original project truth in compact observations
+
+Output-budget compaction now retains current predicate evidence, the exact
+stage and historical achievement scopes, complete semantic room/output truth,
+future-reserve status and epistemic class, physical quiescence and the emitted
+continuation request or refusal. Bulky original source and predicate detail is
+explicitly marked omitted. A completed harvest can no longer lose the separate
+unfinished or unknown room result while retaining only an `achieved` label;
+current stock success cannot lose its outstanding future-reserve requirement.
+Historical outcomes and source/plan identities are unchanged.
+
+All 18 tests in the complete production output-budget module pass on latest
+nightly `1.102.0-nightly ac8310ba6 (2026-11-09)`, including four new lifecycle
+regressions covering pulse/briefing compaction, completed rooms with spent
+harvest stock, unavailable authority/evidence, every reserve status, and older
+objectives without project fields. This focused component compiles the actual
+file unchanged with the repository-pinned serde_json and matching transitive
+lock identities; it does not execute the full MCP/session/transport runtime.
+Scoped rustfmt and whitespace checks pass. Full MCP validation is being
+attempted separately; no live/native or release qualification is claimed.
+Owners: `df-lab-resource-harvest-h2m.4` and `df-lab-resource-harvest-h2m.5`.
+
 ## Unreleased — Inspect readable original plan steps through bounded pages
 
 Catalog and manifest `step_details` links now expose

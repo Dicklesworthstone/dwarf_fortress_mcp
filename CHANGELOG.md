@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased — Keep whole-project truth when observations are compacted
+
+- Retain exact stage scope, current room/output evidence and outstanding future
+  reserves alongside historical achievement in compact Agent Turn briefings.
+- Preserve unknown evidence, quiescence, continuation eligibility and explicit
+  next calls; mark source detail omitted without inventing missing claims.
+- Pass all 18 actual output-budget module tests, including four new lifecycle
+  regressions; full runtime and native qualification remain separate.
+
 ## Unreleased — Read original plan actions and proof requirements in pages
 
 - Discover readable step pages directly from retained-plan catalogs/manifests.

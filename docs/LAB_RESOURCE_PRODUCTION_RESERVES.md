@@ -108,6 +108,13 @@ not prove continuous maintenance throughout the interval. Population changes,
 interference, casualties and delayed observation can invalidate predictions;
 fresh evidence governs each next stage.
 
+Compact observation briefings preserve `semantic_output_goal` and the complete
+`resource_reserve` status, including its epistemic class, original absolute
+tick and explicit lack of continuous-maintenance proof. They also retain
+physical quiescence, replan eligibility and any emitted continuation request.
+Removing bulky source detail cannot turn current stock success into a claim
+that the future reserve is funded, or turn an unknown reserve into success.
+
 ## Cancellation, recovery and shared sessions
 
 Cancellation retains completed yield; the next stage sizes only the observed

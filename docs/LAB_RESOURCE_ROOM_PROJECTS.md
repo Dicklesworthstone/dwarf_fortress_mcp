@@ -175,6 +175,13 @@ after its wood has been consumed to finish the room, the old harvest stock
 predicate can be False while the complete project is True. Neither event
 rewrites an original action or its historical achievement.
 
+When an observation exceeds its output allowance, the compact briefing retains
+the exact stage truth and scope alongside the complete `semantic_room_goal`,
+its current evidence, physical quiescence and any authorized continuation
+request. It marks omitted source detail explicitly. An achieved harvest must
+not appear to be a completed room merely because the response was compacted;
+an unknown current room result must not inherit an earlier achievement.
+
 An unfinished or unqualified room project remains protected from goal-capacity
 eviction after harvesting. A project with qualified complete room truth and
 quiet work can be considered under the ordinary verified-history and custody

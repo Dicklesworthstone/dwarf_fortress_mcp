@@ -67,6 +67,48 @@ fn alert_qualification(item: &Value) -> Option<(Value, Value)> {
     Some((json!({"epistemic_state":epistemic,"value":null}), evidence))
 }
 
+/// A completed stage is not necessarily a completed original objective. Keep
+/// the current project/output truth, reserve prediction, historical scope and
+/// next-step eligibility together whenever an objective remains visible.
+/// These are copied from the authorized observation, never inferred from its
+/// historical `status`. Bulky source programs and predicates stay in the full
+/// objective projection instead of being repeated in the compact briefing.
+fn compact_objective(item: &mut Value) {
+    let Some(object) = item.as_object_mut() else {
+        return;
+    };
+    object.retain(|key, _| {
+        matches!(
+            key.as_str(),
+            "plan_digest"
+                | "summary"
+                | "status"
+                | "predicate_truth"
+                | "epistemic_state"
+                | "evidence_scope"
+                | "observation_error"
+                | "observed_anchor"
+                | "goal_scope"
+                | "historical_achievement_scope"
+                | "historical_achievement"
+                | "first_satisfied_anchor"
+                | "restore_abandoned_anchor"
+                | "abandonment_publication_pending"
+                | "semantic_room_goal"
+                | "semantic_output_goal"
+                | "resource_reserve"
+                | "physical_quiescent"
+                | "pursuit_active"
+                | "needs_replan"
+                | "continuation_request"
+                | "continuation_refused"
+                | "replacement_work_dispatched"
+                | "blind_retry_allowed"
+        )
+    });
+    object.insert("detail_omitted_for_output_budget".to_owned(), json!(true));
+}
+
 fn compact_turn(turn: &mut Value) {
     if let Some(affordances) = turn.get_mut("affordances").and_then(Value::as_array_mut) {
         affordances.retain(|a| a["enabled"] != false);
@@ -129,11 +171,7 @@ fn compact_turn(turn: &mut Value) {
         .and_then(Value::as_array_mut)
     {
         for item in items.iter_mut() {
-            *item = json!({
-                "plan_digest": item["plan_digest"],
-                "summary": item["summary"],
-                "status": item["status"],
-            });
+            compact_objective(item);
         }
     }
     if let Some(budget) = turn.get_mut("budget") {
@@ -719,6 +757,207 @@ mod tests {
             assert_eq!(pulse["agent_turn"]["active_work"][key], json!([]));
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod objective_projection_tests {
+    use super::*;
+
+    fn objective() -> Value {
+        json!({
+            "plan_digest":"ab".repeat(32), "summary":"furnish the original room",
+            "status":"achieved", "predicate_truth":"true",
+            "epistemic_state":"certified_derived", "evidence_scope":"laboratory_reference_world",
+            "observed_anchor":{"state_hash":"cd".repeat(32),"game_tick":101},
+            "historical_achievement":"verified", "goal_scope":"resource_acquisition_stage",
+            "historical_achievement_scope":"resource_acquisition_stage",
+            "semantic_room_goal":{
+                "truth":"false", "predicate_truth":"false", "status":"not_yet_observed",
+                "epistemic_state":"certified_derived", "evidence_scope":"laboratory_reference_world",
+                "observed_anchor":{"state_hash":"cd".repeat(32),"game_tick":101},
+                "completion_scope":"complete_original_room_and_access",
+                "historical_action_proof_rewritten":false,
+            },
+            "physical_quiescent":true, "pursuit_active":false, "needs_replan":true,
+            "replacement_work_dispatched":false, "blind_retry_allowed":false,
+            "continuation_request":{
+                "tool":"fortress.plan", "arguments":{"session_id":"s",
+                    "blueprint":"{\"template\":\"continue_goal\",\"plan_digest\":\"original\"}"},
+            },
+            "original_source":{"program":"original source detail ".repeat(1000)},
+        })
+    }
+
+    fn response(goal: &Value) -> Value {
+        json!({
+            "ok":true,"session_id":"s", "objectives":[goal],
+            "agent_turn":{
+                "schema":"dfmcp.agent_turn/1","operation":"fortress.observe",
+                "anchor":goal["observed_anchor"], "continuity":{"status":"continuous"},
+                "briefing":{"objective_status":[goal]},"coverage":{},
+                "active_work":{}, "recommendations":[], "affordances":[],
+            },
+        })
+    }
+
+    fn fitted_goal(goal: &Value, profile: &str) -> Result<Value, serde_json::Error> {
+        let shaped = shape_for_profile(&response(goal).to_string(), profile);
+        let text = fit(&shaped, 1_000);
+        assert!(estimate_tokens(&text) <= 1_000);
+        assert_eq!(
+            text,
+            fit(&shaped, 1_000),
+            "projection must be deterministic"
+        );
+        let fitted: Value = serde_json::from_str(&text)?;
+        assert_eq!(fitted["ok"], true, "{fitted}");
+        assert_eq!(
+            fitted["output_budget"]["tier"], "sections_omitted",
+            "{fitted}"
+        );
+        assert_eq!(fitted["objectives"]["omitted_for_output_budget"], true);
+        let compact = fitted["agent_turn"]["briefing"]["objective_status"][0].clone();
+        assert!(compact.is_object(), "the compact briefing still fits");
+        assert_eq!(compact["detail_omitted_for_output_budget"], true);
+        assert!(compact.get("original_source").is_none());
+        Ok(compact)
+    }
+
+    #[test]
+    fn compact_harvest_achievement_keeps_unfinished_room_and_explicit_continuation()
+    -> Result<(), serde_json::Error> {
+        let goal = objective();
+        for profile in ["pulse", "briefing"] {
+            let compact = fitted_goal(&goal, profile)?;
+            assert_eq!(compact["status"], "achieved");
+            assert_eq!(compact["predicate_truth"], "true");
+            assert_eq!(compact["goal_scope"], "resource_acquisition_stage");
+            assert_eq!(
+                compact["historical_achievement_scope"],
+                "resource_acquisition_stage"
+            );
+            assert_eq!(compact["semantic_room_goal"], goal["semantic_room_goal"]);
+            assert_eq!(compact["semantic_room_goal"]["truth"], "false");
+            assert_eq!(compact["needs_replan"], true);
+            assert_eq!(
+                compact["continuation_request"],
+                goal["continuation_request"]
+            );
+            assert_eq!(compact["physical_quiescent"], true);
+            assert_eq!(compact["replacement_work_dispatched"], false);
+            assert_eq!(compact["blind_retry_allowed"], false);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn compact_room_completion_does_not_rewrite_its_spent_harvest_or_unknown_evidence()
+    -> Result<(), serde_json::Error> {
+        let mut goal = objective();
+        goal["status"] = json!("no_longer_holds");
+        goal["predicate_truth"] = json!("false");
+        goal["semantic_room_goal"]["truth"] = json!("true");
+        goal["semantic_room_goal"]["predicate_truth"] = json!("true");
+        goal["semantic_room_goal"]["status"] = json!("achieved");
+        goal["needs_replan"] = json!(false);
+        if let Some(object) = goal.as_object_mut() {
+            object.remove("continuation_request");
+        }
+        for profile in ["pulse", "briefing"] {
+            let compact = fitted_goal(&goal, profile)?;
+            assert_eq!(compact["status"], "no_longer_holds");
+            assert_eq!(compact["predicate_truth"], "false");
+            assert_eq!(compact["semantic_room_goal"], goal["semantic_room_goal"]);
+            assert_eq!(compact["historical_achievement"], "verified");
+            assert_eq!(compact["needs_replan"], false);
+            assert!(compact.get("continuation_request").is_none());
+        }
+
+        goal["semantic_room_goal"] = json!({
+            "truth":"unknown","predicate_truth":"unknown","epistemic_state":"unknown",
+            "observation_error":{"code":"capability_denied","message":"current Query authority is required"},
+        });
+        goal["physical_quiescent"] = Value::Null;
+        goal["continuation_refused"] = json!({"code":"capability_denied"});
+        for profile in ["pulse", "briefing"] {
+            let compact = fitted_goal(&goal, profile)?;
+            assert_eq!(compact["semantic_room_goal"], goal["semantic_room_goal"]);
+            assert!(compact.get("physical_quiescent").is_some());
+            assert!(compact["physical_quiescent"].is_null());
+            assert_eq!(
+                compact["continuation_refused"],
+                goal["continuation_refused"]
+            );
+            assert!(compact.get("continuation_request").is_none());
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn compact_current_output_success_keeps_future_reserve_and_its_epistemic_class()
+    -> Result<(), serde_json::Error> {
+        let mut goal = objective();
+        if let Some(object) = goal.as_object_mut() {
+            object.remove("semantic_room_goal");
+        }
+        goal["semantic_output_goal"] = json!({
+            "predicate_truth":"true", "epistemic_state":"certified_derived",
+            "evidence_scope":"laboratory_reference_world",
+            "historical_action_proof_rewritten":false,
+        });
+        for (status, epistemic, work) in [
+            ("work_required", "predicted", json!(true)),
+            ("funded_from_current_stock", "predicted", json!(false)),
+            ("unknown", "unknown", Value::Null),
+            ("expired", "observed", Value::Null),
+        ] {
+            goal["needs_replan"] = json!(status == "work_required");
+            if status != "work_required"
+                && let Some(object) = goal.as_object_mut()
+            {
+                object.remove("continuation_request");
+            }
+            goal["resource_reserve"] = json!({
+                "reserve_until_tick":12_001, "status":status, "epistemic":epistemic,
+                "work_required":work,"continuous_maintenance_proven":false,
+                "new_request_required":status == "expired",
+                "historical_action_proof_rewritten":false,
+            });
+            for profile in ["pulse", "briefing"] {
+                let compact = fitted_goal(&goal, profile)?;
+                assert_eq!(compact["predicate_truth"], "true");
+                assert_eq!(
+                    compact["semantic_output_goal"],
+                    goal["semantic_output_goal"]
+                );
+                assert_eq!(compact["resource_reserve"], goal["resource_reserve"]);
+                assert_eq!(
+                    compact["resource_reserve"]["continuous_maintenance_proven"],
+                    false
+                );
+                assert!(compact.get("semantic_room_goal").is_none());
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn compact_legacy_objectives_do_not_gain_project_or_continuation_claims() {
+        let mut goal = json!({"plan_digest":"old", "summary":"pause", "status":"achieved"});
+        compact_objective(&mut goal);
+        assert_eq!(goal["status"], "achieved");
+        for field in [
+            "predicate_truth",
+            "semantic_room_goal",
+            "semantic_output_goal",
+            "resource_reserve",
+            "physical_quiescent",
+            "needs_replan",
+            "continuation_request",
+        ] {
+            assert!(goal.get(field).is_none(), "{goal}");
+        }
     }
 }
 
