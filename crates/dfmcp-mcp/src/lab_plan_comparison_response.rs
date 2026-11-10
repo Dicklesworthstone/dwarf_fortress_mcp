@@ -93,6 +93,11 @@ pub(super) fn finish(
             "shared plan proof requires a supported review envelope",
         ));
     }
+    if payload.get("anchor_encoding").is_some() {
+        return Err(invariant(
+            "review anchor references must be produced from the owned current projection",
+        ));
+    }
     projection.budget.validate()?;
     let maximum = usize::try_from(
         projection
@@ -159,26 +164,23 @@ pub(super) fn finish(
             },
             "fortress.commit",
             if acquisition {
-                "The original resource minima have a newly prepared finite acquisition plan."
+                "Finite plan for the original resource minima."
             } else if resource_production {
-                "The original production objective has a newly prepared stage based on observed supply."
+                "Stage uses observed supply for the original goal."
             } else if resource_room {
-                "The complete original room project has a newly prepared stage based on observed materials and geometry."
+                "Room stage uses observed materials and geometry."
             } else {
-                "The selected source has a newly prepared ordinary plan."
+                "Fresh ordinary plan for the selected source."
             },
-            "Pursue the selected original objective after current-state revalidation.",
-            "Obtain observed effect and obligation evidence.",
+            "Advance the revalidated original goal.",
+            "Observe effect and obligation proof.",
             payload["max_risk"].as_str().unwrap_or("unknown"),
             "registered_action_policy",
             false,
             payload["next_step"]["arguments"].clone(),
         );
-        next["invalidating_conditions"] = json!([
-            "source anchor changes",
-            "required authority changes",
-            "plan expires",
-        ]);
+        next["invalidating_conditions"] =
+            json!(["source anchor changes", "authority changes", "plan expires",]);
         vec![next]
     } else {
         Vec::new()
@@ -189,6 +191,14 @@ pub(super) fn finish(
     payload["paused"] = json!(projection.paused);
     payload["game_effect"] = json!("none");
     payload["publication"] = json!("complete_before_pending_plan_change");
+    let mut objectives = projection.objectives.clone();
+    if shared_predicates {
+        payload["anchor_encoding"] = crate::current_anchor_review::apply(
+            &mut active_work,
+            &mut objectives,
+            &projection.anchor,
+        )?;
+    }
     let admitted = json!({
         "max_wall_millis": projection.budget.max_wall_millis,
         "max_game_ticks": projection.budget.max_game_ticks,
@@ -212,7 +222,7 @@ pub(super) fn finish(
             "runtime": "laboratory_reference_world",
             "adapter": "memory",
             "paused": projection.paused,
-            "objectives": projection.objectives,
+            "objectives": objectives,
             "comparison_storage": "stateless",
             "canonical_time_advanced": 0,
             "candidate_predictions_grant_authority": false,
@@ -224,8 +234,8 @@ pub(super) fn finish(
         .uncertainty(vec![uncertainty(
             "candidate-forecast-model",
             "predicted",
-            "Forecasts assume deterministic laboratory effects and no other agent actions; they dispatch only the candidate's deferred chain while physical world jobs advance.",
-            "Other retained plans' deferred actions are not dispatched on these forks. Future outcomes and ordinary commit success remain unproven.",
+            "Assumes deterministic laboratory effects, no other agents, and only this candidate's deferred dispatch; physical jobs advance.",
+            "Other plans' deferred steps are excluded. Outcomes and commit success are unproven.",
             Some("fortress.observe"),
             json!({"session_id": projection.session_id}),
         )])
@@ -235,9 +245,9 @@ pub(super) fn finish(
                 "laboratory.pending_plan_catalog", "laboratory.session_query_baseline_catalog",
                 "laboratory.session_query_watch_catalog", "laboratory.nonfinal_carried_obligation_catalog"],
             "partial_domains": [{"domain": "laboratory.future_outcomes",
-                "reason": "conditional reference-world prediction; no observed effect evidence"},
+                "reason": "laboratory prediction; no observed effect proof"},
                 {"domain": "laboratory.current_game_work",
-                "reason": "owned action receipts and retained recovery records are projected; recovery proofs are not refreshed and other sessions' deferred dispatch is not exhaustively projected"}],
+                "reason": "owned receipts and recovery records; recovery proof unrefreshed; other sessions' deferred dispatch incomplete"}],
             "omitted_domains": ["live_dwarf_fortress_state"],
             "absence_proof_scope": [],
             "continuation": null,

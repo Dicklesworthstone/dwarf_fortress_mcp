@@ -152,6 +152,10 @@ Its shared readable predicate encoding is documented in
 [complete production publication](LAB_RESOURCE_PRODUCTION.md#source-changes-and-complete-publication).
 The response generation changes only review representation: it does not alter
 the `/5` continuation source, plan digest, typed archive or reserve semantics.
+Repeated complete current anchors in work and goal history share the same
+response's `/current_anchor` under explicit `anchor_encoding` metadata. The
+original reserve tick, historical anchors that differ from the current source,
+current stock truth and predicted future-reserve status remain distinct.
 
 See [finite-resource production](LAB_RESOURCE_PRODUCTION.md),
 [production reserves](PRODUCTION_RESERVE_PLANNING.md), and

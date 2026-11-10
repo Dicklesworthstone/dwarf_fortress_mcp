@@ -158,3 +158,56 @@ fn the_complete_shared_proof_is_refused_instead_of_shortened_at_its_byte_boundar
     );
     Ok(())
 }
+
+#[test]
+fn shared_review_keeps_one_complete_current_anchor_and_reconstructible_work() -> Result<()> {
+    let mut view = projection();
+    view.active_work["actions"][0]["work_state"]["observed_anchor"] = view.anchor.clone();
+    view.objectives[0]["observed_anchor"] = view.anchor.clone();
+    view.objectives[0]["semantic_output_goal"]["observed_anchor"] = view.anchor.clone();
+    let historical = json!({"fortress_id":"19", "epoch":1, "sequence":0,
+        "game_tick":1, "state_hash":"c".repeat(64)});
+    view.objectives[0]["sealed_anchor"] = historical.clone();
+    let input = payload(&view);
+    let output = finish(&view, input.clone(), query_work(), Some(pending(&input)))?;
+    let result: Value = serde_json::from_str(&output).map_err(|_| invariant("test packet"))?;
+    assert_eq!(result["current_anchor"], view.anchor);
+    assert_eq!(result["agent_turn"]["anchor"], view.anchor);
+    assert_eq!(
+        result["anchor_encoding"]["schema"],
+        "dfmcp.current-anchor-references/1"
+    );
+    assert_eq!(result["anchor_encoding"]["complete"], true);
+    assert_eq!(result["anchor_encoding"]["reference_count"], 4);
+    for pointer in [
+        "/agent_turn/active_work/pending_plans/0/anchor",
+        "/agent_turn/active_work/actions/0/work_state/observed_anchor",
+        "/agent_turn/briefing/objectives/0/observed_anchor",
+        "/agent_turn/briefing/objectives/0/semantic_output_goal/observed_anchor",
+    ] {
+        let reference = result
+            .pointer(pointer)
+            .ok_or_else(|| invariant("missing shared anchor"))?;
+        assert_eq!(reference, &json!({"$ref":"/current_anchor"}));
+        assert_eq!(
+            result.pointer(reference["$ref"].as_str().unwrap_or_default()),
+            Some(&view.anchor)
+        );
+    }
+    assert_eq!(
+        result["agent_turn"]["briefing"]["objectives"][0]["sealed_anchor"],
+        historical
+    );
+    assert_eq!(
+        result["agent_turn"]["briefing"]["objectives"][0]["semantic_output_goal"]["predicate_truth"],
+        "false"
+    );
+    assert_eq!(
+        result["agent_turn"]["active_work"]["carried_obligations"],
+        view.active_work["carried_obligations"]
+    );
+    let mut supplied = input.clone();
+    supplied["anchor_encoding"] = result["anchor_encoding"].clone();
+    assert!(finish(&view, supplied, query_work(), Some(pending(&input))).is_err());
+    Ok(())
+}

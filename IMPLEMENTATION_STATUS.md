@@ -1,5 +1,52 @@
 # Implementation Status
 
+## Unreleased — Fit complete resource-reserve continuation into the default review budget
+
+Version-two resource reviews now share repeated complete current anchors under
+explicit `dfmcp.current-anchor-references/1` metadata. Only exactly equal
+anchors in declared work and objective-history positions become local
+`/current_anchor` references. The complete current and canonical Agent Turn
+anchors stay inline; different historical anchors, unknown evidence, literal
+source/predicate values and every other work/history field are preserved.
+Both views are prepared atomically, and complete packet admission still occurs
+before pending-plan replacement. Fixed explanatory prose is shorter while
+retaining the authority, prediction, dispatch and recovery qualifications.
+
+The representative complete 22-bed future-reserve continuation now publishes
+at **15,919 bytes under the unchanged 4,096-token / 16,384-byte limit**. Its
+complete original request, absolute reserve tick, lineage, action proof,
+current work and goal history remain reviewable. Ordinary finite-input
+production also fits that default. Corrected room measurements now retain
+actual completed-harvest receipts and use the real room continuation wrappers:
+two bedrooms with an existing Carpenter workshop fit an 8,192-token review,
+both plain (about 30.6 KB) and connected (about 32.7 KB). Full missing-workshop
+setup remains larger, about 34.5/36.5 KB; all measured furnished-room stages
+still exceed the 4,096-token default. Those bounds are explicit, not silently
+raised. The public regression source adds both existing-workshop lifecycles
+at 8,192 tokens and checks that a refused 4,096-token room continuation retains
+the previously reviewed pending seal and world effects.
+
+The final component run passes five predicate-sharing, three anchor-sharing
+and four complete-publication regression bodies, including exact byte-boundary
+acceptance/refusal. All five orientation regression bodies pass again with the
+current sources and merged intent validation. The earlier eighteen tests in
+the actual output-budget module also pass. Source audit confirms the copied
+production implementations match (allowing rustfmt-only whitespace) and all
+eleven external component dependency identities match the project lockfile.
+Final repository validation passes 5,072 checks across 2,966 files. The Agent
+Turn contract, dependency policy, implementation-status gate, scoped rustfmt
+and whitespace checks also pass.
+
+These components execute actual source compilers, planners, MemoryAdapter
+harvest/progression, continuation compilers, forecasts, step renderers and
+publication finishers. Owner-history rows are supplied explicitly; the actual
+session registry, installed Task runtime and MCP transport are outside this
+execution. New full public workflow tests are present but remain unexecuted:
+both real MCP builds were killed in unchanged asupersync before project
+compilation. Full runtime/release/live qualification is not claimed. The
+remaining default-room publication limit and full facade execution stay open
+under `df-lab-resource-harvest-h2m.4` and `df-lab-resource-harvest-h2m.5`.
+
 ## Unreleased — Share complete plan proofs and retain resource reviews across turns
 
 Resource-aware production and room Plan responses now use explicit `/2` review

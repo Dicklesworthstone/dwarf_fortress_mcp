@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased — Fit complete future-reserve reviews within the normal budget
+
+- Share exactly equal current anchors in declared work/history fields with
+  explicit same-response metadata; retain complete evidence and distinct history.
+- Publish the representative complete reserve continuation in 15,919 bytes
+  under the unchanged 4,096-token ceiling, including its original request,
+  reserve tick, lineage, current work and full action proof.
+- Measure complete two-bedroom projects with existing workshops within 8,192
+  tokens and add public lifecycle/refusal regressions. Larger setup and default
+  4,096-token furnished-room reviews remain explicit bounds.
+- Pass seventeen focused proof, anchor, publication and orientation cases;
+  preserve the documented full-runtime build and execution limits.
+
 ## Unreleased — Preserve complete resource plan reviews across turns
 
 - Share repeated readable predicates in explicit production/room `/2` response

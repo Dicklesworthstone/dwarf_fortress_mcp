@@ -318,7 +318,7 @@ fn prepare_source(
         "next_step": {"tool": "fortress.commit", "arguments": {
             "session_id": session.session_id.to_string(), "plan_digest": digest,
         }},
-        "note": "freshly prepared ordinary plan; commit still revalidates current authority, source and registered effect policy",
+        "note": "Commit revalidates current authority, source and effect policy.",
     });
     if resource_room {
         result["room"] = analysis

@@ -287,6 +287,28 @@ fn exact_review(session: &str, proposal: &Json) -> TestResult {
     );
     assert_eq!(proposal["plan_digest"], plan.digest.to_string());
     assert_eq!(proposal["version"], 2);
+    assert_eq!(proposal["current_anchor"], anchor_json(&plan.anchor));
+    assert_eq!(proposal["agent_turn"]["anchor"], proposal["current_anchor"]);
+    assert_eq!(
+        proposal["anchor_encoding"]["schema"],
+        "dfmcp.current-anchor-references/1"
+    );
+    assert_eq!(proposal["anchor_encoding"]["scope"], "same_response");
+    assert_eq!(
+        proposal["anchor_encoding"]["json_pointer"],
+        "/current_anchor"
+    );
+    assert_eq!(proposal["anchor_encoding"]["complete"], true);
+    let pending_anchor = &proposal["agent_turn"]["active_work"]["pending_plans"][0]["anchor"];
+    assert_eq!(pending_anchor, &json!({"$ref":"/current_anchor"}));
+    assert_eq!(
+        proposal.pointer(
+            pending_anchor["$ref"]
+                .as_str()
+                .ok_or("missing anchor reference")?
+        ),
+        Some(&proposal["current_anchor"])
+    );
     Ok(())
 }
 

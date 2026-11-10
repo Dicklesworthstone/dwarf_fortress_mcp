@@ -68,6 +68,10 @@ fn original_connected_room() -> Json {
 /// This source fixture begins with no usable wood and no Carpenter workshop.
 /// Actual harvest, manufacture, construction and placement use the real adapter.
 fn require_finite_inputs(session: &str) -> TestResult<()> {
+    require_finite_stock(session, true)
+}
+
+fn require_finite_stock(session: &str, remove_workshop: bool) -> TestResult<()> {
     in_session(session, |guard| {
         let mut snapshot = guard.adapter.snapshot().clone();
         let ledger = effects::stock_ledger(&snapshot)
@@ -83,10 +87,12 @@ fn require_finite_inputs(session: &str) -> TestResult<()> {
             .ok_or_else(|| fixture_error("qualified wood fact missing"))?
             .value = WorldValue::U64(0);
         record.revision += 1;
-        snapshot
-            .graph
-            .entities
-            .remove(&crate::lab_world::starter::CARPENTERS);
+        if remove_workshop {
+            snapshot
+                .graph
+                .entities
+                .remove(&crate::lab_world::starter::CARPENTERS);
+        }
         snapshot.cursor = snapshot
             .cursor
             .checked_next()
@@ -208,10 +214,18 @@ fn finish_stage(session: &str, digest: &str) -> TestResult<Json> {
 }
 
 fn complete_acquisition(session: &str, request: &Json) -> TestResult<(String, Json)> {
+    complete_acquisition_units(session, request, 3)
+}
+
+fn complete_acquisition_units(
+    session: &str,
+    request: &Json,
+    units: u32,
+) -> TestResult<(String, Json)> {
     let before = effects_before(session)?;
     let acquisition = plan_room(session, request)?;
     assert_stage(&acquisition, "acquire_resources", false);
-    only_wood_harvest(session, 3)?;
+    only_wood_harvest(session, units)?;
     assert_eq!(effects_before(session)?, before);
     assert_eq!(wood(session)?, 0);
     let digest = identity(&acquisition, "plan_digest")?;
@@ -230,7 +244,7 @@ fn complete_acquisition(session: &str, request: &Json) -> TestResult<(String, Js
     );
     assert_eq!(finished["needs_replan"], true);
     assert!(finished["continuation_request"].is_object());
-    assert_eq!(wood(session)?, 3);
+    assert_eq!(wood(session)?, u64::from(units));
     Ok((digest, finished))
 }
 
@@ -343,6 +357,72 @@ fn resource_connected_room_preserves_original_entrance_and_complete_access_goal(
 }
 
 #[test]
+fn two_bedroom_resource_projects_with_existing_workshops_fit_8192_token_reviews() -> TestResult {
+    let _serial = serialized_durable_tests();
+    for connected in [false, true] {
+        let session = open_resources_with_budget(
+            if connected { "9654111" } else { "9654110" },
+            false,
+            false,
+            8_192,
+        )?;
+        require_finite_stock(&session, false)?;
+        let mut request = original_room();
+        request
+            .as_object_mut()
+            .ok_or("room request is not an object")?
+            .remove("prerequisites");
+        if connected {
+            request = json!({
+                "template":"connected_room", "room":request,
+                "access":{"entry":[0,2,10], "region":{"min":[0,0,10],"max":[12,12,10]}},
+            });
+        }
+        let (root, harvest_history) = complete_acquisition_units(&session, &request, 2)?;
+        assert_eq!(harvest_history["semantic_room_goal"]["truth"], "false");
+        let before = effects_before(&session)?;
+        let reviewed = continuation(&session, &root)?;
+        assert_stage(&reviewed, "room", true);
+        assert_eq!(effects_before(&session)?, before);
+        assert!(reviewed.to_string().len() <= 8_192 * 4, "{reviewed}");
+        let sealed = pending_plan(&session)?;
+        assert_eq!(
+            json!(crate::sealed_plan_review::expanded_steps(&reviewed)?),
+            crate::lab_world::plan_steps_json(&sealed),
+        );
+        assert_eq!(
+            sealed
+                .steps
+                .iter()
+                .filter(|step| matches!(step.action, Action::PlaceFurniture { .. }))
+                .count(),
+            2,
+        );
+        assert!(
+            sealed
+                .steps
+                .iter()
+                .any(|step| matches!(step.action, Action::CreateWorkOrder { .. }))
+        );
+        assert!(sealed.steps.iter().all(|step| !matches!(
+            step.action,
+            Action::Build { .. } | Action::HarvestResource { .. }
+        )));
+        assert_eq!(reviewed["room"]["continuation"]["parent_plan_digest"], root);
+        assert_eq!(reviewed["room"]["continuation"]["root_plan_digest"], root);
+        commit_ok(&session, &reviewed)?;
+        let completed = finish_stage(&session, &identity(&reviewed, "plan_digest")?)?;
+        assert_eq!(completed["predicate_truth"], "true", "{completed}");
+        assert_eq!(completed["semantic_room_goal"]["truth"], "true");
+        let original_now = goal(&session, &root)?;
+        assert_history_unchanged(&harvest_history, &original_now);
+        assert_eq!(original_now["semantic_room_goal"]["truth"], "true");
+        assert_eq!(original_now["needs_replan"], false);
+    }
+    Ok(())
+}
+
+#[test]
 fn resource_room_authority_and_complete_publication_refusals_preserve_pending() -> TestResult {
     let _serial = serialized_durable_tests();
     let session = open_resources("9654103", false, false)?;
@@ -376,13 +456,14 @@ fn resource_room_authority_and_complete_publication_refusals_preserve_pending() 
         })?;
     }
     let budget = in_session(&session, |guard| Ok(guard.budget))?;
-    for source_limit in [true, false] {
+    for (entities, tokens) in [
+        (1, budget.max_output_tokens),
+        (budget.max_entities, 4_096),
+        (budget.max_entities, 600),
+    ] {
         in_session(&session, |guard| {
-            if source_limit {
-                guard.budget.max_entities = 1;
-            } else {
-                guard.budget.max_output_tokens = 600;
-            }
+            guard.budget.max_entities = entities;
+            guard.budget.max_output_tokens = tokens;
             Ok(())
         })?;
         let before = effects_before(&session)?;

@@ -422,6 +422,9 @@ pointers expand to every original terminal, postcondition and obligation
 predicate. The typed sealed plan and archive are unchanged. Later observation
 hints retain expanded proofs, so they do not depend on a previous response's
 predicate table. Complete publication still precedes pending-plan replacement.
+`anchor_encoding` declares same-response references to `/current_anchor` for
+equal typed work/history anchors; full canonical anchors, differing history,
+unknown evidence and literal source/predicate values retain their meaning.
 
 The laboratory `blueprint` JSON string also accepts the closed
 `{"template":"continue_goal","plan_digest":"<retained goal digest>"}` form.

@@ -186,6 +186,17 @@ Table references must be canonical, local and acyclic; their expanded node
 count and depth are bounded before publication. The exact typed archive and
 sealed plan/source identities are unchanged.
 
+The same `/2` packet declares `anchor_encoding` with schema
+`dfmcp.current-anchor-references/1`, scope `same_response`, target
+`/current_anchor` and an exact `reference_count`. Known anchor fields under
+`agent_turn.active_work` and `agent_turn.briefing.objectives` may contain
+`{"$ref":"/current_anchor"}` when their complete anchor equals that target.
+Resolve the pointer to recover the full original value. The top-level current
+anchor and canonical Agent Turn anchor remain inline. Different historical
+anchors, unknown/null values and literal source or predicate data stay intact.
+This saves repeated source identities without removing observation or history
+evidence; a reference has no independent authority outside its response.
+
 The complete component material budget appears at
 `production.resource_workflow.requirements`; source provenance, combined
 horizon, iteration count and consumption assumptions appear at

@@ -19,6 +19,7 @@ pub mod agent_facade;
 pub mod agent_turn;
 pub mod bench;
 pub mod build_placement_server;
+mod current_anchor_review;
 pub mod dig_control_server;
 pub mod dig_recovery_server;
 pub mod doctor;

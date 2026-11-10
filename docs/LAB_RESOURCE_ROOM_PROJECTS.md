@@ -147,6 +147,25 @@ generations and digests are unchanged; readable proofs remain requirements to
 verify, not evidence that work has already happened. An oversized complete
 packet still refuses before changing pending work.
 
+`anchor_encoding` separately declares `dfmcp.current-anchor-references/1`.
+Typed work and objective-history anchor fields that exactly equal the full
+top-level `current_anchor` use `{"$ref":"/current_anchor"}`. Expanding those
+pointers restores every original observation and history value. Distinct old
+anchors and unknown values remain inline; source requests and predicate data
+are not rewritten. The canonical Agent Turn anchor also remains complete.
+These declarations apply only to their own response. Subsequent turns retain
+self-contained plan proof and publish their own current evidence.
+
+Complete furnished-room reviews can still exceed a session's default
+`max_output_tokens: 4096`. Component measurements of two bedrooms with an
+existing Carpenter workshop fit `max_output_tokens: 8192`, including connected
+access, retained harvesting evidence and the complete continuation lineage.
+Select that explicit allowance when opening such a session. Missing-workshop
+setup requires more room in the response. Bounds are never raised implicitly;
+an oversized review refuses and preserves the prior pending plan. These are
+measured component limits, with full facade execution tracked separately in
+`IMPLEMENTATION_STATUS.md`.
+
 | Stage | Executable work | Exact goal of this plan |
 | --- | --- | --- |
 | `acquire_resources` | Finite harvesting and permitted harvesting labor | Observed stock for this acquisition stage, with its ordinary harvest proof |
