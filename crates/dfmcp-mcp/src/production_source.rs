@@ -28,7 +28,8 @@ pub(crate) fn compile(
         None => summary.to_owned(),
         Some(
             planner @ (ProductionPlanner::ConsumptionAwareV1
-            | ProductionPlanner::ConsumptionReserveV1),
+            | ProductionPlanner::ConsumptionReserveV1
+            | ProductionPlanner::ResourceAwareV1),
         ) => {
             let digest = source_digest(request);
             let sealed = format!("{summary} [production source {}]", digest.to_hex());

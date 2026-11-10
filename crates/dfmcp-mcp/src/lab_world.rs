@@ -23,7 +23,7 @@ use dfmcp_world::{
     ChunkCoord, CompareOp, EntityKind, EntityRecord, Fact, FactSource, Predicate, Value,
     WorldGraph, WorldSnapshot, laboratory_fact_value, tile_codes,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use serde_json::{Value as Json, json};
 
 #[path = "production_workload.rs"]
@@ -32,6 +32,9 @@ use production_workload::ProductionWorkload;
 
 #[path = "production_consumption.rs"]
 mod production_consumption;
+
+#[path = "production_resources.rs"]
+mod production_resources;
 
 #[path = "production_staffing.rs"]
 mod production_staffing;
@@ -1161,6 +1164,7 @@ pub(crate) struct ProductionRequest {
     planner: Option<ProductionPlanner>,
     reserve_until_tick: Option<u64>,
     orders: Option<ProductionOrders>,
+    acquire_resources: Option<ProductionResourcePolicy>,
 }
 
 /// Independent opt-in lowering generation. Unmarked original sources retain
@@ -1180,6 +1184,7 @@ const PRODUCTION_ORDER_POLICY: &str = "dependency_preserving_v1";
 pub(crate) enum ProductionPlanner {
     ConsumptionAwareV1,
     ConsumptionReserveV1,
+    ResourceAwareV1,
 }
 
 impl ProductionPlanner {
@@ -1187,6 +1192,7 @@ impl ProductionPlanner {
         match self {
             Self::ConsumptionAwareV1 => "consumption_aware_v1",
             Self::ConsumptionReserveV1 => "consumption_reserve_v1",
+            Self::ResourceAwareV1 => "resource_aware_v1",
         }
     }
 }
@@ -1220,72 +1226,128 @@ const MAX_PRODUCTION_JOBS: usize = 6;
 const MAX_PRODUCTION_WORKSHOP_TILES: u64 = 64;
 const MAX_PRODUCTION_SETUP_ENTITIES: usize = 65_536;
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ProductionQuotaInput {
+    item: String,
+    minimum: u32,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ProductionWorkshopInput {
+    building: String,
+    location: [i32; 3],
+    min: Option<[i32; 3]>,
+    max: Option<[i32; 3]>,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ProductionPrerequisitesInput {
+    #[serde(default)]
+    assign_labor: bool,
+    workforce: Option<ProductionWorkforce>,
+    #[serde(default)]
+    workshops: Vec<ProductionWorkshopInput>,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ProductionRequestInput {
+    template: String,
+    quotas: Vec<ProductionQuotaInput>,
+    prerequisites: Option<ProductionPrerequisitesInput>,
+    planner: Option<ProductionPlanner>,
+    reserve_until_tick: Option<u64>,
+    orders: Option<ProductionOrders>,
+    #[serde(default, deserialize_with = "present_resource_policy")]
+    acquire_resources: Option<ProductionResourcePolicy>,
+}
+
+/// Independent permission for the acquisition stage. Production setup retains
+/// its own original permissions and is never widened by this policy.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ProductionResourcePolicy {
+    #[serde(default)]
+    assign_labor: bool,
+}
+
+fn present_resource_policy<'de, D>(
+    deserializer: D,
+) -> std::result::Result<Option<ProductionResourcePolicy>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    ProductionResourcePolicy::deserialize(deserializer).map(Some)
+}
+
+/// Retained continuation sources consume the typed request directly, retaining
+/// duplicate-key rejection before any JSON Value normalization.
+impl<'de> Deserialize<'de> for ProductionRequest {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Self::from_input(ProductionRequestInput::deserialize(deserializer)?, false)
+            .map_err(serde::de::Error::custom)
+    }
+}
+
 impl ProductionRequest {
     pub(crate) fn parse(raw: &str) -> Result<Self> {
         Self::parse_generation(raw, false)
     }
 
     fn parse_generation(raw: &str, current: bool) -> Result<Self> {
-        #[derive(Deserialize)]
-        #[serde(deny_unknown_fields)]
-        struct Quota {
-            item: String,
-            minimum: u32,
-        }
-        #[derive(Deserialize)]
-        #[serde(deny_unknown_fields)]
-        struct Workshop {
-            building: String,
-            location: [i32; 3],
-            min: Option<[i32; 3]>,
-            max: Option<[i32; 3]>,
-        }
-        #[derive(Deserialize)]
-        #[serde(deny_unknown_fields)]
-        struct Prerequisites {
-            #[serde(default)]
-            assign_labor: bool,
-            workforce: Option<ProductionWorkforce>,
-            #[serde(default)]
-            workshops: Vec<Workshop>,
-        }
-        #[derive(Deserialize)]
-        #[serde(deny_unknown_fields)]
-        struct Objective {
-            template: String,
-            quotas: Vec<Quota>,
-            prerequisites: Option<Prerequisites>,
-            planner: Option<ProductionPlanner>,
-            reserve_until_tick: Option<u64>,
-            orders: Option<ProductionOrders>,
-        }
         if raw.len() > MAX_ACTIONS_JSON_BYTES {
             return Err(invalid("production objective exceeds its byte bound"));
         }
-        let objective: Objective = serde_json::from_str(raw).map_err(|error| {
+        let objective: ProductionRequestInput = serde_json::from_str(raw).map_err(|error| {
             invalid(format!(
                 "production objective must be {{\"template\":\"production\",\"quotas\":[{{\"item\":\"DRINK|FOOD|BED|DOOR|TABLE|CHAIR\",\"minimum\":n}}]}}: {error}"
             ))
         })?;
+        Self::from_input(objective, current)
+    }
+
+    fn from_input(objective: ProductionRequestInput, current: bool) -> Result<Self> {
         if objective.template != "production" {
             return Err(invalid("production objective requires template=production"));
         }
-        let planner = match (objective.reserve_until_tick, objective.planner, current) {
-            (Some(_), Some(ProductionPlanner::ConsumptionReserveV1), _) | (Some(_), None, true) => {
-                Some(ProductionPlanner::ConsumptionReserveV1)
-            }
-            (Some(_), _, _) => {
+        let resource_aware = objective.acquire_resources.is_some()
+            || objective.planner == Some(ProductionPlanner::ResourceAwareV1);
+        let planner = if resource_aware {
+            if objective.reserve_until_tick.is_some() {
                 return Err(invalid(
-                    "reserve_until_tick requires the fixed consumption_reserve_v1 compiler",
+                    "resource_aware_v1 does not accept reserve_until_tick; acquisition cannot widen the explicit reserve admission policy",
                 ));
             }
-            (None, Some(ProductionPlanner::ConsumptionReserveV1), _) => {
-                return Err(invalid(
-                    "consumption_reserve_v1 requires an explicit reserve_until_tick",
-                ));
+            match (objective.acquire_resources, objective.planner, current) {
+                (Some(_), Some(ProductionPlanner::ResourceAwareV1), _) | (Some(_), None, true) => {
+                    Some(ProductionPlanner::ResourceAwareV1)
+                }
+                _ => {
+                    return Err(invalid(
+                        "acquire_resources requires its exact resource_aware_v1 compiler; archived sources must retain both fields",
+                    ));
+                }
             }
-            (None, _, true) => Some(ProductionPlanner::ConsumptionAwareV1),
-            (None, generation, false) => generation,
+        } else {
+            match (objective.reserve_until_tick, objective.planner, current) {
+                (Some(_), Some(ProductionPlanner::ConsumptionReserveV1), _)
+                | (Some(_), None, true) => Some(ProductionPlanner::ConsumptionReserveV1),
+                (Some(_), _, _) => {
+                    return Err(invalid(
+                        "reserve_until_tick requires the fixed consumption_reserve_v1 compiler",
+                    ));
+                }
+                (None, Some(ProductionPlanner::ConsumptionReserveV1), _) => {
+                    return Err(invalid(
+                        "consumption_reserve_v1 requires an explicit reserve_until_tick",
+                    ));
+                }
+                (None, _, true) => Some(ProductionPlanner::ConsumptionAwareV1),
+                (None, generation, false) => generation,
+            }
         };
         // Bound submitted records before normalization: duplicates must not
         // bypass the same input allowance as distinct requested goals.
@@ -1393,6 +1455,7 @@ impl ProductionRequest {
             planner,
             reserve_until_tick: objective.reserve_until_tick,
             orders: objective.orders,
+            acquire_resources: objective.acquire_resources,
         })
     }
 
@@ -1409,6 +1472,19 @@ impl ProductionRequest {
 
     pub(crate) fn planner(&self) -> Option<ProductionPlanner> {
         self.planner
+    }
+
+    pub(crate) fn is_resource_aware(&self) -> bool {
+        self.planner == Some(ProductionPlanner::ResourceAwareV1) && self.acquire_resources.is_some()
+    }
+
+    /// Original output stock truth is independent of any earlier acquisition's
+    /// mandatory exact-task proof. It never treats missing inventory as zero.
+    pub(crate) fn semantic_goal_truth(
+        &self,
+        snapshot: &WorldSnapshot,
+    ) -> Result<dfmcp_world::PredicateTruth> {
+        production_resources::semantic_goal_truth(self, snapshot)
     }
 
     pub(crate) const fn reserve_until_tick(&self) -> Option<u64> {
@@ -1452,12 +1528,22 @@ impl ProductionRequest {
         if self.orders.is_some() {
             request["orders"] = json!(PRODUCTION_ORDER_POLICY);
         }
+        if let Some(policy) = self.acquire_resources {
+            request["acquire_resources"] = json!({"assign_labor": policy.assign_labor});
+        }
         request.to_string()
     }
 
     /// Recompile from the original quotas at this one observed snapshot.
     /// Work-order completion and the original stock goal remain separate.
     pub(crate) fn compile(&self, snapshot: &WorldSnapshot) -> Result<ProductionCompilation> {
+        if self.acquire_resources.is_some()
+            != (self.planner == Some(ProductionPlanner::ResourceAwareV1))
+        {
+            return Err(invalid(
+                "resource acquisition policy and compiler generation must agree",
+            ));
+        }
         if self.reserve_until_tick.is_some()
             != (self.planner == Some(ProductionPlanner::ConsumptionReserveV1))
         {
@@ -1477,6 +1563,9 @@ impl ProductionRequest {
             Some(ProductionPlanner::ConsumptionReserveV1) => {
                 production_consumption::compile_reserve(self, snapshot)
             }
+            Some(ProductionPlanner::ResourceAwareV1) => {
+                production_resources::compile(self, snapshot)
+            }
         }
     }
 
@@ -1489,6 +1578,20 @@ impl ProductionRequest {
         targets: &BTreeMap<String, u32>,
         joint_staffing: bool,
     ) -> Result<ProductionCompilation> {
+        let candidate = self.compile_candidate(snapshot, targets, joint_staffing, false)?;
+        self.finish_candidate(snapshot, candidate)
+    }
+
+    /// Inspect the complete proposed material balance without inventing stock.
+    /// An infeasible candidate is private diagnostic state and cannot be sealed
+    /// or dispatched; only `finish_candidate` creates a production compilation.
+    fn compile_candidate(
+        &self,
+        snapshot: &WorldSnapshot,
+        targets: &BTreeMap<String, u32>,
+        joint_staffing: bool,
+        inspect_shortages: bool,
+    ) -> Result<ProductionCandidate> {
         let evidence = dfmcp_world::PredicateEvidence::laboratory(snapshot)?;
         let snapshot = evidence.snapshot();
         let construction_model = effects::construction_material_model(snapshot)?;
@@ -1644,7 +1747,7 @@ impl ProductionRequest {
             inventory.get_stock("PLANT"),
             workload.reserved_plant_units(),
         );
-        if !plan.model_feasible() && construction_model.is_none() {
+        if !plan.model_feasible() && construction_model.is_none() && !inspect_shortages {
             return Err(DfmcpError::new(
                 ErrorCode::PreconditionsFailed,
                 format!("production quotas are infeasible in the laboratory model: {analysis}"),
@@ -1693,11 +1796,14 @@ impl ProductionRequest {
                 }
             }
         };
+        let mut setup_wood = 0u64;
+        let mut material_feasible = plan.model_feasible();
         if let Some(model) = construction_model {
             // Determine the actual deduplicated setup before admitting any
             // material feasibility. Existing complete workshops cost nothing;
             // every new workshop and furniture item shares the same wood pool.
             let construction_wood = construction_setup_wood(snapshot, &setup)?;
+            setup_wood = construction_wood;
             let needs_material = needs_wood || construction_wood > 0;
             if construction_wood > 0 && !needs_wood {
                 let held = ledger.and_then(|record| {
@@ -1733,7 +1839,8 @@ impl ProductionRequest {
                 )?;
             }
             analysis = production_plan_analysis(&plan);
-            analysis["feasible"] = json!(plan.model_feasible() && construction_fits);
+            material_feasible = plan.model_feasible() && construction_fits;
+            analysis["feasible"] = json!(material_feasible);
             analysis["construction_materials"] = json!({
                 "model": model,
                 "new_workshop_wood": construction_wood,
@@ -1759,11 +1866,50 @@ impl ProductionRequest {
                 inventory.get_stock("PLANT"),
                 workload.reserved_plant_units(),
             );
-            if !construction_fits || !plan.model_feasible() {
+            if !material_feasible && !inspect_shortages {
                 return Err(production_setup_refusal(format!(
                     "production and workshop setup exceed the shared laboratory material supply: {analysis}"
                 )));
             }
+        }
+        let resource_requirements = if inspect_shortages {
+            production_resources::requirements(snapshot, &plan, &workload, setup_wood)?
+        } else {
+            Vec::new()
+        };
+        Ok(ProductionCandidate {
+            plan,
+            setup,
+            workload,
+            analysis,
+            terminal: Predicate::All(terminal).normalized(),
+            joint_staffing,
+            material_feasible,
+            provisions_model: provisions.is_some(),
+            resource_requirements,
+        })
+    }
+
+    fn finish_candidate(
+        &self,
+        snapshot: &WorldSnapshot,
+        candidate: ProductionCandidate,
+    ) -> Result<ProductionCompilation> {
+        let ProductionCandidate {
+            plan,
+            setup,
+            workload,
+            mut analysis,
+            terminal,
+            joint_staffing,
+            material_feasible,
+            provisions_model,
+            ..
+        } = candidate;
+        if !material_feasible || !plan.model_feasible() {
+            return Err(production_setup_refusal(
+                "unfunded production demand is diagnostic only and cannot become an executable production stage",
+            ));
         }
         let setup_count = setup.actions.len();
         let offset = u32::try_from(setup_count)
@@ -1900,7 +2046,7 @@ impl ProductionRequest {
                         conditions.push(json!({
                             "kind": "material_available", "material_token": "WOOD", "minimum": 1,
                         }));
-                    } else if provisions.is_some() {
+                    } else if provisions_model {
                         conditions.push(json!({
                             "kind": "material_available", "material_token": "PLANT", "minimum": 1,
                         }));
@@ -1958,11 +2104,12 @@ impl ProductionRequest {
         Ok(ProductionCompilation {
             actions,
             analysis,
-            terminal: Predicate::All(terminal).normalized(),
+            terminal,
             workload,
             consumption_horizon: None,
             satisfied_goal_reserve_until: None,
             setup_workforce: setup.setup_workforce,
+            acquisition: None,
         })
     }
 }
@@ -2418,6 +2565,20 @@ fn compile_production_prerequisites(
     Ok(setup)
 }
 
+/// The complete bounded production model before material admission. Its
+/// diagnostic demand and schedule may motivate acquisition, never authorize it.
+struct ProductionCandidate {
+    plan: dfmcp_intent::ProductionPlan,
+    setup: ProductionSetup,
+    workload: ProductionWorkload,
+    analysis: Json,
+    terminal: Predicate,
+    joint_staffing: bool,
+    material_feasible: bool,
+    provisions_model: bool,
+    resource_requirements: Vec<production_resources::ResourceRequirement>,
+}
+
 pub(crate) struct ProductionCompilation {
     pub(crate) actions: String,
     pub(crate) analysis: Json,
@@ -2429,6 +2590,10 @@ pub(crate) struct ProductionCompilation {
     // their original summary and prepared seal.
     satisfied_goal_reserve_until: Option<GameTick>,
     setup_workforce: Option<dfmcp_intent::workforce_planning::ProjectSetupStaffing>,
+    // Only the resource-aware compiler can install this exact harvest stage.
+    // Its guards and compensation are not representable in the public action
+    // string and must survive binding before ordinary StaticPlanner sealing.
+    acquisition: Option<dfmcp_intent::ResourceAcquisitionPlan>,
 }
 
 impl ProductionCompilation {
@@ -2438,6 +2603,31 @@ impl ProductionCompilation {
     /// permission to dispatch existing or new work.
     pub(crate) fn apply_capacity_horizon(&self, intent: &mut dfmcp_intent::Intent) -> Result<()> {
         let mut proposed = intent.clone();
+        if let Some(acquisition) = &self.acquisition {
+            if proposed.anchor != acquisition.source_anchor
+                || proposed.terminal_condition != self.terminal
+                || proposed.requested_actions != parse_steps(&self.actions)?
+                || self.consumption_horizon.is_some()
+                || self.satisfied_goal_reserve_until.is_some()
+                || self.setup_workforce.is_some()
+                || proposed.constraints.iter().any(|constraint| {
+                    matches!(
+                        constraint,
+                        dfmcp_intent::Constraint::LaboratoryProductionReserveUntil(_)
+                    )
+                })
+            {
+                return Err(invalid(
+                    "resource acquisition stage belongs to a different source, goal or action program",
+                ));
+            }
+            // Preserve each original per-action guard, compensation and any
+            // explicit obligation. Ordinary preparation adds mandatory harvest
+            // identity/conservation proof and the shared-workforce deadline.
+            proposed.requested_actions = acquisition.requested_actions.clone();
+            *intent = proposed;
+            return Ok(());
+        }
         if self.satisfied_goal_reserve_until.is_some()
             && proposed.terminal_condition != self.terminal
         {

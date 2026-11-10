@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased — Reach production goals through observed resource stages
+
+- Add opt-in `acquire_resources` to the existing production blueprint, pinning
+  the distinct `resource_aware_v1` compiler and the original output quotas.
+- Derive finite WOOD/PLANT acquisition from actual recipe demand, pending input
+  debt, deduplicated workshop costs and population consumption through both
+  acquisition and production horizons.
+- Review and commit harvesting first when inputs are missing; compile later
+  production only from observed yield through an explicit `continue_goal`.
+- Retain original policy and parent/root custody in flat production continuation
+  generation 4, including canceled-work proof and same-root exclusion.
+- Admit current complete-source budgets and publish the entire review before
+  replacing pending work; require a fresh explicit review after source drift.
+- Preserve historical production generations and the existing native boundary.
+  Future `reserve_until_tick` requests remain a separate unsupported combination.
+
 ## Unreleased — Continue original resource acquisition goals
 
 - Extend `continue_goal` to original WOOD/PLANT stock targets, retaining the

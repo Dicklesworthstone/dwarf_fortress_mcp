@@ -87,6 +87,45 @@ pub(super) fn execute_resource_acquisition(
         summary,
         raw: request.canonical_json(),
     };
+    execute_original_source(session_id, source, "resource_acquisition", started)
+}
+
+/// The original output objective owns both stages. Only the stage compiled
+/// from current observed input stock is proposed; production is never queued
+/// behind a predicted harvest in this request.
+pub(super) fn execute_resource_production(
+    session_id: Option<String>,
+    summary: Option<String>,
+    raw: &str,
+    started: Instant,
+) -> Result<String> {
+    let request = crate::lab_world::ProductionRequest::parse_current(raw)?;
+    if !request.is_resource_aware() {
+        return Err(DfmcpError::new(
+            ErrorCode::InvalidRequest,
+            "resource production requires the fixed resource-aware policy",
+        ));
+    }
+    let summary = summary.map_or_else(|| "meet production quotas".to_owned(), |value| value);
+    if summary.len() > MAX_SUMMARY_BYTES {
+        return Err(DfmcpError::new(
+            ErrorCode::BudgetExceeded,
+            "resource production summary exceeds its explicit byte bound",
+        ));
+    }
+    let source = PlanSource::Production {
+        summary,
+        raw: request.canonical_json(),
+    };
+    execute_original_source(session_id, source, "resource_production", started)
+}
+
+fn execute_original_source(
+    session_id: Option<String>,
+    source: PlanSource,
+    kind: &str,
+    started: Instant,
+) -> Result<String> {
     let session = resolve_session(session_id)?;
     let _admission = LAB_ADMISSION.read().map_err(|_| {
         DfmcpError::new(
@@ -115,7 +154,7 @@ pub(super) fn execute_resource_acquisition(
                 rid,
                 &current,
                 source_work,
-                "resource_acquisition",
+                kind,
                 started,
             )?;
             let forecast = pending.source.forecast(
@@ -130,9 +169,9 @@ pub(super) fn execute_resource_acquisition(
     )
 }
 
-/// A resource continuation must hold the same owner through current lineage,
-/// complete source admission and response publication. Other retained goal
-/// families keep their established intake path without inheriting new authority.
+/// A supply-dependent continuation holds the same owner through current
+/// lineage, complete source admission and response publication. Other retained
+/// goal families keep their established intake path and authority.
 pub(super) fn execute_resource_continuation(
     session_id: Option<String>,
     summary: Option<String>,
@@ -166,7 +205,9 @@ pub(super) fn execute_resource_continuation(
         },
         |session| {
             if !session.objectives.iter().any(|objective| {
-                objective.plan_digest == parent && objective.is_resource_acquisition()
+                objective.plan_digest == parent
+                    && (objective.is_resource_acquisition()
+                        || objective.is_resource_aware_production())
             }) {
                 return Ok(None);
             }
@@ -177,19 +218,24 @@ pub(super) fn execute_resource_continuation(
                 &remaining(&current, started)?,
             )?;
             let source = objectives::continuation_source(session, parent, summary, None)?;
-            if !matches!(source, PlanSource::ResourceAcquisitionContinuation { .. }) {
+            if !source.requires_complete_source_review() {
                 return Err(DfmcpError::new(
                     ErrorCode::InternalInvariantViolation,
                     "resource continuation did not retain its original source family",
                 ));
             }
+            let kind = if source.is_resource_aware_production() {
+                "resource_production_continuation"
+            } else {
+                "resource_acquisition_continuation"
+            };
             let (mut payload, pending) = prepare_source(
                 session,
                 source,
                 rid,
                 &current,
                 source_work,
-                "resource_acquisition_continuation",
+                kind,
                 started,
             )?;
             let forecast = pending.source.forecast(
@@ -221,9 +267,10 @@ fn prepare_source(
     check(current, started)?;
     let digest = plan.digest.to_string();
     let acquisition = source.is_resource_acquisition();
+    let resource_production = source.is_resource_aware_production();
     let result = json!({
         "kind": kind,
-        "schema": if acquisition { "dfmcp.resource-acquisition/1" } else { "dfmcp.plan-comparison/1" },
+        "schema": if acquisition { "dfmcp.resource-acquisition/1" } else if resource_production { "dfmcp.resource-production/1" } else { "dfmcp.plan-comparison/1" },
         "version": 1,
         "plan_id": plan.id.to_string(),
         "plan_digest": digest,
@@ -327,7 +374,7 @@ fn publish_owned(
         plan_comparison_response::pending_plan_entry(
             &pending.plan,
             session.session_id,
-            pending.source.is_resource_acquisition(),
+            pending.source.requires_complete_source_review(),
         )
     });
     let output =

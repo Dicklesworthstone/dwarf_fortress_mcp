@@ -1797,7 +1797,7 @@ impl GoalContinuation {
         matches!(
             self,
             Self::Room(_) | Self::ConnectedRoom(_) | Self::ResourceAcquisition(_)
-        )
+        ) || matches!(self, Self::Production(source) if source.is_resource_aware())
     }
 
     fn lineage_json(&self) -> serde_json::Value {
@@ -1851,12 +1851,43 @@ impl PlanSource {
             || matches!(self, Self::Blueprint { raw, .. } if resource_acquisition::is_request(raw))
     }
 
+    fn is_resource_aware_production(&self) -> bool {
+        match self {
+            Self::Production { raw, .. } => crate::lab_world::ProductionRequest::parse(raw)
+                .is_ok_and(|request| request.is_resource_aware()),
+            Self::ProductionContinuation { raw, .. } => {
+                goal_continuation::ProductionContinuation::parse(raw)
+                    .is_ok_and(|source| source.is_resource_aware())
+            }
+            _ => false,
+        }
+    }
+
+    /// These compilers select a current stage from the complete supply, stock,
+    /// staffing and work census. A narrow action witness cannot replay them.
+    fn requires_complete_source_review(&self) -> bool {
+        self.is_resource_acquisition() || self.is_resource_aware_production()
+    }
+
     fn resource_replan_step(&self, session_id: SessionId) -> Option<serde_json::Value> {
-        if !self.is_resource_acquisition() {
+        if !self.requires_complete_source_review() {
             return None;
         }
         let (summary, blueprint) = match self {
-            Self::Blueprint { summary, raw } => (summary, raw.clone()),
+            Self::Blueprint { summary, raw } | Self::Production { summary, raw } => {
+                (summary, raw.clone())
+            }
+            Self::ProductionContinuation { summary, raw } => {
+                let source = goal_continuation::ProductionContinuation::parse(raw).ok()?;
+                (
+                    summary,
+                    json!({
+                        "template": "continue_goal",
+                        "plan_digest": source.parent.to_hex(),
+                    })
+                    .to_string(),
+                )
+            }
             Self::ResourceAcquisitionContinuation { summary, raw } => {
                 let source =
                     resource_acquisition_continuation::ResourceAcquisitionContinuation::parse(raw)
@@ -3612,6 +3643,32 @@ pub(crate) fn plan_request_publication(
     production: Option<String>,
     started: std::time::Instant,
 ) -> PlanPublication {
+    let staged_production = blueprint
+        .as_deref()
+        .filter(|raw| is_resource_aware_production_request(raw))
+        .or_else(|| {
+            production
+                .as_deref()
+                .filter(|raw| is_resource_aware_production_request(raw))
+        });
+    if let Some(raw) = staged_production {
+        if actions.is_some()
+            || paused_target.is_some()
+            || (blueprint.is_some() && production.is_some())
+        {
+            return PlanPublication::Pending(coded_error_payload(
+                "fortress.plan",
+                ErrorCode::InvalidRequest,
+                "resource-aware production contains its complete objective; supply it once without actions or a pause target",
+            ));
+        }
+        return match plan_comparison_handler::execute_resource_production(
+            session_id, summary, raw, started,
+        ) {
+            Ok(output) => PlanPublication::Published(output),
+            Err(error) => PlanPublication::Pending(dfmcp_error_payload("fortress.plan", &error)),
+        };
+    }
     if blueprint
         .as_deref()
         .is_some_and(resource_acquisition::is_request)
@@ -3696,6 +3753,17 @@ pub(crate) fn plan_request_publication(
         blueprint,
         production,
     ))
+}
+
+/// Detection routes original bytes to the strict versioned parser. It never
+/// normalizes away duplicate keys or treats a malformed policy as an opt-out.
+fn is_resource_aware_production_request(raw: &str) -> bool {
+    raw.len() <= crate::lab_world::MAX_ACTIONS_JSON_BYTES
+        && serde_json::from_str::<serde_json::Value>(raw).is_ok_and(|request| {
+            request["template"] == "production"
+                && (request.get("acquire_resources").is_some()
+                    || request["planner"] == "resource_aware_v1")
+        })
 }
 
 fn plan_request_legacy(
@@ -3878,7 +3946,7 @@ fn plan_request_legacy(
                 }
             };
             let snapshot = guard.adapter.snapshot();
-            if source.is_resource_acquisition() {
+            if source.requires_complete_source_review() {
                 let admitted = authorize_entry(&ctx, Capability::Observe, RiskTier::ReadOnly)
                     .and_then(|()| query_budget::admit_sources(&[snapshot], &ctx));
                 if let Err(error) = admitted {
@@ -4624,10 +4692,10 @@ fn rebase_by_witness(
     session: &mut LabSession,
     stale: &PendingPlan,
 ) -> std::result::Result<(PreparedPlan, serde_json::Value), serde_json::Value> {
-    if stale.source.is_resource_acquisition() {
+    if stale.source.requires_complete_source_review() {
         return Err(json!({
             "accepted": false,
-            "reason": "resource acquisition reads complete finite supply, active demand, stock and workforce domains; review a fresh source allocation",
+            "reason": "resource planning reads complete finite supply, active demand, stock and workforce domains; review a fresh source allocation and stage",
         }));
     }
     if matches!(stale.source, PlanSource::CivilianRelease { .. }) {
@@ -4717,10 +4785,15 @@ fn rebase_by_witness(
 fn replay_stale_plan(session: &mut LabSession, stale: PendingPlan) -> String {
     if let Some(next_step) = stale.source.resource_replan_step(session.session_id) {
         let from_digest = stale.digest.clone();
+        let production = stale.source.is_resource_aware_production();
         session.pending = Some(stale);
         let error = DfmcpError::new(
             ErrorCode::StaleAnchor,
-            "resource acquisition observation changed; request and review a fresh allocation from the complete original stock objective before committing",
+            if production {
+                "production supply observation changed; request and review the current stage of the complete original production objective before committing"
+            } else {
+                "resource acquisition observation changed; request and review a fresh allocation from the complete original stock objective before committing"
+            },
         );
         let mut payload = serde_json::from_str::<serde_json::Value>(&dfmcp_error_payload(
             "fortress.commit",
@@ -4729,7 +4802,7 @@ fn replay_stale_plan(session: &mut LabSession, stale: PendingPlan) -> String {
         .unwrap_or_else(|_| json!({"ok": false}));
         payload["session_id"] = json!(session.session_id.to_string());
         payload["rebase"] = json!({
-            "method": "fresh_resource_acquisition_required",
+            "method": if production { "fresh_resource_production_required" } else { "fresh_resource_acquisition_required" },
             "from_digest": from_digest,
             "pending_plan_preserved": true,
             "game_effect": "none",
@@ -5011,6 +5084,24 @@ pub fn fortress_commit(session_id: Option<String>, plan_digest: String) -> Strin
                     ErrorCode::Conflict,
                     "plan digest does not match the pending prepared plan; plans are sealed over their digest",
                 );
+            }
+            if pending.source.is_resource_aware_production() {
+                // Current read authority and complete-source budgets apply at
+                // commit as well as proposal, before leases or effect custody.
+                let current = context_for(guard, guard.next_request_id);
+                let admitted = [Capability::Observe, Capability::Query, Capability::Plan]
+                    .into_iter()
+                    .try_for_each(|capability| {
+                        authorize_entry(&current, capability, RiskTier::ReadOnly)
+                    })
+                    .and_then(|()| {
+                        query_budget::admit_sources(&[guard.adapter.snapshot()], &current)
+                            .map(|_| ())
+                    });
+                if let Err(error) = admitted {
+                    guard.pending = Some(pending);
+                    return dfmcp_error_payload("fortress.commit", &error);
+                }
             }
             if let PlanSource::CivilianRelease { raw, .. } = &pending.source {
                 let validated = civilian_recovery::ReleaseSource::parse(raw)

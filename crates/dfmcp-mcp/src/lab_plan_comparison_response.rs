@@ -13,12 +13,12 @@ fn invariant(message: &str) -> DfmcpError {
     DfmcpError::new(ErrorCode::InternalInvariantViolation, message)
 }
 
-/// Resource plans carry their complete proof once in the same response. The
+/// Supply-dependent plans carry their complete proof once in the same response. The
 /// catalog names that exact array rather than duplicating every predicate.
 pub(super) fn pending_plan_entry(
     plan: &PreparedPlan,
     session_id: SessionId,
-    resource_acquisition: bool,
+    share_step_proof: bool,
 ) -> Value {
     let digest = plan.digest.to_string();
     let mut pending = json!({
@@ -30,7 +30,7 @@ pub(super) fn pending_plan_entry(
             "session_id": session_id.to_string(), "plan_digest": digest,
         }},
     });
-    if resource_acquisition {
+    if share_step_proof {
         pending["step_count"] = json!(plan.steps.len());
         pending["steps_reference"] = json!({
             "scope": "same_response",
@@ -54,7 +54,11 @@ pub(super) fn finish(
         payload["kind"].as_str(),
         Some("resource_acquisition" | "resource_acquisition_continuation")
     );
-    let selecting = payload["kind"] == "select_candidate" || acquisition;
+    let resource_production = matches!(
+        payload["kind"].as_str(),
+        Some("resource_production" | "resource_production_continuation")
+    );
+    let selecting = payload["kind"] == "select_candidate" || acquisition || resource_production;
     if !payload.is_object()
         || payload["ok"] != true
         || payload["anchor"] != projection.anchor
@@ -104,7 +108,8 @@ pub(super) fn finish(
                 || pending["plan_digest"] != payload["plan_digest"]
                 || steps
                     .is_none_or(|rows| pending["step_count"].as_u64() != Some(rows.len() as u64))
-                || !payload["resource_acquisition"].is_object()
+                || (!payload["resource_acquisition"].is_object()
+                    && !payload["production"]["resource_workflow"].is_object())
             {
                 return Err(invariant(
                     "resource pending catalog must reference its complete matching plan steps in this response",
@@ -117,12 +122,16 @@ pub(super) fn finish(
         let mut next = recommendation(
             if acquisition {
                 "commit-resource-acquisition"
+            } else if resource_production {
+                "commit-production-stage"
             } else {
                 "commit-selected-candidate"
             },
             "fortress.commit",
             if acquisition {
                 "The original resource minima have a newly prepared finite acquisition plan."
+            } else if resource_production {
+                "The original production objective has a newly prepared stage based on observed supply."
             } else {
                 "The selected source has a newly prepared ordinary plan."
             },

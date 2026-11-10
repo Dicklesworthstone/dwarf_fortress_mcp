@@ -10,7 +10,7 @@ use super::*;
 
 const MAX_CONSUMPTION_ROUNDS: u32 = 64;
 
-struct ConsumptionModel {
+pub(super) struct ConsumptionModel {
     living: u64,
     metabolism_ticks: u64,
 }
@@ -24,7 +24,7 @@ fn exhausted(message: impl Into<String>) -> DfmcpError {
 }
 
 impl ConsumptionModel {
-    fn capture(snapshot: &WorldSnapshot) -> Result<Self> {
+    pub(super) fn capture(snapshot: &WorldSnapshot) -> Result<Self> {
         if snapshot.graph.entities.len() > MAX_PRODUCTION_SETUP_ENTITIES {
             return Err(exhausted(
                 "consumption planning exceeds the 65,536-entity observation bound",
@@ -64,7 +64,7 @@ impl ConsumptionModel {
         })
     }
 
-    fn allowance(&self, item: &str, horizon: u64) -> Result<u64> {
+    pub(super) fn allowance(&self, item: &str, horizon: u64) -> Result<u64> {
         if is_carpentry_output(item) || matches!(item, "WOOD" | "PLANT") {
             return Ok(0);
         }
@@ -244,7 +244,7 @@ fn reserve_targets(
     Ok(targets)
 }
 
-fn annotate(
+pub(super) fn annotate(
     request: &ProductionRequest,
     snapshot: &WorldSnapshot,
     model: &ConsumptionModel,

@@ -40,6 +40,35 @@ impl Objective {
         self.source.is_resource_acquisition()
     }
 
+    pub(super) fn is_resource_aware_production(&self) -> bool {
+        self.source.is_resource_aware_production()
+    }
+
+    fn current_resource_output_truth(&self, session: &LabSession) -> Result<PredicateTruth> {
+        let context = context_for(session, session.next_request_id);
+        authorize_entry(&context, Capability::Observe, RiskTier::ReadOnly)?;
+        authorize_entry(&context, Capability::Query, RiskTier::ReadOnly)?;
+        query_budget::admit_sources(&[session.adapter.snapshot()], &context)?;
+        if self.abandoned(session) || self.verification_error.is_some() || self.plan.is_none() {
+            return Err(DfmcpError::new(
+                ErrorCode::PreconditionsFailed,
+                "the original resource-aware production goal has no verified active custody",
+            ));
+        }
+        match &self.source {
+            PlanSource::Production { raw, .. } => crate::lab_world::ProductionRequest::parse(raw)?
+                .semantic_goal_truth(session.adapter.snapshot()),
+            PlanSource::ProductionContinuation { raw, .. } => {
+                goal_continuation::ProductionContinuation::parse(raw)?
+                    .semantic_goal_truth(session.adapter.snapshot())
+            }
+            _ => Err(DfmcpError::new(
+                ErrorCode::InvalidIntent,
+                "current production output truth requires its complete original production request",
+            )),
+        }
+    }
+
     pub(super) fn committed(
         plan: &PreparedPlan,
         source: PlanSource,
@@ -100,6 +129,18 @@ impl Objective {
             .unwrap_or(PredicateTruth::Unknown);
         let mut result = crate::observation_projection::laboratory_objective_evidence(observed);
         let abandoned = self.abandoned(session);
+        let continuation_truth = if self.is_resource_aware_production() {
+            let output = self.current_resource_output_truth(session);
+            let truth = output.as_ref().copied().unwrap_or(PredicateTruth::Unknown);
+            let mut projection =
+                crate::observation_projection::laboratory_objective_evidence(output);
+            projection["observed_anchor"] = anchor_json(&session.adapter.snapshot().anchor());
+            projection["historical_action_proof_rewritten"] = json!(false);
+            result["semantic_output_goal"] = projection;
+            truth
+        } else {
+            truth
+        };
         let historical = self
             .first_satisfied_anchor
             .filter(|_| self.historical_proof_verified);
@@ -159,11 +200,11 @@ impl Objective {
         result["pursuit_active"] =
             json!(!abandoned && truth != PredicateTruth::True && quiet != Some(true));
         result["needs_replan"] =
-            json!(!abandoned && truth == PredicateTruth::False && quiet == Some(true));
+            json!(!abandoned && continuation_truth == PredicateTruth::False && quiet == Some(true));
         result["replacement_work_dispatched"] = json!(false);
         result["blind_retry_allowed"] = json!(false);
         if !abandoned
-            && truth == PredicateTruth::False
+            && continuation_truth == PredicateTruth::False
             && quiet == Some(true)
             && self.source.can_continue()
         {
@@ -283,7 +324,7 @@ pub(super) fn continuation_source(
             "restore abandoned pursuit of this original goal; explicitly request a new goal in the current epoch",
         ));
     }
-    if objective.source.is_resource_acquisition() {
+    if objective.source.is_resource_acquisition() || objective.is_resource_aware_production() {
         // The public proposal, handoff discovery and commit-time revalidation
         // inspect the same complete finite resource and lineage domains.
         authorize_entry(&context, Capability::Query, RiskTier::ReadOnly)?;
@@ -358,7 +399,17 @@ pub(super) fn continuation_source(
             "the original goal has no verified active observation lineage",
         )
     })?;
-    if active == original.anchor {
+    if let GoalContinuation::Production(source) = &continuation
+        && source.is_resource_aware()
+    {
+        source.validate_resource_goal_evidence(
+            original,
+            active,
+            session.adapter.snapshot(),
+            &context,
+            quiet,
+        )?;
+    } else if active == original.anchor {
         goal_continuation::validate_goal_evidence(
             original,
             session.adapter.snapshot(),

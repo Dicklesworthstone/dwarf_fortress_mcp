@@ -374,3 +374,62 @@ fn explicit_reserve_is_a_separate_generation_without_altering_historical_source_
     );
     Ok(())
 }
+
+#[test]
+fn resource_stage_seal_binds_the_whole_output_request_and_unused_acquisition_permission()
+-> Result<()> {
+    let snapshot = scenario_snapshot("starter_fortress_resources", FortressId::new(8_287), false)?;
+    let make = |assign_labor| {
+        ProductionRequest::parse_current(
+            &json!({
+                "template":"production",
+                "quotas":[{"item":"BED","minimum":24}],
+                "acquire_resources":{"assign_labor":assign_labor},
+            })
+            .to_string(),
+        )
+    };
+    let original = make(false)?;
+    let with_permission = make(true)?;
+    let (first, analysis) = compile(
+        &original,
+        IntentId::new(77),
+        &snapshot,
+        "supply original beds",
+    )?;
+    let (permitted, _) = compile(
+        &with_permission,
+        IntentId::new(77),
+        &snapshot,
+        "supply original beds",
+    )?;
+    assert_eq!(first.requested_actions, permitted.requested_actions);
+    assert_eq!(first.terminal_condition, permitted.terminal_condition);
+    assert_ne!(source_digest(&original), source_digest(&with_permission));
+    assert_ne!(
+        prepared(&snapshot, &first)?.digest,
+        prepared(&snapshot, &permitted)?.digest
+    );
+    assert_eq!(analysis["source_binding"]["planner"], "resource_aware_v1");
+    assert_eq!(
+        analysis["source_binding"]["production_source_digest"],
+        source_digest(&original).to_hex()
+    );
+    assert!(
+        first
+            .requested_actions
+            .iter()
+            .all(|step| matches!(step.action, Action::HarvestResource { .. }))
+    );
+    assert!(format!("{:?}", first.terminal_condition).contains(effects::STOCK_BED_FIELD));
+    assert!(!format!("{:?}", first.terminal_condition).contains(effects::STOCK_WOOD_FIELD));
+    let reopened = ProductionRequest::parse(&original.canonical_json())?;
+    let replay = compile(
+        &reopened,
+        IntentId::new(77),
+        &snapshot,
+        "supply original beds",
+    )?;
+    assert_eq!((first, analysis), replay);
+    Ok(())
+}

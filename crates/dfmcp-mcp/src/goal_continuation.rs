@@ -18,6 +18,7 @@ use serde_json::{Value, json};
 const LEGACY_SOURCE_SCHEMA: &str = "dfmcp.production-continuation/1";
 const SOURCE_SCHEMA: &str = "dfmcp.production-continuation/2";
 const RESERVE_SOURCE_SCHEMA: &str = "dfmcp.production-continuation/3";
+const RESOURCE_SOURCE_SCHEMA: &str = "dfmcp.production-continuation/4";
 
 /// Archive parsing selects the historical algorithm; new planning selects one
 /// fixed generation without editing the original retained quota/setup request.
@@ -26,6 +27,7 @@ enum SourceVersion {
     Legacy,
     ConsumptionAwareV1,
     ConsumptionReserveV1,
+    ResourceAwareV1,
 }
 
 impl SourceVersion {
@@ -34,6 +36,7 @@ impl SourceVersion {
             Self::Legacy => LEGACY_SOURCE_SCHEMA,
             Self::ConsumptionAwareV1 => SOURCE_SCHEMA,
             Self::ConsumptionReserveV1 => RESERVE_SOURCE_SCHEMA,
+            Self::ResourceAwareV1 => RESOURCE_SOURCE_SCHEMA,
         }
     }
 
@@ -42,6 +45,7 @@ impl SourceVersion {
             Self::Legacy => b"dfmcp-production-continuation-source/1\0",
             Self::ConsumptionAwareV1 => b"dfmcp-production-continuation-source/2\0",
             Self::ConsumptionReserveV1 => b"dfmcp-production-continuation-source/3\0",
+            Self::ResourceAwareV1 => b"dfmcp-production-continuation-source/4\0",
         }
     }
 }
@@ -153,7 +157,9 @@ impl ProductionContinuation {
         root: Digest32,
         request: ProductionRequest,
     ) -> Result<Self> {
-        let version = if request.reserve_until_tick().is_some() {
+        let version = if request.is_resource_aware() {
+            SourceVersion::ResourceAwareV1
+        } else if request.reserve_until_tick().is_some() {
             SourceVersion::ConsumptionReserveV1
         } else {
             SourceVersion::ConsumptionAwareV1
@@ -174,15 +180,24 @@ impl ProductionContinuation {
         }
         let reserve_planner = request.planner() == Some(ProductionPlanner::ConsumptionReserveV1);
         let reserve_horizon = request.reserve_until_tick().is_some();
+        let resource_planner = request.planner() == Some(ProductionPlanner::ResourceAwareV1);
         let valid_reserve = match version {
-            SourceVersion::ConsumptionReserveV1 => reserve_planner && reserve_horizon,
+            SourceVersion::ResourceAwareV1 => {
+                resource_planner && request.is_resource_aware() && !reserve_horizon
+            }
+            SourceVersion::ConsumptionReserveV1 => {
+                reserve_planner && reserve_horizon && !request.is_resource_aware()
+            }
             SourceVersion::Legacy | SourceVersion::ConsumptionAwareV1 => {
-                !reserve_planner && !reserve_horizon
+                !reserve_planner
+                    && !reserve_horizon
+                    && !resource_planner
+                    && !request.is_resource_aware()
             }
         };
         if !valid_reserve {
             return Err(invalid(
-                "reserve continuation requires its exact compiler generation and original absolute reserve horizon",
+                "production continuation must preserve its exact resource or reserve compiler, original acquisition policy and horizon contract",
             ));
         }
         let source = Self {
@@ -202,7 +217,9 @@ impl ProductionContinuation {
             schema: String,
             parent_plan_digest: String,
             root_plan_digest: String,
-            production: Value,
+            // Decode original nested bytes through the closed request grammar.
+            // A Value round trip would erase duplicate quotas or permissions.
+            production: ProductionRequest,
         }
         bounded(raw)?;
         let source: Source = serde_json::from_str(raw)
@@ -211,9 +228,10 @@ impl ProductionContinuation {
             LEGACY_SOURCE_SCHEMA => SourceVersion::Legacy,
             SOURCE_SCHEMA => SourceVersion::ConsumptionAwareV1,
             RESERVE_SOURCE_SCHEMA => SourceVersion::ConsumptionReserveV1,
+            RESOURCE_SOURCE_SCHEMA => SourceVersion::ResourceAwareV1,
             _ => return Err(invalid("unknown retained goal continuation schema")),
         };
-        let request = ProductionRequest::parse(&source.production.to_string())?;
+        let request = source.production;
         if version == SourceVersion::Legacy && request.planner().is_some() {
             return Err(invalid(
                 "legacy continuation source cannot contain a later production compiler generation",
@@ -235,6 +253,38 @@ impl ProductionContinuation {
 
     pub(crate) const fn reserve_until_tick(&self) -> Option<u64> {
         self.request.reserve_until_tick()
+    }
+
+    pub(crate) fn is_resource_aware(&self) -> bool {
+        self.version == SourceVersion::ResourceAwareV1 && self.request.is_resource_aware()
+    }
+
+    /// Current qualified output stocks are independent of any canceled
+    /// predecessor's exact harvest-action proof. This never changes that proof
+    /// or makes a retained historical achievement current again.
+    pub(crate) fn semantic_goal_truth(&self, snapshot: &WorldSnapshot) -> Result<PredicateTruth> {
+        self.request.semantic_goal_truth(snapshot)
+    }
+
+    /// A resource stage can finish or be canceled before the original output
+    /// goal is attained. Continue only from the owner's verified lineage and
+    /// current output truth, without rewriting the old action/goal proof.
+    pub(crate) fn validate_resource_goal_evidence(
+        &self,
+        original: &PreparedPlan,
+        active: StateAnchor,
+        snapshot: &WorldSnapshot,
+        context: &OperationContext,
+        work_quiescent: bool,
+    ) -> Result<()> {
+        if !self.is_resource_aware() {
+            return Err(invalid(
+                "resource-stage eligibility requires the exact resource-aware original source",
+            ));
+        }
+        validate_goal_lineage(original, active, snapshot, context)?;
+        context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
+        validate_truth_and_work(self.semantic_goal_truth(snapshot)?, work_quiescent)
     }
 
     pub(crate) fn canonical_json(&self) -> String {
@@ -272,6 +322,12 @@ impl ProductionContinuation {
             lineage["reserve_until_tick"] = json!(self.request.reserve_until_tick());
             lineage["original_absolute_horizon_preserved"] = json!(true);
             lineage["continuous_maintenance_proven"] = json!(false);
+        } else if self.version == SourceVersion::ResourceAwareV1 {
+            lineage["source_schema"] = json!(RESOURCE_SOURCE_SCHEMA);
+            lineage["planner"] = json!("resource_aware_v1");
+            lineage["original_resource_policy_preserved"] = json!(true);
+            lineage["requires_observed_inputs_for_production"] = json!(true);
+            lineage["next_stage_dispatched"] = json!(false);
         }
         lineage
     }
@@ -315,6 +371,7 @@ impl ProductionContinuation {
                 .clone()
                 .with_planner(ProductionPlanner::ConsumptionReserveV1)
                 .compile(snapshot)?,
+            SourceVersion::ResourceAwareV1 => self.request.compile(snapshot)?,
         };
         let requested_actions = parse_steps(&compiled.actions)?;
         let max_risk = requested_actions
@@ -366,6 +423,19 @@ pub(crate) fn validate_goal_evidence_in_active_lineage(
     context: &OperationContext,
     work_quiescent: bool,
 ) -> Result<()> {
+    validate_goal_lineage(original, active, snapshot, context)?;
+    validate_truth_and_work(
+        crate::lab_world::plan_goal_truth(snapshot, original)?,
+        work_quiescent,
+    )
+}
+
+fn validate_goal_lineage(
+    original: &PreparedPlan,
+    active: StateAnchor,
+    snapshot: &WorldSnapshot,
+    context: &OperationContext,
+) -> Result<()> {
     context.authorize(Capability::Observe, RiskTier::ReadOnly, &[], None)?;
     context.authorize(Capability::Plan, RiskTier::ReadOnly, &[], None)?;
     let current = snapshot.anchor();
@@ -387,7 +457,11 @@ pub(crate) fn validate_goal_evidence_in_active_lineage(
             "continuation evidence does not advance the original goal's verified active observation lineage",
         ));
     }
-    match crate::lab_world::plan_goal_truth(snapshot, original)? {
+    Ok(())
+}
+
+fn validate_truth_and_work(truth: PredicateTruth, work_quiescent: bool) -> Result<()> {
+    match truth {
         PredicateTruth::True => {
             return Err(DfmcpError::new(
                 ErrorCode::InvalidIntent,
@@ -429,3 +503,4 @@ mod tests;
 #[cfg(test)]
 #[path = "goal_reserve_continuation_tests.rs"]
 mod reserve_tests;
+

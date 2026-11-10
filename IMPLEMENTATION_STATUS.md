@@ -1,5 +1,46 @@
 # Implementation Status
 
+## Unreleased — Retain production goals across finite acquisition stages
+
+The existing production blueprint accepts an explicit `acquire_resources`
+policy, selecting the fixed `resource_aware_v1` compiler. The original FOOD,
+DRINK and furniture output quotas remain the semantic goal throughout the
+workflow. A private typed diagnostic candidate establishes recipe demand,
+existing input debt, actual deduplicated workshop costs, required staffing and
+sites without adding hypothetical stock. A bounded monotone calculation
+includes population consumption through sequential acquisition and production
+horizons. An unfunded candidate can expose only actual finite WOOD/PLANT
+harvests and explicitly permitted harvest labor. It cannot dispatch workshop
+construction or production against future yield.
+
+After all physical work for the same original goal is quiet, `continue_goal`
+recompiles from current observed inventory. Flat production continuation
+generation `dfmcp.production-continuation/4` retains the complete original
+request, separate labor permissions and parent/root lineage. Existing source
+generations and durable source tags are unchanged. Current semantic output
+truth suppresses redundant pursuits without rewriting canceled original action
+proof. Active, unknown or abandoned sibling work and unverified recovery lineage
+remain ineligible. Combining acquisition with `reserve_until_tick` is explicitly
+refused; this does not widen the existing satisfied-goal reserve admission.
+
+Initial planning, continuation, comparison, selection and commit use the
+complete source and current authority. Owned Agent Turn publication fits the
+complete response before changing pending custody and retains action proof once
+through checked same-response references. Changed-source commit preserves the
+reviewed plan and returns a public initial or parent-based Plan request for fresh
+review. No forecast, prepared order or incomplete harvest becomes observed stock.
+
+Validation checkpoint: the actual `dfmcp-intent` library suite passes all 234
+tests on latest nightly 1.102.0. New compiler and source-seal regressions are present. Selected exact-source
+verification also stopped in unchanged adapter compilation with SIGKILL before
+reaching the new source; no new selected test pass is claimed at this checkpoint.
+Continuation and public workflow validation continue separately. Actual full MCP `cargo check --locked --offline -p
+dfmcp-mcp --lib`, with one build job and debug/incremental disabled, was killed by
+SIGKILL in unchanged pinned `asupersync` before reaching this crate. Full MCP
+transport, installed Task supervision, clean-head release qualification and live
+admission are not established by this checkpoint. Owning bead:
+`df-lab-resource-harvest-h2m.3`.
+
 ## Unreleased — Continue original finite resource goals
 
 The existing `continue_goal` request now supports retained resource acquisition
