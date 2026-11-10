@@ -214,11 +214,85 @@ fn complete_reference(proposal: &Json) {
     );
     assert_eq!(proposal.pointer("/steps"), Some(&proposal["steps"]));
     assert!(pending.get("steps").is_none());
+    assert_eq!(
+        reference["predicate_encoding_pointer"],
+        "/predicate_encoding"
+    );
+    assert_eq!(proposal["predicate_encoding"]["complete"], true);
+    assert_eq!(
+        proposal["predicate_encoding"]["plan_digest"],
+        proposal["plan_digest"]
+    );
+}
+
+/// Expand only predicate slots. Literal field values may themselves contain
+/// JSON-looking keys; they are data, never additional reference authority.
+fn expanded_predicate(
+    proposal: &Json,
+    predicate: &Json,
+    remaining: &mut usize,
+) -> TestResult<Json> {
+    *remaining = remaining
+        .checked_sub(1)
+        .ok_or("cyclic or overlarge predicate proof")?;
+    if let Some(reference) = predicate.get("$ref") {
+        let pointer = reference
+            .as_str()
+            .ok_or("predicate reference is not a string")?;
+        if predicate.as_object().map(|object| object.len()) != Some(1)
+            || !pointer.starts_with("/predicates/")
+        {
+            return Err("predicate reference escaped its local table".into());
+        }
+        let target = proposal
+            .pointer(pointer)
+            .ok_or("predicate reference is dangling")?;
+        return expanded_predicate(proposal, target, remaining);
+    }
+    for operator in ["all", "any"] {
+        if let Some(children) = predicate.get(operator).and_then(Json::as_array) {
+            let expanded = children
+                .iter()
+                .map(|child| expanded_predicate(proposal, child, remaining))
+                .collect::<TestResult<Vec<_>>>()?;
+            return Ok(json!({operator: expanded}));
+        }
+    }
+    if let Some(child) = predicate.get("not") {
+        return Ok(json!({"not": expanded_predicate(proposal, child, remaining)?}));
+    }
+    Ok(predicate.clone())
+}
+
+fn exact_review(session: &str, proposal: &Json) -> TestResult {
+    let plan = prepared(session)?;
+    let mut steps = proposal["steps"].clone();
+    let mut remaining = 65_536;
+    for row in steps.as_array_mut().ok_or("review has no step array")? {
+        for predicate in row["postconditions"]
+            .as_array_mut()
+            .ok_or("missing postconditions")?
+        {
+            *predicate = expanded_predicate(proposal, predicate, &mut remaining)?;
+        }
+        if let Some(obligation) = row.get_mut("obligation").filter(|value| value.is_object()) {
+            obligation["terminal"] =
+                expanded_predicate(proposal, &obligation["terminal"], &mut remaining)?;
+        }
+    }
+    assert_eq!(steps, crate::lab_world::plan_steps_json(&plan));
+    assert_eq!(
+        expanded_predicate(proposal, &proposal["terminal_condition"], &mut remaining)?,
+        crate::lab_world::predicate_json(&plan.terminal_condition)
+    );
+    assert_eq!(proposal["plan_digest"], plan.digest.to_string());
+    assert_eq!(proposal["version"], 2);
+    Ok(())
 }
 
 fn assert_stage(proposal: &Json, stage: &str, child: bool) {
     assert_eq!(proposal["ok"], true, "{proposal}");
-    assert_eq!(proposal["schema"], "dfmcp.resource-production/1");
+    assert_eq!(proposal["schema"], "dfmcp.resource-production/2");
     assert_eq!(
         proposal["kind"],
         if child {
@@ -293,6 +367,7 @@ fn resource_production_keeps_bed_goal_and_requires_observed_wood_before_output()
     let before = effects_before(&session)?;
     let acquisition = plan(&session, beds(22), Some("make twenty-two beds"))?;
     assert_stage(&acquisition, "acquire_resources", false);
+    exact_review(&session, &acquisition)?;
     assert!(acquisition.to_string().len() <= 4 * 4_096);
     assert_eq!(effects_before(&session)?, before);
     only_harvest(&session, HarvestResource::Wood, 2)?;
@@ -319,6 +394,7 @@ fn resource_production_keeps_bed_goal_and_requires_observed_wood_before_output()
     let before = effects_before(&session)?;
     let production = continuation(&session, &root, None)?;
     assert_stage(&production, "production", true);
+    exact_review(&session, &production)?;
     assert_lineage(&production, &root, &root);
     assert!(production.to_string().len() <= 4 * 4_096);
     assert_eq!(effects_before(&session)?, before);

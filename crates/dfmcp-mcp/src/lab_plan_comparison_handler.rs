@@ -328,6 +328,15 @@ fn prepare_source(
         result["goal_scope"] = result["room"]["goal_scope"].clone();
         result["forecast_scope"] = json!("current_reviewed_stage_only");
     }
+    if resource_room || resource_production {
+        result["schema"] = json!(if resource_room {
+            "dfmcp.resource-room/2"
+        } else {
+            "dfmcp.resource-production/2"
+        });
+        result["version"] = json!(2);
+        crate::sealed_plan_review::apply(&mut result, &plan)?;
+    }
     Ok((
         result,
         PendingPlan {

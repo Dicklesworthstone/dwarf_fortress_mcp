@@ -56,6 +56,7 @@ mod output_budget;
 mod project_staffing;
 pub mod replay;
 pub mod resources;
+mod sealed_plan_review;
 mod semantic_citizens;
 pub mod semantic_dig_runtime;
 pub mod semantic_furniture_runtime;

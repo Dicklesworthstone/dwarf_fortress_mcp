@@ -37,6 +37,9 @@
     "automatic_dispatch": false
   },
   "reporting": {
+    "response_schema": "dfmcp.resource-production/2",
+    "predicate_encoding": "dfmcp.plan-predicate-references/1",
+    "proof": "complete_readable_same_response_projection_with_unchanged_exact_typed_archive",
     "workflow_schema": "dfmcp.production-resource-workflow/2",
     "current_stock_truth": "separate_from_remaining_predicted_reserve_demand",
     "forecast": "current_stage_only_with_separate_absolute_tick_endpoint",

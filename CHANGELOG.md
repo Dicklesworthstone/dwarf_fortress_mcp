@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased — Preserve complete resource plan reviews across turns
+
+- Share repeated readable predicates in explicit production/room `/2` response
+  envelopes, retaining every step and proof with bounded same-response references.
+- Preserve exact typed archives and source/plan identities; reject incomplete,
+  mismatched, cyclic and excessively expanding proofs before publication.
+- Refresh pending production/room hints and cache expanded proofs for later
+  Observe/Commit; retain stale room fresh-review instructions instead of an old
+  commit affordance.
+- Pass thirteen focused proof/publication/orientation regressions and execute
+  actual two-stage room compilers and MemoryAdapter work. Record remaining
+  default-budget overflows and the blocked full-runtime build explicitly.
+
 ## Unreleased — Keep identical source identities from simulating different worlds
 
 - Refuse four reserved canonical entity-kind aliases before physical progress,

@@ -14,7 +14,7 @@ fn reserve_beds(minimum: u32, until: u64) -> Json {
 
 fn assert_reserve_stage(proposal: &Json, stage: &str, child: bool, until: u64) {
     assert_eq!(proposal["ok"], true, "{proposal}");
-    assert_eq!(proposal["schema"], "dfmcp.resource-production/1");
+    assert_eq!(proposal["schema"], "dfmcp.resource-production/2");
     assert_eq!(
         proposal["kind"],
         if child {
@@ -206,12 +206,14 @@ fn resource_reserve_default_budget_keeps_complete_review_and_refusals_preserve_p
     let session = open("9643103", false, false, None)?;
     let acquisition = plan(&session, reserve_beds(22, 6_001), None)?;
     assert_reserve_stage(&acquisition, "acquire_resources", false, 6_001);
+    exact_review(&session, &acquisition)?;
     assert!(acquisition.to_string().len() <= 4 * 4_096);
     let root = text(&acquisition, "plan_digest")?;
     commit_ok(&session, &acquisition)?;
     wait(&session, 100)?;
     let production = continuation(&session, &root, None)?;
     assert_reserve_stage(&production, "production", true, 6_001);
+    exact_review(&session, &production)?;
     assert_reserve_lineage(&production, &root, &root, 6_001);
     assert!(production.to_string().len() <= 4 * 4_096);
     let retained = pending(&session)?;
@@ -465,12 +467,15 @@ fn current_true_resource_reserve_cannot_be_evicted_while_future_work_or_its_evid
     assert_eq!(proven["physical_quiescent"], true);
     assert_eq!(proven["resource_reserve"]["status"], "work_required");
 
-    // Match the established objective-capacity fixtures: use the internal
-    // request/commit boundary so 64 retained roots do not measure facade packet
-    // compression. Every slot still comes from an actual admitted sealed goal.
+    // Match the established objective-capacity fixtures: use raw preparation
+    // and the actual commit boundary so 64 retained roots test goal custody,
+    // independently of whole-history packet sizing. The public dispatcher now
+    // sends resource sources through complete response publication, so naming
+    // its old wrapper here no longer selects this lower-level fixture seam.
+    // Every slot still comes from the real parser, source admission and planner.
     // The verified current-True reserve is the sole ordinary eviction candidate.
     for index in 1..dfmcp_lab::durable::MAX_OBJECTIVES_PER_FORTRESS {
-        let proposal = parsed(&plan_request(
+        let proposal = parsed(&plan_request_legacy(
             Some(session.clone()),
             Some(format!("retain unfinished bed goal {index}")),
             None,
@@ -492,7 +497,7 @@ fn current_true_resource_reserve_cannot_be_evicted_while_future_work_or_its_evid
         ))?;
         assert_eq!(stopped["ok"], true, "{stopped}");
     }
-    let candidate = parsed(&plan_request(
+    let candidate = parsed(&plan_request_legacy(
         Some(session.clone()),
         Some("capacity must retain reserve".to_owned()),
         None,

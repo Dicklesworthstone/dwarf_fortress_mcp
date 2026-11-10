@@ -146,6 +146,12 @@ The existing eleven tools are unchanged. Source changes before commit require
 a fresh review. Complete Agent Turn publication must fit before pending work
 is replaced. Authority, source, no-work, deadline and output-budget refusals
 preserve the prior review; complete action proof and lineage are not truncated.
+The Plan response uses `dfmcp.resource-production/2`, retaining the complete
+original reserve request, absolute tick, current work and parent/root lineage.
+Its shared readable predicate encoding is documented in
+[complete production publication](LAB_RESOURCE_PRODUCTION.md#source-changes-and-complete-publication).
+The response generation changes only review representation: it does not alter
+the `/5` continuation source, plan digest, typed archive or reserve semantics.
 
 See [finite-resource production](LAB_RESOURCE_PRODUCTION.md),
 [production reserves](PRODUCTION_RESERVE_PLANNING.md), and

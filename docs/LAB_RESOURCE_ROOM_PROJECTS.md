@@ -121,13 +121,31 @@ stair connection. No fixture-only stock edit is needed.
 
 ## Review, commit, observe and continue
 
-The initial response uses schema `dfmcp.resource-room/1` and kind
+The initial response uses schema `dfmcp.resource-room/2` and kind
 `resource_room`. Its complete analysis is under `room`, including
 `room.resource_workflow.original_request`, the current `stage`, material
 requirements and downstream preflight. The response retains the exact current
 plan steps and mandatory proof obligations. Its forecast is explicitly scoped
 to the current reviewed stage; a harvest forecast is not a forecast of room
 completion.
+
+Response generation `/2` retains all readable steps and shares repeated
+predicate nodes in the same response. `predicate_encoding` identifies
+`dfmcp.plan-predicate-references/1`; a predicate such as
+`{"$ref":"/predicates/0"}` resolves to that JSON pointer in the response's
+complete `predicates` array. The final `terminal_condition`, each step's
+`postconditions`, and each obligation's `terminal` use this encoding. Boolean
+children can also contain references. Expand them to recover exactly the
+existing readable predicate projection. This prevents the same item custody
+proof from occupying space repeatedly in the final goal, action and obligation.
+
+References are canonical, local and acyclic, with bounded expanded size and
+depth. The pending-plan catalog references `/steps` and explicitly points to
+`/predicate_encoding`. All dependencies, capabilities, risk and obligation
+timing remain present. The exact typed sealed plan and its archive, source
+generations and digests are unchanged; readable proofs remain requirements to
+verify, not evidence that work has already happened. An oversized complete
+packet still refuses before changing pending work.
 
 | Stage | Executable work | Exact goal of this plan |
 | --- | --- | --- |

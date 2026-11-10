@@ -40,9 +40,14 @@
     "restore": "abandons_original_pursuits"
   },
   "publication": {
+    "response_schema": "dfmcp.resource-production/2",
     "authority": "current_observe_query_plan_and_complete_source_budget",
     "pending_state": "replace_only_after_complete_owned_agent_turn_fits",
     "step_proof": "complete_top_level_steps_with_checked_same_response_catalog_reference",
+    "predicate_encoding": "dfmcp.plan-predicate-references/1",
+    "predicate_table": "complete_same_response_predicates_with_canonical_acyclic_bounded_references",
+    "readable_proof": "expands_to_original_terminal_step_postconditions_and_obligation_terminal_projection",
+    "exact_typed_plan_archive": "unchanged",
     "stale_commit": "retain_pending_and_return_explicit_original_plan_or_public_parent_continuation",
     "candidate_comparison": "same_original_output_goal_and_discarded_stage_forecast"
   },

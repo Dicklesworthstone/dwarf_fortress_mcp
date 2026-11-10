@@ -4,6 +4,15 @@ use super::*;
 use dfmcp_intent::HarvestResource;
 
 fn open_resources(selector: &str, shared: bool, durable: bool) -> TestResult<String> {
+    open_resources_with_budget(selector, shared, durable, 16_384)
+}
+
+fn open_resources_with_budget(
+    selector: &str,
+    shared: bool,
+    durable: bool,
+    max_output_tokens: u32,
+) -> TestResult<String> {
     let opened = parsed(&facade::fortress_open_session(
         Some(false),
         Some(selector.to_owned()),
@@ -28,7 +37,7 @@ fn open_resources(selector: &str, shared: bool, durable: bool) -> TestResult<Str
         Some(12_000),
         Some(8_192),
         Some(4 * 1024 * 1024),
-        Some(16_384),
+        Some(max_output_tokens),
         Some(64),
         Some("starter_fortress_resources".to_owned()),
         Some(shared),
@@ -137,7 +146,12 @@ fn pending_plan(session: &str) -> TestResult<PreparedPlan> {
 
 fn assert_stage(proposal: &Json, stage: &str, continuation: bool) {
     assert_eq!(proposal["ok"], true, "{proposal}");
-    assert_eq!(proposal["schema"], "dfmcp.resource-room/1");
+    assert_eq!(proposal["schema"], "dfmcp.resource-room/2");
+    assert_eq!(proposal["version"], 2);
+    assert!(
+        crate::sealed_plan_review::validate(proposal).is_ok(),
+        "{proposal}"
+    );
     assert_eq!(
         proposal["kind"],
         if continuation {
@@ -160,6 +174,10 @@ fn assert_stage(proposal: &Json, stage: &str, continuation: bool) {
     assert_eq!(reference["scope"], "same_response");
     assert_eq!(reference["json_pointer"], "/steps");
     assert_eq!(reference["complete"], true);
+    assert_eq!(
+        reference["predicate_encoding_pointer"],
+        "/predicate_encoding"
+    );
     assert_eq!(reference["plan_digest"], proposal["plan_digest"]);
     assert_eq!(
         review["step_count"].as_u64(),

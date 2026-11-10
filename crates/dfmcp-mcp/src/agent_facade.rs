@@ -216,6 +216,52 @@ fn session_id_from(payload: &Value, hint: Option<&str>) -> Option<String> {
         .or_else(|| hint.map(str::to_owned))
 }
 
+/// Same-response proof references cannot survive in a later turn's cache.
+/// Expand complete shared reviews before retaining any commit or work hints.
+fn cache_pending_plan(payload: &Value, state: &mut SessionOrientation) {
+    state.pending_plan_digest = None;
+    state.pending_resource_review = None;
+    state.pending_plan_capabilities.clear();
+    state.pending_plan_steps.clear();
+    state.pending_forecast = Value::Null;
+
+    let Some(digest) = payload.get("plan_digest").and_then(Value::as_str) else {
+        return;
+    };
+    let shared_schema = matches!(
+        payload["schema"].as_str(),
+        Some("dfmcp.resource-production/2" | "dfmcp.resource-room/2")
+    );
+    let steps = if shared_schema
+        || payload.get("predicate_encoding").is_some()
+        || payload.get("predicates").is_some()
+    {
+        if !shared_schema || payload["version"] != 2 {
+            return;
+        }
+        let Ok(steps) = crate::sealed_plan_review::expanded_steps(payload) else {
+            // Publication has already succeeded. Discard unsafe presentation
+            // hints without refitting, refusing, or changing published bytes.
+            return;
+        };
+        steps
+    } else {
+        payload
+            .get("steps")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+    };
+    state.pending_plan_digest = Some(digest.to_owned());
+    state.pending_plan_capabilities = string_array(payload.get("required_capabilities"));
+    if state.pending_plan_capabilities.is_empty() {
+        // Legacy pause plans do not list their capability set.
+        state.pending_plan_capabilities = vec!["control_clock".to_owned()];
+    }
+    state.pending_plan_steps = steps;
+    state.pending_forecast = value_or_null(payload.get("forecast"));
+}
+
 fn update_orientation(operation: &str, payload: &Value, state: &mut SessionOrientation) {
     if let Some(anchor) = extract_anchor(payload, state.anchor.as_ref()) {
         state.anchor = Some(anchor);
@@ -235,25 +281,7 @@ fn update_orientation(operation: &str, payload: &Value, state: &mut SessionOrien
 
     match operation {
         "fortress.plan" => {
-            state.pending_resource_review = None;
-            state.pending_plan_digest = payload
-                .get("plan_digest")
-                .and_then(Value::as_str)
-                .map(str::to_owned);
-            if state.pending_plan_digest.is_some() {
-                state.pending_plan_capabilities =
-                    string_array(payload.get("required_capabilities"));
-                if state.pending_plan_capabilities.is_empty() {
-                    // Legacy pause plans do not list their capability set.
-                    state.pending_plan_capabilities = vec!["control_clock".to_owned()];
-                }
-                state.pending_plan_steps = payload
-                    .get("steps")
-                    .and_then(Value::as_array)
-                    .cloned()
-                    .unwrap_or_default();
-                state.pending_forecast = value_or_null(payload.get("forecast"));
-            }
+            cache_pending_plan(payload, state);
         }
         "fortress.commit" => {
             state.pending_plan_digest = None;
@@ -791,7 +819,11 @@ fn resource_replan_step(payload: &Value) -> Option<&Value> {
         && error_code(payload) == "stale_anchor"
         && matches!(
             payload["rebase"]["method"].as_str(),
-            Some("fresh_resource_acquisition_required" | "fresh_resource_production_required")
+            Some(
+                "fresh_resource_acquisition_required"
+                    | "fresh_resource_production_required"
+                    | "fresh_resource_room_required"
+            )
         )
         && payload["rebase"]["pending_plan_preserved"] == true
         && payload["rebase"]["from_digest"].is_string()
@@ -1636,20 +1668,8 @@ fn presentation_state(
                         "lesson_candidate": "commit promptly after planning, or expect replay in shared fortresses",
                     }),
                 );
-                existing.pending_forecast = value_or_null(rebased.get("forecast"));
                 // A stale commit was replayed into a new pending plan.
-                existing.pending_plan_digest = rebased
-                    .get("plan_digest")
-                    .and_then(Value::as_str)
-                    .map(str::to_owned);
-                existing.pending_resource_review = None;
-                existing.pending_plan_capabilities =
-                    string_array(rebased.get("required_capabilities"));
-                existing.pending_plan_steps = rebased
-                    .get("steps")
-                    .and_then(Value::as_array)
-                    .cloned()
-                    .unwrap_or_default();
+                cache_pending_plan(rebased, existing);
             }
             let sequence = existing.advance_turn();
             (existing.clone(), prior, sequence)
@@ -1659,6 +1679,29 @@ fn presentation_state(
             let sequence = fallback.advance_turn();
             (fallback, None, sequence)
         }
+    }
+}
+
+fn refresh_published_plan_orientation(raw: &str) {
+    // The owner published this complete response atomically with the pending
+    // replacement. Comparisons and refusals leave existing plan hints intact.
+    if let Ok(mut payload) = serde_json::from_str::<Value>(raw)
+        && is_ok(&payload)
+        && matches!(
+            payload["kind"].as_str(),
+            Some(
+                "select_candidate"
+                    | "resource_acquisition"
+                    | "resource_acquisition_continuation"
+                    | "resource_production"
+                    | "resource_production_continuation"
+                    | "resource_room"
+                    | "resource_room_continuation"
+            )
+        )
+    {
+        let resolved = payload["session_id"].as_str().map(str::to_owned);
+        let _ = presentation_state("fortress.plan", &mut payload, resolved.as_ref());
     }
 }
 
@@ -2081,22 +2124,7 @@ pub fn fortress_plan(
             session_id.as_deref(),
         ),
         crate::server::PlanPublication::Published(raw) => {
-            // Selection was published atomically with the pending replacement.
-            // Refresh presentation hints only; never refit or refuse these bytes.
-            // A comparison must not clear a previously prepared plan's hints.
-            if let Ok(mut payload) = serde_json::from_str::<Value>(&raw)
-                && matches!(
-                    payload["kind"].as_str(),
-                    Some(
-                        "select_candidate"
-                            | "resource_acquisition"
-                            | "resource_acquisition_continuation"
-                    )
-                )
-            {
-                let resolved = payload["session_id"].as_str().map(str::to_owned);
-                let _ = presentation_state("fortress.plan", &mut payload, resolved.as_ref());
-            }
+            refresh_published_plan_orientation(&raw);
             raw
         }
     };
@@ -2628,6 +2656,10 @@ mod tests {
 #[cfg(test)]
 #[path = "lab_actions_mcp_tests.rs"]
 mod lab_actions_tests;
+
+#[cfg(test)]
+#[path = "resource_plan_orientation_tests.rs"]
+mod resource_plan_orientation_tests;
 
 #[cfg(test)]
 #[path = "lab_alerts_mcp_tests.rs"]

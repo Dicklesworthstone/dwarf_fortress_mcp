@@ -45,7 +45,11 @@
     "recovery": "reconstruct_exact_stage_source_without_changing_original_history_or_restoring_grants"
   },
   "reporting": {
-    "schema": "dfmcp.resource-room/1",
+    "schema": "dfmcp.resource-room/2",
+    "predicate_encoding": "dfmcp.plan-predicate-references/1",
+    "predicate_table": "complete_same_response_predicates_with_canonical_acyclic_bounded_references",
+    "readable_proof": "expands_to_original_terminal_step_postconditions_and_obligation_terminal_projection",
+    "exact_typed_plan_archive": "unchanged",
     "kinds": [
       "resource_room",
       "resource_room_continuation"

@@ -174,6 +174,18 @@ The analysis, current work and query catalogs must fit before pending state is
 replaced. Output, source, authority, no-work and deadline refusals preserve the
 previous pending plan. Full step proof appears once in top-level `steps`; the
 pending catalog uses a checked same-response `steps_reference` and count.
+Resource-aware Plan responses use `dfmcp.resource-production/2`. Their
+`predicate_encoding` declares `dfmcp.plan-predicate-references/1`: the complete
+readable predicate table appears once at `/predicates`. A predicate
+`{"$ref":"/predicates/0"}` refers only to that same response. References can
+appear in `terminal_condition`, step `postconditions`, obligation `terminal`
+and Boolean child positions. Expanding them recovers the original readable
+predicate JSON, including every repeated requirement. The pending catalog's
+`steps_reference.predicate_encoding_pointer` points to `/predicate_encoding`.
+Table references must be canonical, local and acyclic; their expanded node
+count and depth are bounded before publication. The exact typed archive and
+sealed plan/source identities are unchanged.
+
 The complete component material budget appears at
 `production.resource_workflow.requirements`; source provenance, combined
 horizon, iteration count and consumption assumptions appear at

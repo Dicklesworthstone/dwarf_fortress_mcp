@@ -1,5 +1,51 @@
 # Implementation Status
 
+## Unreleased — Share complete plan proofs and retain resource reviews across turns
+
+Resource-aware production and room Plan responses now use explicit `/2` review
+envelopes. Repeated readable predicates appear once in a same-response table;
+terminal conditions, postconditions and obligations retain every requirement
+through canonical local references. Expansion reproduces the original readable
+step projection. Validation binds the table to the plan digest, rejects broken,
+foreign, cyclic and alias-only references, and bounds expanded nodes, depth and
+bytes. Exact typed plans, archives, compiler generations and source digests are
+unchanged. Complete publication still precedes pending-plan replacement.
+
+Published production/room roots and continuations now refresh presentation
+state, including the pending digest, capabilities, steps and forecast. Cached
+steps expand same-response references before later Observe/Commit turns reuse
+them. Invalid proof clears all pending presentation hints without rewriting an
+already-published response. Stale room commits retain their exact fresh-review
+instruction across observation; the old commit affordance stays disabled.
+Comparisons and refusals preserve the prior proposal.
+
+Thirteen focused regression bodies pass using actual source implementations:
+five shared-proof/archive/expansion cases, three complete-publication cases
+(including exact byte-boundary refusal), and five orientation/cache lifecycle
+cases. Actual source compilers and MemoryAdapter also execute zero-wood
+acquisition followed by complete two-bedroom manufacture, excavation and
+installation, both plain and connected. Packet measurements include supplied
+owner-history rows; they do not execute the actual session registry, durable
+owner or MCP transport. The first room measurements additionally omit the
+public continuation wrapper and retained acquisition receipt, so their sizes
+are lower bounds for the public workflow. Public workflow tests were updated
+to check `/2` and reconstruct exact proof, but have not run in the full server.
+
+The room component review shrank from about 40.1 KB to 33.4 KB, but even that
+lower bound exceeds the default 16,384-byte publication limit.
+The resource-reserve continuation also remains slightly over that limit at
+about 16.9 KB. These are measured remaining gaps, not passing default-budget
+claims; oversized responses continue to refuse without replacing pending work.
+
+Repository validation passes 5,065 checks across 2,962 files; integrity,
+dependency policy, the eleven-tool Agent Turn contract, scoped formatting and
+whitespace checks pass. Both the locked/offline MCP test build and a cheaper
+`cargo check --tests` were killed in unchanged `asupersync 0.5.0`, before
+project compilation. The aggregate verifier stopped at missing `br`; the normal
+release qualifier refused the dirty development worktree. No complete MCP,
+release, native or live qualification is claimed. Owners:
+`df-lab-resource-harvest-h2m.4` and `df-lab-resource-harvest-h2m.5`.
+
 ## Unreleased — Reject ambiguous canonical entity kinds before physical progress
 
 Physical advancement now refuses the reserved `Other("unit")`,
@@ -42,8 +88,9 @@ harvest stock, unavailable authority/evidence, every reserve status, and older
 objectives without project fields. This focused component compiles the actual
 file unchanged with the repository-pinned serde_json and matching transitive
 lock identities; it does not execute the full MCP/session/transport runtime.
-Scoped rustfmt and whitespace checks pass. Full MCP validation is being
-attempted separately; no live/native or release qualification is claimed.
+Scoped rustfmt and whitespace checks pass. The full MCP test and metadata-only
+attempts subsequently stopped in unchanged asupersync before project
+compilation; no live/native or release qualification is claimed.
 Owners: `df-lab-resource-harvest-h2m.4` and `df-lab-resource-harvest-h2m.5`.
 
 ## Unreleased — Inspect readable original plan steps through bounded pages

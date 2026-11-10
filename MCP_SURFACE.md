@@ -408,12 +408,20 @@ An explicit nested `acquire_resources` policy selects the additive resource
 room compiler. `provisioned_room_resources_v1`, `connected_room_resources_v1`
 and explicit `connected_room_stairs_resources_v1` retain the complete project
 through finite-input acquisition and separately reviewed room stages. Responses
-use `dfmcp.resource-room/1`, kind `resource_room` or
+use `dfmcp.resource-room/2`, kind `resource_room` or
 `resource_room_continuation`, and complete `room` analysis. Goal observations
 separate `semantic_room_goal` from exact historical stage truth; a finished
 harvest cannot complete or evict an unfinished room. Current Observe/Query/Plan,
 full source/output bounds and same-root quiescence are enforced at the relevant
 review and commit boundaries. See `docs/LAB_RESOURCE_ROOM_PROJECTS.md`.
+
+Resource-aware room and production Plan responses share repeated readable
+proof predicates through `dfmcp.plan-predicate-references/1`. Complete
+`predicates` and `steps` remain in the same response; canonical local `$ref`
+pointers expand to every original terminal, postcondition and obligation
+predicate. The typed sealed plan and archive are unchanged. Later observation
+hints retain expanded proofs, so they do not depend on a previous response's
+predicate table. Complete publication still precedes pending-plan replacement.
 
 The laboratory `blueprint` JSON string also accepts the closed
 `{"template":"continue_goal","plan_digest":"<retained goal digest>"}` form.

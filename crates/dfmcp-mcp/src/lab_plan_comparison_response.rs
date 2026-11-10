@@ -77,6 +77,22 @@ pub(super) fn finish(
             "candidate publication differs from its owned source or operation",
         ));
     }
+    let shared_predicates = matches!(
+        payload["schema"].as_str(),
+        Some("dfmcp.resource-production/2" | "dfmcp.resource-room/2")
+    );
+    if shared_predicates {
+        if payload["version"] != 2 {
+            return Err(invariant(
+                "shared plan proof requires its versioned review envelope",
+            ));
+        }
+        crate::sealed_plan_review::validate(&payload)?;
+    } else if payload.get("predicate_encoding").is_some() || payload.get("predicates").is_some() {
+        return Err(invariant(
+            "shared plan proof requires a supported review envelope",
+        ));
+    }
     projection.budget.validate()?;
     let maximum = usize::try_from(
         projection
@@ -105,7 +121,7 @@ pub(super) fn finish(
             })?;
         active_work[name] = records.clone();
     }
-    if let Some(pending) = selected_pending {
+    if let Some(mut pending) = selected_pending {
         if let Some(reference) = pending.get("steps_reference") {
             let steps = payload["steps"].as_array();
             if reference["scope"] != "same_response"
@@ -122,6 +138,10 @@ pub(super) fn finish(
                 return Err(invariant(
                     "resource pending catalog must reference its complete matching plan steps in this response",
                 ));
+            }
+            if shared_predicates {
+                pending["steps_reference"]["predicate_encoding_pointer"] =
+                    json!("/predicate_encoding");
             }
         }
         active_work["pending_plans"] = json!([pending]);
@@ -244,3 +264,7 @@ pub(super) fn finish(
     }
     Ok(output)
 }
+
+#[cfg(test)]
+#[path = "lab_plan_comparison_response_tests.rs"]
+mod tests;
