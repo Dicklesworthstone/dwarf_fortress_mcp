@@ -475,6 +475,41 @@ fn reserve_demand_never_chooses_between_duplicate_or_unqualified_ledgers() -> Re
 }
 
 #[test]
+fn canonical_unit_alias_cannot_hide_reserve_demand_or_supply_a_compilation() -> Result<()> {
+    let original = provisions(2401)?;
+    let snapshot = source(0)?;
+    assert!(reserve_work_required(&original, &snapshot)?);
+    assert!(original.compile(&snapshot).is_ok());
+    let mut aliased = snapshot.clone();
+    for unit in aliased.graph.entities.values_mut() {
+        if unit.kind == EntityKind::Unit {
+            unit.kind = EntityKind::Other(EntityKind::Unit.as_str().to_owned());
+        }
+    }
+    aliased.refresh_hash();
+    assert_eq!(aliased.anchor(), snapshot.anchor());
+    let before = aliased.clone();
+    assert!(
+        reserve_work_required(&original, &aliased)
+            .is_err_and(|error| error.code == ErrorCode::PreconditionsFailed)
+    );
+    assert!(
+        original
+            .compile(&aliased)
+            .is_err_and(|error| error.code == ErrorCode::PreconditionsFailed)
+    );
+    // A currently false output goal must not bypass the same source check.
+    let unmet = request(json!([{"item": "DRINK", "minimum": 140}]), 4801, false)?;
+    assert!(
+        unmet
+            .compile(&aliased)
+            .is_err_and(|error| error.code == ErrorCode::PreconditionsFailed)
+    );
+    assert_eq!(aliased, before);
+    Ok(())
+}
+
+#[test]
 fn reserve_horizon_and_quantity_overflow_refuse_without_modifying_source() -> Result<()> {
     let snapshot = source(0)?;
     let before = snapshot.clone();

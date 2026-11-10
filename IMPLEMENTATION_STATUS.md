@@ -1,5 +1,47 @@
 # Implementation Status
 
+## Unreleased — Qualify remaining reserve demand before acquiring more inputs
+
+The existing laboratory resource-reserve admission now independently requires
+qualified output stock to be short of the original minima plus population
+consumption through the unchanged absolute horizon. Its complete bounded
+census validates unit and ledger identity, living-state and metabolism facts,
+and checked arithmetic. Canonical `Other("unit")` aliases are refused: they
+can share the legacy world anchor with a typed unit and must not silently
+remove a consumer. The public resource-reserve compiler and continuation
+oracle apply the same alias refusal before sizing work or declaring a reserve
+funded, including when the current output goal is false.
+
+The satisfied-goal harvest exception also closes its compensation program.
+Harvest has no compensation; harvesting labor may use its ordinary default
+inverse or disable exactly the same workers and labor. Unrelated effects
+cannot enter through compensation. The trusted production compiler remains
+responsible for recipe/setup input necessity. This gate proves qualified
+remaining output demand, without treating a forecast as current inventory.
+
+Published constraint names, summary seals and source generations remain
+unchanged. Zero-valued quotas and duplicate normalization remain valid, and
+accepted ordinary/default-inverse plans retain identical exact archives.
+The older production-only admission is unchanged.
+
+Validation: the actual locked/offline `dfmcp-intent` library suite passes all
+247 tests, with zero failed or ignored, including eight new regressions. A
+selected synchronous MCP assembly also passes the new compiler alias regression
+and five of seven reserve lifecycle cases. It retains the original public
+workflow bodies from `c5842bb` plus this core/census hardening; transport,
+installed Task runtime and later room-project integration are outside that
+execution scope. The two remaining cases expose a real default-budget
+continuation overflow and an overlarge capacity-test setup publication. They
+are retained as explicit failures pending the next publication fix.
+
+The aggregate verifier passed initial integrity, source/status, native-contract,
+dependency and bead gates, then was stopped with exit 130 during the Python
+contract phase to prioritize functional execution on the constrained build
+host. The normal release qualifier refused the dirty development checkout.
+Neither command establishes full qualification; the earlier full MCP attempt
+was killed in pinned asupersync before reaching this crate. No native or live
+admission changes. Owning bead: `df-lab-resource-harvest-h2m.4`.
+
 ## Unreleased — Reach finite-input stair rooms from a built-in world
 
 `starter_fortress_multilevel_resources` combines the existing qualified finite

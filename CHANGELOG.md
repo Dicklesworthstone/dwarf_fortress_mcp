@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased — Refuse unfounded reserve work and unrelated compensation
+
+- Require source-qualified remaining output demand before admitting harvest
+  for currently satisfied production minima at an unchanged future tick.
+- Reject ambiguous unit aliases, incomplete census/stock/metabolism evidence,
+  ledger ambiguity and arithmetic overflow instead of inventing a funded reserve.
+- Keep harvest compensation absent and labor compensation confined to its exact
+  inverse, with ordinary capabilities and mandatory action proof preserved.
+- Preserve published plan/source identities, zero minima and normalization.
+- Pass all 247 actual intent tests and the selected compiler alias regression;
+  record the independently discovered public packet-budget failures explicitly.
+
 ## Unreleased — Exercise finite-input stair rooms in one built-in world
 
 - Add `starter_fortress_multilevel_resources`, retaining finite sources and

@@ -349,6 +349,17 @@ fn reserve_horizon(
             "reserve_until_tick exceeds the bounded one-game-year planning horizon",
         ));
     }
+    // Legacy canonical kinds can share bytes with a typed `Other` alias. Do
+    // not let that alias disappear from the population census and turn an
+    // unfunded original reserve into no-work or an evictable objective.
+    inspect_bound(snapshot)?;
+    if snapshot.graph.entities.values().any(|record| {
+        record.kind != EntityKind::Unit && record.kind.as_str() == EntityKind::Unit.as_str()
+    }) {
+        return Err(production_setup_refusal(
+            "resource reserve population contains a noncanonical unit kind alias",
+        ));
+    }
     Ok((GameTick(until), ticks))
 }
 

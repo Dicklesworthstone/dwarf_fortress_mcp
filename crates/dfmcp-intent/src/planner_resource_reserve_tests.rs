@@ -271,3 +271,383 @@ fn reserve_harvest_preserves_labor_source_generation_budget_and_authority_checks
     );
     Ok(())
 }
+
+#[test]
+fn reserve_harvest_needs_qualified_remaining_consumption_at_the_original_tick() -> Result<()> {
+    let mut snapshot = world(30);
+    let remaining = 12_000 - snapshot.tick.0;
+    let allowance = remaining / effects::DRINK_INTERVAL_TICKS;
+    set(
+        &mut snapshot,
+        LEDGER,
+        effects::STOCK_DRINK_FIELD,
+        Value::U64(10_000 + allowance),
+    )?;
+    let funded = intent(&snapshot)?;
+    let before = snapshot.canonical_bytes();
+    assert!(
+        StaticPlanner::default()
+            .prepare_laboratory(&snapshot, &funded, &context(&snapshot))
+            .is_err_and(|error| error.code == ErrorCode::InvalidIntent
+                && error.message.contains("already covers"))
+    );
+    assert_eq!(snapshot.canonical_bytes(), before);
+
+    // The remaining absolute duration is unchanged, but this observed
+    // metabolism phase includes one additional consumption boundary.
+    set(
+        &mut snapshot,
+        LEDGER,
+        effects::METABOLISM_TICKS_FIELD,
+        Value::U64(effects::DRINK_INTERVAL_TICKS - 1),
+    )?;
+    let phase = intent(&snapshot)?;
+    let prepared =
+        StaticPlanner::default().prepare_laboratory(&snapshot, &phase, &context(&snapshot))?;
+    assert_eq!(prepared.terminal_condition, phase.terminal_condition);
+    assert!(
+        prepared
+            .summary
+            .ends_with("[laboratory resource production reserve until 12000]")
+    );
+    Ok(())
+}
+
+#[test]
+fn reserve_harvest_keeps_zero_minima_duplicate_normalization_and_exact_archive_bytes() -> Result<()>
+{
+    let mut snapshot = world(30);
+    set(
+        &mut snapshot,
+        LEDGER,
+        effects::STOCK_DRINK_FIELD,
+        Value::U64(0),
+    )?;
+    let mut original = intent(&snapshot)?;
+    original.terminal_condition = Predicate::FieldCompare {
+        entity_id: LEDGER,
+        field: effects::STOCK_DRINK_FIELD.to_owned(),
+        op: CompareOp::Ge,
+        value: Value::U64(0),
+    };
+    let planner = StaticPlanner::default();
+    let expected = planner.prepare_laboratory(&snapshot, &original, &context(&snapshot))?;
+    let mut repeated = original.clone();
+    repeated.terminal_condition = Predicate::All(vec![
+        original.terminal_condition.clone(),
+        Predicate::All(vec![original.terminal_condition.clone()]),
+    ]);
+    let actual = planner.prepare_laboratory(&snapshot, &repeated, &context(&snapshot))?;
+    assert_eq!(actual, expected);
+    assert_eq!(
+        crate::plan_archive::encode(&actual, Default::default())?,
+        crate::plan_archive::encode(&expected, Default::default())?,
+        "published normalization and the exact typed archive must remain unchanged"
+    );
+    assert_eq!(
+        expected.summary,
+        format!(
+            "{} [laboratory resource production reserve until 12000]",
+            original.summary
+        ),
+        "do not rename the already published summary seal"
+    );
+    Ok(())
+}
+
+#[test]
+fn reserve_harvest_cannot_hide_unrelated_effects_in_compensation() -> Result<()> {
+    let snapshot = world(30);
+    let original = intent(&snapshot)?;
+    for compensation in [
+        Action::Pause { paused: true },
+        Action::SetStandingOrder {
+            key: "reserve-side-effect".to_owned(),
+            value: "true".to_owned(),
+        },
+        Action::SetLabor {
+            units: vec![WORKER],
+            labor: "PLANT_GATHERING".to_owned(),
+            enabled: false,
+        },
+    ] {
+        let mut changed = original.clone();
+        changed.requested_actions[0].compensation = Some(compensation);
+        assert!(
+            StaticPlanner::default()
+                .prepare_laboratory(&snapshot, &changed, &context(&snapshot))
+                .is_err_and(|error| error.code == ErrorCode::InvalidIntent
+                    && error.message.contains("compensation"))
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn reserve_labor_keeps_its_exact_inverse_and_ordinary_default_plan_bytes() -> Result<()> {
+    let mut snapshot = world(30);
+    set(
+        &mut snapshot,
+        WORKER,
+        "labor.PLANT_GATHERING",
+        Value::Bool(false),
+    )?;
+    let original = intent(&snapshot)?;
+    let planner = StaticPlanner::default();
+    let expected = planner.prepare_laboratory(&snapshot, &original, &context(&snapshot))?;
+    assert_eq!(
+        expected.steps[0].compensation,
+        Some(Action::SetLabor {
+            units: vec![WORKER],
+            labor: "PLANT_GATHERING".to_owned(),
+            enabled: false,
+        })
+    );
+
+    let mut ordinary_default = original.clone();
+    ordinary_default.requested_actions[0].compensation = None;
+    let actual = planner.prepare_laboratory(&snapshot, &ordinary_default, &context(&snapshot))?;
+    assert_eq!(actual, expected);
+    assert_eq!(
+        crate::plan_archive::encode(&actual, Default::default())?,
+        crate::plan_archive::encode(&expected, Default::default())?
+    );
+
+    for compensation in [
+        Action::Pause { paused: true },
+        Action::SetLabor {
+            units: vec![EntityId::new(12)],
+            labor: "PLANT_GATHERING".to_owned(),
+            enabled: false,
+        },
+        Action::SetLabor {
+            units: vec![WORKER],
+            labor: "WOODCUTTING".to_owned(),
+            enabled: false,
+        },
+        Action::SetLabor {
+            units: vec![WORKER],
+            labor: "PLANT_GATHERING".to_owned(),
+            enabled: true,
+        },
+    ] {
+        let mut changed = original.clone();
+        changed.requested_actions[0].compensation = Some(compensation);
+        assert!(
+            planner
+                .prepare_laboratory(&snapshot, &changed, &context(&snapshot))
+                .is_err_and(|error| error.code == ErrorCode::InvalidIntent
+                    && error.message.contains("compensation"))
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn reserve_harvest_requires_the_complete_source_qualified_consumption_census() -> Result<()> {
+    let snapshot = world(30);
+    let original = intent(&snapshot)?;
+    for variant in 0..8 {
+        let mut changed = snapshot.clone();
+        match variant {
+            0 => {
+                changed
+                    .graph
+                    .entities
+                    .get_mut(&WORKER)
+                    .expect("worker")
+                    .fields
+                    .remove("alive");
+            }
+            1 => {
+                changed
+                    .graph
+                    .entities
+                    .get_mut(&WORKER)
+                    .expect("worker")
+                    .fields
+                    .get_mut("alive")
+                    .expect("life state")
+                    .source = FactSource::Derived("untrusted".to_owned());
+            }
+            2 => {
+                changed
+                    .graph
+                    .entities
+                    .get_mut(&WORKER)
+                    .expect("worker")
+                    .fields
+                    .get_mut("alive")
+                    .expect("life state")
+                    .observed_at = GameTick(snapshot.tick.0 + 1);
+            }
+            3 => {
+                changed
+                    .graph
+                    .entities
+                    .get_mut(&WORKER)
+                    .expect("worker")
+                    .fields
+                    .get_mut("alive")
+                    .expect("life state")
+                    .source_digest = Digest32::of_bytes(b"not the registered laboratory producer");
+            }
+            4 => {
+                changed
+                    .graph
+                    .entities
+                    .get_mut(&LEDGER)
+                    .expect("ledger")
+                    .fields
+                    .remove(effects::METABOLISM_TICKS_FIELD);
+            }
+            5 => {
+                changed
+                    .graph
+                    .entities
+                    .get_mut(&LEDGER)
+                    .expect("ledger")
+                    .fields
+                    .get_mut(effects::METABOLISM_TICKS_FIELD)
+                    .expect("metabolism")
+                    .source = FactSource::Derived("untrusted".to_owned());
+            }
+            6 => {
+                changed
+                    .graph
+                    .entities
+                    .get_mut(&WORKER)
+                    .expect("worker")
+                    .generation = 0;
+            }
+            _ => {
+                changed
+                    .graph
+                    .entities
+                    .get_mut(&LEDGER)
+                    .expect("ledger")
+                    .generation = 0;
+            }
+        }
+        changed.refresh_hash();
+        let mut request = original.clone();
+        request.anchor = changed.anchor();
+        assert!(
+            StaticPlanner::default()
+                .prepare_laboratory(&changed, &request, &context(&changed))
+                .is_err_and(|error| error.code == ErrorCode::PreconditionsFailed
+                    && error.message.starts_with("resource reserve")),
+            "variant {variant}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn reserve_harvest_rejects_a_unit_kind_alias_even_when_its_anchor_is_unchanged() -> Result<()> {
+    let mut snapshot = world(30);
+    let original = intent(&snapshot)?;
+    let anchor = snapshot.anchor();
+    snapshot
+        .graph
+        .entities
+        .get_mut(&WORKER)
+        .expect("worker")
+        .kind = EntityKind::Other(EntityKind::Unit.as_str().to_owned());
+    snapshot.refresh_hash();
+    assert_eq!(snapshot.anchor(), anchor, "legacy canonical kind alias");
+    assert!(
+        StaticPlanner::default()
+            .prepare_laboratory(&snapshot, &original, &context(&snapshot))
+            .is_err_and(|error| error.code == ErrorCode::PreconditionsFailed
+                && error.message.contains("unit kind alias"))
+    );
+    Ok(())
+}
+
+#[test]
+fn reserve_harvest_refuses_ambiguous_ledger_and_overflow_instead_of_inventing_no_work() -> Result<()>
+{
+    let snapshot = world(30);
+    let original = intent(&snapshot)?;
+    let mut duplicate = snapshot.clone();
+    let mut ledger = duplicate
+        .graph
+        .entities
+        .get(&LEDGER)
+        .expect("ledger")
+        .clone();
+    ledger.id = EntityId::new(992);
+    duplicate.graph.entities.insert(ledger.id, ledger);
+    duplicate.refresh_hash();
+    let mut request = original.clone();
+    request.anchor = duplicate.anchor();
+    assert!(
+        StaticPlanner::default()
+            .prepare_laboratory(&duplicate, &request, &context(&duplicate))
+            .is_err_and(|error| error.code == ErrorCode::PreconditionsFailed
+                && error.message.contains("ledger custody"))
+    );
+
+    for target_overflow in [false, true] {
+        let mut changed = snapshot.clone();
+        let mut request = original.clone();
+        if target_overflow {
+            set(
+                &mut changed,
+                LEDGER,
+                effects::STOCK_DRINK_FIELD,
+                Value::U64(u64::MAX),
+            )?;
+            request.terminal_condition = Predicate::FieldCompare {
+                entity_id: LEDGER,
+                field: effects::STOCK_DRINK_FIELD.to_owned(),
+                op: CompareOp::Ge,
+                value: Value::U64(u64::MAX),
+            };
+        } else {
+            set(
+                &mut changed,
+                LEDGER,
+                effects::METABOLISM_TICKS_FIELD,
+                Value::U64(u64::MAX),
+            )?;
+        }
+        request.anchor = changed.anchor();
+        assert!(
+            StaticPlanner::default()
+                .prepare_laboratory(&changed, &request, &context(&changed))
+                .is_err_and(|error| error.code == ErrorCode::BudgetExceeded)
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn reserve_harvest_bounds_the_complete_source_even_for_one_small_action() -> Result<()> {
+    let mut snapshot = world(30);
+    let mut request = intent(&snapshot)?;
+    for index in 0..65_537 {
+        let id = EntityId::new(1_000_000 + index);
+        snapshot.graph.entities.insert(
+            id,
+            EntityRecord {
+                id,
+                generation: 1,
+                revision: 1,
+                kind: EntityKind::Item,
+                label: String::new(),
+                fields: BTreeMap::new(),
+            },
+        );
+    }
+    snapshot.refresh_hash();
+    request.anchor = snapshot.anchor();
+    assert!(
+        StaticPlanner::default()
+            .prepare_laboratory(&snapshot, &request, &context(&snapshot))
+            .is_err_and(|error| error.code == ErrorCode::BudgetExceeded
+                && error.message.starts_with("resource reserve"))
+    );
+    Ok(())
+}
