@@ -814,6 +814,17 @@ Budget or counter overflow returns `BudgetExceeded`. Future-dated eligible facts
 are rejected against the source tick before time moves. Active work with
 noncanonical counters or unknown excavation terrain refuses instead of guessing.
 
+Physical advancement also requires the named `Unit`, `Building`, `WorkOrder`
+and `Creature` entity variants. Canonical snapshot v1 encodes kind names, so
+`Other("unit")` has the same canonical bytes and anchor as `Unit`, even though
+the typed physical model would omit it from population and workforce scans.
+The shared advance entry point refuses these four reserved `Other` aliases with
+`PreconditionsFailed` before any internal event or mutation. This prevents a
+consumer, workshop, active work order or hostile from disappearing from a
+forecast or time advance at an unchanged anchor. The validation uses the
+existing bounded source scan; registered custom laboratory kinds and unrelated
+`Other` names retain their current behavior. Canonical encoding is unchanged.
+
 The effect function operates on its caller's transaction shadow. `MemoryAdapter`
 publishes only after the entire requested advance succeeds; refusal preserves
 the original world, receipts and transcript even if earlier internal events

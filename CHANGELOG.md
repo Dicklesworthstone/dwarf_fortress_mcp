@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased — Keep identical source identities from simulating different worlds
+
+- Refuse four reserved canonical entity-kind aliases before physical progress,
+  preserving consumption, workforce, production, construction and combat rules.
+- Reuse the bounded source scan and retain canonical bytes and valid custom kinds.
+- Reproduce five failures on the original code; pass all 397 actual intent tests
+  with the fix. Add real adapter regressions for atomic refusal and normal progress.
+- Record the separate adapter-build memory limit without claiming unexecuted
+  lab, MCP, release or live qualification.
+
 ## Unreleased — Keep whole-project truth when observations are compacted
 
 - Retain exact stage scope, current room/output evidence and outstanding future

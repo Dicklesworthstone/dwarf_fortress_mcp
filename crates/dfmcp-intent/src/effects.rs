@@ -1382,26 +1382,47 @@ pub fn advance_effects_with_limits(
     // rewinding it: a fact from inside the proposed interval must not become
     // legitimate simply because the destination clock has reached it.
     budget.charge(snapshot.graph.entities.len() as u64 + snapshot.graph.edges.len() as u64)?;
-    for facts in snapshot
-        .graph
-        .entities
-        .values()
-        .map(|record| &record.fields)
-        .chain(snapshot.graph.edges.values().map(|record| &record.fields))
-    {
-        budget.charge(facts.len() as u64)?;
-        if facts.values().any(|fact| {
-            fact.observed_at.0 > start && laboratory_fact_value(fact, fact.observed_at).is_some()
-        }) {
-            return Err(precondition(
-                "reference advancement cannot promote a future-dated known source fact",
-            ));
+    for record in snapshot.graph.entities.values() {
+        // Canonical v1 encodes kind names: Other("unit") has the same bytes as
+        // Unit, but the physical model requires the named enum variants. Do
+        // not silently omit a consumer, worker, building, order or hostile at
+        // an otherwise identical anchor. Refuse before any event can run.
+        if let EntityKind::Other(kind) = &record.kind
+            && matches!(
+                kind.as_str(),
+                "unit" | "building" | "work_order" | "creature"
+            )
+        {
+            return Err(precondition(format!(
+                "entity {} aliases canonical entity kind {kind:?}; reference advancement requires its named kind",
+                record.id.get()
+            )));
         }
+        validate_advance_source_fields(&record.fields, start, &mut budget)?;
+    }
+    for record in snapshot.graph.edges.values() {
+        validate_advance_source_fields(&record.fields, start, &mut budget)?;
     }
     snapshot.tick = GameTick(start);
     let result = advance_timeline(snapshot, destination, elapsed, &mut budget);
     snapshot.tick = destination;
     result
+}
+
+fn validate_advance_source_fields(
+    fields: &BTreeMap<String, Fact>,
+    start: u64,
+    budget: &mut EffectAdvanceBudget,
+) -> Result<()> {
+    budget.charge(fields.len() as u64)?;
+    if fields.values().any(|fact| {
+        fact.observed_at.0 > start && laboratory_fact_value(fact, fact.observed_at).is_some()
+    }) {
+        return Err(precondition(
+            "reference advancement cannot promote a future-dated known source fact",
+        ));
+    }
+    Ok(())
 }
 
 enum ConditionRecord {

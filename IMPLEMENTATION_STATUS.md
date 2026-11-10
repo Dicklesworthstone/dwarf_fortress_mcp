@@ -1,5 +1,29 @@
 # Implementation Status
 
+## Unreleased — Reject ambiguous canonical entity kinds before physical progress
+
+Physical advancement now refuses the reserved `Other("unit")`,
+`Other("building")`, `Other("work_order")` and `Other("creature")` aliases.
+Canonical snapshot v1 gives these aliases the same bytes and state anchor as
+their named variants, while typed timeline scans would omit them. The shared
+bounded source scan rejects them with `PreconditionsFailed` before any tick or
+world mutation, preventing consumption, workforce, work-order, construction or
+combat effects from disappearing at an unchanged source identity. Named kinds
+and unrelated custom names remain supported; canonical encoding is unchanged.
+
+All five new intent regressions fail against the original production code and
+pass with the gate. They prove byte-identical source anchors and exercise real
+consumption, order completion, workshop capacity, construction and hostile
+combat, including source preservation on refusal. The complete actual locked,
+offline `dfmcp-intent` suite passes **397 tests**: 252 unit and 145 integration,
+zero failed or ignored, on latest nightly. Two additional real MemoryAdapter
+integration regressions cover committed work, receipts, transcript and clock
+preservation on repeated refusal plus normal/custom-kind progress. Their lab
+execution is not yet established: the first combined intent/lab build was
+SIGKILLed compiling the production adapter before reaching tests. Scoped
+formatting and whitespace checks pass. Full MCP/release qualification and
+native/live admission are unchanged. Owner: `df-predicate-evidence-authority-r7m`.
+
 ## Unreleased — Preserve original project truth in compact observations
 
 Output-budget compaction now retains current predicate evidence, the exact

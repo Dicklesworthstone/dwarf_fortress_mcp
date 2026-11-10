@@ -199,6 +199,136 @@ fn below(threshold: u32) -> WorkOrderCondition {
     }
 }
 
+fn same_anchor_alias(source: &WorldSnapshot, id: EntityId) -> Result<WorldSnapshot> {
+    let mut aliased = source.clone();
+    let record = aliased
+        .graph
+        .entities
+        .get_mut(&id)
+        .ok_or_else(|| precondition("alias regression requires its source entity"))?;
+    record.kind = EntityKind::Other(record.kind.as_str().to_owned());
+    aliased.refresh_hash();
+    // Canonical v1 encodes the kind's name, not its Rust enum variant. Such a
+    // source must not gain different physical behavior at the identical anchor.
+    assert_ne!(source.graph, aliased.graph);
+    assert_eq!(source.canonical_bytes(), aliased.canonical_bytes());
+    assert_eq!(source.anchor(), aliased.anchor());
+    assert_eq!(
+        WorldSnapshot::from_canonical_bytes(&aliased.canonical_bytes())?,
+        *source
+    );
+    Ok(aliased)
+}
+
+fn assert_alias_refused_without_progress(mut source: WorldSnapshot, ticks: u64) -> Result<()> {
+    let before = source.clone();
+    let refused = advance_with(&mut source, ticks, EffectAdvanceLimits::default()).err();
+    assert_eq!(
+        refused.as_ref().map(|error| error.code),
+        Some(ErrorCode::PreconditionsFailed),
+        "an ambiguous canonical kind must not be omitted from physical progress"
+    );
+    assert!(refused.is_some_and(|error| error.message.contains("canonical entity kind")));
+    assert_eq!(source, before);
+
+    // This source rejection precedes even the first event. The shared entry
+    // point itself preserves every field and its caller-supplied destination
+    // tick, independently of a caller's transaction-shadow publication rule.
+    let mut shadow = before;
+    shadow.tick = GameTick(shadow.tick.0 + ticks);
+    let before = shadow.clone();
+    let refused = advance_effects_with_limits(&mut shadow, ticks, EffectAdvanceLimits::default())
+        .err()
+        .map(|error| error.code);
+    assert_eq!(refused, Some(ErrorCode::PreconditionsFailed));
+    assert_eq!(shadow, before);
+    Ok(())
+}
+
+#[test]
+fn same_anchor_consumer_alias_cannot_skip_population_consumption() -> Result<()> {
+    let mut source = world()?;
+    set(&mut source, LEDGER, STOCK_DRINK_FIELD, Value::U64(10))?;
+    set(
+        &mut source,
+        LEDGER,
+        METABOLISM_TICKS_FIELD,
+        Value::U64(1_199),
+    )?;
+    let aliased = same_anchor_alias(&source, CITIZEN)?;
+    let advanced = after(&source, &[1])?;
+    assert_eq!(number(&advanced, LEDGER, STOCK_DRINK_FIELD)?, 8);
+    assert_alias_refused_without_progress(aliased, 1)
+}
+
+#[test]
+fn same_anchor_work_order_alias_cannot_disappear_from_progress() -> Result<()> {
+    let mut source = world()?;
+    let id = EntityId::new(100);
+    order(&mut source, id, "barrel", "MAKE_BARREL", 1, 49, Vec::new())?;
+    let aliased = same_anchor_alias(&source, id)?;
+    let advanced = after(&source, &[1])?;
+    assert_eq!(number(&advanced, id, AMOUNT_REMAINING_FIELD)?, 0);
+    assert_alias_refused_without_progress(aliased, 1)
+}
+
+#[test]
+fn same_anchor_building_alias_cannot_drop_construction_progress() -> Result<()> {
+    let mut source = world()?;
+    set(
+        &mut source,
+        STILL,
+        CONSTRUCTION_STAGE_FIELD,
+        Value::Text(STAGE_UNDER_CONSTRUCTION.to_owned()),
+    )?;
+    set(&mut source, STILL, "required_ticks", Value::U64(500))?;
+    set(&mut source, STILL, "progress_ticks", Value::U64(499))?;
+    let aliased = same_anchor_alias(&source, STILL)?;
+    let advanced = after(&source, &[1])?;
+    assert_eq!(
+        field_text(
+            entity(&advanced, STILL)?,
+            CONSTRUCTION_STAGE_FIELD,
+            advanced.tick
+        ),
+        Some(STAGE_COMPLETE)
+    );
+    assert_alias_refused_without_progress(aliased, 1)
+}
+
+#[test]
+fn same_anchor_workshop_alias_cannot_remove_production_capacity() -> Result<()> {
+    let mut source = world()?;
+    order(
+        &mut source,
+        EntityId::new(100),
+        "brew",
+        "BREW_DRINK",
+        1,
+        49,
+        Vec::new(),
+    )?;
+    let aliased = same_anchor_alias(&source, STILL)?;
+    let advanced = after(&source, &[1])?;
+    assert_eq!(number(&advanced, LEDGER, STOCK_DRINK_FIELD)?, 5);
+    assert_alias_refused_without_progress(aliased, 1)
+}
+
+#[test]
+fn same_anchor_hostile_alias_cannot_erase_combat() -> Result<()> {
+    let mut source = world()?;
+    let id = EntityId::new(200);
+    threat(&mut source, id, 0)?;
+    let aliased = same_anchor_alias(&source, id)?;
+    let advanced = after(&source, &[300])?;
+    assert_eq!(
+        field_value(entity(&advanced, BREWER)?, "alive", advanced.tick),
+        Some(&Value::Bool(false))
+    );
+    assert_eq!(number(&advanced, id, COMBAT_ROUNDS_FIELD)?, 3);
+    assert_alias_refused_without_progress(aliased, 300)
+}
+
 #[test]
 fn prerequisite_completion_only_releases_later_intervals_in_either_entity_order() -> Result<()> {
     for (first, second) in [(100, 200), (200, 100)] {
