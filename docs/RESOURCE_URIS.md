@@ -54,6 +54,10 @@ continuity metadata immutable.
 | `state` | Current immutable-world manifest, including section counts and exact-version page URIs |
 | `state-{state_hash}` | Manifest of precisely that retained world version |
 | `state-{state_hash}~{section}~{offset}` | Bounded canonical records from precisely that retained version |
+| `plans` | Pending and retained original prepared-plan catalog |
+| `plans-{catalog_digest}~{offset}` | Continuation bound to the same complete catalog and current anchor |
+| `plan-{plan_digest}~{object_digest}` | Exact original prepared-plan manifest |
+| `plan-{plan_digest}~{object_digest}~archive~{offset}` | Lossless bounded pages of the original typed plan archive |
 
 `df://doctor/{session_id}` returns the session's diagnostic bundle under its
 negotiated `doctor` capability. State pages require `observe`, as do the existing
@@ -109,6 +113,86 @@ an effect. Active-work coverage is explicitly omitted from a state page; use
 the handoff reference to inspect it. Neither an empty active-work collection
 nor a state page constitutes proof that no work is pending.
 
+## Inspecting an original prepared plan
+
+Read `df://session/{session_id}/plans` to discover normal prepared plans,
+including the current pending plan and original plans retained by the objective
+book after commit. This does not require creating an MCP Task. The catalog
+returns `dfmcp.lab-plan-catalog/1`, with each plan's summary, compiler source
+kind, retention class, semantic digest, exact object digest, manifest URI and
+direct archive URI. A retained objective whose exact verified plan is unavailable
+has `status: "exact_plan_unavailable"` and null links; the consumer does not
+reconstruct a replacement from the current world.
+
+All plan views require current, whole-fortress `observe` **and** `query`
+grants. Both are checked under the authoritative session/shared-world view and
+durable-owner fence before revealing plan existence. Historical plan expiry
+does not block inspection, but an expired current capability does. Resources
+never acquire commit authority, authorize a new pursuit, or revive old handles.
+
+A plan manifest (`dfmcp.lab-plan-manifest/1`) reports its original IDs,
+summary, terminal condition, step count, required capabilities, risk, checkpoint
+requirement and expiry. Its `inspection_projection: true` fields are readable
+summaries, not an exact typed reconstruction. Its source anchor remains separate
+from `current_anchor`; historical reads carry stale continuity. Current goal
+truth is explicitly `not_evaluated`. Active work is explicitly omitted and
+points to the handoff resource. Neither a plan seal nor a completed byte download
+proves a goal, action effect, lack of work, or live-game compatibility.
+
+The exact prepared plan is available as the existing **DFMPAR01** archive
+documented in [PLAN_ARCHIVE.md](PLAN_ARCHIVE.md). Follow the manifest's archive
+link, or the catalog's direct archive link if manifest metadata exceeds the
+output allowance. Each `dfmcp.lab-plan-archive-page/1` response carries:
+
+- The original semantic `plan_digest` and exact typed `object_digest`.
+- `format: "DFMPAR01"`, `encoding: "hex"`, and `data_hex`.
+- An original-byte `offset`, `returned_bytes`, and `total_bytes`.
+- The SHA-256 of the complete framed archive and the next exact-object URI.
+- `complete` when the page reaches the object's end, and `complete_object`
+  only when this one page covers the entire object from offset zero.
+
+Concatenate decoded hex bytes at their declared offsets, verify the complete
+archive SHA-256, then use the checked archive decoder with **both** externally
+selected digests. The semantic plan digest alone can alias typed Other/Custom
+variants; it is insufficient to select an exact object. The manifest's object
+digest uses the archive codec's domain-separated identity; it differs from the
+plain SHA-256 of the complete framed bytes. Pages never substitute a new pending
+plan, rebase an old plan, rewrite expiry, or regenerate idempotency keys.
+
+The archive contains every original `PreparedPlan` field, including the full
+typed actions, preconditions, postconditions, compensation, dependency and
+obligation contracts. `source_kind` classifies the compiler request; this
+resource does not export the separate original `PlanSource` request or replace
+the original-goal history in handoff. The readable manifest is not a complete
+semantic step view.
+
+The catalog has at most 25 rows per page. Its continuation binds the entire
+sorted retained catalog, session identity and current anchor. Pending
+replacement, commit, collection or a world change returns `cursor_gap`; refresh
+`plans` instead of joining different catalog generations. A catalog with zero
+rows describes only the retained plan book, not the absence of fortress work.
+Exact plan links do not pin retention: replaced uncommitted plans and collected
+original objectives return `stale_anchor`. Neither failure falls back to a
+similar digest or the current pending plan.
+
+Plan inspection charges the retained-record scan plus every encoded step and
+the complete archive bytes before publishing a page. Catalog discovery encodes
+the available original plans to obtain their exact object identities; their
+**cumulative** bytes must fit the negotiated allowance. A large catalog can
+therefore return `budget_exceeded`, even when the requested output page is
+small. Selected-plan reads encode only matching semantic-digest candidates.
+The existing codec additionally bounds each object to 4 MiB, 256 steps, 65,536
+nodes and nesting depth 64. One wall deadline covers lookup, checked encoding,
+projection and escaped publication.
+
+Archive pages begin with at most 4,096 original bytes and reduce their byte
+count until the complete escaped resource response fits the session byte/token
+budget and 60,000-byte transport ceiling. The shared maximum numeric JSON-RPC
+ID reserve is counted once. Catalog rows and manifest fields are indivisible;
+a metadata or source-budget refusal does not return a partial trusted object.
+All addresses require lowercase 64-digit hashes and canonical decimal offsets,
+with no query strings, extra segments, signs or leading zeroes.
+
 ## Bounds, retention, and refusals
 
 A page starts with at most 25 records and reduces its row count to fit the
@@ -159,13 +243,20 @@ router. Fortress-only URIs lack an explicit session authority binding;
 registering them without that design would introduce ambient authority.
 
 Session `state` pages now provide the canonical entity/relation/chunk/event
-consumer path. Session `anchor`, `handoff`, and task evidence provide useful
-existing views of identity and active work, but do not claim implementation of
+consumer path. Session `plans` now supplies exact original prepared-plan discovery and archive
+retrieval. Session `anchor`, `handoff`, and task evidence provide useful views of
+identity and active work, but do not claim implementation of
 every planned independently addressable receipt, checkpoint or cognition
 resource. Knowledge and memory URIs still have no registered resource consumer.
 The `.11` roadmap bead consequently remains open.
 
 ## Verification
+
+The original-plan resource slice adds focused tests for exact codec round trips,
+immutable traversal, catalog gaps, current capability scopes and expiry, source
+and output budgets, and inspection side effects. Execution results for this
+slice are recorded separately in the current implementation status; the older
+qualification receipt below does not cover these new files.
 
 **Execution status:** exact clean `4ed1091` passed 26 resource tests and all
 11 objective-lifecycle tests, including the 30 process/durable allowed/denied

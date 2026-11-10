@@ -34,6 +34,7 @@ use crate::server::{
 };
 use dfmcp_core::{Capability, Digest32, EntityId, RiskTier, SessionId, StateAnchor};
 
+pub(crate) mod plans;
 pub(crate) mod state;
 
 /// One template serves every session view. The pinned fastmcp router admits
@@ -42,7 +43,7 @@ pub(crate) mod state;
 /// `view` capture keeps the documented URIs exactly.
 const SESSION_VIEW_TEMPLATE: &str = "df://session/{session_id}/{view}";
 /// Views served under `df://session/{session_id}/{view}`.
-pub const SESSION_VIEWS: [&str; 7] = [
+pub const SESSION_VIEWS: [&str; 8] = [
     "summary",
     "capabilities",
     "handoff",
@@ -50,6 +51,7 @@ pub const SESSION_VIEWS: [&str; 7] = [
     "anchor",
     "tasks",
     "state",
+    "plans",
 ];
 const DOCTOR_BUNDLE_TEMPLATE: &str = "df://doctor/{session_id}";
 
@@ -782,7 +784,11 @@ const SESSION_VIEW_DESCRIPTION: &str = "Session views: summary (bounded snapshot
      and final evidence; laboratory process only), entity-{id}~{generation}~{anchor_digest} \
      (one Query-authorized entity at the exact current complete anchor, discovered in entity query rows), state (current world manifest), \
      state-{state_hash} (exact retained manifest), state-{state_hash}~{section}~{offset} \
-     (immutable bounded entities, relations, chunks, or events page; requires observe)";
+     (immutable bounded entities, relations, chunks, or events page; requires observe), plans \
+     (pending and retained original plan catalog), plans-{catalog_digest}~{offset} \
+     (catalog continuation), plan-{plan_digest}~{object_digest} (exact original plan manifest), \
+     plan-{plan_digest}~{object_digest}~archive~{offset} (lossless typed archive byte page; \
+     plan views require current whole-fortress observe and query)";
 
 impl ResourceHandler for SessionViewResource {
     fn definition(&self) -> Resource {
@@ -835,6 +841,10 @@ impl ResourceHandler for SessionViewResource {
             "tasks" => session_tasks(raw, uri, 0),
             "state" => state::read(raw, uri, view),
             page if page.starts_with("state-") => state::read(raw, uri, page),
+            "plans" => plans::read(raw, uri, view),
+            plan if plan.starts_with("plan-") || plan.starts_with("plans-") => {
+                plans::read(raw, uri, plan)
+            }
             page if page.starts_with("tasks-") => {
                 let offset = page[6..].parse::<usize>().map_err(|_| {
                     McpError::invalid_params("task page offset must be a nonnegative integer")
@@ -1173,7 +1183,8 @@ mod tests {
                 "replay",
                 "anchor",
                 "tasks",
-                "state"
+                "state",
+                "plans"
             ]
         );
         let doctor = DoctorBundleResource.template().expect("doctor template");

@@ -46,6 +46,19 @@ pub(super) struct Objective {
 }
 
 impl Objective {
+    /// Resource inspection may export only the exact, verified retained plan.
+    /// It never reconstructs missing custody or evaluates a current predicate.
+    pub(super) fn resource_plan(&self) -> Option<&PreparedPlan> {
+        self.verification_error
+            .is_none()
+            .then_some(self.plan.as_ref())
+            .flatten()
+    }
+
+    pub(super) fn resource_source_kind(&self) -> &'static str {
+        super::plan_resources::source_kind(&self.source)
+    }
+
     pub(super) fn is_resource_acquisition(&self) -> bool {
         self.source.is_resource_acquisition()
     }

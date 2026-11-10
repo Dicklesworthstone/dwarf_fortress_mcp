@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased — Read exact original plans after their first response
+
+- Add session-bound retained-plan catalogs, manifests and bounded lossless
+  archive pages through the existing MCP resource template.
+- Bind both semantic and typed-object digests, preserve original anchors, and
+  reject stale catalog pages or missing exact custody without fallback.
+- Require current Observe and Query grants, enforce complete source and wire
+  budgets, and keep reads free of dispatch or proof/history side effects.
+- Add nine server regressions and execute seven focused consumer groups with
+  the actual resource/codec modules, including typed-hash alias protection.
+- Document the exact scope: focused execution does not establish full MCP
+  transport, durable-owner plumbing or release qualification.
+
 ## Unreleased — Gather finite inputs for explicit future production reserves
 
 - Combine `acquire_resources` and `reserve_until_tick` under the new fixed

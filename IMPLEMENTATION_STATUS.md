@@ -1,5 +1,47 @@
 # Implementation Status
 
+## Unreleased — Inspect retained original plans through bounded resources
+
+Session resources now expose a retained-plan catalog at
+`df://session/{session_id}/plans`, exact plan manifests and paged lossless
+`DFMPAR01` archive bytes. Both the semantic plan digest and exact typed archive
+object digest bind every detail and archive handle. Legacy canonical aliases
+therefore cannot substitute another typed plan. Catalog continuations bind the
+complete catalog, owner session and current anchor; changed membership or a
+changed world produces an explicit gap. Archive handles retain original source
+identity across later plans and world changes while the exact plan is retained.
+
+The consumer borrows pending plans and verified original objectives through
+the existing immutable owner-fenced session path. Current whole-fortress
+Observe and Query grants precede plan existence and custody disclosure. Source
+records, plan steps, cumulative archive encoding, escaped wire bytes, output
+tokens and one wall deadline remain bounded. Catalog and archive pages shrink
+to fit while retaining indivisible records or bytes; they never silently
+truncate a plan. The resource does not dispatch, evaluate current goal truth,
+advance semantic request IDs or publish objective/durable history. Manifest
+predicate JSON is an inspection projection; the exact typed contract is the
+archive, which contains the PreparedPlan rather than the raw original request.
+
+Nine repository regression tests cover canonical addressing, current grants,
+missing and foreign custody, default budgets, immutable archives, cursor gaps
+and side-effect fingerprints. A focused scratch consumer assembly compiled
+and executed the unchanged resource consumer, immutable-borrow helper and
+Agent Turn module with real core/world/intent/lab types and archive codec.
+All seven assertion groups passed: default-budget catalog/manifest, clipped
+archive reconstruction, exact dual identity, real capability algebra,
+source/output bounds, changing catalog cursors and canonical typed aliases.
+The assembly substitutes transport types and session/owner plumbing; it does
+not execute the nine complete server tests or establish FastMCP transport,
+shared-world locking or durable-owner qualification. Full locked MCP checking
+was killed by SIGKILL in pinned asupersync before this crate was reached.
+Scoped formatting and whitespace checks pass. Broader verification and clean
+release qualification remain separate gates.
+
+Owning bead: `dfmcp-reality-wiring-proof-4bf.11`. The inventory and wire formats
+are documented in `docs/RESOURCE_URIS.md` and `MCP_SURFACE.md`. Broad fortress,
+knowledge and memory resource families and external every-family acceptance
+remain open; this adds no native route, compatibility admission or tool.
+
 ## Unreleased — Fund explicit future reserves through finite resource stages
 
 The existing production blueprint now composes `acquire_resources` with an

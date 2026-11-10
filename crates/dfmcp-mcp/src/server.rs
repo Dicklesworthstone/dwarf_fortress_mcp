@@ -53,6 +53,9 @@ mod restore_work;
 mod objectives;
 use objectives::{Objective, objective_history_roots};
 
+#[path = "plan_resources.rs"]
+pub(crate) mod plan_resources;
+
 #[path = "production_source.rs"]
 pub(crate) mod production_source;
 
