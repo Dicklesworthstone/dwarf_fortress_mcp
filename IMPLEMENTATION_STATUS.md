@@ -1,5 +1,42 @@
 # Implementation Status
 
+## Unreleased — Inspect readable original plan steps through bounded pages
+
+Catalog and manifest `step_details` links now expose
+`plan-{plan_digest}~{object_digest}~steps~{offset}`. The consumer validates the
+entire exact original archive before reusing the laboratory's existing step
+renderer. Each page contains at most 25 intact rows, reducing its row count
+until the escaped byte/token allowance fits. Dependencies, capability/risk
+requirements, planned postconditions and obligation summaries remain readable
+without decoding the archive. Exact dual identities, original and current
+anchors, current Observe/Query grants, source-work bounds, the single wall
+deadline and immutable session inspection are unchanged.
+
+The new `dfmcp.lab-plan-steps-page/1` labels its projection and omitted contract
+fields, including exact typed action/predicate representations, preconditions,
+compensation payload, obligation failure predicate and idempotency key. Sealed
+requirements and predicted created IDs are not current evidence. Every page
+links the lossless archive. `complete_projection` means that one page contains
+all readable steps from offset zero, never complete current-world coverage or
+proof of dispatched work.
+
+Two production regressions bring this reader's server test source to 11 cases.
+All eight focused consumer groups pass against synchronized source `2f9a32a`
+plus the unchanged tested reserve hardening. The new group reconstructs 32
+sealed core steps through byte-driven clipping, compares every row to the exact
+production renderer, checks obligation summaries, original anchors, wrong or
+replaced identities, full-source admission and revoked Query authority. The
+seven previous archive/catalog/capability groups also pass. Before/after audits
+match all four production file hashes, eight verbatim renderer/helper bodies,
+and all 16 dependency identities in the project lockfile. Scoped formatting
+and whitespace checks pass.
+
+These focused runs still substitute transport and session plumbing. They do
+not execute the 11 complete server tests or establish real transport/durable
+owner qualification. No new tool, effect, native route or compatibility
+admission is introduced. Owner: `dfmcp-reality-wiring-proof-4bf.11`; wire and
+projection details: `docs/RESOURCE_URIS.md` and `MCP_SURFACE.md`.
+
 ## Unreleased — Qualify remaining reserve demand before acquiring more inputs
 
 The existing laboratory resource-reserve admission now independently requires

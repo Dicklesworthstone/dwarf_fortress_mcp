@@ -699,6 +699,7 @@ df://session/{id}/state-{state_hash}~{section}~{offset}
 df://session/{id}/plans
 df://session/{id}/plans-{catalog_digest}~{offset}
 df://session/{id}/plan-{plan_digest}~{object_digest}
+df://session/{id}/plan-{plan_digest}~{object_digest}~steps~{offset}
 df://session/{id}/plan-{plan_digest}~{object_digest}~archive~{offset}
 df://fortress/{id}/anchor
 df://fortress/{id}/entity/{entity}
@@ -730,14 +731,16 @@ the resource wrapper; an oversized record is refused without silent field loss.
 Inspection preserves semantic request IDs and does not certify objectives,
 retain versions or run the durable-persistence postlude, including after denial.
 
-Normal prepared plans also have a session-bound catalog, original-plan manifest
-and lossless DFMPAR01 archive pages, independently of MCP Tasks. Current
+Normal prepared plans also have a session-bound catalog, original-plan manifest,
+readable step pages and lossless DFMPAR01 archive pages, independently of MCP Tasks. Current
 whole-fortress Observe and Query grants precede even digest existence checks.
 Exact references bind the semantic plan digest and the distinct typed archive
 object digest. Catalog continuations additionally bind the current anchor and
 entire retained membership; collection or pending replacement never silently
 changes an exact object. Manifest fields are inspection projections, with
-current goal truth unevaluated and active work linked to handoff. Archive bytes
+current goal truth unevaluated and active work linked to handoff. Step pages
+retain whole readable rows, identify omitted contract fields, and distinguish
+sealed requirements and predicted IDs from current evidence. Archive bytes
 retain original steps, predicates, obligations and idempotency keys without
 granting commit authority. Source work, output and elapsed-time bounds apply to
 every read. See the resource consumer document for reconstruction and retention.

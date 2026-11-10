@@ -138,12 +138,17 @@ fn only_canonical_closed_plan_addresses_are_accepted() {
     assert!(address(&format!("plans-{a}~0")).is_ok());
     assert!(address(&format!("plan-{a}~{b}")).is_ok());
     assert!(address(&format!("plan-{a}~{b}~archive~123")).is_ok());
+    assert!(address(&format!("plan-{a}~{b}~steps~0")).is_ok());
     for bad in [
         String::new(),
         "plan".to_owned(),
         format!("plan-{a}"),
         format!("plan-{a}~{}", "B".repeat(64)),
-        format!("plan-{a}~{b}~steps~0"),
+        format!("plan-{a}~{b}~source~0"),
+        format!("plan-{a}~{b}~steps"),
+        format!("plan-{a}~{b}~steps~01"),
+        format!("plan-{a}~{b}~steps~-1"),
+        format!("plan-{a}~{b}~steps~0~extra"),
         format!("plan-{a}~{b}~archive"),
         format!("plan-{a}~{b}~archive~-1"),
         format!("plan-{a}~{b}~archive~+1"),
@@ -506,4 +511,156 @@ fn catalog_pages_are_bounded_and_reject_membership_or_world_changes() {
         from_uri(&id, &pinned).expect_err("world and retention gap"),
         "cursor_gap",
     );
+}
+
+#[test]
+fn readable_steps_page_the_original_projection_across_world_changes() {
+    let id = open();
+    let actions = json!(
+        (0..16)
+            .map(|_| json!({"action": {"kind": "pause", "paused": false}}))
+            .collect::<Vec<_>>()
+    );
+    let raw = crate::server::plan_with_actions(
+        Some(id.clone()),
+        Some("Inspect the complete original step list".to_owned()),
+        None,
+        Some(actions.to_string()),
+    );
+    let prepared: Value = serde_json::from_str(&raw).expect("plan JSON");
+    assert_eq!(prepared["ok"], true, "{prepared}");
+    let original = original(&id, prepared["plan_digest"].as_str().expect("digest"));
+    assert_eq!(original.steps.len(), 16);
+    let expected = crate::lab_world::plan_steps_json(&original);
+    let expected_rows = expected.as_array().expect("step projection");
+    let (archive_bytes, seal) =
+        plan_archive::encode(&original, ArchiveLimits::default()).expect("archive");
+    let catalog = payload(view(&id, "plans").expect("catalog"));
+    let row = &catalog["rows"][0];
+    let manifest =
+        payload(from_uri(&id, row["uri"].as_str().expect("manifest URI")).expect("manifest"));
+    assert_eq!(manifest["step_details"], row["step_details"]);
+    let mut uri = row["step_details"].as_str().expect("step URI").to_owned();
+    assert_eq!(uri, steps_uri(&id, seal, 0));
+    let session = resolve_session(Some(id.clone())).expect("session");
+    let full = from_uri(&id, &uri).expect("unclipped steps");
+    let wire_bytes =
+        super::super::task_resource_bytes(&uri, full[0].text.as_deref().expect("text"));
+    let semantic_budget = session.lock().expect("lock").budget;
+    let mut page_budget = semantic_budget;
+    page_budget.max_bytes = (wire_bytes as u64 - 64).min(4_096 * 4);
+    page_budget.max_output_tokens = 4_096;
+    assert!(page_budget.max_bytes > archive_bytes.len() as u64);
+    session.lock().expect("lock").budget = page_budget;
+    let mut reconstructed = Vec::new();
+    let mut pages = 0;
+    loop {
+        let contents = from_uri(&id, &uri).expect("steps page");
+        assert!(
+            super::super::task_resource_bytes(&uri, contents[0].text.as_deref().expect("text"))
+                <= 4_096 * 4
+        );
+        let page = payload(contents);
+        assert_eq!(page["schema"], "dfmcp.lab-plan-steps-page/1");
+        assert_eq!(page["inspection_projection"], true);
+        assert_eq!(page["projection"]["exact_typed_contract"], false);
+        assert_eq!(
+            page["projection"]["predicates"],
+            "sealed_requirements_not_current_evidence"
+        );
+        assert_eq!(page["goal_truth"], "not_evaluated");
+        assert_eq!(page["dispatch_authority"], false);
+        assert_eq!(page["plan_digest"], seal.plan_digest.to_hex());
+        assert_eq!(page["object_digest"], seal.object_digest.to_hex());
+        assert_eq!(page["anchor"], anchor_json(&original.anchor));
+        assert_eq!(page["archive"], archive_uri(&id, seal, 0));
+        assert_eq!(page["offset"].as_u64(), Some(reconstructed.len() as u64));
+        assert_eq!(page["complete_projection"], false);
+        assert_eq!(page["coverage"]["complete_domains"], json!([]));
+        assert_eq!(page["coverage"]["absence_proof_scope"], json!([]));
+        let rows = page["rows"].as_array().expect("rows");
+        assert!(!rows.is_empty() && rows.len() <= MAX_PAGE_RECORDS);
+        assert_eq!(
+            rows.as_slice(),
+            &expected_rows[reconstructed.len()..reconstructed.len() + rows.len()]
+        );
+        reconstructed.extend_from_slice(rows);
+        pages += 1;
+        if pages > 1 {
+            assert_eq!(page["historical"], true);
+            assert_eq!(page["agent_turn"]["continuity"]["status"], "stale");
+        }
+        let Some(next) = page["next"].as_str() else {
+            assert_eq!(page["complete"], true);
+            break;
+        };
+        uri = next.to_owned();
+        if pages == 1 {
+            with_session(
+                &session,
+                || panic!("session unavailable"),
+                |guard| {
+                    guard.adapter.advance_ticks(1).expect("new current anchor");
+                },
+            );
+        }
+    }
+    assert!(pages > 1);
+    assert_eq!(reconstructed, *expected_rows);
+    let wrong = PlanArchiveSeal {
+        object_digest: Digest32::of_bytes(b"wrong original steps"),
+        ..seal
+    };
+    error_data(
+        from_uri(&id, &steps_uri(&id, wrong, 0)).expect_err("wrong object"),
+        "stale_anchor",
+    );
+    error_data(
+        from_uri(&id, &steps_uri(&id, seal, 16)).expect_err("out of range"),
+        "invalid_request",
+    );
+    session.lock().expect("lock").budget = semantic_budget;
+    plan(&id, "Replace the pending contract", false);
+    error_data(
+        from_uri(&id, &steps_uri(&id, seal, 0)).expect_err("replaced plan"),
+        "stale_anchor",
+    );
+}
+
+#[test]
+fn readable_steps_require_the_complete_source_budget_and_current_authority() {
+    let id = open();
+    let prepared = plan(&id, "Inspect a bounded step", false);
+    let original = original(&id, prepared["plan_digest"].as_str().expect("digest"));
+    let (bytes, seal) = plan_archive::encode(&original, ArchiveLimits::default()).expect("archive");
+    let uri = steps_uri(&id, seal, 0);
+    let before = fingerprint(&id);
+    let page = payload(from_uri(&id, &uri).expect("steps"));
+    assert_eq!(page["complete_projection"], true);
+    assert_eq!(page["rows"], crate::lab_world::plan_steps_json(&original));
+    assert_eq!(fingerprint(&id), before);
+    let session = resolve_session(Some(id.clone())).expect("session");
+    let budget = session.lock().expect("lock").budget;
+    session.lock().expect("lock").budget.max_bytes = bytes.len() as u64 - 1;
+    error_data(
+        from_uri(&id, &uri).expect_err("full source budget"),
+        "budget_exceeded",
+    );
+    session.lock().expect("lock").budget = budget;
+    session.lock().expect("lock").budget.max_output_tokens = 1;
+    error_data(
+        from_uri(&id, &uri).expect_err("indivisible metadata"),
+        "budget_exceeded",
+    );
+    session.lock().expect("lock").budget = budget;
+    session
+        .lock()
+        .expect("lock")
+        .grants
+        .retain(|grant| grant.capability != Capability::Query);
+    let denied = error_data(
+        from_uri(&id, &uri).expect_err("current Query required"),
+        "capability_denied",
+    );
+    assert_eq!(denied["agent_turn"]["anchor"], Value::Null);
 }

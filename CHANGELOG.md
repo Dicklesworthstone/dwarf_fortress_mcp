@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased — Read original plan actions and proof requirements in pages
+
+- Discover readable step pages directly from retained-plan catalogs/manifests.
+- Reuse the existing step renderer with exact plan/object identity, original
+  anchors and at most 25 intact rows per page, clipped to complete wire budgets.
+- Keep readable projections distinct from the full typed archive and current
+  evidence; expose omitted contract fields and the authoritative archive link.
+- Add two server regressions and pass all eight focused actual-consumer groups,
+  including full paged reconstruction and current capability/source budgets.
+
 ## Unreleased — Refuse unfounded reserve work and unrelated compensation
 
 - Require source-qualified remaining output demand before admitting harvest

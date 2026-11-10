@@ -31,8 +31,14 @@ enum Address {
     },
     Plan {
         seal: PlanArchiveSeal,
-        offset: Option<usize>,
+        page: Option<PlanPage>,
     },
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum PlanPage {
+    Archive(usize),
+    Steps(usize),
 }
 
 fn invalid(message: impl Into<String>) -> DfmcpError {
@@ -99,11 +105,14 @@ fn address(view: &str) -> Result<Address> {
     )?;
     let page = match parts.next() {
         None => None,
-        Some("archive") => Some(offset(
+        Some("archive") => Some(PlanPage::Archive(offset(
             parts
                 .next()
                 .ok_or_else(|| invalid("missing archive offset"))?,
-        )?),
+        )?)),
+        Some("steps") => Some(PlanPage::Steps(offset(
+            parts.next().ok_or_else(|| invalid("missing step offset"))?,
+        )?)),
         Some(_) => return Err(invalid("unknown plan resource section")),
     };
     if parts.next().is_some() {
@@ -114,7 +123,7 @@ fn address(view: &str) -> Result<Address> {
             plan_digest: semantic,
             object_digest: object,
         },
-        offset: page,
+        page,
     })
 }
 
@@ -127,6 +136,10 @@ fn plan_uri(session: &str, seal: PlanArchiveSeal) -> String {
 
 fn archive_uri(session: &str, seal: PlanArchiveSeal, start: usize) -> String {
     format!("{}~archive~{start}", plan_uri(session, seal))
+}
+
+fn steps_uri(session: &str, seal: PlanArchiveSeal, start: usize) -> String {
+    format!("{}~steps~{start}", plan_uri(session, seal))
 }
 
 fn catalog_uri(session: &str, hash: Digest32, start: usize) -> String {
@@ -272,7 +285,8 @@ fn read_with_elapsed(
                             check_deadline(guard.budget, &mut elapsed)?;
                             let mut row = json!({"plan_digest": entry.digest.to_hex(),
                                 "retention": entry.retention, "source_kind": entry.source_kind,
-                                "status": "exact_plan_unavailable", "uri": null, "archive": null});
+                                "status": "exact_plan_unavailable", "uri": null,
+                                "archive": null, "step_details": null});
                             if let Some(plan) = entry.plan {
                                 validate_identity(plan, entry.digest, current)?;
                                 let (bytes, seal) =
@@ -284,6 +298,7 @@ fn read_with_elapsed(
                                 row["archive_bytes"] = json!(bytes.len());
                                 row["uri"] = json!(plan_uri(&canonical_session, seal));
                                 row["archive"] = json!(archive_uri(&canonical_session, seal, 0));
+                                row["step_details"] = json!(steps_uri(&canonical_session, seal, 0));
                             }
                             rows.push(row);
                         }
@@ -311,7 +326,7 @@ fn read_with_elapsed(
                             &mut elapsed,
                         )
                     }
-                    Address::Plan { seal, offset } => {
+                    Address::Plan { seal, page } => {
                         for entry in plan_resources::entries(guard)
                             .filter(|entry| entry.digest == seal.plan_digest)
                         {
@@ -323,7 +338,7 @@ fn read_with_elapsed(
                             if actual != seal {
                                 continue;
                             }
-                            return match offset {
+                            return match page {
                                 None => {
                                     let payload = json!({
                                         "schema": "dfmcp.lab-plan-manifest/1",
@@ -335,6 +350,7 @@ fn read_with_elapsed(
                                         "summary": plan.summary,
                                         "terminal_condition": crate::lab_world::predicate_json(&plan.terminal_condition),
                                         "steps": plan.steps.len(),
+                                        "step_details": steps_uri(&canonical_session, seal, 0),
                                         "max_risk": plan.max_risk.as_str(),
                                         "required_capabilities": plan.required_capabilities.iter()
                                             .map(|cap| cap.as_str()).collect::<Vec<_>>(),
@@ -359,13 +375,24 @@ fn read_with_elapsed(
                                         "plan manifest exceeds the negotiated output budget; use its catalog archive link",
                                     ))
                                 }
-                                Some(start) => archive(
+                                Some(PlanPage::Archive(start)) => archive(
                                     &canonical_session,
                                     uri,
                                     seal,
                                     &bytes,
                                     start,
                                     plan.anchor,
+                                    current,
+                                    guard.budget,
+                                    &work,
+                                    &mut elapsed,
+                                ),
+                                Some(PlanPage::Steps(start)) => steps(
+                                    &canonical_session,
+                                    uri,
+                                    seal,
+                                    plan,
+                                    start,
                                     current,
                                     guard.budget,
                                     &work,
@@ -509,6 +536,82 @@ fn archive(
         if returned <= 1 {
             return Err(exhausted(
                 "plan archive metadata or one byte exceeds the negotiated output budget",
+            ));
+        }
+        returned /= 2;
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn steps(
+    session: &str,
+    uri: &str,
+    seal: PlanArchiveSeal,
+    plan: &dfmcp_intent::PreparedPlan,
+    start: usize,
+    current: StateAnchor,
+    budget: WorkBudget,
+    work: &SourceWork,
+    elapsed: &mut impl FnMut() -> std::time::Duration,
+) -> Result<String> {
+    let total = plan.steps.len();
+    if start > total || (start == total && total != 0) {
+        return Err(invalid("step offset is outside the exact original plan"));
+    }
+    // The caller already admitted and validated the entire exact archive.
+    // Reuse the existing readable projection without treating its deliberately
+    // omitted action/contract fields as an exact typed plan representation.
+    check_deadline(budget, elapsed)?;
+    let Value::Array(rows) = crate::lab_world::plan_steps_json(plan) else {
+        return Err(DfmcpError::new(
+            ErrorCode::InternalInvariantViolation,
+            "the laboratory step projection did not return an array",
+        ));
+    };
+    check_deadline(budget, elapsed)?;
+    if rows.len() != total {
+        return Err(DfmcpError::new(
+            ErrorCode::InternalInvariantViolation,
+            "the laboratory step projection changed the original step count",
+        ));
+    }
+    let mut returned = (total - start).min(MAX_PAGE_RECORDS);
+    loop {
+        let end = start + returned;
+        let next = (end < total).then(|| steps_uri(session, seal, end));
+        let payload = json!({
+            "schema": "dfmcp.lab-plan-steps-page/1", "inspection_projection": true,
+            "plan_digest": seal.plan_digest.to_hex(), "object_digest": seal.object_digest.to_hex(),
+            "canonical_uri": steps_uri(session, seal, start),
+            "offset": start, "returned": returned, "total": total, "rows": rows[start..end],
+            "complete": end == total, "complete_projection": start == 0 && end == total,
+            "next": next, "archive": archive_uri(session, seal, 0),
+            "goal_truth": "not_evaluated", "dispatch_authority": false,
+            "projection": {
+                "renderer": "laboratory_plan_steps", "exact_typed_contract": false,
+                "omitted_contract_fields": ["full_typed_action", "full_typed_predicates", "preconditions",
+                    "compensation_action", "obligation_failure_predicate", "idempotency_key"],
+                "predicates": "sealed_requirements_not_current_evidence",
+                "created_entity_ids": "predicted_from_sealed_steps_not_dispatch_evidence"
+            },
+            "coverage": {"status": "step_projection_only", "complete_domains": [],
+                "absence_proof_scope": [], "continuation": next},
+        });
+        if let Some(text) = render(
+            payload,
+            session,
+            uri,
+            plan.anchor,
+            current,
+            budget,
+            work,
+            elapsed,
+        )? {
+            return Ok(text);
+        }
+        if returned <= 1 {
+            return Err(exhausted(
+                "step page metadata or one indivisible projection row exceeds the negotiated output budget",
             ));
         }
         returned /= 2;

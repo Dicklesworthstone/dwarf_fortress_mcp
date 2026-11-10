@@ -57,6 +57,7 @@ continuity metadata immutable.
 | `plans` | Pending and retained original prepared-plan catalog |
 | `plans-{catalog_digest}~{offset}` | Continuation bound to the same complete catalog and current anchor |
 | `plan-{plan_digest}~{object_digest}` | Exact original prepared-plan manifest |
+| `plan-{plan_digest}~{object_digest}~steps~{offset}` | Bounded readable projections of original steps and proof requirements |
 | `plan-{plan_digest}~{object_digest}~archive~{offset}` | Lossless bounded pages of the original typed plan archive |
 
 `df://doctor/{session_id}` returns the session's diagnostic bundle under its
@@ -119,8 +120,9 @@ Read `df://session/{session_id}/plans` to discover normal prepared plans,
 including the current pending plan and original plans retained by the objective
 book after commit. This does not require creating an MCP Task. The catalog
 returns `dfmcp.lab-plan-catalog/1`, with each plan's summary, compiler source
-kind, retention class, semantic digest, exact object digest, manifest URI and
-direct archive URI. A retained objective whose exact verified plan is unavailable
+kind, retention class, semantic digest, exact object digest, manifest URI,
+`step_details` URI and direct archive URI. A retained objective whose exact
+verified plan is unavailable
 has `status: "exact_plan_unavailable"` and null links; the consumer does not
 reconstruct a replacement from the current world.
 
@@ -138,6 +140,23 @@ from `current_anchor`; historical reads carry stale continuity. Current goal
 truth is explicitly `not_evaluated`. Active work is explicitly omitted and
 points to the handoff resource. Neither a plan seal nor a completed byte download
 proves a goal, action effect, lack of work, or live-game compatibility.
+
+Follow `step_details` for readable `dfmcp.lab-plan-steps-page/1` pages. These
+reuse the laboratory's existing step renderer for action summaries, dependency
+and capability requirements, planned postconditions and obligation details.
+Each page contains at most 25 whole rows and shrinks to fit the escaped output
+budget. `offset`, `returned`, `total` and `next` describe the traversal;
+`complete_projection` is true only when one page covers all rows from zero.
+Every page retains both exact identities and the original anchor, even after
+the current world or pending plan changes.
+
+These rows explicitly identify their omitted contract fields, including full
+typed action and predicate representations, preconditions, compensation action, obligation failure
+predicate and idempotency key. Rendered predicates are sealed requirements,
+and created entity IDs are predictions from the sealed steps; neither is
+current dispatch evidence. The page links the exact archive for complete typed
+inspection. Step pages never evaluate predicates, dispatch work or advance
+semantic request IDs.
 
 The exact prepared plan is available as the existing **DFMPAR01** archive
 documented in [PLAN_ARCHIVE.md](PLAN_ARCHIVE.md). Follow the manifest's archive
@@ -163,8 +182,8 @@ The archive contains every original `PreparedPlan` field, including the full
 typed actions, preconditions, postconditions, compensation, dependency and
 obligation contracts. `source_kind` classifies the compiler request; this
 resource does not export the separate original `PlanSource` request or replace
-the original-goal history in handoff. The readable manifest is not a complete
-semantic step view.
+the original-goal history in handoff. Readable manifests and step pages do not
+replace this complete typed contract.
 
 The catalog has at most 25 rows per page. Its continuation binds the entire
 sorted retained catalog, session identity and current anchor. Pending
@@ -188,7 +207,8 @@ projection and escaped publication.
 Archive pages begin with at most 4,096 original bytes and reduce their byte
 count until the complete escaped resource response fits the session byte/token
 budget and 60,000-byte transport ceiling. The shared maximum numeric JSON-RPC
-ID reserve is counted once. Catalog rows and manifest fields are indivisible;
+ID reserve is counted once. Catalog rows, projected step rows and manifest
+fields are indivisible;
 a metadata or source-budget refusal does not return a partial trusted object.
 All addresses require lowercase 64-digit hashes and canonical decimal offsets,
 with no query strings, extra segments, signs or leading zeroes.
