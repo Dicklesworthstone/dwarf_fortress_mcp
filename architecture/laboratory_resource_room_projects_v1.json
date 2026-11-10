@@ -66,9 +66,15 @@
     "combined_room_actions": 64,
     "access_cells": 1024,
     "source_entities": 65536,
-    "source_terrain_chunks": 4096
+    "connected_source_terrain_chunks": 4096
   },
   "native_protocol_change": false,
   "live_admission_change": false,
-  "new_top_level_tool": false
+  "new_top_level_tool": false,
+  "scenarios": {
+    "single_level": "starter_fortress_resources",
+    "paired_stairs": "starter_fortress_multilevel_resources",
+    "combined_world": "unchanged_resource_entities_edges_and_events_plus_existing_multilevel_terrain",
+    "prior_scenario_snapshots": "unchanged"
+  }
 }

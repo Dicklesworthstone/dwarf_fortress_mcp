@@ -2,6 +2,12 @@
 
 The `starter_fortress_resources` scenario extends the finite workforce, construction-material and provisions models with explicit WOOD and PLANT sources. Agents acquire supplies, observe the resulting inventory, and then use the existing furniture, workshop and food-production planners.
 
+`starter_fortress_multilevel_resources` retains those same entities, finite
+sources and opening stocks while providing the existing five-level terrain
+at z=8 through z=12. It supports the complete
+[resource-aware room and paired-stair workflow](LAB_RESOURCE_ROOM_PROJECTS.md#connected-rooms-and-stairs)
+through an ordinary built-in scenario. Earlier scenario snapshots are unchanged.
+
 This is a deterministic reference economy. Resource units and timing are laboratory rules; the action has no native DFHack route or admission.
 
 For an original WOOD/PLANT stock target, use the

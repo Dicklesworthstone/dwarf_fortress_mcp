@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased — Exercise finite-input stair rooms in one built-in world
+
+- Add `starter_fortress_multilevel_resources`, retaining finite sources and
+  worker assignments while supplying the five-level terrain needed for safe
+  cross-level room access. Preserve previous scenario snapshots and indices.
+- Exercise ordinary twenty-door production to consume starting wood, harvest
+  exactly two finite logs, then furnish two lower bedrooms with paired stairs
+  while preserving the original doors and conserving source quantities.
+- Execute the actual source compiler and comparison consumer, including
+  same-room acquisition/funded forecasts and rejection of different rooms or
+  access domains sharing the same WOOD target. Correct the public test fixture's
+  typed stock assignment.
+- Pass 246 selected Rust tests with source-item and locked-dependency audits;
+  this includes all 15 comparison tests. Public handler/facade execution and
+  full qualification remain unestablished. Broader static verification was
+  stopped during native-component contract tests after earlier gates passed.
+
 ## Unreleased — Build complete rooms through observed finite-input stages
 
 - Add explicit finite-resource acquisition to provisioned rooms and both

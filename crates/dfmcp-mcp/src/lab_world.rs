@@ -102,7 +102,7 @@ const MAX_NAME_BYTES: usize = 128;
 const MAX_LIST_ITEMS: usize = 64;
 
 /// Built-in laboratory scenarios.
-pub(crate) const SCENARIOS: [&str; 9] = [
+pub(crate) const SCENARIOS: [&str; 10] = [
     "empty",
     "starter_fortress",
     "besieged_fortress",
@@ -112,6 +112,7 @@ pub(crate) const SCENARIOS: [&str; 9] = [
     "starter_fortress_multilevel",
     "starter_fortress_history",
     "starter_fortress_resources",
+    "starter_fortress_multilevel_resources",
 ];
 
 /// Starter-fortress entity identities.
@@ -184,6 +185,7 @@ pub(crate) fn scenario_snapshot(
         }
         "starter_fortress_multilevel" => multilevel_starter_graph(fortress_id)?,
         "starter_fortress_resources" => laboratory_harvest::starter_graph(fortress_id)?,
+        "starter_fortress_multilevel_resources" => multilevel_resources_starter_graph(fortress_id)?,
         "besieged_fortress" => {
             let mut graph = starter_graph()?;
             graph.entities.insert(
@@ -313,6 +315,19 @@ fn provisions_starter_graph(fortress_id: FortressId) -> Result<WorldGraph> {
 /// level above or below the entrance. Earlier scenarios keep their exact bytes.
 fn multilevel_starter_graph(fortress_id: FortressId) -> Result<WorldGraph> {
     let mut graph = provisions_starter_graph(fortress_id)?;
+    add_multilevel_terrain(&mut graph);
+    Ok(graph)
+}
+
+/// Finite observed harvesting and the existing cross-level hazard coverage in
+/// one public scenario. Both earlier opening worlds retain their exact bytes.
+fn multilevel_resources_starter_graph(fortress_id: FortressId) -> Result<WorldGraph> {
+    let mut graph = laboratory_harvest::starter_graph(fortress_id)?;
+    add_multilevel_terrain(&mut graph);
+    Ok(graph)
+}
+
+fn add_multilevel_terrain(graph: &mut WorldGraph) {
     for z in [starter::LEVEL_Z - 2, starter::LEVEL_Z + 2] {
         for x in -1..=1 {
             for y in -1..=1 {
@@ -323,7 +338,6 @@ fn multilevel_starter_graph(fortress_id: FortressId) -> Result<WorldGraph> {
             }
         }
     }
-    Ok(graph)
 }
 
 /// Three 48x48 rock levels (z 9..11) with a carved 10x3 entrance hall on

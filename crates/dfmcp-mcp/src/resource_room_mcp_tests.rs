@@ -72,7 +72,7 @@ fn require_finite_inputs(session: &str) -> TestResult<()> {
             .fields
             .get_mut(effects::STOCK_WOOD_FIELD)
             .ok_or_else(|| fixture_error("qualified wood fact missing"))?
-            .value = Some(WorldValue::U64(0));
+            .value = WorldValue::U64(0);
         record.revision += 1;
         snapshot
             .graph

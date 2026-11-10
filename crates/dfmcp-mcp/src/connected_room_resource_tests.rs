@@ -2,26 +2,28 @@
 //! cross-level routes, durable recovery and residual access-only repair.
 
 use super::*;
+use crate::lab_world::{ProductionRequest, parse_steps};
 use crate::server::connected_room_continuation::ConnectedRoomContinuation;
 use dfmcp_adapter::GameAdapter;
 use dfmcp_core::{
     Capability, CapabilityGrant, CapabilityScope, CommitState, FortressId, OperationContext,
     RequestId, RiskTier, SessionId, WorkBudget,
 };
-use dfmcp_intent::{PreparedPlan, effects};
+use dfmcp_intent::{Constraint, FurnitureKind, HarvestResource, PreparedPlan, effects};
 use dfmcp_lab::MemoryAdapter;
 use dfmcp_world::{Fact, FactSource, Value, laboratory_fact_value};
 
 fn source(stairs: bool) -> Result<WorldSnapshot> {
     let fortress = FortressId::new(98_601);
-    let mut snapshot =
-        crate::lab_world::scenario_snapshot("starter_fortress_resources", fortress, false)?;
-    if stairs {
-        snapshot.graph.chunks =
-            crate::lab_world::scenario_snapshot("starter_fortress_multilevel", fortress, false)?
-                .graph
-                .chunks;
-    }
+    let mut snapshot = crate::lab_world::scenario_snapshot(
+        if stairs {
+            "starter_fortress_multilevel_resources"
+        } else {
+            "starter_fortress_resources"
+        },
+        fortress,
+        false,
+    )?;
     snapshot
         .graph
         .entities
@@ -330,6 +332,114 @@ fn finite_acquisition_recovers_into_complete_cardinal_and_stair_rooms_then_repai
             );
         }
     }
+    Ok(())
+}
+
+#[test]
+fn builtin_multilevel_resources_replenishes_real_production_consumption_to_furnish_stair_rooms()
+-> Result<()> {
+    // Enter through the public builtin with its original entities, terrain and
+    // stock. Ordinary production creates the shortage through registered work;
+    // no fixture mutation supplies wood, workers, workshop sites or stairs.
+    let snapshot = crate::lab_world::scenario_snapshot(
+        "starter_fortress_multilevel_resources",
+        FortressId::new(98_631),
+        false,
+    )?;
+    assert_eq!(wood(&snapshot)?, 20);
+    let doors = ProductionRequest::parse_current(
+        &json!({
+            "template":"production", "quotas":[{"item":"DOOR","minimum":20}],
+        })
+        .to_string(),
+    )?;
+    let compiled = doors.compile(&snapshot)?;
+    let mut production = Intent {
+        id: IntentId::new(98_632),
+        anchor: snapshot.anchor(),
+        summary: "use the opening wood for twenty actual doors".to_owned(),
+        terminal_condition: compiled.terminal.clone(),
+        constraints: vec![Constraint::MaxRisk(RiskTier::Guarded)],
+        requested_actions: parse_steps(&compiled.actions)?,
+    };
+    compiled.apply_capacity_horizon(&mut production)?;
+    let (depleted, _) = execute(snapshot, &production)?;
+    assert_eq!(wood(&depleted)?, 0);
+    assert_eq!(doors.semantic_goal_truth(&depleted)?, PredicateTruth::True);
+    let original_doors = effects::loose_furniture_items(&depleted, FurnitureKind::Door)?;
+    assert_eq!(original_doors.len(), 20);
+    assert!(effects::harvest_report(&depleted)?.is_some_and(|report| report.tasks.is_empty()));
+
+    let request = request(true)?;
+    let (acquisition, acquisition_analysis) = request.compile(
+        IntentId::new(98_633),
+        &depleted,
+        "supply the original lower bedrooms",
+    )?;
+    assert_eq!(
+        classify_room_stage(&acquisition),
+        RoomCompileStage::ResourceAcquisition
+    );
+    assert_eq!(
+        acquisition_analysis["resource_workflow"]["original_request"]["planner"],
+        RESOURCE_STAIRS_PLANNER
+    );
+    assert_eq!(
+        request.semantic_goal_truth(&depleted)?,
+        PredicateTruth::False
+    );
+    assert_eq!(acquisition.requested_actions.len(), 1);
+    assert!(matches!(
+        acquisition.requested_actions[0].action,
+        Action::HarvestResource {
+            resource: HarvestResource::Wood,
+            amount: 2,
+            ..
+        }
+    ));
+    let (harvested, acquisition_plan) = execute(depleted, &acquisition)?;
+    assert_eq!(wood(&harvested)?, 2);
+    assert_eq!(
+        request.semantic_goal_truth(&harvested)?,
+        PredicateTruth::False
+    );
+
+    let source =
+        ConnectedRoomContinuation::new(acquisition_plan.digest, acquisition_plan.digest, request)?;
+    let source = ConnectedRoomContinuation::parse(&source.canonical_json())?;
+    let (room, analysis) = source.compile(
+        IntentId::new(98_634),
+        &harvested,
+        "furnish the complete original stair-connected bedrooms",
+    )?;
+    assert_eq!(classify_room_stage(&room), RoomCompileStage::FurnishRoom);
+    assert_eq!(analysis["new_placements"], 2);
+    assert_eq!(analysis["access"]["new_stair_tiles"], 2);
+    assert!(!room.requested_actions.iter().any(|step| matches!(
+        step.action,
+        Action::HarvestResource { .. } | Action::Build { .. }
+    )));
+    let (completed, _) = execute(harvested, &room)?;
+    assert_eq!(
+        source.semantic_goal_truth(&completed)?,
+        PredicateTruth::True
+    );
+    assert_eq!(wood(&completed)?, 0);
+    assert_eq!(doors.semantic_goal_truth(&completed)?, PredicateTruth::True);
+    assert_eq!(
+        effects::loose_furniture_items(&completed, FurnitureKind::Door)?,
+        original_doors
+    );
+    let harvest = effects::harvest_report(&completed)?
+        .ok_or_else(|| invalid("completed fixture lost its finite resource model"))?;
+    let wood_source = harvest
+        .sources
+        .iter()
+        .find(|source| source.resource == HarvestResource::Wood)
+        .ok_or_else(|| invalid("completed fixture lost its original wood source"))?;
+    assert_eq!(wood_source.initial, 32);
+    assert_eq!(wood_source.harvested, 2);
+    assert_eq!(wood_source.remaining, 30);
     Ok(())
 }
 

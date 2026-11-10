@@ -14,6 +14,10 @@ The feature belongs to the deterministic `starter_fortress_resources`
 laboratory. Its resource yields, labor and timing are reference-model rules.
 It grants no native DFHack route or live compatibility admission.
 
+The additive `starter_fortress_multilevel_resources` scenario exposes the same
+finite resource model with five observed rock levels for connected-room stairs.
+Its stock goals and harvesting rules are identical.
+
 ## Request and review
 
 Open the resource scenario with current Observe, Query and Plan authority,

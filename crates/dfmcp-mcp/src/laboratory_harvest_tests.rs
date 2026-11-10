@@ -135,6 +135,67 @@ fn resource_scenario_is_an_additive_generation_with_explicit_finite_sources() ->
 }
 
 #[test]
+fn multilevel_resource_scenario_combines_qualified_sources_with_original_hazard_terrain()
+-> Result<()> {
+    assert!(SCENARIOS.contains(&"starter_fortress_multilevel_resources"));
+    for fortress in [FortressId::new(1), FortressId::new(99812)] {
+        let resources = scenario_snapshot("starter_fortress_resources", fortress, false)?;
+        let multilevel = scenario_snapshot("starter_fortress_multilevel", fortress, false)?;
+        let combined = scenario_snapshot("starter_fortress_multilevel_resources", fortress, false)?;
+        assert_eq!(combined.graph.entities, resources.graph.entities);
+        assert_eq!(combined.graph.edges, resources.graph.edges);
+        assert_eq!(combined.graph.events, resources.graph.events);
+        assert_eq!(combined.graph.chunks, multilevel.graph.chunks);
+        let harvest =
+            harvest_json(&combined)?.ok_or_else(|| invalid("combined harvest model missing"))?;
+        assert_eq!(harvest["available"], true);
+        assert_eq!(
+            harvest["source_anchor"]["state_hash"],
+            combined.state_hash.to_hex()
+        );
+        assert_eq!(harvest["sources_total"], 2);
+        assert_eq!(harvest["sources"][0]["remaining_units"], 32);
+        assert_eq!(harvest["sources"][1]["remaining_units"], 40);
+        assert_eq!(
+            stock(&combined, effects::STOCK_WOOD_FIELD)?,
+            starter::OPENING_WOOD
+        );
+        assert_eq!(
+            stock(&combined, effects::STOCK_PLANT_FIELD)?,
+            starter::OPENING_PLANTS
+        );
+        assert!(harvest_json(&multilevel)?.is_none());
+        for z in 8..=12 {
+            assert_eq!(
+                combined.tile_code_at(dfmcp_core::MapCoord::new(2, 6, z)),
+                Some(tile_codes::SOLID_WALL)
+            );
+        }
+        // Removing only the extra outer-level terrain exactly recovers the
+        // original finite-resource world, including every qualified timestamp.
+        let mut without_outer_levels = combined.clone();
+        without_outer_levels.graph.chunks = resources.graph.chunks.clone();
+        without_outer_levels.refresh_hash();
+        assert_eq!(
+            without_outer_levels.canonical_bytes(),
+            resources.canonical_bytes()
+        );
+        assert_eq!(without_outer_levels.state_hash, resources.state_hash);
+        // Conversely, replacing only the opt-in harvest entities with the
+        // original multilevel entity census recovers that exact world too.
+        let mut without_harvesting = combined;
+        without_harvesting.graph.entities = multilevel.graph.entities.clone();
+        without_harvesting.refresh_hash();
+        assert_eq!(
+            without_harvesting.canonical_bytes(),
+            multilevel.canonical_bytes()
+        );
+        assert_eq!(without_harvesting.state_hash, multilevel.state_hash);
+    }
+    Ok(())
+}
+
+#[test]
 fn harvest_request_is_closed_and_retains_the_exact_selected_source() -> Result<()> {
     let valid = raw("WOOD", 3);
     assert_eq!(

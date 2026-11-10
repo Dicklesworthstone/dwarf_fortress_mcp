@@ -76,6 +76,49 @@ stair model or weaken its proof. A room with an impossible connector, unsafe
 geometry, conflicting workshop site or unavailable required staffing is refused
 before its finite sources are depleted.
 
+Open `starter_fortress_multilevel_resources` for the combined built-in world:
+the same finite sources, worker assignments and opening stocks as
+`starter_fortress_resources`, plus observed rock at z=8 through z=12. This
+provides the complete hazard halo for rooms one level above or below the
+entrance. Prior scenarios keep their exact opening snapshots.
+
+For example, this request builds two bedrooms below the entrance:
+
+```json
+{
+  "template": "connected_room",
+  "planner": "connected_room_stairs_resources_v1",
+  "room": {
+    "template": "provisioned_room",
+    "planner": "provisioned_room_resources_v1",
+    "layout": {
+      "template": "bedroom_cluster",
+      "origin": [2, 6, 9],
+      "rooms": 2,
+      "room_size": [3, 3]
+    },
+    "acquire_resources": {"assign_labor": false},
+    "prerequisites": {
+      "assign_labor": true,
+      "workforce": "complete_project_v1"
+    }
+  },
+  "access": {
+    "entry": [0, 2, 10],
+    "region": {"min": [0, 0, 9], "max": [12, 12, 10]}
+  }
+}
+```
+
+The scenario starts with 20 WOOD and a working Carpenter workshop, so the
+example normally proceeds directly to the room stage. To exercise the finite
+input path through ordinary game actions, first plan and complete
+`{"template":"production","quotas":[{"item":"DOOR","minimum":20}]}`.
+Those twenty observed outputs consume the starting wood. After that work is
+quiet, the same bedroom request proposes harvesting the two missing logs,
+then a separately reviewed continuation manufactures its beds and builds its
+stair connection. No fixture-only stock edit is needed.
+
 ## Review, commit, observe and continue
 
 The initial response uses schema `dfmcp.resource-room/1` and kind

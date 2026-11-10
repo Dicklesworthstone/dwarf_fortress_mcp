@@ -807,6 +807,14 @@ masks, then installs exact furnishings and proves current entrance access.
 archive bytes remain unchanged. See [multi-level connected rooms](docs/LAB_CONNECTED_ROOM_ACCESS.md#connect-rooms-across-levels)
 for the complete request, geometry limits and laboratory-only stair semantics.
 
+`starter_fortress_multilevel_resources` adds the same finite harvest sources,
+worker assignments and opening stock as `starter_fortress_resources` to that
+five-level terrain. With `connected_room_stairs_resources_v1` and the inner
+room's explicit `acquire_resources` policy, one retained project can gather
+missing inputs, then manufacture, excavate stairs and furnish from observed
+yield. Each stage keeps its own review and commit. Existing scenarios retain
+their original opening snapshots.
+
 ### Owned civilian recovery and guarded release
 
 The laboratory `fortress.query` mode `civilian_recovery` reports process-local

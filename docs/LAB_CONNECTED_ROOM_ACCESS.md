@@ -39,6 +39,14 @@ observed rock levels at z=8 through z=12. The entrance remains at z=10; the extr
 outer levels provide the hazard halos needed for room and shaft work at z=9 or
 z=11. Existing scenarios keep their exact opening snapshots.
 
+For finite input acquisition as part of the same project, open
+`starter_fortress_multilevel_resources` and use
+`connected_room_stairs_resources_v1` with an inner
+`provisioned_room_resources_v1` request and `acquire_resources`. This combines
+the same multilevel terrain with finite WOOD/PLANT sources and their qualified
+workers. The complete [resource-and-stairs example](LAB_RESOURCE_ROOM_PROJECTS.md#connected-rooms-and-stairs)
+includes a workflow that consumes starting wood through real production first.
+
 Choose the new planner explicitly. This example connects the entrance hall to
 two furnished bedrooms one level below it:
 

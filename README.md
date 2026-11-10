@@ -308,6 +308,9 @@ a harvest review; `continue_goal` retains the complete layout, furnishings and
 entrance policy and proposes building from observed yield. The goal tracker
 keeps acquisition-stage proof separate from full room completion. Both
 single-level connections and explicit paired-stair connections are supported.
+Open `starter_fortress_multilevel_resources` to combine finite WOOD/PLANT
+sources with the observed terrain needed to gather, furnish and connect rooms
+across levels through the same reviewed workflow.
 
 The [original Carpenter workshop workflow](docs/WORKSHOP_CONSTRUCTION_MCP.md)
 documents the separate unadmitted workshop/1.20 native, safe-Rust and registered

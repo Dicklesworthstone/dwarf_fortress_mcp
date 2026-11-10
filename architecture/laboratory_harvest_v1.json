@@ -5,7 +5,10 @@
     "field": "laboratory_harvest_model",
     "value": "finite-harvest/1",
     "requires": "shared-workforce/1",
-    "scenario": "starter_fortress_resources"
+    "scenario": "starter_fortress_resources",
+    "additional_scenarios": [
+      "starter_fortress_multilevel_resources"
+    ]
   },
   "action": {
     "kind": "harvest_resource",

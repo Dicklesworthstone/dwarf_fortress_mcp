@@ -1,5 +1,40 @@
 # Implementation Status
 
+## Unreleased — Reach finite-input stair rooms from a built-in world
+
+`starter_fortress_multilevel_resources` combines the existing qualified finite
+WOOD/PLANT sources, worker assignments and opening stocks with the complete
+z=8–12 terrain used for connected-room stairs. Prior scenario indices and
+opening snapshots remain unchanged. Tool discovery, usage examples and the
+resource contracts expose the new scenario.
+
+A new execution regression starts from that untouched public world, produces
+twenty actual doors to consume the opening twenty WOOD, harvests two missing
+logs, then continues into two furnished lower bedrooms with paired-stair
+access. It verifies the original doors remain intact and finite-source
+conservation: 32 initial = 30 remaining + 2 harvested. A separate regression
+checks qualified resource identity, all five terrain levels, and exact recovery
+of both prior scenario snapshots after removing only the new additions.
+
+The final selected Rust run passed **246 tests**, zero failed or ignored. It
+includes all 21 new compiler/continuation/scenario/comparison tests from this
+work and all 15 actual comparison-consumer tests. The extended assembly uses
+the whole original `PlanSource` and `GoalContinuation` definitions and
+implementations plus their pure helpers; no source-compilation branches are
+substituted. Before/after audits verified 543 source records, 14 original server
+items and 11 exact locked external dependency identities. Formatting and
+whitespace checks pass, and both complete documented room requests validate
+against the closed schema.
+
+The nine public facade tests remain unexecuted; full handler publication,
+session orchestration and default-budget packet fit are outside this selected
+assembly. `DFMCP_STATIC_ONLY=1 scripts/verify.sh` passed the initial repository,
+source/status, bridge/admission, dependency and bead gates, then was explicitly
+stopped with exit 130 during native-component contract testing after the
+preceding Python groups passed. It did not complete. The release qualifier
+refused the dirty follow-up worktree. No full workspace/release, native or live
+qualification is claimed. Owner: `df-lab-resource-harvest-h2m.5`.
+
 ## Unreleased — Carry furnished-room projects through finite resource stages
 
 Explicit `acquire_resources` on a provisioned room now retains the complete
