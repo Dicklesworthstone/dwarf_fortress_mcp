@@ -7,13 +7,15 @@ use dfmcp_core::{DfmcpError, Digest32, ErrorCode, IntentId, MapCoord, MapCuboid,
 use dfmcp_intent::blueprint::{BlueprintLayout, ExcavationRole, HazardAssessment};
 use dfmcp_intent::{Action, BlueprintPlanner, Intent, RequestedAction, StaticPlanner};
 use dfmcp_world::{
-    EntityKind, Predicate, WorldSnapshot, laboratory_building_footprints, tile_codes,
+    EntityKind, Predicate, PredicateEvidence, PredicateTruth, WorldSnapshot,
+    laboratory_building_footprints, tile_codes,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use serde_json::{Value as Json, json};
 
 use super::room_provisioning::{
-    ProvisionedRoomRequest, RoomAccessComposition, RoomAccessExcavation,
+    ProvisionedRoomRequest, RoomAccessComposition, RoomAccessExcavation, RoomCompileStage,
+    classify_room_stage,
 };
 use crate::lab_world::spatial_index;
 
@@ -24,6 +26,10 @@ const PLANNER: &str = "connected_room_v1";
 const RESIDUAL_PLANNER: &str = "connected_room_residual_v1";
 const STAIRS_PLANNER: &str = "connected_room_stairs_v1";
 const STAIRS_RESIDUAL_PLANNER: &str = "connected_room_stairs_residual_v1";
+const RESOURCE_PLANNER: &str = "connected_room_resources_v1";
+const RESOURCE_RESIDUAL_PLANNER: &str = "connected_room_resources_residual_v1";
+const RESOURCE_STAIRS_PLANNER: &str = "connected_room_stairs_resources_v1";
+const RESOURCE_STAIRS_RESIDUAL_PLANNER: &str = "connected_room_stairs_resources_residual_v1";
 const ROUTING_POLICY: &str = "laboratory-room-mining-cardinal/1";
 const MAX_REQUEST_BYTES: usize = 64 * 1_024;
 const MAX_CELLS: u64 = 1_024;
@@ -37,6 +43,47 @@ pub(crate) struct ConnectedRoomRequest {
     entry: MapCoord,
     area: MapCuboid,
     paired_stairs: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Region {
+    min: [i32; 3],
+    max: [i32; 3],
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Access {
+    entry: [i32; 3],
+    region: Region,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Input<R> {
+    template: String,
+    planner: Option<String>,
+    room: R,
+    access: Access,
+}
+
+#[derive(Deserialize)]
+#[serde(transparent)]
+struct CurrentRoom(
+    #[serde(deserialize_with = "ProvisionedRoomRequest::deserialize_current")]
+    ProvisionedRoomRequest,
+);
+
+/// Archived envelopes decode the original nested bytes through both closed
+/// grammars. A JSON Value round trip could erase repeated permission keys.
+impl<'de> Deserialize<'de> for ConnectedRoomRequest {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Self::from_input(Input::deserialize(deserializer)?, false).map_err(serde::de::Error::custom)
+    }
 }
 
 pub(crate) fn is_connected_room(raw: &str) -> bool {
@@ -63,47 +110,48 @@ impl ConnectedRoomRequest {
         if raw.len() > MAX_REQUEST_BYTES {
             return Err(bounds("connected room source exceeds 65536 bytes"));
         }
-        #[derive(Deserialize)]
-        #[serde(deny_unknown_fields)]
-        struct Region {
-            min: [i32; 3],
-            max: [i32; 3],
-        }
-        #[derive(Deserialize)]
-        #[serde(deny_unknown_fields)]
-        struct Access {
-            entry: [i32; 3],
-            region: Region,
-        }
-        #[derive(Deserialize)]
-        #[serde(deny_unknown_fields)]
-        struct Input {
-            template: String,
-            planner: Option<String>,
-            room: Json,
-            access: Access,
-        }
-        let input: Input = serde_json::from_str(raw)
-            .map_err(|error| invalid(format!("invalid connected room source: {error}")))?;
-        if input.template != "connected_room"
-            || !match input.planner.as_deref() {
-                Some(PLANNER | STAIRS_PLANNER) => true,
-                None => current,
-                _ => false,
+        let input = if current {
+            let Input {
+                template,
+                planner,
+                room: CurrentRoom(room),
+                access,
+            } = serde_json::from_str::<Input<CurrentRoom>>(raw)
+                .map_err(|error| invalid(format!("invalid connected room source: {error}")))?;
+            Input {
+                template,
+                planner,
+                room,
+                access,
             }
-        {
+        } else {
+            serde_json::from_str(raw)
+                .map_err(|error| invalid(format!("invalid connected room source: {error}")))?
+        };
+        Self::from_input(input, current)
+    }
+
+    fn from_input(input: Input<ProvisionedRoomRequest>, current: bool) -> Result<Self> {
+        if input.template != "connected_room" {
             return Err(invalid(
                 "connected_room requires a supported fixed connected_room planner",
             ));
         }
-        let room = if current {
-            ProvisionedRoomRequest::parse_current(&input.room.to_string())?
-        } else {
-            ProvisionedRoomRequest::parse(&input.room.to_string())?
+        let room = input.room;
+        let paired_stairs = match (input.planner.as_deref(), room.is_resource_aware(), current) {
+            (Some(PLANNER), false, _) | (None, false, true) => false,
+            (Some(STAIRS_PLANNER), false, _) => true,
+            (Some(RESOURCE_PLANNER), true, _) | (None, true, true) => false,
+            (Some(RESOURCE_STAIRS_PLANNER), true, _) => true,
+            _ => {
+                return Err(invalid(
+                    "connected room compiler must match the original room resource policy and access model; archives retain both exact generations",
+                ));
+            }
         };
         let request = Self {
             room,
-            paired_stairs: input.planner.as_deref() == Some(STAIRS_PLANNER),
+            paired_stairs,
             entry: coordinate(input.access.entry),
             area: MapCuboid::new(
                 coordinate(input.access.region.min),
@@ -134,20 +182,58 @@ impl ConnectedRoomRequest {
         )
     }
 
-    fn planner(&self) -> &'static str {
-        if self.paired_stairs {
-            STAIRS_PLANNER
-        } else {
-            PLANNER
+    pub(crate) fn planner(&self) -> &'static str {
+        match (self.is_resource_aware(), self.paired_stairs) {
+            (false, false) => PLANNER,
+            (false, true) => STAIRS_PLANNER,
+            (true, false) => RESOURCE_PLANNER,
+            (true, true) => RESOURCE_STAIRS_PLANNER,
         }
     }
 
     pub(crate) fn residual_planner(&self) -> &'static str {
-        if self.paired_stairs {
-            STAIRS_RESIDUAL_PLANNER
-        } else {
-            RESIDUAL_PLANNER
+        match (self.is_resource_aware(), self.paired_stairs) {
+            (false, false) => RESIDUAL_PLANNER,
+            (false, true) => STAIRS_RESIDUAL_PLANNER,
+            (true, false) => RESOURCE_RESIDUAL_PLANNER,
+            (true, true) => RESOURCE_STAIRS_RESIDUAL_PLANNER,
         }
+    }
+
+    pub(crate) fn is_resource_aware(&self) -> bool {
+        self.room.is_resource_aware()
+    }
+
+    /// Current completion of the retained room and access request is distinct
+    /// from an acquisition stage's exact finite-harvest proof. This read never
+    /// builds a route or supplies authority to dispatch a later stage.
+    pub(crate) fn semantic_goal_truth(&self, snapshot: &WorldSnapshot) -> Result<PredicateTruth> {
+        let mut work = Work::default();
+        work.charge(self.validate_source(snapshot)?)?;
+        let (layout, mut targets) = self.room.access_geometry()?;
+        self.validate_geometry(&layout, &targets)?;
+        targets.sort_unstable();
+        let access = if self.paired_stairs {
+            Predicate::LaboratoryRoomAccessPairedStairs {
+                area: self.area,
+                entry: self.entry,
+                targets,
+            }
+        } else {
+            Predicate::LaboratoryRoomAccess {
+                area: self.area,
+                entry: self.entry,
+                targets,
+            }
+        };
+        access.validate_shape()?;
+        let room = self.room.semantic_goal_truth(snapshot)?;
+        let access = PredicateEvidence::laboratory(snapshot)?.evaluate(&access)?;
+        Ok(match (room, access) {
+            (PredicateTruth::Unknown, _) | (_, PredicateTruth::Unknown) => PredicateTruth::Unknown,
+            (PredicateTruth::False, _) | (_, PredicateTruth::False) => PredicateTruth::False,
+            (PredicateTruth::True, PredicateTruth::True) => PredicateTruth::True,
+        })
     }
 
     pub(crate) fn compile(
@@ -183,10 +269,11 @@ impl ConnectedRoomRequest {
         let (mut intent, mut analysis) =
             self.room
                 .compile_with_access(id, snapshot, residual, &build_access)?;
-        let mut source = if residual {
-            b"dfmcp-connected-room-residual-source/1\0".to_vec()
-        } else {
-            b"dfmcp-connected-room-source/1\0".to_vec()
+        let mut source = match (self.is_resource_aware(), residual) {
+            (false, false) => b"dfmcp-connected-room-source/1\0".to_vec(),
+            (false, true) => b"dfmcp-connected-room-residual-source/1\0".to_vec(),
+            (true, false) => b"dfmcp-connected-room-source/2\0".to_vec(),
+            (true, true) => b"dfmcp-connected-room-residual-source/2\0".to_vec(),
         };
         source.extend_from_slice(self.canonical_json().as_bytes());
         let digest = Digest32::of_bytes(&source);
@@ -214,9 +301,29 @@ impl ConnectedRoomRequest {
         });
         analysis["source_binding"]["connected_room_source_digest"] = json!(digest.to_hex());
         analysis["source_binding"]["access_request_preserved"] = json!(true);
-        analysis["goal"] = json!(
+        if self.is_resource_aware() {
+            analysis["source_binding"]["original_resource_policy_preserved"] = json!(true);
+            analysis["resource_workflow"]["original_request"] =
+                serde_json::from_str(&self.canonical_json()).map_err(|error| {
+                    DfmcpError::new(
+                        ErrorCode::InternalInvariantViolation,
+                        format!("canonical connected room source could not be decoded: {error}"),
+                    )
+                })?;
+            analysis["resource_workflow"]["planner"] = json!(self.planner());
+        }
+        let semantic_goal = json!(
             "every original room terrain region and furnishing, plus current entrance-to-furnishing approach access"
         );
+        if self.is_resource_aware() {
+            analysis["semantic_room_goal"] = semantic_goal.clone();
+        }
+        if classify_room_stage(&intent) == RoomCompileStage::ResourceAcquisition {
+            analysis["access"]["deferred_scope"] =
+                json!("separately_reviewed_room_and_access_pursuit");
+        } else {
+            analysis["goal"] = semantic_goal;
+        }
         Ok((intent, analysis))
     }
 
@@ -842,3 +949,7 @@ fn bounds(message: impl Into<String>) -> DfmcpError {
 #[cfg(test)]
 #[path = "connected_room_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "connected_room_resource_tests.rs"]
+mod resource_tests;

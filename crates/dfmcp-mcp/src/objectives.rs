@@ -67,6 +67,41 @@ impl Objective {
         self.source.is_resource_aware_production()
     }
 
+    pub(super) fn is_resource_aware_room(&self) -> bool {
+        self.source.is_resource_aware_room()
+    }
+
+    fn current_resource_room_truth(&self, session: &LabSession) -> Result<PredicateTruth> {
+        let context = context_for(session, session.next_request_id);
+        authorize_entry(&context, Capability::Observe, RiskTier::ReadOnly)?;
+        authorize_entry(&context, Capability::Query, RiskTier::ReadOnly)?;
+        query_budget::admit_sources(&[session.adapter.snapshot()], &context)?;
+        if !self.is_resource_aware_room()
+            || self.abandoned(session)
+            || self.verification_error.is_some()
+            || self.plan.is_none()
+        {
+            return Err(DfmcpError::new(
+                ErrorCode::PreconditionsFailed,
+                "the original resource-aware room has no verified active project custody",
+            ));
+        }
+        self.source
+            .resource_room_goal_truth(session.adapter.snapshot())
+    }
+
+    fn room_stage_scope(&self) -> &'static str {
+        if self.plan.as_ref().is_some_and(|plan| {
+            plan.steps
+                .iter()
+                .any(|step| matches!(&step.action, Action::HarvestResource { .. }))
+        }) {
+            "resource_acquisition_stage"
+        } else {
+            "reviewed_room_pursuit"
+        }
+    }
+
     fn resource_reserve_source(&self) -> Result<Option<goal_continuation::ProductionContinuation>> {
         let source = match &self.source {
             PlanSource::Production { raw, .. } => {
@@ -221,7 +256,20 @@ impl Objective {
             .unwrap_or(PredicateTruth::Unknown);
         let mut result = crate::observation_projection::laboratory_objective_evidence(observed);
         let abandoned = self.abandoned(session);
-        let continuation_truth = if self.is_resource_aware_production() {
+        let continuation_truth = if self.is_resource_aware_room() {
+            let project = self.current_resource_room_truth(session);
+            let truth = project.as_ref().copied().unwrap_or(PredicateTruth::Unknown);
+            let mut projection =
+                crate::observation_projection::laboratory_objective_evidence(project);
+            projection["truth"] = projection["predicate_truth"].clone();
+            projection["observed_anchor"] = anchor_json(&session.adapter.snapshot().anchor());
+            projection["completion_scope"] = json!("complete_original_room_and_access");
+            projection["historical_action_proof_rewritten"] = json!(false);
+            result["semantic_room_goal"] = projection;
+            result["goal_scope"] = json!(self.room_stage_scope());
+            result["historical_achievement_scope"] = json!(self.room_stage_scope());
+            truth
+        } else if self.is_resource_aware_production() {
             let output = self.current_resource_output_truth(session);
             let truth = output.as_ref().copied().unwrap_or(PredicateTruth::Unknown);
             let mut projection =
@@ -328,7 +376,10 @@ impl Objective {
         );
         result["pursuit_active"] = json!(
             !abandoned
-                && (truth != PredicateTruth::True || reserve_source.is_some())
+                && (truth != PredicateTruth::True
+                    || reserve_source.is_some()
+                    || (self.is_resource_aware_room()
+                        && continuation_truth != PredicateTruth::True))
                 && quiet != Some(true)
         );
         result["needs_replan"] = json!(!abandoned && continuation_needed && quiet == Some(true));
@@ -451,7 +502,7 @@ pub(super) fn continuation_source(
             "restore abandoned pursuit of this original goal; explicitly request a new goal in the current epoch",
         ));
     }
-    if objective.source.is_resource_acquisition() || objective.is_resource_aware_production() {
+    if objective.source.requires_complete_source_review() {
         // The public proposal, handoff discovery and commit-time revalidation
         // inspect the same complete finite resource and lineage domains.
         authorize_entry(&context, Capability::Query, RiskTier::ReadOnly)?;
@@ -526,7 +577,16 @@ pub(super) fn continuation_source(
             "the original goal has no verified active observation lineage",
         )
     })?;
-    if let GoalContinuation::Production(source) = &continuation
+    if continuation.is_resource_aware_room() {
+        goal_continuation::validate_room_project_evidence(
+            original,
+            active,
+            session.adapter.snapshot(),
+            &context,
+            quiet,
+            continuation.resource_room_goal_truth(session.adapter.snapshot())?,
+        )?;
+    } else if let GoalContinuation::Production(source) = &continuation
         && source.is_resource_aware()
     {
         source.validate_resource_goal_evidence(
@@ -575,7 +635,12 @@ pub(super) fn continuation_source(
                 ));
             }
             if continuation.requires_semantic_sibling_check() {
-                match other.current_truth(session)? {
+                let sibling_truth = if continuation.is_resource_aware_room() {
+                    other.current_resource_room_truth(session)?
+                } else {
+                    other.current_truth(session)?
+                };
+                match sibling_truth {
                     PredicateTruth::True if !reserve_work_required => {
                         return Err(DfmcpError::new(
                             ErrorCode::InvalidIntent,
@@ -586,7 +651,8 @@ pub(super) fn continuation_source(
                         ));
                     }
                     PredicateTruth::Unknown
-                        if matches!(continuation, GoalContinuation::ResourceAcquisition(_)) =>
+                        if matches!(continuation, GoalContinuation::ResourceAcquisition(_))
+                            || continuation.is_resource_aware_room() =>
                     {
                         return Err(DfmcpError::new(
                             ErrorCode::PreconditionsFailed,
@@ -767,9 +833,19 @@ pub(super) fn objective_evictions(session: &LabSession, digest: Digest32) -> Res
     for objective in &session.objectives {
         if !objective.historical_proof_verified
             || objective.first_satisfied_anchor.is_none()
-            || !matches!(objective.current_truth(session), Ok(PredicateTruth::True))
             || !goal_work_quiescent(session, objective).unwrap_or(false)
         {
+            continue;
+        }
+        // The resource stage can finish before the room exists, and its WOOD
+        // target can later become false when the completed room consumes it.
+        // Neither observation determines completion of the retained project.
+        let completion = if objective.is_resource_aware_room() {
+            objective.current_resource_room_truth(session)
+        } else {
+            objective.current_truth(session)
+        };
+        if !matches!(completion, Ok(PredicateTruth::True)) {
             continue;
         }
         match objective.resource_reserve_source() {

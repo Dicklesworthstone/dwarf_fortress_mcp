@@ -404,6 +404,17 @@ and current access; later obstructions can invalidate current success.
 See `docs/LAB_CONNECTED_ROOM_ACCESS.md` for the complete JSON example,
 deterministic routing policy and reference-model limits.
 
+An explicit nested `acquire_resources` policy selects the additive resource
+room compiler. `provisioned_room_resources_v1`, `connected_room_resources_v1`
+and explicit `connected_room_stairs_resources_v1` retain the complete project
+through finite-input acquisition and separately reviewed room stages. Responses
+use `dfmcp.resource-room/1`, kind `resource_room` or
+`resource_room_continuation`, and complete `room` analysis. Goal observations
+separate `semantic_room_goal` from exact historical stage truth; a finished
+harvest cannot complete or evict an unfinished room. Current Observe/Query/Plan,
+full source/output bounds and same-root quiescence are enforced at the relevant
+review and commit boundaries. See `docs/LAB_RESOURCE_ROOM_PROJECTS.md`.
+
 The laboratory `blueprint` JSON string also accepts the closed
 `{"template":"continue_goal","plan_digest":"<retained goal digest>"}` form.
 It compiles a new reviewed plan from complete original production quotas,

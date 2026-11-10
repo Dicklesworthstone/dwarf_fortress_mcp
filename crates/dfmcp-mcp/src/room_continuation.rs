@@ -8,13 +8,16 @@ use super::room_provisioning::ProvisionedRoomRequest;
 use crate::lab_world::MAX_ACTIONS_JSON_BYTES;
 use dfmcp_core::{DfmcpError, Digest32, ErrorCode, IntentId, Result};
 use dfmcp_intent::{Intent, StaticPlanner};
-use dfmcp_world::WorldSnapshot;
+use dfmcp_world::{PredicateTruth, WorldSnapshot};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
 const SOURCE_SCHEMA: &str = "dfmcp.room-continuation/1";
+#[cfg(test)]
 const PLANNER: &str = "provisioned_room_residual_v1";
 const SOURCE_DOMAIN: &[u8] = b"dfmcp-room-continuation-source/1\0";
+const RESOURCE_SOURCE_SCHEMA: &str = "dfmcp.room-continuation/2";
+const RESOURCE_SOURCE_DOMAIN: &[u8] = b"dfmcp-room-continuation-source/2\0";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct RoomContinuation {
@@ -72,17 +75,30 @@ impl RoomContinuation {
             planner: String,
             parent_plan_digest: String,
             root_plan_digest: String,
-            room: Value,
+            room: ProvisionedRoomRequest,
         }
         bounded(raw)?;
         let source: Source = serde_json::from_str(raw)
             .map_err(|error| invalid(format!("invalid retained room continuation: {error}")))?;
-        if source.schema != SOURCE_SCHEMA || source.planner != PLANNER {
+        if !matches!(
+            source.schema.as_str(),
+            SOURCE_SCHEMA | RESOURCE_SOURCE_SCHEMA
+        ) {
             return Err(invalid(
                 "unknown room continuation schema or residual compiler",
             ));
         }
-        let request = ProvisionedRoomRequest::parse(&source.room.to_string())?;
+        let request = source.room;
+        let expected_schema = if request.is_resource_aware() {
+            RESOURCE_SOURCE_SCHEMA
+        } else {
+            SOURCE_SCHEMA
+        };
+        if source.schema != expected_schema || source.planner != request.residual_planner() {
+            return Err(invalid(
+                "room continuation generation differs from its original resource policy",
+            ));
+        }
         Self::new(
             digest(&source.parent_plan_digest)?,
             digest(&source.root_plan_digest)?,
@@ -98,7 +114,9 @@ impl RoomContinuation {
         // Embed the existing canonical request unchanged, including its v1
         // marker and supplied setup options that happen not to be needed now.
         format!(
-            "{{\"schema\":\"{SOURCE_SCHEMA}\",\"planner\":\"{PLANNER}\",\"parent_plan_digest\":\"{}\",\"root_plan_digest\":\"{}\",\"room\":{}}}",
+            "{{\"schema\":\"{}\",\"planner\":\"{}\",\"parent_plan_digest\":\"{}\",\"root_plan_digest\":\"{}\",\"room\":{}}}",
+            self.source_schema(),
+            self.request.residual_planner(),
             self.parent.to_hex(),
             self.root.to_hex(),
             self.request.canonical_json(),
@@ -106,15 +124,19 @@ impl RoomContinuation {
     }
 
     pub(crate) fn source_digest(&self) -> Digest32 {
-        let mut bytes = SOURCE_DOMAIN.to_vec();
+        let mut bytes = if self.is_resource_aware() {
+            RESOURCE_SOURCE_DOMAIN.to_vec()
+        } else {
+            SOURCE_DOMAIN.to_vec()
+        };
         bytes.extend_from_slice(self.canonical_json().as_bytes());
         Digest32::of_bytes(&bytes)
     }
 
     pub(crate) fn lineage_json(&self) -> Value {
-        json!({
-            "source_schema":SOURCE_SCHEMA,
-            "planner":PLANNER,
+        let mut lineage = json!({
+            "source_schema":self.source_schema(),
+            "planner":self.request.residual_planner(),
             "parent_plan_digest":self.parent.to_hex(),
             "root_plan_digest":self.root.to_hex(),
             "continuation_source_digest":self.source_digest().to_hex(),
@@ -123,7 +145,28 @@ impl RoomContinuation {
             "completion_proves":"this_reviewed_pursuit_only",
             "requires_explicit_commit":true,
             "replacement_work_dispatched":false,
-        })
+        });
+        if self.is_resource_aware() {
+            lineage["original_resource_policy_preserved"] = json!(true);
+            lineage["stage_completion_is_project_completion"] = json!(false);
+        }
+        lineage
+    }
+
+    fn source_schema(&self) -> &'static str {
+        if self.is_resource_aware() {
+            RESOURCE_SOURCE_SCHEMA
+        } else {
+            SOURCE_SCHEMA
+        }
+    }
+
+    pub(crate) fn is_resource_aware(&self) -> bool {
+        self.request.is_resource_aware()
+    }
+
+    pub(crate) fn semantic_goal_truth(&self, snapshot: &WorldSnapshot) -> Result<PredicateTruth> {
+        self.request.semantic_goal_truth(snapshot)
     }
 
     pub(crate) fn same_original_request(&self, other: &Self) -> bool {
@@ -156,3 +199,7 @@ impl RoomContinuation {
 #[cfg(test)]
 #[path = "room_continuation_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "room_resource_continuation_tests.rs"]
+mod resource_tests;

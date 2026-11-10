@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased — Build complete rooms through observed finite-input stages
+
+- Add explicit finite-resource acquisition to provisioned rooms and both
+  single-level and paired-stair connected rooms, retaining the full project.
+- Preflight geometry, actual workshop sites, staffing, access and deferred
+  action bounds before proposing harvest; manufacture and build only from
+  observed stock in a separately reviewed stage.
+- Preserve the original room, permissions and parent/root custody in additive
+  continuation `/2`, including partial harvest and installed-furniture recovery.
+- Separate complete semantic room truth from exact harvest/room stage proof;
+  retain unfinished project custody and block duplicate same-root work.
+- Require complete authority/source/publication budgets and fresh review after
+  source drift. Bind comparisons to the same complete room request and label
+  predictions as current-stage evidence.
+- Pass 224 selected real-module Rust tests, including all 17 new compiler and
+  continuation cases, with exact source and locked dependency audits. Validate
+  17 schema vectors and scoped formatting. Nine public lifecycle/comparison
+  tests are authored but unexecuted; full MCP and release qualification remain
+  unestablished after the earlier dependency build memory kills.
+- Preserve historical compiler bytes, the eleven-tool surface and current
+  native/live admission boundaries. Track `df-lab-resource-harvest-h2m.5`.
+
 ## Unreleased — Read exact original plans after their first response
 
 - Add session-bound retained-plan catalogs, manifests and bounded lossless

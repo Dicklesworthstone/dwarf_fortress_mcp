@@ -1,0 +1,228 @@
+{
+  "$id": "https://dwarf-fortress-mcp.org/schemas/0.1.0/lab_resource_room.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Laboratory furnished and connected rooms with finite resource acquisition",
+  "description": "Decoded fortress.plan blueprint. Only resource-aware room generations are described here. Every stage requires separate review and commit; archives require explicit matching planner markers.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/room"
+    },
+    {
+      "$ref": "#/$defs/connected_room"
+    }
+  ],
+  "$defs": {
+    "coordinate": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {
+        "type": "integer",
+        "minimum": -2147483648,
+        "maximum": 2147483647
+      }
+    },
+    "bedroom_cluster": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "template",
+        "origin",
+        "rooms",
+        "room_size"
+      ],
+      "properties": {
+        "template": {
+          "const": "bedroom_cluster"
+        },
+        "origin": {
+          "$ref": "#/$defs/coordinate"
+        },
+        "rooms": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16
+        },
+        "room_size": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 255
+          }
+        }
+      }
+    },
+    "dining_hall": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "template",
+        "origin",
+        "width",
+        "height"
+      ],
+      "properties": {
+        "template": {
+          "const": "dining_hall"
+        },
+        "origin": {
+          "$ref": "#/$defs/coordinate"
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 255
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 255
+        }
+      }
+    },
+    "room": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "template",
+        "layout",
+        "acquire_resources"
+      ],
+      "properties": {
+        "template": {
+          "const": "provisioned_room"
+        },
+        "planner": {
+          "const": "provisioned_room_resources_v1"
+        },
+        "layout": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/bedroom_cluster"
+            },
+            {
+              "$ref": "#/$defs/dining_hall"
+            }
+          ]
+        },
+        "acquire_resources": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "assign_labor": {
+              "type": "boolean",
+              "default": false
+            }
+          }
+        },
+        "prerequisites": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "assign_labor": {
+              "type": "boolean",
+              "default": false
+            },
+            "workforce": {
+              "const": "complete_project_v1"
+            },
+            "workshops": {
+              "type": "array",
+              "maxItems": 3,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "building",
+                  "location"
+                ],
+                "dependentRequired": {
+                  "min": [
+                    "max"
+                  ],
+                  "max": [
+                    "min"
+                  ]
+                },
+                "properties": {
+                  "building": {
+                    "enum": [
+                      "workshop:Still",
+                      "workshop:Kitchen",
+                      "workshop:Carpenters"
+                    ]
+                  },
+                  "location": {
+                    "$ref": "#/$defs/coordinate"
+                  },
+                  "min": {
+                    "$ref": "#/$defs/coordinate"
+                  },
+                  "max": {
+                    "$ref": "#/$defs/coordinate"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "connected_room": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "template",
+        "room",
+        "access"
+      ],
+      "properties": {
+        "template": {
+          "const": "connected_room"
+        },
+        "planner": {
+          "enum": [
+            "connected_room_resources_v1",
+            "connected_room_stairs_resources_v1"
+          ]
+        },
+        "room": {
+          "$ref": "#/$defs/room"
+        },
+        "access": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "entry",
+            "region"
+          ],
+          "properties": {
+            "entry": {
+              "$ref": "#/$defs/coordinate"
+            },
+            "region": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "min",
+                "max"
+              ],
+              "properties": {
+                "min": {
+                  "$ref": "#/$defs/coordinate"
+                },
+                "max": {
+                  "$ref": "#/$defs/coordinate"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$comment": "Rust additionally rejects duplicate keys and exact-integer violations, limits source to 65536 bytes and continuation to 16384 bytes, validates layout geometry and 1..16 furnishing slots, requires entry/targets in the 1024-cell access domain, checks paired stairs only under the explicit stairs compiler, bounds deferred and executable programs to 64 actions, and requires current qualified complete source evidence. No future stock or future item identity is acquisition credit."
+}

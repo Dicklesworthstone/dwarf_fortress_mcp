@@ -23,6 +23,7 @@ use serde_json::{Value, json};
 
 use super::PlanSource;
 use super::plan_forecast::{ForecastBudget, forecast_plan_bounded};
+use super::room_provisioning::{RoomCompileStage, classify_room_stage};
 
 const MAX_REQUEST_BYTES: usize = 128 * 1024;
 const MAX_CANDIDATES: usize = 4;
@@ -453,6 +454,14 @@ struct Compiled {
     candidate: Candidate,
     intent: Intent,
     reserve_until: Option<u64>,
+    resource_room_request: Option<String>,
+}
+
+fn room_goal_scope(intent: &Intent) -> &'static str {
+    match classify_room_stage(intent) {
+        RoomCompileStage::ResourceAcquisition => "resource_acquisition_stage",
+        RoomCompileStage::FurnishRoom => "reviewed_room_pursuit",
+    }
 }
 
 fn reserve_until(source: &PlanSource) -> Result<Option<u64>> {
@@ -565,17 +574,30 @@ pub(super) fn compare(
     let mut compiled = Vec::with_capacity(candidates.len());
     let mut common_goal: Option<Predicate> = None;
     let mut common_reserve: Option<Option<u64>> = None;
+    let mut common_room: Option<Option<String>> = None;
     let mut total_actions = 0_usize;
     for candidate in candidates {
         check_wall(context, started)?;
         let result = candidate.source().and_then(|source| {
             let normalized = candidate.normalized(&source)?;
             let reserve_until = reserve_until(&source)?;
+            // Equal WOOD acquisition terminals do not establish equal room
+            // projects. Keep the full canonical room/access intent in the
+            // comparison contract before either candidate forecast is run.
+            let resource_room_request = match &source {
+                PlanSource::Blueprint { raw, .. } | PlanSource::ConnectedRoom { raw, .. }
+                    if source.is_resource_aware_room() =>
+                {
+                    Some(raw.clone())
+                }
+                _ => None,
+            };
             let (intent, _) = source.compile(intent_id, snapshot)?;
             Ok(Compiled {
                 candidate: normalized,
                 intent,
                 reserve_until,
+                resource_room_request,
             })
         });
         let value = match result {
@@ -586,6 +608,14 @@ pub(super) fn compare(
             }
         };
         let goal = value.intent.terminal_condition.normalized();
+        if common_room
+            .as_ref()
+            .is_some_and(|existing| existing != &value.resource_room_request)
+        {
+            return Err(invalid(
+                "resource-aware room candidates must retain the same complete original room and access request; matching acquisition targets alone are not the same project",
+            ));
+        }
         if common_goal
             .as_ref()
             .is_some_and(|existing| existing != &goal)
@@ -597,6 +627,7 @@ pub(super) fn compare(
         }
         common_goal = Some(goal);
         common_reserve = Some(value.reserve_until);
+        common_room = Some(value.resource_room_request.clone());
         total_actions = total_actions.saturating_add(value.intent.requested_actions.len());
         if total_actions > context.budget.max_actions as usize {
             return Err(exhausted(
@@ -605,6 +636,13 @@ pub(super) fn compare(
         }
         compiled.push(value);
     }
+    // Preserve the complete original room separately from the current stage's
+    // terminal. A successful finite harvest forecast cannot imply that the
+    // room, furnishings or access route have been built on the fork.
+    let resource_room_scope = compiled
+        .first()
+        .filter(|candidate| candidate.resource_room_request.is_some())
+        .map(|candidate| room_goal_scope(&candidate.intent));
     // Establish the entire common objective before a single candidate fork.
     let mut prepared: Vec<(Compiled, PreparedPlan)> = Vec::with_capacity(compiled.len());
     for candidate in compiled {
@@ -654,7 +692,7 @@ pub(super) fn compare(
                 candidate.candidate.key.clone(),
             ));
         }
-        rows.push(json!({
+        let mut row = json!({
             "key": candidate.candidate.key,
             "status": if available { "evaluated" } else { "unavailable" },
             "epistemic_state": "predicted",
@@ -667,7 +705,12 @@ pub(super) fn compare(
             "prediction": compact_prediction(&prediction),
             "selection_available": true,
             "next_step": selection_step(snapshot, context, &candidate.candidate)?,
-        }));
+        });
+        if candidate.resource_room_request.is_some() {
+            row["goal_scope"] = json!(room_goal_scope(&candidate.intent));
+            row["forecast_scope"] = json!("current_reviewed_stage_only");
+        }
+        rows.push(row);
     }
     check_wall(context, started)?;
     rows.sort_by(|left, right| left["key"].as_str().cmp(&right["key"].as_str()));
@@ -685,7 +728,7 @@ pub(super) fn compare(
     let goal_digest = common_goal
         .as_ref()
         .map(|goal| Digest32::of_bytes(&goal.canonical_bytes()).to_hex());
-    Ok(json!({
+    let mut result = json!({
         "ok": true,
         "schema": "dfmcp.plan-comparison/1",
         "kind": "compare_candidates",
@@ -709,7 +752,31 @@ pub(super) fn compare(
         "effect_evidence": false,
         "pending_plan_changed": false,
         "note": "predictions assume no other agent acts; selection creates a newly reviewed plan under current authority and never commits it",
-    }))
+    });
+    if let Some(raw) = common_room.flatten() {
+        result["semantic_room_request"] = serde_json::from_str(&raw).map_err(|error| {
+            DfmcpError::new(
+                ErrorCode::InternalInvariantViolation,
+                format!("canonical resource room comparison source could not be decoded: {error}"),
+            )
+        })?;
+        result["goal_scope"] = json!(resource_room_scope);
+        result["forecast_scope"] = json!("current_reviewed_stage_only");
+        result["recommendation_scope"] = json!("current_reviewed_stage_only");
+        result["method"] =
+            json!("same_original_room_request_current_stage_on_discarded_laboratory_forks");
+        result["recommendation"]["reason"] = json!(if !evidence_complete {
+            "at least one candidate lacks a complete comparable stage prediction; no recommendation is justified"
+        } else if result["recommended_candidate"].is_null() {
+            "no candidate predicts the reviewed stage goal, verified actions and physical quiescence together within the common horizon"
+        } else {
+            "among complete reviewed-stage predictions, minimize risk, checkpoint burden, completion tick, action count, then lexical key"
+        });
+        result["note"] = json!(
+            "predictions cover only the currently reviewed stage; an acquisition forecast does not include later room or access work; selection prepares a new plan under current authority and never commits it"
+        );
+    }
+    Ok(result)
 }
 
 // serde_json::Value accepts repeated object keys. A source candidate must retain

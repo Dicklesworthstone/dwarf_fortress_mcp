@@ -13,14 +13,21 @@ use dfmcp_intent::{
     Action, BlueprintPlanner, BlueprintTemplate, Constraint, FurnitureKind, Intent,
     RequestedAction, StaticPlanner, derive_step_idempotency_key, effects,
 };
-use dfmcp_world::{EntityKind, Predicate, Value, WorldSnapshot, laboratory_fact_value};
-use serde::Deserialize;
+use dfmcp_world::{
+    EntityKind, Predicate, PredicateEvidence, PredicateTruth, Value, WorldSnapshot,
+    laboratory_building_footprints, laboratory_fact_value,
+};
+use serde::{Deserialize, Deserializer};
 use serde_json::{Value as Json, json};
 
-use crate::lab_world::{ProductionRequest, parse_steps, spatial_index};
+use crate::lab_world::{
+    ProductionPrerequisitesInput, ProductionRequest, parse_steps, spatial_index,
+};
 
 const PLANNER: &str = "provisioned_room_v1";
 const RESIDUAL_PLANNER: &str = "provisioned_room_residual_v1";
+const RESOURCE_PLANNER: &str = "provisioned_room_resources_v1";
+const RESOURCE_RESIDUAL_PLANNER: &str = "provisioned_room_resources_residual_v1";
 const MAX_REQUEST_BYTES: usize = 64 * 1_024;
 const MAX_SLOTS: usize = 16;
 const MAX_STEPS: usize = 64;
@@ -105,6 +112,64 @@ pub(crate) struct ProvisionedRoomRequest {
     layout: RoomLayout,
     prerequisites: Option<Json>,
     setup_workforce: Option<bool>,
+    acquire_resources: Option<RoomResourcePolicy>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RoomResourcePolicy {
+    #[serde(default)]
+    assign_labor: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RoomRequestInput {
+    template: String,
+    planner: Option<String>,
+    layout: RoomLayout,
+    prerequisites: Option<ProductionPrerequisitesInput>,
+    #[serde(default, deserialize_with = "present_resource_policy")]
+    acquire_resources: Option<RoomResourcePolicy>,
+}
+
+fn present_resource_policy<'de, D>(
+    deserializer: D,
+) -> std::result::Result<Option<RoomResourcePolicy>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    RoomResourcePolicy::deserialize(deserializer).map(Some)
+}
+
+impl<'de> Deserialize<'de> for ProvisionedRoomRequest {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Self::from_input(RoomRequestInput::deserialize(deserializer)?, false)
+            .map_err(serde::de::Error::custom)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RoomCompileStage {
+    ResourceAcquisition,
+    FurnishRoom,
+}
+
+/// Only trusted room compiler outputs are classified here. The acquisition
+/// branch is structurally restricted to the core's finite harvest program.
+pub(crate) fn classify_room_stage(intent: &Intent) -> RoomCompileStage {
+    if intent
+        .requested_actions
+        .iter()
+        .any(|step| matches!(step.action, Action::HarvestResource { .. }))
+    {
+        RoomCompileStage::ResourceAcquisition
+    } else {
+        RoomCompileStage::FurnishRoom
+    }
 }
 
 /// Optional work composed before exact furnishing step identities are derived.
@@ -146,28 +211,34 @@ impl ProvisionedRoomRequest {
         Self::parse_inner(raw, false)
     }
 
+    pub(crate) fn deserialize_current<'de, D>(
+        deserializer: D,
+    ) -> std::result::Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Self::from_input(RoomRequestInput::deserialize(deserializer)?, true)
+            .map_err(serde::de::Error::custom)
+    }
+
     fn parse_inner(raw: &str, current: bool) -> Result<Self> {
         if raw.len() > MAX_REQUEST_BYTES {
             return Err(bounds("provisioned room request exceeds 65536 bytes"));
         }
-        #[derive(Deserialize)]
-        #[serde(deny_unknown_fields)]
-        struct Input {
-            template: String,
-            planner: Option<String>,
-            layout: RoomLayout,
-            prerequisites: Option<Json>,
-        }
-        let input: Input = serde_json::from_str(raw)
+        let input: RoomRequestInput = serde_json::from_str(raw)
             .map_err(|error| invalid(format!("invalid provisioned room request: {error}")))?;
-        let supported_planner = match input.planner.as_deref() {
-            Some(PLANNER) => true,
-            None => current,
+        Self::from_input(input, current)
+    }
+
+    fn from_input(input: RoomRequestInput, current: bool) -> Result<Self> {
+        let supported_planner = match (input.planner.as_deref(), input.acquire_resources) {
+            (Some(PLANNER), None) | (Some(RESOURCE_PLANNER), Some(_)) => true,
+            (None, _) => current,
             _ => false,
         };
         if input.template != "provisioned_room" || !supported_planner {
             return Err(invalid(
-                "provisioned_room requires the fixed provisioned_room_v1 planner generation",
+                "provisioned_room requires its exact planner generation and matching finite-resource policy",
             ));
         }
         let (origin, template) = input.layout.geometry();
@@ -201,18 +272,101 @@ impl ProvisionedRoomRequest {
             layout: input.layout,
             prerequisites,
             setup_workforce,
+            acquire_resources: input.acquire_resources,
         })
+    }
+
+    pub(crate) fn is_resource_aware(&self) -> bool {
+        self.acquire_resources.is_some()
+    }
+
+    pub(crate) fn planner(&self) -> &'static str {
+        if self.is_resource_aware() {
+            RESOURCE_PLANNER
+        } else {
+            PLANNER
+        }
+    }
+
+    pub(crate) fn residual_planner(&self) -> &'static str {
+        if self.is_resource_aware() {
+            RESOURCE_RESIDUAL_PLANNER
+        } else {
+            RESIDUAL_PLANNER
+        }
     }
 
     pub(crate) fn canonical_json(&self) -> String {
         let mut value = json!({
-            "template":"provisioned_room", "planner":PLANNER,
+            "template":"provisioned_room", "planner":self.planner(),
             "layout":self.layout.canonical_value(),
         });
         if let Some(options) = &self.prerequisites {
             value["prerequisites"] = options.clone();
         }
+        if let Some(policy) = self.acquire_resources {
+            value["acquire_resources"] = json!({"assign_labor":policy.assign_labor});
+        }
         value.to_string()
+    }
+
+    /// Current semantic completion of the entire original room, independent of
+    /// any acquisition stage's material stock or a prior attempt's action IDs.
+    /// Only exact reciprocal, complete item custody satisfies a furnishing.
+    pub(crate) fn semantic_goal_truth(&self, snapshot: &WorldSnapshot) -> Result<PredicateTruth> {
+        let (origin, template) = self.layout.geometry();
+        let layout = BlueprintPlanner.layout(origin, template)?;
+        let slots = furniture_slots(&layout, self.layout.furniture())?;
+        validate_complete_occupancy(snapshot, &layout)?;
+        let evidence = PredicateEvidence::laboratory(snapshot)?;
+        let retained = retained_installations(snapshot, &layout, &slots)?;
+        let mut terrain_complete = true;
+        let mut terrain_unknown = false;
+        for part in layout.excavations() {
+            match evidence.evaluate(&Predicate::RegionTerrain {
+                area: part.area,
+                tile_code: effects::dig_target_tile_code(part.mode),
+            })? {
+                PredicateTruth::True => {}
+                PredicateTruth::False => terrain_complete = false,
+                PredicateTruth::Unknown => terrain_unknown = true,
+            }
+        }
+        if terrain_unknown {
+            Ok(PredicateTruth::Unknown)
+        } else if terrain_complete && retained.len() == slots.len() {
+            Ok(PredicateTruth::True)
+        } else {
+            Ok(PredicateTruth::False)
+        }
+    }
+
+    fn source_digest(&self, residual: bool) -> Digest32 {
+        let domain: &[u8] = match (self.is_resource_aware(), residual) {
+            (false, false) => b"dfmcp-provisioned-room-source/1\0",
+            (false, true) => b"dfmcp-provisioned-room-residual-source/1\0",
+            (true, false) => b"dfmcp-provisioned-room-source/2\0",
+            (true, true) => b"dfmcp-provisioned-room-residual-source/2\0",
+        };
+        let mut source_bytes = domain.to_vec();
+        source_bytes.extend_from_slice(self.canonical_json().as_bytes());
+        Digest32::of_bytes(&source_bytes)
+    }
+
+    fn resource_workflow(&self, stage: &str, production: &Json) -> Result<Json> {
+        let original_request: Json = serde_json::from_str(&self.canonical_json())
+            .map_err(|_| invariant("canonical original room request could not be decoded"))?;
+        Ok(json!({
+            "schema":"dfmcp.resource-room/1", "stage":stage,
+            "planner":self.planner(), "original_request":original_request,
+            "requirements":production.get("resource_workflow")
+                .and_then(|workflow| workflow.get("requirements"))
+                .cloned().unwrap_or_else(|| json!([])),
+            "next_stage_requires_separate_review":stage == "acquire_resources",
+            "automatic_continuation":false,
+            "acquisition_proves_room_goal":false,
+            "future_inventory_is_not_credit":true,
+        }))
     }
 
     pub(crate) fn compile(
@@ -272,6 +426,9 @@ impl ProvisionedRoomRequest {
         let (origin, template) = self.layout.geometry();
         let layout = BlueprintPlanner.layout(origin, template.clone())?;
         let slots = furniture_slots(&layout, self.layout.furniture())?;
+        if self.is_resource_aware() {
+            validate_complete_occupancy(snapshot, &layout)?;
+        }
         let retained = if residual {
             retained_installations(snapshot, &layout, &slots)?
         } else {
@@ -354,6 +511,8 @@ impl ProvisionedRoomRequest {
         }
         let mut requested_actions = Vec::new();
         let mut production_analysis = Json::Null;
+        let mut acquisition_stage = None;
+        let mut deferred_production_steps = 0;
         if !quotas.is_empty() {
             let mut source = json!({"template":"production", "quotas":quotas});
             if let Some(options) = &self.prerequisites {
@@ -367,20 +526,35 @@ impl ProvisionedRoomRequest {
                     options.remove("workforce");
                 }
             }
-            let compiled =
-                ProductionRequest::parse_current(&source.to_string())?.compile(snapshot)?;
-            let mut procurement = Intent {
-                id,
-                anchor: snapshot.anchor(),
-                summary: "procure original room furnishings".to_owned(),
-                terminal_condition: compiled.terminal.clone(),
-                constraints: vec![Constraint::MaxRisk(RiskTier::Guarded)],
-                requested_actions: parse_steps(&compiled.actions)?,
-            };
-            compiled.apply_capacity_horizon(&mut procurement)?;
+            if let Some(policy) = self.acquire_resources {
+                source["acquire_resources"] = json!({"assign_labor":policy.assign_labor});
+            }
+            let production = ProductionRequest::parse_current(&source.to_string())?;
+            let compiled = production.compile(snapshot)?;
+            if let Some(acquisition) = compiled.acquisition_stage() {
+                // Downstream setup is inspected only to reject impossible
+                // geometry, access and staffing before spending finite stock.
+                // The returned executable program remains the exact harvest
+                // stage and never contains these unfunded setup actions.
+                let preflight = production.room_resource_preflight_actions(snapshot)?;
+                requested_actions = preflight.setup_actions;
+                deferred_production_steps = preflight.production_steps;
+                acquisition_stage = Some(acquisition.clone());
+            } else {
+                let mut procurement = Intent {
+                    id,
+                    anchor: snapshot.anchor(),
+                    summary: "procure original room furnishings".to_owned(),
+                    terminal_condition: compiled.terminal.clone(),
+                    constraints: vec![Constraint::MaxRisk(RiskTier::Guarded)],
+                    requested_actions: parse_steps(&compiled.actions)?,
+                };
+                compiled.apply_capacity_horizon(&mut procurement)?;
+                requested_actions = procurement.requested_actions;
+            }
             production_analysis = compiled.analysis;
-            requested_actions = procurement.requested_actions;
         }
+        reject_workshop_overlap(&layout, &requested_actions)?;
         let access = access_builder
             .map(|build| {
                 let targets: Vec<_> = slots.iter().map(|slot| slot.location).collect();
@@ -397,7 +571,13 @@ impl ProvisionedRoomRequest {
         }
         let mut mining_dependency = None;
         let mut construction_dependency = None;
-        let setup_staffing = if let Some(allow_assign) = self.setup_workforce {
+        // Before depleting a finite source, prove the downstream room can be
+        // staffed too. Without explicit complete-project setup permission this
+        // may reuse observed labor, but may not synthesize any labor enable.
+        let setup_policy = self
+            .setup_workforce
+            .or_else(|| acquisition_stage.as_ref().map(|_| false));
+        let setup_staffing = if let Some(allow_assign) = setup_policy {
             use dfmcp_intent::workforce_planning::{ProjectSetupLabor, ProjectSetupStaffing};
             let mut required = Vec::new();
             let evidence = dfmcp_world::PredicateEvidence::laboratory(snapshot)?;
@@ -457,6 +637,85 @@ impl ProvisionedRoomRequest {
         } else {
             None
         };
+        if let Some(acquisition) = acquisition_stage {
+            let deferred_steps = requested_actions.len()
+                + deferred_production_steps
+                + excavation_parts.iter().map(Vec::len).sum::<usize>()
+                + access.as_ref().map_or(0, |part| part.excavations.len())
+                + slots.len().saturating_sub(retained.len());
+            if deferred_steps > MAX_STEPS {
+                return Err(bounds(
+                    "resource acquisition cannot fund a room exceeding 64 deferred production, excavation and placement steps",
+                ));
+            }
+            if acquisition.source_anchor != snapshot.anchor()
+                || acquisition.requested_actions.is_empty()
+                || !acquisition
+                    .requested_actions
+                    .iter()
+                    .any(|step| matches!(step.action, Action::HarvestResource { .. }))
+                || acquisition.requested_actions.iter().any(|step| {
+                    !matches!(
+                        step.action,
+                        Action::HarvestResource { .. } | Action::SetLabor { enabled: true, .. }
+                    )
+                })
+            {
+                return Err(invariant(
+                    "room acquisition escaped its exact finite-resource stage",
+                ));
+            }
+            let digest = self.source_digest(residual);
+            let label = if summary.is_empty() {
+                "acquire finite materials for the complete original room"
+            } else {
+                summary
+            };
+            let sealed_summary = seal_summary(label, digest)?;
+            let workflow = self.resource_workflow("acquire_resources", &production_analysis)?;
+            let mut analysis = json!({
+                "template":"provisioned_room",
+                "planner":if residual { self.residual_planner() } else { self.planner() },
+                "source_binding":{"room_source_digest":digest.to_hex(), "original_request_preserved":true},
+                "layout":self.layout.canonical_value(), "inventory":inventory,
+                "production":production_analysis, "allocation":[],
+                "excavation":{"parts":layout.excavations().len(), "tiles":layout.tile_count(), "deferred":true},
+                "goal":"the observed finite material stock required by this acquisition stage",
+                "goal_scope":"resource_acquisition_stage",
+                "semantic_room_goal":"all original excavation regions and every exact installed furnishing",
+                "resource_workflow":workflow,
+                "downstream_preflight":{"geometry":true, "workshops":true, "staffing":true,
+                    "deferred_steps":deferred_steps, "execution_deferred":true},
+                "intermediate_stock_quotas_are_final_goals":false,
+                "room_assignment_created":false, "native_admission_changed":false,
+            });
+            if residual {
+                analysis["source_planner"] = json!(self.planner());
+                analysis["retained_placements"] = json!(retained.len());
+                analysis["new_placements"] = json!(0);
+                analysis["proves_old_exact_action_goal"] = json!(false);
+                analysis["pursuit"] =
+                    json!("new reviewed resource stage for every original room target");
+            }
+            if let Some(access) = access {
+                analysis["access"] = access.analysis;
+                analysis["downstream_preflight"]["access"] = json!(true);
+            }
+            if let Some(staffing) = setup_staffing {
+                analysis["deferred_setup_workforce"] = crate::project_staffing::report(&staffing);
+            }
+            return Ok((
+                Intent {
+                    id,
+                    anchor: snapshot.anchor(),
+                    summary: sealed_summary,
+                    terminal_condition: acquisition.terminal_condition,
+                    constraints: vec![Constraint::MaxRisk(RiskTier::Guarded)],
+                    requested_actions: acquisition.requested_actions,
+                },
+                analysis,
+            ));
+        }
         let mut production_dependencies = Vec::new();
         for (index, requested) in requested_actions.iter().enumerate() {
             match &requested.action {
@@ -658,26 +917,13 @@ impl ProvisionedRoomRequest {
                 "room procurement produced excess unassigned items",
             ));
         }
-        let mut source_bytes = if residual {
-            b"dfmcp-provisioned-room-residual-source/1\0".to_vec()
-        } else {
-            b"dfmcp-provisioned-room-source/1\0".to_vec()
-        };
-        source_bytes.extend_from_slice(self.canonical_json().as_bytes());
-        let digest = Digest32::of_bytes(&source_bytes);
+        let digest = self.source_digest(residual);
         let label = if summary.is_empty() {
             "provision the complete original room"
         } else {
             summary
         };
-        let sealed_summary = format!("{label} [provisioned room source {}]", digest.to_hex());
-        if sealed_summary.len() > StaticPlanner::default().policy.max_string_bytes
-            || sealed_summary.contains('\0')
-        {
-            return Err(invalid(
-                "room summary plus source seal exceeds the planner bound; supply a shorter summary",
-            ));
-        }
+        let sealed_summary = seal_summary(label, digest)?;
         let terminal_condition = Predicate::All(terminal).normalized();
         terminal_condition.validate_shape()?;
         let intent = Intent {
@@ -689,7 +935,7 @@ impl ProvisionedRoomRequest {
             requested_actions,
         };
         let mut analysis = json!({
-            "template":"provisioned_room", "planner":if residual { RESIDUAL_PLANNER } else { PLANNER },
+            "template":"provisioned_room", "planner":if residual { self.residual_planner() } else { self.planner() },
             "source_binding":{"room_source_digest":digest.to_hex(), "original_request_preserved":true},
             "layout":self.layout.canonical_value(), "inventory":inventory,
             "production":production_analysis, "allocation":allocation,
@@ -699,7 +945,7 @@ impl ProvisionedRoomRequest {
             "room_assignment_created":false, "native_admission_changed":false,
         });
         if residual {
-            analysis["source_planner"] = json!(PLANNER);
+            analysis["source_planner"] = json!(self.planner());
             analysis["retained_placements"] = json!(retained.len());
             analysis["new_placements"] = json!(allocated_ids.len() - retained.len());
             analysis["proves_old_exact_action_goal"] = json!(false);
@@ -711,6 +957,11 @@ impl ProvisionedRoomRequest {
         if let Some(staffing) = setup_staffing {
             analysis["setup_workforce"] = crate::project_staffing::report(&staffing);
         }
+        if self.is_resource_aware() {
+            analysis["goal_scope"] = json!("reviewed_room_pursuit");
+            analysis["resource_workflow"] =
+                self.resource_workflow("room", &analysis["production"])?;
+        }
         Ok((intent, analysis))
     }
 }
@@ -719,6 +970,52 @@ struct Slot {
     kind: FurnitureKind,
     location: MapCoord,
     excavation: usize,
+}
+
+fn seal_summary(label: &str, digest: Digest32) -> Result<String> {
+    let summary = format!("{label} [provisioned room source {}]", digest.to_hex());
+    if summary.len() > StaticPlanner::default().policy.max_string_bytes || summary.contains('\0') {
+        return Err(invalid(
+            "room summary plus source seal exceeds the planner bound; supply a shorter summary",
+        ));
+    }
+    Ok(summary)
+}
+
+fn reject_workshop_overlap(layout: &BlueprintLayout, actions: &[RequestedAction]) -> Result<()> {
+    if actions.iter().any(|step| {
+        matches!(step.action, Action::Build { footprint, .. }
+            if layout.excavations().iter().any(|part| overlap(footprint, part.area)))
+    }) {
+        return Err(precondition(
+            "a planned production workshop overlaps the original room excavation",
+        ));
+    }
+    Ok(())
+}
+
+/// The semantic census must not silently ignore a canonical building alias or
+/// an unqualified footprint. Historical room generations retain their original
+/// behavior; new resource stages require this complete source before harvesting.
+fn validate_complete_occupancy(snapshot: &WorldSnapshot, layout: &BlueprintLayout) -> Result<()> {
+    for (id, area) in laboratory_building_footprints(snapshot)? {
+        let building = snapshot
+            .graph
+            .entities
+            .get(&id)
+            .ok_or_else(|| invariant("complete occupancy lost its building"))?;
+        if building.kind != EntityKind::Building
+            && layout
+                .excavations()
+                .iter()
+                .any(|part| overlap(area, part.area))
+        {
+            return Err(precondition(
+                "an aliased building occupies the original room geometry without exact furniture custody",
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Retain only complete exact-item furniture at the original requested slots.

@@ -7,6 +7,15 @@ The original layout, every furnishing slot and all supplied setup choices remain
 part of the request. This is reference-simulator behavior; native mutation and
 live compatibility admission are unchanged.
 
+Rooms that explicitly opt into `acquire_resources` use the additive resource
+compilers and continuation `/2`. They can gather missing finite inputs before
+the room stage while retaining the entire original project. Their separate
+`semantic_room_goal` governs continuation and completion across harvest stages;
+exact historical stage proof remains unchanged. See
+[finite-input room projects](LAB_RESOURCE_ROOM_PROJECTS.md) for the request,
+generation names and stricter complete-source review requirements. The `/1`
+behavior documented below remains the ordinary room contract.
+
 ## Request and review
 
 Pass this object as the JSON string in the existing `fortress.plan` tool's

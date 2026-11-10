@@ -1,5 +1,8 @@
 //! Room continuation crosses real plan, cancellation, commit and recovery paths.
 
+#[path = "resource_room_mcp_tests.rs"]
+mod resource_rooms;
+
 use super::*;
 use crate::agent_facade as facade;
 use dfmcp_intent::effects;

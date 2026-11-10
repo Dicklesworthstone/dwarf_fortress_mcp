@@ -23,7 +23,7 @@ use dfmcp_world::{
     ChunkCoord, CompareOp, EntityKind, EntityRecord, Fact, FactSource, Predicate, Value,
     WorldGraph, WorldSnapshot, laboratory_fact_value, tile_codes,
 };
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Value as Json, json};
 
 #[path = "production_workload.rs"]
@@ -1210,7 +1210,7 @@ struct ProductionPrerequisites {
 }
 
 /// Explicit policy generation: old sources keep their recipe-only staffing.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 enum ProductionWorkforce {
     CompleteProjectV1,
@@ -1235,7 +1235,7 @@ struct ProductionQuotaInput {
     item: String,
     minimum: u32,
 }
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct ProductionWorkshopInput {
     building: String,
@@ -1243,9 +1243,11 @@ struct ProductionWorkshopInput {
     min: Option<[i32; 3]>,
     max: Option<[i32; 3]>,
 }
-#[derive(Deserialize)]
+/// Shared typed grammar keeps nested room setup permissions strict before any
+/// JSON normalization can erase duplicate authorization or site keys.
+#[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-struct ProductionPrerequisitesInput {
+pub(crate) struct ProductionPrerequisitesInput {
     #[serde(default)]
     assign_labor: bool,
     workforce: Option<ProductionWorkforce>,
@@ -1928,6 +1930,31 @@ impl ProductionRequest {
             material_feasible,
             provisions_model: provisions.is_some(),
             resource_requirements,
+        })
+    }
+
+    /// Workshop/setup projection for original-room geometry and access checks.
+    /// This validates the complete production candidate with its actual input
+    /// shortage, but exposes only the already authorized setup actions for
+    /// diagnostic inspection. The room compiler never dispatches this projection.
+    pub(crate) fn room_resource_preflight_actions(
+        &self,
+        snapshot: &WorldSnapshot,
+    ) -> Result<RoomProductionPreflight> {
+        if !self.is_resource_aware() {
+            return Err(invalid(
+                "room resource preflight requires the resource-aware production generation",
+            ));
+        }
+        let candidate = self.compile_candidate(snapshot, &self.quotas, true, true)?;
+        let setup_actions = if candidate.setup.actions.is_empty() {
+            Vec::new()
+        } else {
+            parse_steps(&Json::Array(candidate.setup.actions).to_string())?
+        };
+        Ok(RoomProductionPreflight {
+            setup_actions,
+            production_steps: candidate.plan.steps().len(),
         })
     }
 
@@ -2620,6 +2647,13 @@ struct ProductionCandidate {
     resource_requirements: Vec<production_resources::ResourceRequirement>,
 }
 
+/// Diagnostic downstream shape only; no unfunded order or item identity is
+/// created. The room uses this count to bound its complete deferred program.
+pub(crate) struct RoomProductionPreflight {
+    pub(crate) setup_actions: Vec<RequestedAction>,
+    pub(crate) production_steps: usize,
+}
+
 pub(crate) struct ProductionCompilation {
     pub(crate) actions: String,
     pub(crate) analysis: Json,
@@ -2638,6 +2672,13 @@ pub(crate) struct ProductionCompilation {
 }
 
 impl ProductionCompilation {
+    /// The core's exact finite-resource stage, including qualified guards and
+    /// compensation. A composing room uses its actual material-stock terminal;
+    /// downstream production identities cannot exist before the next review.
+    pub(crate) fn acquisition_stage(&self) -> Option<&dfmcp_intent::ResourceAcquisitionPlan> {
+        self.acquisition.as_ref()
+    }
+
     /// Bind the queued-service allowance to actual sealed step identities.
     /// Call before preparing the intent; changing a deadline changes its seal.
     /// This only describes a reference-model allowance, never future proof or

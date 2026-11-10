@@ -11,6 +11,9 @@ use dfmcp_world::{Fact, FactPresence, FactSource, PredicateEvidence, PredicateTr
 #[path = "room_residual_tests.rs"]
 mod residual;
 
+#[path = "room_resource_tests.rs"]
+mod resources;
+
 fn source() -> Result<WorldSnapshot> {
     crate::lab_world::scenario_snapshot("starter_fortress", FortressId::new(963), false)
 }

@@ -120,6 +120,43 @@ pub(super) fn execute_resource_production(
     execute_original_source(session_id, source, "resource_production", started)
 }
 
+/// A room source keeps its complete geometry, furnishings and access request
+/// while the compiler chooses one currently funded stage.
+pub(super) fn execute_resource_room(
+    session_id: Option<String>,
+    summary: Option<String>,
+    raw: &str,
+    started: Instant,
+) -> Result<String> {
+    let summary = summary.unwrap_or_default();
+    if summary.len() > MAX_SUMMARY_BYTES {
+        return Err(DfmcpError::new(
+            ErrorCode::BudgetExceeded,
+            "resource-aware room summary exceeds its explicit byte bound",
+        ));
+    }
+    let source = if connected_room::is_connected_room(raw) {
+        let request = connected_room::ConnectedRoomRequest::parse_current(raw)?;
+        PlanSource::ConnectedRoom {
+            summary,
+            raw: request.canonical_json(),
+        }
+    } else {
+        let request = room_provisioning::ProvisionedRoomRequest::parse_current(raw)?;
+        PlanSource::Blueprint {
+            summary,
+            raw: request.canonical_json(),
+        }
+    };
+    if !source.is_resource_aware_room() {
+        return Err(DfmcpError::new(
+            ErrorCode::InvalidRequest,
+            "resource-aware room intake requires its original acquisition policy and fixed compiler",
+        ));
+    }
+    execute_original_source(session_id, source, "resource_room", started)
+}
+
 fn execute_original_source(
     session_id: Option<String>,
     source: PlanSource,
@@ -200,7 +237,8 @@ pub(super) fn execute_resource_continuation(
             if !session.objectives.iter().any(|objective| {
                 objective.plan_digest == parent
                     && (objective.is_resource_acquisition()
-                        || objective.is_resource_aware_production())
+                        || objective.is_resource_aware_production()
+                        || objective.is_resource_aware_room())
             }) {
                 return Ok(None);
             }
@@ -217,7 +255,9 @@ pub(super) fn execute_resource_continuation(
                     "resource continuation did not retain its original source family",
                 ));
             }
-            let kind = if source.is_resource_aware_production() {
+            let kind = if source.is_resource_aware_room() {
+                "resource_room_continuation"
+            } else if source.is_resource_aware_production() {
                 "resource_production_continuation"
             } else {
                 "resource_acquisition_continuation"
@@ -254,9 +294,10 @@ fn prepare_source(
     let digest = plan.digest.to_string();
     let acquisition = source.is_resource_acquisition();
     let resource_production = source.is_resource_aware_production();
-    let result = json!({
+    let resource_room = source.is_resource_aware_room();
+    let mut result = json!({
         "kind": kind,
-        "schema": if acquisition { "dfmcp.resource-acquisition/1" } else if resource_production { "dfmcp.resource-production/1" } else { "dfmcp.plan-comparison/1" },
+        "schema": if acquisition { "dfmcp.resource-acquisition/1" } else if resource_production { "dfmcp.resource-production/1" } else if resource_room { "dfmcp.resource-room/1" } else { "dfmcp.plan-comparison/1" },
         "version": 1,
         "plan_id": plan.id.to_string(),
         "plan_digest": digest,
@@ -267,7 +308,7 @@ fn prepare_source(
         "requires_checkpoint": plan.requires_checkpoint,
         "expires_at_tick": plan.expires_at_tick.0,
         "steps": crate::lab_world::plan_steps_json(&plan),
-        "production": if acquisition { None } else { analysis.as_ref() },
+        "production": if acquisition || resource_room { None } else { analysis.as_ref() },
         "resource_acquisition": if acquisition { analysis.as_ref() } else { None },
         "live_routing": live_routing_json(&plan),
         "source_work": source_work,
@@ -279,6 +320,14 @@ fn prepare_source(
         }},
         "note": "freshly prepared ordinary plan; commit still revalidates current authority, source and registered effect policy",
     });
+    if resource_room {
+        result["room"] = analysis
+            .as_ref()
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
+        result["goal_scope"] = result["room"]["goal_scope"].clone();
+        result["forecast_scope"] = json!("current_reviewed_stage_only");
+    }
     Ok((
         result,
         PendingPlan {

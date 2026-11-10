@@ -301,6 +301,14 @@ cancellation and recovery. Current stock minima and future reserve demand stay
 separate, so gathering can lead into production while the present minima still
 hold; already funded reserves cause no new work.
 
+[Furnished room projects](docs/LAB_RESOURCE_ROOM_PROJECTS.md) can opt into the
+same finite-input workflow by adding `acquire_resources` to `provisioned_room`,
+including the room nested inside `connected_room`. Missing WOOD first produces
+a harvest review; `continue_goal` retains the complete layout, furnishings and
+entrance policy and proposes building from observed yield. The goal tracker
+keeps acquisition-stage proof separate from full room completion. Both
+single-level connections and explicit paired-stair connections are supported.
+
 The [original Carpenter workshop workflow](docs/WORKSHOP_CONSTRUCTION_MCP.md)
 documents the separate unadmitted workshop/1.20 native, safe-Rust and registered
 eleven-tool development consumer. Focused execution and an actual-SDK diagnostic

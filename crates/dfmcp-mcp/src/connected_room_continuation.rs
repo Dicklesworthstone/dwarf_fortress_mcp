@@ -8,7 +8,7 @@ use super::connected_room::ConnectedRoomRequest;
 use crate::lab_world::MAX_ACTIONS_JSON_BYTES;
 use dfmcp_core::{DfmcpError, Digest32, ErrorCode, IntentId, Result};
 use dfmcp_intent::{Intent, StaticPlanner};
-use dfmcp_world::WorldSnapshot;
+use dfmcp_world::{PredicateTruth, WorldSnapshot};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -16,6 +16,8 @@ const SOURCE_SCHEMA: &str = "dfmcp.connected-room-continuation/1";
 #[cfg(test)]
 const PLANNER: &str = "connected_room_residual_v1";
 const SOURCE_DOMAIN: &[u8] = b"dfmcp-connected-room-continuation-source/1\0";
+const RESOURCE_SOURCE_SCHEMA: &str = "dfmcp.connected-room-continuation/2";
+const RESOURCE_SOURCE_DOMAIN: &[u8] = b"dfmcp-connected-room-continuation-source/2\0";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ConnectedRoomContinuation {
@@ -73,20 +75,28 @@ impl ConnectedRoomContinuation {
             planner: String,
             parent_plan_digest: String,
             root_plan_digest: String,
-            connected_room: Value,
+            connected_room: ConnectedRoomRequest,
         }
         bounded(raw)?;
         let source: Source = serde_json::from_str(raw)
             .map_err(|error| invalid(format!("invalid retained room continuation: {error}")))?;
-        if source.schema != SOURCE_SCHEMA {
+        if !matches!(
+            source.schema.as_str(),
+            SOURCE_SCHEMA | RESOURCE_SOURCE_SCHEMA
+        ) {
             return Err(invalid(
                 "unknown room continuation schema or residual compiler",
             ));
         }
-        let request = ConnectedRoomRequest::parse(&source.connected_room.to_string())?;
-        if source.planner != request.residual_planner() {
+        let request = source.connected_room;
+        let expected_schema = if request.is_resource_aware() {
+            RESOURCE_SOURCE_SCHEMA
+        } else {
+            SOURCE_SCHEMA
+        };
+        if source.schema != expected_schema || source.planner != request.residual_planner() {
             return Err(invalid(
-                "room continuation compiler differs from the retained access model",
+                "room continuation compiler differs from the retained access model or resource policy",
             ));
         }
         Self::new(
@@ -104,7 +114,8 @@ impl ConnectedRoomContinuation {
         // Embed the complete connected request unchanged, including both fixed
         // marker and supplied setup options that happen not to be needed now.
         format!(
-            "{{\"schema\":\"{SOURCE_SCHEMA}\",\"planner\":\"{}\",\"parent_plan_digest\":\"{}\",\"root_plan_digest\":\"{}\",\"connected_room\":{}}}",
+            "{{\"schema\":\"{}\",\"planner\":\"{}\",\"parent_plan_digest\":\"{}\",\"root_plan_digest\":\"{}\",\"connected_room\":{}}}",
+            self.source_schema(),
             self.request.residual_planner(),
             self.parent.to_hex(),
             self.root.to_hex(),
@@ -113,14 +124,18 @@ impl ConnectedRoomContinuation {
     }
 
     pub(crate) fn source_digest(&self) -> Digest32 {
-        let mut bytes = SOURCE_DOMAIN.to_vec();
+        let mut bytes = if self.is_resource_aware() {
+            RESOURCE_SOURCE_DOMAIN.to_vec()
+        } else {
+            SOURCE_DOMAIN.to_vec()
+        };
         bytes.extend_from_slice(self.canonical_json().as_bytes());
         Digest32::of_bytes(&bytes)
     }
 
     pub(crate) fn lineage_json(&self) -> Value {
-        json!({
-            "source_schema":SOURCE_SCHEMA,
+        let mut lineage = json!({
+            "source_schema":self.source_schema(),
             "planner":self.request.residual_planner(),
             "parent_plan_digest":self.parent.to_hex(),
             "root_plan_digest":self.root.to_hex(),
@@ -131,7 +146,28 @@ impl ConnectedRoomContinuation {
             "completion_proves":"this_reviewed_access_and_room_pursuit_only",
             "requires_explicit_commit":true,
             "replacement_work_dispatched":false,
-        })
+        });
+        if self.is_resource_aware() {
+            lineage["original_resource_policy_preserved"] = json!(true);
+            lineage["stage_completion_is_project_completion"] = json!(false);
+        }
+        lineage
+    }
+
+    fn source_schema(&self) -> &'static str {
+        if self.is_resource_aware() {
+            RESOURCE_SOURCE_SCHEMA
+        } else {
+            SOURCE_SCHEMA
+        }
+    }
+
+    pub(crate) fn is_resource_aware(&self) -> bool {
+        self.request.is_resource_aware()
+    }
+
+    pub(crate) fn semantic_goal_truth(&self, snapshot: &WorldSnapshot) -> Result<PredicateTruth> {
+        self.request.semantic_goal_truth(snapshot)
     }
 
     pub(crate) fn same_original_request(&self, other: &Self) -> bool {
@@ -164,3 +200,7 @@ impl ConnectedRoomContinuation {
 #[cfg(test)]
 #[path = "connected_room_continuation_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "connected_room_resource_continuation_tests.rs"]
+mod resource_tests;

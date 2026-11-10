@@ -1,5 +1,55 @@
 # Implementation Status
 
+## Unreleased — Carry furnished-room projects through finite resource stages
+
+Explicit `acquire_resources` on a provisioned room now retains the complete
+project while gathering missing materials. The additive resource compilers
+cover ordinary rooms, single-level connected rooms and paired-stair connected
+rooms. Acquisition compiles actual finite harvesting and permitted harvesting
+labor only. A separately reviewed `continue_goal` stage uses observed yield to
+manufacture items, build permitted workshops, excavate and install exact
+furniture. Complete geometry, proposed workshop footprints, access, downstream
+staffing and the shared 64-action limit are checked before harvesting.
+
+Room and connected continuation `/2` retain the full original request and flat
+parent/root lineage under distinct source digests. Valid installed furnishings
+and canceled harvest yield contribute only through current qualified evidence.
+No future stock or furniture identity is inserted to make an acquisition plan
+look like a completed room. Historical room/connected generations are preserved.
+
+The goal tracker now separates exact stage proof from `semantic_room_goal`,
+which evaluates every original terrain/furnishing requirement and the original
+connected access policy. A finished harvest cannot complete or evict an
+unfinished project; consuming its wood after successful furnishing cannot make
+the complete room false. Historical action outcomes and first achievement are
+unchanged. Proposal and commit require current complete-source authority and
+budgets, continuation repeats same-root physical quiescence, stale sources need
+a new explicit review, and full publication precedes pending replacement.
+Candidate comparison requires the same complete room request and labels its
+predictions and recommendations as current-stage evidence.
+
+Selected latest-nightly Rust execution passed **224 tests**, including all 17
+new room/resource/compiler/continuation cases; zero failed or ignored. These
+tests execute the actual core/world/intent/adapter/laboratory modules and the
+unchanged selected production module bodies, with only unrelated test module
+registrations and crate roots excluded. Before/after audits verified all 539
+original/assembled source records and all 11 external versions/checksums
+against the repository lockfile. The request schema passed five positive and
+twelve negative vectors; scoped rustfmt and whitespace checks passed.
+
+Nine public facade regressions cover stage progression, authority, budgets,
+stale sources, shared continuation races, goal capacity, recovery and comparison.
+They are present but unexecuted: the selected assembly excludes the full
+FastMCP/session publication path. Earlier full MCP test and metadata-check
+attempts were killed in pinned `asupersync` before reaching this crate. No full
+public packet-fit, full workspace/release, native or live qualification is
+claimed for this source. This feature changes laboratory behavior only.
+
+Contract and usage: [`docs/LAB_RESOURCE_ROOM_PROJECTS.md`](docs/LAB_RESOURCE_ROOM_PROJECTS.md),
+`architecture/laboratory_resource_room_projects_v1.json` and
+`schemas/lab_resource_room.schema.json`. Owning bead:
+`df-lab-resource-harvest-h2m.5`; remaining full-runtime evidence stays explicit.
+
 ## Unreleased — Inspect retained original plans through bounded resources
 
 Session resources now expose a retained-plan catalog at

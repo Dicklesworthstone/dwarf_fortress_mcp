@@ -58,7 +58,14 @@ pub(super) fn finish(
         payload["kind"].as_str(),
         Some("resource_production" | "resource_production_continuation")
     );
-    let selecting = payload["kind"] == "select_candidate" || acquisition || resource_production;
+    let resource_room = matches!(
+        payload["kind"].as_str(),
+        Some("resource_room" | "resource_room_continuation")
+    );
+    let selecting = payload["kind"] == "select_candidate"
+        || acquisition
+        || resource_production
+        || resource_room;
     if !payload.is_object()
         || payload["ok"] != true
         || payload["anchor"] != projection.anchor
@@ -109,7 +116,8 @@ pub(super) fn finish(
                 || steps
                     .is_none_or(|rows| pending["step_count"].as_u64() != Some(rows.len() as u64))
                 || (!payload["resource_acquisition"].is_object()
-                    && !payload["production"]["resource_workflow"].is_object())
+                    && !payload["production"]["resource_workflow"].is_object()
+                    && !payload["room"]["resource_workflow"].is_object())
             {
                 return Err(invariant(
                     "resource pending catalog must reference its complete matching plan steps in this response",
@@ -124,6 +132,8 @@ pub(super) fn finish(
                 "commit-resource-acquisition"
             } else if resource_production {
                 "commit-production-stage"
+            } else if resource_room {
+                "commit-room-stage"
             } else {
                 "commit-selected-candidate"
             },
@@ -132,6 +142,8 @@ pub(super) fn finish(
                 "The original resource minima have a newly prepared finite acquisition plan."
             } else if resource_production {
                 "The original production objective has a newly prepared stage based on observed supply."
+            } else if resource_room {
+                "The complete original room project has a newly prepared stage based on observed materials and geometry."
             } else {
                 "The selected source has a newly prepared ordinary plan."
             },

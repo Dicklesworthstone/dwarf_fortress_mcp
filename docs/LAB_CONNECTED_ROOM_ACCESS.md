@@ -7,6 +7,13 @@ connector, and installs exact items. Its final goal also requires current access
 to every furnishing from that original entrance. Use the existing
 `fortress.plan`, `fortress.commit`, wait and prove workflow; no tool is added.
 
+When wood must be gathered first, add `acquire_resources` to the nested room.
+The distinct `connected_room_resources_v1` and
+`connected_room_stairs_resources_v1` generations retain this complete access
+request through separately reviewed acquisition and furnished-room stages.
+Their continuation `/2` evaluates full project completion separately from
+historical harvest proof. See [finite-input room projects](LAB_RESOURCE_ROOM_PROJECTS.md).
+
 This is the bounded reference simulator's structural movement model. The
 default completion predicate is `Predicate::LaboratoryRoomAccess`, with fixed policy
 `dfmcp.laboratory-room-access/1`. The explicit multi-level generation below uses

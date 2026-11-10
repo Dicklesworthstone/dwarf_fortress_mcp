@@ -488,6 +488,23 @@ pub(crate) fn validate_goal_evidence_in_active_lineage(
     )
 }
 
+/// A staged project can finish its resource action goal before the original
+/// room exists. The owner supplies source-derived semantic truth, never caller
+/// JSON, while this gate retains the same authority, active lineage and quiet
+/// work requirements as ordinary exact-goal continuation.
+pub(crate) fn validate_room_project_evidence(
+    original: &PreparedPlan,
+    active: StateAnchor,
+    snapshot: &WorldSnapshot,
+    context: &OperationContext,
+    work_quiescent: bool,
+    semantic_truth: PredicateTruth,
+) -> Result<()> {
+    validate_goal_lineage(original, active, snapshot, context)?;
+    context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
+    validate_truth_and_work(semantic_truth, work_quiescent)
+}
+
 fn validate_goal_lineage(
     original: &PreparedPlan,
     active: StateAnchor,

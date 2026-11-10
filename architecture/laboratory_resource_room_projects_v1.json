@@ -1,0 +1,74 @@
+{
+  "schema": "dfmcp.laboratory_resource_room_projects/1",
+  "owner_bead": "df-lab-resource-harvest-h2m.5",
+  "scope": "laboratory_reference_world",
+  "planners": {
+    "room": "provisioned_room_resources_v1",
+    "room_residual": "provisioned_room_resources_residual_v1",
+    "connected": "connected_room_resources_v1",
+    "connected_residual": "connected_room_resources_residual_v1",
+    "paired_stairs": "connected_room_stairs_resources_v1",
+    "paired_stairs_residual": "connected_room_stairs_resources_residual_v1"
+  },
+  "request": {
+    "opt_in": "acquire_resources_on_inner_provisioned_room",
+    "permission": "harvesting_labor_separate_from_production_and_complete_project_setup",
+    "retained": "entire_original_layout_slots_setup_sites_permissions_entrance_domain_and_stair_policy",
+    "new_intake": "matching_planner_fixed_when_omitted_except_stairs_require_explicit_selection",
+    "archived_intake": "exact_generations_required_with_strict_typed_nested_duplicate_rejection",
+    "old_generations": "canonical_bytes_and_semantics_unchanged"
+  },
+  "stages": {
+    "acquire_resources": "actual_finite_harvest_and_explicitly_permitted_harvesting_labor_only",
+    "room": "strict_observed_input_setup_manufacture_excavation_and_exact_installation",
+    "preflight": "complete_room_geometry_workshop_footprints_access_staffing_and_deferred_64_action_bound",
+    "future_stock_credit": false,
+    "invented_future_room_item_ids_in_harvest_goal": false,
+    "automatic_continuation": false
+  },
+  "truth": {
+    "exact_plan": "original_sealed_stage_terminal_and_mandatory_action_proof",
+    "semantic_room_goal": "all_original_terrain_and_qualified_reciprocal_installed_furniture_custody_plus_original_access",
+    "goal_capacity": "verified_history_and_quiet_work_plus_qualified_complete_semantic_room_goal",
+    "unknown_source": "no_continuation_dispatch_or_completion_eviction",
+    "historical_action_proof_rewritten": false
+  },
+  "continuation": {
+    "room_schema": "dfmcp.room-continuation/2",
+    "connected_schema": "dfmcp.connected-room-continuation/2",
+    "room_digest_domain": "dfmcp-room-continuation-source/2",
+    "connected_digest_domain": "dfmcp-connected-room-continuation-source/2",
+    "lineage": "flat_parent_and_root_plus_complete_original_request",
+    "eligibility": "verified_active_source_current_semantic_false_and_complete_same_root_physical_quiescence",
+    "commit": "repeat_current_authority_source_budget_and_continuation_checks_before_leases_and_effects",
+    "stale_anchor": "fresh_explicit_review_preserving_existing_pending_plan",
+    "recovery": "reconstruct_exact_stage_source_without_changing_original_history_or_restoring_grants"
+  },
+  "reporting": {
+    "schema": "dfmcp.resource-room/1",
+    "kinds": [
+      "resource_room",
+      "resource_room_continuation"
+    ],
+    "analysis": "room",
+    "forecast_scope": "current_reviewed_stage_only",
+    "goal_scopes": [
+      "resource_acquisition_stage",
+      "reviewed_room_pursuit"
+    ],
+    "publication": "complete_owned_agent_turn_before_pending_replacement",
+    "comparison": "same_complete_canonical_room_request_required_in_addition_to_same_stage_terminal"
+  },
+  "bounds": {
+    "request_bytes": 65536,
+    "continuation_bytes": 16384,
+    "furnishing_slots": 16,
+    "combined_room_actions": 64,
+    "access_cells": 1024,
+    "source_entities": 65536,
+    "source_terrain_chunks": 4096
+  },
+  "native_protocol_change": false,
+  "live_admission_change": false,
+  "new_top_level_tool": false
+}

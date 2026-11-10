@@ -1781,6 +1781,29 @@ enum GoalContinuation {
 }
 
 impl GoalContinuation {
+    fn is_resource_aware_room(&self) -> bool {
+        match self {
+            Self::Room(source) => source.is_resource_aware(),
+            Self::ConnectedRoom(source) => source.is_resource_aware(),
+            _ => false,
+        }
+    }
+
+    fn resource_room_goal_truth(&self, snapshot: &WorldSnapshot) -> Result<PredicateTruth> {
+        match self {
+            Self::Room(source) if source.is_resource_aware() => {
+                source.semantic_goal_truth(snapshot)
+            }
+            Self::ConnectedRoom(source) if source.is_resource_aware() => {
+                source.semantic_goal_truth(snapshot)
+            }
+            _ => Err(DfmcpError::new(
+                ErrorCode::InvalidIntent,
+                "semantic room completion requires the retained resource-aware room request",
+            )),
+        }
+    }
+
     fn parent(&self) -> Digest32 {
         match self {
             Self::Production(source) => source.parent,
@@ -1852,6 +1875,46 @@ impl GoalContinuation {
 }
 
 impl PlanSource {
+    fn is_resource_aware_room(&self) -> bool {
+        match self {
+            Self::Blueprint { raw, .. } if room_provisioning::is_provisioned_room(raw) => {
+                room_provisioning::ProvisionedRoomRequest::parse(raw)
+                    .is_ok_and(|request| request.is_resource_aware())
+            }
+            Self::RoomContinuation { raw, .. } => room_continuation::RoomContinuation::parse(raw)
+                .is_ok_and(|source| source.is_resource_aware()),
+            Self::ConnectedRoom { raw, .. } => connected_room::ConnectedRoomRequest::parse(raw)
+                .is_ok_and(|request| request.is_resource_aware()),
+            Self::ConnectedRoomContinuation { raw, .. } => {
+                connected_room_continuation::ConnectedRoomContinuation::parse(raw)
+                    .is_ok_and(|source| source.is_resource_aware())
+            }
+            _ => false,
+        }
+    }
+
+    fn resource_room_goal_truth(&self, snapshot: &WorldSnapshot) -> Result<PredicateTruth> {
+        match self {
+            Self::Blueprint { raw, .. } if room_provisioning::is_provisioned_room(raw) => {
+                room_provisioning::ProvisionedRoomRequest::parse(raw)?.semantic_goal_truth(snapshot)
+            }
+            Self::RoomContinuation { raw, .. } => {
+                room_continuation::RoomContinuation::parse(raw)?.semantic_goal_truth(snapshot)
+            }
+            Self::ConnectedRoom { raw, .. } => {
+                connected_room::ConnectedRoomRequest::parse(raw)?.semantic_goal_truth(snapshot)
+            }
+            Self::ConnectedRoomContinuation { raw, .. } => {
+                connected_room_continuation::ConnectedRoomContinuation::parse(raw)?
+                    .semantic_goal_truth(snapshot)
+            }
+            _ => Err(DfmcpError::new(
+                ErrorCode::InvalidIntent,
+                "semantic room completion requires the complete retained room source",
+            )),
+        }
+    }
+
     fn is_resource_acquisition(&self) -> bool {
         matches!(self, Self::ResourceAcquisitionContinuation { .. })
             || matches!(self, Self::Blueprint { raw, .. } if resource_acquisition::is_request(raw))
@@ -1872,7 +1935,9 @@ impl PlanSource {
     /// These compilers select a current stage from the complete supply, stock,
     /// staffing and work census. A narrow action witness cannot replay them.
     fn requires_complete_source_review(&self) -> bool {
-        self.is_resource_acquisition() || self.is_resource_aware_production()
+        self.is_resource_acquisition()
+            || self.is_resource_aware_production()
+            || self.is_resource_aware_room()
     }
 
     fn resource_replan_step(&self, session_id: SessionId) -> Option<serde_json::Value> {
@@ -1880,8 +1945,25 @@ impl PlanSource {
             return None;
         }
         let (summary, blueprint) = match self {
-            Self::Blueprint { summary, raw } | Self::Production { summary, raw } => {
-                (summary, raw.clone())
+            Self::Blueprint { summary, raw }
+            | Self::Production { summary, raw }
+            | Self::ConnectedRoom { summary, raw } => (summary, raw.clone()),
+            Self::RoomContinuation { summary, raw } => {
+                let source = room_continuation::RoomContinuation::parse(raw).ok()?;
+                (
+                    summary,
+                    json!({"template":"continue_goal", "plan_digest":source.parent.to_hex()})
+                        .to_string(),
+                )
+            }
+            Self::ConnectedRoomContinuation { summary, raw } => {
+                let source =
+                    connected_room_continuation::ConnectedRoomContinuation::parse(raw).ok()?;
+                (
+                    summary,
+                    json!({"template":"continue_goal", "plan_digest":source.parent.to_hex()})
+                        .to_string(),
+                )
             }
             Self::ProductionContinuation { summary, raw } => {
                 let source = goal_continuation::ProductionContinuation::parse(raw).ok()?;
@@ -3649,6 +3731,24 @@ pub(crate) fn plan_request_publication(
     production: Option<String>,
     started: std::time::Instant,
 ) -> PlanPublication {
+    if let Some(raw) = blueprint
+        .as_deref()
+        .filter(|raw| is_resource_aware_room_request(raw))
+    {
+        if actions.is_some() || production.is_some() || paused_target.is_some() {
+            return PlanPublication::Pending(coded_error_payload(
+                "fortress.plan",
+                ErrorCode::InvalidRequest,
+                "resource-aware rooms contain the complete original project; supply the blueprint without actions, production or a pause target",
+            ));
+        }
+        return match plan_comparison_handler::execute_resource_room(
+            session_id, summary, raw, started,
+        ) {
+            Ok(output) => PlanPublication::Published(output),
+            Err(error) => PlanPublication::Pending(dfmcp_error_payload("fortress.plan", &error)),
+        };
+    }
     let staged_production = blueprint
         .as_deref()
         .filter(|raw| is_resource_aware_production_request(raw))
@@ -3770,6 +3870,25 @@ fn is_resource_aware_production_request(raw: &str) -> bool {
                 && (request.get("acquire_resources").is_some()
                     || request["planner"] == "resource_aware_v1"
                     || request["planner"] == "resource_reserve_v1")
+        })
+}
+
+/// Detection preserves the original bytes for strict parsing. A malformed or
+/// duplicate acquisition policy must never fall back to ordinary room intake.
+fn is_resource_aware_room_request(raw: &str) -> bool {
+    raw.len() <= 64 * 1_024
+        && serde_json::from_str::<serde_json::Value>(raw).is_ok_and(|request| {
+            let room = if request["template"] == "provisioned_room" {
+                &request
+            } else if request["template"] == "connected_room" {
+                &request["room"]
+            } else {
+                return false;
+            };
+            room.get("acquire_resources").is_some()
+                || room["planner"] == "provisioned_room_resources_v1"
+                || request["planner"] == "connected_room_resources_v1"
+                || request["planner"] == "connected_room_stairs_resources_v1"
         })
 }
 
@@ -4793,10 +4912,13 @@ fn replay_stale_plan(session: &mut LabSession, stale: PendingPlan) -> String {
     if let Some(next_step) = stale.source.resource_replan_step(session.session_id) {
         let from_digest = stale.digest.clone();
         let production = stale.source.is_resource_aware_production();
+        let room = stale.source.is_resource_aware_room();
         session.pending = Some(stale);
         let error = DfmcpError::new(
             ErrorCode::StaleAnchor,
-            if production {
+            if room {
+                "room supply or geometry observation changed; request and review the current stage of the complete original room project before committing"
+            } else if production {
                 "production supply observation changed; request and review the current stage of the complete original production objective before committing"
             } else {
                 "resource acquisition observation changed; request and review a fresh allocation from the complete original stock objective before committing"
@@ -4809,7 +4931,7 @@ fn replay_stale_plan(session: &mut LabSession, stale: PendingPlan) -> String {
         .unwrap_or_else(|_| json!({"ok": false}));
         payload["session_id"] = json!(session.session_id.to_string());
         payload["rebase"] = json!({
-            "method": if production { "fresh_resource_production_required" } else { "fresh_resource_acquisition_required" },
+            "method": if room { "fresh_resource_room_required" } else if production { "fresh_resource_production_required" } else { "fresh_resource_acquisition_required" },
             "from_digest": from_digest,
             "pending_plan_preserved": true,
             "game_effect": "none",
@@ -5092,7 +5214,9 @@ pub fn fortress_commit(session_id: Option<String>, plan_digest: String) -> Strin
                     "plan digest does not match the pending prepared plan; plans are sealed over their digest",
                 );
             }
-            if pending.source.is_resource_aware_production() {
+            if pending.source.is_resource_aware_production()
+                || pending.source.is_resource_aware_room()
+            {
                 // Current read authority and complete-source budgets apply at
                 // commit as well as proposal, before leases or effect custody.
                 let current = context_for(guard, guard.next_request_id);
