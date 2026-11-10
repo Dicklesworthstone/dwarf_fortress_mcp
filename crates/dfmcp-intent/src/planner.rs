@@ -15,6 +15,9 @@ const MAX_INTENT_CONSTRAINTS: usize = 256;
 const MAX_PREDICATES_PER_ACTION: usize = 64;
 const MAX_ACTION_AUXILIARY_ITEMS: usize = 512;
 
+#[path = "planner_resource_reserve.rs"]
+mod resource_reserve;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PlanPolicy {
     pub max_steps: u32,
@@ -124,7 +127,11 @@ impl StaticPlanner {
         }
         validate_intent_shape(intent, &self.policy, context)?;
         let reserve_until = laboratory_reserve_horizon(intent, evidence, laboratory)?;
-        if reserve_until.is_none() && evidence.establishes(&intent.terminal_condition)? {
+        let resource_reserve_until = resource_reserve::horizon(intent, evidence, laboratory)?;
+        if reserve_until.is_none()
+            && resource_reserve_until.is_none()
+            && evidence.establishes(&intent.terminal_condition)?
+        {
             return Err(DfmcpError::new(
                 ErrorCode::InvalidIntent,
                 "intent terminal condition is already satisfied",
@@ -139,7 +146,13 @@ impl StaticPlanner {
                 "{} [laboratory production reserve until {}]",
                 intent.summary, until.0,
             ),
-            None => intent.summary.clone(),
+            None => match resource_reserve_until {
+                Some(until) => format!(
+                    "{} [laboratory resource production reserve until {}]",
+                    intent.summary, until.0,
+                ),
+                None => intent.summary.clone(),
+            },
         };
         if summary.len() > self.policy.max_string_bytes {
             return Err(DfmcpError::new(
@@ -871,7 +884,8 @@ fn validate_constraints(intent: &Intent, action: &Action) -> Result<()> {
             | Constraint::Deadline(_)
             | Constraint::RequireCheckpoint
             | Constraint::MaxSteps(_)
-            | Constraint::LaboratoryProductionReserveUntil(_) => {}
+            | Constraint::LaboratoryProductionReserveUntil(_)
+            | Constraint::LaboratoryResourceProductionReserveUntil(_) => {}
         }
     }
     Ok(())

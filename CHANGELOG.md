@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased — Bound reserve acquisition admission separately from production
+
+- Add a distinct laboratory-only typed admission for finite harvest and its
+  relevant labor setup when original production stock minima currently hold.
+- Keep the previous production-only reserve policy, mandatory harvest proof,
+  finite sources, action deadlines and ordinary authority requirements intact.
+- Add five real-planner regression groups for positive admission and refusal
+  boundaries. Execution remains pending after the build host disconnected;
+  no full Rust, native or live qualification is claimed.
+- Track the public finite-input future-reserve workflow in
+  `df-lab-resource-harvest-h2m.4`.
+
 ## Unreleased — Reach production goals through observed resource stages
 
 - Add opt-in `acquire_resources` to the existing production blueprint, pinning

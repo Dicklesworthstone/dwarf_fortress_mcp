@@ -26,6 +26,10 @@ pub enum Constraint {
     /// goal is already true. This bounded horizon is sealed by the planner; it
     /// neither extends action deadlines nor supplies future proof or authority.
     LaboratoryProductionReserveUntil(GameTick),
+    /// Separately reviewed finite acquisition for a future production reserve.
+    /// This admits only harvest and its own labor setup, never production
+    /// against predicted yield or an extension of the older reserve policy.
+    LaboratoryResourceProductionReserveUntil(GameTick),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

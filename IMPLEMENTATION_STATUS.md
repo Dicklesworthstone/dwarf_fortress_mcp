@@ -1,5 +1,27 @@
 # Implementation Status
 
+## Unreleased — Admit finite harvesting for explicit laboratory production reserves
+
+A distinct typed `LaboratoryResourceProductionReserveUntil` constraint permits
+finite harvest and its relevant harvesting labor enables while qualified
+original production stock minima already hold. It retains the original goal,
+seals one future bounded horizon, and leaves actual harvest deadlines,
+finite-source/generation checks, mandatory proof, risk, checkpoint and authority
+rules intact. It rejects generic/native planning, mixed production effects,
+unrelated labor, duplicate/mixed markers and nonproduction terminal predicates.
+The existing production-only reserve constraint retains its closed action set.
+
+Five focused real-planner regression groups are authored, including archive
+roundtrip, mandatory proof and current authority/source/budget refusal. The
+ordinary core/world/intent test command compiled the real core/world libraries
+but the intent test binary was killed during code generation under severe
+shared-host load. A selected original-source assembly emitted no test output
+before the execution environment disconnected. No executable result is claimed
+for the reconstructed final source. Source was preserved and reviewed through
+GitHub; final formatting, full Rust qualification and all native/live admission
+remain unestablished. This core checkpoint adds no public request route.
+Owner: `df-lab-resource-harvest-h2m.4`.
+
 ## Unreleased — Retain production goals across finite acquisition stages
 
 The existing production blueprint accepts an explicit `acquire_resources`

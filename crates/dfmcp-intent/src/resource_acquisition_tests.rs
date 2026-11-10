@@ -11,6 +11,9 @@ use dfmcp_world::{Fact, FactPresence, FactSource, PredicateTruth, WorldGraph};
 use super::*;
 use crate::{Constraint, Intent, PreparedPlan, StaticPlanner};
 
+#[path = "planner_resource_reserve_tests.rs"]
+mod reserve_admission;
+
 const LEDGER: EntityId = EntityId::new(91);
 const WORKER: EntityId = EntityId::new(11);
 const WOOD: EntityId = EntityId::new(81);
