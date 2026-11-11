@@ -589,6 +589,54 @@ observable after another restart.
 Returns evidence-backed rationale for a fact, score, attention item, affordance, recommendation,
 plan, transition, compatibility decision, error, surprise, memory item, or doctor finding.
 
+The laboratory currently accepts a decimal `entity_id` for graph dependencies,
+an omitted `entity_id` for recent transcript events, and two typed selectors for
+a bounded explanation of an exact original plan or goal:
+
+- `plan:<64-lowercase-plan-digest>` resolves a pending plan or retained original.
+- `goal:<64-lowercase-plan-digest>` requires a committed original still retained
+  by the goal book. An uncommitted pending plan cannot satisfy this selector.
+
+A successful typed read returns `dfmcp.lab-goal-explanation/1`. It separates
+current terminal-clause truth, original room/output project truth, resource or
+ordinary production reserve status, retained first-achievement proof, original
+step receipts, and current physical work. A finished resource-acquisition stage
+can therefore explain the still-unfinished original room or production goal.
+When the existing continuation gate permits a new reviewed pursuit, `next_step`
+contains that original-goal request; inspection itself prepares or dispatches
+nothing. Unknown facts remain unknown. Historical achievement never substitutes
+for present goal truth or physical quiescence.
+
+`requirements_summary` counts true, false and unknown conjunctive terminal
+clauses. Nested `All` clauses are expanded; `Any` and `Not` remain intact, so
+a false alternative inside a satisfied disjunction is not labeled a blocker.
+`original_steps` and `original_requirements` contain complete follow-up
+`fortress.explain` calls. Follow their `next` calls for subsequent pages;
+do not construct offsets or mix pages from different discovery responses.
+
+Each page selector binds the semantic plan digest, exact typed object digest,
+inspecting session and an observation pin over the full anchor, original source,
+complete selected goal projection, all clause diagnostics and all step evidence.
+Receipt, historical-proof or custody changes invalidate the pin even when the
+world anchor stays unchanged. A mismatch returns `cursor_gap`; restart with
+the original `plan:` or `goal:` selector. `complete_domain` refers only to the
+selected requirements or steps domain. Agent Turn work coverage is explicitly
+partial for the selected original, with the session handoff linked for all work.
+
+Typed reads require current whole-fortress Observe and Query authority before
+looking up a digest. They admit the complete world and retained source scan,
+validate the exact typed archive, cap source/diagnostic work and elapsed time,
+and reduce pages from at most eight intact rows to fit the complete Agent Turn.
+An indivisible result that cannot fit refuses explicitly. Malformed typed
+selectors never fall through to transcript or numeric-entity handling.
+
+These reads use the immutable session owner fence: they do not allocate a
+semantic request ID, poll obligations, record replay, update orientation or
+historical proof, publish durable progress, notify Task progress, or move the
+clock. Exact plan archives and lossless original source remain available through
+the returned `df://session/...` references; see
+[Resource URI consumers](docs/RESOURCE_URIS.md#explaining-current-original-goal-truth).
+
 ### `fortress.doctor`
 
 Checks bridge, compatibility, canonical state, ledger, active work, leases, checkpoints, indexes,

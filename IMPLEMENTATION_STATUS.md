@@ -1,5 +1,45 @@
 # Implementation Status
 
+## Unreleased — Explain exact original goals through the existing tool
+
+fortress.explain now accepts plan:<digest> for pending or retained plans and
+goal:<digest> for committed original goals. Its bounded read-only result keeps
+current terminal requirements, original room/output truth, ordinary/resource
+reserve demand, historical achievement, action receipts and physical work
+separate. It exposes a reviewed continuation request when the existing oracle
+allows one. Conjunction clauses are diagnosed individually; Any and Not retain
+their logical meaning, and unknown evidence remains unknown.
+
+Follow-up page requests bind the exact typed object, inspecting session, full
+world anchor, original source, complete selected goal, all requirement samples
+and all step evidence. Receipt/history changes invalidate old pages even when
+the world anchor does not advance. Current Observe/Query authority, complete
+source and archive admission, bounded diagnostic work, elapsed time and full
+response limits apply. The immutable owner-fenced path does not poll, update
+proof/replay/orientation, allocate request IDs, dispatch or advance the clock.
+The public eleven-tool surface is unchanged.
+
+Nine actual-facade/diagnostic regressions are added, bringing this session's
+new regression sources to 31 across explanations, reserve continuation and
+compact reviews. Independent reviews checked API signatures, authority,
+source custody, pagination and historical-generation isolation. All 21 changed
+Rust files were parsed/formatted with rustfmt from rustc 1.102.0-nightly
+(9c5648833, 2026-11-10); recovered final file contents were checked against
+local Git blob hashes and uploaded through GitHub. Git diff whitespace checking
+also completed before formatting.
+
+Runtime verification remains incomplete. The full locked offline MCP check
+stopped before compilation on dependency checkout/workspace disk exhaustion.
+A subsequent exact-source component harness used the real five internal
+crates and complete codec/production/continuation modules, with all eleven
+external dependency identities matched to Cargo.lock. Its one-job, debug-zero,
+incremental-disabled test build was killed by SIGKILL while compiling the
+unchanged dfmcp-world library, before new tests compiled or ran. The subsequent
+metadata-only check could not start after the executor disconnected. No passing
+Rust test, full MCP build, default-budget room fit, native build or live
+qualification is claimed. The owning explanation bead
+dfmcp-reality-wiring-proof-4bf.11 and related reserve/room work remain in progress.
+
 ## Unreleased — Resume interrupted ordinary future reserves
 
 New continuations of an original consumption_reserve_v1 goal use the isolated

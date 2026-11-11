@@ -466,10 +466,7 @@ fn resource_room_reviews_preserve_complete_proof_or_pending_under_default_budget
             assert!(attempted.to_string().len() <= 4_096 * 4, "{attempted}");
             attempted
         } else {
-            assert_eq!(
-                attempted["error"]["code"], "budget_exceeded",
-                "{attempted}"
-            );
+            assert_eq!(attempted["error"]["code"], "budget_exceeded", "{attempted}");
             assert_eq!(pending_digest(&session)?, retained);
             prior
         };
@@ -498,9 +495,12 @@ fn resource_room_reviews_preserve_complete_proof_or_pending_under_default_budget
                 .count(),
             usize::from(missing_workshop),
         );
-        assert!(sealed.steps.iter().any(
-            |step| matches!(step.action, Action::CreateWorkOrder { .. })
-        ));
+        assert!(
+            sealed
+                .steps
+                .iter()
+                .any(|step| matches!(step.action, Action::CreateWorkOrder { .. }))
+        );
         assert!(
             sealed
                 .steps

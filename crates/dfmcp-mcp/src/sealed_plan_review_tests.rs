@@ -375,19 +375,20 @@ fn compact_plan_review_refuses_changed_columns_references_and_incomplete_rows() 
     for case in 0..12 {
         let mut changed = compacted.clone();
         match case {
-            0 => changed["predicate_encoding"]["columns"]["field"] =
-                json!(["field","entity_id","op","value"]),
+            0 => {
+                changed["predicate_encoding"]["columns"]["field"] =
+                    json!(["field", "entity_id", "op", "value"])
+            }
             1 => changed["predicate_encoding"]["reference"] = json!("external"),
             2 => changed["predicate_encoding"]["leaf_values"] = json!("references"),
             3 => changed["predicate_encoding"]["plan_digest"] = json!("b".repeat(64)),
-            4 => changed["predicates"][0] = json!(["all",[0]]),
+            4 => changed["predicates"][0] = json!(["all", [0]]),
             5 => changed["predicates"][0] = json!(["entity_exists"]),
-            6 => changed["predicates"][0] = json!(["entity_exists","7","extra"]),
+            6 => changed["predicates"][0] = json!(["entity_exists", "7", "extra"]),
             7 => changed["terminal_condition"] = json!(-1),
             8 => changed["terminal_condition"] = json!("0"),
             9 => changed["steps"][0]["postconditions"][0] = json!(MAX_NODES),
-            10 => changed["steps"][0]["obligation"]["terminal"] =
-                json!({"$ref":"/predicates/0"}),
+            10 => changed["steps"][0]["obligation"]["terminal"] = json!({"$ref":"/predicates/0"}),
             _ => changed["predicate_encoding"]["columns"]["unknown"] = json!([]),
         }
         assert!(validate(&changed).is_err(), "case {case}");
@@ -404,12 +405,12 @@ fn compact_plan_review_keeps_expansion_bounds_and_atomic_refusal() -> TestResult
     assert!(compact(&mut compacted)?);
     for deep in [true, false] {
         let mut changed = compacted.clone();
-        let mut rows = vec![json!(["paused",true])];
+        let mut rows = vec![json!(["paused", true])];
         for index in 1..if deep { MAX_DEPTH + 1 } else { 20 } {
             rows.push(if deep {
-                json!(["not",index-1])
+                json!(["not", index - 1])
             } else {
-                json!(["all",[index-1,index-1]])
+                json!(["all", [index - 1, index - 1]])
             });
         }
         changed["terminal_condition"] = json!(rows.len() - 1);
@@ -440,6 +441,9 @@ fn compact_plan_review_keeps_expansion_bounds_and_atomic_refusal() -> TestResult
     small["terminal_condition"] = json!({"$ref":"/predicates/0"});
     let before = small.clone();
     assert!(!compact(&mut small)?);
-    assert_eq!(small, before, "non-saving encoding changed the original packet");
+    assert_eq!(
+        small, before,
+        "non-saving encoding changed the original packet"
+    );
     Ok(())
 }

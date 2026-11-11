@@ -72,11 +72,12 @@
   "validation": {
     "pure_regression_tests_authored": 6,
     "mcp_regression_tests_authored": 8,
-    "execution": "not_executed_dependency_checkout_and_workspace_disk_exhaustion",
+    "execution": "not_executed_component_build_sigkill_in_unchanged_dfmcp_world",
     "formatting": "all_recovered_source_and_regressions_syntax_formatted_with_nightly_rustfmt",
     "default_output_budget_success_measured": false,
     "full_mcp_build_qualified": false,
-    "native_build_qualified": false
+    "native_build_qualified": false,
+    "metadata_check": "not_started_executor_disconnected"
   },
   "native_protocol_change": false,
   "live_admission_change": false

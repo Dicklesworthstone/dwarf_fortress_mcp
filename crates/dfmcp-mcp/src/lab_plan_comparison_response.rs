@@ -83,9 +83,7 @@ pub(super) fn finish(
     let shared_predicates = matches!(
         payload["schema"].as_str(),
         Some(
-            "dfmcp.resource-production/2"
-                | "dfmcp.resource-room/2"
-                | "dfmcp.production-reserve/1"
+            "dfmcp.resource-production/2" | "dfmcp.resource-room/2" | "dfmcp.production-reserve/1"
         )
     );
     if shared_predicates {
@@ -357,10 +355,9 @@ fn compact_objective_briefing(payload: &mut Value) -> Result<()> {
                     "sealed_anchor" | "first_satisfied_anchor" | "recorded_first_satisfied_anchor"
                 ) && removed == current_anchor_reference
                 {
-                    removed_anchor_references =
-                        removed_anchor_references.checked_add(1).ok_or_else(|| {
-                            invariant("objective anchor reference count overflowed")
-                        })?;
+                    removed_anchor_references = removed_anchor_references
+                        .checked_add(1)
+                        .ok_or_else(|| invariant("objective anchor reference count overflowed"))?;
                 }
                 row_projected = true;
             }
@@ -392,7 +389,9 @@ fn compact_objective_briefing(payload: &mut Value) -> Result<()> {
         let remaining = payload["anchor_encoding"]["reference_count"]
             .as_u64()
             .and_then(|count| count.checked_sub(removed_anchor_references))
-            .ok_or_else(|| invariant("objective projection lost its current-anchor reference count"))?;
+            .ok_or_else(|| {
+                invariant("objective projection lost its current-anchor reference count")
+            })?;
         payload["anchor_encoding"]["reference_count"] = json!(remaining);
     }
     if projected {

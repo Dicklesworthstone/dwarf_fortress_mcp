@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased — Explain current original-goal blockers without changing proof
+
+- Extend the existing Explain selector with exact plan:<digest> and goal:<digest>
+  reads for current requirements, original project/reserve truth, historical
+  achievement, retained receipts and physical work.
+- Return bounded follow-up calls pinned to the complete selected evidence;
+  reject same-anchor history/receipt changes instead of mixing pages.
+- Preserve the immutable current-authority read path and existing eleven tools.
+- Add nine regression tests and finalize formatting of recovered changes.
+- Verification remains limited to syntax formatting, source/integrity review
+  and Git blob checks. The exact-source focused build was killed in unchanged
+  dfmcp-world before tests ran; a later metadata check could not start after
+  executor disconnection. No runtime qualification is inferred.
+
 ## Unreleased — Continue underfunded ordinary reserves without renewing their horizon
 
 - Add isolated /6 continuation sources for original consumption_reserve_v1

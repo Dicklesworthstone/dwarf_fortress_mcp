@@ -124,8 +124,11 @@ that preserves prior pending work and world effects. With an ample allowance
 it requires exact proof reconstruction and the full harvest-to-furnished-room
 lifecycle, including original-goal history.
 
-These new Rust tests were not executed in the implementation session because
-the execution environment became unavailable during dependency preparation.
+These new Rust tests were not executed. Recovered final sources were
+syntax-formatted with nightly Rustfmt and verified against their local Git
+blob hashes. An exact-source component build with unchanged dependency pins
+was killed by SIGKILL in the unchanged dfmcp-world library before tests
+compiled or ran. Executor disconnection then prevented a metadata-only check.
 The implementation does not establish default-budget fit for complete room
 reviews. Existing measured limits in
 [LAB_RESOURCE_ROOM_PROJECTS.md](LAB_RESOURCE_ROOM_PROJECTS.md) and the runtime

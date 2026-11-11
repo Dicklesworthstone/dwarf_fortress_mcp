@@ -92,7 +92,7 @@ presence does not establish production admission.
 | `fortress.cancel` | `fortress_cancel` | implemented (request/drain/finalize) |
 | `fortress.checkpoint` | `fortress_checkpoint` | implemented |
 | `fortress.restore` | `fortress_restore` | implemented (epoch invalidation) |
-| `fortress.explain` | `fortress_explain` | transcript-tail evidence |
+| `fortress.explain` | `fortress_explain` | transcript/entity evidence and bounded, read-only exact original-plan/goal explanations |
 | `fortress.doctor` | `fortress_doctor` | implemented (health/compatibility) |
 
 Run it:

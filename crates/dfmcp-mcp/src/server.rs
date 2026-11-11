@@ -56,6 +56,9 @@ use objectives::{Objective, objective_history_roots};
 #[path = "plan_resources.rs"]
 pub(crate) mod plan_resources;
 
+#[path = "lab_goal_explanation.rs"]
+pub(crate) mod goal_explanation;
+
 #[path = "production_source.rs"]
 pub(crate) mod production_source;
 
@@ -6468,9 +6471,15 @@ pub fn fortress_restore(session_id: Option<String>, checkpoint_id: String) -> St
 
 /// Explain recent state transitions or graph dependencies for a specific entity.
 #[tool(
-    description = "Explain what happened in this session: return recent transcript events, or graph dependencies and causal topology for a specified entity."
+    description = "Explain recent transcript events or numeric entity graph dependencies. Typed entity_id selectors plan:<64-lowercase-plan-digest> and goal:<digest> inspect an exact pending/retained plan or committed original goal without advancing proof. Reports separate current terminal requirements, original project/reserve truth, historical achievement, receipts and physical work. Follow the returned original_steps, original_requirements and next requests for bounded pages pinned to the exact typed plan and current source. Current whole-fortress Observe and Query grants are required; no plan, effect, clock or historical proof is changed."
 )]
 pub fn fortress_explain(session_id: Option<String>, entity_id: Option<String>) -> String {
+    if let Some(subject) = entity_id
+        .as_deref()
+        .filter(|raw| goal_explanation::is_subject(raw))
+    {
+        return goal_explanation::execute(session_id, subject);
+    }
     let session = match resolve_session(session_id) {
         Ok(value) => value,
         Err(error) => return dfmcp_error_payload("fortress.explain", &error),

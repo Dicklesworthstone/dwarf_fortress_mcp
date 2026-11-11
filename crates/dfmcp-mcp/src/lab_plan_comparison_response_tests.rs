@@ -119,11 +119,11 @@ mod shared_predicates {
     }
 
     #[test]
-    fn compact_review_preserves_complete_proof_current_work_and_exact_budget_boundary() -> Result<()> {
+    fn compact_review_preserves_complete_proof_current_work_and_exact_budget_boundary() -> Result<()>
+    {
         let mut view = projection();
         let mut input = payload(&view);
-        input["steps"][0]["postconditions"] =
-            json!(vec![json!({"$ref":"/predicates/1"}); 64]);
+        input["steps"][0]["postconditions"] = json!(vec![json!({"$ref":"/predicates/1"}); 64]);
         let original_steps = crate::sealed_plan_review::expanded_steps(&input)?;
         view.budget.max_bytes = 9_999;
         let full = finish(&view, input.clone(), query_work(), Some(pending(&input)))?;
@@ -139,7 +139,10 @@ mod shared_predicates {
             result["predicate_encoding"]["schema"],
             "dfmcp.plan-predicate-references/2"
         );
-        assert_eq!(crate::sealed_plan_review::expanded_steps(&result)?, original_steps);
+        assert_eq!(
+            crate::sealed_plan_review::expanded_steps(&result)?,
+            original_steps
+        );
         assert_eq!(
             result["agent_turn"]["briefing"]["objectives"],
             v1["agent_turn"]["briefing"]["objectives"]
@@ -148,7 +151,13 @@ mod shared_predicates {
             result["agent_turn"]["active_work"],
             v1["agent_turn"]["active_work"]
         );
-        for field in ["production", "forecast", "anchor", "current_anchor", "anchor_encoding"] {
+        for field in [
+            "production",
+            "forecast",
+            "anchor",
+            "current_anchor",
+            "anchor_encoding",
+        ] {
             assert_eq!(result[field], v1[field], "{field}");
         }
         assert!(shrunk.len() < full.len());
@@ -162,12 +171,16 @@ mod shared_predicates {
             matches!(finish(&view, input.clone(), query_work(), Some(pending(&input))),
                 Err(error) if error.code == ErrorCode::BudgetExceeded)
         );
-        assert_eq!(crate::sealed_plan_review::expanded_steps(&input)?, original_steps);
+        assert_eq!(
+            crate::sealed_plan_review::expanded_steps(&input)?,
+            original_steps
+        );
         Ok(())
     }
 
     #[test]
-    fn ordinary_reserve_continuation_shares_complete_review_without_resource_acquisition() -> Result<()> {
+    fn ordinary_reserve_continuation_shares_complete_review_without_resource_acquisition()
+    -> Result<()> {
         let view = projection();
         let mut input = payload(&view);
         input["kind"] = json!("production_reserve_continuation");
@@ -178,9 +191,13 @@ mod shared_predicates {
             .ok_or_else(|| invariant("test production"))?
             .remove("resource_workflow");
         input["production"]["consumption"] = json!({"reserve_until_tick":6001});
-        let result: Value = serde_json::from_str(
-            &finish(&view, input.clone(), query_work(), Some(pending(&input)))?
-        ).map_err(|_| invariant("test packet"))?;
+        let result: Value = serde_json::from_str(&finish(
+            &view,
+            input.clone(),
+            query_work(),
+            Some(pending(&input)),
+        )?)
+        .map_err(|_| invariant("test packet"))?;
         assert_eq!(result["publication"], "complete_before_pending_plan_change");
         assert_eq!(result["production"], input["production"]);
         assert_eq!(
@@ -219,7 +236,8 @@ mod shared_predicates {
     }
 
     #[test]
-    fn the_complete_shared_proof_is_refused_instead_of_shortened_at_its_byte_boundary() -> Result<()> {
+    fn the_complete_shared_proof_is_refused_instead_of_shortened_at_its_byte_boundary() -> Result<()>
+    {
         let mut view = projection();
         let input = payload(&view);
         // All measured byte ceilings have four digits, so the admitted budget
@@ -295,7 +313,8 @@ mod shared_predicates {
     }
 
     #[test]
-    fn shared_anchor_counts_remain_exact_when_historical_goal_artifacts_move_to_details() -> Result<()> {
+    fn shared_anchor_counts_remain_exact_when_historical_goal_artifacts_move_to_details()
+    -> Result<()> {
         for literal_field in ["original_source", "terminal_condition"] {
             let mut view = projection();
             view.budget.max_output_tokens = 4_096;
@@ -318,7 +337,8 @@ mod shared_predicates {
             let input = payload(&view);
             let output = finish(&view, input.clone(), query_work(), Some(pending(&input)))?;
             assert!(output.len() <= 4 * 4_096);
-            let result: Value = serde_json::from_str(&output).map_err(|_| invariant("test packet"))?;
+            let result: Value =
+                serde_json::from_str(&output).map_err(|_| invariant("test packet"))?;
             for field in [
                 "steps",
                 "predicates",
@@ -370,8 +390,14 @@ mod shared_predicates {
             ] {
                 assert!(goal.get(field).is_none(), "archived {field} stayed inline");
             }
-            assert_eq!(briefing["objective_projection"]["complete_record_membership"], true);
-            assert_eq!(briefing["objective_projection"]["complete_goal_evidence"], false);
+            assert_eq!(
+                briefing["objective_projection"]["complete_record_membership"],
+                true
+            );
+            assert_eq!(
+                briefing["objective_projection"]["complete_goal_evidence"],
+                false
+            );
         }
         Ok(())
     }
@@ -390,7 +416,8 @@ mod objective_briefing {
         let mut active_work = empty_active_work();
         active_work["actions"] = json!([{"action_id":"original-harvest", "state":"Verified",
             "work_state":{"physical_quiescent":true}}]);
-        active_work["indeterminate_effects"] = json!([{"action_id":"other-action", "state":"unknown"}]);
+        active_work["indeterminate_effects"] =
+            json!([{"action_id":"other-action", "state":"unknown"}]);
         active_work["carried_obligations"] =
             json!([{"plan_digest":"retained", "proof":"retained_not_reobserved"}]);
         let goal = json!({
@@ -456,8 +483,8 @@ mod objective_briefing {
     }
 
     #[test]
-    fn compact_prior_goals_keep_current_truth_complete_candidate_and_every_active_record() -> Result<()>
-    {
+    fn compact_prior_goals_keep_current_truth_complete_candidate_and_every_active_record()
+    -> Result<()> {
         let view = projection(4_096);
         let (payload, pending, queries) = candidate(&view);
         let raw = finish(
@@ -540,7 +567,8 @@ mod objective_briefing {
     }
 
     #[test]
-    fn compact_goal_projection_never_relabels_missing_unknown_or_historical_anchors() -> Result<()> {
+    fn compact_goal_projection_never_relabels_missing_unknown_or_historical_anchors() -> Result<()>
+    {
         let mut view = projection(4_096);
         let mut historical = view.anchor.clone();
         historical["sequence"] = json!(1);
@@ -548,7 +576,8 @@ mod objective_briefing {
         view.objectives[0]["observed_anchor"] = historical.clone();
         view.objectives[0]["semantic_output_goal"] = json!({"predicate_truth":"unknown",
             "observed_anchor":null, "error":{"code":"preconditions_failed", "message":"unqualified stock"}});
-        view.objectives[0]["semantic_room_goal"] = json!({"truth":"unknown", "error":"missing source"});
+        view.objectives[0]["semantic_room_goal"] =
+            json!({"truth":"unknown", "error":"missing source"});
         view.objectives[0]["continuation_refused"] = json!({"code":"capability_denied"});
         let (payload, pending, queries) = candidate(&view);
         let output = decoded(&finish(&view, payload, queries, Some(pending))?)?;
@@ -590,7 +619,8 @@ mod objective_briefing {
             match source {
                 "steps" => payload["steps"][0]["required_proof"] = json!("x".repeat(16_384)),
                 "active_work" => {
-                    view.active_work["indeterminate_effects"] = json!([{"evidence":"x".repeat(16_384)}])
+                    view.active_work["indeterminate_effects"] =
+                        json!([{"evidence":"x".repeat(16_384)}])
                 }
                 "bytes" => view.budget.max_bytes = 2_048,
                 _ => view.budget.max_output_tokens = 512,
@@ -618,10 +648,8 @@ mod objective_briefing {
                     "coverage": {"partial_domains": []}
                 }
             });
-            assert!(
-                matches!(compact_objective_briefing(&mut payload),
-                    Err(error) if error.code == ErrorCode::InternalInvariantViolation)
-            );
+            assert!(matches!(compact_objective_briefing(&mut payload),
+                    Err(error) if error.code == ErrorCode::InternalInvariantViolation));
         }
     }
 }

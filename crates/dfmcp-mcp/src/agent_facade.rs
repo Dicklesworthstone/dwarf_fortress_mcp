@@ -231,9 +231,7 @@ fn cache_pending_plan(payload: &Value, state: &mut SessionOrientation) {
     let shared_schema = matches!(
         payload["schema"].as_str(),
         Some(
-            "dfmcp.resource-production/2"
-                | "dfmcp.resource-room/2"
-                | "dfmcp.production-reserve/1"
+            "dfmcp.resource-production/2" | "dfmcp.resource-room/2" | "dfmcp.production-reserve/1"
         )
     );
     let steps = if shared_schema
@@ -2248,9 +2246,18 @@ pub fn fortress_restore(session_id: Option<String>, checkpoint_id: String) -> St
 }
 
 #[tool(
-    description = "Explain state transitions or graph dependencies with explicit epistemic and coverage limits."
+    description = "Explain state transitions or numeric entity graph dependencies. entity_id also accepts plan:<64-lowercase-plan-digest> or goal:<digest> for exact original-plan/goal explanation: current unmet/unknown requirements, project/reserve truth, historical achievement, original receipts and physical work stay distinct. Follow returned next/original_steps/original_requirements calls for exact-source bounded pages. Typed inspection requires current whole-fortress Observe and Query and does not poll, change historical proof, dispatch effects or advance the clock."
 )]
 pub fn fortress_explain(session_id: Option<String>, entity_id: Option<String>) -> String {
+    // The owner renders the complete, currently authorized immutable inspection
+    // under one lock. Do not resample proof, alter replay/orientation, notify
+    // Task progress or replace its packet after the read has completed.
+    if entity_id
+        .as_deref()
+        .is_some_and(crate::server::goal_explanation::is_subject)
+    {
+        return crate::server::fortress_explain(session_id, entity_id);
+    }
     let recorded = json!({"entity_id": entity_id});
     let response = project_response(
         crate::server::fortress_explain(session_id.clone(), entity_id),

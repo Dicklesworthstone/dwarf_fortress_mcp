@@ -282,6 +282,39 @@ resource error and Agent Turn; unauthorized errors disclose no current anchor
 or goal existence. Successful and failed inspections preserve semantic request
 IDs, pending plans, replay, proof history and durable files.
 
+## Explaining current original-goal truth
+
+The source/history resources above preserve an original without evaluating its
+current goal. For a current read-only explanation, call the existing
+`fortress.explain` tool with `entity_id="goal:<plan_digest>"`. Use
+`entity_id="plan:<plan_digest>"` to inspect a pending plan as well. This adds
+no resource URI family or tool name.
+
+The `dfmcp.lab-goal-explanation/1` response evaluates the complete retained
+original through the existing goal oracle and reports true, false or unknown
+current requirements. Its goal projection preserves semantic room/output truth,
+resource and ordinary production reserve horizons, continuation eligibility,
+historical proof and physical quiescence separately. Step pages expose the
+exact retained receipt or recovery evidence and distinguish it from current
+physical work. A missing receipt cannot prove work is absent. A pending plan
+has no committed original-goal history.
+
+Follow the structured `original_requirements`, `original_steps` and `next`
+tool calls. Unlike immutable source bytes, these pages also pin the complete
+selected current goal and step evidence, the full world anchor and the
+inspecting session. A historical-proof publication at an unchanged world
+anchor invalidates older explanation pages. `cursor_gap` requires a new
+unpaged typed selector; a different exact typed object returns `stale_anchor`.
+No continuation pins retention or restores dispatch authority.
+
+Every typed explanation reacquires the owner-fenced immutable read and current
+whole-fortress Observe and Query authority. Complete world/source admission,
+exact archive verification, bounded diagnostic work, full response byte/token
+limits and one elapsed-time budget apply before publication. Inspection does
+not change request identity, replay, proof history, durable custody or the clock.
+The returned lossless original source and typed-plan archive links retain the
+resource semantics described above.
+
 ## Bounds, retention, and refusals
 
 A page starts with at most 25 records and reduces its row count to fit the

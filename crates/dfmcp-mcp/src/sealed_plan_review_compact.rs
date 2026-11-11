@@ -80,7 +80,9 @@ fn reference(value: &Value, upper: usize, compress: bool) -> Result<Value> {
             .get("$ref")
             .and_then(Value::as_str)
             .and_then(|reference| reference.strip_prefix(PREFIX))
-            .ok_or_else(|| invalid("compact proof reference is not local to its predicate table"))?;
+            .ok_or_else(|| {
+                invalid("compact proof reference is not local to its predicate table")
+            })?;
         raw.parse::<usize>()
             .ok()
             .filter(|index| index.to_string() == raw && *index < upper)
@@ -268,7 +270,9 @@ pub(super) fn readable(payload: &Value) -> Result<Value> {
     let mut bytes = 0usize;
     for (index, predicate) in original.iter().enumerate() {
         let (kind, row) = readable_row(predicate, index)?;
-        bytes = bytes.checked_add(row.to_string().len()).ok_or_else(bounded)?;
+        bytes = bytes
+            .checked_add(row.to_string().len())
+            .ok_or_else(bounded)?;
         if bytes > MAX_EXPANDED_BYTES {
             return Err(bounded());
         }

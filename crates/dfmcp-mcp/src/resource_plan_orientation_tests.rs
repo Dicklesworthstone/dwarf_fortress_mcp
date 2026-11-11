@@ -276,11 +276,13 @@ fn incomplete_published_proof_discards_stale_pending_hints() -> TestResult {
 #[test]
 fn compact_published_plan_proof_is_standalone_in_later_turns() -> TestResult {
     let _serial = crate::test_serial();
-    for kind in ["resource_room_continuation", "production_reserve_continuation"] {
+    for kind in [
+        "resource_room_continuation",
+        "production_reserve_continuation",
+    ] {
         let id = register_session(&format!("compact-published-{kind}"));
         let mut payload = shared_plan(&id, kind);
-        payload["steps"][0]["postconditions"] =
-            json!(vec![json!({"$ref":"/predicates/0"}); 48]);
+        payload["steps"][0]["postconditions"] = json!(vec![json!({"$ref":"/predicates/0"}); 48]);
         let original = crate::sealed_plan_review::expanded_steps(&payload)?;
         assert!(crate::sealed_plan_review::compact(&mut payload)?);
         let raw = payload.to_string();
@@ -296,7 +298,10 @@ fn compact_published_plan_proof_is_standalone_in_later_turns() -> TestResult {
         presentation_state("fortress.commit", &mut commit, Some(&id));
         let mut observed = json!({"ok":true,"session_id":id,"game_tick":102});
         let (state, _, _) = presentation_state("fortress.observe", &mut observed, Some(&id));
-        assert_eq!(active_work(&state)["obligations"][0]["terminal"], full_terminal());
+        assert_eq!(
+            active_work(&state)["obligations"][0]["terminal"],
+            full_terminal()
+        );
         assert!(!active_work(&state).to_string().contains("\"$ref\""));
         assert_eq!(serde_json::from_str::<Value>(&raw)?, payload);
     }

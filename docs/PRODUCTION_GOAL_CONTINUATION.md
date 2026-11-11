@@ -381,7 +381,10 @@ These regressions are authored but unexecuted. The recovered production changes
 and all new tests, including capacity and restore cases, were syntax-formatted
 with nightly Rustfmt during a brief recovery of the execution environment.
 The full Cargo check stopped before compilation on missing offline dependency
-checkout and workspace disk exhaustion.
+checkout and workspace disk exhaustion. A later exact-source component build
+with all eleven external lock identities preserved was killed by SIGKILL in
+the unchanged dfmcp-world library, before tests compiled or ran. Executor
+disconnection prevented the metadata-only follow-up check.
 No successful default-budget run, full MCP build, native build or live admission
 is claimed for this increment. The machine contract is
 [`laboratory_production_reserve_continuation_v1.json`](../architecture/laboratory_production_reserve_continuation_v1.json),
