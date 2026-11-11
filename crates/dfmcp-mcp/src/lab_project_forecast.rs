@@ -294,6 +294,25 @@ fn model_error(error: DfmcpError, progress: &ProjectProgress) -> Result<Value> {
     Ok(report)
 }
 
+/// Planning authority can describe a future stage without authorizing its
+/// effects. Refuse that stage before charging or forking its simulation; the
+/// adapter still rechecks these grants during ordinary preparation and commit.
+fn authorize_model_stage(plan: &PreparedPlan, context: &OperationContext) -> Result<()> {
+    for step in &plan.steps {
+        let scope = step.action.scope();
+        context.authorize(
+            step.required_capability,
+            step.risk,
+            &scope.entity_ids,
+            scope.map_area,
+        )?;
+    }
+    if plan.requires_checkpoint {
+        context.authorize(Capability::Checkpoint, RiskTier::Guarded, &[], None)?;
+    }
+    Ok(())
+}
+
 /// Registered stock fields only; unknown evidence stays explicitly unknown.
 fn stock_frontier(snapshot: &WorldSnapshot, ledger: ProductionGoalLedger) -> Result<Value> {
     ledger.validate_current(snapshot)?;
@@ -489,6 +508,9 @@ pub(crate) fn forecast_project_bounded(
             Ok(plan) => plan,
             Err(error) => return model_error(error, &progress),
         };
+        if let Err(error) = authorize_model_stage(&next, &model_context) {
+            return model_error(error, &progress);
+        }
         budget.admit_project_stage(world.snapshot(), &next, template)?;
         plan = next;
     }

@@ -178,6 +178,14 @@ stage, the agent uses the ordinary `continue_goal` workflow to review a
 fresh later plan. Predicted later stages never become pending plans, effect
 authority or current goal evidence.
 
+Every later compiled stage checks its required effect capabilities, risk,
+entity/map scope, grant expiry at the predicted stage anchor, and checkpoint
+authority before consuming aggregate stage, action or source-fork allowances.
+A refused stage reports unavailable capability evidence with only the earlier
+admitted stages and costs. Its missing authority cannot become a shared-action
+budget error or consume budget that belongs to another alternative. Ordinary
+adapter preparation and execution still recheck the same authority.
+
 All stages and alternatives share the original request deadline, source work,
 action allowance, game-tick allowance and 400-slice ceiling. The complete
 project generation permits at most four stages per candidate and twenty source

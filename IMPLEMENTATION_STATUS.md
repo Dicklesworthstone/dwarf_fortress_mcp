@@ -1,5 +1,30 @@
 # Implementation Status
 
+## Unreleased — Authorize future project stages before simulation accounting
+
+Complete-project forecasts now check each newly compiled stage's exact effect
+capabilities, risk, entity/map scope, expiry at its predicted anchor, and required
+checkpoint grant before admitting that stage or forking its simulation. The
+ordinary adapter still performs its own preparation and execution checks.
+
+Previously a denied later stage could consume aggregate action/stage/fork
+allowances and appear in the simulated-stage catalog before refusal. A tight
+shared action allowance could consequently hide the actionable capability
+failure behind `budget_exceeded`. The forecast now reports `capability_denied`
+with only the earlier admitted stages and their real simulation costs. The
+original adapter, source request and prepared plan remain unchanged.
+
+Validation: all 12 original-source complete-project forecast tests pass,
+including the formerly failing authority case and new missing, insufficient-risk,
+expired and entity-scoped grant cases under tight aggregate action limits.
+Existing staged room/production, reserve-frontier, quiescence and horizon cases
+also pass. All 32 compiler-reported thin-component source/manifest/lock inputs
+remain hash-stable; the run uses the complete cached core/world/intent/adapter/lab
+crates and exact locked serialization dependencies on rustc 1.100.0-nightly
+(f7d782a3b, 2026-08-19). This selected-source execution excludes the public facade,
+transport and full current-head release/native qualification. Owning bead
+df-lab-project-forecast-p7q remains in progress.
+
 ## Unreleased — Preserve full query sources through bounded live responses
 
 Shared structured queries now carry independent source and response allowances
@@ -25,17 +50,20 @@ A zero remaining response allowance now returns `budget_exceeded` after current
 authority validation and before any publication callback.
 
 Validation passed 116/116 original-source query component tests, including two
-direct source/output regressions, and 8/8 actual shared-publisher regressions.
-The query run preserved all 76 recorded inputs; all 11 external versions,
-sources and archive checksums match the unchanged repository lock. The publisher
-assembly uses the actual semantic crates and function bodies while excluding
-transport registration, an installed Task service and unrelated test modules.
-Both runs used rustc 1.100.0-nightly (f7d782a3b, 2026-08-19). A real spatial-handler
-regression adds forty-record paging/counting and source-limit refusal under an
-8 KiB response limit; its execution is still pending. These focused results do
-not establish full current-head workspace, native-game, latest-nightly release
-qualification or compatibility admission. Owning bead df-lab-structured-query-f7q
-remains in progress.
+direct source/output regressions. The merged MCP assembly then passed the real
+spatial-handler regression and 16/16 shared-publisher executions: eight distinct
+cases in both laboratory and spatial runtime instances. Forty-record pages and
+compound counts fit complete 8 KiB responses, keep their anchored continuation,
+and perform no bridge read; lowering the real source allowance still refuses.
+
+All 76 query-run inputs and all 603 frozen MCP component files stayed unchanged
+during their respective runs. All 11 external versions, sources and archive
+checksums match the repository lock. The MCP assembly uses actual semantic
+crates and production function bodies while excluding transport registration,
+an installed Task service and unrelated test modules. These runs used rustc
+1.100.0-nightly (f7d782a3b, 2026-08-19); they do not establish full current-head
+workspace, native-game, latest-nightly release qualification or compatibility
+admission. Owning bead df-lab-structured-query-f7q remains in progress.
 
 ## Unreleased — Wait for a retained laboratory condition
 

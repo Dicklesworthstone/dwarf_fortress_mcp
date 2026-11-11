@@ -402,7 +402,74 @@ fn future_stage_authority_and_aggregate_actions_are_checked_before_simulation() 
     );
     assert_eq!(report["stages"].as_array().map(Vec::len), Some(1));
     assert_eq!(budget.work_json()["source_forks"], 1);
+    assert_eq!(budget.work_json()["project_stages"], 1);
+    assert_eq!(report["project_action_count"], plan.steps.len());
+    assert_eq!(
+        budget.work_json()["candidate_action_steps"],
+        plan.steps.len()
+    );
     assert_eq!(format!("{adapter:?}"), original);
+    Ok(())
+}
+
+#[test]
+fn denied_future_stage_keeps_grant_refusal_ahead_of_shared_action_exhaustion() -> Result<()> {
+    let adapter = fixture(false)?;
+    let source = beds(24, false)?;
+    let current = context(&adapter);
+    let plan = prepare(&adapter, &source, &current)?;
+    let original = format!("{adapter:?}");
+    let original_plan = plan.clone();
+    let (complete, _) = predict(&adapter, &source, &plan, &current, 5_000)?;
+    assert_eq!(complete["predicted_complete"], true, "{complete}");
+    let next_actions = complete["stages"][1]["action_count"]
+        .as_u64()
+        .ok_or_else(|| invariant("production stage action count missing"))?;
+    let initial_actions = plan.steps.len() as u64;
+    let allowance = initial_actions.max(next_actions);
+    assert!(initial_actions + next_actions > allowance);
+
+    for restriction in ["missing", "risk", "expired", "scope"] {
+        let mut denied = current.clone();
+        // Each stage can be compiled on its own, but both cannot be admitted.
+        // A denied future stage must not consume the remaining action budget.
+        denied.budget.max_actions = u32::try_from(allowance)
+            .map_err(|_| invariant("fixture action allowance is too large"))?;
+        if restriction == "missing" {
+            denied
+                .grants
+                .retain(|grant| grant.capability != Capability::ConfigureProduction);
+        } else {
+            let grant = denied
+                .grants
+                .iter_mut()
+                .find(|grant| grant.capability == Capability::ConfigureProduction)
+                .ok_or_else(|| invariant("fixture production grant missing"))?;
+            match restriction {
+                "risk" => grant.max_risk = RiskTier::ReadOnly,
+                "expired" => grant.expires_at_tick = Some(current.anchor.tick),
+                "scope" => grant.scope.entity_ids = BTreeSet::from([starter::STOCK_LEDGER]),
+                _ => return Err(invariant("unknown grant restriction")),
+            }
+        }
+        let mut budget = ForecastBudget::new_project(&denied, Instant::now(), 5_000)?;
+        let report = forecast_project_bounded(&adapter, &source, &plan, &denied, &mut budget)?;
+        assert_eq!(report["available"], false, "{restriction}: {report}");
+        assert_eq!(
+            report["reason"]["code"],
+            ErrorCode::CapabilityDenied.as_str()
+        );
+        assert_eq!(report["stages"].as_array().map(Vec::len), Some(1));
+        assert_eq!(report["project_action_count"], initial_actions);
+        assert_eq!(budget.work_json()["project_stages"], 1);
+        assert_eq!(budget.work_json()["source_forks"], 1);
+        assert_eq!(
+            budget.work_json()["candidate_action_steps"],
+            initial_actions
+        );
+        assert_eq!(plan, original_plan);
+        assert_eq!(format!("{adapter:?}"), original);
+    }
     Ok(())
 }
 
@@ -612,7 +679,8 @@ fn true_exact_reserve_can_precede_later_stable_verification() -> Result<()> {
         .find_map(|step| step.obligation.as_mut())
         .ok_or_else(|| invariant("production fixture obligation missing"))?;
     obligation.stable_for_observations = 2;
-    let plan = StaticPlanner::default().prepare_laboratory(adapter.snapshot(), &intent, &current)?;
+    let plan =
+        StaticPlanner::default().prepare_laboratory(adapter.snapshot(), &intent, &current)?;
     let original = format!("{adapter:?}");
     let (report, _) = predict(&adapter, &source, &plan, &current, 5_000)?;
     assert_eq!(report["available"], true, "{report}");
@@ -626,7 +694,10 @@ fn true_exact_reserve_can_precede_later_stable_verification() -> Result<()> {
     assert_eq!(report["predicted_physical_quiescent"], true);
     assert_eq!(report["reserve_forecast"]["predicted_tick"], until);
     assert_eq!(report["reserve_forecast"]["predicted_goal_truth"], "true");
-    assert_eq!(report["reserve_forecast"]["changes_action_deadlines"], false);
+    assert_eq!(
+        report["reserve_forecast"]["changes_action_deadlines"],
+        false
+    );
     assert_eq!(format!("{adapter:?}"), original);
     Ok(())
 }
