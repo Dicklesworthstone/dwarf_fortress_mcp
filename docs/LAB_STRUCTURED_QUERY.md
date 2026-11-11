@@ -32,7 +32,7 @@ inner envelope accepts the existing schema, `query`, and optional complete
 | --- | --- |
 | `entities` | Typed filters, explicit field projection, deterministic ordering and source-bound pages |
 | `inspect` | Exact entity ID and generation, with explicit selected fields |
-| `aggregate` | Counts, grouping, and exact integer or fixed-scale numerical statistics |
+| `aggregate` | Counts, grouping and exact integer/fixed statistics, optionally selected by relationships and location |
 | `search` | Bounded lexical retrieval over selected kinds, typed predicates, fields and labels |
 | `traverse` | Bounded observed graph traversal and a witnessed path to an optional target |
 | `dependencies` | Prerequisite order, cycle components, cycle blockers and an unweighted critical chain |
@@ -96,6 +96,61 @@ Results separate excluded/unavailable inputs from actual samples. Sums,
 minima and maxima use decimal integer strings; a mean is an exact rational.
 These are advisory statistics over the selected projection, not a complete
 stock or mutation-precondition certificate.
+
+### Aggregate by recorded relationships and location
+
+An aggregate also accepts optional `relation` and `spatial`, with the same closed
+selector objects used by `ranked_entities`. Either can be used alone or both
+together. This answers questions such as stock totals for a selected stockpile
+inside a work area, or profession counts in a particular part of the fortress,
+without downloading and joining all contributing records.
+
+For a source that publishes item stacks, their coordinates and containment edges:
+
+```json
+{
+  "kind": "aggregate",
+  "kinds": ["item"],
+  "relation": {
+    "edge_kinds": ["contained_in"],
+    "target_kinds": ["stockpile"],
+    "target_ids": ["2001"]
+  },
+  "spatial": {
+    "region": {"min": [0, 0, 10], "max": [9, 2, 10]},
+    "geometry": {"kind": "point", "field": "position"},
+    "relation": "within"
+  },
+  "group_by": {"kind": "field", "field": "type_key"},
+  "metrics": [{"name": "quantity", "field": "stack_size", "numeric_type": "u64"}]
+}
+```
+
+Use this as `request.query`; select field names, edge kinds and target IDs that
+actually exist in the chosen source. A relationship target may be outside the
+region or have no geometry. Each matching source entity contributes once, even
+when several recorded edges select it. Source `where` runs first, then the
+positive relationship, then source geometry, then grouping and exact metrics.
+An unavailable metric does not remove an otherwise selected member.
+
+`selection` reports source False/Unknown exclusions, relation matches,
+`unknown_relation`, `no_observed_match`, missing and unavailable targets,
+and spatial matches/outside/Unknown geometry separately. Relation counts precede
+spatial selection; their edge counts are incidences, not inventory quantities.
+Unknown membership never becomes a zero contribution to a supposedly complete
+total. `coverage.totals_scope` is `selected_known_members_only`, and
+`selection_complete_within_projection` only means membership was decidable
+within the supplied source. Metric sample exclusions remain explicit even when
+membership is complete. Whole-fortress and relation-domain completeness, absence
+proofs and mutation authority remain unestablished.
+
+Complete-source admission includes targets, edges, unrelated fields, chunks and
+events before hashing or allocating a relation index. Source/target predicates,
+geometry, grouping and metrics share one work and wall budget. Groups publish
+atomically; an excessive group count or complete-packet size returns
+`budget_exceeded` without partial totals. Omitting both selectors preserves
+the existing aggregate output shape. The complete contract is in
+`QUERY_EXECUTION.md`.
 
 ## Filtered lexical search
 

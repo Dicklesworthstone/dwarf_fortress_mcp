@@ -238,6 +238,8 @@
         "properties": {
           "kind": {"const": "aggregate"}, "kinds": {"type": "array", "items": {"$ref": "#/$defs/entity_kind"}, "maxItems": 32, "minItems": 0},
           "where": {"anyOf": [{"$ref": "#/$defs/filter"}, {"type": "null"}], "description": "Only True rows contribute. Unavailable filter facts remain Unknown and are counted separately from False in selection coverage."},
+          "relation": {"anyOf": [{"$ref": "#/$defs/relation_selector"}, {"type": "null"}], "description": "Optional positive recorded relationship before grouping and metrics. Each entity contributes once even when several edges match; missing targets and unavailable target filters remain Unknown and are counted separately."},
+          "spatial": {"anyOf": [{"$ref": "#/$defs/spatial_selector"}, {"type": "null"}], "description": "Optional source geometry after source facts and positive relationships, before grouping and metrics. Unknown geometry remains separate from known outside-region entities. Totals describe selected known members, never a complete fortress inventory."},
           "group_by": {"anyOf": [{"$ref": "#/$defs/group_by"}, {"type": "null"}]}, "metrics": {"type": "array", "items": {"$ref": "#/$defs/numeric_metric"}, "maxItems": 16, "minItems": 0},
           "max_groups": {"anyOf": [{"type": "integer", "minimum": 1, "maximum": 128}, {"type": "null"}]}
         }

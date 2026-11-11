@@ -3,6 +3,7 @@
 
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet};
+use std::time::Instant;
 
 use dfmcp_core::{
     Capability, DfmcpError, Digest32, EntityId, ErrorCode, OperationContext, Result, RiskTier,
@@ -14,6 +15,20 @@ use dfmcp_world::{
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
+
+use super::core_query;
+
+#[path = "spatial_query_source.rs"]
+#[allow(dead_code, clippy::duplicate_mod)]
+mod source;
+
+#[path = "relation_selector.rs"]
+#[allow(dead_code, clippy::duplicate_mod)]
+mod relation_selector;
+
+#[path = "spatial_selector.rs"]
+#[allow(dead_code, clippy::duplicate_mod)]
+mod spatial_selector;
 
 const MAX_NODES: usize = 4096;
 const MAX_INPUT_BYTES: usize = 65536;
@@ -40,6 +55,8 @@ enum Query {
         kinds: Vec<String>,
         #[serde(rename = "where")]
         predicate: Option<Value>,
+        relation: Option<relation_selector::Request>,
+        spatial: Option<spatial_selector::Request>,
         group_by: Option<GroupBy>,
         #[serde(default)]
         metrics: Vec<Metric>,
@@ -300,8 +317,10 @@ fn finish(
     result["schema"] = json!("dfmcp.query.result/1");
     result["anchor"] = anchor_json(snapshot.anchor());
     result["query_digest"] = json!(identity.to_string());
-    result["coverage"] = json!({"domain":"observed_projection","absence_proven":false,
-        "note":"counts and matches describe the supplied projection, not complete fortress history or unobserved domains"});
+    if result.get("coverage").is_none() {
+        result["coverage"] = json!({"domain":"observed_projection","absence_proven":false,
+            "note":"counts and matches describe the supplied projection, not complete fortress history or unobserved domains"});
+    }
     let bytes = serde_json::to_vec(&result).map_err(|_| invalid("cannot encode query result"))?;
     if bytes.len() > maximum {
         return Err(exhausted(
@@ -317,6 +336,7 @@ pub(super) fn execute(
     context: &OperationContext,
     input: &Value,
 ) -> Result<Value> {
+    let started = Instant::now();
     context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
     if context.anchor != snapshot.anchor() {
         return Err(DfmcpError::new(
@@ -348,6 +368,16 @@ pub(super) fn execute(
             "expected_anchor does not match the complete current anchor",
         ));
     }
+    // Compound selection may inspect every target and edge. Admit the complete
+    // source, including unselected values, before hashing or building its index.
+    // Plain aggregates and lexical searches retain their established allowance.
+    let work = if matches!(&request.query, Query::Aggregate { relation, spatial, .. }
+        if relation.is_some() || spatial.is_some())
+    {
+        Some(source::preflight(snapshot, context, started)?)
+    } else {
+        None
+    };
     if !snapshot.hash_is_valid() {
         return Err(DfmcpError::new(
             ErrorCode::InternalInvariantViolation,
@@ -366,6 +396,8 @@ pub(super) fn execute(
         Query::Aggregate {
             kinds: selected,
             predicate,
+            relation,
+            spatial,
             group_by,
             metrics,
             max_groups,
@@ -375,11 +407,17 @@ pub(super) fn execute(
                 predicate: predicate
                     .map(super::core_query::decode_filter)
                     .transpose()?,
+                relation: relation
+                    .map(relation_selector::Request::normalize_exact)
+                    .transpose()?,
+                spatial: spatial
+                    .map(spatial_selector::Request::normalize)
+                    .transpose()?,
                 group_by,
                 metrics,
                 max_groups: max_groups.map_or(32, |value| value),
             };
-            aggregate(snapshot, identity, &spec, maximum)
+            aggregate(snapshot, identity, &spec, maximum, work)
         }
         Query::Search {
             text,
@@ -501,6 +539,8 @@ fn group_key(entity: &EntityRecord, group_by: Option<&GroupBy>) -> Result<GroupK
 struct AggregateSpec {
     kinds: BTreeSet<String>,
     predicate: Option<Predicate>,
+    relation: Option<relation_selector::Selection>,
+    spatial: Option<spatial_selector::Selection>,
     group_by: Option<GroupBy>,
     metrics: Vec<Metric>,
     max_groups: usize,
@@ -511,10 +551,13 @@ fn aggregate(
     identity: Digest32,
     spec: &AggregateSpec,
     maximum: usize,
+    mut work: Option<source::Budget>,
 ) -> Result<Value> {
     let AggregateSpec {
         kinds: selected,
         predicate,
+        relation,
+        spatial,
         group_by,
         metrics,
         max_groups,
@@ -545,15 +588,76 @@ fn aggregate(
     let predicate_work = predicate
         .as_ref()
         .map_or(0, |predicate| predicate.complexity().saturating_mul(3));
-    if snapshot.graph.entities.len().saturating_mul(
+    let aggregate_work = snapshot.graph.entities.len().saturating_mul(
         metrics
             .len()
             .saturating_add(2)
             .saturating_add(predicate_work),
-    ) > MAX_WORK
-    {
+    );
+    if aggregate_work > MAX_WORK {
         return Err(exhausted("aggregate scan exceeds its operation bound"));
     }
+    if let Some(work) = &mut work {
+        let relation_work = relation.as_ref().map_or(0, |relation| {
+            let target_validation = relation
+                .predicate
+                .as_ref()
+                .map_or(0, |predicate| predicate.complexity().saturating_mul(2));
+            snapshot
+                .graph
+                .entities
+                .len()
+                .saturating_mul(
+                    relation
+                        .entity_work()
+                        .saturating_add(target_validation)
+                        .saturating_add(4),
+                )
+                .saturating_add(
+                    snapshot
+                        .graph
+                        .edges
+                        .len()
+                        .saturating_mul(relation.edge_work()),
+                )
+        });
+        let group_levels = (usize::BITS - max_groups.leading_zeros()) as usize;
+        let additional_work = snapshot
+            .graph
+            .entities
+            .len()
+            .saturating_mul(
+                selected.len().saturating_add(group_levels).saturating_add(
+                    spatial
+                        .as_ref()
+                        .map_or(0, |spatial| spatial.work_units_per_entity()),
+                ),
+            )
+            .saturating_add(max_groups.saturating_mul(metrics.len().saturating_add(2)));
+        work.charge(
+            0,
+            aggregate_work
+                .saturating_add(relation_work)
+                .saturating_add(additional_work),
+        )?;
+    }
+    let relations = if let Some(relation) = relation {
+        let work = work.as_ref().ok_or_else(|| {
+            DfmcpError::new(
+                ErrorCode::InternalInvariantViolation,
+                "compound aggregate source was not admitted",
+            )
+        })?;
+        Some(relation_selector::prepare(
+            snapshot,
+            selected,
+            predicate.as_ref(),
+            relation,
+            work,
+        )?)
+    } else {
+        None
+    };
     let mut groups = BTreeMap::new();
     if group_by.is_none() {
         groups.insert(
@@ -565,23 +669,62 @@ fn aggregate(
         );
     }
     let mut matched = 0u64;
-    let mut selected_entities = 0u64;
-    let mut excluded_false = 0u64;
-    let mut excluded_unknown = 0u64;
+    let (mut selected_entities, mut excluded_false, mut excluded_unknown) =
+        relations.as_ref().map_or((0u64, 0u64, 0u64), |relations| {
+            (
+                relations.selected as u64,
+                relations.filter_false as u64,
+                relations.filter_unknown as u64,
+            )
+        });
+    let mut geometry_counts = GeometryCounts::default();
     for entity in snapshot.graph.entities.values() {
-        if !selected.is_empty() && !selected.contains(&kind_name(&entity.kind)) {
-            continue;
+        if let Some(work) = &work {
+            work.check()?;
         }
-        selected_entities += 1;
-        if let Some(predicate) = predicate {
-            match evaluate_truth_for(snapshot, entity.id, predicate) {
-                PredicateTruth::True => {}
-                PredicateTruth::False => {
-                    excluded_false += 1;
+        if let Some(relations) = &relations {
+            if !relations
+                .candidates
+                .get(&entity.id)
+                .is_some_and(|candidate| candidate.evidence.matches > 0)
+            {
+                continue;
+            }
+        } else {
+            if !selected.is_empty() && !selected.contains(&kind_name(&entity.kind)) {
+                continue;
+            }
+            selected_entities += 1;
+            if let Some(predicate) = predicate {
+                match evaluate_truth_for(snapshot, entity.id, predicate) {
+                    PredicateTruth::True => {}
+                    PredicateTruth::False => {
+                        excluded_false += 1;
+                        continue;
+                    }
+                    PredicateTruth::Unknown => {
+                        excluded_unknown += 1;
+                        continue;
+                    }
+                }
+            }
+        }
+        if let Some(spatial) = spatial {
+            let work = work.as_ref().ok_or_else(|| {
+                DfmcpError::new(
+                    ErrorCode::InternalInvariantViolation,
+                    "compound aggregate source was not admitted",
+                )
+            })?;
+            match spatial.evaluate(entity, snapshot, &mut || work.check())? {
+                spatial_selector::Decision::Matched(_) => geometry_counts.matched += 1,
+                spatial_selector::Decision::Outside => {
+                    geometry_counts.outside += 1;
                     continue;
                 }
-                PredicateTruth::Unknown => {
-                    excluded_unknown += 1;
+                spatial_selector::Decision::Unknown(reason) => {
+                    geometry_counts.unknown += 1;
+                    *geometry_counts.reasons.entry(reason).or_default() += 1;
                     continue;
                 }
             }
@@ -605,6 +748,9 @@ fn aggregate(
     let rows = groups
         .into_iter()
         .map(|(key, group)| {
+            if let Some(work) = &work {
+                work.check()?;
+            }
             let key = match key {
                 GroupKey::All => json!({"kind":"all"}),
                 GroupKey::Kind(kind) => json!({"kind":"entity_kind","value":kind}),
@@ -624,7 +770,7 @@ fn aggregate(
     let mut result = json!({"kind":"aggregate","matched":matched,"groups":rows,
         "truncated":false,"continuation":null,"epistemic_state":"inferred",
         "scanned_entities":snapshot.graph.entities.len(),"metric_evaluations":matched.saturating_mul(metrics.len() as u64)});
-    if predicate.is_some() {
+    if predicate.is_some() || relation.is_some() || spatial.is_some() {
         result["selection"] = json!({
             "selected_entities":selected_entities,
             "matched":matched,
@@ -635,7 +781,159 @@ fn aggregate(
             "note":"only True rows contribute; Unknown is not False and filtered totals do not establish complete-world absence"
         });
     }
-    finish(snapshot, identity, result, maximum)
+    if let Some(work) = &work {
+        compose_aggregate_metadata(
+            &mut result,
+            spec,
+            relations.as_ref(),
+            &geometry_counts,
+            work,
+            snapshot.graph.entities.len(),
+            AggregateCounts {
+                selected: selected_entities,
+                filter_false: excluded_false,
+                filter_unknown: excluded_unknown,
+            },
+        );
+        work.check()?;
+    }
+    let result = finish(snapshot, identity, result, maximum)?;
+    if let Some(work) = &work {
+        work.check()?;
+    }
+    Ok(result)
+}
+
+struct AggregateCounts {
+    selected: u64,
+    filter_false: u64,
+    filter_unknown: u64,
+}
+
+#[derive(Default)]
+struct GeometryCounts {
+    matched: usize,
+    outside: usize,
+    unknown: usize,
+    reasons: BTreeMap<&'static str, usize>,
+}
+
+/// Statistics summarize the selected known population. Membership uncertainty
+/// is never folded into an empty/zero group or hidden in metric availability.
+fn compose_aggregate_metadata(
+    result: &mut Value,
+    spec: &AggregateSpec,
+    relations: Option<&relation_selector::Prepared<'_>>,
+    geometry: &GeometryCounts,
+    work: &source::Budget,
+    source_entities: usize,
+    counts: AggregateCounts,
+) {
+    let AggregateCounts {
+        selected,
+        filter_false,
+        filter_unknown,
+    } = counts;
+    result["selection"]["matched_source_filter"] = json!(
+        selected
+            .saturating_sub(filter_false)
+            .saturating_sub(filter_unknown)
+    );
+    result["selection"]["predicate_evaluations"] = json!(if spec.predicate.is_some() {
+        selected
+    } else {
+        0
+    });
+    result["selection"]["evaluation_order"] = json!([
+        "source_kind_and_filter",
+        "positive_relation_if_requested",
+        "spatial_geometry_if_requested",
+        "grouping_and_metrics"
+    ]);
+    result["coverage"] = json!({
+        "domain":"selected_known_members_in_canonical_projection",
+        "selection_complete_within_projection":filter_unknown == 0,
+        "world_domain_complete":false, "absence_proven":false,
+        "eligible_as_mutation_evidence":false,
+        "totals_scope":"selected_known_members_only",
+        "note":"Groups and numeric samples cover only entities passing every supplied selector. Unknown membership is excluded and counted separately; no complete-fortress total, unrecorded relation absence, or mutation precondition is established. Metric sample exclusions remain independent of membership."
+    });
+    result["source_cost"] = json!({
+        "bounded_bytes":work.bytes, "estimated_scan_work_units":work.work,
+        "algorithm":"bounded_selection_then_exact_aggregate"
+    });
+    let mut complete = filter_unknown == 0;
+    if let (Some(relation), Some(relations)) = (&spec.relation, relations) {
+        let relation_matched = relations
+            .candidates
+            .values()
+            .filter(|candidate| candidate.evidence.matches > 0)
+            .count();
+        let unknown_relation = relations
+            .candidates
+            .values()
+            .filter(|candidate| candidate.evidence.unknown())
+            .count();
+        let missing_targets: usize = relations
+            .candidates
+            .values()
+            .map(|candidate| candidate.evidence.missing_targets)
+            .sum();
+        let unknown_targets: usize = relations
+            .candidates
+            .values()
+            .map(|candidate| candidate.evidence.unknown_targets)
+            .sum();
+        let matched_edges: usize = relations
+            .candidates
+            .values()
+            .map(|candidate| candidate.evidence.matches)
+            .sum();
+        let mut description = relation.json();
+        if let Some(description) = description.as_object_mut() {
+            description.remove("witnesses_per_row_limit");
+        }
+        result["relation"] = description;
+        result["selection"]["relation_matched"] = json!(relation_matched);
+        result["selection"]["unknown_relation"] = json!(unknown_relation);
+        result["selection"]["no_observed_match"] = json!(
+            relations
+                .candidates
+                .len()
+                .saturating_sub(relation_matched)
+                .saturating_sub(unknown_relation)
+        );
+        result["selection"]["matched_edge_incidences"] = json!(matched_edges);
+        result["selection"]["missing_target_records"] = json!(missing_targets);
+        result["selection"]["unknown_target_filters"] = json!(unknown_targets);
+        result["selection"]["selected_edges"] = json!(relations.selected_edges);
+        result["coverage"]["relation_domain_complete"] = json!(false);
+        result["coverage"]["edge_source_authenticity"] = json!("not_established");
+        result["coverage"]["relation_note"] = json!(
+            "At least one recorded positive edge and selected target is required. Each source entity contributes once even when several edges match. Missing and unavailable targets remain Unknown; edge incidence counts precede spatial selection."
+        );
+        result["source_cost"]["relation_source_candidates"] = json!(relations.candidates.len());
+        result["source_cost"]["relation_target_records"] = json!(source_entities);
+        complete &= unknown_relation == 0;
+    }
+    if let Some(spatial) = &spec.spatial {
+        result["spatial"] = spatial.json();
+        result["selection"]["spatial_matched"] = json!(geometry.matched);
+        result["selection"]["outside_spatial_relation"] = json!(geometry.outside);
+        result["selection"]["unknown_geometry"] = json!(geometry.unknown);
+        result["selection"]["unknown_geometry_reasons"] = json!(geometry.reasons);
+        result["coverage"]["terrain_evaluated"] = json!(false);
+        result["coverage"]["accessibility_evaluated"] = json!(false);
+        result["coverage"]["spatial_note"] = json!(
+            "Inclusive geometry applies only to source entities after any positive relation. Targets may be elsewhere. Unknown geometry is not outside the region; no complete occupancy, walkable route or safe placement is inferred."
+        );
+        complete &= geometry.unknown == 0;
+    }
+    result["selection"]["complete_within_projection"] = json!(complete);
+    result["selection"]["note"] = json!(
+        "Only entities passing all supplied selectors contribute. Unknown membership is not False; totals cover selected known members only."
+    );
+    result["coverage"]["selection_complete_within_projection"] = json!(complete);
 }
 
 struct SearchSpec {
@@ -1804,3 +2102,7 @@ mod tests {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "aggregate_selection_query_tests.rs"]
+mod aggregate_selection_tests;

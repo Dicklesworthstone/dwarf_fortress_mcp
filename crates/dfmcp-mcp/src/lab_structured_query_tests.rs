@@ -1072,3 +1072,258 @@ fn lab_ranked_entities_resume_exact_history_with_current_authority() -> TestResu
     );
     Ok(())
 }
+
+fn aggregate_selection_fixture() -> TestResult<(String, WorldSnapshot)> {
+    let (session_id, _) = open_fixture()?;
+    let session = resolve_session(Some(session_id.clone()))?;
+    let source = {
+        let mut guard = session.lock().map_err(|_| "session poisoned")?;
+        let mut source = guard.adapter.snapshot().clone();
+        for entity in source.graph.entities.values_mut() {
+            entity.fields.insert(
+                "position".to_owned(),
+                Fact::known(
+                    WorldValue::Coord(dfmcp_core::MapCoord::new(entity.id.get() as i32, 0, 0)),
+                    source.tick,
+                    FactSource::Derived("dfmcp.lab-scenario/1".to_owned()),
+                    Digest32::of_bytes(b"aggregate-selection-facade"),
+                ),
+            );
+        }
+        source.cursor = source.cursor.checked_next().ok_or("cursor exhausted")?;
+        source.refresh_hash();
+        guard.adapter.inject_snapshot(source.clone())?;
+        source
+    };
+    Ok((session_id, source))
+}
+
+fn aggregate_selection_request() -> Value {
+    wrapper(
+        json!({
+            "kind":"aggregate", "kinds":["unit"],
+            "where":{"op":"compare","field":"stock","comparison":"le",
+                "value":{"type":"u64","value":3}},
+            "relation":{"edge_kinds":["requires"],"target_kinds":["unit"],
+                "target_ids":["2","3"],"where":{"op":"compare","field":"stock","comparison":"ge",
+                    "value":{"type":"u64","value":2}}},
+            "spatial":{"region":{"min":[1,0,0],"max":[1,0,0]},
+                "geometry":{"kind":"point","field":"position"},"relation":"within"},
+            "group_by":{"kind":"field","field":"alive"},
+            "metrics":[{"name":"stock","field":"stock","numeric_type":"u64"}]
+        }),
+        None,
+    )
+}
+
+#[test]
+fn lab_compound_aggregate_public_facade_preserves_pending_work_and_exact_history() -> TestResult {
+    let _serial = crate::test_serial();
+    let (session_id, source) = aggregate_selection_fixture()?;
+    let request = aggregate_selection_request();
+    let first = query(&session_id, request.clone())?;
+    assert_eq!(first["ok"], true, "{first}");
+    assert_eq!(first["matched"], 1);
+    assert_eq!(first["groups"][0]["count"], 1);
+    assert_eq!(first["groups"][0]["metrics"]["stock"]["sum"], "1");
+    assert_eq!(
+        first["groups"][0]["metrics"]["stock"]["sources"]["derived"],
+        1
+    );
+    assert_eq!(first["selection"]["selected_entities"], 4);
+    assert_eq!(first["selection"]["excluded_false"], 1);
+    assert_eq!(first["selection"]["relation_matched"], 2);
+    assert_eq!(first["selection"]["no_observed_match"], 1);
+    assert_eq!(first["selection"]["outside_spatial_relation"], 1);
+    assert_eq!(
+        first["coverage"]["totals_scope"],
+        "selected_known_members_only"
+    );
+    assert_eq!(first["coverage"]["eligible_as_mutation_evidence"], false);
+    assert_eq!(first["coverage"]["absence_proven"], false);
+    assert_eq!(first["anchor"], anchor_json(&source.anchor()));
+    assert_eq!(first["agent_turn"]["anchor"], first["anchor"]);
+    assert_eq!(first["source_work"]["records"], 6);
+    assert_eq!(
+        first["agent_turn"]["coverage"]["absence_proof_scope"],
+        json!([])
+    );
+    assert!(!first.to_string().contains("concealedpayload"));
+
+    let plan = parsed(&crate::agent_facade::fortress_plan(
+        Some(session_id.clone()),
+        Some("keep this prepared pause change".to_owned()),
+        Some(false),
+        None,
+        None,
+    ))?;
+    assert_eq!(plan["ok"], true, "{plan}");
+    let after_plan = query(&session_id, request.clone())?;
+    assert_eq!(after_plan["ok"], true, "{after_plan}");
+    assert_eq!(after_plan["groups"], first["groups"]);
+    assert_eq!(
+        after_plan["agent_turn"]["active_work"]["pending_plans"][0]["plan_digest"],
+        plan["plan_digest"]
+    );
+    assert_eq!(
+        after_plan["agent_turn"]["active_work"]["pending_plans"][0]["state"],
+        "prepared"
+    );
+    let session = resolve_session(Some(session_id.clone()))?;
+    assert_eq!(
+        session
+            .lock()
+            .map_err(|_| "session poisoned")?
+            .adapter
+            .snapshot(),
+        &source
+    );
+
+    advance(&session_id)?;
+    let current = {
+        let mut guard = session.lock().map_err(|_| "session poisoned")?;
+        let mut current = guard.adapter.snapshot().clone();
+        current.graph.edges.remove(&EdgeId::new(1));
+        current.cursor = current.cursor.checked_next().ok_or("cursor exhausted")?;
+        current.refresh_hash();
+        guard.adapter.inject_snapshot(current.clone())?;
+        current
+    };
+    let changed = query(&session_id, request.clone())?;
+    assert_eq!(changed["ok"], true, "{changed}");
+    assert_eq!(changed["matched"], 0);
+    assert_eq!(changed["groups"], json!([]));
+    let mut retained = request;
+    retained["at"] = json!(source.state_hash.to_string());
+    retained["request"]["expected_anchor"] = anchor_json(&source.anchor());
+    let historical = query(&session_id, retained.clone())?;
+    assert_eq!(historical["ok"], true, "{historical}");
+    assert_eq!(historical["groups"], first["groups"]);
+    assert_eq!(historical["selection"], first["selection"]);
+    assert_eq!(historical["historical"], true);
+    assert_eq!(historical["anchor"], first["anchor"]);
+    assert_eq!(historical["current_anchor"], anchor_json(&current.anchor()));
+    assert_eq!(
+        historical["agent_turn"]["anchor"],
+        historical["current_anchor"]
+    );
+    assert_eq!(historical["agent_turn"]["continuity"]["status"], "stale");
+    {
+        let mut guard = session.lock().map_err(|_| "session poisoned")?;
+        guard
+            .grants
+            .iter_mut()
+            .find(|grant| grant.capability == Capability::Query)
+            .ok_or("Query grant missing")?
+            .expires_at_tick = Some(source.tick);
+    }
+    expect_refusal(&query(&session_id, retained)?, "capability_denied");
+    assert_eq!(
+        session
+            .lock()
+            .map_err(|_| "session poisoned")?
+            .adapter
+            .snapshot(),
+        &current
+    );
+    Ok(())
+}
+
+#[test]
+fn lab_compound_aggregate_final_packet_refuses_clipping_groups_or_selection() -> TestResult {
+    let _serial = crate::test_serial();
+    let (session_id, source) = aggregate_selection_fixture()?;
+    let mut request = aggregate_selection_request();
+    request["request"]["query"]["metrics"] = json!(
+        (0..16)
+            .map(|index| json!({
+                "name":format!("inventory_{index:02}_{}", "m".repeat(96)),
+                "field":"stock", "numeric_type":"u64"
+            }))
+            .collect::<Vec<_>>()
+    );
+    let first = query(&session_id, request.clone())?;
+    assert_eq!(first["ok"], true, "{first}");
+    assert_eq!(
+        first["groups"][0]["metrics"]
+            .as_object()
+            .map(|metrics| metrics.len()),
+        Some(16)
+    );
+    let raw = super::fortress_query(Some(session_id.clone()), Some(request.to_string()));
+    assert_eq!(parsed(&raw)?["ok"], true, "{raw}");
+    let tokens = u32::try_from(raw.len().div_ceil(4) + 1)?;
+    let session = resolve_session(Some(session_id.clone()))?;
+    session
+        .lock()
+        .map_err(|_| "session poisoned")?
+        .budget
+        .max_output_tokens = tokens;
+    let refused = query(&session_id, request.clone())?;
+    expect_refusal(&refused, "budget_exceeded");
+    assert!(refused.get("continuation").is_none());
+    assert!(refused.to_string().len() <= tokens as usize * 4);
+    assert_eq!(refused["error"]["effect_may_have_occurred"], false);
+    session
+        .lock()
+        .map_err(|_| "session poisoned")?
+        .budget
+        .max_output_tokens = 8192;
+    let restored = query(&session_id, request)?;
+    assert_eq!(restored["ok"], true, "{restored}");
+    assert_eq!(restored["groups"], first["groups"]);
+    assert_eq!(restored["selection"], first["selection"]);
+    assert_eq!(
+        session
+            .lock()
+            .map_err(|_| "session poisoned")?
+            .adapter
+            .snapshot(),
+        &source
+    );
+    Ok(())
+}
+
+#[test]
+fn lab_spatial_aggregate_answers_real_starter_workforce_counts_with_default_budgets() -> TestResult
+{
+    let _serial = crate::test_serial();
+    let opened = parsed(&crate::agent_facade::fortress_open_session(
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        Some("starter_fortress".to_owned()),
+        None,
+        None,
+    ))?;
+    assert_eq!(opened["ok"], true, "{opened}");
+    let session = opened["session_id"].as_str().ok_or("session missing")?;
+    let counts = query(
+        session,
+        wrapper(
+            json!({
+                "kind":"aggregate", "kinds":["unit"],
+                "spatial":{"region":{"min":[0,1,10],"max":[2,1,10]},
+                    "geometry":{"kind":"point","field":"position"},"relation":"within"},
+                "group_by":{"kind":"field","field":"profession"}
+            }),
+            None,
+        ),
+    )?;
+    assert_eq!(counts["ok"], true, "{counts}");
+    assert_eq!(counts["matched"], 3);
+    assert_eq!(counts["groups"].as_array().map(Vec::len), Some(3));
+    assert_eq!(counts["selection"]["selected_entities"], 7);
+    assert_eq!(counts["selection"]["outside_spatial_relation"], 4);
+    assert_eq!(counts["selection"]["unknown_geometry"], 0);
+    assert_eq!(counts["selection"]["complete_within_projection"], true);
+    assert_eq!(counts["coverage"]["world_domain_complete"], false);
+    assert_eq!(counts["query_budget"]["max_output_tokens"], 4096);
+    Ok(())
+}

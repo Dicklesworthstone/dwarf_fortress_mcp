@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased — Query exact totals for related entities inside a region
+
+- Compose optional positive relationship and spatial selectors with aggregate
+  source filters, grouping and exact integer/fixed metrics.
+- Count each selected source entity once; keep membership uncertainty separate
+  from unavailable metric samples and avoid complete-world absence claims.
+- Admit complete sources and combined work before selection, preserve unchanged
+  no-selector/ranked/related behavior, and refuse partial aggregate publication.
+- Add ten pure and three public-facade regressions plus closed schema/docs.
+  All52 focused actual-source query tests pass with eleven exact locked registry
+  dependencies. Full MCP/public-facade execution remains blocked by unchanged
+  Asupersync SIGKILL and is not inferred from that run.
+
 ## Unreleased — Stop a selected original plan without stopping other projects
 
 - Add exact plan:<digest> cancellation with complete session-owned original

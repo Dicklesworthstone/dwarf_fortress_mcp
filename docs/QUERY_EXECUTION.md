@@ -117,6 +117,82 @@ requests preserve their previous result fields and values.
 The filter is available to existing structured live-read consumers. It performs
 no bridge read, creates no watch and grants no effect authority.
 
+### Combine aggregate membership with relationships and geometry
+
+Optional `relation` and `spatial` objects on an aggregate use the same closed
+grammar as compound ranking. These can be supplied independently. Source kinds
+and three-valued `where` select candidates first; a requested relationship
+requires at least one recorded positive edge to a selected target; a requested
+spatial selector then checks the source entity's named point/cuboid geometry.
+Only this final population reaches grouping and exact numeric metrics.
+
+This permits grouped quantities within a stockpile, workshop relationship or
+map area in one request. Targets have their own kinds, IDs and independent
+three-valued `relation.where`; they need not lie inside the spatial region.
+The aggregate retains its existing distinction between builtin entity kinds
+and explicit `other:` names, and between builtin edge kinds and
+`custom:` names. The shared relationship matcher exposes an opt-in exact-name
+normalization for this consumer; existing `rq1` and `rk1` normalization and
+cursor identities are unchanged.
+
+A source contributes once regardless of parallel edges or multiple matching
+targets. `outgoing`, `incoming` and `undirected` use the existing opposite-
+endpoint rules, with undirected self-loops recorded once. One positive edge
+suffices even if another endpoint is missing or has an Unknown target filter.
+No positive match plus an undecidable relevant endpoint is Unknown; other
+candidates are `no_observed_match`, never proof that unrecorded relations
+are absent. Unknown geometry is distinct from known outside geometry.
+All inclusive point/cuboid semantics are shared with spatial selection.
+
+Compound results add these staged counters to `selection`:
+
+| Counter | Population |
+| --- | --- |
+| `selected_entities`, `excluded_false`, `excluded_unknown`, `matched_source_filter` | Source kinds and source predicate, before relation or geometry |
+| `relation_matched`, `unknown_relation`, `no_observed_match` | Source-predicate True candidates at the relationship stage |
+| `matched_edge_incidences`, `missing_target_records`, `unknown_target_filters` | Oriented incidences after source filtering, including extra uncertain edges on positive matches |
+| `selected_edges` | All source edges of the requested edge kinds before endpoint filtering |
+| `spatial_matched`, `outside_spatial_relation`, `unknown_geometry` | Candidates reaching the geometry stage |
+| `matched` | Final members contributing to groups |
+
+The top-level `matched` and each group count are exact for selected known
+members. Unavailable numeric samples remain in each metric's excluded counts;
+they neither remove membership nor become zero. An empty metric still has a
+null sum and mean. `coverage.totals_scope` is
+`selected_known_members_only`. Selection completeness is false if any earlier
+membership stage has Unknown exclusions, even when later predicates might
+exclude such rows. It concerns only decidable membership in the projection,
+not metric availability, complete-world coverage, edge-source authenticity,
+terrain, accessibility or mutation authority. Aggregate evidence remains
+inferred. `absence_proven` is always false.
+
+Compound admission uses the existing complete-source structural preflight
+before hashing: all entities, target records, edges, chunks, retained events,
+unselected fields and unavailable backing representations count. The shared
+100,000-record, 16-MiB, depth-64 and 4,000,000-work limits apply alongside the
+negotiated budget. Source/target predicate validation and evaluation, relationship
+incidences, geometry, group lookup and metrics are conservatively charged before
+selection. The temporary relationship index is O(N); group state remains bounded
+by 128 groups and 16 metrics. `source_cost` reports the complete structural
+estimate and charged work. The same deadline spans admission, selection,
+group construction and serialization; enclosing runtimes also enforce their
+full publication budget.
+
+There is no aggregate cursor or partial group publication. Exceeding group
+cardinality, result bytes/tokens or the enclosing Agent Turn allowance refuses
+the complete operation. The existing request/session/source digest binds all
+supplied selectors. Historical laboratory reads still require the exact
+retained source and current whole-fortress Query authority. Omitting both
+selectors leaves the established aggregate shape, result values and identity
+unchanged.
+
+`aggregate_selection_query_tests.rs` covers independent graph-direction and
+coordinate oracles, parallel edges, source/target/geometry Unknowns, separate
+metric availability, exact namespaces, complete-source/work/output refusal and
+schema parity. `lab_structured_query_tests.rs` adds actual public-facade
+grouped selection, prepared-work retention, exact history/current authority,
+atomic full-packet refusal and default-budget starter-world spatial counts.
+
 ## Exact numeric entity ranking
 
 `ranked_entities` selects an ordered page from a canonical source by one to

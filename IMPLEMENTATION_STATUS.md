@@ -1,5 +1,45 @@
 # Implementation Status
 
+## Unreleased — Combine relationship and spatial selection with exact aggregates
+
+Structured aggregate queries accept optional relation and spatial selectors,
+using existing typed positive-relation and point/cuboid geometry semantics.
+Source kinds/where run first, then witnessed relationships, geometry, grouping
+and exact integer/fixed metrics. Each source entity contributes once despite
+multiple matching edges; relation targets need not be inside the source region.
+Source False/Unknown, missing/unavailable relationship targets, no observed
+match, outside geometry and unknown geometry have separate coverage counts.
+Metric sample exclusions remain independent; totals cover selected known
+members and establish no whole-world absence or mutation evidence.
+
+Complete source records/bytes, aggregate predicate/relationship/geometry/group
+work, one wall allowance and the complete output packet are bounded. Oversized
+sources, excessive groups or a packet that cannot fit refuse atomically.
+No-selector aggregate output/identity and existing ranked/related behavior are
+preserved. The shared relationship matcher has an explicit exact-name mode for
+aggregate builtin versus Other/Custom namespaces; existing consumers retain
+their previous normalization.
+
+Validation: 52/52 original-source core/operational query tests passed with
+latest nightly 1.102.0 (9c5648833, 2026-11-10), including all ten new compound
+aggregate regressions and the existing query/search/filter tests. The focused
+assembly uses the actual complete dfmcp-core/dfmcp-world crates and unmodified
+query modules. Its93 source/schema/manifest/lock inputs were recorded by hash;
+all eleven registry identities/checksums match the unchanged repository lock.
+The first run's source integrity was verified. One initial regression wrongly
+expected a zero-wall budget to reach deadline checking; its corrected valid
+deadline case and combined-work case both pass in the final locked rerun.
+Production source was unchanged between runs. All four owned Rust files passed
+nightly parsing/formatting. The final post-run hash/static recheck was interrupted
+when the executor disconnected again.
+
+Three public-facade/history/current-authority/publication regressions are added
+but remain unexecuted. This component run does not establish full MCP/stdio,
+Tasks, native adapter or release qualification. The full locked MCP check was
+SIGKILLed in unchanged Asupersync before repository MCP compilation. Owning bead
+df-lab-structured-query-f7q remains in progress.
+See docs/LAB_STRUCTURED_QUERY.md and docs/QUERY_EXECUTION.md.
+
 ## Unreleased — Cancel one exact original plan while other projects continue
 
 The laboratory Cancel tool now accepts scope=plan:<original-plan-digest>.

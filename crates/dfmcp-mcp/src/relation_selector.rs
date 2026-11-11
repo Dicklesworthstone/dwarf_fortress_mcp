@@ -1,11 +1,13 @@
 //! Shared, positive one-hop selection over one fully admitted immutable source.
 //! The caller owns source admission and charges the complete scan before entry.
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 
 use dfmcp_core::{DfmcpError, EdgeId, EntityId, ErrorCode, Result};
 use dfmcp_world::{
-    EdgeRecord, EntityRecord, Predicate, PredicateTruth, WorldSnapshot, evaluate_truth_for,
+    EdgeKind, EdgeRecord, EntityKind, EntityRecord, Predicate, PredicateTruth, WorldSnapshot,
+    evaluate_truth_for,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -52,6 +54,7 @@ pub(super) struct Selection {
     pub(super) target_kinds: BTreeSet<String>,
     pub(super) target_ids: BTreeSet<EntityId>,
     pub(super) predicate: Option<Predicate>,
+    exact_kind_names: bool,
 }
 
 pub(super) fn kinds(names: Vec<String>) -> Result<BTreeSet<String>> {
@@ -63,6 +66,18 @@ pub(super) fn kinds(names: Vec<String>) -> Result<BTreeSet<String>> {
 
 impl Request {
     pub(super) fn normalize(self) -> Result<Selection> {
+        self.normalize_kind_names(false)
+    }
+
+    /// Operational aggregates have always distinguished builtin kinds from
+    /// Other/Custom names. Opt in without changing established rq1/rk1 matching
+    /// or identity for existing relationship and ranking consumers.
+    #[allow(dead_code)]
+    pub(super) fn normalize_exact(self) -> Result<Selection> {
+        self.normalize_kind_names(true)
+    }
+
+    fn normalize_kind_names(self, exact_kind_names: bool) -> Result<Selection> {
         let edge_kinds = core_query::bounded_names(self.edge_kinds, 32)?;
         if edge_kinds.is_empty() {
             return Err(DfmcpError::new(
@@ -73,15 +88,27 @@ impl Request {
         Ok(Selection {
             edge_kinds: edge_kinds
                 .into_iter()
-                .map(|name| Ok(core_query::edge_kind(&name)?.as_str().to_owned()))
+                .map(|name| {
+                    Ok(edge_name(&core_query::edge_kind(&name)?, exact_kind_names).into_owned())
+                })
                 .collect::<Result<_>>()?,
             direction: self.direction.unwrap_or_default(),
-            target_kinds: kinds(self.target_kinds)?,
+            target_kinds: if exact_kind_names {
+                core_query::bounded_names(self.target_kinds, 32)?
+                    .into_iter()
+                    .map(
+                        |name| Ok(entity_name(&core_query::entity_kind(&name)?, true).into_owned()),
+                    )
+                    .collect::<Result<_>>()?
+            } else {
+                kinds(self.target_kinds)?
+            },
             target_ids: core_query::bounded_names(self.target_ids, 64)?
                 .into_iter()
                 .map(|id| core_query::entity_id(&id))
                 .collect::<Result<_>>()?,
             predicate: self.predicate.map(core_query::decode_filter).transpose()?,
+            exact_kind_names,
         })
     }
 }
@@ -145,6 +172,7 @@ pub(super) struct Evidence<'a> {
     pub(super) unknown_targets: usize,
     pub(super) missing_targets: usize,
     witnesses: Vec<(&'a EdgeRecord, &'a EntityRecord)>,
+    exact_kind_names: bool,
 }
 
 impl Evidence<'_> {
@@ -161,7 +189,7 @@ impl Evidence<'_> {
             "missing_target_records":self.missing_targets,
             "witnesses":self.witnesses.iter().map(|(edge,target)| json!({
                 "edge_id":edge.id.to_string(), "edge_revision":edge.revision,
-                "edge_kind":edge.kind.as_str(),
+                "edge_kind":edge_name(&edge.kind, self.exact_kind_names),
                 "from":edge.from.to_string(), "to":edge.to.to_string(),
                 "target":{"entity_id":target.id.to_string(), "generation":target.generation,
                     "revision":target.revision},
@@ -185,8 +213,22 @@ pub(super) struct Prepared<'a> {
     pub(super) selected_edges: usize,
 }
 
-fn matches_kind(kinds: &BTreeSet<String>, entity: &EntityRecord) -> bool {
-    kinds.is_empty() || kinds.contains(entity.kind.as_str())
+fn entity_name(kind: &EntityKind, exact: bool) -> Cow<'_, str> {
+    match kind {
+        EntityKind::Other(name) if exact => Cow::Owned(format!("other:{name}")),
+        _ => Cow::Borrowed(kind.as_str()),
+    }
+}
+
+fn edge_name(kind: &EdgeKind, exact: bool) -> Cow<'_, str> {
+    match kind {
+        EdgeKind::Custom(name) if exact => Cow::Owned(format!("custom:{name}")),
+        _ => Cow::Borrowed(kind.as_str()),
+    }
+}
+
+fn matches_kind(kinds: &BTreeSet<String>, entity: &EntityRecord, exact: bool) -> bool {
+    kinds.is_empty() || kinds.contains(entity_name(&entity.kind, exact).as_ref())
 }
 
 fn truth(snapshot: &WorldSnapshot, id: EntityId, predicate: Option<&Predicate>) -> PredicateTruth {
@@ -242,7 +284,7 @@ pub(super) fn prepare<'a>(
     };
     for entity in snapshot.graph.entities.values() {
         work.check()?;
-        let target = if matches_kind(&selection.target_kinds, entity)
+        let target = if matches_kind(&selection.target_kinds, entity, selection.exact_kind_names)
             && (selection.target_ids.is_empty() || selection.target_ids.contains(&entity.id))
         {
             truth(snapshot, entity.id, selection.predicate.as_ref())
@@ -250,7 +292,7 @@ pub(super) fn prepare<'a>(
             PredicateTruth::False
         };
         targets.insert(entity.id, (entity, target));
-        if !matches_kind(source_kinds, entity) {
+        if !matches_kind(source_kinds, entity, selection.exact_kind_names) {
             continue;
         }
         prepared.selected += 1;
@@ -269,7 +311,10 @@ pub(super) fn prepare<'a>(
             entity.id,
             Candidate {
                 entity,
-                evidence: Evidence::default(),
+                evidence: Evidence {
+                    exact_kind_names: selection.exact_kind_names,
+                    ..Evidence::default()
+                },
             },
         );
     }
@@ -281,7 +326,10 @@ pub(super) fn prepare<'a>(
                 "relation-query edge identity is inconsistent",
             ));
         }
-        if !selection.edge_kinds.contains(edge.kind.as_str()) {
+        if !selection
+            .edge_kinds
+            .contains(edge_name(&edge.kind, selection.exact_kind_names).as_ref())
+        {
             continue;
         }
         prepared.selected_edges += 1;

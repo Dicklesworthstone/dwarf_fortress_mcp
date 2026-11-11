@@ -314,6 +314,21 @@ Executes bounded structured DfQL at a concrete anchor. Query plans are staticall
 Deterministic result ordering is mandatory. Coverage says exactly what an empty or partial answer
 can establish.
 
+Structured `aggregate` accepts optional `relation` and `spatial` selectors,
+independently or together, using the same closed objects as `ranked_entities`.
+Source kinds and typed `where` run first, positive witnessed relationships next,
+then source point/cuboid geometry, grouping and exact integer/fixed metrics.
+Each source entity contributes once even when several edges match; targets may
+be outside the region or have no geometry. Source False/Unknown, missing or
+unavailable targets, no observed relationship, outside geometry and Unknown
+geometry have separate counts. Totals cover selected known members only,
+with metric sample exclusions independent of membership completeness.
+Complete-source, combined-work and wall admission precede selection; excessive
+groups or a complete packet that cannot fit refuse atomically. Exact retained
+reads still require current Query authority. See
+[`docs/QUERY_EXECUTION.md`](docs/QUERY_EXECUTION.md) and
+[`docs/LAB_STRUCTURED_QUERY.md`](docs/LAB_STRUCTURED_QUERY.md).
+
 Structured `dfmcp.query/1` requests also accept `kind: "events"` for inclusive
 retained-event tick windows, exact kind and historical subject filters,
 explicit typed field projection and ascending/descending chronological pages.
