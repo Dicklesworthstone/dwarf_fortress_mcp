@@ -2179,7 +2179,7 @@ pub fn fortress_wait(session_id: Option<String>, max_game_ticks: Option<u64>) ->
 }
 
 #[tool(
-    description = "Request, drain, compensate when authorized, and finalize cancellation while preserving recovery state. mode: compensate_reversible (default) | stop_future_steps | emergency_pause_and_drain. scope: last_action (default), plan (last committed plan), oldest_open_plan (earliest retained original plan, for bounded cleanup), or session (all retained open work across this session's plans). Drain dependents first and return a finalize_certificate only when goal states are terminal and physical work is proven quiescent. Failed and Verified receipts remain history; their remaining work can be stopped with separate evidence."
+    description = "Request, drain, compensate when authorized, and finalize cancellation while preserving recovery state. mode: compensate_reversible (default) | stop_future_steps | emergency_pause_and_drain. scope: last_action (default), plan (last committed plan), plan:<64-lowercase-original-plan-digest> (one exact commit owned by this session, leaving other plans and descendants alone), oldest_open_plan (earliest retained original plan, for bounded cleanup), or session (all retained open work across this session's plans). Drain dependents first and return a finalize_certificate only when goal states are terminal and physical work is proven quiescent. Failed and Verified receipts remain history; their remaining work can be stopped with separate evidence."
 )]
 pub fn fortress_cancel(
     session_id: Option<String>,

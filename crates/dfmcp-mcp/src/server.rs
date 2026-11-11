@@ -59,6 +59,9 @@ pub(crate) mod plan_resources;
 #[path = "lab_goal_explanation.rs"]
 pub(crate) mod goal_explanation;
 
+#[path = "lab_plan_cancellation.rs"]
+mod plan_cancellation;
+
 #[path = "production_source.rs"]
 pub(crate) mod production_source;
 
@@ -5876,18 +5879,24 @@ pub(crate) fn cancel_in_scope(
     mode: Option<String>,
     scope: Option<String>,
 ) -> String {
+    let selected_plan = match scope.as_deref().filter(|value| value.starts_with("plan:")) {
+        Some(raw) => match plan_cancellation::parse_scope(raw) {
+            Ok(digest) => Some(digest),
+            Err(error) => return dfmcp_error_payload("fortress.cancel", &error),
+        },
+        None => None,
+    };
     let drain_scope = match scope.as_deref() {
         None | Some("last_action") => None,
         Some("plan") => Some("plan"),
         Some("session") => Some("session"),
         Some("oldest_open_plan") => Some("oldest_open_plan"),
-        Some(other) => {
+        Some(_) if selected_plan.is_some() => None,
+        Some(_) => {
             return coded_error_payload(
                 "fortress.cancel",
                 ErrorCode::InvalidRequest,
-                &format!(
-                    "unsupported cancellation scope {other:?}; use last_action, plan, oldest_open_plan or session"
-                ),
+                "unsupported cancellation scope; use last_action, plan, plan:<original-plan-digest>, oldest_open_plan or session",
             );
         }
     };
@@ -5948,6 +5957,9 @@ pub(crate) fn cancel_in_scope(
                     );
                 }
             };
+            if let Some(digest) = selected_plan {
+                return plan_cancellation::cancel(guard, cancel_mode, digest);
+            }
             if let Some(scope) = drain_scope {
                 if scope == "oldest_open_plan" {
                     let Some(oldest) = guard

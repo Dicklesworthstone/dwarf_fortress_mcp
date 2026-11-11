@@ -1,5 +1,38 @@
 # Implementation Status
 
+## Unreleased — Cancel one exact original plan while other projects continue
+
+The laboratory Cancel tool now accepts scope=plan:<original-plan-digest>.
+It resolves only the current session's retained original commit and validates
+the complete canonical action set against the adapter's original plan, step
+order and custody. Current Observe, every selected nonquiescent action's
+scoped capability/risk, source/entity/action budgets and emergency clock
+authority are checked before its first effect. The existing reverse drain
+preserves Failed/Verified proof receipts while stopping their physical work.
+Requested witness-rebase aliases and actual sealed digests remain explicit;
+pending review, other plans and continuation descendants are untouched.
+Only the selected original's proven quiescence earns its finalize certificate.
+
+Typed original-plan/goal Explain returns a concrete selected-stop request when
+current custody and authority permit. The full affordance participates in its
+observation pin, and its complete private receipt bytes are charged before
+diagnostic/archive work. Inspection remains immutable and consumes no request
+ID. The pinned Task supervisor's single-active-monitor contract is unchanged.
+
+Eight regression sources use the actual public cancellation facade and existing
+laboratory physical-work fixtures. They cover a middle plan among three,
+preserved pending/latest work, all-action preflight, terminal proof, foreign/
+missing/corrupt custody, rebased aliases, source bounds, repeat drains and
+read-only offers. All six changed Rust files pass latest-nightly Rustfmt
+parsing/format checks; independent source/API/custody review found no blocker.
+The frozen eleven-tool Agent Turn contract and whitespace checks pass.
+The full locked MCP --tests metadata check resolved exact pinned dependencies
+but was killed by SIGKILL while compiling unchanged Asupersync0.5.0, before
+repository MCP diagnostics or tests. No new Rust test pass, full MCP build,
+native/region drain or release qualification is claimed. Owning bead
+df-cancellation-progress-certificates-vvw remains in progress.
+See docs/LAB_PLAN_CANCELLATION.md.
+
 ## Unreleased — Explain exact original goals through the existing tool
 
 fortress.explain now accepts plan:<digest> for pending or retained plans and

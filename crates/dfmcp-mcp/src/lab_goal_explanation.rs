@@ -396,6 +396,11 @@ fn inspect(session: &LabSession, raw: &str, started: Instant) -> Result<String> 
     if let Some(pending) = &session.pending {
         input_bytes = input_bytes.saturating_add(source_bytes(&pending.source) as u64);
     }
+    // The cancellation affordance reads the selected private commit receipt.
+    // Charge those complete bytes before parsing it or encoding the archive.
+    if let Some(receipt) = session.commit_receipts.get(&target.plan.to_hex()) {
+        input_bytes = input_bytes.saturating_add(receipt.len() as u64);
+    }
     if records > u64::from(context.budget.max_entities)
         || input_bytes > context.budget.max_bytes.min(MAX_SOURCE_BYTES)
     {
@@ -487,6 +492,7 @@ fn inspect(session: &LabSession, raw: &str, started: Instant) -> Result<String> 
         Value::Null
     };
     let is_pending = original.is_none();
+    let cancellation = super::plan_cancellation::offer(session, target.plan);
     let goal = if original.is_some() {
         super::objectives::original_goal_observation(session, &target.plan.to_hex())?.1
     } else {
@@ -512,7 +518,7 @@ fn inspect(session: &LabSession, raw: &str, started: Instant) -> Result<String> 
     let pin_material = json!({"schema":PIN_SCHEMA,"session_id":session_id,
         "retention":if is_pending {"pending_plan"} else {"retained_original_goal"},
         "anchor":anchor,"object":seal.object_digest.to_hex(),"source":source,
-        "goal":goal,"requirements":requirements,"steps":steps})
+        "goal":goal,"requirements":requirements,"steps":steps,"cancellation":cancellation})
     .to_string();
     if pin_material.len() as u64 > context.budget.max_bytes.min(MAX_SOURCE_BYTES) {
         return Err(exhausted(
@@ -544,7 +550,7 @@ fn inspect(session: &LabSession, raw: &str, started: Instant) -> Result<String> 
         "object_digest":seal.object_digest.to_hex(),"observation_pin":observation_pin.to_hex(),
         "current_anchor":anchor,"sealed_anchor":anchor_json(&plan.anchor),"summary":plan.summary,
         "retention":if is_pending {"pending_plan"} else {"retained_original_goal"},
-        "conclusion":conclusion(&goal,is_pending,current_stale),"goal":goal,
+        "conclusion":conclusion(&goal,is_pending,current_stale),"goal":goal,"cancellation":cancellation,
         "current_goal_evaluation":"read_only_no_historical_proof_update",
         "requirement_samples_are_original_goal_proof":false,"game_effect":"none",
         "requirements_summary":{"total":requirements.len(),

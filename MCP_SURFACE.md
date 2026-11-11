@@ -551,8 +551,16 @@ a historical stop receipt does not prove present pause. Session close retains
 both original and clock identities without cancelling game effects.
 
 The laboratory supports `scope: "last_action"` (default), `"plan"` (the latest
-committed plan), `"oldest_open_plan"` (the oldest retained plan with unfinished
-work), and `"session"` (retained open work across the session's plans).
+committed plan), `"plan:<64-lowercase-original-plan-digest>"` (one exact original
+commit owned by the current session), `"oldest_open_plan"` (the oldest retained
+plan with unfinished work), and `"session"` (retained open work across the
+session's plans). Exact original selection checks complete commit/action custody,
+all current scoped effect authority and aggregate budgets before its first
+effect. It leaves other plans, continuation descendants and pending review
+untouched; witness-rebase aliases disclose both requested and actual digests.
+Typed original-plan/goal Explain includes a currently authorized selected-stop
+request when available, bound into its complete observation pin.
+See `docs/LAB_PLAN_CANCELLATION.md`.
 Use `oldest_open_plan` to drain individually bounded original plans when the
 whole session exceeds one call's budget; the response identifies that plan's
 original digest and certifies only its actions.

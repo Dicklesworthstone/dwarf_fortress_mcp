@@ -921,3 +921,6 @@ fn forecast_reports_advancement_refusal_instead_of_an_available_prediction() -> 
     assert_eq!(snapshot(&session)?, before);
     Ok(())
 }
+
+#[path = "plan_cancellation_mcp_tests.rs"]
+mod selected_plan_cancellation;

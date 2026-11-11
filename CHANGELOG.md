@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased — Stop a selected original plan without stopping other projects
+
+- Add exact plan:<digest> cancellation with complete session-owned original
+  action custody, all-action current authority and aggregate budget preflight.
+- Preserve terminal proof and unrelated plans; bind requested original identity
+  into measured drain certificates and disclose witness-rebased aliases.
+- Offer concrete current selected stops through read-only typed Explain, bound
+  to its complete observation pin and source budget.
+- Add eight real-adapter/public cancellation regression sources and operational
+  documentation. Syntax/format/source and eleven-tool checks pass; the full
+  locked MCP check was SIGKILLed in unchanged Asupersync before MCP compilation.
+  New Rust test execution and broad qualification remain open.
+
 ## Unreleased — Explain current original-goal blockers without changing proof
 
 - Extend the existing Explain selector with exact plan:<digest> and goal:<digest>

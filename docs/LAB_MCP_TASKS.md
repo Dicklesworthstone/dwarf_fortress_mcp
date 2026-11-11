@@ -237,3 +237,12 @@ negotiation, task discovery, original-plan progress, completion evidence,
 idempotent effects, capacity refusal, cancellation and deadline failure. Test
 results qualify only their exercised laboratory behavior; they do not replace
 the repository's full qualification gates.
+
+## Foreground stop of a selected original plan
+
+A session can call `fortress.cancel` with `scope: "plan:<original-plan-digest>"`
+to stop one exact retained commit independently of which plan is latest or
+which monitor is active. The complete original action set and current scoped
+authority are checked before effects, and physical drain evidence remains
+separate from historical proof. This does not add Task owners or change the
+single-active-monitor contract. See `LAB_PLAN_CANCELLATION.md`.
