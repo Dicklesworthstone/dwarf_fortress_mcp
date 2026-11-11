@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://dwarf-fortress-mcp.org/schemas/0.1.0/lab_plan_comparison.schema.json",
   "title": "Decoded laboratory fortress.plan candidate blueprint request",
-  "$comment": "This describes the decoded JSON string in the existing blueprint argument. Candidate wrappers cannot be combined with outer summary, actions or paused_target arguments. The server additionally rejects all duplicate JSON object keys, duplicate candidate keys, requests above 128 KiB, summaries above 4096 UTF-8 bytes, and source programs outside their existing semantic bounds. Current authority, exact source identity, equal normalized original goals and reserve frontiers, the common horizon and aggregate budgets remain runtime checks. A candidate digest is an integrity label, not authority. See docs/LAB_PLAN_COMPARISON.md for the complete compare, select and ordinary commit workflow.",
+  "$comment": "This describes the decoded JSON string in the existing blueprint argument. Candidate wrappers cannot be combined with outer summary, actions or paused_target arguments. The server additionally rejects all duplicate JSON object keys, duplicate candidate keys, requests above 128 KiB, summaries above 4096 UTF-8 bytes, and source programs outside their existing semantic bounds. Current authority, exact source identity, equal normalized original goals and reserve frontiers, the common horizon and aggregate budgets remain runtime checks. A candidate digest is an integrity label, not authority. See docs/LAB_PLAN_COMPARISON.md for the complete compare, select and ordinary commit workflow. Version 2 comparisons explicitly require forecast_scope complete_project and typed production or room sources. They compare semantic original project goals while preserving candidate setup strategies. Emitted selections remain version 1 and prepare only the current executable stage.",
   "$defs": {
     "anchor": {
       "type": "object",
@@ -137,6 +137,35 @@
           }
         }
       ]
+    },
+    "project_candidate": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/candidate"
+        },
+        {
+          "required": [
+            "blueprint"
+          ],
+          "properties": {
+            "blueprint": {
+              "type": "object",
+              "required": [
+                "template"
+              ],
+              "properties": {
+                "template": {
+                  "enum": [
+                    "production",
+                    "provisioned_room",
+                    "connected_room"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      ]
     }
   },
   "oneOf": [
@@ -198,6 +227,42 @@
         "candidate_digest": {
           "type": "string",
           "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "template",
+        "version",
+        "horizon_ticks",
+        "candidates",
+        "forecast_scope"
+      ],
+      "properties": {
+        "template": {
+          "const": "compare_candidates"
+        },
+        "version": {
+          "const": 2
+        },
+        "horizon_ticks": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 18446744073709551615
+        },
+        "candidates": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 4,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/project_candidate"
+          }
+        },
+        "forecast_scope": {
+          "const": "complete_project"
         }
       }
     }

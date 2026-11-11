@@ -1,0 +1,126 @@
+{
+  "schema": "dfmcp.laboratory_project_forecast/1",
+  "status": "implemented_source",
+  "owning_bead": "df-lab-project-forecast-p7q",
+  "scope": "deterministic_laboratory_reference_world_only",
+  "live_authority": false,
+  "public_request": {
+    "tool": "fortress.plan",
+    "argument": "blueprint JSON string",
+    "template": "compare_candidates",
+    "version": 2,
+    "forecast_scope": "complete_project",
+    "response_schema": "dfmcp.plan-comparison/2",
+    "candidate_templates": [
+      "production",
+      "provisioned_room",
+      "connected_room"
+    ],
+    "candidates": {
+      "minimum": 2,
+      "maximum": 4
+    },
+    "selection_template": "select_candidate",
+    "selection_version": 1,
+    "selection_scope": "current_reviewed_stage_only"
+  },
+  "semantic_identity": {
+    "production": [
+      "qualified original stock ledger entity and generation",
+      "normalized original output quotas",
+      "exact optional reserve_until_tick"
+    ],
+    "room": [
+      "complete original layout",
+      "furnishing model",
+      "for connected rooms: entry, routing region and movement model"
+    ],
+    "excluded_from_common_goal_only": [
+      "setup and staffing strategy",
+      "resource acquisition policy",
+      "order lowering"
+    ],
+    "retained_in_candidate_source_digest": true,
+    "checked_before_compilation_can_hide_unequal_goals": true
+  },
+  "stage_progression": {
+    "source": "same exact versioned original request",
+    "initial_stage": "ordinary current-source prepared plan",
+    "next_stage": "compile from preceding actual discarded fork",
+    "advance_requires": [
+      "all preceding stage actions Verified",
+      "all preceding stage physical work quiescent"
+    ],
+    "acquisition_may_leave_original_semantic_goal_false": true,
+    "future_stock_credit": false,
+    "fresh_deterministic_stage_identities": true,
+    "automatic_canonical_continuation": false
+  },
+  "completion": {
+    "requires": [
+      "true complete original semantic goal",
+      "every modeled stage action Verified",
+      "all modeled stage work physically quiescent at the reported frontier"
+    ],
+    "room_evidence": "complete original terrain, exact reciprocal installed-item custody and original access predicate",
+    "production_ledger_custody": "original entity and generation retained across every stage",
+    "reserve": "complete-project success requires known True at the exact original reserve frontier, independently of later action verification",
+    "continuous_maintenance_proven": false,
+    "extends_action_deadlines": false,
+    "later_stock_repairs_a_missed_reserve": false
+  },
+  "shared_bounds": {
+    "candidates": 4,
+    "stages_per_candidate": 4,
+    "source_forks": 20,
+    "simulation_slices": 400,
+    "source_records": "aggregate max_entities",
+    "source_bytes": "aggregate max_bytes",
+    "action_steps": "aggregate max_actions",
+    "action_polls": "max_actions * 400",
+    "simulated_game_ticks": "aggregate max_game_ticks",
+    "horizon": "one original source tick + horizon_ticks",
+    "wall_time": "one original request max_wall_millis deadline",
+    "response_bytes": "min(max_bytes,max_output_tokens*4)",
+    "default_4096_token_fit_established": false
+  },
+  "recommendation": {
+    "requires_all_candidates_have_comparable_known_predictions": true,
+    "requires_requested_reserve_evidence": true,
+    "eligible": "complete original project plus requested reserve truth",
+    "cost_scope": "all_simulated_project_stages",
+    "order": [
+      "aggregate max_risk",
+      "aggregate requires_checkpoint",
+      "completion tick",
+      "aggregate action count",
+      "lexical candidate key"
+    ],
+    "unknown_or_unavailable_is_not_an_ordinary_loss": true
+  },
+  "publication": {
+    "canonical_world_unchanged": true,
+    "canonical_time_advanced": 0,
+    "pending_plan_unchanged_by_compare": true,
+    "future_stages_never_installed": true,
+    "full_staged_predictions_retained": true,
+    "output_refusal_before_pending_change": true
+  },
+  "compatibility": {
+    "version_1_current_stage_behavior_preserved": true,
+    "version_1_shape_preserved": true,
+    "selection_generation_unchanged": true,
+    "frozen_eleven_tools_unchanged": true,
+    "bridge_generations_unchanged": true,
+    "dependencies_unchanged": true
+  },
+  "validation": {
+    "rust_tests": [
+      "lab_plan_comparison_tests.rs complete-project regressions",
+      "lab_plan_comparison_mcp_tests.rs public two-stage production and publication regression",
+      "lab_project_forecast core tests"
+    ],
+    "schema_test": "scripts/test_lab_plan_comparison_schema.py",
+    "execution_status": "see IMPLEMENTATION_STATUS.md; test source is not an execution or full-qualification claim"
+  }
+}

@@ -675,3 +675,312 @@ fn equal_acquisition_terminals_do_not_make_different_rooms_or_access_requests_co
     }
     Ok(())
 }
+
+fn project_request(candidates: Value, horizon: u64) -> Result<Request> {
+    parse(
+        &json!({
+            "template":"compare_candidates", "version":2,
+            "forecast_scope":"complete_project", "horizon_ticks":horizon,
+            "candidates":candidates,
+        })
+        .to_string(),
+    )?
+    .ok_or_else(|| invalid("project comparison not recognized"))
+}
+
+#[test]
+fn complete_project_scope_is_explicit_closed_and_does_not_change_v1_grammar() -> Result<()> {
+    let valid = json!({
+        "template":"compare_candidates", "version":2,
+        "forecast_scope":"complete_project", "horizon_ticks":2_000,
+        "candidates":production_candidates(),
+    });
+    assert!(matches!(
+        parse(&valid.to_string())?,
+        Some(Request::Compare(_))
+    ));
+    for scope in [json!(null), json!("current_stage"), json!(true)] {
+        let mut bad = valid.clone();
+        bad["forecast_scope"] = scope;
+        assert_eq!(
+            parse(&bad.to_string())
+                .expect_err("invalid scope accepted")
+                .code,
+            ErrorCode::InvalidRequest
+        );
+    }
+    let mut missing = valid.clone();
+    missing
+        .as_object_mut()
+        .ok_or_else(|| invalid("fixture not an object"))?
+        .remove("forecast_scope");
+    assert_eq!(
+        parse(&missing.to_string())
+            .expect_err("v2 without scope accepted")
+            .code,
+        ErrorCode::InvalidRequest
+    );
+    for version in [1, 3] {
+        let mut bad = valid.clone();
+        bad["version"] = json!(version);
+        assert_eq!(
+            parse(&bad.to_string())
+                .expect_err("scope changed another version")
+                .code,
+            ErrorCode::InvalidRequest
+        );
+    }
+    let mut bad = valid;
+    bad["candidates"] = pause_candidates();
+    assert_eq!(
+        parse(&bad.to_string())
+            .expect_err("action-only project accepted")
+            .code,
+        ErrorCode::InvalidRequest
+    );
+    assert!(matches!(
+        request(pause_candidates(), 100)?,
+        Request::Compare(_)
+    ));
+    Ok(())
+}
+
+#[test]
+fn whole_project_room_comparison_simulates_harvest_and_furnishing_without_changing_selection()
+-> Result<()> {
+    for connected in [false, true] {
+        let adapter = resource_room_adapter(0)?;
+        let before = adapter.snapshot().clone();
+        let room = resource_room_value(connected);
+        let mut alternate = room.clone();
+        if connected {
+            alternate["room"]["acquire_resources"]["assign_labor"] = json!(true);
+        } else {
+            alternate["acquire_resources"]["assign_labor"] = json!(true);
+        }
+        let input = project_request(
+            json!([
+                {"key":"first", "blueprint":room},
+                {"key":"second", "blueprint":alternate},
+            ]),
+            2_000,
+        )?;
+        let ctx = resource_room_context(&adapter);
+        let report = compare(&adapter, &ctx, IntentId::new(111), &input, Instant::now())?;
+        assert_eq!(report["schema"], "dfmcp.plan-comparison/2", "{report}");
+        assert_eq!(report["version"], 2);
+        assert_eq!(report["forecast_scope"], "complete_project");
+        assert_eq!(report["selection_scope"], "current_reviewed_stage_only");
+        assert_eq!(
+            report["recommendation"]["evidence_complete"], true,
+            "{report}"
+        );
+        assert!(report["recommended_candidate"].is_string(), "{report}");
+        assert_eq!(report["effect_evidence"], false);
+        assert_eq!(report["automatic_continuation"], false);
+        for row in report["candidates"]
+            .as_array()
+            .ok_or_else(|| invalid("project rows missing"))?
+        {
+            let prediction = &row["prediction"];
+            assert_eq!(prediction["predicted_complete"], true, "{row}");
+            assert_eq!(prediction["predicted_goal_truth"], "true", "{row}");
+            assert_eq!(prediction["predicted_physical_quiescent"], true, "{row}");
+            assert_eq!(
+                prediction["stages"].as_array().map(Vec::len),
+                Some(2),
+                "{row}"
+            );
+            assert!(
+                row["action_count"].as_u64() > row["current_stage"]["action_count"].as_u64(),
+                "{row}"
+            );
+            assert_eq!(row["cost_scope"], "all_simulated_project_stages");
+            let selection_raw = row["next_step"]["arguments"]["blueprint"]
+                .as_str()
+                .ok_or_else(|| invalid("project selection missing"))?;
+            let selection_value: Value =
+                serde_json::from_str(selection_raw).map_err(|e| invalid(e.to_string()))?;
+            assert_eq!(selection_value["version"], 1);
+            let source = selected_source(&selection(row)?, adapter.snapshot(), &ctx)?
+                .ok_or_else(|| invalid("project selection did not retain a source"))?;
+            let (intent, _) = source.compile(IntentId::new(112), adapter.snapshot())?;
+            assert_eq!(
+                classify_room_stage(&intent),
+                RoomCompileStage::ResourceAcquisition
+            );
+            assert_eq!(
+                intent.requested_actions.len() as u64,
+                row["current_stage"]["action_count"]
+                    .as_u64()
+                    .ok_or_else(|| invalid("initial count missing"))?
+            );
+        }
+        assert_eq!(adapter.snapshot(), &before);
+    }
+    Ok(())
+}
+
+#[test]
+fn whole_project_identity_rejects_unequal_goals_before_a_no_work_compile_can_hide_them()
+-> Result<()> {
+    let adapter = adapter()?;
+    let mut candidates = production_candidates();
+    candidates[1]["blueprint"]["quotas"][0]["minimum"] = json!(1);
+    let refusal = compare(
+        &adapter,
+        &context(&adapter),
+        IntentId::new(113),
+        &project_request(candidates, 1_000)?,
+        Instant::now(),
+    )
+    .expect_err("different original project goals compared");
+    assert_eq!(refusal.code, ErrorCode::InvalidRequest);
+    assert!(refusal.message.contains("same original output quotas"));
+
+    for connected in [false, true] {
+        let adapter = resource_room_adapter(0)?;
+        let original = resource_room_value(connected);
+        let mut changed = original.clone();
+        if connected {
+            changed["access"]["region"]["max"] = json!([13, 12, 10]);
+        } else {
+            changed["layout"]["origin"] = json!([3, 6, 10]);
+        }
+        let refusal = compare(
+            &adapter,
+            &resource_room_context(&adapter),
+            IntentId::new(114),
+            &project_request(
+                json!([
+                    {"key":"original","blueprint":original},
+                    {"key":"different","blueprint":changed},
+                ]),
+                2_000,
+            )?,
+            Instant::now(),
+        )
+        .expect_err("equal resource targets hid different original room projects");
+        assert_eq!(refusal.code, ErrorCode::InvalidRequest);
+    }
+    Ok(())
+}
+
+#[test]
+fn whole_project_order_and_request_identity_do_not_change_predictions() -> Result<()> {
+    let adapter = adapter()?;
+    let candidates = production_candidates();
+    let ctx = context(&adapter);
+    let first = compare(
+        &adapter,
+        &ctx,
+        IntentId::new(115),
+        &project_request(candidates.clone(), 1_000)?,
+        Instant::now(),
+    )?;
+    let mut reversed = candidates
+        .as_array()
+        .cloned()
+        .ok_or_else(|| invalid("candidates missing"))?;
+    reversed.reverse();
+    let second = compare(
+        &adapter,
+        &ctx,
+        IntentId::new(999),
+        &project_request(json!(reversed), 1_000)?,
+        Instant::now(),
+    )?;
+    assert_eq!(
+        first["semantic_project_goal_digest"],
+        second["semantic_project_goal_digest"]
+    );
+    assert_eq!(
+        first["recommended_candidate"],
+        second["recommended_candidate"]
+    );
+    assert_eq!(first["candidates"], second["candidates"]);
+    assert_eq!(first["forecast_work"], second["forecast_work"]);
+    Ok(())
+}
+
+#[test]
+fn whole_project_later_stage_action_budget_is_shared_with_acquisition() -> Result<()> {
+    let adapter = resource_room_adapter(0)?;
+    let before = adapter.snapshot().clone();
+    let room = resource_room_value(false);
+    let input = project_request(
+        json!([
+            {"key":"first","blueprint":room.clone()},
+            {"key":"second","blueprint":room},
+        ]),
+        2_000,
+    )?;
+    let Request::Compare(comparison) = &input else {
+        return Err(invalid("project fixture lost comparison"));
+    };
+    let initial_actions = comparison
+        .candidates
+        .iter()
+        .try_fold(0_u32, |total, candidate| {
+            let (intent, _) = candidate
+                .source()?
+                .compile(IntentId::new(116), adapter.snapshot())?;
+            Ok::<_, DfmcpError>(total + intent.requested_actions.len() as u32)
+        })?;
+    let mut ctx = resource_room_context(&adapter);
+    ctx.budget.max_actions = initial_actions;
+    let error = compare(&adapter, &ctx, IntentId::new(117), &input, Instant::now())
+        .expect_err("later project stages obtained fresh action budgets");
+    assert_eq!(error.code, ErrorCode::BudgetExceeded, "{error}");
+    assert_eq!(adapter.snapshot(), &before);
+    Ok(())
+}
+
+#[test]
+fn whole_project_incomplete_horizon_and_unavailable_final_stage_are_not_recommended() -> Result<()>
+{
+    let adapter = resource_room_adapter(0)?;
+    let before = adapter.snapshot().clone();
+    let room = resource_room_value(false);
+    let candidates = json!([
+        {"key":"first","blueprint":room.clone()},
+        {"key":"second","blueprint":room},
+    ]);
+    let ctx = resource_room_context(&adapter);
+    let short = compare(
+        &adapter,
+        &ctx,
+        IntentId::new(118),
+        &project_request(candidates.clone(), 1)?,
+        Instant::now(),
+    )?;
+    assert!(short["recommended_candidate"].is_null(), "{short}");
+    for row in short["candidates"]
+        .as_array()
+        .ok_or_else(|| invalid("project rows missing"))?
+    {
+        assert_eq!(row["prediction"]["predicted_complete"], false, "{row}");
+        assert_eq!(
+            row["prediction"]["simulation_horizon_truncated"], true,
+            "{row}"
+        );
+    }
+    let mut denied = ctx;
+    denied
+        .grants
+        .retain(|grant| grant.capability != Capability::Construct);
+    let blocked = compare(
+        &adapter,
+        &denied,
+        IntentId::new(119),
+        &project_request(candidates, 2_000)?,
+        Instant::now(),
+    )?;
+    assert!(blocked["recommended_candidate"].is_null(), "{blocked}");
+    assert_eq!(
+        blocked["recommendation"]["evidence_complete"], false,
+        "{blocked}"
+    );
+    assert_eq!(adapter.snapshot(), &before);
+    Ok(())
+}

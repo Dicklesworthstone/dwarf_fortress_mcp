@@ -474,6 +474,20 @@ advance physical world jobs and the candidate's own deferred chain; other
 retained plans' deferred actions are outside the model. Predictions remain
 conditional and grant no effect authority.
 
+An explicit `compare_candidates` version 2 with
+`forecast_scope: "complete_project"` compares production, provisioned_room or
+connected_room sources through up to four discarded stages per candidate.
+Harvested supplies must actually appear in the simulated world before the
+unchanged original request is compiled for production or construction.
+Each stage must verify and become physically quiet before another begins.
+The comparison binds the original semantic output/room/access goal and ledger
+generation, compares complete project costs, and preserves the absolute reserve
+frontier. Later stock cannot repair a missed reserve observation; a known-True
+exact frontier may precede later stable action verification. Version-one
+current-stage comparison behavior and shape remain unchanged.
+Version-two selection still emits an ordinary version-one selection of only
+the current executable stage; future model plans never become effect authority.
+
 Comparison preserves the pending plan and exposes current game work, baselines,
 and watches. Each prepared candidate includes a source-bound selection request.
 Selection checks the exact current anchor and candidate contents, recompiles an

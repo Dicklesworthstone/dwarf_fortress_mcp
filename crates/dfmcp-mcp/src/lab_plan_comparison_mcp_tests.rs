@@ -716,3 +716,145 @@ fn public_candidate_ranking_prefers_one_equivalent_labor_batch_before_lexical_ke
     }
     Ok(())
 }
+
+fn open_project_resources() -> TestResult<Owner> {
+    let opened = parsed(&crate::agent_facade::fortress_open_session(
+        Some(false),
+        None,
+        Some(vec![
+            ("observe".into(), "read_only".into()),
+            ("query".into(), "read_only".into()),
+            ("plan".into(), "read_only".into()),
+            ("configure_labor".into(), "reversible".into()),
+            ("configure_production".into(), "reversible".into()),
+            ("control_clock".into(), "reversible".into()),
+            ("designate".into(), "guarded".into()),
+            ("construct".into(), "guarded".into()),
+            ("checkpoint".into(), "guarded".into()),
+        ]),
+        Some(60_000),
+        Some(20_000),
+        Some(8_192),
+        Some(4 * 1024 * 1024),
+        Some(20_000),
+        Some(64),
+        Some("starter_fortress_resources".into()),
+        Some(false),
+        Some(false),
+    ))?;
+    assert_eq!(opened["ok"], true, "{opened}");
+    Ok(Owner {
+        id: text_field(&opened, "session_id")?,
+    })
+}
+
+#[test]
+fn public_complete_project_comparison_predicts_later_production_but_selects_only_current_harvest()
+-> TestResult {
+    let _serial = crate::test_serial();
+    let owner = open_project_resources()?;
+    let previous = pause_plan(&owner)?;
+    let old_pending = text_field(&previous, "plan_digest")?;
+    let before = snapshot(&owner)?;
+    let blueprint = json!({
+        "template":"compare_candidates", "version":2,
+        "forecast_scope":"complete_project", "horizon_ticks":5_000,
+        "candidates":[
+            {"key":"alpha","blueprint":{
+                "template":"production", "quotas":[{"item":"BED","minimum":24}],
+                "acquire_resources":{"assign_labor":false},
+            }},
+            {"key":"staffed","blueprint":{
+                "template":"production", "quotas":[{"item":"BED","minimum":24}],
+                "acquire_resources":{"assign_labor":true},
+            }},
+        ],
+    });
+    let report = plan_blueprint(&owner, &blueprint.to_string())?;
+    assert_eq!(report["ok"], true, "{report}");
+    assert_eq!(report["schema"], "dfmcp.plan-comparison/2");
+    assert_eq!(report["agent_turn"]["phase"], "compare");
+    assert_eq!(report["forecast_scope"], "complete_project");
+    assert_eq!(report["selection_scope"], "current_reviewed_stage_only");
+    assert_eq!(report["forecast_work"]["actual_game_ticks_advanced"], 0);
+    assert_eq!(report["pending_plan_changed"], false);
+    assert_eq!(report["effect_evidence"], false);
+    assert!(report["recommended_candidate"].is_string(), "{report}");
+    for key in ["alpha", "staffed"] {
+        let row = candidate(&report, key)?;
+        assert_eq!(row["prediction"]["predicted_complete"], true, "{row}");
+        assert_eq!(row["prediction"]["predicted_goal_truth"], "true", "{row}");
+        assert_eq!(
+            row["prediction"]["stages"].as_array().map(Vec::len),
+            Some(2),
+            "{row}"
+        );
+        assert_eq!(
+            row["prediction"]["stages"][0]["stage"], "acquire_resources",
+            "{row}"
+        );
+        assert_eq!(
+            row["prediction"]["stages"][1]["stage"], "production",
+            "{row}"
+        );
+        assert_eq!(row["max_risk"], row["prediction"]["project_max_risk"]);
+        assert_eq!(
+            row["action_count"],
+            row["prediction"]["project_action_count"]
+        );
+    }
+    assert_eq!(snapshot(&owner)?, before);
+    assert_eq!(
+        pending_digest(&owner)?.as_deref(),
+        Some(old_pending.as_str())
+    );
+
+    // Whole-packet refusal cannot replace the existing pending plan with even
+    // the first stage of an otherwise successful model.
+    output_budget(&owner, 256)?;
+    let refused = plan_blueprint(&owner, &blueprint.to_string())?;
+    refusal(&refused, "budget_exceeded");
+    assert_eq!(snapshot(&owner)?, before);
+    assert_eq!(
+        pending_digest(&owner)?.as_deref(),
+        Some(old_pending.as_str())
+    );
+    output_budget(&owner, 20_000)?;
+
+    let selected_raw = selection(&report, "alpha")?;
+    let selected_request = parsed(&selected_raw)?;
+    assert_eq!(selected_request["version"], 1);
+    let selected = plan_blueprint(&owner, &selected_raw)?;
+    assert_eq!(selected["ok"], true, "{selected}");
+    assert_eq!(selected["kind"], "select_candidate");
+    assert_eq!(
+        selected["production"]["resource_workflow"]["stage"], "acquire_resources",
+        "{selected}"
+    );
+    let digest = text_field(&selected, "plan_digest")?;
+    assert_eq!(pending_digest(&owner)?.as_deref(), Some(digest.as_str()));
+    assert_eq!(snapshot(&owner)?, before);
+    {
+        let session = resolve_session(Some(owner.id.clone()))?;
+        let guard = session.lock().map_err(|_| "session poisoned")?;
+        let pending = guard
+            .pending
+            .as_ref()
+            .ok_or("selected current stage missing")?;
+        assert_eq!(
+            pending.plan.steps.len() as u64,
+            candidate(&report, "alpha")?["current_stage"]["action_count"]
+                .as_u64()
+                .ok_or("current-stage count missing")?
+        );
+        assert!(
+            guard.open_actions.is_empty(),
+            "forecast dispatched canonical actions"
+        );
+        let PlanSource::Production { raw, .. } = &pending.source else {
+            return Err("project selection changed source family".into());
+        };
+        assert_eq!(parsed(raw)?["quotas"], json!([{"item":"BED","minimum":24}]));
+    }
+    Ok(())
+}

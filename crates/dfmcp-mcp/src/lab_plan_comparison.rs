@@ -25,6 +25,9 @@ use super::PlanSource;
 use super::plan_forecast::{ForecastBudget, forecast_plan_bounded};
 use super::room_provisioning::{RoomCompileStage, classify_room_stage};
 
+#[path = "lab_project_comparison.rs"]
+mod project_comparison;
+
 const MAX_REQUEST_BYTES: usize = 128 * 1024;
 const MAX_CANDIDATES: usize = 4;
 const MAX_KEY_BYTES: usize = 64;
@@ -71,8 +74,15 @@ struct Anchor {
     state_hash: String,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ForecastScope {
+    CurrentStage,
+    CompleteProject,
+}
+
 #[derive(Debug)]
 pub(super) struct Comparison {
+    scope: ForecastScope,
     horizon_ticks: u64,
     candidates: Vec<Candidate>,
 }
@@ -96,6 +106,8 @@ enum Envelope {
     #[serde(rename = "compare_candidates")]
     Compare {
         version: u32,
+        #[serde(default, deserialize_with = "present")]
+        forecast_scope: Option<String>,
         horizon_ticks: u64,
         candidates: Vec<Candidate>,
     },
@@ -149,10 +161,19 @@ pub(super) fn parse(raw: &str) -> Result<Option<Request>> {
     match envelope {
         Envelope::Compare {
             version,
+            forecast_scope,
             horizon_ticks,
             candidates,
         } => {
-            version_one(version)?;
+            let scope = match (version, forecast_scope.as_deref()) {
+                (1, None) => ForecastScope::CurrentStage,
+                (2, Some("complete_project")) => ForecastScope::CompleteProject,
+                _ => {
+                    return Err(invalid(
+                        "comparison requires version 1 without forecast_scope, or version 2 with forecast_scope complete_project",
+                    ));
+                }
+            };
             if horizon_ticks == 0 {
                 return Err(invalid(
                     "candidate comparison needs a nonzero common horizon_ticks",
@@ -166,11 +187,15 @@ pub(super) fn parse(raw: &str) -> Result<Option<Request>> {
             let mut keys = BTreeSet::new();
             for candidate in &candidates {
                 candidate.validate()?;
+                if scope == ForecastScope::CompleteProject {
+                    project_comparison::validate_candidate(candidate)?;
+                }
                 if !keys.insert(&candidate.key) {
                     return Err(invalid("candidate keys must be distinct"));
                 }
             }
             Ok(Some(Request::Compare(Comparison {
+                scope,
                 horizon_ticks,
                 candidates,
             })))
@@ -549,6 +574,9 @@ pub(super) fn compare(
     let Request::Compare(comparison) = request else {
         return Err(invalid("comparison execution requires compare_candidates"));
     };
+    if comparison.scope == ForecastScope::CompleteProject {
+        return project_comparison::compare(adapter, context, comparison, started);
+    }
     let snapshot = adapter.snapshot();
     authorize(snapshot, context)?;
     check_wall(context, started)?;

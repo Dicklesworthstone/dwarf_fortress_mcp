@@ -11,6 +11,8 @@ use serde_json::{Value, json};
 
 const MAX_CANDIDATES: u64 = 4;
 const MAX_SOURCE_FORKS: u64 = MAX_CANDIDATES * 2;
+pub(crate) const MAX_PROJECT_STAGES: u64 = 4;
+const MAX_PROJECT_FORKS: u64 = MAX_CANDIDATES * (MAX_PROJECT_STAGES + 1);
 
 fn exhausted(message: &str) -> DfmcpError {
     DfmcpError::new(ErrorCode::BudgetExceeded, message)
@@ -30,6 +32,9 @@ pub(crate) struct ForecastBudget {
     polls: u64,
     ticks: u64,
     slices: u64,
+    project_mode: bool,
+    project_stages: u64,
+    current_project_stages: u64,
 }
 
 impl ForecastBudget {
@@ -63,12 +68,28 @@ impl ForecastBudget {
             polls: 0,
             ticks: 0,
             slices: 0,
+            project_mode: false,
+            project_stages: 0,
+            current_project_stages: 0,
         };
         result.check(current)?;
         Ok(result)
     }
 
-    pub(super) fn check(&self, current: &OperationContext) -> Result<()> {
+    /// The original comparison profile is unchanged. Project comparisons
+    /// explicitly opt into bounded later stages while retaining one owner,
+    /// common horizon and aggregate action/tick/slice/byte budget.
+    pub(crate) fn new_project(
+        current: &OperationContext,
+        started: Instant,
+        horizon_ticks: u64,
+    ) -> Result<Self> {
+        let mut budget = Self::new(current, started, horizon_ticks)?;
+        budget.project_mode = true;
+        Ok(budget)
+    }
+
+    pub(crate) fn check(&self, current: &OperationContext) -> Result<()> {
         for capability in [Capability::Plan, Capability::Observe, Capability::Query] {
             current.authorize(capability, RiskTier::ReadOnly, &[], None)?;
         }
@@ -172,7 +193,78 @@ impl ForecastBudget {
         Ok(())
     }
 
-    pub(super) fn before_fork(
+    pub(crate) fn begin_project(
+        &mut self,
+        snapshot: &WorldSnapshot,
+        plan: &PreparedPlan,
+        current: &OperationContext,
+    ) -> Result<()> {
+        if !self.project_mode {
+            return Err(DfmcpError::new(
+                ErrorCode::InvalidRequest,
+                "complete-project forecasts require their explicit shared budget profile",
+            ));
+        }
+        self.begin_candidate(snapshot, plan, current)?;
+        self.current_project_stages = 1;
+        self.project_stages += 1;
+        Ok(())
+    }
+
+    /// Derived sources remain private descendants of this forecast's source.
+    /// Inspection keeps the original real owner/context; only model execution
+    /// binds the derived anchor. No simulated observation becomes authority.
+    pub(crate) fn inspect_project_source(
+        &self,
+        snapshot: &WorldSnapshot,
+        current: &OperationContext,
+    ) -> Result<()> {
+        self.check(current)?;
+        let anchor = snapshot.anchor();
+        if !self.project_mode
+            || self.current_project_stages == 0
+            || anchor.fortress_id != self.current.anchor.fortress_id
+            || anchor.cursor.epoch != self.current.anchor.cursor.epoch
+            || anchor.cursor.sequence < self.current.anchor.cursor.sequence
+            || anchor.tick < self.current.anchor.tick
+            || anchor.tick.0 > self.horizon_tick
+        {
+            return Err(DfmcpError::new(
+                ErrorCode::StaleAnchor,
+                "project model source is outside its owned original epoch and common horizon",
+            ));
+        }
+        self.inspect_source(snapshot, current).map(|_| ())
+    }
+
+    pub(crate) fn admit_project_stage(
+        &mut self,
+        snapshot: &WorldSnapshot,
+        plan: &PreparedPlan,
+        current: &OperationContext,
+    ) -> Result<()> {
+        self.inspect_project_source(snapshot, current)?;
+        if plan.anchor != snapshot.anchor() {
+            return Err(DfmcpError::new(
+                ErrorCode::StaleAnchor,
+                "project stage plan differs from its exact derived model source",
+            ));
+        }
+        let actions = self.actions.saturating_add(plan.steps.len() as u64);
+        if self.current_project_stages >= MAX_PROJECT_STAGES
+            || actions > u64::from(current.budget.max_actions)
+        {
+            return Err(exhausted(
+                "project stages exceed the aggregate action or four-stage bound",
+            ));
+        }
+        self.current_project_stages += 1;
+        self.project_stages += 1;
+        self.actions = actions;
+        Ok(())
+    }
+
+    pub(crate) fn before_fork(
         &mut self,
         snapshot: &WorldSnapshot,
         current: &OperationContext,
@@ -187,7 +279,12 @@ impl ForecastBudget {
         .into_iter()
         .fold(0_u64, |total, count| total.saturating_add(count as u64));
         let forked_records = self.forked_records.saturating_add(records);
-        if self.source_forks >= MAX_SOURCE_FORKS
+        let maximum_forks = if self.project_mode {
+            MAX_PROJECT_FORKS
+        } else {
+            MAX_SOURCE_FORKS
+        };
+        if self.source_forks >= maximum_forks
             || forked_records > u64::from(current.budget.max_entities)
         {
             return Err(exhausted(
@@ -217,7 +314,7 @@ impl ForecastBudget {
         Ok(())
     }
 
-    pub(super) fn before_advance(&mut self, ticks: u64, current: &OperationContext) -> Result<()> {
+    pub(crate) fn before_advance(&mut self, ticks: u64, current: &OperationContext) -> Result<()> {
         self.check(current)?;
         let total = self
             .ticks
@@ -232,7 +329,7 @@ impl ForecastBudget {
         Ok(())
     }
 
-    pub(super) fn advanced(&mut self, ticks: u64) {
+    pub(crate) fn advanced(&mut self, ticks: u64) {
         // before_advance admitted this exact sequential model call. A failed
         // advance is still an attempted slice but cannot claim elapsed ticks.
         self.ticks += ticks;
@@ -251,15 +348,15 @@ impl ForecastBudget {
         Ok(())
     }
 
-    pub(super) const fn horizon_tick(&self) -> u64 {
+    pub(crate) const fn horizon_tick(&self) -> u64 {
         self.horizon_tick
     }
-    pub(super) const fn horizon_ticks(&self) -> u64 {
+    pub(crate) const fn horizon_ticks(&self) -> u64 {
         self.horizon_ticks
     }
 
     pub(crate) fn work_json(&self) -> Value {
-        json!({
+        let mut work = json!({
             "candidates":self.candidates, "source_forks":self.source_forks,
             "forked_source_records":self.forked_records,
             "forked_source_canonical_bytes":self.forked_bytes,
@@ -277,6 +374,12 @@ impl ForecastBudget {
             "source_accounting":"canonical snapshot records and bytes copied into discarded model forks; retained adapter plans, actions, checkpoints and journal are not a measured heap-byte count",
             "actual_game_ticks_advanced":0,
             "slice_accounting":"attempted bounded model advances; simulated_game_ticks counts only successful advances",
-        })
+        });
+        if self.project_mode {
+            work["project_stages"] = json!(self.project_stages);
+            work["limits"]["stages_per_project"] = json!(MAX_PROJECT_STAGES);
+            work["limits"]["source_forks"] = json!(MAX_PROJECT_FORKS);
+        }
+        work
     }
 }

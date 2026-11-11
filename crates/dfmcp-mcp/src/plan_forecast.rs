@@ -14,7 +14,7 @@ use serde_json::json;
 
 #[path = "plan_forecast_budget.rs"]
 mod comparison_budget;
-pub(super) use comparison_budget::ForecastBudget;
+pub(super) use comparison_budget::{ForecastBudget, MAX_PROJECT_STAGES};
 
 #[path = "plan_forecast_schedule.rs"]
 mod observation_schedule;
@@ -123,13 +123,69 @@ fn before_advance(
     Ok(())
 }
 
+/// The private model frontier is returned only to another discarded forecast.
+/// It never leaves this process as current evidence or a committable plan.
+pub(super) struct StageForecast {
+    pub(super) prediction: serde_json::Value,
+    pub(super) frontier: Option<MemoryAdapter>,
+}
+
+/// A project stage ends after its own action proofs and physical work finish.
+/// Acquisition may finish while the original output goal remains False. The
+/// caller must check every action Verified before compiling another stage.
+pub(super) fn forecast_stage_bounded(
+    adapter: &MemoryAdapter,
+    plan: &PreparedPlan,
+    template: &OperationContext,
+    reserve_until_tick: Option<u64>,
+    reserve_goal: &dyn Fn(&dfmcp_world::WorldSnapshot) -> Result<PredicateTruth>,
+    budget: &mut ForecastBudget,
+) -> Result<StageForecast> {
+    let mut frontier = None;
+    let prediction = forecast_model(
+        adapter,
+        plan,
+        template,
+        reserve_until_tick,
+        Some(&mut *budget),
+        Some(&mut frontier),
+        Some(reserve_goal),
+    )?;
+    budget.check(template)?;
+    Ok(StageForecast {
+        prediction,
+        frontier,
+    })
+}
+
 fn forecast_inner(
     adapter: &MemoryAdapter,
     plan: &PreparedPlan,
     template: &OperationContext,
     reserve_until_tick: Option<u64>,
-    mut budget: Option<&mut ForecastBudget>,
+    budget: Option<&mut ForecastBudget>,
 ) -> Result<serde_json::Value> {
+    forecast_model(
+        adapter,
+        plan,
+        template,
+        reserve_until_tick,
+        budget,
+        None,
+        None,
+    )
+}
+
+fn forecast_model(
+    adapter: &MemoryAdapter,
+    plan: &PreparedPlan,
+    template: &OperationContext,
+    reserve_until_tick: Option<u64>,
+    mut budget: Option<&mut ForecastBudget>,
+    stage_frontier: Option<&mut Option<MemoryAdapter>>,
+    reserve_goal: Option<&dyn Fn(&dfmcp_world::WorldSnapshot) -> Result<PredicateTruth>>,
+) -> Result<serde_json::Value> {
+    let stage_only = stage_frontier.is_some();
     if let Some(budget) = budget.as_deref_mut() {
         budget.before_fork(adapter.snapshot(), template)?;
     }
@@ -212,7 +268,7 @@ fn forecast_inner(
     let blocked_by_pause = fork.snapshot().paused
         && (outcomes.iter().any(|(_, _, state, _)| !state.is_terminal())
             || !quiescent
-            || goal != PredicateTruth::True);
+            || (!stage_only && goal != PredicateTruth::True));
     let simulation_horizon = budget.as_deref().map(ForecastBudget::horizon_tick);
     let work_horizon = simulation_horizon.map_or(horizon, |limit| horizon.min(limit));
     let span = work_horizon.saturating_sub(start.0);
@@ -235,7 +291,7 @@ fn forecast_inner(
         while elapsed < span
             && (outcomes.iter().any(|(_, _, state, _)| !state.is_terminal())
                 || !quiescent
-                || goal != PredicateTruth::True)
+                || (!stage_only && goal != PredicateTruth::True))
         {
             check_budget(&budget, template)?;
             let mut advance = slice.min(span - elapsed);
@@ -298,7 +354,15 @@ fn forecast_inner(
             };
             check_budget(&budget, template)?;
             if reserve_until_tick == Some(fork.snapshot().tick.0) {
-                reserve = Some(reserve_frontier(&fork, goal, quiescent));
+                let reserve_truth = if let Some(evaluate) = reserve_goal {
+                    match evaluate(fork.snapshot()) {
+                        Ok(truth) => truth,
+                        Err(error) => return model_failure(error, budget.is_some()),
+                    }
+                } else {
+                    goal
+                };
+                reserve = Some(reserve_frontier(&fork, reserve_truth, quiescent));
             }
         }
     }
@@ -350,7 +414,8 @@ fn forecast_inner(
             json!(!completes && work_horizon < horizon && fork.snapshot().tick.0 >= work_horizon);
     }
     if let Some(until) = reserve_until_tick {
-        if reserve.is_none()
+        if !stage_only
+            && reserve.is_none()
             && !fork.snapshot().paused
             && fork.snapshot().tick.0 < until
             && simulation_horizon.is_none_or(|limit| until <= limit)
@@ -464,6 +529,11 @@ fn forecast_inner(
     }
     check_budget(&budget, template)?;
     forecast["simulation_slices"] = json!(simulation_slices);
+    if let Some(frontier) = stage_frontier {
+        // Move the evaluated fork; copying another world here would require a
+        // second source-fork charge. Earlier /1 callers discard it as before.
+        *frontier = Some(fork);
+    }
     Ok(forecast)
 }
 

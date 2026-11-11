@@ -89,6 +89,115 @@ anchor makes the old selection stale: compare again. Editing the candidate's
 summary, source or digest is refused. Possession of a selection does not prove
 that a comparison previously ran and grants no authority.
 
+## Forecast the complete resource or room project
+
+Version 1 retains its current reviewed-stage behavior. To compare the original
+production or room objective through its later stages, request version 2 with
+the explicit scope `complete_project`. It uses the existing `fortress_plan`
+blueprint argument and the same ordinary source parsers:
+
+```json
+{
+  "template": "compare_candidates",
+  "version": 2,
+  "forecast_scope": "complete_project",
+  "horizon_ticks": 5000,
+  "candidates": [
+    {
+      "key": "current_labor",
+      "blueprint": {
+        "template": "production",
+        "quotas": [{"item": "BED", "minimum": 24}],
+        "acquire_resources": {"assign_labor": false}
+      }
+    },
+    {
+      "key": "allow_labor_setup",
+      "blueprint": {
+        "template": "production",
+        "quotas": [{"item": "BED", "minimum": 24}],
+        "acquire_resources": {"assign_labor": true}
+      }
+    }
+  ]
+}
+```
+
+Use a resource-model laboratory world, such as
+`starter_fortress_resources`, with its observed finite resources and the
+ordinary capabilities needed for both harvesting and production. The original
+request remains each alternative's complete source. The first plan may contain
+only finite resource acquisition. On its discarded fork, the evaluator waits
+until that stage's actions are verified and its physical work is quiet, then
+compiles the same original source at that actual predicted frontier. The next
+stage uses the resources that the model actually produced. Future inventory is
+never inserted into the initial plan as credit.
+
+The complete-project scope accepts production, provisioned-room and
+connected-room blueprints. A room includes every original terrain region and
+furnishing; a connected room also includes its entrance, routing domain and
+movement model. Final room truth inspects exact reciprocal installed-item
+custody and current access. Matching a harvest stock target or newly generated
+action identifiers cannot establish that the room is complete. Production
+retains the original qualified stock-ledger identity and generation.
+
+Alternatives must share the same semantic output quotas and optional reserve
+frontier, or the same complete room geometry, furnishing and access goal.
+Different authorized setup, staffing, acquisition and order strategies may be
+compared. Those choices still participate in each complete candidate source and
+selection digest; they are excluded only from the common semantic-goal key.
+Unequal goals are rejected before a later no-work or failed-preparation result
+can hide the difference. Version 2 excludes raw actions, pause requests and
+owned-history continuation wrappers.
+
+A version 2 result has schema `dfmcp.plan-comparison/2`,
+`forecast_scope: "complete_project"`, and `semantic_project_goal`
+with its digest. Each candidate retains the complete staged `prediction`.
+Its `stages` array names acquisition, production or room work, predicted
+frontiers, action verification, physical quiescence and model costs. These
+stage plans exist only on discarded forks. Each row's `max_risk`,
+`requires_checkpoint`, `action_count` and
+`required_capabilities` summarize all simulated project stages, while
+`current_stage` describes the initial executable plan. Recommendations
+rank complete original-project outcomes using those aggregate costs.
+
+The initial acquisition's output-stock or room goal may still be false when
+its own actions finish. That does not prevent a predicted next stage. Failed,
+canceled, unverified or physically active stage work does prevent advancement.
+A common-horizon stop remains an incomplete prediction; unavailable later-stage
+evidence suppresses the whole recommendation. The model assumes the agent
+reviews each next stage without additional delay. It does not predict competing
+agents or automatically dispatch deferred actions belonging to other plans.
+
+The emitted selection is still a version 1 `select_candidate` request.
+It revalidates the exact source at the current real anchor and prepares **only
+the current executable stage** for review. The comparison explicitly reports
+`selection_scope: "current_reviewed_stage_only"` and
+`automatic_continuation: false`. After committing and observing that
+stage, the agent uses the ordinary `continue_goal` workflow to review a
+fresh later plan. Predicted later stages never become pending plans, effect
+authority or current goal evidence.
+
+All stages and alternatives share the original request deadline, source work,
+action allowance, game-tick allowance and 400-slice ceiling. The complete
+project generation permits at most four stages per candidate and twenty source
+forks across at most four candidates, including reserve tails. Every actual
+fork still consumes the negotiated record and byte allowance. A larger fork cap
+does not multiply those budgets. The whole result must fit the negotiated
+output allowance; the publisher refuses rather than removing stages or
+decision-bearing outcomes. Default 4,096-token fit for arbitrary complete
+project comparisons is not established.
+
+For an explicit future reserve, all alternatives retain the same absolute
+frontier. The evaluator reports stock truth at that exact future tick separately
+from work completion. A true endpoint is not a proof of continuous maintenance,
+and a result after the requested tick cannot rescue missing stock at the
+requested frontier. Complete-project success requires that exact reserve
+observation to be known True; a missing, Unknown or False endpoint keeps the
+project incomplete. A True endpoint may precede later stable action verification,
+because the reserve tick is an evidence frontier, not an added action deadline.
+No forecast extends a sealed action deadline.
+
 ## Which alternatives are comparable
 
 Every candidate has a unique `key` and exactly one of the existing source forms:
@@ -100,7 +209,7 @@ Every candidate has a unique `key` and exactly one of the existing source forms:
 | `paused_target` | A Boolean pause target. |
 | `summary` | An optional candidate-specific summary, included in its normalized source identity. |
 
-All successfully compiled candidates must have the **same normalized original
+For version 1, all successfully compiled candidates must have the **same normalized original
 terminal predicate** and the **same optional absolute reserve frontier**.
 The check occurs before any forecast, including when a candidate would later
 fail preparation. Matching descriptions or similar-looking goals do not
@@ -201,7 +310,7 @@ publication. Opening another candidate does not reset that deadline.
 | Alternatives | 2–4 |
 | Candidate key | 1–64 ASCII letters, digits, underscores or hyphens |
 | Candidate summary | 4,096 UTF-8 bytes |
-| Forecast source forks, including reserve forks | 8 across the set |
+| Forecast source forks, including reserve forks (version 1) | 8 across the set |
 | Simulation slices | 400 across the set |
 | Simulated ticks | Combined total at most the session's `max_game_ticks` |
 | Compiled action count | Combined total at most the session's `max_actions` |
@@ -298,3 +407,12 @@ with the existing `jsonschema` test dependency available. These checks concern
 the laboratory reference world; they do not establish native, live-game or
 release qualification. Current execution evidence is recorded in
 [`IMPLEMENTATION_STATUS.md`](../IMPLEMENTATION_STATUS.md).
+
+The complete-project implementation is separately described by
+[`laboratory_project_forecast_v1.json`](../architecture/laboratory_project_forecast_v1.json).
+Its focused regressions exercise staged harvest-to-room and harvest-to-production
+forecasts, strategy differences, semantic goal equality, aggregate later-stage
+costs, future capability failures, bounded horizons, ordinary current-stage
+selection and pending-plan preservation on output refusal. Test source does not
+by itself establish execution or full Rust qualification; the current status
+document records the commands that actually ran.

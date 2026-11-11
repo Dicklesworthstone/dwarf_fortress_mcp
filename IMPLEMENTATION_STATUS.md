@@ -1,5 +1,58 @@
 # Implementation Status
 
+## Unreleased — Forecast complete original production and room projects
+
+An explicit compare_candidates version2 with forecast_scope=complete_project
+now evaluates production, provisioned_room and connected_room candidates across
+their actual discarded-model stages. A successful acquisition stage can leave
+the original room/output goal False; once its own actions are Verified and its
+physical work is quiet, the unchanged typed original request is recompiled
+against the resources that the simulation actually produced. Future inventory
+is never credited to the initial plan. Final truth checks original output
+quotas or complete terrain/furnishing/access requirements, with the original
+qualified stock-ledger identity and generation retained throughout.
+
+All candidates must have the same semantic original goal before compilation.
+Setup/acquisition/staffing strategies remain in each exact candidate source.
+Risk, checkpoint requirements, capabilities and action counts cover all modeled
+stages. Four stages per candidate, twenty total forks,400 shared advances and
+negotiated aggregate source/action/tick/wall/output allowances bound the work.
+Version-one current-stage forecasts and comparison shape remain unchanged.
+Selection still emits an ordinary version-one review of the current executable
+stage; predicted future plans never become pending plans or effect authority.
+
+Reserve evidence stays at the original absolute tick. A late True stock cannot
+repair an original False/Unknown/missing endpoint. Complete-project success
+requires that exact endpoint to be known True, including when it lies beyond
+the common simulation horizon and is therefore unavailable. A True original
+endpoint may precede later stable action verification: the reserve tick is an
+evidence frontier and does not add or extend action deadlines. Current stock,
+action proof, physical work and reserve truth remain separately reported.
+
+Eleven new core regressions, six comparison regressions and one public-facade
+regression cover harvest-to-production/room/stairs, exact furniture custody,
+strategies and semantic identity, later capabilities, common horizons/shared
+budgets, expired/missing reserve evidence and truthful current-stage selection.
+The decoded request schema checks passed9accepted and53rejected cases. Eight
+owned core/comparison Rust files parsed/formatted on latestnightly1.102 before
+the late reserve guard and tests were refined; the final refinement and shared
+module registration received source review but could not be formatter-checked
+again after executor loss. Independent reviews checked original source pairing,
+custody, stage progression, global bounds and comparison publication.
+
+No new project Rust tests ran. The full locked MCP metadata build was SIGKILLed
+in unchangedAsupersync before MCP compilation. A component with the real five
+internal crates and eleven exact locked registry dependencies was then killed
+in the unchanged full adapter metadata build;648 recorded inputs stayed intact.
+A narrower component used the original adapter API and complete unchanged
+MemoryAdapter, omitting399 unrelated native adapter files. It reached the new
+MCP modules but reported harness-only private-module visibility errors and lost
+the executor before those wiring corrections or a final result. This is not a
+successful complete component check, full MCP build, native admission or
+release qualification. Owning bead df-lab-project-forecast-p7q remains in
+progress. See docs/LAB_PLAN_COMPARISON.md and
+architecture/laboratory_project_forecast_v1.json.
+
 ## Unreleased — Combine relationship and spatial selection with exact aggregates
 
 Structured aggregate queries accept optional relation and spatial selectors,

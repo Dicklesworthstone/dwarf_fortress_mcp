@@ -68,6 +68,47 @@ def main() -> None:
         value = copy.deepcopy(choose)
         value["candidate_digest"] = bad
         cases.append((value, False))
+    project = {
+        "template": "compare_candidates", "version": 2,
+        "forecast_scope": "complete_project", "horizon_ticks": 2000,
+        "candidates": [
+            {"key": "ordinary", "blueprint": {
+                "template": "production", "quotas": [{"item": "BED", "minimum": 2}],
+                "acquire_resources": {"assign_labor": False},
+            }},
+            {"key": "staffed", "blueprint": {
+                "template": "production", "quotas": [{"item": "BED", "minimum": 2}],
+                "acquire_resources": {"assign_labor": True},
+            }},
+        ],
+    }
+    cases.append((project, True))
+    for template in ("provisioned_room", "connected_room"):
+        value = copy.deepcopy(project)
+        value["candidates"][0]["blueprint"] = {"template": template}
+        # This schema gates the wrapper; each typed compiler validates geometry.
+        cases.append((value, True))
+    for key in project:
+        value = copy.deepcopy(project)
+        del value[key]
+        cases.append((value, False))
+    for key, bad in (("version", 1), ("version", 3),
+                     ("forecast_scope", None), ("forecast_scope", "current_stage"),
+                     ("forecast_scope", True), ("unexpected", True)):
+        value = copy.deepcopy(project)
+        value[key] = bad
+        cases.append((value, False))
+    for bad in ({"key": "pause", "paused_target": True},
+                {"key": "actions", "actions": []},
+                {"key": "legacy_room", "blueprint": {"template": "dining_hall"}},
+                {"key": "recursive", "blueprint": {"template": "compare_candidates"}}):
+        value = copy.deepcopy(project)
+        value["candidates"][0] = bad
+        cases.append((value, False))
+    for baseline in (compare, choose):
+        value = copy.deepcopy(baseline)
+        value["forecast_scope"] = "complete_project"
+        cases.append((value, False))
     for request, accepted in cases:
         if validator.is_valid(request) != accepted:
             raise AssertionError(f"expected accepted={accepted}: {request!r}")

@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased — Compare complete resource-backed production and room projects
+
+- Add explicit version2 complete_project comparisons that follow real modeled
+  harvest yields through separately compiled production or room stages.
+- Preserve the complete original semantic goal, stock-ledger identity/generation
+  and exact reserve frontier; later stock cannot repair missed reserve evidence.
+- Rank aggregate stage risk, checkpoint burden and actions under shared bounded
+  work. Keep version1 behavior and fresh current-stage-only selection.
+- Add eleven core, six comparison and one public-facade regression sources;
+  decoded schema checks pass9accepted/53rejected cases. No new projectRust tests
+  ran: full and component builds were interrupted by dependency/adapter SIGKILL
+  and executor loss. Latest reserve refinements remain source-reviewed only.
+
 ## Unreleased — Query exact totals for related entities inside a region
 
 - Compose optional positive relationship and spatial selectors with aggregate
