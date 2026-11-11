@@ -1,5 +1,37 @@
 # Implementation Status
 
+## Unreleased — Wait for a retained laboratory condition
+
+The existing fortress_wait tool now accepts an optional watch_id from laboratory
+temporal watch registration. It advances the shared foreground world in bounded
+intervals clipped to the original watch cadence and absolute deadline, samples
+each published frontier, and stops on satisfaction, failure, expiry, invalidation,
+cancellation, unknown evidence, pause or the requested tick limit. Zero-tick
+waiting needs no committed action or clock effect. plan_digest and watch_id are
+mutually exclusive; existing plain and selected-plan Rust entry points remain.
+
+The original predicate, failure guard, source policy and required stability stay
+fixed. Cursor gaps reset positive stability, and terminal evidence remains
+historical. Current whole-fortress Observe/Query, clock authority for positive
+time, complete source limits and one request-wide wall deadline gate progress.
+Pending plans, baselines, other watches and committed work remain visible.
+Complete watch packets are admitted before retained watch state changes; a later
+refusal preserves actual elapsed time and the last accepted evidence separately.
+The wait affordance is bounded by current authority. Replay records the exact
+selector and refuses reuse of process-local handles in a different session.
+
+Regression sources cover cadence, cross-call stability, exact deadlines, failure
+and unknown guards, pause, ownership, generation/epoch changes, current authority,
+source/output limits, real brewing alongside retained work, late publication
+refusal and raw-handle replay. The new Rust tests were not executed. The full MCP
+dependency build was interrupted before MCP compilation; the execution
+environment then disconnected before focused tests could run. Recovered source
+was independently reviewed through GitHub. Compilation, final Rust formatting,
+the generated wire-definition test and full qualification remain unverified.
+
+Owning bead df-lab-structured-query-f7q.3 remains in progress. No native admission
+or live-game qualification is inferred. See docs/LAB_CONDITION_WATCHES.md.
+
 ## Unreleased — Query retained announcements as typed event windows
 
 Structured event queries now accept source=announcements in addition to the

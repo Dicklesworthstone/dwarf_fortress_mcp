@@ -23,7 +23,10 @@ separately when witness rebase created a retained alias. A pending review,
 another session's commit, or restored source history cannot substitute for
 the exact session-owned original commit and its complete action set.
 
-Omitting `plan_digest` preserves the existing duration-based wait. Direct Rust
+Omitting both `plan_digest` and `watch_id` preserves the existing duration-based
+wait. The additive [condition-watch selector](LAB_CONDITION_WATCHES.md) is
+mutually exclusive with `plan_digest`; it does not change selected-plan
+semantics. Direct Rust
 callers may continue using `fortress_wait(session_id, max_game_ticks)`;
 `fortress_wait_for_plan(session_id, max_game_ticks, plan_digest)` exposes the
 additive selector. The registered handler keeps the wire name `fortress_wait`

@@ -103,6 +103,11 @@ pub(crate) fn record(
             "query continuations are bound to the original session and cannot be replayed into a new session",
         );
     }
+    if tool == "fortress.wait" && arguments["watch_id"].is_string() {
+        log.mark_not_replayable(
+            "watch-selected waits name process-local handles owned by the original session",
+        );
+    }
     if log.calls.len() >= MAX_RECORDED_CALLS {
         log.truncated = true;
         log.mark_not_replayable("the call log exceeded its bound and was truncated");
@@ -220,10 +225,11 @@ fn invoke(tool: &str, session: Option<String>, args: &Value) -> Result<String, S
             Some(session_or(tool)?),
             opt_string(args, "plan_digest").unwrap_or_default(),
         ),
-        "fortress.wait" => f::fortress_wait_for_plan(
+        "fortress.wait" => f::fortress_wait_for_selection(
             Some(session_or(tool)?),
             opt_u64(args, "max_game_ticks"),
             opt_string(args, "plan_digest"),
+            opt_string(args, "watch_id"),
         ),
         "fortress.cancel" => f::fortress_cancel(
             Some(session_or(tool)?),

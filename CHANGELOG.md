@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased — Wait for a retained laboratory condition
+
+- Add optional watch_id to the existing fortress_wait tool, preserving plain and
+  selected-plan callers and rejecting simultaneous plan/watch selection.
+- Sample each published foreground frontier at the original cadence/deadline;
+  stop on decisive or unknown evidence without rewriting the condition.
+- Preserve concurrent game work, pending reviews and query catalogs. Admit the
+  complete response before watch publication; retain elapsed time and historical
+  evidence when later progression or publication fails.
+- Add current-authority wait affordances and exact-selector replay refusal for
+  process-local handles, plus public-facade and owner regression sources.
+- Independently review recovered source through GitHub after executor loss.
+  New Rust tests, compilation and final formatting could not be run; runtime
+  and release qualification remain open.
+
 ## Unreleased — Read retained announcements through typed event queries
 
 - Add explicit events source=announcements with original report-time ordering,

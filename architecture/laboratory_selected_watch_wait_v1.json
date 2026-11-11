@@ -1,0 +1,93 @@
+{
+  "schema": "dfmcp.laboratory-selected-watch-wait-contract/1",
+  "owning_bead": "df-lab-structured-query-f7q.3",
+  "logical_tool": "fortress.wait",
+  "wire_tool": "fortress_wait",
+  "selector": {
+    "field": "watch_id",
+    "format": "watch: followed by 64 lowercase hexadecimal digits",
+    "optional": true,
+    "mutually_exclusive_with": "plan_digest",
+    "omitted_behavior": "existing duration-based or selected-original-plan wait"
+  },
+  "selection_scope": "one exact original process-local watch owned by the addressed laboratory session",
+  "immutable_definition": [
+    "success condition",
+    "failure condition",
+    "entity generations",
+    "created anchor",
+    "absolute deadline",
+    "poll cadence",
+    "required stable observations",
+    "laboratory evidence policy"
+  ],
+  "required_read_capabilities": [
+    "observe",
+    "query"
+  ],
+  "positive_tick_capability": "control_clock",
+  "authority_scope": "current whole-fortress grants; preauthorize the whole requested positive horizon when initially unpaused; recheck at every frontier",
+  "zero_tick_behavior": "evaluate the current snapshot without requiring a prior committed action or clock authority",
+  "response_schema": "dfmcp.selected-watch-wait/1",
+  "stop_reasons": [
+    "satisfied",
+    "failed",
+    "expired",
+    "invalidated",
+    "cancelled",
+    "blocked_unknown",
+    "paused",
+    "tick_limit"
+  ],
+  "progression": {
+    "owner": "existing shared foreground progression",
+    "clip_at": [
+      "ordinary slice ceiling",
+      "action and recovery cadence/deadline",
+      "selected watch next sample",
+      "selected watch original deadline",
+      "remaining requested ticks"
+    ],
+    "other_committed_work_continues": true,
+    "other_watches_are_sampled": false,
+    "unpauses": false
+  },
+  "evidence": {
+    "source_policy": "laboratory_reference/1",
+    "same_anchor_adds_samples": false,
+    "positive_stability_requires_due_observation": true,
+    "internal_sequence_gaps_reset_stability": true,
+    "failure_precedes_success": true,
+    "exact_due_deadline_can_satisfy": true,
+    "late_samples_cannot_satisfy": true,
+    "terminal_outcomes_are_historical": true,
+    "continuous_between_observations": false,
+    "game_effect_success_proven": false,
+    "mutation_authority": false
+  },
+  "publication": [
+    "fit complete initial watch result and current game work before any progression",
+    "persist every accepted game frontier or expose a durability fence before returning",
+    "prepare the exact watch candidate against that published frontier",
+    "render complete current anchors, retained baseline and watch catalogs, pending plans, actions, obligations, and selected evidence before committing the watch root",
+    "return the admitted Agent Turn unchanged; no facade refit",
+    "late refusal leaves the new watch candidate uncommitted while retaining real prior game time; authorized errors preserve last accepted sample separately from current world"
+  ],
+  "budgets": {
+    "size_limit_scope": "each complete observed source",
+    "shared_wall_deadline": true,
+    "maximum_foreground_slices": 4096,
+    "maximum_selected_inspections": 4097,
+    "source_cost": "checked accumulated canonical records and bytes",
+    "full_packet": "min(max_bytes, max_output_tokens * 4)",
+    "refusals": "current owning byte/token caps; standard explicit irreducible-error exception below the minimal JSON envelope"
+  },
+  "discovery": "nonterminal retained descriptors add wait_step only if current Observe/Query/ControlClock grants cover its bounded proposed interval; poll, cancel and release remain separate",
+  "process_local": true,
+  "durable_watch_state": false,
+  "replay": "raw watch-selected calls are recorded but make the session bundle nonreplayable",
+  "automatic_continuation": false,
+  "automatic_cancellation": false,
+  "native_protocol_change": false,
+  "production_admission_change": false
+}

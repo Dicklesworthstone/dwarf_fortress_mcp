@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dwarf-fortress-mcp.dev/schemas/lab_wait.schema.json",
+  "title": "Laboratory fortress_wait arguments",
+  "description": "One existing tool supports ordinary duration-based waiting or one exact selected original plan or condition watch. Runtime admission checks current session ownership, grants, complete source bounds and response publication.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "session_id": {
+      "type": ["string", "null"],
+      "pattern": "^[0-9a-f]{32}$",
+      "description": "Optional wire selector resolved by the existing laboratory session resolver; supply the canonical owning session identifier returned by fortress_open_session."
+    },
+    "max_game_ticks": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0,
+      "maximum": 18446744073709551615,
+      "description": "Total time cap. Omitted/null means zero. Positive ticks require ControlClock. The world remains paused unless a separately authorized operation unpauses it."
+    },
+    "plan_digest": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "One exact session-owned original committed plan; mutually exclusive with a non-null watch_id."
+    },
+    "watch_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^watch:[0-9a-f]{64}$",
+      "description": "One retained laboratory watch handle. Samples its immutable original condition at bounded published frontiers. Mutually exclusive with a non-null plan_digest."
+    }
+  },
+  "not": {
+    "required": [
+      "plan_digest",
+      "watch_id"
+    ],
+    "properties": {
+      "plan_digest": {
+        "type": "string"
+      },
+      "watch_id": {
+        "type": "string"
+      }
+    }
+  },
+  "examples": [
+    {
+      "session_id": "00000000000000000000000000000001",
+      "max_game_ticks": 200,
+      "watch_id": "watch:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "session_id": "00000000000000000000000000000001",
+      "max_game_ticks": 0,
+      "watch_id": "watch:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    }
+  ]
+}

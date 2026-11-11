@@ -239,6 +239,26 @@ pub(crate) fn retained_work(context: &OperationContext) -> Result<Value> {
     retained_work_in(&WATCHES, context)
 }
 
+/// Pin an owned original definition before foreground clock progression.
+/// This reads retained metadata only and never samples the source world.
+pub(crate) fn selected_record(context: &OperationContext, handle: &str) -> Result<Value> {
+    let budget = counts::EvaluationBudget::new(context.budget.max_wall_millis);
+    context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
+    validate_handle(handle)?;
+    let store = lock(&WATCHES)?;
+    SourcePolicy::LaboratoryReference.check_session(&store, context.session_id)?;
+    let watch = store.entries.get(&(context.session_id, handle.to_owned()))
+        .ok_or_else(|| invalid("watch is not retained by this session"))?;
+    let record = watch.detail(context.anchor);
+    let maximum = context.budget.max_bytes.min(u64::from(context.budget.max_output_tokens) * 4);
+    if record.to_string().len() as u64 > maximum {
+        return Err(bounded("selected watch definition exceeds its inspection allowance"));
+    }
+    context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
+    budget.check()?;
+    Ok(record)
+}
+
 fn retained_work_in(storage: &Mutex<Store>, context: &OperationContext) -> Result<Value> {
     let budget = counts::EvaluationBudget::new(context.budget.max_wall_millis);
     context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;

@@ -2026,7 +2026,15 @@ impl ResponsePresentation {
                 covered["attention_selection"] = selection;
                 covered
             })
-            .budget(budget(state))
+            .budget({
+                let mut limits = budget(state);
+                if operation == "fortress.wait" && payload["wait_response_budget"].is_object() {
+                    limits["admitted"]["max_bytes"] = payload["wait_response_budget"]["max_bytes"].clone();
+                    limits["admitted"]["max_output_tokens"] =
+                        payload["wait_response_budget"]["max_output_tokens"].clone();
+                }
+                limits
+            })
             .references(references);
         if let Some(id) = session_id {
             builder = builder.session_id(id);
@@ -2034,11 +2042,16 @@ impl ResponsePresentation {
         if let Some(anchor) = current_anchor {
             builder = builder.anchor(anchor);
         }
-        let max_output_tokens = state
-            .budget
-            .get("max_output_tokens")
-            .and_then(Value::as_u64)
-            .unwrap_or(crate::output_budget::DEFAULT_MAX_OUTPUT_TOKENS);
+        let max_output_tokens = if operation == "fortress.wait"
+            && payload["wait_response_budget"].is_object()
+        {
+            let bytes = payload["wait_response_budget"]["maximum_response_bytes"].as_u64().unwrap_or(0);
+            let tokens = payload["wait_response_budget"]["max_output_tokens"].as_u64().unwrap_or(0);
+            tokens.min(bytes / 4)
+        } else {
+            state.budget.get("max_output_tokens").and_then(Value::as_u64)
+                .unwrap_or(crate::output_budget::DEFAULT_MAX_OUTPUT_TOKENS)
+        };
         // Query publication uses the current authority-bearing budget, not this
         // orientation's opening budget. Its final guard preserves whole legacy
         // pages/cursors and permits only lossless structured-page compaction.
@@ -2226,42 +2239,89 @@ pub fn fortress_commit(session_id: Option<String>, plan_digest: String) -> Strin
 
 /// Preserve the original direct Rust API and its untargeted wait semantics.
 pub fn fortress_wait(session_id: Option<String>, max_game_ticks: Option<u64>) -> String {
-    fortress_wait_for_plan(session_id, max_game_ticks, None)
+    fortress_wait_for_selection(session_id, max_game_ticks, None, None)
 }
 
-/// The wire still exposes one fortress_wait tool. The optional original-plan
-/// selector changes when its bounded foreground work returns, not its authority.
-#[tool(
-    name = "fortress_wait",
-    description = "Progress retained laboratory work in bounded foreground intervals. max_game_ticks caps time advanced while unpaused; each interval observes prerequisites and dispatches authorized ready successors, then persists progress before continuing. Optional plan_digest selects one exact original commit owned by this session and returns early when its original goal is achieved with verified actions and quiet physical work, when its current stage needs a separately reviewed continuation, or when failure or unknown evidence requires attention. Selection never follows descendants, cancels work, or authorizes a new plan. Other committed work continues during the same shared world time. Future reserves retain their exact original tick. selected_plan_wait reports original goal truth separately from stage proof, physical work and reserve evidence. Without plan_digest, the existing duration-based wait behavior is unchanged. Reports actual elapsed and remaining ticks; pause and progression errors stop further advancement."
-)]
+/// Preserve the original selected-plan Rust API.
 pub fn fortress_wait_for_plan(
     session_id: Option<String>,
     max_game_ticks: Option<u64>,
     plan_digest: Option<String>,
 ) -> String {
+    fortress_wait_for_selection(session_id, max_game_ticks, plan_digest, None)
+}
+
+/// Foreground wait for one exact retained laboratory condition.
+pub fn fortress_wait_for_watch(
+    session_id: Option<String>,
+    max_game_ticks: Option<u64>,
+    watch_id: String,
+) -> String {
+    fortress_wait_for_selection(session_id, max_game_ticks, None, Some(watch_id))
+}
+
+/// The wire still exposes one fortress_wait tool. A selector changes when its
+/// bounded foreground work returns; every authority is checked independently.
+#[tool(
+    name = "fortress_wait",
+    description = "Progress retained laboratory work in bounded foreground intervals. max_game_ticks caps time advanced while unpaused; each interval observes prerequisites and dispatches authorized ready successors, then persists progress before continuing. Optional plan_digest selects one exact original commit owned by this session, stopping when its original goal, action proofs and physical work complete or need attention. Optional watch_id instead selects one retained laboratory condition returned by temporal watch registration; intervals stop at its original cadence and deadline, sample the exact published world, and return early on satisfaction, failure, expiry, invalidation, cancellation or unknown evidence. plan_digest and watch_id are mutually exclusive. Watch selection requires current whole-fortress Observe and Query; positive time also requires ControlClock, with the requested horizon authorized before advancement. A zero-tick watch wait samples only the current world. Selection never changes predicates, deadlines, required stability, unpauses, cancels, follows descendant plans or grants mutation authority. Other committed work continues during shared world time. selected_watch_wait preserves the original definition and exact sample evidence; cursor gaps reset positive stability. Without either selector, duration-based behavior is unchanged. Reports actual elapsed and remaining ticks; pause and progression errors stop further advancement."
+)]
+pub fn fortress_wait_for_selection(
+    session_id: Option<String>,
+    max_game_ticks: Option<u64>,
+    plan_digest: Option<String>,
+    watch_id: Option<String>,
+) -> String {
     let mut recorded = json!({"max_game_ticks": max_game_ticks});
     if let Some(digest) = &plan_digest {
         recorded["plan_digest"] = json!(digest);
     }
-    let raw = match plan_digest {
-        Some(digest) => crate::server::wait_for_plan(session_id.clone(), max_game_ticks, digest),
-        None => crate::server::wait_with_ticks(session_id.clone(), max_game_ticks),
+    if let Some(watch) = &watch_id {
+        recorded["watch_id"] = json!(watch);
+    }
+    let publication = match (plan_digest, watch_id) {
+        (Some(_), Some(_)) => crate::server::WaitPublication::Pending(
+            crate::server::coded_error_payload(
+                "fortress.wait", dfmcp_core::ErrorCode::InvalidRequest,
+                "plan_digest and watch_id are mutually exclusive wait selectors",
+            ),
+        ),
+        (None, Some(watch)) => crate::server::wait_for_watch(
+            session_id.clone(), max_game_ticks, watch,
+        ),
+        (Some(digest), None) => crate::server::WaitPublication::Pending(
+            crate::server::wait_for_plan(session_id.clone(), max_game_ticks, digest),
+        ),
+        (None, None) => crate::server::WaitPublication::Pending(
+            crate::server::wait_with_ticks(session_id.clone(), max_game_ticks),
+        ),
     };
-    let response = project_response(
-        raw,
-        "fortress.wait",
-        AgentPhase::Verify,
-        ObservationProfile::Pulse,
-        session_id.as_deref(),
-    );
+    let response = match publication {
+        crate::server::WaitPublication::Pending(raw) => project_response(
+            raw,
+            "fortress.wait",
+            AgentPhase::Verify,
+            ObservationProfile::Pulse,
+            session_id.as_deref(),
+        ),
+        crate::server::WaitPublication::Published(raw) => {
+            // The complete packet was admitted before the watch root changed.
+            // Refresh orientation only; never refit or replace that publication.
+            if let Ok(mut payload) = serde_json::from_str::<Value>(&raw) {
+                let resolved = payload["session_id"].as_str().map(str::to_owned);
+                let _ = presentation_state("fortress.wait", &mut payload, resolved.as_ref());
+            }
+            crate::task_service::notify_progress();
+            raw
+        }
+    };
     crate::replay::record("fortress.wait", session_id.as_deref(), recorded, &response);
     response
 }
 
-// Existing Rust integrations keep the registered handler's name as well as
-// the two-argument function. Its definition now includes the optional selector.
-pub use FortressWaitForPlan as FortressWait;
+// Existing Rust integrations keep both registered handler names.
+pub use FortressWaitForSelection as FortressWait;
+pub use FortressWaitForSelection as FortressWaitForPlan;
 
 #[tool(
     description = "Request, drain, compensate when authorized, and finalize cancellation while preserving recovery state. mode: compensate_reversible (default) | stop_future_steps | emergency_pause_and_drain. scope: last_action (default), plan (last committed plan), plan:<64-lowercase-original-plan-digest> (one exact commit owned by this session, leaving other plans and descendants alone), oldest_open_plan (earliest retained original plan, for bounded cleanup), or session (all retained open work across this session's plans). Drain dependents first and return a finalize_certificate only when goal states are terminal and physical work is proven quiescent. Failed and Verified receipts remain history; their remaining work can be stopped with separate evidence."

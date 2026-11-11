@@ -305,8 +305,9 @@ impl WatchWork {
         }
     }
 
-    fn from_catalog(records: &Value, active: &Value, session: SessionId) -> Result<Self> {
-        fn descriptors(input: &Value, session: SessionId, active: bool) -> Result<Value> {
+    fn from_catalog(records: &Value, active: &Value, current: &OperationContext) -> Result<Self> {
+        fn descriptors(input: &Value, current: &OperationContext, active: bool) -> Result<Value> {
+            let session = current.session_id;
             let records = input
                 .as_array()
                 .filter(|rows| rows.len() <= MAX_WATCHES)
@@ -341,6 +342,9 @@ impl WatchWork {
                 if !terminal {
                     record["cancel_step"] =
                         next_step(session, json!({"kind":"cancel_watch", "watch":handle}));
+                    if let Some(step) = watch_wait_step(current, &record) {
+                        record["wait_step"] = step;
+                    }
                 }
                 if record.to_string().len() > MAX_WATCH_DESCRIPTOR_BYTES {
                     return Err(invariant("watch descriptor exceeds its publication bound"));
@@ -385,10 +389,36 @@ impl WatchWork {
             }
         }
         Ok(Self {
-            records: descriptors(records, session, false)?,
-            active: descriptors(active, session, true)?,
+            records: descriptors(records, current, false)?,
+            active: descriptors(active, current, true)?,
         })
     }
+}
+
+/// Offer bounded clock progression only while the complete proposed interval
+/// has current Observe, Query and ControlClock authority. This is an affordance,
+/// never an unpause request or a replacement for admission when it is invoked.
+fn watch_wait_step(current: &OperationContext, record: &Value) -> Option<Value> {
+    let mut ticks = current.budget.max_game_ticks.min(100);
+    for key in ["next_sample_tick", "deadline_tick"] {
+        if let Some(target) = record[key].as_u64().filter(|target| *target > current.anchor.tick.0) {
+            ticks = ticks.min(target - current.anchor.tick.0);
+        }
+    }
+    if ticks == 0 {
+        return None;
+    }
+    let mut end = current.clone();
+    end.anchor.tick = dfmcp_core::GameTick(current.anchor.tick.0.checked_add(ticks)?);
+    for context in [current, &end] {
+        context.authorize(Capability::Observe, RiskTier::ReadOnly, &[], None).ok()?;
+        context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None).ok()?;
+        context.authorize(Capability::ControlClock, RiskTier::Reversible, &[], None).ok()?;
+    }
+    Some(json!({"tool":"fortress.wait","arguments":{
+        "session_id":current.session_id.to_string(),
+        "watch_id":record["watch"],"max_game_ticks":ticks},
+        "unpauses":false,"authority_rechecked_on_use":true}))
 }
 
 fn watch_catalog(current: &OperationContext) -> Result<WatchWork> {
@@ -396,8 +426,19 @@ fn watch_catalog(current: &OperationContext) -> Result<WatchWork> {
     WatchWork::from_catalog(
         &catalog["records"],
         &catalog["active_work"],
-        current.session_id,
+        current,
     )
+}
+
+/// Convert a candidate catalog without re-locking the retained watch store.
+/// Foreground waits call this while their publisher owns the candidate root.
+pub(super) fn candidate_watch_work(payload: &Value, current: &OperationContext) -> Result<Value> {
+    let work = WatchWork::from_catalog(
+        &payload["_query_watch_work"],
+        &payload["_condition_watch_work"],
+        current,
+    )?;
+    Ok(json!({"query_watches":work.records,"condition_watches":work.active}))
 }
 
 /// Reconstruct both retained and active watch work without sampling. Call while
@@ -586,7 +627,7 @@ where
             WatchWork::from_catalog(
                 &value["_query_watch_work"],
                 &value["_condition_watch_work"],
-                current.session_id,
+                current,
             )?
         } else {
             watches

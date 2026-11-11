@@ -7,7 +7,8 @@
     "field": "plan_digest",
     "format": "64 lowercase hexadecimal digits",
     "optional": true,
-    "omitted_behavior": "existing duration-based wait"
+    "omitted_behavior": "existing duration-based wait when watch_id is also omitted",
+    "mutually_exclusive_with": "watch_id"
   },
   "selection_scope": "exact_original_commit",
   "descendant_plans_included": false,

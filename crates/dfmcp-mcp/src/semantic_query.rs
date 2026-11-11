@@ -62,6 +62,10 @@ pub(super) fn laboratory_watch_work(context: &OperationContext) -> Result<Value>
     query_watch::laboratory::retained_work(context)
 }
 
+pub(super) fn laboratory_watch_record(context: &OperationContext, handle: &str) -> Result<Value> {
+    query_watch::laboratory::selected_record(context, handle)
+}
+
 pub(super) fn laboratory_baseline_work(context: &OperationContext) -> Result<Value> {
     query_history::retained_work(context)
 }

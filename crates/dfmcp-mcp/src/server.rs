@@ -180,6 +180,13 @@ mod lab_progress;
 #[path = "selected_plan_wait.rs"]
 mod selected_plan_wait;
 
+#[path = "selected_watch_wait.rs"]
+mod selected_watch_wait;
+
+#[cfg(test)]
+#[path = "lab_watch_wait_tests.rs"]
+mod watch_wait_mcp_tests;
+
 #[path = "civilian_recovery.rs"]
 mod civilian_recovery;
 
@@ -5572,12 +5579,93 @@ fn wait_receipt_json(
     })
 }
 
+/// Pure projection of the already published progression frontier. It cannot
+/// poll an action, dispatch an effect, or sample a retained condition.
+fn wait_payload(
+    session: &LabSession,
+    action_id: Option<ActionId>,
+    tracked_order: &[ActionId],
+    receipts: &BTreeMap<ActionId, dfmcp_adapter::ActionReceipt>,
+    progress: &lab_progress::ForegroundProgress,
+    include_world: bool,
+) -> Result<serde_json::Value> {
+    let advanced = progress.advanced_game_ticks();
+    let requested = advanced + progress.remaining_game_ticks();
+    let polled_actions = tracked_order
+        .iter()
+        .filter_map(|id| receipts.get(id))
+        .map(|receipt| wait_receipt_json(session, receipt))
+        .collect::<Vec<_>>();
+    let task = action_id
+        .map(|id| {
+            session.adapter.action_receipt(id)
+                .map(crate::tasks::project_action_receipt)
+                .ok_or_else(|| DfmcpError::new(
+                    ErrorCode::InvalidRequest, format!("unknown action {id}")))
+        })
+        .transpose()?;
+    let snapshot = session.adapter.snapshot();
+    let mut payload = match (action_id, task) {
+        (Some(action_id), Some(task)) => json!({
+            "ok": true,
+            "session_id": session.session_id.to_string(),
+            "action_id": action_id.to_string(),
+            "task_id": task.task_id,
+            "handle_kind": "action_projection_only",
+            "modern_task_discovery": format!("df://session/{}/tasks", session.session_id),
+            "status": task.status.as_str(),
+            "commit_state": format!("{:?}", task.commit_state),
+            "summary": task.summary,
+            "work_state": action_work_json(session, action_id),
+            "observed_anchor": anchor_json(&snapshot.anchor()),
+        }),
+        _ => json!({
+            "ok": true,
+            "session_id": session.session_id.to_string(),
+            "action_id": null,
+            "status": if advanced > 0 { "time_passed" } else { "observed" },
+            "summary": if advanced > 0 {
+                "game time passed while observing work already in the world"
+            } else {
+                "retained work was observed at the current frontier without advancing game time"
+            },
+            "observed_anchor": anchor_json(&snapshot.anchor()),
+        }),
+    };
+    payload["paused"] = json!(snapshot.paused);
+    payload["untracked_work"] = untracked_work_json(session);
+    payload["polled_actions"] = json!(polled_actions);
+    payload["open_actions_remaining"] = json!(session.open_actions.len());
+    payload["wait_progress"] = wait_progress_json(requested, advanced, progress.slices());
+    payload["wait_progress"]["action_polls"] = json!(progress.polls());
+    payload["wait_progress"]["deferred_actions_dispatched"] = json!(progress.dispatched_actions());
+    if include_world {
+        payload["advanced_game_ticks"] = json!(advanced);
+        payload["game_tick"] = json!(snapshot.tick.0);
+        payload["world_alerts"] = json!(world_alerts(session));
+        payload["civilian_recovery"] = session.civilian_recovery.projection();
+        payload["objectives"] = objectives_json(session);
+        if !session.carried.is_empty() {
+            payload["carried_obligations"] = json!(
+                session.carried.iter().map(CarriedStep::to_json).collect::<Vec<_>>()
+            );
+        }
+        if requested > advanced && snapshot.paused {
+            payload["blocked"] = json!(
+                "the fortress is paused, so no work progresses; commit an unpause plan to let time pass"
+            );
+        }
+    }
+    Ok(payload)
+}
+
 fn wait_progress_error(
     session: &LabSession,
     error: &DfmcpError,
     progress: &lab_progress::ForegroundProgress,
     receipts: &BTreeMap<ActionId, dfmcp_adapter::ActionReceipt>,
     selected: Option<&selected_plan_wait::SelectedPlanWait>,
+    watch: Option<&selected_watch_wait::SelectedWatchWait>,
 ) -> String {
     let advanced = progress.advanced_game_ticks();
     let requested = advanced + progress.remaining_game_ticks();
@@ -5630,12 +5718,16 @@ fn wait_progress_error(
                 payload["commit_state"] = json!(format!("{:?}", receipt.state));
             }
         }
-        if authorize_entry(&ctx, Capability::Query, RiskTier::ReadOnly).is_ok()
-            && let Some(selected) = selected
-        {
-            payload["selected_plan_wait"] = selected.projection(session, false);
-            // A partial error never certifies a complete selected outcome. Its
-            // last sampled goal anchor stays distinct from the current world.
+        if authorize_entry(&ctx, Capability::Query, RiskTier::ReadOnly).is_ok() {
+            if let Some(selected) = selected {
+                payload["selected_plan_wait"] = selected.projection(session, false);
+            }
+            if let Some(watch) = watch {
+                payload["selected_watch_wait"] = watch.projection(session, false);
+            }
+            // Partial errors never certify a complete selected outcome. Each
+            // last accepted sample retains its own anchor, distinct from the
+            // current world; earlier published game time is not rolled back.
         }
     }
     payload.to_string()
@@ -5662,10 +5754,46 @@ fn carried_wait_ceiling(session: &LabSession) -> Option<u64> {
         .min()
 }
 
+/// The watch owner has already admitted its complete Agent Turn. Its caller
+/// must return Published unchanged, with no subsequent output fitting.
+pub(crate) enum WaitPublication {
+    Pending(String),
+    Published(String),
+}
+
+impl WaitPublication {
+    fn into_response(self) -> String {
+        match self {
+            Self::Pending(response) | Self::Published(response) => response,
+        }
+    }
+}
+
+/// The watch path publishes each world frontier before its candidate query
+/// state. Avoid a second implicit durable write after that publication.
+fn with_wait_session<T>(
+    session: &Arc<Mutex<LabSession>>,
+    watch_selected: bool,
+    poisoned: impl FnOnce() -> T,
+    body: impl FnOnce(&mut LabSession) -> T,
+) -> T {
+    if !watch_selected {
+        return with_session(session, poisoned, body);
+    }
+    let _admission = match LAB_ADMISSION.read() {
+        Ok(guard) => guard,
+        Err(_) => return poisoned(),
+    };
+    if ensure_durable_owner(session).is_err() {
+        return poisoned();
+    }
+    with_session_view(session, poisoned, body, false)
+}
+
 /// Let authorized laboratory time pass in bounded slices, observing all owned
 /// work in dependency order and publishing each frontier before continuing.
 pub(crate) fn wait_with_ticks(session_id: Option<String>, max_game_ticks: Option<u64>) -> String {
-    wait_with_selection(session_id, max_game_ticks, None)
+    wait_with_selection(session_id, max_game_ticks, None, None).into_response()
 }
 
 /// Progress the same owned work, stopping at one exact original plan's goal,
@@ -5679,23 +5807,41 @@ pub(crate) fn wait_for_plan(
         Ok(digest) => digest,
         Err(error) => return dfmcp_error_payload("fortress.wait", &error),
     };
-    wait_with_selection(session_id, max_game_ticks, Some(digest))
+    wait_with_selection(session_id, max_game_ticks, Some(digest), None).into_response()
+}
+
+/// Select one exact session-owned laboratory condition, preserving its original
+/// predicates, deadline, cadence, stability policy and evidence source.
+pub(crate) fn wait_for_watch(
+    session_id: Option<String>,
+    max_game_ticks: Option<u64>,
+    watch_id: String,
+) -> WaitPublication {
+    wait_with_selection(session_id, max_game_ticks, None, Some(watch_id))
 }
 
 fn wait_with_selection(
     session_id: Option<String>,
     max_game_ticks: Option<u64>,
     selected_digest: Option<Digest32>,
-) -> String {
+    watch_id: Option<String>,
+) -> WaitPublication {
     let started = std::time::Instant::now();
     let session = match resolve_session(session_id) {
         Ok(value) => value,
-        Err(error) => return dfmcp_error_payload("fortress.wait", &error),
+        Err(error) => return WaitPublication::Pending(dfmcp_error_payload("fortress.wait", &error)),
     };
-    with_session(
+    let watch_selected = watch_id.is_some();
+    let mut published = false;
+    let mut response_budget = None;
+    let response = with_wait_session(
         &session,
+        watch_selected,
         || mutex_poisoned_payload("fortress.wait"),
         |guard| {
+            if watch_selected {
+                response_budget = Some(guard.budget);
+            }
             if let Err(error) = durability_gate(guard) {
                 return dfmcp_error_payload("fortress.wait", &error);
             }
@@ -5714,6 +5860,7 @@ fn wait_with_selection(
             if action_id.is_none()
                 && guard.carried.iter().all(CarriedStep::is_final)
                 && max_game_ticks.is_none_or(|ticks| ticks == 0)
+                && !watch_selected
             {
                 return coded_error_payload(
                     "fortress.wait",
@@ -5740,7 +5887,16 @@ fn wait_with_selection(
                 Ok(selected) => selected,
                 Err(error) => return dfmcp_error_payload("fortress.wait", &error),
             };
-            let admitted_progress = if selected.is_some() {
+            let mut watcher = match watch_id
+                .map(|handle| selected_watch_wait::SelectedWatchWait::new(
+                    guard, handle, requested_ticks, started,
+                ))
+                .transpose()
+            {
+                Ok(watcher) => watcher,
+                Err(error) => return dfmcp_error_payload("fortress.wait", &error),
+            };
+            let admitted_progress = if selected.is_some() || watcher.is_some() {
                 lab_progress::ForegroundProgress::new_with_start(
                     &guard.adapter,
                     requested_ticks,
@@ -5760,9 +5916,35 @@ fn wait_with_selection(
             // another slice may consume time or cause an effect.
             let tracked_order = guard.open_actions.clone();
             let mut latest_receipts = BTreeMap::new();
-            let mut advanced = 0;
-            let mut rounds = 0u64;
+            // Admit the complete first watch result before any game effect.
+            if let Some(watch) = &mut watcher {
+                let payload = match wait_payload(
+                    guard, action_id, &tracked_order, &latest_receipts, &progress, true,
+                ) {
+                    Ok(payload) => payload,
+                    Err(error) => return wait_progress_error(
+                        guard, &error, &progress, &latest_receipts, selected.as_ref(), Some(watch),
+                    ),
+                };
+                if let Err(error) = watch.sample(guard, payload) {
+                    return wait_progress_error(
+                        guard, &error, &progress, &latest_receipts, selected.as_ref(), Some(watch),
+                    );
+                }
+            }
             loop {
+                if let Some(watch) = &watcher {
+                    // An accepted stop packet is final. Do not introduce a
+                    // fallible check after publishing its retained watch root.
+                    if watch.stopped() {
+                        break;
+                    }
+                    if let Err(error) = watch.check(guard) {
+                        return wait_progress_error(
+                            guard, &error, &progress, &latest_receipts, selected.as_ref(), Some(watch),
+                        );
+                    }
+                }
                 if let Some(selected) = &selected {
                     if let Err(error) = selected.check(guard) {
                         return wait_progress_error(
@@ -5771,6 +5953,7 @@ fn wait_with_selection(
                             &progress,
                             &latest_receipts,
                             Some(selected),
+                            watcher.as_ref(),
                         );
                     }
                     if selected.stopped() {
@@ -5780,12 +5963,15 @@ fn wait_with_selection(
                 let (_, ctx) = match next_context(guard) {
                     Ok(value) => value,
                     Err(error) => {
-                        return wait_progress_error(guard, &error, &progress, &latest_receipts, selected.as_ref());
+                        return wait_progress_error(guard, &error, &progress, &latest_receipts, selected.as_ref(), watcher.as_ref());
                     }
                 };
                 let carried_ceiling = carried_wait_ceiling(guard);
                 let ceiling = selected.as_ref().map_or(carried_ceiling, |selected| {
                     selected.ceiling(guard.adapter.snapshot().tick.0, carried_ceiling)
+                });
+                let ceiling = watcher.as_ref().map_or(ceiling, |watch| {
+                    watch.ceiling(guard.adapter.snapshot().tick.0, ceiling)
                 });
                 let tracked = guard.open_actions.clone();
                 let slice = match progress.step(&mut guard.adapter, &tracked, &ctx, ceiling)
@@ -5793,11 +5979,9 @@ fn wait_with_selection(
                     Ok(Some(slice)) => slice,
                     Ok(None) => break,
                     Err(error) => {
-                        return wait_progress_error(guard, &error, &progress, &latest_receipts, selected.as_ref());
+                        return wait_progress_error(guard, &error, &progress, &latest_receipts, selected.as_ref(), watcher.as_ref());
                     }
                 };
-                advanced = progress.advanced_game_ticks();
-                rounds = progress.slices();
                 let finished = slice.finished;
                 for receipt in slice.receipts {
                     latest_receipts.insert(receipt.action_id, receipt);
@@ -5812,7 +5996,20 @@ fn wait_with_selection(
                 }
                 guard.open_actions = still_open;
                 if let Err(error) = observe_carried(guard) {
-                    return wait_progress_error(guard, &error, &progress, &latest_receipts, selected.as_ref());
+                    // The accepted adapter slice is already real even when
+                    // recovered proof inspection refuses. Watch ownership has
+                    // no trailing implicit save, so publish or fence this
+                    // frontier before reporting its partial progress.
+                    if watcher.is_some() {
+                        persist_durable_head(guard);
+                        if guard.durability_fault.is_none() {
+                            remember_version(guard);
+                        }
+                    }
+                    return wait_progress_error(
+                        guard, &error, &progress, &latest_receipts,
+                        selected.as_ref(), watcher.as_ref(),
+                    );
                 }
                 persist_durable_head(guard);
                 if let Some(fault) = &guard.durability_fault {
@@ -5822,7 +6019,7 @@ fn wait_with_selection(
                             "wait stopped at an unpublished durable frontier ({fault}); further progress requires successful persistence"
                         ),
                     );
-                    return wait_progress_error(guard, &error, &progress, &latest_receipts, selected.as_ref());
+                    return wait_progress_error(guard, &error, &progress, &latest_receipts, selected.as_ref(), watcher.as_ref());
                 }
                 remember_version(guard);
                 if let Some(selected) = &mut selected
@@ -5834,103 +6031,52 @@ fn wait_with_selection(
                         &progress,
                         &latest_receipts,
                         Some(selected),
+                        watcher.as_ref(),
                     );
+                }
+                if let Some(watch) = &mut watcher {
+                    let payload = match wait_payload(
+                        guard, action_id, &tracked_order, &latest_receipts, &progress, true,
+                    ) {
+                        Ok(payload) => payload,
+                        Err(error) => return wait_progress_error(
+                            guard, &error, &progress, &latest_receipts, selected.as_ref(), Some(watch),
+                        ),
+                    };
+                    if let Err(error) = watch.sample(guard, payload) {
+                        return wait_progress_error(
+                            guard, &error, &progress, &latest_receipts, selected.as_ref(), Some(watch),
+                        );
+                    }
                 }
                 if finished {
                     break;
                 }
             }
-            let polled_actions: Vec<_> = tracked_order
-                .iter()
-                .filter_map(|id| latest_receipts.get(id))
-                .map(|receipt| wait_receipt_json(guard, receipt))
-                .collect();
-            // Formatting cannot perform another poll (and potentially dispatch
-            // a deferred effect) outside the persisted progression frontier.
-            let task = match action_id
-                .map(|id| {
-                    guard
-                        .adapter
-                        .action_receipt(id)
-                        .map(crate::tasks::project_action_receipt)
-                        .ok_or_else(|| {
-                            DfmcpError::new(
-                                ErrorCode::InvalidRequest,
-                                format!("unknown action {id}"),
-                            )
-                        })
-                })
-                .transpose()
-            {
-                Ok(task) => task,
-                Err(error) => {
-                    return wait_progress_error(guard, &error, &progress, &latest_receipts, selected.as_ref());
+            if let Some(watch) = &mut watcher {
+                if let Some(response) = watch.take_published() {
+                    published = true;
+                    return response;
                 }
-            };
-            let snapshot = guard.adapter.snapshot();
-            let mut payload = match (action_id, task) {
-                (Some(action_id), Some(task)) => json!({
-                    "ok": true,
-                    "session_id": format!("{}", guard.session_id),
-                    "action_id": format!("{}", action_id),
-                    "task_id": task.task_id,
-                    "handle_kind": "action_projection_only",
-                    "modern_task_discovery": format!("df://session/{}/tasks", guard.session_id),
-                    "status": task.status.as_str(),
-                    "commit_state": format!("{:?}", task.commit_state),
-                    "summary": task.summary,
-                    "work_state": action_work_json(guard, action_id),
-                    "observed_anchor": anchor_json(&snapshot.anchor()),
-                }),
-                _ => json!({
-                    "ok": true,
-                    "session_id": format!("{}", guard.session_id),
-                    "action_id": null,
-                    "status": if advanced > 0 { "time_passed" } else { "observed" },
-                    "summary": if advanced > 0 {
-                        "game time passed while observing work already in the world"
-                    } else {
-                        "retained recovery work was observed at the current frontier without advancing game time"
-                    },
-                    "observed_anchor": anchor_json(&snapshot.anchor()),
-                }),
-            };
-            payload["paused"] = json!(guard.adapter.snapshot().paused);
-            payload["untracked_work"] = untracked_work_json(guard);
-            payload["polled_actions"] = json!(polled_actions);
-            payload["open_actions_remaining"] = json!(guard.open_actions.len());
-            payload["wait_progress"] = wait_progress_json(requested_ticks, advanced, rounds);
-            payload["wait_progress"]["remaining_game_ticks"] =
-                json!(progress.remaining_game_ticks());
-            payload["wait_progress"]["action_polls"] = json!(progress.polls());
-            payload["wait_progress"]["deferred_actions_dispatched"] =
-                json!(progress.dispatched_actions());
-            if let Some(selected) = &mut selected {
-                selected.finish(snapshot.paused);
-                payload["selected_plan_wait"] = selected.projection(guard, true);
+                return wait_progress_error(
+                    guard,
+                    &DfmcpError::new(ErrorCode::InternalInvariantViolation,
+                        "selected watch wait has no admitted publication"),
+                    &progress, &latest_receipts, selected.as_ref(), Some(watch),
+                );
             }
-            if max_game_ticks.is_some() {
-                payload["advanced_game_ticks"] = json!(advanced);
-                payload["game_tick"] = json!(snapshot.tick.0);
-                payload["world_alerts"] = json!(world_alerts(guard));
-                payload["civilian_recovery"] = guard.civilian_recovery.projection();
-                payload["objectives"] = objectives_json(guard);
-                if !guard.carried.is_empty() {
-                    // The bounded evaluation above owns proof status; a raw
-                    // predicate match cannot substitute for cadence/stability.
-                    payload["carried_obligations"] = json!(
-                        guard
-                            .carried
-                            .iter()
-                            .map(CarriedStep::to_json)
-                            .collect::<Vec<_>>()
-                    );
-                }
-                if requested_ticks > advanced && guard.adapter.snapshot().paused {
-                    payload["blocked"] = json!(
-                        "the fortress is paused, so no work progresses; commit an unpause plan to let time pass"
-                    );
-                }
+            let mut payload = match wait_payload(
+                guard, action_id, &tracked_order, &latest_receipts, &progress,
+                max_game_ticks.is_some(),
+            ) {
+                Ok(payload) => payload,
+                Err(error) => return wait_progress_error(
+                    guard, &error, &progress, &latest_receipts, selected.as_ref(), None,
+                ),
+            };
+            if let Some(selected) = &mut selected {
+                selected.finish(guard.adapter.snapshot().paused);
+                payload["selected_plan_wait"] = selected.projection(guard, true);
             }
             if let Some(selected) = &selected
                 && let Err(error) = selected.check(guard)
@@ -5941,11 +6087,31 @@ fn wait_with_selection(
                     &progress,
                     &latest_receipts,
                     Some(selected),
+                    None,
                 );
             }
             payload.to_string()
         },
-    )
+    );
+    if published {
+        WaitPublication::Published(response)
+    } else {
+        // Error projection must honor the current owning budget, even when
+        // the facade's orientation cache still contains the opening budget.
+        let response = if let Some(budget) = response_budget
+            && let Ok(mut payload) = serde_json::from_str::<serde_json::Value>(&response)
+        {
+            payload["wait_response_budget"] = json!({
+                "max_bytes": budget.max_bytes,
+                "max_output_tokens": budget.max_output_tokens,
+                "maximum_response_bytes": budget.max_bytes.min(u64::from(budget.max_output_tokens) * 4),
+            });
+            payload.to_string()
+        } else {
+            response
+        };
+        WaitPublication::Pending(response)
+    }
 }
 
 // ============================================================================
