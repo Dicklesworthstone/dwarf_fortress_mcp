@@ -10,10 +10,31 @@ use dfmcp_lab::durable::{DurableLabStore, DurableObjective, MAX_OBJECTIVES_PER_F
 use serde_json::Value;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ResourceReserveStatus {
+enum ProductionReserveStatus {
     WorkRequired,
     FundedFromCurrentStock,
     Expired,
+}
+
+/// Original ordinary reserve requests and historical /3 pursuits retain their
+/// exact compiler. New continuation requests may select /6, so custody must be
+/// available before the first effect and reconstructed from the sealed source.
+fn is_consumption_reserve(source: &PlanSource) -> bool {
+    match source {
+        PlanSource::Production { raw, .. } => crate::lab_world::ProductionRequest::parse(raw)
+            .is_ok_and(|request| {
+                request.planner() == Some(crate::lab_world::ProductionPlanner::ConsumptionReserveV1)
+            }),
+        PlanSource::ProductionContinuation { raw, .. } => {
+            goal_continuation::ProductionContinuation::parse(raw)
+                .is_ok_and(|source| source.is_consumption_reserve())
+        }
+        _ => false,
+    }
+}
+
+fn requires_output_ledger(source: &PlanSource) -> bool {
+    source.is_resource_aware_production() || is_consumption_reserve(source)
 }
 
 #[derive(Clone, Debug)]
@@ -106,6 +127,14 @@ impl Objective {
         self.source.is_resource_aware_production()
     }
 
+    pub(super) fn is_consumption_reserve(&self) -> bool {
+        is_consumption_reserve(&self.source)
+    }
+
+    fn requires_output_ledger(&self) -> bool {
+        requires_output_ledger(&self.source)
+    }
+
     pub(super) fn is_resource_aware_room(&self) -> bool {
         self.source.is_resource_aware_room()
     }
@@ -141,12 +170,17 @@ impl Objective {
         }
     }
 
-    fn resource_reserve_source(&self) -> Result<Option<goal_continuation::ProductionContinuation>> {
+    fn future_reserve_source(&self) -> Result<Option<goal_continuation::ProductionContinuation>> {
         let source = match &self.source {
             PlanSource::Production { raw, .. } => {
                 let request = crate::lab_world::ProductionRequest::parse(raw)?;
-                if request.planner() != Some(crate::lab_world::ProductionPlanner::ResourceReserveV1)
-                {
+                if !matches!(
+                    request.planner(),
+                    Some(
+                        crate::lab_world::ProductionPlanner::ResourceReserveV1
+                            | crate::lab_world::ProductionPlanner::ConsumptionReserveV1
+                    )
+                ) {
                     return Ok(None);
                 }
                 goal_continuation::ProductionContinuation::new(
@@ -156,18 +190,25 @@ impl Objective {
                 )?
             }
             PlanSource::ProductionContinuation { raw, .. } => {
-                goal_continuation::ProductionContinuation::parse(raw)?
+                let original = goal_continuation::ProductionContinuation::parse(raw)?;
+                if original.is_consumption_reserve() {
+                    // Projection describes an available new review, never a
+                    // mutation of the old source's exact reconstruction.
+                    original.next(self.plan_digest)?
+                } else {
+                    original
+                }
             }
             _ => return Ok(None),
         };
-        Ok(source.is_resource_reserve().then_some(source))
+        Ok(source.admits_remaining_reserve().then_some(source))
     }
 
-    fn resource_reserve_status(
+    fn future_reserve_status(
         &self,
         session: &LabSession,
         source: &goal_continuation::ProductionContinuation,
-    ) -> Result<ResourceReserveStatus> {
+    ) -> Result<ProductionReserveStatus> {
         // Preserve the original stock-ledger identity and current read grants.
         // This report never replaces the lineage, quiescence and plan checks at
         // continuation intake or grants authority to predicted future stock.
@@ -175,17 +216,17 @@ impl Objective {
         let until = source.reserve_until_tick().ok_or_else(|| {
             DfmcpError::new(
                 ErrorCode::CorruptLedger,
-                "the retained resource reserve has no original absolute horizon",
+                "the retained production reserve has no original absolute horizon",
             )
         })?;
         if until <= session.adapter.snapshot().tick.0 {
-            return Ok(ResourceReserveStatus::Expired);
+            return Ok(ProductionReserveStatus::Expired);
         }
         Ok(
-            if source.resource_reserve_work_required(session.adapter.snapshot())? {
-                ResourceReserveStatus::WorkRequired
+            if source.reserve_work_required(session.adapter.snapshot())? {
+                ProductionReserveStatus::WorkRequired
             } else {
-                ResourceReserveStatus::FundedFromCurrentStock
+                ProductionReserveStatus::FundedFromCurrentStock
             },
         )
     }
@@ -198,7 +239,7 @@ impl Objective {
         if self.abandoned(session) || self.verification_error.is_some() || self.plan.is_none() {
             return Err(DfmcpError::new(
                 ErrorCode::PreconditionsFailed,
-                "the original resource-aware production goal has no verified active custody",
+                "the original production goal has no verified active stock-ledger custody",
             ));
         }
         let original_ledger = self.bound_resource_output_ledger()?;
@@ -217,14 +258,16 @@ impl Objective {
     }
 
     fn bound_resource_output_ledger(&self) -> Result<crate::lab_world::ProductionGoalLedger> {
-        let original = self.resource_output_ledger.ok_or_else(|| DfmcpError::new(
-            ErrorCode::PreconditionsFailed,
-            "the retained resource-aware production goal lacks its verified original stock ledger custody",
-        ))?;
+        let original = self.resource_output_ledger.ok_or_else(|| {
+            DfmcpError::new(
+                ErrorCode::PreconditionsFailed,
+                "the retained production goal lacks its verified original stock ledger custody",
+            )
+        })?;
         original.validate_plan(self.plan.as_ref().ok_or_else(|| {
             DfmcpError::new(
                 ErrorCode::CorruptLedger,
-                "the original resource-aware production plan is unavailable",
+                "the original production plan is unavailable",
             )
         })?)?;
         Ok(original)
@@ -277,7 +320,7 @@ impl Objective {
                 "the original sealed goal is unavailable",
             )
         })?;
-        if self.is_resource_aware_production() {
+        if self.requires_output_ledger() {
             self.bound_resource_output_ledger()?
                 .validate_current(session.adapter.snapshot())?;
         }
@@ -320,40 +363,44 @@ impl Objective {
         } else {
             truth
         };
-        let reserve_source = self.resource_reserve_source().ok().flatten();
+        let reserve_source = self.future_reserve_source().ok().flatten();
         let reserve_status = reserve_source
             .as_ref()
-            .map(|source| self.resource_reserve_status(session, source));
+            .map(|source| self.future_reserve_status(session, source));
         if let (Some(source), Some(status)) = (&reserve_source, &reserve_status) {
             let until = source.reserve_until_tick();
             let (name, epistemic, work_required) = match status {
-                Ok(ResourceReserveStatus::WorkRequired) => {
+                Ok(ProductionReserveStatus::WorkRequired) => {
                     ("work_required", "predicted", Some(true))
                 }
-                Ok(ResourceReserveStatus::FundedFromCurrentStock) => {
+                Ok(ProductionReserveStatus::FundedFromCurrentStock) => {
                     ("funded_from_current_stock", "predicted", Some(false))
                 }
-                Ok(ResourceReserveStatus::Expired) => ("expired", "observed", None),
+                Ok(ProductionReserveStatus::Expired) => ("expired", "observed", None),
                 Err(_) => ("unknown", "unknown", None),
             };
             let mut reserve = json!({
-                "planner": "resource_reserve_v1",
+                "planner": source.reserve_planner(),
                 "reserve_until_tick": until,
                 "remaining_horizon_ticks": until.map(|tick| tick.saturating_sub(session.adapter.snapshot().tick.0)),
                 "status": name,
                 "epistemic": epistemic,
                 "work_required": work_required,
-                "new_request_required": matches!(status, Ok(ResourceReserveStatus::Expired)),
+                "new_request_required": matches!(status, Ok(ProductionReserveStatus::Expired)),
                 "continuous_maintenance_proven": false,
                 "historical_action_proof_rewritten": false,
             });
             if let Err(error) = status {
                 reserve["error"] = json!({"code": error.code.as_str(), "message": error.message});
             }
-            result["resource_reserve"] = reserve;
+            result[if source.is_resource_reserve() {
+                "resource_reserve"
+            } else {
+                "production_reserve"
+            }] = reserve;
         }
         let continuation_needed = match &reserve_status {
-            Some(Ok(ResourceReserveStatus::WorkRequired)) => true,
+            Some(Ok(ProductionReserveStatus::WorkRequired)) => true,
             Some(_) => false,
             None => continuation_truth == PredicateTruth::False,
         };
@@ -541,7 +588,7 @@ pub(super) fn continuation_source(
             "restore abandoned pursuit of this original goal; explicitly request a new goal in the current epoch",
         ));
     }
-    if objective.source.requires_complete_source_review() {
+    if objective.source.requires_complete_source_review() || objective.is_consumption_reserve() {
         // The public proposal, handoff discovery and commit-time revalidation
         // inspect the same complete finite resource and lineage domains.
         authorize_entry(&context, Capability::Query, RiskTier::ReadOnly)?;
@@ -626,7 +673,7 @@ pub(super) fn continuation_source(
             continuation.resource_room_goal_truth(session.adapter.snapshot())?,
         )?;
     } else if let GoalContinuation::Production(source) = &continuation
-        && source.is_resource_aware()
+        && (source.is_resource_aware() || source.is_current_consumption_reserve())
     {
         source.validate_resource_goal_evidence(
             original,
@@ -653,8 +700,8 @@ pub(super) fn continuation_source(
         )?;
     }
     let reserve_work_required = match &continuation {
-        GoalContinuation::Production(source) if source.is_resource_reserve() => {
-            source.resource_reserve_work_required(session.adapter.snapshot())?
+        GoalContinuation::Production(source) if source.admits_remaining_reserve() => {
+            source.reserve_work_required(session.adapter.snapshot())?
         }
         _ => false,
     };
@@ -744,6 +791,44 @@ pub(super) fn validate_continuation(
         Some(source_summary(source).to_owned()),
         exclude_candidate,
     )?;
+    if let GoalContinuation::Production(original_source) = &continuation
+        && original_source.is_consumption_reserve()
+        && !original_source.is_current_consumption_reserve()
+    {
+        // An old reviewed /3 candidate is not a newly requested /6 pursuit.
+        // Exact source equality deliberately ignores compiler generation for
+        // retry custody, so enforce /3's historical False-only eligibility
+        // before that equality can authorize the old candidate at a new head.
+        let parent = session
+            .objectives
+            .iter()
+            .find(|objective| objective.plan_digest == original_source.parent)
+            .ok_or_else(|| {
+                DfmcpError::new(
+                    ErrorCode::CorruptLedger,
+                    "historical reserve parent disappeared",
+                )
+            })?;
+        let plan = parent.plan.as_ref().ok_or_else(|| {
+            DfmcpError::new(
+                ErrorCode::CorruptLedger,
+                "historical reserve parent has no sealed plan",
+            )
+        })?;
+        let active = parent.active_observation_anchor.ok_or_else(|| {
+            DfmcpError::new(
+                ErrorCode::CorruptLedger,
+                "historical reserve parent has no active lineage",
+            )
+        })?;
+        goal_continuation::validate_goal_evidence_in_active_lineage(
+            plan,
+            active,
+            session.adapter.snapshot(),
+            &context_for(session, session.next_request_id),
+            goal_work_quiescent(session, parent)?,
+        )?;
+    }
     if !current
         .continuation()?
         .is_some_and(|expected| continuation.same_original_request(&expected))
@@ -887,14 +972,15 @@ pub(super) fn objective_evictions(session: &LabSession, digest: Digest32) -> Res
         if !matches!(completion, Ok(PredicateTruth::True)) {
             continue;
         }
-        match objective.resource_reserve_source() {
-            Ok(Some(source)) => match objective.resource_reserve_status(session, &source) {
+        match objective.future_reserve_source() {
+            Ok(Some(source)) => match objective.future_reserve_status(session, &source) {
                 Ok(
-                    ResourceReserveStatus::FundedFromCurrentStock | ResourceReserveStatus::Expired,
+                    ProductionReserveStatus::FundedFromCurrentStock
+                    | ProductionReserveStatus::Expired,
                 ) => {}
                 // A presently true quota can still have unfinished future
                 // reserve work. Missing qualification never frees that intent.
-                Ok(ResourceReserveStatus::WorkRequired) | Err(_) => continue,
+                Ok(ProductionReserveStatus::WorkRequired) | Err(_) => continue,
             },
             Ok(None) => {}
             Err(_) => continue,
@@ -927,7 +1013,7 @@ pub(super) fn prepare_resource_output_ledger(
     plan: &PreparedPlan,
     source: &PlanSource,
 ) -> Result<Option<crate::lab_world::ProductionGoalLedger>> {
-    if !source.is_resource_aware_production() {
+    if !requires_output_ledger(source) {
         return Ok(None);
     }
     let sealed = if session.adapter.snapshot().anchor() == plan.anchor {
@@ -966,7 +1052,7 @@ pub(super) fn install_objective(
         objective.resource_output_ledger = resource_output_ledger;
         // The public commit owner validates this before admitting any effect.
         // Internal or recovered callers that omit it remain visibly unknown.
-        if objective.is_resource_aware_production()
+        if objective.requires_output_ledger()
             && let Err(error) = objective.bound_resource_output_ledger()
         {
             objective.verification_error = Some(error.message);
@@ -1114,7 +1200,7 @@ pub(super) fn recover_objective(
                 "the original goal source does not reproduce its sealed plan digest",
             ));
         }
-        if objective.is_resource_aware_production() {
+        if objective.requires_output_ledger() {
             let original = crate::lab_world::ProductionGoalLedger::capture(&sealed)?;
             original.validate_plan(&plan)?;
             objective.resource_output_ledger = Some(original);
@@ -1139,10 +1225,10 @@ pub(super) fn recover_objective(
         }
         if let Some(anchor) = retained.first_satisfied_anchor {
             let proof = store.load_snapshot(anchor.state_hash)?;
-            if objective.is_resource_aware_production() {
+            if objective.requires_output_ledger() {
                 objective.resource_output_ledger.ok_or_else(|| DfmcpError::new(
                     ErrorCode::CorruptLedger,
-                    "the historical resource-aware goal lacks its original stock ledger custody",
+                    "the historical production goal lacks its original stock ledger custody",
                 ))?.validate_current(&proof)?;
             }
             if proof.anchor() != anchor

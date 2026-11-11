@@ -1514,6 +1514,16 @@ impl ProductionRequest {
         production_resources::reserve_work_required(self, snapshot)
     }
 
+    /// Read remaining demand for a new, separately reviewed pursuit of an
+    /// ordinary absolute reserve. The compiler and original quotas stay fixed;
+    /// current stock truth remains independent of this conditional prediction.
+    pub(crate) fn consumption_reserve_work_required(
+        &self,
+        snapshot: &WorldSnapshot,
+    ) -> Result<bool> {
+        production_resources::consumption_reserve_work_required(self, snapshot)
+    }
+
     /// Original output stock truth is independent of any earlier acquisition's
     /// mandatory exact-task proof. It never treats missing inventory as zero.
     pub(crate) fn semantic_goal_truth(

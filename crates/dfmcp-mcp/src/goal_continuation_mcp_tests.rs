@@ -7,6 +7,9 @@ use dfmcp_intent::effects;
 use dfmcp_world::{Fact, FactSource, Value as WorldValue};
 use serde_json::Value;
 
+#[path = "consumption_reserve_continuation_mcp_tests.rs"]
+mod consumption_reserve_tests;
+
 type TestResult<T = ()> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 struct StateDir(std::path::PathBuf);

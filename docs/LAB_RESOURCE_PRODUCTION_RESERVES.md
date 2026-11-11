@@ -136,11 +136,15 @@ cannot establish no-work or authorize discarding unfinished goal custody.
 
 ## Saved sources and publication
 
-Historical `resource_aware_v1` still rejects `reserve_until_tick`. The older
-consumption-reserve workflow retains false-goal-only continuation. Saved `/1`
-through `/4` sources keep their compiler, canonical bytes and digest domain.
-The new combination selects `/5`; changing only an old schema label cannot
-import its semantics.
+Historical `resource_aware_v1` still rejects `reserve_until_tick`. Saved `/1`
+through `/4` sources keep their compiler, canonical bytes and digest domain;
+historical ordinary reserve `/3` candidates also keep False-only commit
+eligibility. The resource-acquiring reserve combination selects `/5`.
+New ordinary `consumption_reserve_v1` continuations select `/6` and may resume
+an underfunded remaining reserve while present minima hold, without acquiring
+harvest permission; see
+[ordinary reserve continuation](PRODUCTION_GOAL_CONTINUATION.md#continue-an-explicit-future-reserve-with-6).
+Changing only a saved schema label cannot import either generation's semantics.
 
 The existing eleven tools are unchanged. Source changes before commit require
 a fresh review. Complete Agent Turn publication must fit before pending work

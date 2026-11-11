@@ -39,7 +39,9 @@ fn source(until: u64) -> Result<ProductionContinuation> {
         .to_string(),
     )?;
     let root = Digest32::of_bytes(b"original explicit reserve goal");
-    ProductionContinuation::new(root, root, request)
+    // This suite preserves the historical /3 archive contract. New intake
+    // explicitly upgrades only a newly reviewed pursuit to /6.
+    ProductionContinuation::from_parts(root, root, request, SourceVersion::ConsumptionReserveV1)
 }
 
 #[test]
@@ -123,7 +125,7 @@ fn subsequent_pursuits_keep_the_absolute_tick_and_flat_original_lineage() -> Res
         assert_eq!(current.root, original.root);
         assert_eq!(current.request, original.request);
         assert_eq!(current.reserve_until_tick(), Some(4801));
-        assert_eq!(current.version, SourceVersion::ConsumptionReserveV1);
+        assert_eq!(current.version, SourceVersion::ConsumptionReserveCurrentV1);
         assert_eq!(
             current.canonical_json().len(),
             original.canonical_json().len()

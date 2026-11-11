@@ -335,6 +335,16 @@ fn reserve_horizon(
             "resource reserve planning requires its original acquisition permission",
         ));
     }
+    explicit_reserve_horizon(request, snapshot)
+}
+
+/// The same bounded, qualified population and absolute-time contract governs
+/// remaining demand whether or not a request permits finite input acquisition.
+/// This helper does not change either retained compiler or its action program.
+fn explicit_reserve_horizon(
+    request: &ProductionRequest,
+    snapshot: &WorldSnapshot,
+) -> Result<(GameTick, u64)> {
     let until = request
         .reserve_until_tick
         .ok_or_else(|| invalid("resource reserve planning requires reserve_until_tick"))?;
@@ -373,6 +383,31 @@ pub(super) fn reserve_work_required(
     snapshot: &WorldSnapshot,
 ) -> Result<bool> {
     let (_, ticks) = reserve_horizon(request, snapshot)?;
+    reserve_work_required_through(request, snapshot, ticks)
+}
+
+/// The additive ordinary-reserve continuation may use this read-only demand
+/// check without acquiring resource permissions or switching source compilers.
+pub(super) fn consumption_reserve_work_required(
+    request: &ProductionRequest,
+    snapshot: &WorldSnapshot,
+) -> Result<bool> {
+    if request.planner() != Some(ProductionPlanner::ConsumptionReserveV1)
+        || request.acquire_resources.is_some()
+    {
+        return Err(invalid(
+            "ordinary reserve demand requires its exact consumption-reserve source without acquisition permission",
+        ));
+    }
+    let (_, ticks) = explicit_reserve_horizon(request, snapshot)?;
+    reserve_work_required_through(request, snapshot, ticks)
+}
+
+fn reserve_work_required_through(
+    request: &ProductionRequest,
+    snapshot: &WorldSnapshot,
+    ticks: u64,
+) -> Result<bool> {
     inspect_bound(snapshot)?;
     PredicateEvidence::laboratory(snapshot)?;
     let ledger = unique_ledger(snapshot)?;

@@ -1826,7 +1826,8 @@ impl GoalContinuation {
         matches!(
             self,
             Self::Room(_) | Self::ConnectedRoom(_) | Self::ResourceAcquisition(_)
-        ) || matches!(self, Self::Production(source) if source.is_resource_aware())
+        ) || matches!(self, Self::Production(source) if source.is_resource_aware()
+            || source.is_current_consumption_reserve())
     }
 
     fn lineage_json(&self) -> serde_json::Value {
@@ -1932,12 +1933,21 @@ impl PlanSource {
         }
     }
 
+    /// Only new /6 pursuits admit a qualified future-reserve deficit while
+    /// current stock minima hold. Historical /3 sources keep their semantics.
+    fn is_consumption_reserve_continuation(&self) -> bool {
+        matches!(self, Self::ProductionContinuation { raw, .. }
+            if goal_continuation::ProductionContinuation::parse(raw)
+                .is_ok_and(|source| source.is_current_consumption_reserve()))
+    }
+
     /// These compilers select a current stage from the complete supply, stock,
     /// staffing and work census. A narrow action witness cannot replay them.
     fn requires_complete_source_review(&self) -> bool {
         self.is_resource_acquisition()
             || self.is_resource_aware_production()
             || self.is_resource_aware_room()
+            || self.is_consumption_reserve_continuation()
     }
 
     fn resource_replan_step(&self, session_id: SessionId) -> Option<serde_json::Value> {
@@ -4913,6 +4923,7 @@ fn replay_stale_plan(session: &mut LabSession, stale: PendingPlan) -> String {
         let from_digest = stale.digest.clone();
         let production = stale.source.is_resource_aware_production();
         let room = stale.source.is_resource_aware_room();
+        let reserve = stale.source.is_consumption_reserve_continuation();
         session.pending = Some(stale);
         let error = DfmcpError::new(
             ErrorCode::StaleAnchor,
@@ -4920,6 +4931,8 @@ fn replay_stale_plan(session: &mut LabSession, stale: PendingPlan) -> String {
                 "room supply or geometry observation changed; request and review the current stage of the complete original room project before committing"
             } else if production {
                 "production supply observation changed; request and review the current stage of the complete original production objective before committing"
+            } else if reserve {
+                "reserve demand observation changed; request and review a new pursuit of the original production goal and absolute reserve tick before committing"
             } else {
                 "resource acquisition observation changed; request and review a fresh allocation from the complete original stock objective before committing"
             },
@@ -4931,7 +4944,7 @@ fn replay_stale_plan(session: &mut LabSession, stale: PendingPlan) -> String {
         .unwrap_or_else(|_| json!({"ok": false}));
         payload["session_id"] = json!(session.session_id.to_string());
         payload["rebase"] = json!({
-            "method": if room { "fresh_resource_room_required" } else if production { "fresh_resource_production_required" } else { "fresh_resource_acquisition_required" },
+            "method": if room { "fresh_resource_room_required" } else if production { "fresh_resource_production_required" } else if reserve { "fresh_production_reserve_required" } else { "fresh_resource_acquisition_required" },
             "from_digest": from_digest,
             "pending_plan_preserved": true,
             "game_effect": "none",
@@ -5216,6 +5229,7 @@ pub fn fortress_commit(session_id: Option<String>, plan_digest: String) -> Strin
             }
             if pending.source.is_resource_aware_production()
                 || pending.source.is_resource_aware_room()
+                || pending.source.is_consumption_reserve_continuation()
             {
                 // Current read authority and complete-source budgets apply at
                 // commit as well as proposal, before leases or effect custody.

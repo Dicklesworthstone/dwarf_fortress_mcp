@@ -1,5 +1,36 @@
 # Implementation Status
 
+## Unreleased — Resume interrupted ordinary future reserves
+
+New continuations of an original consumption_reserve_v1 goal use the isolated
+dfmcp.production-continuation/6 source generation. A physically quiet pursuit
+can resume while current stock minima remain True only when qualified current
+evidence shows a deficit through the original absolute reserve tick. The
+complete original request, quotas, setup permissions, ledger identity and
+generation, parent/root lineage and horizon remain fixed. Historical /3
+sources preserve their bytes, compiler, digest domain and False-only commit
+eligibility.
+
+Current goal observations expose production_reserve separately from current
+stock truth and historical proof. Unfunded or unknown future reserves remain
+retained at the goal-capacity boundary; repeated durable reopen preserves exact
+custody, and restore abandons old pursuits. Proposal and commit both recheck
+authority, complete source bounds and same-root physical quiescence. Complete
+review publication precedes pending replacement; stale or refused candidates
+dispatch no effects.
+
+Six pure-module and eight public-facade regression sources cover cancellation,
+current-True continuation, historical source isolation, residual production,
+authority/budget/ledger refusals, recovery, concurrency, capacity and restore.
+The recovered source and all new tests were parsed/formatted successfully with
+nightly Rustfmt during a brief environment recovery, and recovered formatted
+test blobs match their local Git hashes. The source was independently reviewed.
+No new Cargo check/test has completed: the full check stopped before compilation
+on missing offline dependency checkout and workspace disk exhaustion. The host
+has also disconnected repeatedly. Runtime and full qualification remain open;
+bead df-production-reserve-continuation-r6p is in progress. No native protocol
+or live admission changes are made.
+
 ## Unreleased — Lossless compact complete plan reviews
 
 Complete resource-room and production reviews can now encode their shared

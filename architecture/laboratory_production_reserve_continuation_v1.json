@@ -1,0 +1,83 @@
+{
+  "schema": "dfmcp.laboratory_production_reserve_continuation/1",
+  "owner_bead": "df-production-reserve-continuation-r6p",
+  "scope": "laboratory_reference_world",
+  "planner": "consumption_reserve_v1",
+  "request": {
+    "template": "continue_goal",
+    "required": [
+      "plan_digest"
+    ],
+    "parent": "retained_original_ordinary_production_reserve_or_continuation",
+    "retained": "complete_original_quotas_prerequisites_absolute_tick_parent_and_root",
+    "added_resource_acquisition_permission": false
+  },
+  "continuation": {
+    "source_schema": "dfmcp.production-continuation/6",
+    "digest_domain": "dfmcp-production-continuation-source/6",
+    "historical_sources": "unchanged_canonical_bytes_compiler_and_digest_domain",
+    "historical_3_commit_eligibility": "qualified_false_current_stock_goal_only",
+    "historical_parent_promotion": "explicit_new_review_only",
+    "eligibility": "current_authority_original_ledger_verified_lineage_and_complete_same_root_quiescence",
+    "true_current_minima": "eligible_only_with_qualified_deficit_for_remaining_explicit_reserve",
+    "current_authority": [
+      "observe",
+      "query",
+      "plan"
+    ],
+    "complete_source_inspection": "same_bounded_qualified_source_at_planning_discovery_and_commit",
+    "original_output_ledger": "id_and_generation_from_exact_sealed_source_before_effects",
+    "fully_funded_reserve": "no_new_pursuit",
+    "unknown_current_stock_or_reserve": "refuse",
+    "expired_horizon": "refuse_without_renewing",
+    "repeated_recovery": "verify_exact_archived_source_and_bind_current_frontier_without_restoring_authority",
+    "restore": "abandon_old_pursuits",
+    "capacity_retention": "true_current_minima_do_not_release_unfunded_or_unknown_future_reserve",
+    "automatic_dispatch": false
+  },
+  "compilation": {
+    "generation": "existing_consumption_reserve_v1",
+    "inputs": "current_qualified_stocks_population_finite_workforce_ingredients_and_original_setup_permissions",
+    "consumption_horizon": "maximum_of_remaining_original_absolute_tick_and_current_work_completion",
+    "source_horizon_renewal": false,
+    "future_input_credit": false,
+    "original_terminal_predicate": "unchanged_requested_current_stock_minima",
+    "action_deadline": "current_work_schedule_only"
+  },
+  "reporting": {
+    "response_schema": "dfmcp.production-reserve/1",
+    "kind": "production_reserve_continuation",
+    "reserve_status_field": "production_reserve",
+    "reserve_statuses": [
+      "work_required",
+      "funded_from_current_stock",
+      "expired",
+      "unknown"
+    ],
+    "current_stock_truth": "separate_from_remaining_predicted_reserve_demand_and_historical_achievement",
+    "compact_briefing": "retain_reserve_status_original_tick_epistemic_quiescence_and_continuation_guidance",
+    "proof": "complete_readable_same_response_projection_with_unchanged_typed_archive",
+    "publication": "complete_owned_agent_turn_before_pending_replacement",
+    "refusal": "preserve_prior_pending_review_and_dispatch_no_candidate_effects",
+    "forecast": "ordinary_work_and_separate_original_absolute_tick_endpoint",
+    "continuous_maintenance_proven": false,
+    "future_completion_guaranteed": false
+  },
+  "bounds": {
+    "source_bytes": 16384,
+    "maximum_game_time_horizon": 403200,
+    "source_entities": 65536,
+    "retained_goals_per_fortress": 64
+  },
+  "validation": {
+    "pure_regression_tests_authored": 6,
+    "mcp_regression_tests_authored": 8,
+    "execution": "not_executed_dependency_checkout_and_workspace_disk_exhaustion",
+    "formatting": "all_recovered_source_and_regressions_syntax_formatted_with_nightly_rustfmt",
+    "default_output_budget_success_measured": false,
+    "full_mcp_build_qualified": false,
+    "native_build_qualified": false
+  },
+  "native_protocol_change": false,
+  "live_admission_change": false
+}

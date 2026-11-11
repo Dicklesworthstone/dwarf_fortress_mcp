@@ -238,7 +238,8 @@ pub(super) fn execute_resource_continuation(
                 objective.plan_digest == parent
                     && (objective.is_resource_acquisition()
                         || objective.is_resource_aware_production()
-                        || objective.is_resource_aware_room())
+                        || objective.is_resource_aware_room()
+                        || objective.is_consumption_reserve())
             }) {
                 return Ok(None);
             }
@@ -259,6 +260,8 @@ pub(super) fn execute_resource_continuation(
                 "resource_room_continuation"
             } else if source.is_resource_aware_production() {
                 "resource_production_continuation"
+            } else if source.is_consumption_reserve_continuation() {
+                "production_reserve_continuation"
             } else {
                 "resource_acquisition_continuation"
             };
@@ -295,9 +298,10 @@ fn prepare_source(
     let acquisition = source.is_resource_acquisition();
     let resource_production = source.is_resource_aware_production();
     let resource_room = source.is_resource_aware_room();
+    let production_reserve = source.is_consumption_reserve_continuation();
     let mut result = json!({
         "kind": kind,
-        "schema": if acquisition { "dfmcp.resource-acquisition/1" } else if resource_production { "dfmcp.resource-production/1" } else if resource_room { "dfmcp.resource-room/1" } else { "dfmcp.plan-comparison/1" },
+        "schema": if acquisition { "dfmcp.resource-acquisition/1" } else if resource_production { "dfmcp.resource-production/1" } else if resource_room { "dfmcp.resource-room/1" } else if production_reserve { "dfmcp.production-reserve/1" } else { "dfmcp.plan-comparison/1" },
         "version": 1,
         "plan_id": plan.id.to_string(),
         "plan_digest": digest,
@@ -335,6 +339,8 @@ fn prepare_source(
             "dfmcp.resource-production/2"
         });
         result["version"] = json!(2);
+        crate::sealed_plan_review::apply(&mut result, &plan)?;
+    } else if production_reserve {
         crate::sealed_plan_review::apply(&mut result, &plan)?;
     }
     Ok((

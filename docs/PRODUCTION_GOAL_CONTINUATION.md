@@ -7,8 +7,11 @@ Its complete original quotas and acquisition policy remain fixed; see the
 with an explicit future reserve selects the additive `/5` source, preserving
 the same absolute tick and allowing a still-satisfied present stock goal to
 continue only when its remaining reserve has a qualified deficit. See
-[resource production reserves](LAB_RESOURCE_PRODUCTION_RESERVES.md). Historical generations
-described below keep their existing behavior.
+[resource production reserves](LAB_RESOURCE_PRODUCTION_RESERVES.md). Ordinary
+`consumption_reserve_v1` requests now select `/6` for new continuations, with
+the same remaining-reserve eligibility and without adding resource-acquisition
+permission. Historical generations described below keep their existing
+compiler, source bytes and commit eligibility.
 
 The same public `continue_goal` request also resumes retained item-backed rooms.
 See [room goal continuation](ROOM_GOAL_CONTINUATION.md) for its exact installation
@@ -17,6 +20,8 @@ unchanged.
 
 The laboratory can compile a new pursuit of a retained production goal after
 its earlier work is quiet and its original stock requirements no longer hold.
+An explicit future reserve can also continue while current minima still hold
+when qualified current evidence shows that the remaining reserve is underfunded.
 The new request uses the existing `fortress.plan` tool and `blueprint` argument:
 
 ```json
@@ -64,10 +69,13 @@ can subsequently prove the original goal true again.
 ## Review and current authority
 
 Planning requires current Observe and Plan authority. The original goal must be
-retained, reconstructable, in the same fortress/restore epoch, and currently
-False under eligible current evidence. A True goal is ineligible for
-continuation; an Unknown goal requires reconciliation. Restoring a world abandons its old
-pursuits, so an abandoned goal cannot be continued implicitly.
+retained, reconstructable and in the same fortress/restore epoch. Ordinary
+goals must be currently False under eligible current evidence. The explicit
+future-reserve generations `/5` and `/6` additionally require Query authority
+and complete bounded source inspection; they permit True current minima only
+when the remaining reserve has a qualified deficit. Unknown truth requires
+reconciliation. Restoring a world abandons its old pursuits, so an abandoned
+goal cannot be continued implicitly.
 
 Every original effect must be physically quiet. Terminal receipts alone do not
 prove that; missing live deferred handles and unknown recovered work remain
@@ -111,9 +119,10 @@ first achievement and parent/root lineage.
 
 Checkpoint restore follows a separate path: it abandons the old pursuits and
 clears their active continuity immediately, even before durable publication
-finishes. The recorded abandonment survives reopen. Current authority, original
-False truth and physical quiescence of every same-root pursuit are still checked
-when planning and committing a continuation. Recovery neither dispatches old
+finishes. The recorded abandonment survives reopen. Current authority,
+generation-specific original-goal eligibility and physical quiescence of every
+same-root pursuit are still checked when planning and committing a continuation.
+Recovery neither dispatches old
 actions nor recreates their grants or preparation lifetimes.
 
 ## Preserve original steps that were never dispatched
@@ -270,6 +279,21 @@ full-workspace qualification, a native build or live admission.
 
 ## Continue an explicit future reserve with /3
 
+The historical `dfmcp.production-continuation/3` generation retains its exact
+canonical bytes, digest domain, `consumption_reserve_v1` compiler and
+False-current-goal eligibility. Saved `/3` plans reconstruct at their original
+sealed snapshots; commit cannot import the new generation's permission to
+continue a currently True stock goal. Historical `/1` and `/2` envelopes
+continue to reject reserve fields. Resource-acquiring reserve generation `/5`
+also retains its existing behavior.
+
+A new, explicitly requested pursuit of a retained ordinary reserve uses `/6`,
+including when its immediate parent is a historical `/3` goal. This changes
+the new proposal's source generation without rewriting the parent or replaying
+an old candidate under different eligibility rules.
+
+## Continue an explicit future reserve with /6
+
 A production request can retain an absolute `reserve_until_tick`, for example
 2401, using the `consumption_reserve_v1` generation. See
 [explicit reserve planning](PRODUCTION_RESERVE_PLANNING.md#request-reserves-for-an-explicit-future-tick)
@@ -278,22 +302,44 @@ The horizon must remain strictly after the current planning source tick and
 within the bounded one-game-year span. It is a planning target, not an action
 deadline or a continuous maintenance predicate.
 
-An eligible new continuation of such a request uses the flat
-`dfmcp.production-continuation/3` source envelope. It retains every original
-quota, prerequisite permission, explicit site, the exact planner generation
-and the exact absolute tick. The `/3` source digest has its own domain and
-participates in the prepared-plan seal. A subsequent continuation changes its
-immediate parent while preserving the root and the same original request; it
-does not nest earlier envelopes or silently move the reserve horizon forward.
+When ordinary reserve production is canceled or interrupted, its current
+FOOD/DRINK minima may remain True even though observed stocks cannot sustain
+those minima through the requested tick. Once the original work is physically
+quiet, the existing `continue_goal` request can now propose the missing reserve
+production as another pursuit of that original goal.
 
-Archived `/3` reconstruction requires both `consumption_reserve_v1` and the
-reserve tick. Historical `/1` and `/2` envelopes reject reserve fields and the
-reserve generation, while preserving their previous canonical bytes, compiler
-selection and digest domains. Exact saved-plan replay, durable reopen and a
-reviewed stale-source replay preserve the original absolute tick. A newly
-compiled pursuit uses current observed stocks, metabolism phase, workforce and
-finite ingredients to budget through the later of the new work horizon and
-that retained tick. Action deadlines still follow work duration.
+The flat `dfmcp.production-continuation/6` source retains every original quota,
+prerequisite permission, explicit site, the exact planner generation and the
+exact absolute tick. Its source digest has a separate domain and participates
+in the prepared-plan seal. A subsequent continuation changes its immediate
+parent while preserving the root and complete original request. It does not
+nest earlier envelopes, move the horizon forward or authorize harvesting.
+
+Eligibility depends on current source-qualified inventory and population
+consumption through the remaining original horizon. A True stock minimum
+permits another pursuit only when that bounded calculation finds a deficit.
+A fully funded reserve produces no new pursuit. Unknown or unqualified stock,
+population, original ledger identity or ledger generation refuses. The ordinary
+finite-capacity compiler then budgets work through the later of its completion
+horizon and that retained tick, including its original ingredient and setup
+checks. Future output remains a prediction rather than available inventory.
+
+The server captures output-ledger custody from the original sealed snapshot
+before effects and reconstructs it from that exact archive on durable reopen.
+It keeps the original predicate, action receipts and first verified achievement
+separate from current reserve demand. Replacement inventory cannot satisfy or
+continue the old objective. All retained same-root work must be physically
+quiet, and current Observe, Query and Plan authority and complete bounded
+source inspection are checked at both proposal and commit. Missing authority,
+changed sources, active siblings and output-budget refusal preserve the prior
+pending review and dispatch no candidate effects.
+
+An exact durable reopen preserves the request, original ledger, parent/root
+lineage and absolute tick while establishing the new observation frontier.
+Repeated reopen does not renew the horizon or restore old grants. Checkpoint
+restore abandons the old pursuit. A True present-stock goal with unfinished or
+unknown future reserve demand cannot be silently evicted from the bounded
+64-goal book.
 
 If planning or replay reaches tick 2401 in this example, the retained horizon
 has expired and compilation refuses. The continuation cannot turn the original
@@ -301,20 +347,42 @@ has expired and compilation refuses. The continuation cannot turn the original
 date requires a fresh explicit production request with a new reviewed source
 and seal.
 
-The ordinary eligibility rules remain decisive: `continue_goal` requires the
-original stock predicate to be currently False, eligible current evidence and
-physical quiescence across the retained root's pursuits. Unknown truth needs
-reconciliation. A prediction that stocks will fall in the future does not make
-currently satisfied quotas False. Consequently, if the original minima remain
-True after cancelled, interrupted or completed reserve work, `continue_goal`
-cannot add more reserve production. Submit a fresh production request with the
-desired future tick when that work is needed; ordinary overlap, source and
-authority checks still apply. Active same-output production must first finish
-or be explicitly stopped and reconciled.
+Goal observations expose `production_reserve` with the planner, original
+`reserve_until_tick`, epistemic class and a status of `work_required`,
+`funded_from_current_stock`, `expired` or `unknown`. They retain current
+predicate truth and historical achievement separately. When eligible,
+`needs_replan` and `continuation_request` make the remaining work discoverable
+even while present minima are True. Compact briefings retain this reserve
+status.
 
-`production.continuation` identifies the `/3` schema, reserve planner and
-retained `reserve_until_tick`. The ordinary work forecast and
-`forecast.reserve_forecast` keep action completion separate from original quota
-truth at the requested future frontier. Neither that endpoint prediction nor
-the preserved source establishes continuous stock maintenance or grants
-permission to dispatch new work.
+The complete Plan review uses `dfmcp.production-reserve/1` and the
+`production_reserve_continuation` kind. `production.continuation` identifies
+the `/6` source, reserve planner, retained tick and original-ledger requirement.
+Every rendered step and its proof must fit the caller's output budget before
+pending work is replaced. Shared readable proof encoding changes only the
+review representation; the typed archive and source seal remain exact.
+
+The ordinary work forecast and `forecast.reserve_forecast` keep action
+completion separate from original quota truth at the requested future
+frontier. Neither that endpoint prediction nor the preserved source establishes
+continuous stock maintenance or grants permission to dispatch new work.
+
+### Validation status for /6
+
+Six pure-module regressions cover the new and historical source generations,
+observed residual work after cancellation, no-work and expired horizons,
+current authority and population qualification, original ledger custody, exact
+repeated recovery and closed inputs. Eight MCP regressions exercise current-True
+cancellation, complete review reconstruction, authority/source/output refusals,
+same-root sessions, repeated durable reopen, historical `/3` commit eligibility,
+replacement-ledger refusal, goal-capacity retention and restore abandonment.
+
+These regressions are authored but unexecuted. The recovered production changes
+and all new tests, including capacity and restore cases, were syntax-formatted
+with nightly Rustfmt during a brief recovery of the execution environment.
+The full Cargo check stopped before compilation on missing offline dependency
+checkout and workspace disk exhaustion.
+No successful default-budget run, full MCP build, native build or live admission
+is claimed for this increment. The machine contract is
+[`laboratory_production_reserve_continuation_v1.json`](../architecture/laboratory_production_reserve_continuation_v1.json),
+owned by bead `df-production-reserve-continuation-r6p`.

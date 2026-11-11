@@ -22,6 +22,7 @@ const SOURCE_SCHEMA: &str = "dfmcp.production-continuation/2";
 const RESERVE_SOURCE_SCHEMA: &str = "dfmcp.production-continuation/3";
 const RESOURCE_SOURCE_SCHEMA: &str = "dfmcp.production-continuation/4";
 const RESOURCE_RESERVE_SOURCE_SCHEMA: &str = "dfmcp.production-continuation/5";
+const CURRENT_RESERVE_SOURCE_SCHEMA: &str = "dfmcp.production-continuation/6";
 
 /// Archive parsing selects the historical algorithm; new planning selects one
 /// fixed generation without editing the original retained quota/setup request.
@@ -32,6 +33,7 @@ enum SourceVersion {
     ConsumptionReserveV1,
     ResourceAwareV1,
     ResourceReserveV1,
+    ConsumptionReserveCurrentV1,
 }
 
 impl SourceVersion {
@@ -42,6 +44,7 @@ impl SourceVersion {
             Self::ConsumptionReserveV1 => RESERVE_SOURCE_SCHEMA,
             Self::ResourceAwareV1 => RESOURCE_SOURCE_SCHEMA,
             Self::ResourceReserveV1 => RESOURCE_RESERVE_SOURCE_SCHEMA,
+            Self::ConsumptionReserveCurrentV1 => CURRENT_RESERVE_SOURCE_SCHEMA,
         }
     }
 
@@ -52,6 +55,7 @@ impl SourceVersion {
             Self::ConsumptionReserveV1 => b"dfmcp-production-continuation-source/3\0",
             Self::ResourceAwareV1 => b"dfmcp-production-continuation-source/4\0",
             Self::ResourceReserveV1 => b"dfmcp-production-continuation-source/5\0",
+            Self::ConsumptionReserveCurrentV1 => b"dfmcp-production-continuation-source/6\0",
         }
     }
 }
@@ -170,7 +174,7 @@ impl ProductionContinuation {
                 SourceVersion::ResourceAwareV1
             }
         } else if request.reserve_until_tick().is_some() {
-            SourceVersion::ConsumptionReserveV1
+            SourceVersion::ConsumptionReserveCurrentV1
         } else {
             SourceVersion::ConsumptionAwareV1
         };
@@ -200,7 +204,7 @@ impl ProductionContinuation {
             SourceVersion::ResourceAwareV1 => {
                 resource_planner && request.is_resource_aware() && !reserve_horizon
             }
-            SourceVersion::ConsumptionReserveV1 => {
+            SourceVersion::ConsumptionReserveV1 | SourceVersion::ConsumptionReserveCurrentV1 => {
                 reserve_planner && reserve_horizon && !request.is_resource_aware()
             }
             SourceVersion::Legacy | SourceVersion::ConsumptionAwareV1 => {
@@ -246,6 +250,7 @@ impl ProductionContinuation {
             RESERVE_SOURCE_SCHEMA => SourceVersion::ConsumptionReserveV1,
             RESOURCE_SOURCE_SCHEMA => SourceVersion::ResourceAwareV1,
             RESOURCE_RESERVE_SOURCE_SCHEMA => SourceVersion::ResourceReserveV1,
+            CURRENT_RESERVE_SOURCE_SCHEMA => SourceVersion::ConsumptionReserveCurrentV1,
             _ => return Err(invalid("unknown retained goal continuation schema")),
         };
         let request = source.production;
@@ -283,6 +288,36 @@ impl ProductionContinuation {
         matches!(self.version, SourceVersion::ResourceReserveV1)
     }
 
+    /// Historical /3 remains replayable under its original seal. Only a newly
+    /// requested /6 pursuit admits a current-True quota with remaining reserve
+    /// demand; changing current observation never upgrades an archived source.
+    pub(crate) const fn is_current_consumption_reserve(&self) -> bool {
+        matches!(self.version, SourceVersion::ConsumptionReserveCurrentV1)
+    }
+
+    pub(crate) const fn is_consumption_reserve(&self) -> bool {
+        matches!(
+            self.version,
+            SourceVersion::ConsumptionReserveV1 | SourceVersion::ConsumptionReserveCurrentV1
+        )
+    }
+
+    pub(crate) const fn admits_remaining_reserve(&self) -> bool {
+        self.is_resource_reserve() || self.is_current_consumption_reserve()
+    }
+
+    pub(crate) fn reserve_work_required(&self, snapshot: &WorldSnapshot) -> Result<bool> {
+        if self.is_current_consumption_reserve() {
+            self.request.consumption_reserve_work_required(snapshot)
+        } else {
+            self.resource_reserve_work_required(snapshot)
+        }
+    }
+
+    pub(crate) fn reserve_planner(&self) -> Option<&'static str> {
+        self.request.planner().map(ProductionPlanner::as_str)
+    }
+
     pub(crate) fn resource_reserve_work_required(&self, snapshot: &WorldSnapshot) -> Result<bool> {
         if !self.is_resource_reserve() {
             return Ok(false);
@@ -314,9 +349,9 @@ impl ProductionContinuation {
         context: &OperationContext,
         work_quiescent: bool,
     ) -> Result<()> {
-        if !self.is_resource_aware() {
+        if !self.is_resource_aware() && !self.is_current_consumption_reserve() {
             return Err(invalid(
-                "resource-stage eligibility requires the exact resource-aware original source",
+                "stock-goal eligibility requires the exact resource-aware or current reserve continuation source",
             ));
         }
         validate_goal_lineage(original, active, snapshot, context)?;
@@ -326,8 +361,8 @@ impl ProductionContinuation {
         // The new generation retains an explicit future objective even while
         // instantaneous minima hold. Only qualified remaining reserve demand
         // can motivate a separate review; earlier generations remain false-only.
-        if self.is_resource_reserve() {
-            let reserve_needed = self.resource_reserve_work_required(snapshot)?;
+        if self.admits_remaining_reserve() {
+            let reserve_needed = self.reserve_work_required(snapshot)?;
             if truth == PredicateTruth::True && reserve_needed {
                 return validate_truth_and_work(PredicateTruth::False, work_quiescent);
             }
@@ -364,12 +399,16 @@ impl ProductionContinuation {
         if self.version == SourceVersion::ConsumptionAwareV1 {
             lineage["source_schema"] = json!(SOURCE_SCHEMA);
             lineage["planner"] = json!("consumption_aware_v1");
-        } else if self.version == SourceVersion::ConsumptionReserveV1 {
-            lineage["source_schema"] = json!(RESERVE_SOURCE_SCHEMA);
+        } else if self.is_consumption_reserve() {
+            lineage["source_schema"] = json!(self.version.schema());
             lineage["planner"] = json!("consumption_reserve_v1");
             lineage["reserve_until_tick"] = json!(self.request.reserve_until_tick());
             lineage["original_absolute_horizon_preserved"] = json!(true);
             lineage["continuous_maintenance_proven"] = json!(false);
+            if self.is_current_consumption_reserve() {
+                lineage["current_minima_do_not_establish_future_reserve"] = json!(true);
+                lineage["requires_original_stock_ledger"] = json!(true);
+            }
         } else if matches!(
             self.version,
             SourceVersion::ResourceAwareV1 | SourceVersion::ResourceReserveV1
@@ -422,11 +461,12 @@ impl ProductionContinuation {
                 .clone()
                 .with_planner(ProductionPlanner::ConsumptionAwareV1)
                 .compile(snapshot)?,
-            SourceVersion::ConsumptionReserveV1 => self
-                .request
-                .clone()
-                .with_planner(ProductionPlanner::ConsumptionReserveV1)
-                .compile(snapshot)?,
+            SourceVersion::ConsumptionReserveV1 | SourceVersion::ConsumptionReserveCurrentV1 => {
+                self.request
+                    .clone()
+                    .with_planner(ProductionPlanner::ConsumptionReserveV1)
+                    .compile(snapshot)?
+            }
             SourceVersion::ResourceAwareV1 | SourceVersion::ResourceReserveV1 => {
                 self.request.compile(snapshot)?
             }
@@ -578,6 +618,10 @@ mod tests;
 #[cfg(test)]
 #[path = "goal_reserve_continuation_tests.rs"]
 mod reserve_tests;
+
+#[cfg(test)]
+#[path = "goal_current_reserve_continuation_tests.rs"]
+mod current_reserve_tests;
 
 #[cfg(test)]
 #[path = "goal_resource_continuation_tests.rs"]

@@ -97,6 +97,7 @@ fn compact_objective(item: &mut Value) {
                 | "semantic_room_goal"
                 | "semantic_output_goal"
                 | "resource_reserve"
+                | "production_reserve"
                 | "physical_quiescent"
                 | "pursuit_active"
                 | "needs_replan"
@@ -924,6 +925,9 @@ mod objective_projection_tests {
                 "new_request_required":status == "expired",
                 "historical_action_proof_rewritten":false,
             });
+            // The same reserve distinction applies when production is funded
+            // from current ingredients without an acquisition stage.
+            goal["production_reserve"] = goal["resource_reserve"].clone();
             for profile in ["pulse", "briefing"] {
                 let compact = fitted_goal(&goal, profile)?;
                 assert_eq!(compact["predicate_truth"], "true");
@@ -932,6 +936,7 @@ mod objective_projection_tests {
                     goal["semantic_output_goal"]
                 );
                 assert_eq!(compact["resource_reserve"], goal["resource_reserve"]);
+                assert_eq!(compact["production_reserve"], goal["production_reserve"]);
                 assert_eq!(
                     compact["resource_reserve"]["continuous_maintenance_proven"],
                     false
@@ -952,6 +957,7 @@ mod objective_projection_tests {
             "semantic_room_goal",
             "semantic_output_goal",
             "resource_reserve",
+            "production_reserve",
             "physical_quiescent",
             "needs_replan",
             "continuation_request",

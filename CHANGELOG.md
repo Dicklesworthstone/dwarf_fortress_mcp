@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased — Continue underfunded ordinary reserves without renewing their horizon
+
+- Add isolated /6 continuation sources for original consumption_reserve_v1
+  pursuits whose current minima hold but whose remaining reserve is underfunded.
+- Preserve historical /3 eligibility and exact original request, stock ledger,
+  permissions, lineage and absolute tick through recovery.
+- Report production_reserve demand separately, retain unfinished goals at
+  capacity and abandon old pursuits on restore.
+- Wire complete bounded review publication and repeated current-source checks
+  into existing Plan/Commit paths; add six pure and eight facade regressions.
+- Parse/format recovered source and tests with nightly Rustfmt. Cargo execution
+  remains blocked before compilation by dependency checkout/disk-space failures.
+
 ## Unreleased — Compact complete plan proof without dropping requirements
 
 - Add a lossless, self-describing predicate table fallback for oversized

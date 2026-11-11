@@ -324,8 +324,17 @@ guaranteed, or that any action has actually completed. No new background
 maintenance loop or live mutation admission is introduced.
 
 An eligible later pursuit preserves the same absolute tick in continuation
-source `/3`; it cannot renew an expired horizon. When the current original
-minima are still True but more reserve work is needed, submit a fresh explicit
-production request rather than `continue_goal`. See
-[future reserve continuations](PRODUCTION_GOAL_CONTINUATION.md#continue-an-explicit-future-reserve-with-3)
-for the eligibility and replay rules.
+source `/6`; it cannot renew an expired horizon. When current original minima
+are still True but qualified current stocks do not fund the remaining reserve,
+`continue_goal` can propose the missing work after all same-root pursuits are
+physically quiet. It retains the original ledger identity and generation,
+quotas, setup permissions and parent/root lineage. Current Observe, Query and
+Plan authority and complete bounded evidence remain required. Fully funded,
+unknown or expired reserve evidence cannot authorize another pursuit.
+
+Goal observations report this separate demand in `production_reserve`, and an
+eligible observation supplies a continuation request. Historical `/3` sources
+keep their original replay bytes, compiler and False-only commit eligibility;
+only a new reviewed pursuit chooses `/6`. See
+[future reserve continuations](PRODUCTION_GOAL_CONTINUATION.md#continue-an-explicit-future-reserve-with-6)
+for the eligibility, recovery, publication and validation limits.
