@@ -4,6 +4,26 @@
 executor. The private evaluator remains the reference implementation of typed
 predicates, deterministic ordering, row limits, and whole-row byte limits.
 
+## Independent live source and response budgets
+
+The shared live query publisher accepts the original authorized source context
+and a separate byte allowance remaining after the enclosing Agent Turn. Entity,
+spatial, related, ranked, aggregate, lexical and event executors retain their
+source limits while active-watch metadata is reserved from the response.
+This applies at the actual protocol-1.1, jobs, operations, map, spatial/1.6 and
+spatial/1.8 handler boundaries, not only when an executor is called directly.
+A compact count or page can inspect a larger admitted source without requesting
+that source-sized output. The source and response each remain subject to their
+own existing limits; passing a larger response allowance cannot expand source
+bytes, record count, grants, cancellation or token authority.
+
+Compound aggregates still refuse an incomplete total. Paged queries retain
+whole rows and unchanged source/session/selection continuations. Retained
+watch summaries remain identical and visible; stateless queries do not sample
+them. Stateful watch and baseline operations keep their existing atomic
+publication context, and the enclosing runtime validates the complete final
+Agent Turn after the shared publisher accepts its own bounded result.
+
 ## Continuation contract
 
 Treat returned continuations as opaque. A page is bound to the fortress,

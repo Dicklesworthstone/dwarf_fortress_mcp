@@ -666,13 +666,19 @@ pub fn fortress_query(
                     "jobs snapshot missing",
                 )
             })?;
-            semantic_query::execute_with_publisher(snapshot, &narrowed, &input, |mut result| {
-                result["source_stale"] = json!(session.source.poisoned());
-                if let Some(refresh) = refreshed {
-                    result["observation_refresh"] = refresh;
-                }
-                finish_query(&view, result)
-            })
+            semantic_query::execute_with_publisher_budget(
+                snapshot,
+                &context,
+                &input,
+                narrowed.budget.max_bytes,
+                |mut result| {
+                    result["source_stale"] = json!(session.source.poisoned());
+                    if let Some(refresh) = refreshed {
+                        result["observation_refresh"] = refresh;
+                    }
+                    finish_query(&view, result)
+                },
+            )
         },
     )
 }

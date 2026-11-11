@@ -780,13 +780,19 @@ pub fn fortress_query(
                 .state
                 .snapshot()
                 .ok_or_else(|| error(ErrorCode::InternalInvariantViolation, "snapshot missing"))?;
-            semantic_query::execute_with_publisher(snapshot, &narrowed, &input, |mut value| {
-                value["source_stale"] = json!(session.source.poisoned());
-                if let Some(refresh) = refreshed {
-                    value["observation_refresh"] = refresh;
-                }
-                finish_query(&view, value)
-            })
+            semantic_query::execute_with_publisher_budget(
+                snapshot,
+                &context,
+                &input,
+                narrowed.budget.max_bytes,
+                |mut value| {
+                    value["source_stale"] = json!(session.source.poisoned());
+                    if let Some(refresh) = refreshed {
+                        value["observation_refresh"] = refresh;
+                    }
+                    finish_query(&view, value)
+                },
+            )
         },
     )
 }

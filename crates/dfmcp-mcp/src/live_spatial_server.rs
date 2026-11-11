@@ -773,13 +773,19 @@ pub fn fortress_query(
                     "spatial snapshot absent",
                 )
             })?;
-            semantic_query::execute_with_publisher(snapshot, &narrowed, &input, |mut v| {
-                v["source_stale"] = json!(s.source.poisoned());
-                if let Some(r) = refresh {
-                    v["observation_refresh"] = r;
-                }
-                finish(&view, v)
-            })
+            semantic_query::execute_with_publisher_budget(
+                snapshot,
+                &c,
+                &input,
+                narrowed.budget.max_bytes,
+                |mut v| {
+                    v["source_stale"] = json!(s.source.poisoned());
+                    if let Some(r) = refresh {
+                        v["observation_refresh"] = r;
+                    }
+                    finish(&view, v)
+                },
+            )
         },
     )
 }

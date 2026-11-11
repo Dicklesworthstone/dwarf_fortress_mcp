@@ -636,13 +636,19 @@ pub fn fortress_query(
                     "map snapshot missing",
                 )
             })?;
-            semantic_query::execute_with_publisher(snapshot, &narrowed, &input, |mut r| {
-                r["source_stale"] = json!(s.source.poisoned());
-                if let Some(refresh) = refresh {
-                    r["observation_refresh"] = refresh;
-                }
-                finish(&v, r)
-            })
+            semantic_query::execute_with_publisher_budget(
+                snapshot,
+                &c,
+                &input,
+                narrowed.budget.max_bytes,
+                |mut r| {
+                    r["source_stale"] = json!(s.source.poisoned());
+                    if let Some(refresh) = refresh {
+                        r["observation_refresh"] = refresh;
+                    }
+                    finish(&v, r)
+                },
+            )
         },
     )
 }

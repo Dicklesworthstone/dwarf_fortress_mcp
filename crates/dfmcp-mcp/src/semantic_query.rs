@@ -362,6 +362,7 @@ where
 }
 
 /// No watch/baseline mutation is visible before the full response is accepted.
+#[cfg(test)]
 pub fn execute_with_publisher<F>(
     snapshot: &WorldSnapshot,
     context: &OperationContext,
@@ -371,16 +372,35 @@ pub fn execute_with_publisher<F>(
 where
     F: FnOnce(Value) -> Result<String>,
 {
+    execute_with_publisher_budget(snapshot, context, input, context.budget.max_bytes, publish)
+}
+
+/// The enclosing live runtime reserves its complete Agent Turn in output_bytes.
+/// Keep the original source allowance for stateless source-admitting executors;
+/// presentation reservations cannot redefine how much world they may inspect.
+/// Stateful lifecycle operations retain their existing atomic output context.
+pub fn execute_with_publisher_budget<F>(
+    snapshot: &WorldSnapshot,
+    context: &OperationContext,
+    input: &Value,
+    output_bytes: u64,
+    publish: F,
+) -> Result<String>
+where
+    F: FnOnce(Value) -> Result<String>,
+{
+    let mut output_context = context.clone();
+    output_context.budget.max_bytes = context.budget.max_bytes.min(output_bytes);
     match input
         .get("query")
         .and_then(|query| query.get("kind"))
         .and_then(Value::as_str)
     {
         Some("watch" | "poll_watch" | "watches" | "cancel_watch" | "release_watch") => {
-            query_watch::execute(snapshot, context, input, publish)
+            query_watch::execute(snapshot, &output_context, input, publish)
         }
         Some(kind @ ("entities" | "spatial_entities" | "related_entities" | "ranked_entities")) => {
-            let narrowed = result_context(context)?;
+            let narrowed = result_context(&output_context)?;
             let execute_page = match kind {
                 "entities" => core_query::execute_with_output_budget,
                 "spatial_entities" => spatial_entity_query::execute_with_output_budget,
@@ -388,17 +408,42 @@ where
                 _ => ranked_entity_query::execute_with_output_budget,
             };
             let value = execute_page(snapshot, context, input, narrowed.budget.max_bytes)?;
-            publish_with_active_work(context, value, publish)
+            publish_with_active_work(&output_context, value, publish)
+        }
+        Some("aggregate" | "search") => {
+            let narrowed = result_context(&output_context)?;
+            let value = operational_query::execute_with_output_budget(
+                snapshot,
+                context,
+                input,
+                narrowed.budget.max_bytes,
+            )?;
+            publish_with_active_work(&output_context, value, publish)
+        }
+        Some("events") => {
+            let narrowed = result_context(&output_context)?;
+            let value = event_query::execute_with_page_budget(
+                snapshot,
+                context,
+                input,
+                narrowed.budget.max_bytes,
+                &|_| Ok(true),
+            )?;
+            publish_with_active_work(&output_context, value, publish)
         }
         Some("capture" | "changes" | "baselines" | "release_baseline") => {
-            let narrowed = result_context(context)?;
+            let narrowed = result_context(&output_context)?;
             query_history::execute(snapshot, &narrowed, input, |value| {
-                publish_with_active_work(context, value, publish)
+                publish_with_active_work(&output_context, value, publish)
             })
         }
         _ => {
-            let narrowed = result_context(context)?;
-            publish_with_active_work(context, execute(snapshot, &narrowed, input)?, publish)
+            let narrowed = result_context(&output_context)?;
+            publish_with_active_work(
+                &output_context,
+                execute(snapshot, &narrowed, input)?,
+                publish,
+            )
         }
     }
 }

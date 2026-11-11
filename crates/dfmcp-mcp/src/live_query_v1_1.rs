@@ -182,18 +182,13 @@ pub(super) fn query(
                         "announcement event query lost its published source capsule",
                     )
                 })?;
-                return published_announcement_events(
-                    projection,
-                    capsule,
-                    &context,
-                    &input,
-                    &view,
-                );
+                return published_announcement_events(projection, capsule, &context, &input, &view);
             }
-            return semantic_query::execute_with_publisher(
+            return semantic_query::execute_with_publisher_budget(
                 &projection.snapshot,
-                &result_context,
+                &context,
                 &input,
+                result_context.budget.max_bytes,
                 |mut result| {
                     add_field_catalogs(&projection.snapshot, &mut result, result_bytes)?;
                     result["mode"] = json!("structured");

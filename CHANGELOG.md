@@ -1,5 +1,30 @@
 # Changelog
 
+## Unreleased — Preserve full query sources through bounded live responses
+
+Shared structured queries now carry independent source and response allowances
+through the protocol-1.1, jobs, operations, map and spatial live handlers.
+Previously each handler replaced the authorized source-byte limit with the
+space left after its Agent Turn. Compound aggregates and projected entity
+queries could therefore reject a small count or page solely because the
+already-published source was larger than the answer.
+
+The shared publisher preserves the original source context for entity,
+spatial, relationship, ranked, aggregate, search and event executors and applies
+the enclosing response reservation separately. Active-watch metadata remains
+reserved and included. Source/record limits, current grants, cancellation,
+whole-row continuations and atomic aggregate publication are unchanged;
+output reservations cannot expand either allowance. Stateful watch and
+baseline lifecycle operations retain their existing atomic output context.
+
+Regression sources exercise large unselected input with compact compound
+counts and pages, continuation identity, active-watch evidence and source,
+record, output, authority and cancellation refusal before publication.
+Independent source review found no authority or publication-boundary widening.
+Executable validation is in progress; no full workspace, native-game,
+latest-nightly qualification or compatibility admission is established.
+Owning bead df-lab-structured-query-f7q remains in progress.
+
 ## Unreleased — Wait for a retained laboratory condition
 
 - Add optional watch_id to the existing fortress_wait tool, preserving plain and

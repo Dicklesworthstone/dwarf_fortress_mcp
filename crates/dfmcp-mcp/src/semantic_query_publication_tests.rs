@@ -268,3 +268,150 @@ fn projected_entity_pages_reserve_active_work_without_narrowing_source_admission
     release_session_resources(context.session_id, true, |value| Ok(value.to_string()))?;
     Ok(())
 }
+
+fn compound_aggregates() -> Vec<Value> {
+    let relation = json!({"edge_kinds":["assigned_to"],"target_kinds":["building"]});
+    let spatial = json!({"region":{"min":[0,0,0],"max":[10,0,0]},
+        "geometry":{"kind":"point","field":"position"}});
+    [
+        json!({"kind":"aggregate","kinds":["unit"],"relation":relation}),
+        json!({"kind":"aggregate","kinds":["unit"],"spatial":spatial}),
+        json!({"kind":"aggregate","kinds":["unit"],"relation":relation,"spatial":spatial}),
+    ]
+    .into_iter()
+    .map(|query| json!({"schema":"dfmcp.query/1","query":query}))
+    .collect()
+}
+
+#[test]
+fn compound_counts_publish_under_default_output_without_shrinking_source_authority() -> TestResult {
+    let (snapshot, context) = fixture();
+    assert!(snapshot.canonical_bytes().len() > 65_536);
+    for input in compound_aggregates() {
+        let page = publish(&snapshot, &context, &input)?;
+        assert_eq!(page["matched"], 5);
+        assert_eq!(page["selection"]["matched"], 5);
+        assert!(
+            page["source_cost"]["bounded_bytes"]
+                .as_u64()
+                .ok_or("source bytes")?
+                > 8192
+        );
+        assert_eq!(page["coverage"]["absence_proven"], false);
+    }
+    Ok(())
+}
+
+#[test]
+fn enclosing_response_reservation_keeps_the_original_source_for_every_projected_family()
+-> TestResult {
+    let (snapshot, context) = fixture();
+    let mut inputs = requests().to_vec();
+    inputs.extend(compound_aggregates());
+    inputs.push(json!({"schema":"dfmcp.query/1","query":{"kind":"entities",
+        "kinds":["unit"],"fields":["rank"],"limit":1}}));
+    inputs.push(json!({"schema":"dfmcp.query/1","query":{"kind":"search",
+        "kinds":["unit"],"text":"unit","limit":1}}));
+    for mut input in inputs {
+        // This is the allowance remaining after a live runtime reserves its
+        // complete Agent Turn, before the shared publisher reserves watches.
+        let output_bytes = 8192;
+        let expected = execute(&snapshot, &context, &input)?;
+        let raw =
+            execute_with_publisher_budget(&snapshot, &context, &input, output_bytes, |value| {
+                Ok(value.to_string())
+            })?;
+        assert!(raw.len() as u64 <= output_bytes);
+        let first: Value = serde_json::from_str(&raw)?;
+        assert_eq!(first["matched"], 5);
+        assert_eq!(first["query_digest"], expected["query_digest"]);
+        if first["continuation"].is_string() {
+            input["query"]["continuation"] = first["continuation"].clone();
+            let raw = execute_with_publisher_budget(
+                &snapshot,
+                &context,
+                &input,
+                output_bytes,
+                |value| Ok(value.to_string()),
+            )?;
+            let second: Value = serde_json::from_str(&raw)?;
+            assert_eq!(second["rows"][0]["entity_id"], "2");
+            assert_eq!(second["query_digest"], first["query_digest"]);
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn compound_output_reserves_active_watches_and_retains_their_exact_evidence() -> TestResult {
+    let (snapshot, context) = fixture();
+    let watch = publish(
+        &snapshot,
+        &context,
+        &json!({"schema":"dfmcp.query/1","query":{
+        "kind":"watch","key":"compound-count-watch","condition":{"op":"paused","value":false},
+        "deadline_tick":100}}),
+    )?;
+    for input in compound_aggregates() {
+        let raw = execute_with_publisher_budget(&snapshot, &context, &input, 8192, |value| {
+            Ok(value.to_string())
+        })?;
+        assert!(raw.len() <= 8192);
+        let page: Value = serde_json::from_str(&raw)?;
+        assert_eq!(page["matched"], 5);
+        assert_eq!(
+            page["_condition_watch_work"],
+            watch["_condition_watch_work"]
+        );
+    }
+    release_session_resources(context.session_id, true, |value| Ok(value.to_string()))?;
+    Ok(())
+}
+
+#[test]
+fn independent_output_budget_cannot_expand_sources_grants_or_publish_partial_aggregates()
+-> TestResult {
+    let (snapshot, context) = fixture();
+    for input in compound_aggregates() {
+        let called = Cell::new(false);
+        let publisher = |value: Value| {
+            called.set(true);
+            Ok(value.to_string())
+        };
+        let mut source_limited = context.clone();
+        source_limited.budget.max_bytes = 8192;
+        assert!(
+            matches!(execute_with_publisher_budget(&snapshot, &source_limited, &input,
+            u64::MAX, publisher), Err(error) if error.code == ErrorCode::BudgetExceeded)
+        );
+        assert!(!called.get());
+        let mut record_limited = context.clone();
+        record_limited.budget.max_entities = 1;
+        assert!(
+            matches!(execute_with_publisher_budget(&snapshot, &record_limited, &input,
+            u64::MAX, publisher), Err(error) if error.code == ErrorCode::BudgetExceeded)
+        );
+        assert!(!called.get());
+        for output_bytes in [0, 1, 128] {
+            assert!(
+                matches!(execute_with_publisher_budget(&snapshot, &context, &input,
+                output_bytes, publisher), Err(error) if error.code == ErrorCode::BudgetExceeded)
+            );
+            assert!(!called.get());
+        }
+        let mut expired = context.clone();
+        expired.grants[0].expires_at_tick = Some(GameTick(9));
+        assert!(
+            matches!(execute_with_publisher_budget(&snapshot, &expired, &input,
+            u64::MAX, publisher), Err(error) if error.code == ErrorCode::CapabilityDenied)
+        );
+        assert!(!called.get());
+        let mut cancelled = context.clone();
+        cancelled.cancellation_requested = true;
+        assert!(
+            execute_with_publisher_budget(&snapshot, &cancelled, &input, 8192, publisher).is_err()
+        );
+        assert!(!called.get());
+    }
+    Ok(())
+}
