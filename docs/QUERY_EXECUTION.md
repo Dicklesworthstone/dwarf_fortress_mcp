@@ -16,6 +16,8 @@ A compact count or page can inspect a larger admitted source without requesting
 that source-sized output. The source and response each remain subject to their
 own existing limits; passing a larger response allowance cannot expand source
 bytes, record count, grants, cancellation or token authority.
+Zero remaining response bytes are a budget refusal checked after current source
+authority and before any publication callback.
 
 Compound aggregates still refuse an incomplete total. Paged queries retain
 whole rows and unchanged source/session/selection continuations. Retained

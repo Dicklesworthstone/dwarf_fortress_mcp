@@ -413,6 +413,82 @@ fn allocation_pages_keep_current_watch_and_fit_8192_bytes() -> Result<()> {
     );
     Ok(())
 }
+
+#[test]
+fn structured_pages_and_aggregate_keep_source_allowance_at_small_output_budget() -> Result<()> {
+    let _serial = crate::test_serial();
+    let s = register(2048, vec![Capability::Query, Capability::Observe])?;
+    stock(&s, 40)?;
+    let mut query = json!({"kind":"entities","kinds":["item"],
+        "fields":["stack_size"],"limit":1});
+    let mut first_anchor = Value::Null;
+    for native_id in [100, 101] {
+        let raw = fortress_query(
+            s.handle(),
+            None,
+            Some(json!({"schema":"dfmcp.query/1","query":query.clone()})),
+        );
+        assert!(raw.len() <= 8192);
+        let page = decode(&raw)?;
+        assert_eq!(page["ok"], true, "{raw}");
+        assert_eq!(page["matched"], 40);
+        assert_eq!(page["returned"], 1);
+        assert_eq!(
+            page["rows"][0]["entity_id"],
+            item_entity_id(native_id).to_string()
+        );
+        assert!(page["continuation"].is_string());
+        assert_eq!(page["agent_turn"]["anchor"], page["anchor"]);
+        assert_eq!(
+            page["agent_turn"]["coverage"]["continuation"],
+            page["continuation"]
+        );
+        if native_id == 100 {
+            first_anchor = page["anchor"].clone();
+        } else {
+            assert_eq!(page["anchor"], first_anchor);
+        }
+        query["continuation"] = page["continuation"].clone();
+    }
+
+    let point = fixture()?.operations().items[2].raw_position;
+    let coordinates = [point.x, point.y, point.z];
+    let aggregate = json!({"kind":"aggregate","kinds":["item"],
+        "spatial":{"region":{"min":coordinates,"max":coordinates},
+        "geometry":{"kind":"point","field":"raw_position"}}});
+    let raw = fortress_query(
+        s.handle(),
+        None,
+        Some(json!({"schema":"dfmcp.query/1","query":aggregate.clone()})),
+    );
+    assert!(raw.len() <= 8192);
+    let summary = decode(&raw)?;
+    assert_eq!(summary["ok"], true, "{raw}");
+    assert_eq!(summary["matched"], 40);
+    assert_eq!(summary["selection"]["matched"], 40);
+    assert_eq!(summary["selection"]["spatial_matched"], 40);
+    assert_eq!(summary["groups"][0]["count"], 40);
+    assert_eq!(summary["anchor"], first_anchor);
+    assert_eq!(summary["agent_turn"]["anchor"], first_anchor);
+    assert_eq!(summary["coverage"]["absence_proven"], false);
+    assert!(
+        summary["source_cost"]["bounded_bytes"]
+            .as_u64()
+            .is_some_and(|bytes| bytes > 8192)
+    );
+
+    // The larger source remains authorized independently of its compact response.
+    // Reducing that actual authorization must still refuse the complete source.
+    let handle = resolve(s.handle())?;
+    lock(&handle)?.budget.max_bytes = 8192;
+    let refused = ask(&s, aggregate)?;
+    assert_eq!(refused["ok"], false);
+    assert_eq!(refused["error"]["code"], "budget_exceeded");
+    assert!(refused.get("groups").is_none());
+    assert_eq!(s.calls.load(Ordering::SeqCst), 0);
+    Ok(())
+}
+
 #[test]
 fn continuation_binds_current_capture_session_and_origin() -> Result<()> {
     let _serial = crate::test_serial();

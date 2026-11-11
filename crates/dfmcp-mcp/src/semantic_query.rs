@@ -389,6 +389,13 @@ pub fn execute_with_publisher_budget<F>(
 where
     F: FnOnce(Value) -> Result<String>,
 {
+    context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
+    if output_bytes == 0 {
+        return Err(DfmcpError::new(
+            ErrorCode::BudgetExceeded,
+            "query presentation leaves no output byte allowance",
+        ));
+    }
     let mut output_context = context.clone();
     output_context.budget.max_bytes = context.budget.max_bytes.min(output_bytes);
     match input

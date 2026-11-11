@@ -21,9 +21,21 @@ Regression sources exercise large unselected input with compact compound
 counts and pages, continuation identity, active-watch evidence and source,
 record, output, authority and cancellation refusal before publication.
 Independent source review found no authority or publication-boundary widening.
-Executable validation is in progress; no full workspace, native-game,
-latest-nightly qualification or compatibility admission is established.
-Owning bead df-lab-structured-query-f7q remains in progress.
+A zero remaining response allowance now returns `budget_exceeded` after current
+authority validation and before any publication callback.
+
+Validation passed 116/116 original-source query component tests, including two
+direct source/output regressions, and 8/8 actual shared-publisher regressions.
+The query run preserved all 76 recorded inputs; all 11 external versions,
+sources and archive checksums match the unchanged repository lock. The publisher
+assembly uses the actual semantic crates and function bodies while excluding
+transport registration, an installed Task service and unrelated test modules.
+Both runs used rustc 1.100.0-nightly (f7d782a3b, 2026-08-19). A real spatial-handler
+regression adds forty-record paging/counting and source-limit refusal under an
+8 KiB response limit; its execution is still pending. These focused results do
+not establish full current-head workspace, native-game, latest-nightly release
+qualification or compatibility admission. Owning bead df-lab-structured-query-f7q
+remains in progress.
 
 ## Unreleased — Wait for a retained laboratory condition
 
