@@ -1,5 +1,49 @@
 # Implementation Status
 
+## Unreleased — Wait for one exact original project outcome
+
+The laboratory fortress_wait tool now accepts an optional original plan_digest.
+It progresses the ordinary shared foreground world and returns when the selected
+original goal, verified actions and quiet physical work establish completion,
+or when a stage, failure or unknown outcome requires attention. Selecting an
+older commit does not change the latest-action identity, replace pending work,
+cancel peers or follow descendants. Resource-backed room/output goals remain
+separate from harvest-stage proof; eligible continuations are returned for
+separate review and commit.
+
+Original reserve evidence is sampled at its immutable absolute tick. The first
+exact observation and bounded snapshot remain with the original in-process
+owner across bounded waits; later stock cannot repair a missed or failed
+endpoint. Restore clears this non-durable read cache. Complete commit custody,
+current Observe/Query authority, per-effect permissions, source limits and one
+request-wide deadline guard the same publish-before-progress loop. Replay
+records the selector, legacy waiting stays unchanged, and fitting output tiers
+retain selected outcome together with actual elapsed work.
+
+Validation before the executor outage: all 100 enabled actual-source component
+tests completed successfully (the test command returned exit 0). They include
+six selected-owner/room/reserve/authority tests, four executable public-facade
+tests, shared-deadline protection, existing foreground/replay/golden/output
+regressions, and all three deferred-pause forecast regressions. The component
+links the complete unchanged original core/world/intent/adapter/lab crates;
+all eleven external package versions and checksums match the repository lock.
+It omits transport macros/registration and an installed Task service, uses the
+actual no-service discovery branches, and does not execute the new generated
+wire-definition test. The original workspace separately passed 529 tests:
+28 core, 252 intent, 141 world and 108 lab.
+
+The full MCP build was SIGKILLed in unchanged Asupersync before project MCP
+compilation. scripts/verify.sh passed preceding contract groups, including
+5,140 repository checks and the eleven-tool contract, then stopped because br
+is unavailable. Native admission, full transport and release qualification are
+not established. After successful component execution the executor disconnected;
+remaining edits were recovered from recorded patches and reviewed as GitHub
+blobs. Replay, output-budget and foreground-owner blobs match recorded Git
+hash prefixes; complete byte identity to all lost formatted/tested files is
+not established, and the recovered commit could not be rebuilt or reformatted.
+Owning bead df-lab-selected-plan-wait-s4q remains in progress for that validation.
+See docs/LAB_SELECTED_PLAN_WAIT.md and its versioned architecture contract.
+
 ## Unreleased — Stop forecasts at their own deferred pause frontier
 
 The forecast loop now checks the simulated fortress pause state after every
@@ -16,8 +60,9 @@ Three regression tests use the real planner and MemoryAdapter and compare the
 result with ForegroundProgress, including bounded comparison/reserve costs.
 Independent source review and nightly formatting pass. The locked workspace's
 421 core/world/intent unit tests pass (28/252/141); these do not execute the MCP
-forecast module. Its new tests are pending the full MCP dependency build, and
-no transport, native admission or release qualification is inferred. Owning
+forecast module. Its three new tests subsequently passed in the 100-test actual-source
+component described above; no transport, native admission or release
+qualification is inferred. Owning
 bead df-lab-plan-comparison-c9r remains in progress.
 
 ## Unreleased — Forecast complete original production and room projects

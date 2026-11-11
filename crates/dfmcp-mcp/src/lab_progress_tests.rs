@@ -124,6 +124,27 @@ fn run(
     Ok(progress)
 }
 
+#[test]
+fn selected_source_admission_does_not_restart_the_effect_deadline() -> Result<()> {
+    let adapter = new_adapter()?;
+    let ctx = context(&adapter);
+    let expired = Instant::now() - std::time::Duration::from_millis(ctx.budget.max_wall_millis + 1);
+    let error = match ForegroundProgress::new_with_start(&adapter, 2_000, &ctx, expired) {
+        Ok(_) => {
+            return Err(refusal(
+                ErrorCode::InternalInvariantViolation,
+                "expired selected wait was admitted",
+            ));
+        }
+        Err(error) => error,
+    };
+    assert_eq!(error.code, ErrorCode::BudgetExceeded);
+    assert_eq!(adapter.snapshot().anchor(), ctx.anchor);
+    // An ordinary independent wait still begins its own bounded operation.
+    assert!(ForegroundProgress::new(&adapter, 2_000, &ctx).is_ok());
+    Ok(())
+}
+
 const WORKSHOP_PLAN: &str = r#"[
   {"action":{"kind":"designate_dig","min":[0,3,10],"max":[4,5,10],"mode":"mine"}},
   {"action":{"kind":"build","building":"workshop:Still","location":[2,4,10],"min":[1,3,10],"max":[3,5,10]},"depends_on":[0]},

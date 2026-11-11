@@ -560,6 +560,15 @@ progress and is reported as `durability_pending`. Each polled action carries
 its immutable proof `observed_anchor` separately from current physical work.
 See `docs/LAB_FOREGROUND_PROGRESS.md` for the bounded implementation and evidence.
 
+The laboratory tool also accepts an optional `plan_digest` selecting one exact
+original commit owned by the session. It returns early when that original goal,
+verified actions and quiet physical work agree, or when a stage, failure or
+unknown outcome needs attention. Other retained work progresses during the same
+shared time; selection does not follow descendants or dispatch a continuation.
+`selected_plan_wait` separates original goal truth, stage proof, physical work
+and exact reserve evidence. The optional selector is recorded in replay, and
+omitting it preserves duration-based waiting. See `docs/LAB_SELECTED_PLAN_WAIT.md`.
+
 ### `fortress.cancel`
 
 Starts or advances request/drain/compensate/finalize. It never means “delete the record.” Active

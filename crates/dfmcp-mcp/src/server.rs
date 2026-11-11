@@ -177,6 +177,9 @@ mod plan_comparison_response;
 #[path = "lab_progress.rs"]
 mod lab_progress;
 
+#[path = "selected_plan_wait.rs"]
+mod selected_plan_wait;
+
 #[path = "civilian_recovery.rs"]
 mod civilian_recovery;
 
@@ -5574,6 +5577,7 @@ fn wait_progress_error(
     error: &DfmcpError,
     progress: &lab_progress::ForegroundProgress,
     receipts: &BTreeMap<ActionId, dfmcp_adapter::ActionReceipt>,
+    selected: Option<&selected_plan_wait::SelectedPlanWait>,
 ) -> String {
     let advanced = progress.advanced_game_ticks();
     let requested = advanced + progress.remaining_game_ticks();
@@ -5626,6 +5630,13 @@ fn wait_progress_error(
                 payload["commit_state"] = json!(format!("{:?}", receipt.state));
             }
         }
+        if authorize_entry(&ctx, Capability::Query, RiskTier::ReadOnly).is_ok()
+            && let Some(selected) = selected
+        {
+            payload["selected_plan_wait"] = selected.projection(session, false);
+            // A partial error never certifies a complete selected outcome. Its
+            // last sampled goal anchor stays distinct from the current world.
+        }
     }
     payload.to_string()
 }
@@ -5654,6 +5665,29 @@ fn carried_wait_ceiling(session: &LabSession) -> Option<u64> {
 /// Let authorized laboratory time pass in bounded slices, observing all owned
 /// work in dependency order and publishing each frontier before continuing.
 pub(crate) fn wait_with_ticks(session_id: Option<String>, max_game_ticks: Option<u64>) -> String {
+    wait_with_selection(session_id, max_game_ticks, None)
+}
+
+/// Progress the same owned work, stopping at one exact original plan's goal,
+/// proof and physical-work outcome instead of spending the whole tick cap.
+pub(crate) fn wait_for_plan(
+    session_id: Option<String>,
+    max_game_ticks: Option<u64>,
+    plan_digest: String,
+) -> String {
+    let digest = match selected_plan_wait::parse_digest(&plan_digest) {
+        Ok(digest) => digest,
+        Err(error) => return dfmcp_error_payload("fortress.wait", &error),
+    };
+    wait_with_selection(session_id, max_game_ticks, Some(digest))
+}
+
+fn wait_with_selection(
+    session_id: Option<String>,
+    max_game_ticks: Option<u64>,
+    selected_digest: Option<Digest32>,
+) -> String {
+    let started = std::time::Instant::now();
     let session = match resolve_session(session_id) {
         Ok(value) => value,
         Err(error) => return dfmcp_error_payload("fortress.wait", &error),
@@ -5699,11 +5733,24 @@ pub(crate) fn wait_with_ticks(session_id: Option<String>, max_game_ticks: Option
             if let Err(error) = authorize_wait_advance(&entry_ctx, requested_ticks, paused) {
                 return dfmcp_error_payload("fortress.wait", &error);
             }
-            let mut progress = match lab_progress::ForegroundProgress::new(
-                &guard.adapter,
-                requested_ticks,
-                &entry_ctx,
-            ) {
+            let mut selected = match selected_digest
+                .map(|digest| selected_plan_wait::SelectedPlanWait::new(guard, digest, started))
+                .transpose()
+            {
+                Ok(selected) => selected,
+                Err(error) => return dfmcp_error_payload("fortress.wait", &error),
+            };
+            let admitted_progress = if selected.is_some() {
+                lab_progress::ForegroundProgress::new_with_start(
+                    &guard.adapter,
+                    requested_ticks,
+                    &entry_ctx,
+                    started,
+                )
+            } else {
+                lab_progress::ForegroundProgress::new(&guard.adapter, requested_ticks, &entry_ctx)
+            };
+            let mut progress = match admitted_progress {
                 Ok(progress) => progress,
                 Err(error) => return dfmcp_error_payload("fortress.wait", &error),
             };
@@ -5716,20 +5763,37 @@ pub(crate) fn wait_with_ticks(session_id: Option<String>, max_game_ticks: Option
             let mut advanced = 0;
             let mut rounds = 0u64;
             loop {
+                if let Some(selected) = &selected {
+                    if let Err(error) = selected.check(guard) {
+                        return wait_progress_error(
+                            guard,
+                            &error,
+                            &progress,
+                            &latest_receipts,
+                            Some(selected),
+                        );
+                    }
+                    if selected.stopped() {
+                        break;
+                    }
+                }
                 let (_, ctx) = match next_context(guard) {
                     Ok(value) => value,
                     Err(error) => {
-                        return wait_progress_error(guard, &error, &progress, &latest_receipts);
+                        return wait_progress_error(guard, &error, &progress, &latest_receipts, selected.as_ref());
                     }
                 };
                 let carried_ceiling = carried_wait_ceiling(guard);
+                let ceiling = selected.as_ref().map_or(carried_ceiling, |selected| {
+                    selected.ceiling(guard.adapter.snapshot().tick.0, carried_ceiling)
+                });
                 let tracked = guard.open_actions.clone();
-                let slice = match progress.step(&mut guard.adapter, &tracked, &ctx, carried_ceiling)
+                let slice = match progress.step(&mut guard.adapter, &tracked, &ctx, ceiling)
                 {
                     Ok(Some(slice)) => slice,
                     Ok(None) => break,
                     Err(error) => {
-                        return wait_progress_error(guard, &error, &progress, &latest_receipts);
+                        return wait_progress_error(guard, &error, &progress, &latest_receipts, selected.as_ref());
                     }
                 };
                 advanced = progress.advanced_game_ticks();
@@ -5748,7 +5812,7 @@ pub(crate) fn wait_with_ticks(session_id: Option<String>, max_game_ticks: Option
                 }
                 guard.open_actions = still_open;
                 if let Err(error) = observe_carried(guard) {
-                    return wait_progress_error(guard, &error, &progress, &latest_receipts);
+                    return wait_progress_error(guard, &error, &progress, &latest_receipts, selected.as_ref());
                 }
                 persist_durable_head(guard);
                 if let Some(fault) = &guard.durability_fault {
@@ -5758,9 +5822,20 @@ pub(crate) fn wait_with_ticks(session_id: Option<String>, max_game_ticks: Option
                             "wait stopped at an unpublished durable frontier ({fault}); further progress requires successful persistence"
                         ),
                     );
-                    return wait_progress_error(guard, &error, &progress, &latest_receipts);
+                    return wait_progress_error(guard, &error, &progress, &latest_receipts, selected.as_ref());
                 }
                 remember_version(guard);
+                if let Some(selected) = &mut selected
+                    && let Err(error) = selected.inspect(guard)
+                {
+                    return wait_progress_error(
+                        guard,
+                        &error,
+                        &progress,
+                        &latest_receipts,
+                        Some(selected),
+                    );
+                }
                 if finished {
                     break;
                 }
@@ -5789,7 +5864,7 @@ pub(crate) fn wait_with_ticks(session_id: Option<String>, max_game_ticks: Option
             {
                 Ok(task) => task,
                 Err(error) => {
-                    return wait_progress_error(guard, &error, &progress, &latest_receipts);
+                    return wait_progress_error(guard, &error, &progress, &latest_receipts, selected.as_ref());
                 }
             };
             let snapshot = guard.adapter.snapshot();
@@ -5830,6 +5905,10 @@ pub(crate) fn wait_with_ticks(session_id: Option<String>, max_game_ticks: Option
             payload["wait_progress"]["action_polls"] = json!(progress.polls());
             payload["wait_progress"]["deferred_actions_dispatched"] =
                 json!(progress.dispatched_actions());
+            if let Some(selected) = &mut selected {
+                selected.finish(snapshot.paused);
+                payload["selected_plan_wait"] = selected.projection(guard, true);
+            }
             if max_game_ticks.is_some() {
                 payload["advanced_game_ticks"] = json!(advanced);
                 payload["game_tick"] = json!(snapshot.tick.0);
@@ -5852,6 +5931,17 @@ pub(crate) fn wait_with_ticks(session_id: Option<String>, max_game_ticks: Option
                         "the fortress is paused, so no work progresses; commit an unpause plan to let time pass"
                     );
                 }
+            }
+            if let Some(selected) = &selected
+                && let Err(error) = selected.check(guard)
+            {
+                return wait_progress_error(
+                    guard,
+                    &error,
+                    &progress,
+                    &latest_receipts,
+                    Some(selected),
+                );
             }
             payload.to_string()
         },

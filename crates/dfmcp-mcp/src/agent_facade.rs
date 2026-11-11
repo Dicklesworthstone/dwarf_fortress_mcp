@@ -896,6 +896,9 @@ fn routine_recommendations(
     payload: &Value,
     state: &SessionOrientation,
 ) -> Vec<Value> {
+    if ok && let Some(steps) = selected_wait_recommendations(payload, state) {
+        return steps;
+    }
     if let Some(next) =
         resource_replan_step(payload).or_else(|| ok.then(|| state.resource_review_step()).flatten())
     {
@@ -1070,6 +1073,65 @@ fn routine_recommendations(
         )];
     }
     Vec::new()
+}
+
+/// The most recently committed action can belong to a different project.
+/// Guidance for a targeted wait must follow the selected original outcome.
+fn selected_wait_recommendations(
+    payload: &Value,
+    state: &SessionOrientation,
+) -> Option<Vec<Value>> {
+    let selected = payload.get("selected_plan_wait")?.as_object()?;
+    let digest = selected.get("requested_plan_digest")?.as_str()?;
+    let reason = selected.get("stop_reason")?.as_str()?;
+    if reason == "complete" {
+        return Some(Vec::new());
+    }
+    let (id, tool, why, arguments) = match reason {
+        "needs_continuation"
+            if selected
+                .get("continuation_request")
+                .and_then(|next| next.get("arguments"))
+                .is_some_and(Value::is_object) =>
+        {
+            let arguments = selected["continuation_request"]["arguments"].clone();
+            (
+                "review-selected-goal-continuation",
+                "fortress.plan",
+                "the selected stage is quiet but the original project needs a separately reviewed continuation",
+                arguments,
+            )
+        }
+        "tick_limit" if state.paused == Some(false) && has_grant(state, "control_clock") => (
+            "continue-selected-plan-wait",
+            "fortress.wait",
+            "the selected original plan remains unfinished at this call's bounded time limit",
+            json!({"plan_digest":digest, "max_game_ticks":wait_ticks(state)}),
+        ),
+        "paused" if has_grant(state, "plan") && has_grant(state, "control_clock") => (
+            "review-resume-for-selected-plan",
+            "fortress.plan",
+            "the selected original work cannot progress while the shared fortress is paused",
+            json!({"paused_target":false, "summary":"resume to progress the retained original plan"}),
+        ),
+        _ => (
+            "inspect-selected-plan-outcome",
+            "fortress.explain",
+            "inspect the selected original goal, action proof and physical work before deciding how to recover",
+            json!({"entity_id":format!("plan:{digest}")}),
+        ),
+    };
+    Some(vec![recommendation(
+        id,
+        tool,
+        why,
+        "high",
+        "high",
+        "read_only",
+        "not_applicable",
+        false,
+        arguments,
+    )])
 }
 
 /// Observed world changes between the anchor this agent saw last and the
@@ -2162,13 +2224,32 @@ pub fn fortress_commit(session_id: Option<String>, plan_digest: String) -> Strin
     response
 }
 
-#[tool(
-    description = "Progress retained laboratory work in bounded foreground intervals. max_game_ticks caps time advanced while unpaused; each interval observes prerequisites and dispatches authorized ready successors, then persists progress before continuing. Reports actual elapsed and remaining ticks, the final action states and original goals; a pause or failure stops further progression."
-)]
+/// Preserve the original direct Rust API and its untargeted wait semantics.
 pub fn fortress_wait(session_id: Option<String>, max_game_ticks: Option<u64>) -> String {
-    let recorded = json!({"max_game_ticks": max_game_ticks});
+    fortress_wait_for_plan(session_id, max_game_ticks, None)
+}
+
+/// The wire still exposes one fortress_wait tool. The optional original-plan
+/// selector changes when its bounded foreground work returns, not its authority.
+#[tool(
+    name = "fortress_wait",
+    description = "Progress retained laboratory work in bounded foreground intervals. max_game_ticks caps time advanced while unpaused; each interval observes prerequisites and dispatches authorized ready successors, then persists progress before continuing. Optional plan_digest selects one exact original commit owned by this session and returns early when its original goal is achieved with verified actions and quiet physical work, when its current stage needs a separately reviewed continuation, or when failure or unknown evidence requires attention. Selection never follows descendants, cancels work, or authorizes a new plan. Other committed work continues during the same shared world time. Future reserves retain their exact original tick. selected_plan_wait reports original goal truth separately from stage proof, physical work and reserve evidence. Without plan_digest, the existing duration-based wait behavior is unchanged. Reports actual elapsed and remaining ticks; pause and progression errors stop further advancement."
+)]
+pub fn fortress_wait_for_plan(
+    session_id: Option<String>,
+    max_game_ticks: Option<u64>,
+    plan_digest: Option<String>,
+) -> String {
+    let mut recorded = json!({"max_game_ticks": max_game_ticks});
+    if let Some(digest) = &plan_digest {
+        recorded["plan_digest"] = json!(digest);
+    }
+    let raw = match plan_digest {
+        Some(digest) => crate::server::wait_for_plan(session_id.clone(), max_game_ticks, digest),
+        None => crate::server::wait_with_ticks(session_id.clone(), max_game_ticks),
+    };
     let response = project_response(
-        crate::server::wait_with_ticks(session_id.clone(), max_game_ticks),
+        raw,
         "fortress.wait",
         AgentPhase::Verify,
         ObservationProfile::Pulse,
@@ -2177,6 +2258,10 @@ pub fn fortress_wait(session_id: Option<String>, max_game_ticks: Option<u64>) ->
     crate::replay::record("fortress.wait", session_id.as_deref(), recorded, &response);
     response
 }
+
+// Existing Rust integrations keep the registered handler's name as well as
+// the two-argument function. Its definition now includes the optional selector.
+pub use FortressWaitForPlan as FortressWait;
 
 #[tool(
     description = "Request, drain, compensate when authorized, and finalize cancellation while preserving recovery state. mode: compensate_reversible (default) | stop_future_steps | emergency_pause_and_drain. scope: last_action (default), plan (last committed plan), plan:<64-lowercase-original-plan-digest> (one exact commit owned by this session, leaving other plans and descendants alone), oldest_open_plan (earliest retained original plan, for bounded cleanup), or session (all retained open work across this session's plans). Drain dependents first and return a finalize_certificate only when goal states are terminal and physical work is proven quiescent. Failed and Verified receipts remain history; their remaining work can be stopped with separate evidence."
@@ -2698,3 +2783,7 @@ mod threat_corpus_tests;
 #[cfg(test)]
 #[path = "dpor_tests.rs"]
 mod dpor_tests;
+
+#[cfg(test)]
+#[path = "selected_wait_facade_tests.rs"]
+mod selected_wait_facade_tests;

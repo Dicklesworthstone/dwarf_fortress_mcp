@@ -54,6 +54,18 @@ impl ForegroundProgress {
         requested_ticks: u64,
         context: &OperationContext,
     ) -> Result<Self> {
+        Self::new_with_start(adapter, requested_ticks, context, Instant::now())
+    }
+
+    /// A selected wait admits its original source before progression starts.
+    /// Retain that request's clock so every deferred effect and atomic slice
+    /// shares the same wall deadline as the initial source inspection.
+    pub(crate) fn new_with_start(
+        adapter: &MemoryAdapter,
+        requested_ticks: u64,
+        context: &OperationContext,
+        started: Instant,
+    ) -> Result<Self> {
         if context.anchor != adapter.snapshot().anchor() {
             return Err(refusal(
                 ErrorCode::StaleAnchor,
@@ -92,7 +104,7 @@ impl ForegroundProgress {
                 final_context.authorize(Capability::Observe, RiskTier::ReadOnly, &[], None)?;
             }
         }
-        Ok(Self {
+        let progress = Self {
             session_id: context.session_id,
             expected_anchor: context.anchor,
             requested_ticks,
@@ -102,10 +114,12 @@ impl ForegroundProgress {
             dispatches: 0,
             max_actions: context.budget.max_actions,
             max_wall_millis: context.budget.max_wall_millis,
-            started: Instant::now(),
+            started,
             tracked: None,
             finished: false,
-        })
+        };
+        progress.check_deadline(context)?;
+        Ok(progress)
     }
 
     pub(crate) fn advanced_game_ticks(&self) -> u64 {

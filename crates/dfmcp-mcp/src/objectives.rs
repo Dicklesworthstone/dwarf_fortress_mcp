@@ -62,6 +62,10 @@ pub(super) struct Objective {
     retired_never_dispatched: BTreeMap<u32, goal_custody::RetiredNondispatchProof>,
     first_satisfied_anchor: Option<StateAnchor>,
     historical_proof_verified: bool,
+    /// Bounded foreground waits may split after the original reserve tick but
+    /// before action stability settles. Preserve the first exact observation
+    /// with this live original owner; never reconstruct it after recovery.
+    pub(super) selected_wait_reserve_observation: Option<(StateAnchor, PredicateTruth)>,
     restore_abandoned_anchor: Option<StateAnchor>,
     verification_error: Option<String>,
 }
@@ -137,6 +141,53 @@ impl Objective {
 
     pub(super) fn is_resource_aware_room(&self) -> bool {
         self.source.is_resource_aware_room()
+    }
+
+    /// The complete original project can differ from the sealed current stage.
+    /// A foreground wait must not call a harvested input target a finished room
+    /// or production project. Keep the same source/ledger evidence gates as the
+    /// ordinary goal observation and continuation path.
+    pub(super) fn selected_wait_truth(&self, session: &LabSession) -> Result<PredicateTruth> {
+        if self.is_resource_aware_room() {
+            self.current_resource_room_truth(session)
+        } else if self.requires_output_ledger() {
+            self.current_resource_output_truth(session)
+        } else {
+            self.current_truth(session)
+        }
+    }
+
+    pub(super) fn selected_wait_stage_truth(&self, session: &LabSession) -> Result<PredicateTruth> {
+        self.current_truth(session)
+    }
+
+    pub(super) fn selected_wait_can_continue(&self) -> bool {
+        self.source.can_continue()
+    }
+
+    pub(super) fn selected_wait_reserve_horizon(&self) -> Result<Option<u64>> {
+        Ok(self.future_reserve_source()?.and_then(|source| source.reserve_until_tick()))
+    }
+
+    /// The immutable absolute frontier is not an action deadline. Remaining
+    /// demand is only a model estimate; it can request another review but never
+    /// supply evidence of future stock or complete a selected wait.
+    pub(super) fn selected_wait_reserve(
+        &self,
+        session: &LabSession,
+    ) -> Result<Option<(u64, Option<bool>)>> {
+        let Some(source) = self.future_reserve_source()? else {
+            return Ok(None);
+        };
+        let until = source.reserve_until_tick().ok_or_else(|| {
+            DfmcpError::new(ErrorCode::CorruptLedger, "original reserve horizon is missing")
+        })?;
+        let required = match self.future_reserve_status(session, &source)? {
+            ProductionReserveStatus::WorkRequired => Some(true),
+            ProductionReserveStatus::FundedFromCurrentStock => Some(false),
+            ProductionReserveStatus::Expired => None,
+        };
+        Ok(Some((until, required)))
     }
 
     fn current_resource_room_truth(&self, session: &LabSession) -> Result<PredicateTruth> {
@@ -292,6 +343,7 @@ impl Objective {
             retired_never_dispatched: BTreeMap::new(),
             first_satisfied_anchor: None,
             historical_proof_verified: false,
+            selected_wait_reserve_observation: None,
             restore_abandoned_anchor: None,
             verification_error: None,
         }
@@ -1105,6 +1157,7 @@ pub(super) fn stage_objective_abandonment(session: &mut LabSession) {
     for objective in &mut session.objectives {
         objective.original_handles_live = false;
         objective.active_observation_anchor = None;
+        objective.selected_wait_reserve_observation = None;
     }
     session.objective_restore.extend(
         session
@@ -1127,6 +1180,11 @@ pub(super) fn objective_history_roots(session: &LabSession) -> impl Iterator<Ite
                 objective
                     .restore_abandoned_anchor
                     .map(|anchor| anchor.state_hash),
+            )
+            .chain(
+                objective
+                    .selected_wait_reserve_observation
+                    .map(|(anchor, _)| anchor.state_hash),
             )
             .chain(
                 objective
@@ -1159,6 +1217,7 @@ pub(super) fn recover_objective(
         retired_never_dispatched: BTreeMap::new(),
         first_satisfied_anchor: retained.first_satisfied_anchor,
         historical_proof_verified: false,
+        selected_wait_reserve_observation: None,
         restore_abandoned_anchor: retained.restore_abandoned_anchor,
         verification_error: None,
     };

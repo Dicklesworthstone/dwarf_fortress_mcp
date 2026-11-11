@@ -41,6 +41,14 @@ at once: later world changes and goal observations continue in bounded rounds
 while the fortress remains unpaused. A satisfied goal can subsequently become
 false through consumption; both facts remain visible.
 
+A caller can instead provide the optional `plan_digest` to return at the
+meaningful outcome of one exact original commit. The selected wait reuses this
+same foreground owner, shared world time and publication boundary, while
+distinguishing original project truth from stage proof and remaining physical
+work. It may return an eligible continuation for separate review, and preserves
+the exact original reserve frontier. See
+[LAB_SELECTED_PLAN_WAIT.md](LAB_SELECTED_PLAN_WAIT.md).
+
 ## Publish before continuing
 
 A round executes on a laboratory clone and becomes current only after its

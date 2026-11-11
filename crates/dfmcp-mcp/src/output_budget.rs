@@ -512,6 +512,25 @@ fn minimal(payload: &Value) -> Value {
             out.insert(key.to_owned(), value.clone());
         }
     }
+    // A selected wait may already have advanced the shared world. Preserve its
+    // exact stop decision and elapsed work as one unit at every output tier;
+    // falling back to the incidental latest action would change the answer.
+    if payload.get("selected_plan_wait").is_some() {
+        for key in [
+            "selected_plan_wait",
+            "wait_progress",
+            "advanced_game_ticks",
+            "game_tick",
+            "observed_anchor",
+            "paused",
+            "partial_progress",
+            "durability_pending",
+        ] {
+            if let Some(value) = payload.get(key) {
+                out.insert(key.to_owned(), value.clone());
+            }
+        }
+    }
     let turn = &payload["agent_turn"];
     out.insert(
         "agent_turn".to_owned(),

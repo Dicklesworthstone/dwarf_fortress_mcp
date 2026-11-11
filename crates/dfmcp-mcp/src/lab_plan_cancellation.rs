@@ -38,16 +38,16 @@ pub(crate) fn parse_scope(raw: &str) -> Result<Digest32> {
         .ok_or_else(|| DfmcpError::new(ErrorCode::InvalidRequest, "invalid original plan digest"))
 }
 
-struct Selection {
-    requested: Digest32,
-    actual: Digest32,
-    plan_id: String,
-    actions: Vec<ActionId>,
+pub(super) struct Selection {
+    pub(super) requested: Digest32,
+    pub(super) actual: Digest32,
+    pub(super) plan_id: String,
+    pub(super) actions: Vec<ActionId>,
 }
 
 /// Admit the complete original action set before the first effect. In particular,
 /// never certify a truncated client-visible receipt as a complete plan drain.
-fn select(session: &LabSession, requested: Digest32) -> Result<Selection> {
+pub(super) fn select(session: &LabSession, requested: Digest32) -> Result<Selection> {
     session.budget.validate()?;
     let raw = session.commit_receipts.get(&requested.to_hex()).ok_or_else(|| {
         refused("no original commit owned by this session matches the selected digest; pending plans, restored sources and other sessions do not grant cancellation authority")

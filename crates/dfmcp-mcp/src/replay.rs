@@ -220,9 +220,11 @@ fn invoke(tool: &str, session: Option<String>, args: &Value) -> Result<String, S
             Some(session_or(tool)?),
             opt_string(args, "plan_digest").unwrap_or_default(),
         ),
-        "fortress.wait" => {
-            f::fortress_wait(Some(session_or(tool)?), opt_u64(args, "max_game_ticks"))
-        }
+        "fortress.wait" => f::fortress_wait_for_plan(
+            Some(session_or(tool)?),
+            opt_u64(args, "max_game_ticks"),
+            opt_string(args, "plan_digest"),
+        ),
         "fortress.cancel" => f::fortress_cancel(
             Some(session_or(tool)?),
             opt_string(args, "mode"),

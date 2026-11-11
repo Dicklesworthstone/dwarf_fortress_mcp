@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased — Wait for a selected original laboratory plan
+
+- Add optional plan_digest to the existing fortress_wait tool, preserving its
+  name, legacy Rust API and ordinary duration-based behavior when omitted.
+- Stop at original project completion or an actionable incomplete outcome;
+  keep stage proof, physical work and exact reserve evidence distinct.
+- Preserve older-plan custody, peer work, current authority, one shared deadline,
+  cross-call exact reserve snapshots, replay and bounded response evidence.
+- Complete 100 actual-source component tests and 529 original internal-crate
+  tests before executor loss. Recover and independently review remaining edits
+  through GitHub; final recovered bytes could not be rebuilt. Full MCP transport,
+  generated wire-definition execution and release qualification remain open.
+
 ## Unreleased — Respect deferred pauses in plan forecasts
 
 - Stop forecast game time when a deferred action pauses the fortress, matching
@@ -8,7 +21,8 @@
   exact reserve observations; later reserve evidence stays unavailable while paused.
 - Add three real planner/adapter regressions, including direct foreground parity.
   Formatting and source review pass. The 421 core/world/intent tests pass on the
-  current locked workspace; new MCP regressions await the full dependency build.
+  current locked workspace. All three new forecast regressions subsequently pass
+  in the 100-test actual-source component described above.
 
 ## Unreleased — Compare complete resource-backed production and room projects
 

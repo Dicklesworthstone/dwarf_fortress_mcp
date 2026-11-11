@@ -1,0 +1,52 @@
+{
+  "schema": "dfmcp.laboratory-selected-plan-wait-contract/1",
+  "owning_bead": "df-lab-selected-plan-wait-s4q",
+  "logical_tool": "fortress.wait",
+  "wire_tool": "fortress_wait",
+  "selector": {
+    "field": "plan_digest",
+    "format": "64 lowercase hexadecimal digits",
+    "optional": true,
+    "omitted_behavior": "existing duration-based wait"
+  },
+  "selection_scope": "exact_original_commit",
+  "descendant_plans_included": false,
+  "required_read_capabilities": [
+    "observe",
+    "query"
+  ],
+  "positive_tick_capability": "control_clock",
+  "response_schema": "dfmcp.selected-plan-wait/1",
+  "completion_requires": [
+    "complete original project currently true",
+    "all original actions verified",
+    "original physical work known quiescent",
+    "required exact original reserve endpoint observed true"
+  ],
+  "stop_reasons": [
+    "complete",
+    "needs_continuation",
+    "goal_unmet",
+    "goal_unknown",
+    "failed",
+    "cancelled",
+    "cancellation_pending",
+    "indeterminate",
+    "work_unknown",
+    "reserve_unmet",
+    "reserve_unknown",
+    "reserve_unobserved",
+    "paused",
+    "tick_limit"
+  ],
+  "progression": "shared ordinary foreground owner; other retained plans continue during the same world time",
+  "publication": "persist each complete slice before further effects; failed publication stops advancement",
+  "reserve_semantics": "clip at immutable original absolute tick; later stock cannot repair missing or failed endpoint evidence; sealed action deadlines unchanged",
+  "reserve_evidence_retention": "exact owned observation and bounded snapshot across calls; process-local, non-durable, cleared on restore",
+  "output_semantics": "retain selected_plan_wait and elapsed-work counters together in every fitting output tier",
+  "replay": "record optional selected original digest and reproduce the observed early frontier",
+  "automatic_continuation": false,
+  "automatic_cancellation": false,
+  "native_protocol_change": false,
+  "production_admission_change": false
+}
