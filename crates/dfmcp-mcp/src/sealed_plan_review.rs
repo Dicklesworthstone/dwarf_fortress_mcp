@@ -21,6 +21,15 @@ const MAX_NODES: usize = 16_384;
 const MAX_DEPTH: usize = 64;
 const MAX_EXPANDED_BYTES: usize = dfmcp_intent::plan_archive::MAX_ARCHIVE_BYTES;
 
+#[path = "sealed_plan_review_compact.rs"]
+mod compact;
+
+/// Try a lossless table representation after the original complete packet has
+/// exceeded its output allowance. Fitting generation-one packets stay intact.
+pub(crate) fn compact(payload: &mut Value) -> Result<bool> {
+    compact::apply(payload)
+}
+
 fn invalid(message: &str) -> DfmcpError {
     DfmcpError::new(ErrorCode::InternalInvariantViolation, message)
 }
@@ -148,6 +157,13 @@ pub(crate) fn apply(payload: &mut Value, plan: &PreparedPlan) -> Result<()> {
 /// a future node cannot hide behind a small serialized proof. Values inside a
 /// leaf predicate are data: only predicate positions interpret `$ref`.
 pub(crate) fn validate(payload: &Value) -> Result<()> {
+    if compact::is_compact(payload) {
+        return validate_v1(&compact::readable(payload)?);
+    }
+    validate_v1(payload)
+}
+
+fn validate_v1(payload: &Value) -> Result<()> {
     let encoding = &payload["predicate_encoding"];
     if encoding["schema"] != SCHEMA
         || encoding["scope"] != "same_response"
@@ -317,6 +333,9 @@ fn validate_node(
 /// Cache standalone readable steps for later turns. Same-response references
 /// are valid only in their original packet and must not outlive its table.
 pub(crate) fn expanded_steps(payload: &Value) -> Result<Vec<Value>> {
+    if compact::is_compact(payload) {
+        return expanded_steps(&compact::readable(payload)?);
+    }
     validate(payload)?;
     if payload["steps"].to_string().len() > MAX_EXPANDED_BYTES {
         return Err(bounded());

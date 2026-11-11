@@ -39,6 +39,8 @@
   "reporting": {
     "response_schema": "dfmcp.resource-production/2",
     "predicate_encoding": "dfmcp.plan-predicate-references/1",
+    "compact_predicate_encoding": "dfmcp.plan-predicate-references/2",
+    "compact_selection": "only_after_complete_original_response_overflows_and_only_when_lossless_conversion_saves_bytes",
     "anchor_encoding": "dfmcp.current-anchor-references/1",
     "anchor_references": "complete_current_source_without_erasing_distinct_history_or_unknown_evidence",
     "proof": "complete_readable_same_response_projection_with_unchanged_exact_typed_archive",

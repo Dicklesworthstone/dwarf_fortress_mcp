@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased — Compact complete plan proof without dropping requirements
+
+- Add a lossless, self-describing predicate table fallback for oversized
+  resource-room, production and reserve-continuation reviews.
+- Require an exact inverse, preserve literal data and sealed identity, and
+  expand accepted proof into standalone later-turn orientation.
+- Preserve complete current work and safe refusal before pending-plan changes.
+- Add codec, publication, cache and four-variant public room regression sources.
+  These tests are unexecuted after loss of the execution environment; default
+  4,096-token room fit and full-runtime qualification remain open.
+
 ## Unreleased — Read exact original goals through bounded resource pages
 
 - Expose retained original requests, requirements and historical custody through

@@ -230,13 +230,22 @@ fn cache_pending_plan(payload: &Value, state: &mut SessionOrientation) {
     };
     let shared_schema = matches!(
         payload["schema"].as_str(),
-        Some("dfmcp.resource-production/2" | "dfmcp.resource-room/2")
+        Some(
+            "dfmcp.resource-production/2"
+                | "dfmcp.resource-room/2"
+                | "dfmcp.production-reserve/1"
+        )
     );
     let steps = if shared_schema
         || payload.get("predicate_encoding").is_some()
         || payload.get("predicates").is_some()
     {
-        if !shared_schema || payload["version"] != 2 {
+        let version = if payload["schema"] == "dfmcp.production-reserve/1" {
+            1
+        } else {
+            2
+        };
+        if !shared_schema || payload["version"] != version {
             return;
         }
         let Ok(steps) = crate::sealed_plan_review::expanded_steps(payload) else {
@@ -823,6 +832,7 @@ fn resource_replan_step(payload: &Value) -> Option<&Value> {
                 "fresh_resource_acquisition_required"
                     | "fresh_resource_production_required"
                     | "fresh_resource_room_required"
+                    | "fresh_production_reserve_required"
             )
         )
         && payload["rebase"]["pending_plan_preserved"] == true
@@ -1695,6 +1705,7 @@ fn refresh_published_plan_orientation(raw: &str) {
                     | "resource_acquisition_continuation"
                     | "resource_production"
                     | "resource_production_continuation"
+                    | "production_reserve_continuation"
                     | "resource_room"
                     | "resource_room_continuation"
             )

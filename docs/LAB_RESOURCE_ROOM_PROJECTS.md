@@ -139,6 +139,17 @@ children can also contain references. Expand them to recover exactly the
 existing readable predicate projection. This prevents the same item custody
 proof from occupying space repeatedly in the final goal, action and obligation.
 
+When that complete packet exceeds its allowance, publication can select the
+lossless `dfmcp.plan-predicate-references/2` table representation. Predicate
+references become zero-based integer indices, and each table row names its kind
+and values in declared column order. For example, a field row is
+`["field","207","construction_stage","eq","complete"]`. Only declared
+predicate positions interpret indices; field values, source requests, entity
+identities and coordinates remain literal. The encoder compares the exact
+inverse with the original complete response, and later-turn caches retain
+expanded standalone proofs. Fitting `/1` packets keep their representation.
+See [Compact plan reviews](COMPACT_PLAN_REVIEWS.md) for the complete format.
+
 References are canonical, local and acyclic, with bounded expanded size and
 depth. The pending-plan catalog references `/steps` and explicitly points to
 `/predicate_encoding`. All dependencies, capabilities, risk and obligation
@@ -165,6 +176,13 @@ setup requires more room in the response. Bounds are never raised implicitly;
 an oversized review refuses and preserves the prior pending plan. These are
 measured component limits, with full facade execution tracked separately in
 `IMPLEMENTATION_STATUS.md`.
+
+The compact `/2` implementation adds regression sources for lossless proof
+reconstruction and for safe default-budget success or refusal across plain
+and connected rooms with present or missing workshops. Those new Rust tests
+were not executed in the implementation session because the execution
+environment became unavailable. They do not establish that all complete room
+reviews fit 4,096 tokens or supersede the measurements above.
 
 | Stage | Executable work | Exact goal of this plan |
 | --- | --- | --- |

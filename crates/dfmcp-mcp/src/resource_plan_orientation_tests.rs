@@ -35,10 +35,13 @@ fn shared_plan(id: &str, kind: &str) -> Value {
         "ok":true, "session_id":id, "kind":kind,
         "schema":if kind.starts_with("resource_room") {
             "dfmcp.resource-room/2"
+        } else if kind == "production_reserve_continuation" {
+            "dfmcp.production-reserve/1"
         } else {
             "dfmcp.resource-production/2"
         },
-        "version":2, "plan_digest":PLAN_DIGEST,
+        "version":if kind == "production_reserve_continuation" { 1 } else { 2 },
+        "plan_digest":PLAN_DIGEST,
         "required_capabilities":["construct","checkpoint"],
         "predicate_encoding":{
             "schema":"dfmcp.plan-predicate-references/1", "scope":"same_response",
@@ -93,6 +96,7 @@ fn published_resource_plans_refresh_complete_pending_orientation() -> TestResult
     for kind in [
         "resource_production",
         "resource_production_continuation",
+        "production_reserve_continuation",
         "resource_room",
         "resource_room_continuation",
         "select_candidate",
@@ -264,6 +268,36 @@ fn incomplete_published_proof_discards_stale_pending_hints() -> TestResult {
                 .iter()
                 .any(|value| value["affordance_id"] == "commit-pending-plan")
         );
+        assert_eq!(serde_json::from_str::<Value>(&raw)?, payload);
+    }
+    Ok(())
+}
+
+#[test]
+fn compact_published_plan_proof_is_standalone_in_later_turns() -> TestResult {
+    let _serial = crate::test_serial();
+    for kind in ["resource_room_continuation", "production_reserve_continuation"] {
+        let id = register_session(&format!("compact-published-{kind}"));
+        let mut payload = shared_plan(&id, kind);
+        payload["steps"][0]["postconditions"] =
+            json!(vec![json!({"$ref":"/predicates/0"}); 48]);
+        let original = crate::sealed_plan_review::expanded_steps(&payload)?;
+        assert!(crate::sealed_plan_review::compact(&mut payload)?);
+        let raw = payload.to_string();
+        refresh_published_plan_orientation(&raw);
+        let state = registered_state(&id)?;
+        assert_eq!(state.pending_plan_digest.as_deref(), Some(PLAN_DIGEST));
+        assert_eq!(state.pending_plan_steps, original);
+        let mut commit = json!({
+            "ok":true, "session_id":id,
+            "observed_anchor":{"fortress_id":"7","epoch":1,"sequence":4,"game_tick":101,"state_hash":"applied"},
+            "actions":[{"action_id":"91","step":0,"state":"AppliedAwaitingVerification","work_state":{"quiescent":false}}],
+        });
+        presentation_state("fortress.commit", &mut commit, Some(&id));
+        let mut observed = json!({"ok":true,"session_id":id,"game_tick":102});
+        let (state, _, _) = presentation_state("fortress.observe", &mut observed, Some(&id));
+        assert_eq!(active_work(&state)["obligations"][0]["terminal"], full_terminal());
+        assert!(!active_work(&state).to_string().contains("\"$ref\""));
         assert_eq!(serde_json::from_str::<Value>(&raw)?, payload);
     }
     Ok(())

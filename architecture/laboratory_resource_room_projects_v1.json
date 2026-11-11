@@ -47,6 +47,8 @@
   "reporting": {
     "schema": "dfmcp.resource-room/2",
     "predicate_encoding": "dfmcp.plan-predicate-references/1",
+    "compact_predicate_encoding": "dfmcp.plan-predicate-references/2",
+    "compact_selection": "only_after_complete_original_response_overflows_and_only_when_lossless_conversion_saves_bytes",
     "anchor_encoding": "dfmcp.current-anchor-references/1",
     "anchor_references": "equal_typed_current_anchor_slots_only_with_complete_same_response_target",
     "predicate_table": "complete_same_response_predicates_with_canonical_acyclic_bounded_references",

@@ -62,10 +62,13 @@ pub(super) fn finish(
         payload["kind"].as_str(),
         Some("resource_room" | "resource_room_continuation")
     );
+    let production_reserve = payload["kind"] == "production_reserve_continuation"
+        && payload["schema"] == "dfmcp.production-reserve/1";
     let selecting = payload["kind"] == "select_candidate"
         || acquisition
         || resource_production
-        || resource_room;
+        || resource_room
+        || production_reserve;
     if !payload.is_object()
         || payload["ok"] != true
         || payload["anchor"] != projection.anchor
@@ -79,10 +82,14 @@ pub(super) fn finish(
     }
     let shared_predicates = matches!(
         payload["schema"].as_str(),
-        Some("dfmcp.resource-production/2" | "dfmcp.resource-room/2")
+        Some(
+            "dfmcp.resource-production/2"
+                | "dfmcp.resource-room/2"
+                | "dfmcp.production-reserve/1"
+        )
     );
     if shared_predicates {
-        if payload["version"] != 2 {
+        if payload["version"] != if production_reserve { 1 } else { 2 } {
             return Err(invariant(
                 "shared plan proof requires its versioned review envelope",
             ));
@@ -136,7 +143,8 @@ pub(super) fn finish(
                 || pending["plan_digest"] != payload["plan_digest"]
                 || steps
                     .is_none_or(|rows| pending["step_count"].as_u64() != Some(rows.len() as u64))
-                || (!payload["resource_acquisition"].is_object()
+                || (!production_reserve
+                    && !payload["resource_acquisition"].is_object()
                     && !payload["production"]["resource_workflow"].is_object()
                     && !payload["room"]["resource_workflow"].is_object())
             {
@@ -155,7 +163,7 @@ pub(super) fn finish(
         let mut next = recommendation(
             if acquisition {
                 "commit-resource-acquisition"
-            } else if resource_production {
+            } else if resource_production || production_reserve {
                 "commit-production-stage"
             } else if resource_room {
                 "commit-room-stage"
@@ -165,7 +173,7 @@ pub(super) fn finish(
             "fortress.commit",
             if acquisition {
                 "Finite plan for the original resource minima."
-            } else if resource_production {
+            } else if resource_production || production_reserve {
                 "Stage uses observed supply for the original goal."
             } else if resource_room {
                 "Room stage uses observed materials and geometry."
@@ -270,6 +278,16 @@ pub(super) fn finish(
     let output = payload.to_string();
     if output.len() <= maximum {
         return Ok(output);
+    }
+    // Keep the complete new proof and historical evidence together when a
+    // lossless table removes enough repeated predicate syntax. Fitting v1
+    // packets keep their exact representation; decoding this version restores
+    // every original readable requirement before later-turn caching.
+    if shared_predicates && crate::sealed_plan_review::compact(&mut payload)? {
+        let output = payload.to_string();
+        if output.len() <= maximum {
+            return Ok(output);
+        }
     }
     // The original request and proof of every *previous* objective are forensic
     // detail, not part of this new plan's action program. Project only those

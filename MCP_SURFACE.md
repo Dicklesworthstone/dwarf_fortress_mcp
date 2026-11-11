@@ -422,6 +422,12 @@ pointers expand to every original terminal, postcondition and obligation
 predicate. The typed sealed plan and archive are unchanged. Later observation
 hints retain expanded proofs, so they do not depend on a previous response's
 predicate table. Complete publication still precedes pending-plan replacement.
+Oversized complete packets can select `dfmcp.plan-predicate-references/2`,
+using zero-based integer references and tagged rows with explicit columns.
+Its checked inverse restores every original readable requirement; literal
+leaf values and source requests stay unchanged. Fitting `/1` packets retain
+their original representation. See `docs/COMPACT_PLAN_REVIEWS.md` for grammar,
+bounds and qualification limits.
 `anchor_encoding` declares same-response references to `/current_anchor` for
 equal typed work/history anchors; full canonical anchors, differing history,
 unknown evidence and literal source/predicate values retain their meaning.

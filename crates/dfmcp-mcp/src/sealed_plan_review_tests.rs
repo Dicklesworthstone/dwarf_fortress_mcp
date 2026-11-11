@@ -290,3 +290,156 @@ fn shared_plan_review_bounds_expanded_depth_and_exponential_reference_graphs() -
     }
     Ok(())
 }
+
+#[test]
+fn compact_plan_review_losslessly_restores_complete_proof_and_literal_data() -> TestResult {
+    let plan = plan()?;
+    let archive = plan_archive::encode(&plan, plan_archive::ArchiveLimits::default())?;
+    let mut original = payload(&plan);
+    apply(&mut original, &plan)?;
+    // Literal data is not part of the reference grammar, even when it looks
+    // exactly like a table node or an old local JSON pointer.
+    original["source_request"] = json!({"$ref":"/predicates/0", "value":0,
+        "array":["all",[0,1,true]], "unknown_future_field":{"preserve":true}});
+    let mut compacted = original.clone();
+    assert!(compact(&mut compacted)?);
+    assert_eq!(
+        compacted["predicate_encoding"]["schema"],
+        "dfmcp.plan-predicate-references/2"
+    );
+    validate(&compacted)?;
+    assert_eq!(compact::readable(&compacted)?, original);
+    assert_eq!(expanded_steps(&compacted)?, expanded_steps(&original)?);
+    assert_eq!(compacted["source_request"], original["source_request"]);
+    assert!(compacted.to_string().len() < original.to_string().len());
+    assert_eq!(
+        plan_archive::encode(&plan, plan_archive::ArchiveLimits::default())?,
+        archive
+    );
+    let mut repeated = original;
+    assert!(compact(&mut repeated)?);
+    assert_eq!(compacted, repeated);
+    Ok(())
+}
+
+#[test]
+fn compact_plan_review_preserves_all_registered_leaf_shapes_and_value_types() -> TestResult {
+    let mut original = payload(&plan()?);
+    apply(&mut original, &plan()?)?;
+    original["predicates"] = json!([
+        {"entity_exists":"7"}, {"paused":false},
+        {"entity_kind":{"entity_id":"7","kind":"unit"}},
+        {"field":{"entity_id":"7","field":"$ref","op":"eq",
+            "value":{"$ref":"/predicates/0","array":[0,true,["all",[0]]],"literal":null}}},
+        {"entity_quantity":{"kind":"item","filter_field":"token","filter_value":"BED",
+            "quantity_field":"count","op":"ge","value":2}},
+        {"entity_quantity_increase":{"kind":"item","filter_field":"token","filter_value":"BED",
+            "quantity_field":"count","baseline":1,"increase":2,"target":3,
+            "baseline_anchor":{"$ref":"/current_anchor"},"baseline_source_digest":"a".repeat(64),
+            "source_generation":"fixture/1","baseline_source_counters":[1,2],
+            "meaning":"net observed quantity growth; causal production unknown"}},
+        {"edge_exists":{"edge_id":"9","kind":null}},
+        {"region_terrain":{"min":[-1,0,10],"max":[1,2,10],"tile":"floor"}},
+        {"laboratory_room_access":{"policy":"cardinal","region":{"min":[0,0,10],"max":[5,5,10]},
+            "entry":[0,0,10],"targets":[[2,3,10]]}},
+        {"laboratory_room_access_paired_stairs":{"policy":"stairs","region":{"min":[0,0,9],"max":[5,5,10]},
+            "entry":[0,0,10],"targets":[[2,3,9]]}},
+        {"laboratory_civilian_release_safety":{"policy":"complete_roster","burrow":{"id":"9","generation":1},
+            "civilians":[{"id":"7","generation":2}]}},
+        {"not":{"$ref":"/predicates/1"}},
+        {"any":[{"$ref":"/predicates/0"},{"$ref":"/predicates/11"},false]},
+        {"all":[{"$ref":"/predicates/2"},{"$ref":"/predicates/3"},true]},
+    ]);
+    original["terminal_condition"] = json!({"$ref":"/predicates/13"});
+    let all: Vec<_> = (0..14)
+        .map(|index| json!({"$ref":format!("/predicates/{index}")}))
+        .collect();
+    original["steps"][0]["postconditions"] = json!(all);
+    original["steps"][0]["obligation"]["terminal"] = json!({"$ref":"/predicates/12"});
+    original["steps"][1]["postconditions"] = json!(all);
+    original["steps"][1]["obligation"]["terminal"] = json!({"$ref":"/predicates/13"});
+    validate(&original)?;
+    let mut compacted = original.clone();
+    assert!(compact(&mut compacted)?);
+    validate(&compacted)?;
+    assert_eq!(compact::readable(&compacted)?, original);
+    assert_eq!(expanded_steps(&compacted)?, expanded_steps(&original)?);
+    Ok(())
+}
+
+#[test]
+fn compact_plan_review_refuses_changed_columns_references_and_incomplete_rows() -> TestResult {
+    let mut compacted = payload(&plan()?);
+    apply(&mut compacted, &plan()?)?;
+    assert!(compact(&mut compacted)?);
+    for case in 0..12 {
+        let mut changed = compacted.clone();
+        match case {
+            0 => changed["predicate_encoding"]["columns"]["field"] =
+                json!(["field","entity_id","op","value"]),
+            1 => changed["predicate_encoding"]["reference"] = json!("external"),
+            2 => changed["predicate_encoding"]["leaf_values"] = json!("references"),
+            3 => changed["predicate_encoding"]["plan_digest"] = json!("b".repeat(64)),
+            4 => changed["predicates"][0] = json!(["all",[0]]),
+            5 => changed["predicates"][0] = json!(["entity_exists"]),
+            6 => changed["predicates"][0] = json!(["entity_exists","7","extra"]),
+            7 => changed["terminal_condition"] = json!(-1),
+            8 => changed["terminal_condition"] = json!("0"),
+            9 => changed["steps"][0]["postconditions"][0] = json!(MAX_NODES),
+            10 => changed["steps"][0]["obligation"]["terminal"] =
+                json!({"$ref":"/predicates/0"}),
+            _ => changed["predicate_encoding"]["columns"]["unknown"] = json!([]),
+        }
+        assert!(validate(&changed).is_err(), "case {case}");
+        assert!(expanded_steps(&changed).is_err(), "case {case}");
+    }
+    Ok(())
+}
+
+#[test]
+fn compact_plan_review_keeps_expansion_bounds_and_atomic_refusal() -> TestResult {
+    let plan = plan()?;
+    let mut compacted = payload(&plan);
+    apply(&mut compacted, &plan)?;
+    assert!(compact(&mut compacted)?);
+    for deep in [true, false] {
+        let mut changed = compacted.clone();
+        let mut rows = vec![json!(["paused",true])];
+        for index in 1..if deep { MAX_DEPTH + 1 } else { 20 } {
+            rows.push(if deep {
+                json!(["not",index-1])
+            } else {
+                json!(["all",[index-1,index-1]])
+            });
+        }
+        changed["terminal_condition"] = json!(rows.len() - 1);
+        changed["predicates"] = json!(rows);
+        changed["predicate_encoding"]["columns"] = if deep {
+            json!({"paused":["paused"],"not":["child"]})
+        } else {
+            json!({"paused":["paused"],"all":["children"]})
+        };
+        changed["steps"] = json!([]);
+        assert_eq!(
+            validate(&changed).err().map(|error| error.code),
+            Some(ErrorCode::BudgetExceeded)
+        );
+        assert!(expanded_steps(&changed).is_err());
+    }
+    let mut broken = payload(&plan);
+    apply(&mut broken, &plan)?;
+    broken["terminal_condition"] = json!({"$ref":"/predicates/999999"});
+    let before = broken.clone();
+    assert!(compact(&mut broken).is_err());
+    assert_eq!(broken, before);
+
+    let mut small = payload(&plan);
+    apply(&mut small, &plan)?;
+    small["steps"] = json!([]);
+    small["predicates"] = json!([{"paused":true}]);
+    small["terminal_condition"] = json!({"$ref":"/predicates/0"});
+    let before = small.clone();
+    assert!(!compact(&mut small)?);
+    assert_eq!(small, before, "non-saving encoding changed the original packet");
+    Ok(())
+}

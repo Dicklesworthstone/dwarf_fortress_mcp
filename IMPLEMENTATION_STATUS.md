@@ -1,5 +1,34 @@
 # Implementation Status
 
+## Unreleased — Lossless compact complete plan reviews
+
+Complete resource-room and production reviews can now encode their shared
+predicate proof as checked tagged rows and integer references when the original
+packet exceeds its output allowance. The inverse must reproduce the entire
+original JSON projection before publication, including every terminal condition,
+step postcondition and mandatory obligation. Literal field values, source
+requests, exact typed archives and plan/source digests are unchanged. Fitting
+generation-one reviews keep their existing representation. Later-turn caches
+restore standalone predicates; a still-oversized packet refuses before pending
+plan replacement.
+
+Regression sources cover every registered predicate kind, literal values,
+malformed columns/references, expansion bounds, atomic refusal, complete
+publication at byte boundaries and later-turn cache reconstruction. Public room
+coverage includes plain/connected projects with existing/missing workshops,
+requiring complete success or state-preserving refusal at 4,096 tokens and the
+full lifecycle with ample review budget. This does not establish default-budget
+room fit.
+
+Qualification: the execution environment became unavailable during dependency
+preparation, after a disk-space failure. No new Rust build or test run completed.
+Recovered source and test edits were reviewed against the immutable upstream
+base and independently read back from GitHub blobs; JSON contracts were parsed.
+Final recovered-tree formatting, public MCP execution, full verification and
+release qualification remain unestablished. Native protocol/live admission are
+unchanged. Owning beads df-lab-resource-harvest-h2m.4 and .5 remain in progress.
+See docs/COMPACT_PLAN_REVIEWS.md for the format and bounds.
+
 ## Unreleased — Inspect exact original goals without repeating their full history
 
 The existing session resource template now serves retained original-goal

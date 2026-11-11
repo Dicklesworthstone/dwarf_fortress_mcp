@@ -186,6 +186,14 @@ Table references must be canonical, local and acyclic; their expanded node
 count and depth are bounded before publication. The exact typed archive and
 sealed plan/source identities are unchanged.
 
+If the complete original response exceeds its allowance, the publisher can
+select the lossless `dfmcp.plan-predicate-references/2` representation: integer
+references and tagged rows with declared columns. Literal field values and
+source requests are never interpreted as references. Expanding it restores the
+same complete readable proof before later-turn caching. Fitting `/1` responses
+stay unchanged. See [Compact plan reviews](COMPACT_PLAN_REVIEWS.md) for the
+format and the current qualification limits.
+
 The same `/2` packet declares `anchor_encoding` with schema
 `dfmcp.current-anchor-references/1`, scope `same_response`, target
 `/current_anchor` and an exact `reference_count`. Known anchor fields under

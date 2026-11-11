@@ -423,6 +423,105 @@ fn two_bedroom_resource_projects_with_existing_workshops_fit_8192_token_reviews(
 }
 
 #[test]
+fn resource_room_reviews_preserve_complete_proof_or_pending_under_default_budget() -> TestResult {
+    let _serial = serialized_durable_tests();
+    for (index, (connected, missing_workshop)) in
+        [(false, false), (true, false), (false, true), (true, true)]
+            .into_iter()
+            .enumerate()
+    {
+        let session = open_resources(&format!("965412{index}"), false, false)?;
+        require_finite_stock(&session, missing_workshop)?;
+        let mut request = original_room();
+        if !missing_workshop {
+            request
+                .as_object_mut()
+                .ok_or("room request is not an object")?
+                .remove("prerequisites");
+        }
+        if connected {
+            request = json!({
+                "template":"connected_room", "room":request,
+                "access":{"entry":[0,2,10], "region":{"min":[0,0,10],"max":[12,12,10]}},
+            });
+        }
+        let units = if missing_workshop { 3 } else { 2 };
+        let (root, harvest_history) = complete_acquisition_units(&session, &request, units)?;
+        assert_eq!(harvest_history["semantic_room_goal"]["truth"], "false");
+        let prior = continuation(&session, &root)?;
+        assert_stage(&prior, "room", true);
+        let retained = pending_digest(&session)?;
+        let budget = in_session(&session, |guard| Ok(guard.budget))?;
+        in_session(&session, |guard| {
+            guard.budget.max_output_tokens = 4_096;
+            Ok(())
+        })?;
+        let before = effects_before(&session)?;
+        let attempted = continuation(&session, &root)?;
+        assert_eq!(effects_before(&session)?, before);
+        // Default-budget fit is not assumed: an unsuccessful complete review
+        // must leave the last published proposal usable and the world intact.
+        let reviewed = if attempted["ok"] == true {
+            assert_stage(&attempted, "room", true);
+            assert!(attempted.to_string().len() <= 4_096 * 4, "{attempted}");
+            attempted
+        } else {
+            assert_eq!(
+                attempted["error"]["code"], "budget_exceeded",
+                "{attempted}"
+            );
+            assert_eq!(pending_digest(&session)?, retained);
+            prior
+        };
+        in_session(&session, |guard| {
+            guard.budget = budget;
+            Ok(())
+        })?;
+        let sealed = pending_plan(&session)?;
+        assert_eq!(
+            json!(crate::sealed_plan_review::expanded_steps(&reviewed)?),
+            crate::lab_world::plan_steps_json(&sealed),
+        );
+        assert_eq!(
+            sealed
+                .steps
+                .iter()
+                .filter(|step| matches!(step.action, Action::PlaceFurniture { .. }))
+                .count(),
+            2,
+        );
+        assert_eq!(
+            sealed
+                .steps
+                .iter()
+                .filter(|step| matches!(step.action, Action::Build { .. }))
+                .count(),
+            usize::from(missing_workshop),
+        );
+        assert!(sealed.steps.iter().any(
+            |step| matches!(step.action, Action::CreateWorkOrder { .. })
+        ));
+        assert!(
+            sealed
+                .steps
+                .iter()
+                .all(|step| !matches!(step.action, Action::HarvestResource { .. }))
+        );
+        assert_eq!(reviewed["room"]["continuation"]["parent_plan_digest"], root);
+        assert_eq!(reviewed["room"]["continuation"]["root_plan_digest"], root);
+        commit_ok(&session, &reviewed)?;
+        let completed = finish_stage(&session, &identity(&reviewed, "plan_digest")?)?;
+        assert_eq!(completed["predicate_truth"], "true", "{completed}");
+        assert_eq!(completed["semantic_room_goal"]["truth"], "true");
+        let original_now = goal(&session, &root)?;
+        assert_history_unchanged(&harvest_history, &original_now);
+        assert_eq!(original_now["semantic_room_goal"]["truth"], "true");
+        assert_eq!(original_now["needs_replan"], false);
+    }
+    Ok(())
+}
+
+#[test]
 fn resource_room_authority_and_complete_publication_refusals_preserve_pending() -> TestResult {
     let _serial = serialized_durable_tests();
     let session = open_resources("9654103", false, false)?;
@@ -458,7 +557,7 @@ fn resource_room_authority_and_complete_publication_refusals_preserve_pending() 
     let budget = in_session(&session, |guard| Ok(guard.budget))?;
     for (entities, tokens) in [
         (1, budget.max_output_tokens),
-        (budget.max_entities, 4_096),
+        (budget.max_entities, 1_024),
         (budget.max_entities, 600),
     ] {
         in_session(&session, |guard| {

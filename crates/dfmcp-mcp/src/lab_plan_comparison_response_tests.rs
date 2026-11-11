@@ -119,6 +119,85 @@ mod shared_predicates {
     }
 
     #[test]
+    fn compact_review_preserves_complete_proof_current_work_and_exact_budget_boundary() -> Result<()> {
+        let mut view = projection();
+        let mut input = payload(&view);
+        input["steps"][0]["postconditions"] =
+            json!(vec![json!({"$ref":"/predicates/1"}); 64]);
+        let original_steps = crate::sealed_plan_review::expanded_steps(&input)?;
+        view.budget.max_bytes = 9_999;
+        let full = finish(&view, input.clone(), query_work(), Some(pending(&input)))?;
+        let v1: Value = serde_json::from_str(&full).map_err(|_| invariant("test packet"))?;
+        assert_eq!(
+            v1["predicate_encoding"]["schema"],
+            "dfmcp.plan-predicate-references/1"
+        );
+        view.budget.max_bytes = (full.len() - 1) as u64;
+        let shrunk = finish(&view, input.clone(), query_work(), Some(pending(&input)))?;
+        let result: Value = serde_json::from_str(&shrunk).map_err(|_| invariant("test packet"))?;
+        assert_eq!(
+            result["predicate_encoding"]["schema"],
+            "dfmcp.plan-predicate-references/2"
+        );
+        assert_eq!(crate::sealed_plan_review::expanded_steps(&result)?, original_steps);
+        assert_eq!(
+            result["agent_turn"]["briefing"]["objectives"],
+            v1["agent_turn"]["briefing"]["objectives"]
+        );
+        assert_eq!(
+            result["agent_turn"]["active_work"],
+            v1["agent_turn"]["active_work"]
+        );
+        for field in ["production", "forecast", "anchor", "current_anchor", "anchor_encoding"] {
+            assert_eq!(result[field], v1[field], "{field}");
+        }
+        assert!(shrunk.len() < full.len());
+        view.budget.max_bytes = shrunk.len() as u64;
+        assert_eq!(
+            finish(&view, input.clone(), query_work(), Some(pending(&input)))?.len(),
+            shrunk.len()
+        );
+        view.budget.max_bytes -= 1;
+        assert!(
+            matches!(finish(&view, input.clone(), query_work(), Some(pending(&input))),
+                Err(error) if error.code == ErrorCode::BudgetExceeded)
+        );
+        assert_eq!(crate::sealed_plan_review::expanded_steps(&input)?, original_steps);
+        Ok(())
+    }
+
+    #[test]
+    fn ordinary_reserve_continuation_shares_complete_review_without_resource_acquisition() -> Result<()> {
+        let view = projection();
+        let mut input = payload(&view);
+        input["kind"] = json!("production_reserve_continuation");
+        input["schema"] = json!("dfmcp.production-reserve/1");
+        input["version"] = json!(1);
+        input["production"]
+            .as_object_mut()
+            .ok_or_else(|| invariant("test production"))?
+            .remove("resource_workflow");
+        input["production"]["consumption"] = json!({"reserve_until_tick":6001});
+        let result: Value = serde_json::from_str(
+            &finish(&view, input.clone(), query_work(), Some(pending(&input)))?
+        ).map_err(|_| invariant("test packet"))?;
+        assert_eq!(result["publication"], "complete_before_pending_plan_change");
+        assert_eq!(result["production"], input["production"]);
+        assert_eq!(
+            crate::sealed_plan_review::expanded_steps(&result)?,
+            crate::sealed_plan_review::expanded_steps(&input)?
+        );
+        assert_eq!(
+            result["agent_turn"]["active_work"]["pending_plans"][0]["steps_reference"]["predicate_encoding_pointer"],
+            "/predicate_encoding"
+        );
+        let mut malformed = input.clone();
+        malformed["version"] = json!(2);
+        assert!(finish(&view, malformed, query_work(), Some(pending(&input))).is_err());
+        Ok(())
+    }
+
+    #[test]
     fn publication_rejects_incomplete_or_misbound_shared_proof_before_budgeting() {
         let view = projection();
         for case in 0..7 {
