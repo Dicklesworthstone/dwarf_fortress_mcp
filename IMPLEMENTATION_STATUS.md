@@ -1,5 +1,46 @@
 # Implementation Status
 
+## Unreleased — Query retained announcements as typed event windows
+
+Structured event queries now accept source=announcements in addition to the
+unchanged default world_events source. The read-only view uses existing
+protocol-1.1 report entities, preserves native report dates and typed Fact
+provenance, and supports bounded chronological windows, projections and
+source/session/selection-bound continuations. It does not insert canonical
+WorldEvents, change world projection hashes, refresh native observations or
+expand native protocols/admission.
+
+The owning live publisher binds native retention bounds and gap status to the
+exact already-published capsule and private projection receipt. Whole rows fit
+together with the complete Agent Turn and retained-work metadata. Unknown
+identity, unavailable fields and unestablished subjects remain explicit; report
+text is tainted and never supplies a subject join or mutation evidence. Empty
+pages and complete retained suffixes never establish complete history or
+absence. Cheap current-authority/source admission precedes capsule validation,
+and validation, source selection and complete packet rendering share one wall
+deadline.
+
+Before executor loss, all 42 actual-source component tests passed: nine new
+announcement-query tests, six new live-publisher tests, fourteen existing event
+regressions and thirteen existing Unix durable-watch tests. The assembly uses
+the full original adapter/lab dependencies, actual semantic-query/watch/Agent
+Turn/response modules, and six byte-identical extracted publisher helpers.
+All eleven external dependency versions, sources and checksums match the
+repository lock. Full service dispatch, transport/startup/ticket admission and
+unrelated suites are outside this component result. Source formatting,
+whitespace, closed-schema checks and announcement contracts also passed before
+the outage.
+
+Remaining edits were recovered through strict base patches and recorded full
+new files after the executor disconnected. Independent review of recovered
+production code found no missing gate, signature mismatch or functional
+omission. JSON syntax, blob readback, NUL and trailing-whitespace checks passed.
+Formatting/comments and schema prose can differ from the lost tested files;
+post-recovery compilation/formatting and full byte identity are not established.
+The full MCP Asupersync build and br limitations recorded below remain open.
+Owning bead df-typed-event-windows-k4e stays in progress; no production admission
+or complete-history claim is added. See docs/ANNOUNCEMENT_EVENT_WINDOWS.md.
+
 ## Unreleased — Wait for one exact original project outcome
 
 The laboratory fortress_wait tool now accepts an optional original plan_digest.

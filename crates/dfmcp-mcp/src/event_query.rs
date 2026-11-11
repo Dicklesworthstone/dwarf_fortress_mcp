@@ -12,6 +12,9 @@ use dfmcp_world::{Value as WorldValue, WorldEvent, WorldSnapshot};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
+#[path = "announcement_event_query.rs"]
+mod announcements;
+
 const MAX_INPUT_NODES: usize = 4096;
 const MAX_INPUT_BYTES: usize = 65_536;
 const MAX_SCAN_EVENTS: usize = 100_000;
@@ -31,6 +34,8 @@ struct Request {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 enum Query {
     Events {
+        #[serde(default)]
+        source: Source,
         from_tick: Option<u64>,
         through_tick: Option<u64>,
         #[serde(default)]
@@ -47,6 +52,14 @@ enum Query {
 
 #[derive(Clone, Copy, Default, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+enum Source {
+    #[default]
+    WorldEvents,
+    Announcements,
+}
+
+#[derive(Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
 enum Order {
     #[default]
     TickAscending,
@@ -54,6 +67,7 @@ enum Order {
 }
 
 struct Selection {
+    source: Source,
     from_tick: u64,
     through_tick: u64,
     kinds: BTreeSet<String>,
@@ -161,7 +175,12 @@ fn identity(snapshot: &WorldSnapshot, context: &OperationContext, spec: &Selecti
             bytes.extend_from_slice(value.as_bytes());
         }
     }
-    let mut bytes = b"dfmcp-event-query-v1\0".to_vec();
+    // The default path retains its exact historical identity. A separate
+    // domain makes projected reports and canonical WorldEvents non-aliasing.
+    let mut bytes = match spec.source {
+        Source::WorldEvents => b"dfmcp-event-query-v1\0".to_vec(),
+        Source::Announcements => b"dfmcp-announcement-event-query-v1\0".to_vec(),
+    };
     bytes.extend_from_slice(&context.session_id.get().to_be_bytes());
     bytes.extend_from_slice(&snapshot.fortress_id.get().to_be_bytes());
     bytes.extend_from_slice(&snapshot.cursor.epoch.to_be_bytes());
@@ -402,7 +421,26 @@ pub(super) fn execute_with_page_budget(
     max_output_bytes: u64,
     fits: &dyn Fn(&Value) -> Result<bool>,
 ) -> Result<Value> {
-    let started = Instant::now();
+    execute_with_page_budget_started(
+        snapshot,
+        context,
+        input,
+        max_output_bytes,
+        fits,
+        Instant::now(),
+    )
+}
+
+/// An enclosing publisher can charge its source verification to the same
+/// request deadline instead of restarting the allowance at query execution.
+pub(super) fn execute_with_page_budget_started(
+    snapshot: &WorldSnapshot,
+    context: &OperationContext,
+    input: &Value,
+    max_output_bytes: u64,
+    fits: &dyn Fn(&Value) -> Result<bool>,
+    started: Instant,
+) -> Result<Value> {
     context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
     if context.anchor != snapshot.anchor() {
         return Err(stale(
@@ -426,6 +464,7 @@ pub(super) fn execute_with_page_budget(
         ));
     }
     let Query::Events {
+        source,
         from_tick,
         through_tick,
         kinds,
@@ -436,6 +475,7 @@ pub(super) fn execute_with_page_budget(
         continuation,
     } = request.query;
     let spec = Selection {
+        source,
         from_tick: from_tick.unwrap_or(0),
         through_tick: through_tick.unwrap_or(snapshot.tick.0),
         kinds: names(kinds, 32)?,
@@ -451,6 +491,20 @@ pub(super) fn execute_with_page_budget(
     let limit = limit.unwrap_or(4);
     if limit == 0 || limit > MAX_ROWS {
         return Err(invalid("event page limit must be between 1 and 128"));
+    }
+    if spec.source == Source::Announcements {
+        return announcements::execute(
+            snapshot,
+            context,
+            announcements::Window {
+                selection: &spec,
+                limit,
+                continuation: continuation.as_deref(),
+                started,
+                max_output_bytes,
+                fits,
+            },
+        );
     }
     if snapshot.graph.events.len() > (context.budget.max_entities as usize).min(MAX_SCAN_EVENTS) {
         return Err(exhausted(

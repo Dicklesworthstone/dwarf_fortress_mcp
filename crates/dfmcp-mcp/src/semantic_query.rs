@@ -201,6 +201,24 @@ pub fn execute(
     }
 }
 
+pub(super) fn execute_events_with_page_budget(
+    snapshot: &WorldSnapshot,
+    context: &OperationContext,
+    input: &Value,
+    max_output_bytes: u64,
+    fits: &dyn Fn(&Value) -> Result<bool>,
+    started: std::time::Instant,
+) -> Result<Value> {
+    event_query::execute_with_page_budget_started(
+        snapshot,
+        context,
+        input,
+        max_output_bytes,
+        fits,
+        started,
+    )
+}
+
 /// Validate an await handle and its pre-refresh anchor without sampling a watch.
 /// The bounded metadata query retains the same session/authority checks as polling.
 pub fn prepare_await(

@@ -623,7 +623,7 @@ world advances and verifies current grant expiry.
 
 The shared stateless `dfmcp.query/1` executor accepts `kind: "events"` on the
 default laboratory's structured wrapper and existing structured live-read
-consumers. The closed query accepts optional `from_tick`, `through_tick`,
+consumers. The closed query accepts optional `source`, `from_tick`, `through_tick`,
 `kinds`, `subjects`, `fields`, `order`, `limit` and `continuation`. Tick bounds
 are inclusive and default to zero through the source snapshot's tick. Reversed
 windows and future end ticks are refused. Canonical event kinds are exact name
@@ -679,6 +679,26 @@ historical authority prerequisites, corruption and scan limits.
 `lab_structured_query_tests.rs` drives the public facade across retained history
 and grant expiry. `live_spatial_server_tests.rs` exercises the actual live query
 handler over its published canonical fixture without a bridge refresh.
+
+### Retained native announcements
+
+`source: "announcements"` selects a read view of existing protocol-1.1
+announcement entities. The default `source: "world_events"` and its historical
+cursor domain are unchanged. The announcement view orders reports by their
+original native dates, preserves typed Fact provenance and unavailable states,
+and keeps raw text tainted. Subject identity cannot be inferred from text.
+Its distinct cursor domain binds the complete source and selection without
+inserting canonical events or changing projection hashes.
+
+The protocol-1.1 runtime attaches exact retention bounds and gap status from
+the same already-published combined capsule; filtering and response pagination
+do not alter that native coverage. Other consumers cannot infer native bounds
+from entity rows and return unknown retained-suffix completeness. History
+completeness, absence and mutation eligibility remain false in both cases.
+The live runtime fits complete rows with their Agent Turn and native metadata
+under the response allowance, while retaining the original complete-source
+work budget. See `ANNOUNCEMENT_EVENT_WINDOWS.md` for requests, field semantics,
+identity, coverage and bounds.
 
 ## Qualified entity quantities
 

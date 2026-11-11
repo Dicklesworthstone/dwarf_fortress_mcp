@@ -146,6 +146,17 @@ runtime is unadmitted development, the server artifact is not qualified, no runt
 occurred, announcement history is incomplete, and mutation is unavailable. Successful execution is
 useful source and live-campaign tooling, not compatibility evidence by itself.
 
+Structured `fortress.query` also exposes the published reports through the
+shared `dfmcp.query/1` event-window grammar. Select `kind: "events"` and
+`source: "announcements"` for inclusive original-report tick windows, typed
+fields, chronological ordering and bounded continuations. The response carries
+the exact published batch's retained bounds, completeness and gap status;
+query pagination and native retention are separate. It makes no new bridge
+read, constructs no canonical `WorldEvent`, and changes no source hash or
+admission status. See `ANNOUNCEMENT_EVENT_WINDOWS.md` for a complete request and
+the unavailable-fact, subject, taint and coverage contract. Schema discovery is
+available through `fortress.query` with `mode: "schema"`.
+
 ## Version and admission
 
 This is bridge protocol `1.1` and bridge implementation `0.2.0`. Any historical protocol-1.0

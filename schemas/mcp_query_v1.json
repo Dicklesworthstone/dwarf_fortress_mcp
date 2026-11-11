@@ -258,6 +258,7 @@
         "type": "object", "additionalProperties": false, "required": ["kind"],
         "properties": {
           "kind": {"const": "events"},
+          "source": {"enum": ["world_events", "announcements"], "description": "Defaults to world_events with its existing canonical event and cursor semantics. announcements is a read-only view of retained protocol-1.1 report entities; it does not create canonical events or establish mutation authority."},
           "from_tick": {"anyOf": [{"type": "integer", "minimum": 0, "maximum": 18446744073709551615}, {"type": "null"}]},
           "through_tick": {"anyOf": [{"type": "integer", "minimum": 0, "maximum": 18446744073709551615}, {"type": "null"}]},
           "kinds": {"type": "array", "items": {"$ref": "#/$defs/name"}, "maxItems": 32, "description": "Exact canonical event kind names, including custom names; empty selects every retained kind."},
@@ -267,7 +268,7 @@
           "limit": {"anyOf": [{"type": "integer", "minimum": 1, "maximum": 128}, {"type": "null"}]},
           "continuation": {"anyOf": [{"type": "string", "maxLength": 256}, {"type": "null"}]}
         },
-        "description": "Inclusive tick window over the exact retained canonical event projection; defaults to tick zero through the source tick, ascending tick then EventId, four rows and no additional fields. The runtime rejects reversed/future windows. Every selector and the complete anchor/session bind continuation; page width may change. Retention completeness, per-field provenance and source authenticity remain unestablished, and results cannot authorize effects."
+        "description": "Inclusive tick window over the selected exact retained source; defaults to world_events, tick zero through the source tick, ascending tick then EventId, four rows and no additional fields. announcements uses original report dates and preserves typed Fact presence and provenance without inventing subject identity. Only the owning live runtime can attach exact published batch bounds and gap status; an entity-only source leaves native suffix completeness unknown. Every selector, source and complete anchor/session bind continuation; page width may change. Reversed/future windows are rejected. Complete retained suffixes never establish complete history, absence or mutation authority."
       },
       {
         "type":"object", "additionalProperties":false, "required":["kind","key","select","max_game_ticks"],

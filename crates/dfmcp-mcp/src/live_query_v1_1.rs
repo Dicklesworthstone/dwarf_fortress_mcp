@@ -175,6 +175,21 @@ pub(super) fn query(
                     "structured query has no published canonical projection",
                 )
             })?;
+            if input["query"]["kind"] == "events" && input["query"]["source"] == "announcements" {
+                let capsule = guard.adapter.last_capsule().ok_or_else(|| {
+                    error(
+                        ErrorCode::InternalInvariantViolation,
+                        "announcement event query lost its published source capsule",
+                    )
+                })?;
+                return published_announcement_events(
+                    projection,
+                    capsule,
+                    &context,
+                    &input,
+                    &view,
+                );
+            }
             return semantic_query::execute_with_publisher(
                 &projection.snapshot,
                 &result_context,
@@ -302,6 +317,158 @@ pub(super) fn query(
             decorated.unwrap_or(raw)
         }
     }
+}
+
+/// The capsule and its private receipt bind retention evidence to precisely the
+/// snapshot the caller is inspecting. No query argument can supply these bounds.
+fn published_announcement_events(
+    projection: &dfmcp_adapter::LiveWorldProjectionV1_1,
+    capsule: &dfmcp_adapter::LiveObservationCapsuleV1_1,
+    context: &OperationContext,
+    input: &JsonValue,
+    view: &QueryResponseProjection,
+) -> Result<String> {
+    published_announcement_events_started(
+        projection,
+        capsule,
+        context,
+        input,
+        view,
+        std::time::Instant::now(),
+    )
+}
+
+fn announcement_query_deadline(
+    context: &OperationContext,
+    started: std::time::Instant,
+) -> Result<()> {
+    if started.elapsed() >= Duration::from_millis(context.budget.max_wall_millis) {
+        return Err(error(
+            ErrorCode::BudgetExceeded,
+            "announcement query publication deadline exhausted",
+        ));
+    }
+    Ok(())
+}
+
+fn published_announcement_events_started(
+    projection: &dfmcp_adapter::LiveWorldProjectionV1_1,
+    capsule: &dfmcp_adapter::LiveObservationCapsuleV1_1,
+    context: &OperationContext,
+    input: &JsonValue,
+    view: &QueryResponseProjection,
+    started: std::time::Instant,
+) -> Result<String> {
+    context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
+    announcement_query_deadline(context, started)?;
+    // This immutable capsule was validated at publication. Admit its cached
+    // lengths and raw record counts before reproducing/hashing it again. The
+    // conservative byte charge includes the repeated base and batch bytes in
+    // the combined encoding; output-page width cannot bypass this source cost.
+    let records = capsule
+        .base
+        .citizens
+        .len()
+        .saturating_add(capsule.announcement_batch.announcements.len())
+        .saturating_add(1);
+    let bytes = [
+        capsule.base.canonical_bytes.len(),
+        capsule.announcement_batch.canonical_bytes.len(),
+        capsule.canonical_bytes.len(),
+    ]
+    .into_iter()
+    .try_fold(0u64, |total, length| {
+        u64::try_from(length)
+            .ok()
+            .and_then(|length| total.checked_add(length))
+            .ok_or_else(|| {
+                error(
+                    ErrorCode::BudgetExceeded,
+                    "announcement capsule byte work overflows",
+                )
+            })
+    })?;
+    if records > context.budget.max_entities as usize || bytes > context.budget.max_bytes {
+        return Err(error(
+            ErrorCode::BudgetExceeded,
+            "announcement capsule verification exceeds the source work budget",
+        ));
+    }
+    capsule.validate()?;
+    announcement_query_deadline(context, started)?;
+    let receipt = &projection.receipt;
+    if receipt.snapshot_anchor() != projection.snapshot.anchor()
+        || receipt.source_capsule_digest() != capsule.content_digest
+        || receipt.source_citizen_capsule_digest() != capsule.base.content_digest
+        || receipt.source_announcement_batch_digest() != capsule.announcement_batch.content_digest
+        || receipt.source_bridge_generation() != capsule.base.bridge.bridge_generation
+    {
+        return Err(error(
+            ErrorCode::CorruptLedger,
+            "announcement event source and published projection receipt disagree",
+        ));
+    }
+    let coverage = &capsule.announcement_batch.coverage;
+    let native_window = json!({
+        "source_digest":capsule.announcement_batch.content_digest.to_string(),
+        "combined_capsule_digest":capsule.content_digest.to_string(),
+        "source_anchor":anchor_json(projection.snapshot.anchor()),
+        "requested_after_id":coverage.requested_after_id,
+        "next_after_id":coverage.next_after_id,
+        "oldest_available_id":coverage.oldest_available_id,
+        "latest_available_id":coverage.latest_available_id,
+        "returned":coverage.returned,
+        "complete_through_latest":coverage.complete_through_latest,
+        "gap_before_retained_window":coverage.has_gap(),
+        "complete_history":false,
+        "query_refreshes_source":false,
+    });
+    semantic_query::publish_with_active_work(context, json!({}), |metadata| {
+        let encode = |mut result: JsonValue| -> Result<String> {
+            announcement_query_deadline(context, started)?;
+            if result["source"] != "announcements" || result["kind"] != "events" {
+                return Err(error(
+                    ErrorCode::InternalInvariantViolation,
+                    "announcement window cannot decorate another query source",
+                ));
+            }
+            result["coverage"]["native_retained_window"] = native_window.clone();
+            result["coverage"]["retained_suffix_complete"] =
+                json!(coverage.complete_through_latest);
+            result["mode"] = json!("structured");
+            result["source_stale"] = json!(false);
+            let object = result.as_object_mut().ok_or_else(|| {
+                error(
+                    ErrorCode::InternalInvariantViolation,
+                    "event result is not an object",
+                )
+            })?;
+            let work = metadata.as_object().ok_or_else(|| {
+                error(
+                    ErrorCode::InternalInvariantViolation,
+                    "watch metadata is not an object",
+                )
+            })?;
+            object.extend(work.iter().map(|(key, value)| (key.clone(), value.clone())));
+            let encoded = view.finish(result)?;
+            announcement_query_deadline(context, started)?;
+            Ok(encoded)
+        };
+        let fits = |candidate: &JsonValue| match encode(candidate.clone()) {
+            Ok(_) => Ok(true),
+            Err(failure) if failure.code == ErrorCode::BudgetExceeded => Ok(false),
+            Err(failure) => Err(failure),
+        };
+        let result = semantic_query::execute_events_with_page_budget(
+            &projection.snapshot,
+            context,
+            input,
+            view.maximum_bytes as u64,
+            &fits,
+            started,
+        )?;
+        encode(result)
+    })
 }
 
 fn query_schema() -> Result<JsonValue> {
@@ -453,7 +620,9 @@ mod tests {
             kinds,
             vec![
                 "entities",
+                "spatial_entities",
                 "inspect",
+                "related_entities",
                 "traverse",
                 "dependencies",
                 "aggregate",
@@ -468,7 +637,8 @@ mod tests {
                 "await_watch",
                 "watches",
                 "cancel_watch",
-                "release_watch"
+                "release_watch",
+                "ranked_entities"
             ]
         );
         Ok(())
@@ -495,3 +665,7 @@ mod tests {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "live_announcement_event_query_tests.rs"]
+mod announcement_event_tests;

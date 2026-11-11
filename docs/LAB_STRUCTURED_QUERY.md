@@ -399,6 +399,16 @@ the control transcript into world events or add a native event collector.
 See `LAB_EVENT_HISTORY.md` for production, restore and durable-recovery semantics
 and `QUERY_EXECUTION.md` for cursor and budget bounds.
 
+`source: "world_events"` makes this default explicit. The alternative
+`source: "announcements"` reads existing protocol-1.1 announcement entities,
+when present in the selected canonical source, as chronological report rows.
+It preserves their typed source facts, original report dates and unknown
+subject identity. The laboratory cannot recover native retained-window bounds
+from entities alone, so native suffix completeness remains unknown even when
+every matching row fits. This selector neither acquires native reports nor
+populates the laboratory history scenario. See `ANNOUNCEMENT_EVENT_WINDOWS.md`
+for the distinct source cursor and evidence contract.
+
 ## Exact history, authority and pagination
 
 Every call resolves the session and checks current whole-fortress Query

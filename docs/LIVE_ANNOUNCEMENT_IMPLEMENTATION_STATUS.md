@@ -176,8 +176,14 @@ entering the private server. Session identifiers use a distinct `0x11` high-byte
 protocol-1.0 session handle cannot alias a protocol-1.1 session.
 
 The runtime preserves the frozen eleven-tool MCP waist. Read-only operations use the protocol-1.1
-adapter; mutation-stage operations stay registered and fail closed. `fortress.query` accepts only
-`summary, citizens, announcements, or all`.
+adapter; mutation-stage operations stay registered and fail closed. Legacy `fortress.query` modes
+are `summary, citizens, announcements, or all`; `mode: "schema"` discovers the shared structured
+`dfmcp.query/1` grammar. Structured `kind: "events", source: "announcements"` queries the existing
+report entities by original report date, selected typed fields and chronological continuations.
+The runtime attaches the exact already-published batch's retention bounds and gap status, and
+fits complete report rows with the full Agent Turn. This is a versioned read view over the existing
+canonical projection, with no new native read, world-event insertion or canonical hash generation.
+`ANNOUNCEMENT_EVENT_WINDOWS.md` specifies the source, unavailable-fact and coverage semantics.
 
 Every success and failure carries an Agent Turn that says:
 

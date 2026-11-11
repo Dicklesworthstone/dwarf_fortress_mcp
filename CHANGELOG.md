@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased — Read retained announcements through typed event queries
+
+- Add explicit events source=announcements with original report-time ordering,
+  typed fields, bounded windows and source-specific continuation pages.
+- Attach exact published native retention/gap evidence through whole-AgentTurn
+  page fitting; preserve unknown subjects/fields and tainted report text.
+- Keep canonical events, default cursor identity, native projections/hashes and
+  production admission unchanged.
+- Pass 42 actual-source query/publisher/watch regressions before executor loss,
+  including source admission before capsule validation and one shared deadline.
+  Recover and independently review the feature through GitHub; final recovered
+  code could not be rerun or reformatted after the environment became unavailable.
+
 ## Unreleased — Wait for a selected original laboratory plan
 
 - Add optional plan_digest to the existing fortress_wait tool, preserving its
