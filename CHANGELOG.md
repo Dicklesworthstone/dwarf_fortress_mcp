@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased — Respect deferred pauses in plan forecasts
+
+- Stop forecast game time when a deferred action pauses the fortress, matching
+  the actual foreground wait owner and preventing invented stability samples.
+- Preserve valid immediate-pause completion, same-round authorized resume and
+  exact reserve observations; later reserve evidence stays unavailable while paused.
+- Add three real planner/adapter regressions, including direct foreground parity.
+  Formatting and source review pass. The 421 core/world/intent tests pass on the
+  current locked workspace; new MCP regressions await the full dependency build.
+
 ## Unreleased — Compare complete resource-backed production and room projects
 
 - Add explicit version2 complete_project comparisons that follow real modeled

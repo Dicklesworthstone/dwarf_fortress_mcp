@@ -262,6 +262,16 @@ and an earlier original obligation deadline still applies. A known incomplete
 or paused result can have `available: true`; unavailable evidence is distinct
 from a known negative result.
 
+Pause state is checked again after every complete observation and deferred-action
+round. If a newly dispatched action pauses the world, the forecast stops at that
+exact frontier: it cannot force additional game ticks or collect advancing
+stability samples while paused. An immediately verified pause can itself finish
+the plan, and an authorized immediate resume later in the same round permits
+normal progression. `blocked_by_pause` describes any remaining goal proof or
+physical work at the final frontier. An exact reserve endpoint already reached
+remains available; a later endpoint stays unavailable while paused, even when
+the current plan is otherwise complete.
+
 The nominal stride never skips an unfinished step's absolute deadline. Before
 that deadline, an obligation requiring several stable observations reserves a
 final window of cadence-spaced samples. Its eligible-read clock starts when the

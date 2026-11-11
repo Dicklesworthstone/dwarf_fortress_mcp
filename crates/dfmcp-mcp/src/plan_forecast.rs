@@ -265,10 +265,6 @@ fn forecast_model(
         .filter_map(|step| step.obligation.as_ref().map(|o| o.deadline_tick.0))
         .max()
         .unwrap_or(start.0);
-    let blocked_by_pause = fork.snapshot().paused
-        && (outcomes.iter().any(|(_, _, state, _)| !state.is_terminal())
-            || !quiescent
-            || (!stage_only && goal != PredicateTruth::True));
     let simulation_horizon = budget.as_deref().map(ForecastBudget::horizon_tick);
     let work_horizon = simulation_horizon.map_or(horizon, |limit| horizon.min(limit));
     let span = work_horizon.saturating_sub(start.0);
@@ -286,9 +282,10 @@ fn forecast_model(
         .div_ceil(work_slices)
         .max(dfmcp_intent::effects::DEFAULT_POLL_INTERVAL_TICKS);
     let mut reserve = None;
-    if !blocked_by_pause && span > 0 {
+    if !fork.snapshot().paused && span > 0 {
         let mut elapsed = 0u64;
         while elapsed < span
+            && !fork.snapshot().paused
             && (outcomes.iter().any(|(_, _, state, _)| !state.is_terminal())
                 || !quiescent
                 || (!stage_only && goal != PredicateTruth::True))
@@ -366,6 +363,16 @@ fn forecast_model(
             }
         }
     }
+    // Polling a prerequisite can dispatch a deferred pause. Respect the final
+    // state of that complete dispatch round before spending another game tick:
+    // the low-level laboratory clock can advance while paused, but a real
+    // foreground wait cannot manufacture those ticks or stability samples.
+    // A pause followed by an authorized immediate resume in the same round is
+    // still evaluated in full, just as it is by the foreground owner.
+    let blocked_by_pause = fork.snapshot().paused
+        && (outcomes.iter().any(|(_, _, state, _)| !state.is_terminal())
+            || !quiescent
+            || (!stage_only && goal != PredicateTruth::True));
     let steps: Vec<serde_json::Value> = outcomes
         .iter()
         .map(|(step, _, state, at)| {
@@ -572,3 +579,7 @@ mod budget_tests;
 #[cfg(test)]
 #[path = "plan_forecast_deadline_tests.rs"]
 mod deadline_tests;
+
+#[cfg(test)]
+#[path = "plan_forecast_pause_tests.rs"]
+mod pause_tests;

@@ -1,5 +1,25 @@
 # Implementation Status
 
+## Unreleased — Stop forecasts at their own deferred pause frontier
+
+The forecast loop now checks the simulated fortress pause state after every
+complete poll/dispatch round. Previously, a pause dispatched by a completed
+prerequisite could leave the model advancing time through the low-level adapter
+and collecting proof that a real foreground wait could not obtain. Forecasts
+now retain the actual stop tick, incomplete action proof and physical work
+separately. An immediate pause that completes its goal, or an authorized resume
+in the same dispatch round, remains eligible for completion. Exact reserve
+samples already reached remain visible; future samples are unavailable while
+paused and consume no simulated ticks.
+
+Three regression tests use the real planner and MemoryAdapter and compare the
+result with ForegroundProgress, including bounded comparison/reserve costs.
+Independent source review and nightly formatting pass. The locked workspace's
+421 core/world/intent unit tests pass (28/252/141); these do not execute the MCP
+forecast module. Its new tests are pending the full MCP dependency build, and
+no transport, native admission or release qualification is inferred. Owning
+bead df-lab-plan-comparison-c9r remains in progress.
+
 ## Unreleased — Forecast complete original production and room projects
 
 An explicit compare_candidates version2 with forecast_scope=complete_project
