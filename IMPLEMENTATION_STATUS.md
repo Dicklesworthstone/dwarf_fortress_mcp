@@ -1,5 +1,37 @@
 # Implementation Status
 
+## Unreleased — Discover retained laboratory history and replay intervals
+
+The existing fortress_query tool accepts a closed history mode that pages exact
+session-owned retained anchors in recording order. Agents can recover historical
+hashes after a handoff and select bounded condition-replay intervals without
+having remembered earlier responses. Recording positions, full canonical
+anchors, collected recording gaps and original observation-cursor gaps remain
+distinct. Replay suggestions contain at most 32 consecutive retained versions
+from the current fortress/epoch; later replay still independently admits and
+validates every complete source.
+
+The metadata source is bounded before allocation and hashing. Continuations bind
+the exact retained catalog, current anchor, session, order and last returned
+recording position; append, collection, owner or anchor changes require a fresh
+discovery. Whole rows and the exact next cursor fit together or the complete
+response is refused. Metadata discovery does not observe, scan world contents,
+advance time, pin history, sample watches or publish an observed orientation.
+The enclosing Agent Turn uses the current owner and retained query-work catalog
+under the original deadline, and marks its observation continuity partial.
+Handoff exposes the owning-session query and consumed cursors remain nonportable.
+
+Eighteen new regression sources cover ordering, ownership and cursor invalidation, retention
+holes, epoch/cursor boundaries, replay-window bounds, metadata budgets, current
+authority and complete-packet refusal, plus public discovery and historical
+condition replay. Source review and JSON/lexical checks do not establish Rust
+execution. No new tests, compiler check or Rust formatting ran: dependency fetch
+failed with ENOSPC and the executor disconnected. The new bounded catalog reader
+and public integration therefore remain uncompiled and unqualified.
+
+Owning bead df-lab-structured-query-f7q.4 remains in progress.
+See docs/LAB_HISTORY_DISCOVERY.md for request examples and evidence limits.
+
 ## Unreleased — Wait for a selected set of laboratory conditions
 
 The existing fortress_wait tool accepts an explicit watch_ids set of one to

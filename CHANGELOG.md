@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased — Discover exact retained history for laboratory replay
+
+- Add bounded history discovery to fortress_query, including full anchors,
+  stable recording positions, newest/oldest order and exact continuation pages.
+- Expose collected recording holes separately from original observation cursor
+  gaps, and suggest current-epoch replay windows of at most 32 consecutive
+  retained versions. The replay operation still validates all world sources.
+- Bind cursors to the complete catalog, current anchor, owner and order; refuse
+  stale tokens after observation or collection changes. Fit complete rows and
+  their next cursor together, without a lossy history-success response.
+- Keep discovery metadata-only and read-only, including its response rendering;
+  preserve game work, retained query handles and the cached observed anchor.
+  Add owning-session handoff discovery and portable-replay cursor refusals.
+- Add retention, helper and public workflow regression sources. Execution and
+  Rust formatting remain blocked by the dependency-fetch disk exhaustion and
+  subsequent executor disconnection.
+
 ## Unreleased — Foreground waiting for multiple laboratory conditions
 
 - Add optional watch_ids (one to eight unique owned handles) and watch_policy

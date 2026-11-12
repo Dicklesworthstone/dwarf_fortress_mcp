@@ -105,6 +105,13 @@ mod query_comparison;
 #[path = "lab_condition_replay.rs"]
 mod condition_replay;
 
+#[path = "lab_history_catalog.rs"]
+mod history_catalog;
+
+#[cfg(test)]
+#[path = "lab_history_catalog_mcp_tests.rs"]
+mod history_catalog_mcp_tests;
+
 #[cfg(test)]
 #[path = "lab_condition_replay_mcp_tests.rs"]
 mod condition_replay_mcp_tests;
@@ -3466,11 +3473,17 @@ fn query_publication(
     let structured = structured_query::parse(&mode);
     let comparison = query_comparison::parse(&mode);
     let replay = condition_replay::parse(&mode);
+    let history = history_catalog::parse(&mode);
     let temporal = temporal_query::parse(&mode);
     let is_structured = matches!(&structured, Ok(Some(_)));
     let is_temporal = matches!(&temporal, Ok(Some(_)));
     let is_replay = matches!(&replay, Ok(Some(_)));
-    let invalid_query = structured.is_err() || comparison.is_err() || replay.is_err() || temporal.is_err();
+    let is_history = matches!(&history, Ok(Some(_)));
+    let invalid_query = structured.is_err()
+        || comparison.is_err()
+        || replay.is_err()
+        || history.is_err()
+        || temporal.is_err();
     let session = match resolve_session(session_id) {
         Ok(value) => value,
         Err(error) => {
@@ -3479,7 +3492,7 @@ fn query_publication(
     };
     with_query_session(
         &session,
-        is_temporal || is_replay || invalid_query,
+        is_temporal || is_replay || is_history || invalid_query,
         || QueryPublication::Pending(mutex_poisoned_payload("fortress.query")),
         |guard| {
             let (_, ctx) = match next_context(guard) {
@@ -3496,10 +3509,12 @@ fn query_publication(
                     let structured = structured?;
                     let comparison = comparison?;
                     let replay = replay?;
+                    let history = history?;
                     let temporal = temporal?;
                     if structured.is_none()
                         && comparison.is_none()
                         && replay.is_none()
+                        && history.is_none()
                         && temporal.is_none()
                         && mode.len() > MAX_MODE_BYTES
                     {
@@ -3523,6 +3538,36 @@ fn query_publication(
                             );
                         }
                         return Ok(QueryPublication::Published(response));
+                    }
+                    if let Some(request) = &history {
+                        let spent_millis = started.elapsed().as_nanos().div_ceil(1_000_000);
+                        if spent_millis >= u128::from(ctx.budget.max_wall_millis) {
+                            return Err(DfmcpError::new(
+                                ErrorCode::BudgetExceeded,
+                                "history discovery exhausted its wall-time allowance before owning the session",
+                            ));
+                        }
+                        let mut remaining = ctx.clone();
+                        remaining.budget.max_wall_millis -= spent_millis as u64;
+                        let mut payload = history_catalog::execute(
+                            &guard.history,
+                            guard.adapter.snapshot(),
+                            &remaining,
+                            request,
+                        )?;
+                        let spent_millis = started.elapsed().as_nanos().div_ceil(1_000_000);
+                        if spent_millis >= u128::from(ctx.budget.max_wall_millis) {
+                            return Err(DfmcpError::new(
+                                ErrorCode::BudgetExceeded,
+                                "history discovery exhausted its wall-time allowance before publishing current query work",
+                            ));
+                        }
+                        remaining.budget.max_wall_millis =
+                            ctx.budget.max_wall_millis - spent_millis as u64;
+                        payload["query_work"] = query_work_json(&remaining);
+                        return Ok(QueryPublication::Pending(query_budget::response(
+                            Ok(payload), &ctx, false,
+                        )));
                     }
                     if let Some(request) = &replay {
                         let spent_millis = started.elapsed().as_nanos().div_ceil(1_000_000);
@@ -4344,6 +4389,13 @@ pub(crate) fn handoff_json(session: &LabSession) -> serde_json::Value {
                 "arguments": {"mode": json!({"mode": "changes", "since": hash}).to_string()},
             })),
             "retained_versions": session.history.len(),
+            "retained_history": {
+                "tool":"fortress.query",
+                "arguments":{
+                    "session_id":session.session_id.to_string(),
+                    "mode":json!({"mode":"history","limit":4}).to_string(),
+                },
+            },
         },
         "session_id": format!("{}", session.session_id),
         "fortress_id": format!("{}", session.fortress_id),

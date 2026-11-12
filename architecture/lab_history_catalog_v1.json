@@ -1,0 +1,135 @@
+{
+  "schema": "dfmcp.lab-history-contract/1",
+  "owning_bead": "df-lab-structured-query-f7q.4",
+  "public_tool": "fortress.query",
+  "wire_tool": "fortress_query",
+  "mode": "history",
+  "response_schema": "dfmcp.lab-history/1",
+  "request_schema": "schemas/lab_history_catalog.schema.json",
+  "source_scope": "laboratory_reference_world_retention_metadata",
+  "authority": {
+    "capability": "query",
+    "risk": "read_only",
+    "scope": "current_whole_fortress",
+    "checked_before_metadata": true,
+    "historical_ticks_renew_grants": false,
+    "continuation_is_authority": false
+  },
+  "retention": {
+    "reader": "VersionRetention::recorded_anchors",
+    "identity": [
+      "recording_sequence",
+      "full_state_anchor"
+    ],
+    "order": "recording_sequence",
+    "clones_worlds": false,
+    "world_contents_scanned": false,
+    "world_contents_validated": false,
+    "creates_observations": false,
+    "pins_versions": false,
+    "collects_versions": false,
+    "publishes_world_progress": false
+  },
+  "bounds": {
+    "request_bytes": 2048,
+    "catalog_records": 4096,
+    "page_records": 32,
+    "default_page_records": 4,
+    "condition_replay_window_records": 32,
+    "cursor_bytes": 85,
+    "complete_metadata_count_charged_to": "max_entities",
+    "complete_metadata_encoding_charged_to": "max_bytes",
+    "wall_time": "one request deadline through ownership, metadata acquisition and full response publication",
+    "output": "complete page and Agent Turn must fit negotiated bytes and tokens; generic clipping is forbidden"
+  },
+  "canonical_metadata": {
+    "domain": "dfmcp-laboratory-retained-anchor-catalog/1\\0",
+    "integer_encoding": "unsigned big endian",
+    "fields": [
+      "domain_bytes",
+      "session_id_u128",
+      "current_anchor",
+      "record_count_u64",
+      "records_in_ascending_recording_order"
+    ],
+    "anchor_fields": [
+      "fortress_id_u64",
+      "observation_epoch_u64",
+      "observation_sequence_u64",
+      "game_tick_u64",
+      "state_hash_32_bytes"
+    ],
+    "anchor_bytes": 64,
+    "record_fields": [
+      "recording_sequence_u64",
+      "anchor"
+    ],
+    "record_bytes": 72
+  },
+  "continuation": {
+    "shape": "lh1:<16-lowercase-hex-recording-sequence>:<64-lowercase-hex-checksum>",
+    "checksum_domain": "dfmcp-laboratory-retained-anchor-page/1\\0",
+    "checksum_fields": [
+      "catalog_generation_32_bytes",
+      "recording_sequence_u64_be",
+      "order_byte"
+    ],
+    "order_bytes": {
+      "oldest_first": 0,
+      "newest_first": 1
+    },
+    "exact_shape_and_reencoding": true,
+    "limit_may_change": true,
+    "invalidators": [
+      "retained_membership_change",
+      "re_recorded_ordinal",
+      "current_full_anchor_change",
+      "session_change",
+      "order_change",
+      "cursor_change"
+    ]
+  },
+  "replay_windows": {
+    "page_relevant": true,
+    "reader": "VersionRetention::consecutive_range",
+    "breaks_on": [
+      "missing_recording_position",
+      "fortress_change",
+      "epoch_change",
+      "nonincreasing_observation_sequence",
+      "decreasing_game_tick",
+      "current_lineage_ineligible_anchor"
+    ],
+    "cursor_gaps": "preserved; unfinished watch stability resets",
+    "content_validation": "deferred to the selected condition_replay query's complete source admission",
+    "continuous_truth_proven": false,
+    "requires_condition_definition": true,
+    "eligible_as_mutation_evidence": false
+  },
+  "delivery": {
+    "catalog_generation": "SHA-256 over exact canonical metadata; includes session and current full anchor",
+    "default_order": "newest_first",
+    "optional_order": "oldest_first",
+    "complete_membership_distinct_from_page_delivery": true,
+    "complete_game_history": false,
+    "old_epochs": "listed as ineligible for current-epoch condition replay",
+    "foreign_fortress": "refused before disclosure",
+    "final_page": "no further identities in the selected order; not proof the caller received earlier pages"
+  },
+  "integration": {
+    "server_session_view": "with_query_session(read_only = true)",
+    "facade": "existing Pending query and complete Agent Turn lossless budget path",
+    "handoff": "orientation.retained_history with owning session_id and history mode JSON",
+    "replay": "a successful consumed history continuation marks transcript nonportable; first-page query remains portable"
+  },
+  "implementation": [
+    "crates/dfmcp-world/src/retention_catalog.rs",
+    "crates/dfmcp-mcp/src/lab_history_catalog.rs"
+  ],
+  "tests": [
+    "crates/dfmcp-world/src/retention_catalog.rs::tests",
+    "crates/dfmcp-mcp/src/lab_history_catalog_tests.rs",
+    "crates/dfmcp-mcp/src/lab_history_catalog_mcp_tests.rs"
+  ],
+  "qualification_scope": "source contract and focused regressions; exact executed evidence belongs in IMPLEMENTATION_STATUS.md; no native protocol or admission change"
+}

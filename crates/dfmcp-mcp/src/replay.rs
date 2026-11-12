@@ -103,7 +103,8 @@ pub(crate) fn record(
             .and_then(Value::as_str)
             .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
             .is_some_and(|query| {
-                (query["mode"] == "query_changes" && query["continuation"].is_string())
+                (matches!(query["mode"].as_str(), Some("query_changes" | "history"))
+                    && query["continuation"].is_string())
                     || (query["mode"] == "structured"
                         && query["request"]["query"]["continuation"].is_string())
             })

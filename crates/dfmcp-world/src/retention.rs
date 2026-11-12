@@ -15,6 +15,9 @@ use dfmcp_core::{DfmcpError, Digest32, ErrorCode, Result};
 
 use crate::model::WorldSnapshot;
 
+#[path = "retention_catalog.rs"]
+mod catalog;
+
 /// Tombstones kept for collected versions before the oldest are forgotten.
 pub const MAX_TOMBSTONES: usize = 4_096;
 

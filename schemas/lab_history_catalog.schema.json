@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dwarf-fortress-mcp.org/schemas/0.1.0/lab_history_catalog.schema.json",
+  "title": "Discover exact retained laboratory observation identities",
+  "description": "Decoded mode-string request for the existing fortress_query tool. Returns bounded, source-bound pages of retained recording ordinals and full anchors, plus page-relevant condition_replay candidate windows. Metadata discovery requires current whole-fortress Query authority and does not scan world content, acquire observations, pin history, or establish mutation evidence.",
+  "$comment": "Owning bead: df-lab-structured-query-f7q.4. Runtime rejects duplicate fields, caps this decoded UTF-8 request at 2048 bytes, admits the full retained metadata catalog before allocation and hashing (at most 4096 records), and carries the call-wide wall deadline through complete Agent Turn publication. The 85-byte lh1 cursor binds the exact recording ordinal, selected order, whole catalog, current full anchor and owning session. It is an identity checksum, not authority. Both omitted and null limit/continuation select their defaults.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "mode"
+  ],
+  "properties": {
+    "mode": {
+      "const": "history"
+    },
+    "limit": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1,
+      "maximum": 32,
+      "default": 4,
+      "description": "Maximum whole anchor rows. A smaller complete payload prefix may be returned. The final Agent Turn must fit losslessly or the request refuses without advancing a hidden cursor."
+    },
+    "order": {
+      "enum": [
+        "newest_first",
+        "oldest_first"
+      ],
+      "default": "newest_first",
+      "description": "Retention recording order, distinct from game tick or original observation sequence."
+    },
+    "continuation": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 85,
+          "maxLength": 85,
+          "pattern": "^lh1:[0-9a-f]{16}:[0-9a-f]{64}$"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Copy the opaque previous continuation and keep order unchanged; limit may change. Append, collection, re-recording, restore, changed current anchor, another session, or altered cursor invalidates it. Reading never pins retention."
+    }
+  }
+}

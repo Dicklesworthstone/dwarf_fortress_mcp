@@ -352,6 +352,14 @@ atomic laboratory action, tick, cancellation, restore and recovery publication.
 Its `coverage.producer` describes bounded retention and omitted details;
 [`docs/LAB_EVENT_HISTORY.md`](docs/LAB_EVENT_HISTORY.md) defines the source model.
 
+Laboratory `history` lists bounded exact retained recording identities without
+requiring old transcript hashes. It returns source-bound pages and page-relevant
+condition-replay windows of at most 32 versions, separating recording holes,
+restore epochs and original cursor gaps. It copies metadata only, under current
+Query authority, and does not observe, pin or scan world contents. The handoff
+links this query with the owning session ID. See
+[retained history discovery](docs/LAB_HISTORY_DISCOVERY.md).
+
 Laboratory `condition_replay` evaluates a closed temporal definition over one
 to 32 exact retained consecutive versions. It preserves ordinary sampled watch
 semantics, refuses collected interiors, charges the complete selected interval,
