@@ -314,7 +314,51 @@ pub fn plan_inventory<S: OperationsStateView + ?Sized>(
     let mut work = Work::new(max_work, context.budget.max_wall_millis)?;
     let (observation, snapshot, source_digest) = source(state, context)?;
     let demands = normalized_demands(requested)?;
-    let inventory = InventoryIndex::build(observation, &mut work)?;
+    let raw = allocate_inventory(observation, demands, &mut work)?;
+    Ok(InventoryAnalysis {
+        anchor: snapshot.anchor(),
+        source_digest,
+        demands: raw.demands,
+        allocation: raw.allocation,
+        candidate_items: raw.candidate_items,
+        candidate_stack_units: raw.candidate_stack_units,
+        excluded_items: raw.excluded_items,
+        unmatched_items: raw.unmatched_items,
+        work_units: raw.work_units,
+    })
+}
+
+/// Internal bounded allocation over a complete typed capture. It deliberately
+/// carries no canonical anchor or source authority. The source-qualified input
+/// owner must independently admit native identity, completeness and read grants.
+pub(crate) struct RawInventoryAnalysis {
+    pub(crate) demands: Vec<MaterialDemand>,
+    pub(crate) allocation: Allocation,
+    pub(crate) candidate_items: u64,
+    pub(crate) candidate_stack_units: u64,
+    pub(crate) excluded_items: BTreeMap<&'static str, u64>,
+    pub(crate) unmatched_items: u64,
+    pub(crate) work_units: u64,
+}
+
+pub(crate) fn plan_raw_inventory(
+    observation: &LiveOperationsObservation,
+    context: &OperationContext,
+    requested: &[MaterialDemand],
+    max_work: u64,
+) -> Result<RawInventoryAnalysis> {
+    let mut work = Work::new(max_work, context.budget.max_wall_millis)?;
+    observation.validate()?;
+    let demands = normalized_demands(requested)?;
+    allocate_inventory(observation, demands, &mut work)
+}
+
+fn allocate_inventory(
+    observation: &LiveOperationsObservation,
+    demands: Vec<MaterialDemand>,
+    work: &mut Work,
+) -> Result<RawInventoryAnalysis> {
+    let inventory = InventoryIndex::build(observation, work)?;
     let mut supplies = Vec::new();
     let mut excluded_items = BTreeMap::new();
     let mut unmatched_items = 0;
@@ -374,9 +418,7 @@ pub fn plan_inventory<S: OperationsStateView + ?Sized>(
             }
         })?;
     work.charge(allocation.work_units)?;
-    Ok(InventoryAnalysis {
-        anchor: snapshot.anchor(),
-        source_digest,
+    Ok(RawInventoryAnalysis {
         demands,
         allocation,
         candidate_items: supplies.len() as u64,

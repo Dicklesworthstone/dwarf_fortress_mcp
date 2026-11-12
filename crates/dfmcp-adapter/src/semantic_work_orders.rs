@@ -26,6 +26,7 @@ use crate::work_orders::{WorkOrderObservation, WorkOrderPlan, WorkOrderState};
 pub mod goal_history;
 pub mod goal_monitor;
 pub mod goal_projection;
+mod input_supply;
 mod inventory_baseline;
 mod inventory_objective;
 mod stock_target;
@@ -38,6 +39,11 @@ pub use goal_monitor::{
     OperationsGoalSource, WorkOrderGoalMonitor, WorkOrderGoalProgress, WorkOrderGoalResult,
 };
 pub use goal_projection::{WorkOrderGoalProjection, WorkOrderPhysicalState};
+pub use input_supply::{
+    FURNITURE_INPUT_POLICY, FurnitureInputRequirements, INPUT_SUPPLY_MAX_EDGES,
+    INPUT_SUPPLY_MAX_ENTITIES, INPUT_SUPPLY_MAX_RESERVE_STACK_UNITS, INPUT_SUPPLY_QUALIFY_BYTES,
+    InputSupplyAssessment, InputSupplySource,
+};
 pub use inventory_baseline::{
     INVENTORY_BASELINE_PROJECTION_BYTES, INVENTORY_BASELINE_QUALIFY_BYTES,
     InventoryBaselineProjection,
@@ -1110,7 +1116,8 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage, N: WorkOrderSource>
         {
             return Err(custody());
         }
-        let record = records.into_iter()
+        let record = records
+            .into_iter()
             .find(|record| record.plan().key() == key)
             .ok_or_else(custody)?;
         let review = SemanticWorkOrderReview {

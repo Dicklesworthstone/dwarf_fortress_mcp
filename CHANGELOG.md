@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased — Conserve shared furniture input supply
+
+- Add independently source-qualified furniture input requirements and assessments
+  over a complete Operations/1.3 census. Account for all original finite orders
+  and an optional retained wood reserve in one allocation, without reusing stock
+  across leaves or releasing demand on order insertion.
+- Reuse the conservative inventory allocator for flags, container ancestry, job
+  attachments and building holders. Keep the existing inventory baseline source
+  grants unchanged and avoid a second canonical projection. Retain exact source,
+  original-anchor, requirement and allocator-seed commitments with explicit
+  shortages; the versioned host requirement grants no resource reservation,
+  native recipe-feasibility or output claim.
+- Add 13 input-supply regressions. All 144 retained adapter component tests pass,
+  including the existing production, Manager and operations-inspection cases;
+  another 23 ordinary repository integration tests pass for the shared inventory,
+  production-chain and spatial consumers (167 distinct tests total).
+  Scoped formatting and source correspondence pass. Full MCP transport, plugin,
+  live-game and admission qualification remain separate; the combined-host
+  consumer follows as another implementation checkpoint.
+
 ## Unreleased — Verify the original manager before combined production
 
 - Connect optional independently acknowledged Manager 1.23 originals to the

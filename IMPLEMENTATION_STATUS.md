@@ -1,5 +1,42 @@
 # Implementation Status
 
+## Unreleased — Qualify conserved furniture input supply
+
+The adapter now qualifies the conservative WOOD input requirement of one to four
+original finite furniture orders and an optional retained reserve. All original
+amounts participate in one exact joint allocation; an inserted order does not
+release its demand. Independent Operations/1.3 pins, the exact original paused
+canonical anchor and current Query/Observe authority qualify the complete raw
+capture. The legacy inventory baseline's type/quantity-only evidence policy is
+unchanged.
+
+`FurnitureInputRequirements`, `InputSupplySource` and `InputSupplyAssessment`
+retain versioned requirement/source identities, full capture commitments,
+allocator seeds and explicit ready/shortage results. The existing conservative
+inventory allocator is shared with inspection, including inherited item flags,
+container relationships, job attachments and building holders. The raw assessor
+reserves 16 MiB, admits at most 4096 records/8192 relationships before analysis,
+and creates no second canonical projection. One WOOD stack unit per requested
+furniture unit is an explicit host requirement, not certified native recipe cost.
+No reservation, path access, native feasibility or output proof is inferred.
+
+All 144 retained adapter component tests passed with zero failures: 119 existing
+production/Manager tests, 12 operations-inspection tests and 13 new input-supply
+regressions. The new tests cover shared shortages and reserves, all exclusion
+classes, inherited and malformed relationships, independent source/authority/
+tick/budget checks, large exact quantities, allocator regression and parity with
+the existing Query allocator. Another 23 ordinary repository integration tests
+passed across operations analysis, production chains, spatial production and
+spatial inventory, for 167 distinct passing tests in this checkpoint. Adapter
+source correspondence was verified before
+and after execution (manifest
+`47d92bf9b5f67c3729bd5af17881367b7931740bb0f01a3a506ba88c287a3809`).
+The component preserves production implementations and locked dependencies while
+excluding unrelated adapter test registrations and full MCP transport/supervision,
+native plugin and live-game execution. No broader qualification or admission is
+claimed. Combined original-plan, dispatch and recovery consumption is the next
+increment; beads `.14.4` and `pic.4.1` remain in progress.
+
 ## Unreleased — Manager prerequisite in the combined production workflow
 
 The combined `serve-gameplay-dev labor-order` host now accepts closed optional
