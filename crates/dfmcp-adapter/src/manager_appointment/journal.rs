@@ -17,6 +17,8 @@ use dfmcp_core::{Capability, GameTick, OperationContext, RiskTier, SessionId};
 use std::io::SeekFrom;
 use std::path::Path;
 use std::time::{Duration, Instant};
+#[path = "production_origin.rs"]
+pub mod production_origin;
 const MAX_BYTES: usize = 4 * 1024 * 1024;
 const MAX_FRAMES: u32 = 16;
 pub const MAX_HORIZON_TICKS: u64 = 12000;

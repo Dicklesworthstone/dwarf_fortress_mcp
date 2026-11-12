@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased — Import an acknowledged production manager safely
+
+- Add read-only `ManagerProductionOrigin` for one complete, independently
+  acknowledged Manager 1.23 appointment. Verify the exact Offline profile, scope,
+  original key/plan and private canonical donor record. Bound the immutable
+  descriptor at 4096 bytes by committing to the full record digest.
+- Qualify current readiness through authenticated ReadManager: preserve the
+  original citizen, historical figure, ordinary manager role, assignment/link,
+  native getters and production-responsibility cache at the caller's paused
+  anchor. Permit unrelated roster, history, role and index growth.
+- Retain decoded generation, sequence, history and allocation floors even after
+  later source or authority refusals. Fix the native client's late-read error
+  path to expose consumed floors; permanently fence identity/continuity loss.
+  Equal sequence values on repeated reads remain valid.
+- Add thirteen private-custody/readiness regressions and two actual native-client
+  TCP regressions. Manager-origin validation: all 41 exact-source Manager adapter component tests
+  passed, including all 15 new regressions, with zero failures.
+  No native writer/protocol/tool, live-game proof or admission is added. Combined
+  MCP integration is the next independently verified increment.
+
 ## Unreleased — Assign labor before fulfilling a native stock portfolio
 
 - Add explicit `stock_targets.assign_labor=true`: one independently reviewed

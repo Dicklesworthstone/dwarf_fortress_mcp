@@ -4,6 +4,7 @@
 //! Beads dfmcp-reality-wiring-proof-4bf.14 and .14.2 remain independently verified.
 mod capture;
 pub mod journal;
+pub use journal::production_origin;
 mod record;
 pub mod rpc;
 use crate::bounded_run::{Reader, error, hash, require, validate_key};

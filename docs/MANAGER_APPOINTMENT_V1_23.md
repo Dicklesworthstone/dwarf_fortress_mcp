@@ -77,3 +77,26 @@ The original order disappeared, so its semantic goal remains Unknown and causal
 attribution is unproved. Offline pre/post file hashes were not captured. The
 later append-bound SDK artifact `8fe393ed…` and this integration source do not
 inherit W's exact-binary live evidence.
+
+## Read-only handoff to finite production
+
+`ManagerProductionOrigin` imports one exact complete Manager 1.23 original from
+independently acknowledged Offline journal custody. A separate profile-specific
+ACK verifier prevents a Workshop or legacy Manager acknowledgement from standing
+in for this original. The immutable descriptor is bounded at 4096 bytes and
+commits to the complete canonical record digest, original identity, binding and
+journal pin; importing it produces no current readiness evidence.
+
+Fresh qualification reads the same selected manager and checks the original
+assignment, historical-figure position link, ordinary role, dual getters and
+MANAGE_PRODUCTION cache at the combined host's paused tick. Unrelated history
+and roster growth are allowed. Tick, generation, native sequence, history and
+entity allocation floors are retained across failed checks; sequence equality
+is valid. Original identity or source-continuity loss fences the reader.
+
+The owner has no appointment permission and never writes donor custody. Its
+anchor-bound readiness result is a dispatch prerequisite, not proof of office
+sufficiency, recipe feasibility, new goods or production attribution. Later
+fresh-read floors are caller-held recovery data, not new donor ACKs. Combined-host configuration and protected order-gate composition are a
+separate consumer of this adapter API. Existing Manager 1.22/1.23
+appointment protocols and their historical evidence remain unchanged.

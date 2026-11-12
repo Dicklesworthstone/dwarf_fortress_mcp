@@ -147,6 +147,8 @@
     "bridge/dfhack-manager-v1_23/DfmcpManagerV1_23.proto",
     "bridge/dfhack-manager-v1_23/dfmcp_manager_v1_23.cpp",
     "crates/dfmcp-adapter/src/manager_appointment/tests_v1_23.rs",
+    "crates/dfmcp-adapter/src/manager_appointment/production_origin.rs",
+    "crates/dfmcp-adapter/src/manager_appointment/production_origin_tests.rs",
     "crates/dfmcp-mcp/src/manager_appointment_v1_23_server.rs",
     "crates/dfmcp-mcp/src/bin/dfmcp-manager-v1-23-dev-server.rs",
     "crates/dfmcp-mcp/tests/manager_appointment_v1_23_stdio.rs",

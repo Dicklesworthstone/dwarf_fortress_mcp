@@ -1,4 +1,5 @@
 //! One foreground manager/1.22 connection. No caller chooses methods or profiles.
+use super::production_origin::ManagerProductionFloor;
 use super::*;
 use crate::build_placement::rpc::{
     BuildCancellation,
@@ -164,6 +165,8 @@ pub struct ManagerRpc {
     pub unresolved: bool,
     retained: u64,
     high_tick: u64,
+    observed_generation: Option<u64>,
+    observed_floor: Option<ManagerProductionFloor>,
 }
 impl ManagerRpc {
     pub fn connect(
@@ -233,12 +236,31 @@ impl ManagerRpc {
             unresolved: false,
             retained: 0,
             high_tick: c.anchor.tick.get(),
+            observed_generation: None,
+            observed_floor: None,
         };
-        out.call(0, None, None, c)?;
+        if let Err(cause) = out.call(0, None, None, c) {
+            return Err(match out.observed_generation {
+                Some(generation) => {
+                    cause.with_detail("consumed_manager_generation", generation.to_string())
+                }
+                None => cause,
+            });
+        }
         Ok(out)
     }
     pub fn binding(&self) -> &Binding {
         &self.binding
+    }
+    /// Authenticated reply high-water, not the expected operator pin. Retained
+    /// before later software/source checks so connection refusal cannot erase it.
+    pub fn observed_generation(&self) -> Option<u64> {
+        self.observed_generation
+    }
+    /// Every canonically decoded ReadManager frontier, including a capture
+    /// rejected later for source mismatch, identity or expired authority.
+    pub fn observed_floor(&self) -> Option<ManagerProductionFloor> {
+        self.observed_floor
     }
     pub fn fence(&mut self) {
         self.prepared = None;
@@ -330,9 +352,18 @@ impl ManagerRpc {
             }
             fields.sort_unstable();
             reply.exact(&fields)?;
+            let generation = reply.number(6)?;
+            require(
+                generation > 0 && generation < u64::MAX,
+                "invalid manager generation",
+            )?;
+            self.observed_generation = Some(
+                self.observed_generation
+                    .map_or(generation, |old| old.max(generation)),
+            );
             require(
                 reply.number(2)? == 0
-                    && reply.number(6)? == self.binding.generation
+                    && generation == self.binding.generation
                     && reply.bytes(7)? == self.binding.df_version.as_bytes()
                     && reply.bytes(8)? == self.binding.dfhack_version.as_bytes(),
                 "manager native software/incarnation differs",
@@ -372,9 +403,15 @@ impl ManagerRpc {
                 Capture::decode(r.observation.as_deref().ok_or_else(|| {
                     error(ErrorCode::AdapterRejected, "missing manager capture")
                 })?)?;
+            let next = ManagerProductionFloor::capture(&capture);
+            if let Some(floor) = self.observed_floor.as_mut() {
+                floor.retain(next);
+            } else {
+                self.observed_floor = Some(next);
+            }
+            self.high_tick = self.high_tick.max(capture.tick);
             self.binding.capture(&capture)?;
             require(capture.selection == selection, "manager candidate differs")?;
-            self.high_tick = self.high_tick.max(capture.tick);
             let mut actual = c.clone();
             actual.anchor.tick = dfmcp_core::GameTick(self.high_tick.max(c.anchor.tick.get()));
             authorize(&actual, &self.binding, None)

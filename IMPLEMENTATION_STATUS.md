@@ -1,5 +1,46 @@
 # Implementation Status
 
+## Unreleased — Acknowledged Manager 1.23 origin for production
+
+The adapter now owns a non-cloneable `ManagerProductionOrigin` imported only from
+one exact complete independently acknowledged Offline Manager 1.23 original.
+It decodes the private canonical journal bytes rather than trusting mutable
+public diagnostic fields. A separate exact-profile ACK verifier keeps legacy
+Manager and Workshop custody ineligible. Its <=4096-byte immutable descriptor
+binds the donor source, journal pin, original seal and complete native record
+hash without copying the potentially >64 KiB record into a small association.
+Importing or verifying historical custody creates no current readiness proof.
+
+Each fresh read verifies original unit/HF/group/position/assignment identity,
+current active citizenship and membership, the ordinary Manager definition,
+position-link identity and current cache indices, dual native getters and the
+original assignment in the production-responsibility cache. Other roster,
+history, catalog, role-cache and assignment growth remains permitted. Exact
+transaction poststate equality applies only to the historical import. A ready
+result binds the immutable donor, current capture and exact caller anchor.
+
+Tick, generation, intervention sequence, history count/event allocation and both
+entities' position/assignment allocation floors are monotone. Equal native
+sequences are valid. Identity/continuity loss is sticky; missing current cache
+readiness refuses insertion without inventing a new appointment. The actual
+native client retains authenticated handshake generations and decoded capture
+floors before later source/authority rejection, including connection errors.
+External recovery retains these negative floors, never a readiness certificate
+or appointment permit. Whole external checkpoint rollback beyond the donor seed
+remains independently undetectable by a newly opened reader.
+
+Thirteen focused origin regressions cover exact profile/scope/key/ACK custody,
+large record commitments, mutable diagnostic isolation, paused-tick and cache
+readiness, unrelated growth, lost identity, floor restoration and failed reads.
+Two real TCP-client regressions exercise late authority and incarnation refusal.
+Manager-origin validation: all 41 exact-source Manager adapter component tests
+passed, including all 15 new regressions, with zero failures. Existing full MCP
+build/check remains memory-blocked in unchanged pinned Asupersync. These adapter
+checks do not exercise MCP transport, plugin SDKs or a live fortress and do not
+confer admission. Manager beads .14.2/.14.4 remain in progress; the separate
+combined-host configuration, sidecar and protected order-gate consumer is being
+integrated next.
+
 ## Unreleased — Assign workers for a complete native stock-target portfolio
 
 The closed `stock_targets` Plan request now accepts optional Boolean

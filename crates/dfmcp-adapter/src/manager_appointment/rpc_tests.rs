@@ -526,3 +526,65 @@ fn manager_dispatch_guard_and_writer_use_retained_tick_for_actual_lease() -> Res
     }
     Ok(())
 }
+
+#[test]
+fn decoded_manager_floor_survives_actual_rpc_late_grant_and_source_refusal() -> Result<()> {
+    for wrong_source in [false, true] {
+        let cap = capture()?;
+        let mut later = cap.clone();
+        later.tick += 5;
+        later.year_tick += 5;
+        later.sequence += 5;
+        later.next_event += 5;
+        later.history_count += 5;
+        later.group.next_position += 5;
+        later.group.next_assignment += 5;
+        later.civ.next_position += 5;
+        later.civ.next_assignment += 5;
+        if wrong_source {
+            later.generation += 1;
+        }
+        later.raw = later.encode();
+        let later = Capture::decode(later.bytes())?;
+        let peer = start_peer(
+            vec![vec![Step::observed(1, later.bytes().to_vec())]],
+            cap.generation,
+        )?;
+        let mut c = context()?;
+        for grant in &mut c.grants {
+            if matches!(grant.capability, Capability::Query | Capability::Observe) {
+                grant.expires_at_tick = Some(dfmcp_core::GameTick(cap.tick + 1));
+            }
+        }
+        let mut rpc = connect(&peer, &c, cap.generation)?;
+        assert!(rpc.observe(cap.selection, &c).is_err());
+        assert_eq!(rpc.observed_generation(), Some(cap.generation));
+        assert_eq!(
+            rpc.observed_floor(),
+            Some(ManagerProductionFloor::capture(&later))
+        );
+        assert_eq!(rpc.high_tick, later.tick);
+        assert!(rpc.observe(cap.selection, &c).is_err());
+        assert_eq!(
+            rpc.observed_floor(),
+            Some(ManagerProductionFloor::capture(&later))
+        );
+        drop(rpc);
+        assert_eq!(peer.finish()?, [1]);
+    }
+    Ok(())
+}
+
+#[test]
+fn mismatched_authenticated_handshake_generation_is_returned_in_connection_error() -> Result<()> {
+    let cap = capture()?;
+    let peer = start_peer(vec![vec![]], cap.generation + 1)?;
+    let result = connect(&peer, &context()?, cap.generation);
+    let cause = result.err().ok_or_else(malformed)?;
+    assert!(cause.details.contains(&(
+        "consumed_manager_generation".into(),
+        (cap.generation + 1).to_string()
+    )));
+    assert!(peer.finish()?.is_empty());
+    Ok(())
+}

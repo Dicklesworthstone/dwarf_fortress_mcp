@@ -297,6 +297,21 @@ impl<S: EffectJournalStorage> WorkshopAcknowledgements<S> {
         check(matches!(self.protocol, Protocol::Workshop) && self.scope.is_none() && self.offline)?;
         self.verify(context)
     }
+    /// A production Manager import needs its exact cache-bearing generation,
+    /// complete original read scope and Offline acknowledgement. A legacy
+    /// Manager, Workshop or Tree acknowledgement cannot supply this custody.
+    pub(crate) fn verify_manager_v1_23_offline(
+        &mut self,
+        context: &OperationContext,
+        scope: MapCuboid,
+    ) -> Result<()> {
+        check(
+            matches!(self.protocol, Protocol::ManagerV1_23)
+                && self.scope == Some(scope)
+                && self.offline,
+        )?;
+        self.verify(context)
+    }
     pub fn acknowledge(&mut self, pin: WorkshopPin, context: &OperationContext) -> Result<()> {
         self.verify(context)?;
         if self.latest == Some(pin) {
