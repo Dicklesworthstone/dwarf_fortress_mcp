@@ -10,6 +10,9 @@ use serde::Deserialize;
 #[allow(clippy::duplicate_mod)]
 #[path = "../operations_production.rs"]
 mod production;
+#[allow(dead_code, clippy::duplicate_mod)]
+#[path = "../production_chain_query.rs"]
+mod production_chain;
 #[allow(clippy::duplicate_mod)]
 #[path = "../semantic_query_core.rs"]
 mod structured;
@@ -37,6 +40,8 @@ const MAX_QUERY_TOKENS: u32 = 4_096;
 pub(super) const QUERY_KINDS: &[&str] = &[
     "production_diagnosis",
     "inventory_plan",
+    "production_chain",
+    "production_chain_compare",
     "entities",
     "inspect",
     "traverse",
@@ -253,6 +258,8 @@ impl Runtime {
                         "query":{"kind":"production_diagnosis","limit":4}},
                     "inventory_totals_request":inventory_totals_request(source.projection.anchor()),
                     "inventory_totals_semantics":INVENTORY_TOTALS_SEMANTICS,
+                    "production_chain_semantics":"caller_declared_model_over_captured_conservative_supply",
+                    "production_chain_native_recipe_verified":false,
                     "query_kinds":QUERY_KINDS,
                     "unknown":["job_to_original_order_attribution","full_native_job_requirements",
                         "path_access","labor_eligibility","successful_job_completion"]})
@@ -331,7 +338,9 @@ impl Runtime {
         query_context.anchor = source.projection.anchor();
         query_context.budget.max_output_tokens =
             query_context.budget.max_output_tokens.min(MAX_QUERY_TOKENS);
-        let mut payload = if production::handles(&request.0) {
+        let mut payload = if production_chain::handles(&request.0) {
+            production_chain::execute(&source.projection, &query_context, &request.0)?
+        } else if production::handles(&request.0) {
             production::execute(&source.projection, &query_context, &request.0)?
         } else {
             execute_structured(snapshot, &query_context, &request.0)?
@@ -409,7 +418,9 @@ impl Runtime {
         query_context.anchor = snapshot.anchor();
         query_context.budget.max_output_tokens =
             query_context.budget.max_output_tokens.min(MAX_QUERY_TOKENS);
-        let mut payload = if production::handles(&request.0) {
+        let mut payload = if production_chain::handles(&request.0) {
+            production_chain::execute(source, &query_context, &request.0)?
+        } else if production::handles(&request.0) {
             production::execute(source, &query_context, &request.0)?
         } else {
             execute_structured(snapshot, &query_context, &request.0)?

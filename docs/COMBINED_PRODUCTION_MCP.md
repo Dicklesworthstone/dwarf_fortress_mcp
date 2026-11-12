@@ -61,7 +61,8 @@ generations remain independently pinned; they need not equal each other.
 `dfmcp.combined-production-development/1`, an absolute normalized `directory`,
 Boolean `initialize`, and optional `recovery`, `clock`, `inventory_clock`,
 `workshop_prerequisite`, `workshop_prerequisite_checkpoint`,
-`manager_prerequisite` and `manager_prerequisite_checkpoint`. All three custody directories
+`manager_prerequisite`, `manager_prerequisite_checkpoint`, `input_supply` and
+`input_supply_checkpoint`. All three custody directories
 must be separate and nonnested. Existing private-file owners require real
 owner-private directories and regular no-follow files with canonical modes;
 the host neither repairs nor silently replaces custody.
@@ -86,6 +87,7 @@ Only the following additional family environment names are accepted:
 - `DFMCP_SEMANTIC_WORK_ORDER_ALLOW_INVENTORY_CLOCK`
 - `DFMCP_SEMANTIC_WORK_ORDER_INVENTORY_CLOCK_TOKEN`
 - `DFMCP_COMBINED_PRODUCTION_WORKSHOP_TOKEN`
+- `DFMCP_COMBINED_PRODUCTION_MANAGER_TOKEN`
 
 Each pair of clock environment names is accepted only when that clock is
 explicitly configured in the parent and child. Dropping configuration cannot
@@ -385,6 +387,48 @@ The independent native plugins do not provide an atomic fortress transaction.
 No bridge method, native writer, public MCP tool or production admission is
 added by this handoff.
 
+## Require conserved input supply for the complete original
+
+The optional `input_supply` object requires a fresh conservative WOOD allocation
+for all original finite furniture amounts together, plus an optional reserve:
+
+```json
+{
+  "input_supply": {
+    "schema": "dfmcp.furniture-input-supply/1",
+    "reserve_wood_stack_units": 4
+  }
+}
+```
+
+Add it to the existing parent operator configuration. The reserve defaults to
+zero. No native IDs, alternate source or caller-supplied availability claims are
+accepted. The versioned host requirement uses one WOOD stack unit per requested
+furniture unit. It is independent of the native recipe-feasibility claim, which
+remains unknown.
+
+A bed and door cannot each count the same log. The allocation excludes observed
+forbidden, occupied, job-attached, building-held and otherwise excluded items,
+including exclusions inherited through containers. All original order amounts
+remain required after prefix orders are inserted: a Created receipt is not input
+consumption. Positive Plan and every protected order dispatch require fresh
+supply at the original paused tick and the exact acknowledged original queue
+prefix. Stock sizing and input assessment reuse one raw complete census.
+
+All six request families and both stock-target assignment modes support this
+policy together with Manager and Workshop prerequisites. Already-satisfied
+stock targets create no original and skip input qualification and its queue read.
+Existing no-input identities are unchanged. A failed check keeps the original
+keys and full demand; it cannot restore a confirmation or permit redispatch.
+
+Retain `input_supply_checkpoint` before an original exists and the complete
+`input_supply_digest`/`input_supply_floor` recovery pair afterward. The marker
+resides in the existing original archive; no input sidecar is added. The public
+view retains shortage quantities and exclusion counts, while historical success
+does not become current supply, a reservation or goal proof. See
+[the input-supply guide](FURNITURE_INPUT_SUPPLY.md) for source qualification,
+failure behavior, recovery fields and the unchanged public budget.
+
 ## Public sequence
 
 Use the exact names returned by `tools/list`. The logical operations below
@@ -463,7 +507,7 @@ belongs to the operations snapshot; `canonical_anchor` and `parent_anchor` name
 the citizen observation used for subsequent planning. These are distinct
 source identities, even at the same tick. The source descriptor includes its
 digest, ready `diagnosis_request`, `inventory_request` and
-`inventory_totals_request` handles, and the twelve supported query kinds.
+`inventory_totals_request` handles, and the fourteen supported query kinds.
 Use the descriptor's operations `anchor` for query
 `expected_anchor`, and the current citizen `observation.seal` for original Plan.
 Neither field substitutes for the other.
@@ -474,6 +518,7 @@ Call `fortress_query` with the same session ID and the JSON encoding of
 `order_step_id` is accepted before an original exists. Query uses only the
 retained capture, rechecking current read authority and source pins without
 native contact. It supports the same `production_diagnosis`, `inventory_plan`,
+`production_chain`, `production_chain_compare`,
 `entities`, `inspect`, `traverse`, `dependencies` and `aggregate` operations described below.
 `search` finds captured text; `spatial_entities`, `related_entities` and
 `ranked_entities` select bounded pages using observed positions, witnessed
@@ -485,7 +530,9 @@ The diagnosis can identify observed suspension, worker, holder and attachment
 conditions. The inventory query exposes individual item types and stack quantities,
 while the totals request groups complete observed stock by item type in one bounded
 result. Declared-demand allocation can then show competing demand and conservative
-shortage without counting the same stack units twice.
+shortage without counting the same stack units twice. Production-chain analysis
+adds dependency-ordered stages and retained final-stock reserves; comparison
+evaluates bounded declared alternatives over that same captured supply.
 
 Agent Turn guidance offers this explicit read before original planning when
 production inspection is missing, preserving the current workforce selectors.
@@ -970,6 +1017,72 @@ full native recipe requirements, path access or labor-eligibility proof.
 The result explicitly carries `attribution="not_order_attributed"`. It neither
 identifies a proven causal blocker for the selected order nor changes the
 original goal's proof, deadline, plan or clock authority.
+
+### Analyze shared inputs and compare declared production models
+
+Both pre-plan and selected-goal inspection accept `production_chain` and
+`production_chain_compare` through the existing Query tool. They operate on the
+exact advertised captured source and create no native reads or effects.
+
+For example, a caller-declared model can ask for two beds, three doors and four
+remaining wood stack units:
+
+```json
+{
+  "schema": "dfmcp.query/1",
+  "query": {
+    "kind": "production_chain",
+    "quantity_unit": "stack_units",
+    "resources": [
+      {"key": "wood", "item_types": ["WOOD"]},
+      {"key": "bed", "item_types": ["BED"]},
+      {"key": "door", "item_types": ["DOOR"]}
+    ],
+    "quotas": [
+      {"resource": "bed", "minimum_stock": 2},
+      {"resource": "door", "minimum_stock": 3},
+      {"resource": "wood", "minimum_stock": 4}
+    ],
+    "recipes": [
+      {
+        "output": "bed", "output_batch_size": 1,
+        "inputs": [{"resource": "wood", "units": 1}],
+        "job_token": "DeclaredBed",
+        "workshop": {"kind": "workshop", "type_key": "DeclaredCarpenters"}
+      },
+      {
+        "output": "door", "output_batch_size": 1,
+        "inputs": [{"resource": "wood", "units": 1}],
+        "job_token": "DeclaredDoor",
+        "workshop": {"kind": "workshop", "type_key": "DeclaredCarpenters"}
+      }
+    ],
+    "limit": 8
+  }
+}
+```
+
+Use the actual `production_inspection_source.anchor` as `expected_anchor` when
+binding the request explicitly, and serialize the envelope as Query's `request`
+string. This model jointly accounts for eligible captured stock and all declared
+consumption. With no eligible beds or doors, it requires nine eligible wood units;
+the four-unit wood quota means final stock after the hypothetical consumption.
+
+For comparison, set `kind="production_chain_compare"` and replace `recipes` with
+`candidates`, each containing a distinct `key` and its declared `recipes`. All
+alternatives share the same resources, quotas and original capture. The result
+reports feasible alternatives and nondominated shortage vectors without claiming
+that one scalar score proves a globally optimal plan. Both query forms use bounded
+whole-row pages; continuations retain the exact source, session and complete model.
+Refresh invalidates old continuations even when the caller supplies the new anchor.
+
+These recipes are explicit caller assumptions. The queries do not certify native
+ingredient costs, workshop subtype, labor, routes, queue capacity or future
+completion. Their conservative eligible-stock model also differs from the native
+stock-target mode's established count of all matching observed stack units. A
+model result is not an executable original or dispatch permission. Actual Plan,
+the optional input-supply prerequisite, Prepare and Commit acquire and qualify
+their own required sources.
 
 ### Count the complete captured stock
 

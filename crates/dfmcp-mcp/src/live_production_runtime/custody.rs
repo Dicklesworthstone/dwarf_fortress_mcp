@@ -1,4 +1,5 @@
 //! Parent-plan custody at each child evidence boundary.
+use super::input_supply::{self, SharedInputSupply};
 use super::manager_prerequisite::{self, SharedManager};
 use super::stock_target::{self, SharedStockTarget};
 use super::stock_targets::{self, SharedStockTargets};
@@ -31,6 +32,7 @@ struct Custody {
     original: PreparedPlan,
     workshop: Option<SharedWorkshop>,
     manager: Option<SharedManager>,
+    input_supply: Option<SharedInputSupply>,
     stock_target: Option<SharedStockTarget>,
     stock_targets: Option<SharedStockTargets>,
     authority_tick_floor: GameTick,
@@ -103,6 +105,7 @@ impl SharedCustody {
             stock_targets,
         )
     }
+    #[cfg(test)]
     pub(super) fn new_with_manager(
         archive: PlanArchiveStore<PrivateBuildFile>,
         identity: CapsuleStore<PrivateBuildFile>,
@@ -112,6 +115,27 @@ impl SharedCustody {
         stock_target: Option<SharedStockTarget>,
         stock_targets: Option<SharedStockTargets>,
     ) -> Self {
+        Self::new_with_input_supply(
+            archive,
+            identity,
+            original,
+            workshop,
+            manager,
+            stock_target,
+            stock_targets,
+            None,
+        )
+    }
+    pub(super) fn new_with_input_supply(
+        archive: PlanArchiveStore<PrivateBuildFile>,
+        identity: CapsuleStore<PrivateBuildFile>,
+        original: PreparedPlan,
+        workshop: Option<SharedWorkshop>,
+        manager: Option<SharedManager>,
+        stock_target: Option<SharedStockTarget>,
+        stock_targets: Option<SharedStockTargets>,
+        input_supply: Option<SharedInputSupply>,
+    ) -> Self {
         Self(Arc::new(Mutex::new(Custody {
             archive,
             identity,
@@ -119,6 +143,7 @@ impl SharedCustody {
             original,
             workshop,
             manager,
+            input_supply,
             stock_target,
             stock_targets,
             armed: None,
@@ -199,6 +224,12 @@ impl SharedCustody {
         let original_anchor = state.original.anchor;
         let retained_tick_floor = state
             .authority_tick_floor
+            .max(
+                state
+                    .input_supply
+                    .as_ref()
+                    .map_or(GameTick(0), SharedInputSupply::high_tick),
+            )
             .max(GameTick(
                 state.workshop.as_ref().map_or(0, SharedWorkshop::high_tick),
             ))
@@ -382,18 +413,21 @@ impl SharedCustody {
             return Ok(());
         };
         let queue = queue.ok_or_else(|| denied("stock target lost its original queue capture"))?;
+        let input = state.input_supply.clone();
+        let bytes =
+            stock_target::CHECK_BYTES + input.as_ref().map_or(0, |_| input_supply::GUARD_BYTES);
         let armed = state
             .armed
             .as_mut()
             .ok_or_else(|| denied("custody operation is not armed"))?;
         armed.bytes = armed
             .bytes
-            .checked_sub(stock_target::CHECK_BYTES)
+            .checked_sub(bytes)
             .ok_or_else(|| exhausted("stock target prerequisite allowance exhausted"))?;
         let mut current = current;
         current.anchor.tick = GameTick(queue.tick());
-        current.budget.max_bytes = stock_target::CHECK_BYTES;
-        let result = target.qualify(queue, &current);
+        current.budget.max_bytes = bytes;
+        let result = target.qualify_with_input(queue, input.as_ref(), &current);
         state.authority_tick_floor = state.authority_tick_floor.max(target.high_tick());
         result
     }
@@ -412,19 +446,55 @@ impl SharedCustody {
         };
         let queue =
             queue.ok_or_else(|| denied("stock targets lost their original queue capture"))?;
+        let input = state.input_supply.clone();
+        let bytes =
+            stock_targets::CHECK_BYTES + input.as_ref().map_or(0, |_| input_supply::GUARD_BYTES);
         let armed = state
             .armed
             .as_mut()
             .ok_or_else(|| denied("custody operation is not armed"))?;
         armed.bytes = armed
             .bytes
-            .checked_sub(stock_targets::CHECK_BYTES)
+            .checked_sub(bytes)
             .ok_or_else(|| exhausted("stock-target portfolio prerequisite allowance exhausted"))?;
         let mut current = current;
         current.anchor.tick = GameTick(queue.tick());
-        current.budget.max_bytes = stock_targets::CHECK_BYTES;
-        let result = targets.qualify(queue, &current);
+        current.budget.max_bytes = bytes;
+        let result = targets.qualify_with_input(queue, input.as_ref(), &current);
         state.authority_tick_floor = state.authority_tick_floor.max(targets.high_tick());
+        result
+    }
+    fn qualify_input_supply(
+        &self,
+        c: &OperationContext,
+        queue: Option<&WorkOrderObservation>,
+    ) -> Result<()> {
+        let current = self.narrow(c)?;
+        let mut state = self
+            .0
+            .try_lock()
+            .map_err(|_| denied("custody is unavailable"))?;
+        if state.stock_target.is_some() || state.stock_targets.is_some() {
+            return Ok(());
+        }
+        let Some(input) = state.input_supply.clone() else {
+            return Ok(());
+        };
+        let queue =
+            queue.ok_or_else(|| denied("input supply lost the protected original queue"))?;
+        let armed = state
+            .armed
+            .as_mut()
+            .ok_or_else(|| denied("custody operation is not armed"))?;
+        armed.bytes = armed
+            .bytes
+            .checked_sub(input_supply::CHECK_BYTES)
+            .ok_or_else(|| exhausted("input supply allowance exhausted"))?;
+        let mut current = current;
+        current.anchor.tick = GameTick(queue.tick());
+        current.budget.max_bytes = input_supply::CHECK_BYTES;
+        let result = input.qualify(queue, &current);
+        state.authority_tick_floor = state.authority_tick_floor.max(input.high_tick());
         result
     }
     fn narrow(&self, c: &OperationContext) -> Result<OperationContext> {
@@ -565,6 +635,8 @@ impl<E: WorkOrderEvidenceOwner> WorkOrderEvidenceOwner for GuardedEvidence<E> {
             .qualify_stock_target(&remaining_context(c, start)?, Some(observation))?;
         self.custody
             .qualify_stock_targets(&remaining_context(c, start)?, Some(observation))?;
+        self.custody
+            .qualify_input_supply(&remaining_context(c, start)?, Some(observation))?;
         let generation = self
             .custody
             .verify_generation(&remaining_context(c, start)?)?;
@@ -595,6 +667,10 @@ impl<E: WorkOrderEvidenceOwner> WorkOrderEvidenceOwner for GuardedEvidence<E> {
             self.order_observation.as_ref(),
         )?;
         self.custody.qualify_stock_targets(
+            &remaining_context(c, start)?,
+            self.order_observation.as_ref(),
+        )?;
+        self.custody.qualify_input_supply(
             &remaining_context(c, start)?,
             self.order_observation.as_ref(),
         )?;

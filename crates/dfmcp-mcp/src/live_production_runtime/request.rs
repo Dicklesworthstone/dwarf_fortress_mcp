@@ -316,6 +316,9 @@ impl Request {
         if origins.manager.is_some() {
             planner.policy.max_string_bytes = 1024;
         }
+        if origins.input_supply.is_some() {
+            planner.policy.max_string_bytes = 2048;
+        }
         let mut plan = planner.prepare_with_evidence(evidence, &intent, context)?;
         for step in &mut plan.steps {
             step.compensation = None;

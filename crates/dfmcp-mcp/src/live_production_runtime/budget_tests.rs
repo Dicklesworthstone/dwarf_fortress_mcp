@@ -1,6 +1,58 @@
 use super::*;
 
 #[test]
+fn conserved_inputs_fit_all_four_targets_and_both_donors_without_reusing_budget() -> Result<()> {
+    let local =
+        4 * MIB + 32 * MIB + workshop_prerequisite::LOCAL_BYTES + manager_prerequisite::LOCAL_BYTES;
+    let custody = MANAGER_CUSTODY_DISPATCH_BYTES
+        + 6 * (stock_targets::CHECK_BYTES + input_supply::GUARD_BYTES);
+    let actual = 13 * local
+        + 6 * (workshop_prerequisite::CHECK_BYTES
+            + manager_prerequisite::CHECK_BYTES
+            + stock_targets::CHECK_BYTES
+            + input_supply::GUARD_BYTES);
+    assert_eq!(custody, 3786 * MIB);
+    assert!(actual <= custody);
+    let c = OperationContext {
+        session_id: SessionId::new(1),
+        request_id: RequestId::new(1),
+        anchor: StateAnchor {
+            fortress_id: dfmcp_core::FortressId::new(1),
+            cursor: ObservationCursor::ORIGIN,
+            tick: GameTick(1),
+            state_hash: Digest32::of_bytes(b"four targets with conserved original inputs"),
+        },
+        budget: WorkBudget {
+            max_bytes: 8 * 1024 * MIB - 512 * MIB - 128 * 1024,
+            max_wall_millis: MAX_WALL_MILLIS,
+            ..WorkBudget::CONSERVATIVE_DEFAULT
+        },
+        grants: Vec::new(),
+        cancellation_requested: false,
+    };
+    let mut work = Work::new(&c)?;
+    let deadline = work.until;
+    let output = work.take(256 * MIB)?;
+    // A half-of-remainder cap is insufficient, although the actual public
+    // parent budget can fund the complete last insertion without overlap.
+    assert!(custody > work.bytes / 2);
+    let checks = work.take(custody)?;
+    work.take(8 * MIB)?;
+    for _ in 0..3 {
+        work.take(512 * MIB)?;
+    }
+    let native = work.rest(MAX_FRONTIER_BYTES)?;
+    assert_eq!(native.budget.max_bytes, MAX_FRONTIER_BYTES);
+    assert_eq!(checks.budget.max_bytes, custody);
+    assert_eq!(work.bytes, 45 * MIB + 896 * 1024);
+    assert_eq!(work.until, deadline);
+    let mut view = Work::new(&output)?;
+    assert!(view.take(view.bytes / 2)?.budget.max_bytes >= local);
+    assert!(view.bytes >= 3 * 8 * MIB);
+    Ok(())
+}
+
+#[test]
 fn manager_and_workshop_fit_four_target_dispatch_with_all_original_receipt_prefixes() {
     let local =
         4 * MIB + 32 * MIB + workshop_prerequisite::LOCAL_BYTES + manager_prerequisite::LOCAL_BYTES;
@@ -222,6 +274,62 @@ fn machine_host_contract_preserves_bounded_development_scope() -> Result<()> {
         json!(["original.plan", "original.citizens", "execution.journal"])
     );
     assert_eq!(host["tool_names"].as_array().map(Vec::len), Some(11));
+    let inputs = &host["input_supply"];
+    assert_eq!(inputs["configuration_schema"], input_config::SCHEMA);
+    assert_eq!(
+        inputs["policy"],
+        dfmcp_adapter::semantic_work_orders::FURNITURE_INPUT_POLICY
+    );
+    assert_eq!(
+        inputs["raw_assessment_byte_work"],
+        input_supply::ASSESS_BYTES
+    );
+    assert_eq!(inputs["shared_guard_byte_work"], input_supply::GUARD_BYTES);
+    assert_eq!(
+        inputs["captured_plan_byte_work"],
+        input_supply::CAPTURED_PLAN_BYTES
+    );
+    assert_eq!(
+        inputs["standalone_check_byte_work"],
+        input_supply::CHECK_BYTES
+    );
+    assert_eq!(
+        inputs["four_target_manager_workshop_dispatch_custody_max_bytes"],
+        MANAGER_CUSTODY_DISPATCH_BYTES
+            + 6 * (stock_targets::CHECK_BYTES + input_supply::GUARD_BYTES)
+    );
+    for flag in [
+        "whole_original_requirement_includes_created_prefix",
+        "positive_plan_requires_fresh_complete_supply",
+        "initial_queue_must_be_empty",
+        "dispatch_queue_requires_exact_original_created_prefix",
+        "every_original_shape_supported",
+        "all_met_skips_input_qualification_and_queue",
+        "stock_sizing_and_input_assessment_share_raw_capture",
+        "decoded_floors_retained_before_later_refusal",
+        "ambiguous_native_read_failure_fences_owner",
+        "config_or_original_marker_stripping_refused",
+        "unavailable_owner_cannot_erase_complete_checkpoint",
+    ] {
+        assert_eq!(inputs[flag], true, "input supply {flag}");
+    }
+    for flag in [
+        "legacy_inventory_baseline_grants_widened",
+        "additional_private_sidecar",
+        "recovery_restores_confirmation",
+        "query_performs_native_contact",
+        "native_recipe_feasibility_proven",
+        "resource_reservation",
+        "path_access_proven",
+        "new_native_protocol_or_tool",
+        "admission",
+    ] {
+        assert_eq!(inputs[flag], false, "input supply {flag}");
+    }
+    for name in ["production_inspection", "preplan_production_inspection"] {
+        assert_eq!(host[name]["query_kinds"], json!(inspection::QUERY_KINDS));
+        assert_eq!(host[name]["production_chain_native_recipe_verified"], false);
+    }
     let target = &host["stock_target"];
     assert_eq!(target["plan_census_bytes"], stock_target::CENSUS_BYTES);
     assert_eq!(

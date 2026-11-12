@@ -109,6 +109,34 @@ fn items() -> Value {
     json!({"kind":"entities","kinds":["item"],"fields":["type_key","stack_size"],"limit":1})
 }
 
+// Deliberately caller-declared transformations of the captured BED stock. The
+// report must never certify these hypothetical recipes as native DF recipes.
+fn declared_chain() -> Value {
+    json!({"kind":"production_chain","quantity_unit":"stack_units",
+        "resources":[{"key":"raw","item_types":["BED"]},
+            {"key":"product","item_types":["DOOR"]}],
+        "quotas":[{"resource":"raw","minimum_stock":4},
+            {"resource":"product","minimum_stock":4}],
+        "recipes":[{"output":"product","output_batch_size":1,
+            "inputs":[{"resource":"raw","units":1}],"job_token":"DeclaredTransformation",
+            "workshop":{"kind":"workshop","type_key":"DeclaredWorkshop"}}],"limit":1})
+}
+
+fn declared_comparison() -> Value {
+    let mut query = declared_chain();
+    query["kind"] = json!("production_chain_compare");
+    let mut efficient = query["recipes"].clone();
+    efficient[0]["output_batch_size"] = json!(2);
+    query["candidates"] = json!([
+        {"key":"demanding","recipes":query["recipes"]},
+        {"key":"efficient","recipes":efficient}]);
+    query
+        .as_object_mut()
+        .expect("query object")
+        .remove("recipes");
+    query
+}
+
 #[test]
 fn native_preflight_inspection_is_read_only_and_growth_plan_acquires_its_own_baseline() -> TestResult
 {
@@ -132,6 +160,14 @@ fn native_preflight_inspection_is_read_only_and_growth_plan_acquires_its_own_bas
     assert!(source["order_step_id"].is_null());
     assert!(observed["original_plan"].is_null());
     assert_eq!(source["mutation_authority"], false);
+    for kind in ["production_chain", "production_chain_compare"] {
+        assert!(
+            source["query_kinds"]
+                .as_array()
+                .ok_or("query kinds")?
+                .contains(&json!(kind))
+        );
+    }
     let before_query = native_calls()?;
     assert_eq!(operations_reads(&before_query), 1);
 
@@ -156,6 +192,47 @@ fn native_preflight_inspection_is_read_only_and_growth_plan_acquires_its_own_bas
         diagnosis["production_inspection"]["anchor"],
         source["anchor"]
     );
+    let first_chain = inspect(&mut runtime, source, declared_chain())?;
+    let chain = &first_chain["production_inspection"];
+    assert_eq!(chain["anchor"], source["anchor"]);
+    assert_eq!(chain["source_digest"], source["source_digest"]);
+    assert_eq!(chain["inspection_scope"], "preplan_captured_operations");
+    assert_eq!(chain["model_feasible"], false);
+    assert_eq!(chain["summary"]["shortage_resources"], 1);
+    assert_eq!(chain["native_recipe_verified"], false);
+    assert!(chain["continuation"].is_string());
+    let mut next_chain = declared_chain();
+    next_chain["continuation"] = chain["continuation"].clone();
+    next_chain["limit"] = json!(128);
+    let second_chain = inspect(&mut runtime, source, next_chain)?;
+    assert_eq!(
+        second_chain["production_inspection"]["analysis_digest"],
+        chain["analysis_digest"]
+    );
+    let comparison = inspect(&mut runtime, source, declared_comparison())?;
+    let compared = &comparison["production_inspection"];
+    assert_eq!(
+        compared["summary"]["feasible_candidates"],
+        json!(["efficient"])
+    );
+    assert_eq!(
+        compared["summary"]["deficit_frontier"],
+        json!(["efficient"])
+    );
+    assert_eq!(compared["source_digest"], source["source_digest"]);
+    for result in [chain, compared] {
+        for flag in [
+            "plan_created",
+            "reservation_created",
+            "commit_compatible",
+            "mutation_dispatched",
+            "native_recipe_verified",
+            "completion_proven",
+            "original_goal_evidence",
+        ] {
+            assert_eq!(result[flag], false, "{flag}: {result}");
+        }
+    }
     assert_eq!(native_calls()?, before_query, "Query made a native request");
 
     let request = Request::parse(&json!({
@@ -212,6 +289,9 @@ fn native_preflight_refresh_and_default_observe_withdraw_stale_sources() -> Test
     let mut runtime = runtime()?;
     let first = observe(&mut runtime)?;
     let first_source = &first["production_inspection_source"];
+    let first_chain = inspect(&mut runtime, first_source, declared_chain())?;
+    let continuation = first_chain["production_inspection"]["continuation"].clone();
+    assert!(continuation.is_string());
     let second = observe(&mut runtime)?;
     let second_source = &second["production_inspection_source"];
     assert_ne!(first_source["anchor"], second_source["anchor"]);
@@ -225,12 +305,28 @@ fn native_preflight_refresh_and_default_observe_withdraw_stale_sources() -> Test
         11
     );
     let before_refusal = native_calls()?;
-    assert!(matches!(inspect(&mut runtime, first_source, items()),
+    let mut stale_chain = declared_chain();
+    stale_chain["continuation"] = continuation;
+    assert!(matches!(inspect(&mut runtime, second_source, stale_chain),
         Err(cause) if cause.code == ErrorCode::StaleAnchor));
     // A failed query withdraws current visibility without erasing the source
     // publisher's identity history; only another Observe restores visibility.
     assert!(inspect(&mut runtime, second_source, items()).is_err());
     assert_eq!(native_calls()?, before_refusal);
+
+    let refreshed = observe(&mut runtime)?;
+    let before_anchor_refusal = native_calls()?;
+    assert!(matches!(inspect(&mut runtime, first_source, items()),
+        Err(cause) if cause.code == ErrorCode::StaleAnchor));
+    assert!(
+        inspect(
+            &mut runtime,
+            &refreshed["production_inspection_source"],
+            items()
+        )
+        .is_err()
+    );
+    assert_eq!(native_calls()?, before_anchor_refusal);
 
     let fresh = observe(&mut runtime)?;
     assert_eq!(

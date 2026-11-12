@@ -15,6 +15,13 @@ const MANAGER: &[&str] = &[
     "civ_next_position",
     "civ_next_assignment",
 ];
+const INPUT_SUPPLY: &[&str] = &[
+    "tick",
+    "generation",
+    "next_job_id",
+    "next_building_id",
+    "next_item_id",
+];
 
 fn complete_floor(value: &Value, fields: &[&str]) -> bool {
     value["fenced"].is_boolean() && fields.iter().all(|field| value[*field].is_u64())
@@ -34,6 +41,12 @@ pub(super) fn retain(retained: &mut Value, latest: &Value) {
             "manager_prerequisite_digest",
             "manager_prerequisite_floor",
             MANAGER,
+        ),
+        (
+            "input_supply",
+            "input_supply_digest",
+            "input_supply_floor",
+            INPUT_SUPPLY,
         ),
     ] {
         // These form one original association. Never combine a new digest with
@@ -58,7 +71,13 @@ pub(super) fn retain(retained: &mut Value, latest: &Value) {
             retained[scope]["status"] = json!("unavailable");
         }
         if retained[scope].is_object() {
-            retained[scope]["last_qualified"] = Value::Null;
+            if scope == "input_supply" && retained[scope]["last_qualified"]["status"] == "shortage"
+            {
+                retained[scope]["last_qualified"]["fresh_for_current_call"] = json!(false);
+                retained[scope]["last_qualified"]["current_supply_proven"] = json!(false);
+            } else {
+                retained[scope]["last_qualified"] = Value::Null;
+            }
             if fenced {
                 if recovery[floor].is_object() {
                     recovery[floor]["fenced"] = json!(true);
@@ -95,6 +114,12 @@ mod tests {
                 "manager_prerequisite_floor",
                 MANAGER,
             ),
+            (
+                "input_supply",
+                "input_supply_digest",
+                "input_supply_floor",
+                INPUT_SUPPLY,
+            ),
         ] {
             let mut state = json!({"fenced":true});
             for field in fields {
@@ -111,10 +136,15 @@ mod tests {
             "manager_prerequisite_digest":null,"manager_prerequisite_floor":null,
             "workshop_prerequisite_digest":null,"workshop_prerequisite_floor":null},
             "manager_prerequisite":{"status":"unavailable","current_state_proven":false},
-            "workshop_prerequisite":{"status":"unavailable","current_state_proven":false}});
+            "workshop_prerequisite":{"status":"unavailable","current_state_proven":false},
+            "input_supply":{"status":"unavailable","current_state_proven":false}});
         retain(&mut retained, &latest);
         assert_eq!(retained["recovery"]["frontier"]["head"], "new");
-        for scope in ["workshop_prerequisite", "manager_prerequisite"] {
+        for scope in [
+            "workshop_prerequisite",
+            "manager_prerequisite",
+            "input_supply",
+        ] {
             assert_eq!(retained[scope]["checkpoint"], original[scope]["checkpoint"]);
             assert_eq!(
                 retained[scope]["association_digest"],

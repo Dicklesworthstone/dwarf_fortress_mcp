@@ -5,7 +5,12 @@
   "policy": "dfmcp.furniture-wood-input-requirement/1",
   "supply_policy": "conservative-unattached-stack-units/1",
   "source_protocol": "operations/1.3",
-  "recipes": ["wooden_bed", "wooden_door", "wooden_table", "wooden_chair"],
+  "recipes": [
+    "wooden_bed",
+    "wooden_door",
+    "wooden_table",
+    "wooden_chair"
+  ],
   "requirement": {
     "wood_stack_units_per_requested_furniture_unit": 1,
     "coefficient_is_versioned_host_requirement": true,
@@ -25,8 +30,17 @@
     "analysis_work_units": 10000000
   },
   "qualification": {
-    "independent_pins": ["world_folder", "site_id", "df_version", "dfhack_version", "operations_generation"],
-    "required_capabilities": ["Query", "Observe"],
+    "independent_pins": [
+      "world_folder",
+      "site_id",
+      "df_version",
+      "dfhack_version",
+      "operations_generation"
+    ],
+    "required_capabilities": [
+      "Query",
+      "Observe"
+    ],
     "exact_original_canonical_anchor": true,
     "same_paused_fortress_tick": true,
     "complete_items_containers_buildings_jobs_and_attachments": true,
@@ -37,9 +51,17 @@
     "higher_failed_read_floors_owned_by_consumer": true
   },
   "excluded_supply": [
-    "zero_stack_size", "removed_in_chain", "forbidden_in_chain", "rotten_in_chain",
-    "trader_in_chain", "attached_to_job_in_chain", "in_job_in_chain", "dump_in_chain",
-    "in_inventory_in_chain", "in_building_in_chain", "building_holder_in_chain"
+    "zero_stack_size",
+    "removed_in_chain",
+    "forbidden_in_chain",
+    "rotten_in_chain",
+    "trader_in_chain",
+    "attached_to_job_in_chain",
+    "in_job_in_chain",
+    "dump_in_chain",
+    "in_inventory_in_chain",
+    "in_building_in_chain",
+    "building_holder_in_chain"
   ],
   "claims": {
     "current_readiness_from_retained_assessment": false,
@@ -51,7 +73,23 @@
     "causal_output_proof": false,
     "admission": false
   },
-  "host_integration": "separate_consumer_increment",
+  "host_integration": {
+    "profile": [
+      "serve-gameplay-dev",
+      "labor-order"
+    ],
+    "contract": "live_production_executor_v1.json#/development_mcp_host/input_supply",
+    "configuration_schema": "dfmcp.furniture-input-supply/1",
+    "original_marked_archive_required": true,
+    "all_original_amounts_conserved": true,
+    "fresh_plan_prepare_and_post_dispatch_started_checks": true,
+    "stock_sizing_capture_shared": true,
+    "created_prefix_checked": true,
+    "complete_source_checkpoint_retained": true,
+    "all_met_no_input_work": true,
+    "new_native_protocol_or_tool": false,
+    "admission": false
+  },
   "implementation_files": [
     "crates/dfmcp-adapter/src/operations_analysis.rs",
     "crates/dfmcp-adapter/src/semantic_work_orders.rs",

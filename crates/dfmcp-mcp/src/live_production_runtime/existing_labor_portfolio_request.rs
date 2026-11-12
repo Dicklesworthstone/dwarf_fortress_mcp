@@ -264,6 +264,9 @@ impl ExistingLaborPortfolioRequest {
             // legacy originals retain the default policy and identical bytes.
             planner.policy.max_string_bytes = 1024;
         }
+        if origins.input_supply.is_some() {
+            planner.policy.max_string_bytes = 2048;
+        }
         let mut plan = planner.prepare_with_evidence(evidence, &intent, c)?;
         for step in &mut plan.steps {
             step.compensation = None;

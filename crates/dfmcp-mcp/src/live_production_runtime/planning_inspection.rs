@@ -290,6 +290,8 @@ impl Runtime {
                     "fields":["type_key","stack_size","material_type","material_index"],"limit":16}},
             "inventory_totals_request":inspection::inventory_totals_request(snapshot.anchor()),
             "inventory_totals_semantics":inspection::INVENTORY_TOTALS_SEMANTICS,
+            "production_chain_semantics":"caller_declared_model_over_captured_conservative_supply",
+            "production_chain_native_recipe_verified":false,
             "query_kinds":inspection::QUERY_KINDS,
             "unknown":["native_recipe_requirements","workshop_subtype","path_access",
                 "labor_eligibility","production_attribution","future_production_success"],

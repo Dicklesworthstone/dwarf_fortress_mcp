@@ -1,6 +1,6 @@
 use super::*;
 #[path = "../../dfmcp-adapter/tests/support/production_spatial.rs"]
-mod fixture;
+pub(crate) mod fixture;
 use dfmcp_adapter::live_spatial::SpatialStateView;
 use dfmcp_adapter::live_spatial::citizens::LiveSpatialCitizenState;
 use dfmcp_core::{CapabilityGrant, CapabilityScope, RequestId, SessionId, WorkBudget};
@@ -39,7 +39,7 @@ fn context(state: &LiveSpatialCitizenState) -> Result<OperationContext> {
         cancellation_requested: false,
     })
 }
-fn query() -> Value {
+pub(crate) fn query() -> Value {
     json!({"schema":"dfmcp.query/1","query":{"kind":"production_chain","quantity_unit":"stack_units",
         "resources":[{"key":"raw","item_types":["item_type_3"]},
             {"key":"component","item_types":["item_type_998"]},{"key":"product","item_types":["item_type_999"]}],
@@ -276,7 +276,3 @@ fn schema_discovery_adds_only_the_new_query() -> Result<()> {
     assert!(!handles(&json!({"query":{"kind":"create_work_order"}})));
     Ok(())
 }
-
-#[cfg(unix)]
-#[path = "production_chain_runtime_tests.rs"]
-mod runtime;

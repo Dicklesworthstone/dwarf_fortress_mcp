@@ -1,5 +1,33 @@
 # Changelog
 
+## Unreleased — Enforce original input supply and inspect production chains
+
+- Connect optional conserved furniture inputs to all six combined-production
+  request families. Bind the complete original demand, retained reserve and
+  independent source before deriving intent and step identities; compose with
+  both Workshop and Manager prerequisites in the original archive.
+- Require fresh conservative supply and an exact receipt-backed native queue
+  prefix at protected preparation and post-DispatchStarted checks. Retain every
+  original order's demand after insertion and share stock-sizing captures.
+  Preserve all-met no-work behavior without prerequisite reads or effect grants.
+- Carry complete source floors, sticky failures and original marker custody
+  through pre-plan checkpoints, Offline recovery and uncertain-effect
+  reconciliation. Expose shortages and historical qualification in full, compact
+  and Agent Turn responses while withholding stale order guidance.
+- Fix final-control budget exhaustion and reserve the full four-target dispatch
+  with both donors inside the unchanged 8 GiB public allowance, including the
+  three earlier receipts and native frontier.
+- Expose existing `production_chain` and `production_chain_compare` Query engines
+  through combined production inspection. Support declared shared inputs, final
+  reserves, shortage analysis, bounded candidate comparison and exact-source
+  continuation without native I/O or new production authority.
+- Pass all 641 distinct focused Rust tests: 144 adapter component, 23 ordinary
+  adapter integration and 474 Runtime/presentation/inspection tests. The Runtime
+  suite includes 24 new native peer scenarios covering all request routes,
+  four-target donor composition, late shortages, queue changes, lost replies,
+  recovery and no redispatch. Full transport/supervision, native plugin, live-game
+  and admission qualification remain outside this evidence.
+
 ## Unreleased — Conserve shared furniture input supply
 
 - Add independently source-qualified furniture input requirements and assessments

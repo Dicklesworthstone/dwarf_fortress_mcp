@@ -33,6 +33,12 @@ mod custody;
 mod existing_labor_portfolio_request;
 mod existing_labor_request;
 mod goals;
+mod input_binding;
+mod input_config;
+mod input_supply;
+#[cfg(test)]
+#[path = "live_production_runtime/input_supply_tests.rs"]
+mod input_supply_tests;
 mod inspection;
 mod inventory_clock;
 mod manager_config;
@@ -86,6 +92,7 @@ pub(crate) use config::Config;
 use custody::{GuardedEvidence, SharedCustody};
 pub(crate) use existing_labor_portfolio_request::ExistingLaborPortfolioRequest;
 pub(crate) use existing_labor_request::ExistingLaborRequest;
+use input_supply::{PlanInputs, SharedInputSupply};
 pub(crate) use inspection::InspectionRequest;
 use inspection::InspectionSource;
 use inventory_clock::ProductionInventoryClock;
@@ -103,7 +110,7 @@ use stock_targets::SharedStockTargets;
 pub(crate) use stock_targets_request::StockTargetsRequest;
 pub(crate) use workforce::Mode;
 use workforce::Shell as WorkforceShell;
-use workforce::{denied, exhausted, invalid};
+use workforce::{denied, digest, exhausted, invalid};
 use workshop_prerequisite::SharedWorkshop;
 
 pub(crate) const MAX_BYTES: u64 = 32 * 1024 * 1024 * 1024;
@@ -264,6 +271,7 @@ pub(crate) struct Runtime {
     custody: Option<SharedCustody>,
     workshop: Option<SharedWorkshop>,
     manager: Option<SharedManager>,
+    input_supply: Option<SharedInputSupply>,
     stock_target: Option<SharedStockTarget>,
     stock_target_no_work: Option<Value>,
     stock_targets: Option<SharedStockTargets>,
@@ -425,6 +433,7 @@ impl Runtime {
             custody: None,
             workshop: None,
             manager: None,
+            input_supply: None,
             stock_target: None,
             stock_target_no_work: None,
             stock_targets: None,
@@ -476,6 +485,17 @@ impl Runtime {
                 )
             })
             .transpose()?;
+        out.input_supply = out
+            .config
+            .input_supply
+            .map(|config| SharedInputSupply::new(config, out.config.orders.clone()))
+            .transpose()?;
+        if let Some(checkpoint) = out.config.input_supply_checkpoint {
+            out.input_supply
+                .as_ref()
+                .ok_or_else(|| denied("input supply checkpoint lost its policy"))?
+                .restore_checkpoint(checkpoint, &work.take(MIB)?)?;
+        }
         if let Some(checkpoint) = out.config.workshop_prerequisite_checkpoint {
             let workshop = out
                 .workshop
@@ -613,6 +633,22 @@ impl Runtime {
                     ));
                 }
             }
+            match (
+                origins.input_supply,
+                &out.input_supply,
+                recovery.input_supply_digest,
+                recovery.input_supply_floor,
+            ) {
+                (Some(_), Some(input), Some(digest), Some(floor)) => {
+                    input.reopen(&original, digest, floor, &work.take(MIB)?)?
+                }
+                (None, None, None, None) => {}
+                _ => {
+                    return Err(denied(
+                        "recovery must retain the original input supply policy and complete source floors",
+                    ));
+                }
+            }
             let mut identity = workforce::identity::open_private_capsule(
                 &out.config.path("original.citizens"),
                 recovery.identity_digest,
@@ -648,7 +684,7 @@ impl Runtime {
                 out.config.orders.clone(),
                 out.authority_tick_floor(),
             )?;
-            out.custody = Some(SharedCustody::new_with_manager(
+            out.custody = Some(SharedCustody::new_with_input_supply(
                 archive,
                 identity,
                 original.clone(),
@@ -656,6 +692,7 @@ impl Runtime {
                 out.manager.clone(),
                 out.stock_target.clone(),
                 out.stock_targets.clone(),
+                out.input_supply.clone(),
             ));
             out.original = Some(original.clone());
             out.layout = Some(layout);
@@ -790,6 +827,11 @@ impl Runtime {
     }
     fn authority_tick_floor(&self) -> GameTick {
         self.observation_tick_floor
+            .max(
+                self.input_supply
+                    .as_ref()
+                    .map_or(GameTick(0), SharedInputSupply::high_tick),
+            )
             .max(GameTick(
                 self.workshop.as_ref().map_or(0, SharedWorkshop::high_tick),
             ))
@@ -865,7 +907,7 @@ impl Runtime {
         } else {
             WORKSHOP_CUSTODY_DISPATCH_BYTES
         };
-        let ceiling = if self.stock_targets.is_some() {
+        let mut ceiling = if self.stock_targets.is_some() {
             prerequisites + 6 * stock_targets::CHECK_BYTES
         } else if self.stock_target.is_some() {
             // Existing-labor dispatch can revalidate after both independent
@@ -877,6 +919,24 @@ impl Runtime {
         } else {
             512 * MIB
         };
+        if self.input_supply.is_some() {
+            ceiling += 6 * if self.stock_target.is_some() || self.stock_targets.is_some() {
+                input_supply::GUARD_BYTES
+            } else {
+                input_supply::CHECK_BYTES
+            };
+            // Four stock leaves, both independent donors and the input check
+            // require 3786 MiB of prepaid custody. All three earlier receipts,
+            // the native frontier and final output still fit the public 8 GiB
+            // budget, but halving the remainder would underfund this guard.
+            // Reserve its exact bounded cost before any dispatch work begins.
+            if let Some(custody) = &self.custody {
+                let mut reserved = work.take(ceiling)?;
+                reserved.anchor.tick = reserved.anchor.tick.max(self.authority_tick_floor());
+                custody.arm(&reserved)?;
+            }
+            return Ok(());
+        }
         self.arm_with_ceiling(work, ceiling)
     }
     fn arm_with_ceiling(&self, work: &mut Work, ceiling: u64) -> Result<()> {
@@ -976,6 +1036,9 @@ impl Runtime {
         self.planning_inspection.withdraw();
         self.stock_target_no_work = None;
         self.stock_targets_no_work = None;
+        if let Some(input) = &self.input_supply {
+            input.withdraw();
+        }
         if let Some(target) = &self.stock_target {
             target.withdraw();
         }
@@ -1048,6 +1111,10 @@ impl Runtime {
                         json!(workshop.seal().map(|seal| seal.to_hex()));
                     value["workshop_prerequisite_floor"] = workshop.recovery_floor();
                 }
+                if let Some(input) = &self.input_supply {
+                    value["input_supply_digest"] = json!(input.seal().map(|seal| seal.to_hex()));
+                    value["input_supply_floor"] = input.recovery_floor();
+                }
                 if let Some(manager) = &self.manager {
                     value["manager_prerequisite_digest"] =
                         json!(manager.seal().map(|seal| seal.to_hex()));
@@ -1063,6 +1130,7 @@ impl Runtime {
         json!({"mode":self.mode.as_str(),"anchor":anchor_json(self.anchor),"recovery":self.recovery_json(),
             "workshop_prerequisite":self.workshop.as_ref().map(SharedWorkshop::status),
             "manager_prerequisite":self.manager.as_ref().map(SharedManager::status),
+            "input_supply":self.input_supply.as_ref().map(SharedInputSupply::status),
             "stock_target":self.stock_target_json(),
             "stock_targets":self.stock_targets_json(),
             "portfolio":self.portfolio_json(),
@@ -1171,6 +1239,7 @@ impl Runtime {
         let value = json!({"ok":true,"mode":self.mode.as_str(),"anchor":anchor_json(self.anchor),
             "workshop_prerequisite":self.workshop.as_ref().map(SharedWorkshop::status),
             "manager_prerequisite":self.manager.as_ref().map(SharedManager::status),
+            "input_supply":self.input_supply.as_ref().map(SharedInputSupply::status),
             "stock_target":self.stock_target_json(),
             "stock_targets":self.stock_targets_json(),
             "portfolio":self.portfolio_json(),
@@ -1325,6 +1394,7 @@ impl Runtime {
             request.observation()?,
             false,
             &objectives,
+            PlanInputs::requested([(request.recipe.as_str(), request.amount)])?,
             c,
             |evidence, baselines, current, origin| {
                 request.compile_with_prerequisites(evidence, baselines, current, origin)
@@ -1346,6 +1416,12 @@ impl Runtime {
             request.observation()?,
             true,
             &objectives,
+            PlanInputs::requested(
+                request
+                    .orders
+                    .iter()
+                    .map(|order| (order.recipe.as_str(), order.amount)),
+            )?,
             c,
             |evidence, baselines, current, origin| {
                 request.compile_with_prerequisites(evidence, baselines, current, origin)
@@ -1364,6 +1440,7 @@ impl Runtime {
             (request.unit_ids()?, request.labor.clone()),
             false,
             &objectives,
+            PlanInputs::requested([(request.recipe.as_str(), request.amount)])?,
             c,
             |evidence, requirement, baselines, current, origin| {
                 request.compile_with_prerequisites(
@@ -1392,6 +1469,12 @@ impl Runtime {
             (request.unit_ids()?, request.labor.clone()),
             true,
             &objectives,
+            PlanInputs::requested(
+                request
+                    .orders
+                    .iter()
+                    .map(|order| (order.recipe.as_str(), order.amount)),
+            )?,
             c,
             |evidence, requirement, baselines, current, origin| {
                 request.compile_with_prerequisites(
@@ -1410,6 +1493,7 @@ impl Runtime {
         selection: (Vec<dfmcp_core::EntityId>, String),
         portfolio: bool,
         objectives: &[&orders::request::Objective],
+        inputs: PlanInputs,
         c: &OperationContext,
         compile: impl FnOnce(
             &PredicateEvidence<'_>,
@@ -1434,6 +1518,7 @@ impl Runtime {
             observation,
             portfolio,
             objectives,
+            inputs,
             c,
             |evidence, baselines, current, origin| {
                 let identity =
@@ -1480,6 +1565,7 @@ impl Runtime {
         observation: Digest32,
         portfolio: bool,
         objectives: &[&orders::request::Objective],
+        inputs: PlanInputs,
         c: &OperationContext,
         compile: impl FnOnce(
             &PredicateEvidence<'_>,
@@ -1538,7 +1624,20 @@ impl Runtime {
         } else {
             None
         };
-        let origins = Origins { workshop, manager };
+        let input_supply = if let Some(input) = &self.input_supply {
+            Some(if inputs.captured {
+                input.prepared(&inputs.orders, &work.take(MIB)?)?
+            } else {
+                input.prepare(&inputs.orders, None, &work.take(input_supply::CHECK_BYTES)?)?
+            })
+        } else {
+            None
+        };
+        let origins = Origins {
+            workshop,
+            manager,
+            input_supply,
+        };
         let plan = compile(&evidence, &baselines, &work.take(8 * MIB)?, origins)?;
         if prerequisite_binding::requirements(&plan)? != origins {
             return Err(denied(
@@ -1596,7 +1695,12 @@ impl Runtime {
         self.layout = Some(layout);
         self.stock_target = stock_target;
         self.stock_targets = stock_targets;
-        self.custody = Some(SharedCustody::new_with_manager(
+        // Until the original archive and identity are retained, a failed local
+        // publication must continue emitting the source-policy checkpoint.
+        if let Some(input) = &self.input_supply {
+            input.bind(&plan, &work.take(MIB)?)?;
+        }
+        self.custody = Some(SharedCustody::new_with_input_supply(
             archive,
             identity,
             plan.clone(),
@@ -1604,6 +1708,7 @@ impl Runtime {
             self.manager.clone(),
             self.stock_target.clone(),
             self.stock_targets.clone(),
+            self.input_supply.clone(),
         ));
         self.frontier = Some(durable::open_private_coordinator(
             &self.config.path("execution.journal"),

@@ -364,7 +364,23 @@
       "crates/dfmcp-mcp/src/live_production_presentation_manager.rs",
       "tests/stdio/combined_manager_prerequisite_runtime_peer.py",
       "crates/dfmcp-mcp/src/live_production_presentation_recovery.rs",
-      "crates/dfmcp-mcp/src/live_production_runtime/manager_config_tests.rs"
+      "crates/dfmcp-mcp/src/live_production_runtime/manager_config_tests.rs",
+      "crates/dfmcp-adapter/src/semantic_work_orders/input_supply.rs",
+      "crates/dfmcp-adapter/src/semantic_work_orders/input_supply_tests.rs",
+      "crates/dfmcp-adapter/src/operations_analysis.rs",
+      "crates/dfmcp-adapter/src/operations_production_chain.rs",
+      "crates/dfmcp-mcp/src/live_production_runtime/input_config.rs",
+      "crates/dfmcp-mcp/src/live_production_runtime/input_binding.rs",
+      "crates/dfmcp-mcp/src/live_production_runtime/input_supply.rs",
+      "crates/dfmcp-mcp/src/live_production_runtime/input_supply_tests.rs",
+      "crates/dfmcp-mcp/src/live_production_presentation_input_supply.rs",
+      "crates/dfmcp-mcp/src/production_chain_query.rs",
+      "crates/dfmcp-mcp/src/production_chain_query_tests.rs",
+      "crates/dfmcp-mcp/src/production_chain_compare.rs",
+      "crates/dfmcp-mcp/src/production_chain_compare_tests.rs",
+      "crates/dfmcp-mcp/src/production_chain_runtime_tests.rs",
+      "crates/dfmcp-mcp/src/spatial_production.rs",
+      "tests/stdio/combined_input_supply_runtime_peer.py"
     ],
     "private_custody_platforms": [
       "linux-x86_64",
@@ -657,6 +673,8 @@
       "query_kinds": [
         "production_diagnosis",
         "inventory_plan",
+        "production_chain",
+        "production_chain_compare",
         "entities",
         "inspect",
         "traverse",
@@ -699,7 +717,11 @@
       "test_execution_status": "added_not_executed_executor_unavailable",
       "aggregate_inventory_semantics": "observed_stock_not_usable_supply",
       "aggregate_complete_groups_or_refusal": true,
-      "aggregate_native_contact": false
+      "aggregate_native_contact": false,
+      "production_chain_semantics": "caller_declared_model_over_captured_conservative_supply",
+      "production_chain_native_recipe_verified": false,
+      "production_chain_model_comparison": "all bounded declared alternatives share one exact captured source and final-stock quotas",
+      "production_chain_continuation_binds": "session, complete source anchor, full declared model, section and work budget"
     },
     "existing_labor": {
       "request_kind": "existing_labor",
@@ -835,6 +857,8 @@
       "query_kinds": [
         "production_diagnosis",
         "inventory_plan",
+        "production_chain",
+        "production_chain_compare",
         "entities",
         "inspect",
         "traverse",
@@ -897,7 +921,11 @@
       "explicit_capture_preserved_in_workforce_page_requests": true,
       "native_factory_narrowed_entity_budget_checked_before_connection": true,
       "additional_test_campaign": "tests/stdio/combined_production_preflight.py",
-      "actual_runtime_tcp_regressions": "crates/dfmcp-mcp/src/live_production_runtime/preflight_tests.rs"
+      "actual_runtime_tcp_regressions": "crates/dfmcp-mcp/src/live_production_runtime/preflight_tests.rs",
+      "production_chain_semantics": "caller_declared_model_over_captured_conservative_supply",
+      "production_chain_native_recipe_verified": false,
+      "production_chain_model_comparison": "all bounded declared alternatives share one exact captured source and final-stock quotas",
+      "production_chain_continuation_binds": "session, complete source anchor, full declared model, section and work budget"
     },
     "workshop_prerequisite": {
       "configuration_field": "workshop_prerequisite",
@@ -1309,6 +1337,69 @@
         "failures": 0,
         "manager_native_scenarios": 17
       }
+    },
+    "input_supply": {
+      "owner_bead": "dfmcp-reality-wiring-proof-4bf.14.4",
+      "configuration_field": "input_supply",
+      "configuration_schema": "dfmcp.furniture-input-supply/1",
+      "policy": "dfmcp.furniture-wood-input-requirement/1",
+      "source_protocol": "operations/1.3",
+      "read_credential": "existing separately pinned semantic work-order Operations credential",
+      "reserve_wood_stack_units_default": 0,
+      "reserve_wood_stack_units_max": 1000000,
+      "whole_original_requirement_includes_created_prefix": true,
+      "positive_plan_requires_fresh_complete_supply": true,
+      "initial_queue_must_be_empty": true,
+      "dispatch_queue_requires_exact_original_created_prefix": true,
+      "every_original_shape_supported": true,
+      "all_met_skips_input_qualification_and_queue": true,
+      "stock_sizing_and_input_assessment_share_raw_capture": true,
+      "legacy_inventory_baseline_grants_widened": false,
+      "initial_source_requirement_and_floor_bound_before_original_keys": true,
+      "marker": "dfmcp-input-supply/1",
+      "archive_marker_hex_characters": 400,
+      "additional_private_sidecar": false,
+      "complete_original_plan_summary_max_bytes": 2048,
+      "no_input_summary_limits_and_identity_bytes_unchanged": true,
+      "raw_assessment_byte_work": 16777216,
+      "shared_guard_byte_work": 17825792,
+      "captured_plan_byte_work": 23068672,
+      "standalone_check_byte_work": 56623104,
+      "maximum_fresh_checks_per_prepare": 6,
+      "four_target_manager_workshop_dispatch_custody_max_bytes": 3969908736,
+      "public_default_bytes_unchanged": 8589934592,
+      "qualify_at": [
+        "positive_original_plan",
+        "each_original_order_prepare",
+        "each_original_order_post_dispatch_started_evidence_refresh"
+      ],
+      "preplan_checkpoint_field": "input_supply_checkpoint",
+      "recovery_fields": [
+        "input_supply_digest",
+        "input_supply_floor"
+      ],
+      "floor_fields": [
+        "tick",
+        "generation",
+        "next_job_id",
+        "next_building_id",
+        "next_item_id",
+        "fenced"
+      ],
+      "decoded_floors_retained_before_later_refusal": true,
+      "ambiguous_native_read_failure_fences_owner": true,
+      "config_or_original_marker_stripping_refused": true,
+      "recovery_restores_confirmation": false,
+      "query_performs_native_contact": false,
+      "historical_shortage_retained_in_error_and_compact_responses": true,
+      "unavailable_owner_cannot_erase_complete_checkpoint": true,
+      "native_recipe_feasibility_proven": false,
+      "resource_reservation": false,
+      "path_access_proven": false,
+      "new_native_protocol_or_tool": false,
+      "admission": false,
+      "native_test_campaign": "tests/stdio/combined_input_supply_runtime_peer.py",
+      "execution_evidence": "source integration under focused execution; final results recorded in IMPLEMENTATION_STATUS.md"
     }
   },
   "selected_work_order_goal_monitor": {

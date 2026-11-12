@@ -738,6 +738,7 @@ fn manager_and_workshop_stock_target_preserves_original_sizing_and_keys_on_recov
         let origins = Origins {
             workshop: Some(Digest32::of_bytes(b"workshop")),
             manager: Some(Digest32::of_bytes(b"manager")),
+            input_supply: None,
         };
         let original = compile(origins)?;
         let bound =
@@ -750,6 +751,7 @@ fn manager_and_workshop_stock_target_preserves_original_sizing_and_keys_on_recov
             Origins {
                 workshop: None,
                 manager: origins.manager,
+                input_supply: None,
             },
         ] {
             let mut stripped = original.clone();

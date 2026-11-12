@@ -1,4 +1,5 @@
 //! Fixed operator configuration for the combined, unadmitted development owner.
+use super::input_config::{self, InputCheckpoint, InputConfig, InputFloor};
 use super::manager_config::{
     self, ManagerConfig, ManagerPrerequisiteCheckpoint, ManagerRecoveryFloor,
 };
@@ -52,6 +53,8 @@ pub(crate) struct Recovery {
     pub(super) workshop_prerequisite_floor: Option<WorkshopRecoveryFloor>,
     pub(crate) manager_prerequisite_digest: Option<Digest32>,
     pub(super) manager_prerequisite_floor: Option<ManagerRecoveryFloor>,
+    pub(crate) input_supply_digest: Option<Digest32>,
+    pub(super) input_supply_floor: Option<InputFloor>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
@@ -178,6 +181,10 @@ struct Input {
     manager_prerequisite: Option<manager_config::Input>,
     #[serde(default, deserialize_with = "manager_config::checkpoint")]
     manager_prerequisite_checkpoint: Option<ManagerPrerequisiteCheckpoint>,
+    #[serde(default, deserialize_with = "input_config::configuration")]
+    input_supply: Option<InputConfig>,
+    #[serde(default, deserialize_with = "input_config::checkpoint")]
+    input_supply_checkpoint: Option<InputCheckpoint>,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -200,6 +207,10 @@ struct RecoveryInput {
     manager_prerequisite_digest: Option<String>,
     #[serde(default, deserialize_with = "manager_config::recovery_floor")]
     manager_prerequisite_floor: Option<ManagerRecoveryFloor>,
+    #[serde(default, deserialize_with = "journal_identity")]
+    input_supply_digest: Option<String>,
+    #[serde(default, deserialize_with = "input_config::recovery_floor")]
+    input_supply_floor: Option<InputFloor>,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -236,6 +247,8 @@ pub(crate) struct Config {
     pub(super) workshop_prerequisite_checkpoint: Option<WorkshopPrerequisiteCheckpoint>,
     pub(super) manager_prerequisite: Option<ManagerConfig>,
     pub(super) manager_prerequisite_checkpoint: Option<ManagerPrerequisiteCheckpoint>,
+    pub(super) input_supply: Option<InputConfig>,
+    pub(super) input_supply_checkpoint: Option<InputCheckpoint>,
     pub(crate) workforce: workforce::native::NativeShell,
     pub(crate) orders: orders::native::NativeShell,
     check: Arc<dyn Fn() -> Result<()> + Send + Sync>,
@@ -268,7 +281,7 @@ fn environment() -> Result<[String; 3]> {
         Ok(raw)
     };
     let raw = [read(CONFIG)?, read(WORKFORCE_CONFIG)?, read(ORDER_CONFIG)?];
-    let (_, _, _, clock, inventory_clock, workshop, _, manager, _) = parse(&raw[0])?;
+    let (_, _, _, clock, inventory_clock, workshop, _, manager, _, _, _) = parse(&raw[0])?;
     for (key, _) in std::env::vars_os() {
         let key = key.to_string_lossy();
         if !allowed_key(
@@ -321,6 +334,8 @@ fn parse(
     Option<WorkshopPrerequisiteCheckpoint>,
     Option<ManagerConfig>,
     Option<ManagerPrerequisiteCheckpoint>,
+    Option<InputConfig>,
+    Option<InputCheckpoint>,
 )> {
     if raw.is_empty() || raw.len() > MAX_CONFIG_BYTES {
         return Err(invalid("combined operator configuration exceeds 16 KiB"));
@@ -358,6 +373,16 @@ fn parse(
         .map(|manager| manager.validate(&input.directory))
         .transpose()?;
     let manager_prerequisite_checkpoint = input.manager_prerequisite_checkpoint;
+    let input_supply = input.input_supply;
+    let input_supply_checkpoint = input.input_supply_checkpoint;
+    if let Some(checkpoint) = input_supply_checkpoint {
+        if input_supply.is_none() || input.recovery.is_some() {
+            return Err(denied(
+                "input supply checkpoint requires its configured pre-plan owner",
+            ));
+        }
+        checkpoint.floor.validate(0, checkpoint.floor.tick)?;
+    }
     if let (Some(workshop), Some(manager)) = (&workshop_prerequisite, &manager_prerequisite)
         && !distinct_directories([&workshop.directory, &manager.directory])
     {
@@ -471,10 +496,22 @@ fn parse(
                     .map(digest)
                     .transpose()?,
                 manager_prerequisite_floor: r.manager_prerequisite_floor,
+                input_supply_digest: r.input_supply_digest.as_deref().map(digest).transpose()?,
+                input_supply_floor: r.input_supply_floor,
             })
         })
         .transpose()?;
     if let Some(recovery) = recovery {
+        if recovery.input_supply_digest.is_some() != input_supply.is_some()
+            || recovery.input_supply_floor.is_some() != input_supply.is_some()
+        {
+            return Err(denied(
+                "combined input supply recovery requires its exact original marker and complete source floors",
+            ));
+        }
+        if let Some(floor) = recovery.input_supply_floor {
+            floor.validate(0, recovery.frontier.authority_tick_floor)?;
+        }
         if recovery.workshop_prerequisite_digest.is_some() != workshop_prerequisite.is_some()
             || recovery.workshop_prerequisite_floor.is_some() != workshop_prerequisite.is_some()
         {
@@ -539,6 +576,8 @@ fn parse(
         workshop_prerequisite_checkpoint,
         manager_prerequisite,
         manager_prerequisite_checkpoint,
+        input_supply,
+        input_supply_checkpoint,
     ))
 }
 
@@ -578,6 +617,8 @@ impl Config {
             workshop_prerequisite_checkpoint,
             manager_prerequisite,
             manager_prerequisite_checkpoint,
+            input_supply,
+            input_supply_checkpoint,
         ) = parse(&raw[0])?;
         let check: Arc<dyn Fn() -> Result<()> + Send + Sync> = Arc::new(move || {
             let current = environment()?;
@@ -664,6 +705,8 @@ impl Config {
             workshop_prerequisite_checkpoint,
             manager_prerequisite,
             manager_prerequisite_checkpoint,
+            input_supply,
+            input_supply_checkpoint,
             workforce,
             orders,
             check,

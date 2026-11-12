@@ -9,12 +9,16 @@ const WORKSHOP_PREFIX: &str =
     "Requires completed original Carpenter workshop [dfmcp-workshop-prerequisite/1] ";
 const MANAGER_RESERVED: &str = "Requires original production Manager";
 const MANAGER_PREFIX: &str = "Requires original production Manager [dfmcp-manager-prerequisite/1] ";
+const INPUT_RESERVED: &str = "Requires conserved furniture inputs";
+const INPUT_PREFIX: &str = "Requires conserved furniture inputs [dfmcp-input-supply/1] ";
+const INPUT_DOMAIN: &[u8] = b"dfmcp-native-combined-input-supply/1\0";
 const MANAGER_DOMAIN: &[u8] = b"dfmcp-native-combined-manager-prerequisite/1\0";
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct Origins {
     pub(crate) workshop: Option<Digest32>,
     pub(crate) manager: Option<Digest32>,
+    pub(crate) input_supply: Option<super::input_binding::InputBinding>,
 }
 
 impl From<Option<Digest32>> for Origins {
@@ -22,6 +26,7 @@ impl From<Option<Digest32>> for Origins {
         Self {
             workshop,
             manager: None,
+            input_supply: None,
         }
     }
 }
@@ -40,6 +45,13 @@ pub(super) fn append_identity(bytes: &mut Vec<u8>, origins: Origins) -> Result<(
         bytes.extend_from_slice(original.as_bytes());
         bytes.extend_from_slice(manager.as_bytes());
     }
+    if let Some(input) = origins.input_supply {
+        let original = Digest32::of_bytes(bytes);
+        bytes.clear();
+        bytes.extend_from_slice(INPUT_DOMAIN);
+        bytes.extend_from_slice(original.as_bytes());
+        bytes.extend_from_slice(input.witness().as_bytes());
+    }
     Ok(())
 }
 
@@ -47,6 +59,10 @@ pub(super) fn summary(body: String, origins: Origins) -> Result<String> {
     if body.is_empty() || reserved(&body) {
         return Err(invalid("empty or repeated production prerequisite summary"));
     }
+    let body = origins.input_supply.map_or_else(
+        || body.clone(),
+        |input| format!("{INPUT_PREFIX}{}\n{body}", input.encode()),
+    );
     let body = match origins.manager {
         Some(manager) => {
             if manager == Digest32::ZERO {
@@ -64,9 +80,11 @@ fn reserved(value: &str) -> bool {
         || value.contains(MANAGER_RESERVED)
         || value.contains("dfmcp-workshop-prerequisite")
         || value.contains("dfmcp-manager-prerequisite")
+        || value.contains(INPUT_RESERVED)
+        || value.contains("dfmcp-input-supply")
 }
 
-/// Only workshop then manager then the original body is accepted. A duplicate,
+/// Only workshop, manager, input supply, then the original body is accepted. A duplicate,
 /// reordered, unsupported or hidden marker cannot silently become legacy work.
 pub(super) fn parse_summary(summary: &str) -> Result<(Origins, &str)> {
     let mut body = summary;
@@ -82,6 +100,13 @@ pub(super) fn parse_summary(summary: &str) -> Result<(Origins, &str)> {
             *destination = Some(digest(witness)?);
             body = remainder;
         }
+    }
+    if let Some(rest) = body.strip_prefix(INPUT_PREFIX) {
+        let (encoded, remainder) = rest
+            .split_once('\n')
+            .ok_or_else(|| invalid("incomplete input supply marker"))?;
+        origins.input_supply = Some(super::input_binding::InputBinding::parse(encoded)?);
+        body = remainder;
     }
     if body.is_empty() || reserved(body) {
         return Err(invalid(
@@ -129,6 +154,7 @@ pub(super) fn assert_manager_variants(
             let origins = Origins {
                 workshop,
                 manager: Some(manager),
+                input_supply: None,
             };
             let plan = compile(origins)?;
             assert_eq!(requirements(&plan)?, origins);
@@ -182,7 +208,8 @@ pub(super) fn assert_manager_variants(
     assert!(
         compile(Origins {
             workshop: None,
-            manager: Some(Digest32::ZERO)
+            manager: Some(Digest32::ZERO),
+            input_supply: None
         })
         .is_err()
     );
@@ -205,10 +232,12 @@ mod tests {
             Origins {
                 workshop: None,
                 manager: Some(manager),
+                input_supply: None,
             },
             Origins {
                 workshop: Some(workshop),
                 manager: Some(manager),
+                input_supply: None,
             },
         ] {
             let marked = summary("Original goal".into(), origins)?;
@@ -260,7 +289,8 @@ mod tests {
                 &mut vec![],
                 Origins {
                     workshop: None,
-                    manager: Some(Digest32::ZERO)
+                    manager: Some(Digest32::ZERO),
+                    input_supply: None
                 }
             )
             .is_err()

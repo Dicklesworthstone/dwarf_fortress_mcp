@@ -13,6 +13,12 @@ mod shared;
 #[path = "production_chain_query.rs"]
 mod chain;
 
+// The spatial session tests belong to this host. The shared query engine also
+// serves combined production, whose native source/custody tests are separate.
+#[cfg(all(test, unix))]
+#[path = "production_chain_runtime_tests.rs"]
+mod runtime_tests;
+
 pub(super) fn handles(input: &Value) -> bool {
     chain::handles(input) || shared::handles(input) || workforce_queries::portfolio::handles(input)
 }

@@ -1,6 +1,175 @@
 use super::*;
 use serde_json::{Value, json};
 
+fn input_configuration() -> Value {
+    json!({"schema":"dfmcp.combined-production-development/1", "directory":"/tmp/combined-inputs",
+        "initialize":true,"input_supply":{"schema":"dfmcp.furniture-input-supply/1"}})
+}
+
+fn input_floor() -> Value {
+    json!({"tick":130,"generation":27,"next_job_id":80,
+        "next_building_id":90,"next_item_id":100,"fenced":false})
+}
+
+fn input_recovery() -> Value {
+    let hash = Digest32::of_bytes(b"original conserved input custody").to_hex();
+    json!({"plan_digest":hash,"object_digest":hash,"identity_digest":hash,
+        "anchor":{"fortress_id":"1","epoch":0,"sequence":2,"tick":120,"state_hash":hash},
+        "frontier":{"journal_id":hash,"head":hash,"authority_tick_floor":130},
+        "input_supply_digest":Digest32::of_bytes(b"original input marker").to_hex(),
+        "input_supply_floor":input_floor()})
+}
+
+#[test]
+fn input_policy_is_opt_in_closed_and_bounded_without_native_selectors() -> Result<()> {
+    let raw = input_configuration();
+    assert_eq!(
+        parse(&raw.to_string())?
+            .9
+            .map(|c| c.reserve_wood_stack_units),
+        Some(0)
+    );
+    assert!(parse(&raw.to_string())?.10.is_none());
+    for reserve in [0, 1, 1_000_000] {
+        let mut valid = raw.clone();
+        valid["input_supply"]["reserve_wood_stack_units"] = json!(reserve);
+        assert_eq!(
+            parse(&valid.to_string())?
+                .9
+                .map(|c| c.reserve_wood_stack_units),
+            Some(reserve)
+        );
+    }
+    for value in [Value::Null, json!({}), json!("policy")] {
+        let mut bad = raw.clone();
+        bad["input_supply"] = value;
+        assert!(parse(&bad.to_string()).is_err());
+    }
+    for (field, value) in [
+        ("schema", json!("dfmcp.furniture-input-supply/2")),
+        ("reserve_wood_stack_units", json!(-1)),
+        ("reserve_wood_stack_units", json!(1_000_001)),
+        ("reserve_wood_stack_units", Value::Null),
+        ("endpoint", json!("127.0.0.1:5000")),
+        ("directory", json!("/tmp/foreign")),
+        ("method", json!("ReadItems")),
+        ("protocol", json!("operations/1.3")),
+        ("generation", json!(27)),
+        ("item_ids", json!([1, 2])),
+        ("required_stack_units", json!(0)),
+    ] {
+        let mut bad = raw.clone();
+        bad["input_supply"][field] = value;
+        assert!(parse(&bad.to_string()).is_err(), "invalid {field}");
+    }
+    Ok(())
+}
+
+#[test]
+fn input_recovery_requires_exact_marker_and_every_consumed_allocator_floor() -> Result<()> {
+    let mut raw = input_configuration();
+    raw["initialize"] = json!(false);
+    raw["recovery"] = input_recovery();
+    let recovery = parse(&raw.to_string())?
+        .2
+        .ok_or_else(|| invalid("recovery"))?;
+    assert_eq!(
+        recovery.input_supply_floor.map(|f| f.counters()),
+        Some([80, 90, 100])
+    );
+    for field in ["input_supply_digest", "input_supply_floor"] {
+        let mut bad = raw.clone();
+        bad["recovery"]
+            .as_object_mut()
+            .ok_or_else(|| invalid("fixture"))?
+            .remove(field);
+        assert!(parse(&bad.to_string()).is_err(), "missing {field}");
+        bad["recovery"][field] = Value::Null;
+        assert!(parse(&bad.to_string()).is_err(), "null {field}");
+    }
+    for field in [
+        "tick",
+        "generation",
+        "next_job_id",
+        "next_building_id",
+        "next_item_id",
+        "fenced",
+    ] {
+        let mut bad = raw.clone();
+        bad["recovery"]["input_supply_floor"]
+            .as_object_mut()
+            .ok_or_else(|| invalid("fixture"))?
+            .remove(field);
+        assert!(parse(&bad.to_string()).is_err(), "missing {field}");
+    }
+    for (field, value) in [
+        ("tick", json!(131)),
+        ("generation", json!(0)),
+        ("generation", json!(u64::MAX)),
+        ("next_job_id", json!(u32::MAX)),
+        ("next_building_id", json!(u32::MAX)),
+        ("next_item_id", json!(u32::MAX)),
+        ("fenced", json!("false")),
+        ("extra", json!(true)),
+    ] {
+        let mut bad = raw.clone();
+        bad["recovery"]["input_supply_floor"][field] = value;
+        assert!(parse(&bad.to_string()).is_err(), "invalid {field}");
+    }
+    raw.as_object_mut()
+        .ok_or_else(|| invalid("fixture"))?
+        .remove("input_supply");
+    assert!(
+        parse(&raw.to_string()).is_err(),
+        "input policy cannot be stripped from recovery"
+    );
+    Ok(())
+}
+
+#[test]
+fn input_preplan_checkpoint_cannot_compete_with_full_original_recovery() -> Result<()> {
+    let mut raw = input_configuration();
+    let mut checkpoint = input_floor();
+    checkpoint["origin_witness"] = json!(Digest32::of_bytes(b"input source policy").to_hex());
+    raw["input_supply_checkpoint"] = checkpoint;
+    let retained = parse(&raw.to_string())?
+        .10
+        .ok_or_else(|| invalid("checkpoint"))?;
+    assert_eq!(retained.floor.tick, 130);
+    assert_eq!(retained.floor.counters(), [80, 90, 100]);
+    for value in [Value::Null, json!({}), json!("checkpoint")] {
+        let mut bad = raw.clone();
+        bad["input_supply_checkpoint"] = value;
+        assert!(parse(&bad.to_string()).is_err());
+    }
+    for field in [
+        "origin_witness",
+        "tick",
+        "generation",
+        "next_job_id",
+        "next_building_id",
+        "next_item_id",
+        "fenced",
+    ] {
+        let mut bad = raw.clone();
+        bad["input_supply_checkpoint"]
+            .as_object_mut()
+            .ok_or_else(|| invalid("fixture"))?
+            .remove(field);
+        assert!(parse(&bad.to_string()).is_err(), "missing {field}");
+    }
+    let mut missing = raw.clone();
+    missing
+        .as_object_mut()
+        .ok_or_else(|| invalid("fixture"))?
+        .remove("input_supply");
+    assert!(parse(&missing.to_string()).is_err());
+    raw["initialize"] = json!(false);
+    raw["recovery"] = input_recovery();
+    assert!(parse(&raw.to_string()).is_err());
+    Ok(())
+}
+
 #[test]
 fn portfolio_recovery_retains_actual_zero_or_one_based_order_ids() -> Result<()> {
     let hash = Digest32::of_bytes(b"retained portfolio").to_hex();
@@ -51,7 +220,7 @@ fn portfolio_recovery_retains_actual_zero_or_one_based_order_ids() -> Result<()>
 #[test]
 fn closed_configuration_and_recovery_are_exact() -> Result<()> {
     let raw = json!({"schema":"dfmcp.combined-production-development/1", "directory":"/tmp/combined", "initialize":true});
-    let (directory, initialize, recovery, clock, inventory_clock, workshop, checkpoint, _, _) =
+    let (directory, initialize, recovery, clock, inventory_clock, workshop, checkpoint, _, _, _, _) =
         parse(&raw.to_string())?;
     assert_eq!(directory, Path::new("/tmp/combined"));
     assert!(initialize && recovery.is_none());
@@ -76,7 +245,7 @@ fn closed_configuration_and_recovery_are_exact() -> Result<()> {
         "anchor":{"fortress_id":"1", "epoch":0, "sequence":2, "tick":3, "state_hash":hash},
         "frontier":{"journal_id":hash, "head":hash, "authority_tick_floor":4}
     });
-    let (_, _, value, _, _, _, _, _, _) = parse(&recovered.to_string())?;
+    let (_, _, value, _, _, _, _, _, _, _, _) = parse(&recovered.to_string())?;
     assert_eq!(
         value
             .ok_or_else(|| invalid("missing test recovery"))?
@@ -257,7 +426,7 @@ fn independent_inventory_clock_and_both_recovery_journals_remain_exact() -> Resu
     let mut raw = json!({"schema":"dfmcp.combined-production-development/1",
         "directory":"/tmp/combined-inventory-clock", "initialize":true,
         "inventory_clock":{"generation":60}});
-    let (_, _, _, order_clock, inventory_clock, _, _, _, _) = parse(&raw.to_string())?;
+    let (_, _, _, order_clock, inventory_clock, _, _, _, _, _, _) = parse(&raw.to_string())?;
     assert!(order_clock.is_none());
     let configured = inventory_clock.ok_or_else(|| invalid("inventory clock"))?;
     assert_eq!(configured.generation, 60);
@@ -311,7 +480,7 @@ fn independent_inventory_clock_and_both_recovery_journals_remain_exact() -> Resu
         "order recovery remains independent"
     );
     raw["recovery"]["clock_journal_id"] = json!(order_id.to_hex());
-    let (_, _, recovery, clock, inventory_clock, _, _, _, _) = parse(&raw.to_string())?;
+    let (_, _, recovery, clock, inventory_clock, _, _, _, _, _, _) = parse(&raw.to_string())?;
     let recovered = recovery.ok_or_else(|| invalid("recovery"))?;
     assert_eq!(recovered.clock_journal_id, Some(order_id));
     assert_eq!(recovered.inventory_clock_journal_id, Some(inventory_id));
@@ -414,7 +583,7 @@ fn workshop_configuration() -> Value {
 #[test]
 fn optional_workshop_retains_exact_independent_source_and_original_pins() -> Result<()> {
     let raw = workshop_configuration();
-    let (_, initialize, recovery, clock, inventory_clock, workshop, checkpoint, _, _) =
+    let (_, initialize, recovery, clock, inventory_clock, workshop, checkpoint, _, _, _, _) =
         parse(&raw.to_string())?;
     assert!(initialize && recovery.is_none() && clock.is_none() && inventory_clock.is_none());
     assert!(checkpoint.is_none());

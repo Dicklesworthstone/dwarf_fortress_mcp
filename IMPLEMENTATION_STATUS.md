@@ -1,5 +1,86 @@
 # Implementation Status
 
+## Unreleased — Enforce complete input supply through original production
+
+The combined production host now consumes the furniture input-supply adapter
+through closed optional `input_supply` configuration. All six production request
+families account for every original positive furniture order and the retained
+WOOD reserve together, including after earlier orders have Created receipts.
+The initial source, full demand, reserve, allocator seed and assessment bind the
+original intent and step identities in a canonical `dfmcp-input-supply/1` marker
+inside `original.plan`. Existing configurations without this prerequisite retain
+their original identity bytes. Workshop, Manager and input prerequisites compose
+in one ordered envelope without adding a native method, protocol or MCP tool.
+
+Positive Plan, each protected order preparation and the existing post-
+DispatchStarted evidence boundary require a fresh complete independent
+Operations/1.3 supply capture at the exact original paused tick. Stock sizing and
+input checks share the same raw capture. The native order queue must be empty at
+initial qualification and exactly match the receipt-backed original Created
+prefix afterward. Unexpected, retired or substituted orders refuse dispatch.
+All-met stock requests still return no work without input qualification, queue
+reads, prerequisite credentials or effect authority. An input-only source fence
+remains visible without invalidating an independently qualified all-met result.
+
+Recovery requires the original marker, unchanged source/configuration and full
+consumed tick, generation and job/building/item allocation floors. Decoded floors
+survive later refusals; ambiguous native failures fence continuity. Before an
+original is published, the retained checkpoint uses the stable source-policy
+witness. Offline reopening preserves historical custody without current supply,
+restored confirmations or redispatch. Public, compact and Agent Turn views expose
+demand, reserve, shortage, exclusions and complete recovery floors, and withdraw
+order guidance when qualification fails. An input assessment does not satisfy
+the output goal or certify native recipe cost, path access or resource reservation.
+
+Native execution exposed an exhausted final-control allowance after input
+qualification. Explicit reservations now retain that work: 16 MiB for assessment,
+17 MiB for a shared dispatch guard, 22 MiB for qualification with an existing
+capture and 54 MiB for a standalone capture/assessment/queue check. A four-target
+dispatch with both Manager and Workshop prerequisites reserves 3786 MiB and fits
+the unchanged public 8 GiB allowance after all three prior receipt checks, the
+native frontier, opening and response reservations. No verification was removed.
+
+The same host now exposes `production_chain` and `production_chain_compare` over
+its exact captured inspection source, before Plan and during selected-goal
+inspection. These existing bounded engines jointly allocate declared shared
+inputs, retain final-stock reserves, report stage shortages and compare candidate
+models. Continuations bind the exact source, model, section and work budget.
+Query performs no native I/O and does not promote a caller-declared recipe or
+advisory capture into native feasibility, reservation or Plan authority. There
+are fourteen inspection kinds through the existing Query tool.
+
+All 641 distinct Rust tests passed: 144 retained adapter component tests,
+23 ordinary repository adapter integration tests, and 474 Runtime/presentation/
+inspection component tests. The Runtime run includes 24 new native RPC peer
+scenarios inside two Rust tests, all request routes, four positive targets with
+both donors, loss after both durable dispatch markers, full demand after Created,
+lost-reply Offline/reconciliation without redispatch, changed custody, allocator
+regression, fenced all-met versus positive demand, and source-bound chain queries.
+It also includes sixteen shared chain/comparison tests and all retained Runtime
+regressions. There were zero failures or ignored tests in these runs.
+
+The final Runtime execution snapshot was verified unchanged before and after the
+run: 1752 exact copies, two exact excerpts, 619 real path-dependency inputs and
+eleven unchanged external lock identities, manifest
+`6e4883bbfd2499f772bdecb10ab3e88562c4faa11ad3531b6271e93d32388d57`.
+Adapter correspondence also remained unchanged across both adapter runs. Scoped
+formatting, Python syntax, the 143-path combined contract inventory and whitespace
+checks pass. Documentation and result metadata were recorded afterward without
+changing production or test bodies. Component execution uses actual Runtime,
+native-client and presentation implementations with unchanged pins and features;
+it excludes full MCP transport/tool macros, Asupersync supervision, admission
+execution, native SDK/plugin builds and live Dwarf Fortress. No full qualification,
+live production proof, admission or broad acceptance closure is claimed. Beads
+`dfmcp-reality-wiring-proof-4bf.14.4`, `df-dfhack-bridge-plane-c-pic.4.1` and
+`df-production-preplan-inspection-7hd` retain their wider acceptance obligations.
+
+One ordinary locked/offline `cargo check -p dfmcp-mcp --all-targets` attempt on
+these production/test bodies was killed with exit 137 while checking unchanged
+`asupersync v0.5.0`, without a Rust diagnostic or successful MCP completion. The
+repository verification gate remains blocked by unavailable `br`; the current
+bead-coverage invocation reproduces that missing executable. There is no completed
+full local qualification receipt from this session.
+
 ## Unreleased — Qualify conserved furniture input supply
 
 The adapter now qualifies the conservative WOOD input requirement of one to four

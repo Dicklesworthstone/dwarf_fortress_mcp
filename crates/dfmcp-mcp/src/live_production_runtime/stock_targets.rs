@@ -25,6 +25,8 @@ fn acquire(
     shell: &O,
     targets: &[stock_targets_request::StockTarget],
     consumed: &mut GameTick,
+    input: Option<&SharedInputSupply>,
+    initial: bool,
     c: &OperationContext,
 ) -> Result<Vec<StockTargetAssessment>> {
     if targets.is_empty() || targets.len() > 4 {
@@ -38,13 +40,39 @@ fn acquire(
     inventory_baseline::authorize_observe(c, *consumed)?;
     shell.check_environment()?;
     let mut work = Work::new(c)?;
-    if work.bytes < CENSUS_BYTES {
+    let input_bytes = input.map_or(0, |_| {
+        if initial {
+            input_supply::CAPTURED_PLAN_BYTES
+        } else {
+            input_supply::ASSESS_BYTES
+        }
+    });
+    if work.bytes < CENSUS_BYTES + input_bytes {
         return Err(exhausted(
             "complete stock-target portfolio census must be prepaid",
         ));
     }
-    let mut source = shell.operations(&work.take(16 * MIB)?)?;
-    let operations = source.read_operations(&work.take(16 * MIB)?)?;
+    let mut source = shell.operations(&work.take(16 * MIB)?).inspect_err(|_| {
+        if let Some(input) = input {
+            input.native_failed();
+        }
+    })?;
+    let read = work.take(16 * MIB).inspect_err(|_| {
+        if let Some(input) = input {
+            input.native_failed();
+        }
+    })?;
+    let operations = source.read_operations(&read).inspect_err(|_| {
+        if let Some(input) = input {
+            input.native_failed();
+        }
+    })?;
+    // Retain decoded input floors immediately, but a fully met portfolio has
+    // no input demand and therefore cannot be blocked by an input-only fence.
+    let mut input_note_failure = input.and_then(|input| input.note_capture(&operations).err());
+    if !initial && let Some(cause) = input_note_failure.take() {
+        return Err(cause);
+    }
     drop(source);
     *consumed = (*consumed).max(operations.jobs.tick());
     inventory_baseline::authorize_observe(&work.current()?, *consumed)?;
@@ -65,13 +93,33 @@ fn acquire(
             &work.take(INVENTORY_BASELINE_QUALIFY_BYTES)?,
         )?);
     }
+    if let Some(input) = input {
+        if initial {
+            let inputs = PlanInputs::captured(&assessments)?;
+            if !inputs.orders.is_empty() {
+                if let Some(cause) = input_note_failure.take() {
+                    return Err(cause);
+                }
+                input.prepare(
+                    &inputs.orders,
+                    Some(projection.operations()),
+                    &work.take(input_supply::CAPTURED_PLAN_BYTES)?,
+                )?;
+            }
+        } else {
+            input.qualify_captured(
+                projection.operations(),
+                &work.take(input_supply::ASSESS_BYTES)?,
+            )?;
+        }
+    }
     shell.check_environment()?;
     work.current()?;
     Ok(assessments)
 }
 
 #[derive(Clone)]
-struct ReceiptPrefix {
+pub(super) struct ReceiptPrefix {
     session: SessionId,
     request: RequestId,
     step: StepId,
@@ -80,12 +128,62 @@ struct ReceiptPrefix {
 }
 
 impl ReceiptPrefix {
-    fn matches(&self, queue: &WorkOrderObservation, c: &OperationContext) -> bool {
+    pub(super) fn matches(&self, queue: &WorkOrderObservation, c: &OperationContext) -> bool {
         self.session == c.session_id
             && self.request == c.request_id
             && queue.order_ids() == self.ids
             && self.after.is_none_or(|after| queue.witness() == after)
     }
+}
+
+pub(super) fn verified_prefix(
+    plan: &PreparedPlan,
+    archive: PlanArchiveSeal,
+    journal: Digest32,
+    step: StepId,
+    results: &[SemanticWorkOrderResult],
+    c: &OperationContext,
+) -> Result<ReceiptPrefix> {
+    let layout = live_production::ProductionLayout::from_plan(plan)?;
+    let ordinal = layout
+        .order_ordinal(step)
+        .ok_or_else(|| denied("stock-target prefix selected an original non-order step"))?;
+    if c.anchor != plan.anchor || ordinal != results.len() {
+        return Err(denied(
+            "stock-target prefix differs from the exact original next step",
+        ));
+    }
+    let mut ids = Vec::with_capacity(results.len());
+    let mut after = None;
+    for (index, result) in results.iter().enumerate() {
+        let custody = SelectedOrderClockCustody::new(plan, archive, journal, result)?;
+        let before = custody.native_plan().observation();
+        if custody.step_id() != layout.order_steps()[index]
+            || before.tick() != plan.anchor.tick.get()
+            || !before.paused()
+            || before.order_ids() != ids
+            || after.is_some_and(|after| before.witness() != after)
+        {
+            return Err(denied(
+                "stock-target queue is not the exact original Created prefix",
+            ));
+        }
+        ids.push(custody.native_order_id());
+        after = Some(
+            result
+                .native_record()
+                .effect()
+                .after_witness()
+                .ok_or_else(|| denied("original Created order lacks its exact queue readback"))?,
+        );
+    }
+    Ok(ReceiptPrefix {
+        session: c.session_id,
+        request: c.request_id,
+        step,
+        ids,
+        after,
+    })
 }
 
 struct Owner {
@@ -162,64 +260,36 @@ impl SharedStockTargets {
         owner.prefix = None;
         owner.last_checked = None;
         inventory_baseline::authorize_observe(c, owner.consumed_tick)?;
-        let layout = live_production::ProductionLayout::from_plan(plan)?;
-        let ordinal = layout
-            .order_ordinal(step)
-            .ok_or_else(|| denied("stock-target prefix selected an original non-order step"))?;
-        if plan.digest != owner.original_digest
-            || plan.anchor != owner.binding.original_anchor
-            || c.anchor != plan.anchor
-            || ordinal != results.len()
-        {
-            return Err(denied(
-                "stock-target prefix differs from the exact original next step",
-            ));
+        if plan.digest != owner.original_digest || plan.anchor != owner.binding.original_anchor {
+            return Err(denied("stock-target prefix differs from its original plan"));
         }
-        let mut ids = Vec::with_capacity(results.len());
-        let mut after = None;
-        for (index, result) in results.iter().enumerate() {
-            let custody = SelectedOrderClockCustody::new(plan, archive, journal, result)?;
-            let before = custody.native_plan().observation();
-            if custody.step_id() != layout.order_steps()[index]
-                || before.tick() != plan.anchor.tick.get()
-                || !before.paused()
-                || before.order_ids() != ids
-                || after.is_some_and(|after| before.witness() != after)
-            {
-                return Err(denied(
-                    "stock-target queue is not the exact original Created prefix",
-                ));
-            }
-            ids.push(custody.native_order_id());
-            after = Some(
-                result
-                    .native_record()
-                    .effect()
-                    .after_witness()
-                    .ok_or_else(|| {
-                        denied("original Created order lacks its exact queue readback")
-                    })?,
-            );
-        }
-        owner.prefix = Some(ReceiptPrefix {
-            session: c.session_id,
-            request: c.request_id,
-            step,
-            ids,
-            after,
-        });
+        owner.prefix = Some(verified_prefix(plan, archive, journal, step, results, c)?);
         Ok(())
     }
 
+    #[cfg(test)]
     pub(super) fn qualify(&self, queue: &WorkOrderObservation, c: &OperationContext) -> Result<()> {
+        self.qualify_with_input(queue, None, c)
+    }
+    pub(super) fn qualify_with_input(
+        &self,
+        queue: &WorkOrderObservation,
+        input: Option<&SharedInputSupply>,
+        c: &OperationContext,
+    ) -> Result<()> {
         let mut owner = self
             .0
             .try_lock()
             .map_err(|_| denied("stock targets are busy"))?;
         owner.last_checked = None;
         owner.consumed_tick = owner.consumed_tick.max(GameTick(queue.tick()));
-        let result = owner.qualify(queue, c);
+        let result = owner.qualify(queue, input, c);
         owner.revalidation_failed = result.is_err();
+        if result.is_err() {
+            if let Some(input) = input {
+                input.guard_failed();
+            }
+        }
         result
     }
 
@@ -240,12 +310,21 @@ impl SharedStockTargets {
 }
 
 impl Owner {
-    fn qualify(&mut self, queue: &WorkOrderObservation, c: &OperationContext) -> Result<()> {
+    fn qualify(
+        &mut self,
+        queue: &WorkOrderObservation,
+        input: Option<&SharedInputSupply>,
+        c: &OperationContext,
+    ) -> Result<()> {
         c.budget.validate()?;
-        if c.budget.max_bytes < CHECK_BYTES {
+        let input_bytes = input.map_or(0, |_| input_supply::GUARD_BYTES);
+        if c.budget.max_bytes < CHECK_BYTES + input_bytes {
             return Err(exhausted(
                 "stock-target portfolio census and queue checks must be prepaid",
             ));
+        }
+        if let Some(input) = input {
+            input.begin_guard(queue, c)?;
         }
         inventory_baseline::authorize_observe(c, self.consumed_tick)?;
         self.shell.check_environment()?;
@@ -292,7 +371,9 @@ impl Owner {
             &self.shell,
             &targets,
             &mut self.consumed_tick,
-            &work.take(CENSUS_BYTES)?,
+            input,
+            false,
+            &work.take(CENSUS_BYTES + input.map_or(0, |_| input_supply::ASSESS_BYTES))?,
         )?;
         let fresh = if self.binding.assign_labor() {
             StockTargetsBinding::from_assessments_with_assignment(&assessments)?
@@ -317,6 +398,9 @@ impl Owner {
             return Err(stale(
                 "stock-target queue changed after census; retain the original keys",
             ));
+        }
+        if let Some(input) = input {
+            input.finish_guard(&fresh_queue, &work.current()?)?;
         }
         self.shell.check_environment()?;
         work.current()?;
@@ -445,7 +529,15 @@ impl Runtime {
             &self.config.orders,
             &request.targets,
             &mut self.observation_tick_floor,
-            &work.take(CENSUS_BYTES)?,
+            self.input_supply.as_ref(),
+            true,
+            &work.take(
+                CENSUS_BYTES
+                    + self
+                        .input_supply
+                        .as_ref()
+                        .map_or(0, |_| input_supply::CAPTURED_PLAN_BYTES),
+            )?,
         )?;
         let binding = if request.assign_labor {
             StockTargetsBinding::from_assessments_with_assignment(&assessments)?
@@ -487,6 +579,7 @@ impl Runtime {
                 request.observation()?,
                 true,
                 &[],
+                PlanInputs::captured(&assessments)?,
                 &work.current()?,
                 |evidence, _, current, origin| {
                     request.compile_with_labor_assignment(&assessments, evidence, current, origin)
@@ -498,6 +591,7 @@ impl Runtime {
             (request.unit_ids()?, request.labor.clone()),
             true,
             &[],
+            PlanInputs::captured(&assessments)?,
             &work.current()?,
             |evidence, workers, _, current, origin| {
                 request.compile(&assessments, evidence, workers, current, origin)
@@ -509,10 +603,17 @@ impl Runtime {
     /// native guard can accept a nonempty prefix. No prior call's selection is
     /// reused, and this read preserves the separately prepared current order.
     pub(super) fn arm_stock_targets_prefix(&mut self, work: &mut Work) -> Result<()> {
-        let Some(targets) = self.stock_targets.clone() else {
+        let targets = self.stock_targets.clone();
+        let inputs = self.input_supply.clone();
+        if targets.is_none() && inputs.is_none() {
             return Ok(());
-        };
-        targets.withdraw();
+        }
+        if let Some(targets) = &targets {
+            targets.withdraw();
+        }
+        if let Some(inputs) = &inputs {
+            inputs.withdraw();
+        }
         let view = self
             .frontier
             .as_mut()
@@ -580,14 +681,27 @@ impl Runtime {
             }
             results.push(result);
         }
-        targets.arm_prefix(
-            plan,
-            archive,
-            self.order_journal,
-            selected,
-            &results,
-            &work.current()?,
-        )
+        if let Some(targets) = targets {
+            targets.arm_prefix(
+                plan,
+                archive,
+                self.order_journal,
+                selected,
+                &results,
+                &work.current()?,
+            )?;
+        }
+        if let Some(inputs) = inputs {
+            inputs.arm_prefix(
+                plan,
+                archive,
+                self.order_journal,
+                selected,
+                &results,
+                &work.current()?,
+            )?;
+        }
+        Ok(())
     }
 
     pub(super) fn stock_targets_json(&self) -> Value {

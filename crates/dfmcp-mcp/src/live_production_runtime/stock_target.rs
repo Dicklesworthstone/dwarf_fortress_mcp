@@ -26,6 +26,8 @@ fn acquire(
     target: u64,
     maximum: u32,
     consumed: &mut GameTick,
+    input: Option<&SharedInputSupply>,
+    initial: bool,
     c: &OperationContext,
 ) -> Result<StockTargetAssessment> {
     if c.anchor.tick < *consumed {
@@ -36,13 +38,39 @@ fn acquire(
     inventory_baseline::authorize_observe(c, *consumed)?;
     shell.check_environment()?;
     let mut work = Work::new(c)?;
-    if work.bytes < CENSUS_BYTES {
+    let input_bytes = input.map_or(0, |_| {
+        if initial {
+            input_supply::CAPTURED_PLAN_BYTES
+        } else {
+            input_supply::ASSESS_BYTES
+        }
+    });
+    if work.bytes < CENSUS_BYTES + input_bytes {
         return Err(exhausted(
             "complete stock-target read exceeds its reserved allowance",
         ));
     }
-    let mut source = shell.operations(&work.take(16 * MIB)?)?;
-    let operations = source.read_operations(&work.take(16 * MIB)?)?;
+    let mut source = shell.operations(&work.take(16 * MIB)?).inspect_err(|_| {
+        if let Some(input) = input {
+            input.native_failed();
+        }
+    })?;
+    let read = work.take(16 * MIB).inspect_err(|_| {
+        if let Some(input) = input {
+            input.native_failed();
+        }
+    })?;
+    let operations = source.read_operations(&read).inspect_err(|_| {
+        if let Some(input) = input {
+            input.native_failed();
+        }
+    })?;
+    // Retain decoded input floors immediately, but no-work stock plans do not
+    // depend on input readiness. Only a positive deficit consumes this policy.
+    let mut input_note_failure = input.and_then(|input| input.note_capture(&operations).err());
+    if !initial && let Some(cause) = input_note_failure.take() {
+        return Err(cause);
+    }
     drop(source);
     // Even a later pin/tick/census refusal cannot revive an expired grant.
     *consumed = (*consumed).max(operations.jobs.tick());
@@ -61,6 +89,26 @@ fn acquire(
         policy,
         &work.take(INVENTORY_BASELINE_QUALIFY_BYTES)?,
     )?;
+    if let Some(input) = input {
+        if initial {
+            let inputs = PlanInputs::captured(std::slice::from_ref(&assessment))?;
+            if !inputs.orders.is_empty() {
+                if let Some(cause) = input_note_failure.take() {
+                    return Err(cause);
+                }
+                input.prepare(
+                    &inputs.orders,
+                    Some(projection.operations()),
+                    &work.take(input_supply::CAPTURED_PLAN_BYTES)?,
+                )?;
+            }
+        } else {
+            input.qualify_captured(
+                projection.operations(),
+                &work.take(input_supply::ASSESS_BYTES)?,
+            )?;
+        }
+    }
     shell.check_environment()?;
     work.current()?;
     Ok(assessment)
@@ -119,7 +167,16 @@ impl SharedStockTarget {
         }
     }
 
+    #[cfg(test)]
     pub(super) fn qualify(&self, queue: &WorkOrderObservation, c: &OperationContext) -> Result<()> {
+        self.qualify_with_input(queue, None, c)
+    }
+    pub(super) fn qualify_with_input(
+        &self,
+        queue: &WorkOrderObservation,
+        input: Option<&SharedInputSupply>,
+        c: &OperationContext,
+    ) -> Result<()> {
         let mut owner = self
             .0
             .try_lock()
@@ -127,8 +184,13 @@ impl SharedStockTarget {
         owner.last_checked = None;
         // Retain decoded time before any fallible authority or source check.
         owner.consumed_tick = owner.consumed_tick.max(GameTick(queue.tick()));
-        let result = owner.qualify(queue, c);
+        let result = owner.qualify(queue, input, c);
         owner.revalidation_failed = result.is_err();
+        if result.is_err() {
+            if let Some(input) = input {
+                input.guard_failed();
+            }
+        }
         result
     }
 
@@ -167,12 +229,21 @@ impl SharedStockTarget {
 }
 
 impl Owner {
-    fn qualify(&mut self, queue: &WorkOrderObservation, c: &OperationContext) -> Result<()> {
+    fn qualify(
+        &mut self,
+        queue: &WorkOrderObservation,
+        input: Option<&SharedInputSupply>,
+        c: &OperationContext,
+    ) -> Result<()> {
         c.budget.validate()?;
-        if c.budget.max_bytes < CHECK_BYTES {
+        let input_bytes = input.map_or(0, |_| input_supply::GUARD_BYTES);
+        if c.budget.max_bytes < CHECK_BYTES + input_bytes {
             return Err(exhausted(
                 "stock-target census and queue checks must be prepaid together",
             ));
+        }
+        if let Some(input) = input {
+            input.begin_guard(queue, c)?;
         }
         inventory_baseline::authorize_observe(c, self.consumed_tick)?;
         self.shell.check_environment()?;
@@ -212,7 +283,9 @@ impl Owner {
             self.binding.objective().target_stack_units(),
             self.binding.max_order_amount(),
             &mut self.consumed_tick,
-            &work.take(CENSUS_BYTES)?,
+            input,
+            false,
+            &work.take(CENSUS_BYTES + input.map_or(0, |_| input_supply::ASSESS_BYTES))?,
         )?;
         if assessment.witness() != self.binding.witness()
             || assessment.objective() != Some(self.binding.objective())
@@ -232,6 +305,9 @@ impl Owner {
             return Err(stale(
                 "stock target native queue changed; retain its original preparation and key",
             ));
+        }
+        if let Some(input) = input {
+            input.finish_guard(&fresh_queue, &work.current()?)?;
         }
         self.shell.check_environment()?;
         work.current()?;
@@ -320,7 +396,15 @@ impl Runtime {
             request.minimum_stack_units,
             request.max_order_amount,
             &mut self.observation_tick_floor,
-            &work.take(CENSUS_BYTES)?,
+            self.input_supply.as_ref(),
+            true,
+            &work.take(
+                CENSUS_BYTES
+                    + self
+                        .input_supply
+                        .as_ref()
+                        .map_or(0, |_| input_supply::CAPTURED_PLAN_BYTES),
+            )?,
         )?;
         if assessment.amount().is_none() {
             self.stock_target_no_work = Some(no_work(&assessment, request.assign_labor));
@@ -337,7 +421,12 @@ impl Runtime {
                 &request.unit_ids()?,
                 None,
             )?;
-            authority.authorize(Capability::ConfigureProduction, RiskTier::Guarded, &[], None)?;
+            authority.authorize(
+                Capability::ConfigureProduction,
+                RiskTier::Guarded,
+                &[],
+                None,
+            )?;
             // The qualified assessment already owns the one inventory baseline.
             // Reuse the ordinary assignment compiler and durable two-step owner;
             // neither acquire a second baseline nor bypass native labor review.
@@ -345,6 +434,7 @@ impl Runtime {
                 request.observation()?,
                 false,
                 &[],
+                PlanInputs::captured(std::slice::from_ref(&assessment))?,
                 &work.current()?,
                 |evidence, _, current, origin| {
                     request.compile_with_labor_assignment(&assessment, evidence, current, origin)
@@ -356,6 +446,7 @@ impl Runtime {
             (request.unit_ids()?, request.labor.clone()),
             false,
             &[],
+            PlanInputs::captured(std::slice::from_ref(&assessment))?,
             &work.current()?,
             |evidence, requirement, _, current, origin| {
                 request.compile(&assessment, evidence, requirement, current, origin)

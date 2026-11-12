@@ -494,4 +494,4 @@ pub(super) fn extend_schema(mut schema: Value) -> Result<Value> {
 
 #[cfg(test)]
 #[path = "production_chain_query_tests.rs"]
-mod tests;
+pub(super) mod tests;

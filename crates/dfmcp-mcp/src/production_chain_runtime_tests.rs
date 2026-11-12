@@ -1,6 +1,6 @@
 //! Exercise the actual spatial/1.8 query path with an injected coherent source.
-use super::super::super::super::*;
-use super::{fixture, query};
+use super::super::*;
+use super::chain::tests::{fixture, query};
 use std::collections::VecDeque;
 
 struct Script {
