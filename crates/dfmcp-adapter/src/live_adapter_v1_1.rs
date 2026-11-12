@@ -220,6 +220,175 @@ impl<T: LiveObservationSourceV1_1> LiveReadAdapterV1_1<T> {
         read_publishable_observation_v1_1(&mut self.source, &publication)
     }
 
+    /// Begin a new bounded announcement suffix after an explicitly acknowledged
+    /// complete published batch. The publisher must be side-effect free: it
+    /// admits the complete response before any cursor, capsule or anchor moves.
+    /// Reading the external source is not rolled back if publication is refused.
+    pub fn observe_acknowledged_announcements_with_publisher<R>(
+        &mut self,
+        request: &ObservationRequest,
+        context: &OperationContext,
+        expected_anchor: StateAnchor,
+        expected_batch_digest: Digest32,
+        acknowledged_after_id: i32,
+        publish: impl FnOnce(
+            &LiveWorldProjectionV1_1,
+            &LiveObservationCapsuleV1_1,
+            &ObservationFrame,
+        ) -> Result<R>,
+    ) -> Result<R> {
+        self.observe_acknowledged_announcements_started(
+            request,
+            context,
+            expected_anchor,
+            expected_batch_digest,
+            acknowledged_after_id,
+            std::time::Instant::now(),
+            publish,
+        )
+    }
+
+    /// Preserve the owning request's original deadline, including session
+    /// ownership acquisition, argument validation and complete response rendering.
+    #[allow(clippy::too_many_arguments)]
+    pub fn observe_acknowledged_announcements_started<R>(
+        &mut self,
+        request: &ObservationRequest,
+        context: &OperationContext,
+        expected_anchor: StateAnchor,
+        expected_batch_digest: Digest32,
+        acknowledged_after_id: i32,
+        started: std::time::Instant,
+        publish: impl FnOnce(
+            &LiveWorldProjectionV1_1,
+            &LiveObservationCapsuleV1_1,
+            &ObservationFrame,
+        ) -> Result<R>,
+    ) -> Result<R> {
+        let check_deadline = || {
+            if started.elapsed()
+                >= std::time::Duration::from_millis(context.budget.max_wall_millis)
+            {
+                Err(error(
+                    ErrorCode::BudgetExceeded,
+                    "announcement window publication exhausted its original wall deadline",
+                ))
+            } else {
+                Ok(())
+            }
+        };
+        context.authorize(Capability::Observe, RiskTier::ReadOnly, &[], None)?;
+        self.check_context_anchor(context)?;
+        check_deadline()?;
+        let current = self.current_projection_required()?.snapshot.anchor();
+        if expected_anchor != current {
+            return Err(error(
+                ErrorCode::StaleAnchor,
+                "announcement acknowledgment does not name the exact published anchor",
+            )
+            .retryable(true));
+        }
+        if request.since != Some(expected_anchor.cursor) {
+            return Err(error(
+                ErrorCode::CursorGap,
+                "announcement acknowledgment requires its exact published observation cursor",
+            ));
+        }
+        let prior = self.current_capsule_required()?;
+        let coverage = &prior.announcement_batch.coverage;
+        if prior.announcement_batch.content_digest != expected_batch_digest
+            || !coverage.complete_through_latest
+            || acknowledged_after_id != coverage.next_after_id
+            || acknowledged_after_id != coverage.latest_available_id
+            || coverage.requested_after_id != self.config.announcement_after_id
+        {
+            return Err(error(
+                ErrorCode::StaleAnchor,
+                "announcement acknowledgment must match the complete published batch and its exact high-water mark",
+            )
+            .retryable(true));
+        }
+        if acknowledged_after_id < 0
+            || acknowledged_after_id <= self.config.announcement_after_id
+        {
+            return Err(error(
+                ErrorCode::InvalidRequest,
+                "announcement acknowledgment must advance beyond the current configured suffix",
+            ));
+        }
+        let prior_generation = prior.base.bridge.bridge_generation;
+        let prior_identity = SessionIdentity::from_capsule(prior);
+        let max_citizens = self.validate_observation_request(request, context)?;
+        let mut publication = self.config.publication_config(max_citizens)?;
+        publication.announcement_after_id = acknowledged_after_id;
+        check_deadline()?;
+        let capsule = read_publishable_observation_v1_1(&mut self.source, &publication)?;
+        check_deadline()?;
+        ensure_same_session_identity(&prior_identity, &capsule)?;
+        let next_tick = crate::DwarfFortressClock {
+            year: capsule.base.current_year,
+            year_tick: capsule.base.current_year_tick,
+        }
+        .absolute_tick()?;
+        if capsule.base.bridge.bridge_generation != prior_generation || next_tick < current.tick {
+            return Err(error(
+                ErrorCode::CursorGap,
+                "announcement acknowledgment cannot cross a bridge or game-clock reset; open a fresh session",
+            ));
+        }
+        let candidate_sequence = self.sequence.checked_add(1).ok_or_else(|| {
+            error(
+                ErrorCode::CursorGap,
+                "protocol-1.1 observation sequence space is exhausted",
+            )
+        })?;
+        let projection = project_live_capsule_v1_1(
+            &capsule,
+            self.config.fortress_id,
+            ObservationCursor {
+                epoch: self.epoch,
+                sequence: candidate_sequence,
+            },
+        )?;
+        ensure_snapshot_budget(request, &projection)?;
+        let mut candidate_context = context.clone();
+        candidate_context.anchor = projection.snapshot.anchor();
+        candidate_context.authorize(Capability::Observe, RiskTier::ReadOnly, &[], None)?;
+        let mut warnings = vec![
+            "the explicitly acknowledged announcement prefix is outside the new current projection; no complete-history or durable-retention claim is made"
+                .to_owned(),
+        ];
+        if capsule.announcement_batch.coverage.has_gap() {
+            warnings.push(
+                "new announcement suffix begins after a native retained-window gap; intervening history is unknown"
+                    .to_owned(),
+            );
+        }
+        let frame = ObservationFrame {
+            payload: ObservationPayload::Snapshot(projection.snapshot.clone()),
+            evidence: vec![observation_evidence(
+                &capsule,
+                projection.snapshot.anchor(),
+                None,
+                "complete protocol-1.1 observation after an exact acknowledged announcement window",
+            )],
+            warnings,
+            truncated: false,
+            continuation: None,
+        };
+        check_deadline()?;
+        let published = publish(&projection, &capsule, &frame)?;
+        check_deadline()?;
+        candidate_context.authorize(Capability::Observe, RiskTier::ReadOnly, &[], None)?;
+
+        self.config.announcement_after_id = acknowledged_after_id;
+        self.sequence = candidate_sequence;
+        self.identity = adapter_identity(&capsule.base.bridge);
+        self.last_capsule = Some(capsule);
+        self.current = Some(projection);
+        Ok(published)
+    }
+
     fn current_projection_required(&self) -> Result<&LiveWorldProjectionV1_1> {
         self.current.as_ref().ok_or_else(|| {
             error(
@@ -773,6 +942,7 @@ mod tests {
         manifest: BridgeManifest,
         pages: VecDeque<ObservationPageV1_1>,
         calls: usize,
+        requested_after_ids: Vec<i32>,
     }
 
     impl LiveObservationSourceV1_1 for ScriptedSource {
@@ -785,10 +955,11 @@ mod tests {
             _offset: u32,
             _maximum: u32,
             _include_names: bool,
-            _announcement_after_id: i32,
+            announcement_after_id: i32,
             _max_announcements: u32,
         ) -> Result<ObservationPageV1_1> {
             self.calls = self.calls.saturating_add(1);
+            self.requested_after_ids.push(announcement_after_id);
             self.pages.pop_front().ok_or_else(|| {
                 error(
                     ErrorCode::AdapterFailure,
@@ -940,6 +1111,7 @@ mod tests {
             manifest: manifest(generation),
             pages: pages.into(),
             calls: 0,
+            requested_after_ids: Vec::new(),
         }
     }
 
@@ -1299,4 +1471,337 @@ mod tests {
             .saturating_add(1);
         assert!(invalid.validate().is_err());
     }
+
+    fn acknowledgment_basis(
+        adapter: &LiveReadAdapterV1_1<ScriptedSource>,
+    ) -> Result<(StateAnchor, Digest32, i32)> {
+        let anchor = adapter.current_projection_required()?.snapshot.anchor();
+        let batch = &adapter.current_capsule_required()?.announcement_batch;
+        Ok((anchor, batch.content_digest, batch.coverage.next_after_id))
+    }
+
+    fn suffix_page(
+        generation: u64,
+        year_tick: u32,
+        after: i32,
+        oldest: i32,
+        latest: i32,
+        ids: &[i32],
+        continuity: AnnouncementContinuity,
+    ) -> Result<ObservationPageV1_1> {
+        Ok(page(
+            generation,
+            year_tick,
+            &[0],
+            batch(
+                generation, after, oldest, latest, ids, true, continuity, true, year_tick,
+            )?,
+        ))
+    }
+
+    #[test]
+    fn acknowledged_window_recovers_a_full_suffix_without_silently_skipping_reports() -> Result<()> {
+        let initial = complete_page(42, 12_345, &[0], &[10, 11])?;
+        let overflowing = page(
+            42,
+            12_346,
+            &[0],
+            batch(
+                42, -1, 10, 13, &[10, 11], false,
+                AnnouncementContinuity::CompleteSuffix, true, 12_346,
+            )?,
+        );
+        let next = suffix_page(
+            42, 12_346, 11, 10, 13, &[12, 13], AnnouncementContinuity::CompleteSuffix,
+        )?;
+        let mut limits = config();
+        limits.announcement_page_size = 2;
+        limits.max_total_announcements = 2;
+        let mut adapter = LiveReadAdapterV1_1::new(
+            source(42, vec![initial, overflowing, next.clone(), next]),
+            limits,
+        )?;
+        adapter.bootstrap()?;
+        let (prior, digest, high_water) = acknowledgment_basis(&adapter)?;
+        let request = observation_request(Some(prior.cursor));
+        let operation = context(prior, Capability::Observe);
+        assert!(adapter.observe(&request, &operation).is_err());
+        assert_eq!(acknowledgment_basis(&adapter)?, (prior, digest, high_water));
+        let published_anchor = adapter.observe_acknowledged_announcements_with_publisher(
+            &request, &operation, prior, digest, high_water,
+            |projection, capsule, frame| {
+                assert_eq!(capsule.announcement_batch.coverage.requested_after_id, 11);
+                assert_eq!(capsule.announcement_batch.announcements.iter()
+                    .map(|report| report.report_id).collect::<Vec<_>>(), vec![12, 13]);
+                assert!(matches!(&frame.payload, ObservationPayload::Snapshot(_)));
+                assert!(frame.warnings.iter().any(|warning| warning.contains("acknowledged")));
+                Ok(projection.snapshot.anchor())
+            },
+        )?;
+        assert_eq!(adapter.config().announcement_after_id, 11);
+        assert_eq!(published_anchor.cursor.sequence, prior.cursor.sequence + 1);
+        assert_eq!(adapter.current_anchor(), Some(published_anchor));
+        let heartbeat = adapter.observe(
+            &observation_request(Some(published_anchor.cursor)),
+            &context(published_anchor, Capability::Observe),
+        )?;
+        assert_eq!(heartbeat.payload, ObservationPayload::Heartbeat(published_anchor));
+        assert_eq!(adapter.source().requested_after_ids, vec![-1, -1, 11, 11]);
+        Ok(())
+    }
+
+    #[test]
+    fn acknowledgment_rejects_foreign_stale_or_unpublished_values_before_reading() -> Result<()> {
+        let mut adapter = LiveReadAdapterV1_1::new(
+            source(42, vec![complete_page(42, 12_345, &[0], &[10, 11])?]),
+            config(),
+        )?;
+        adapter.bootstrap()?;
+        let (prior, digest, high_water) = acknowledgment_basis(&adapter)?;
+        let mut foreign = prior;
+        foreign.fortress_id = FortressId::new(10);
+        let mut stale = prior;
+        stale.cursor.sequence = stale.cursor.sequence.saturating_add(1);
+        for (anchor, batch, cursor) in [
+            (foreign, digest, high_water),
+            (stale, digest, high_water),
+            (prior, Digest32::of_bytes(b"unpublished"), high_water),
+            (prior, digest, high_water - 1),
+            (prior, digest, high_water + 1),
+        ] {
+            assert!(adapter.observe_acknowledged_announcements_with_publisher(
+                &observation_request(Some(prior.cursor)),
+                &context(prior, Capability::Observe),
+                anchor, batch, cursor, |_, _, _| Ok(()),
+            ).is_err());
+        }
+        assert_eq!(adapter.source().calls, 1);
+        assert_eq!(acknowledgment_basis(&adapter)?, (prior, digest, high_water));
+        assert_eq!(adapter.config().announcement_after_id, -1);
+        Ok(())
+    }
+
+    #[test]
+    fn rejected_complete_packet_preserves_the_original_acknowledgment_for_retry() -> Result<()> {
+        let next = suffix_page(
+            42, 12_346, 11, 10, 12, &[12], AnnouncementContinuity::CompleteSuffix,
+        )?;
+        let mut adapter = LiveReadAdapterV1_1::new(
+            source(42, vec![
+                complete_page(42, 12_345, &[0], &[10, 11])?,
+                next.clone(), next,
+            ]),
+            config(),
+        )?;
+        adapter.bootstrap()?;
+        let (prior, digest, high_water) = acknowledgment_basis(&adapter)?;
+        let request = observation_request(Some(prior.cursor));
+        let operation = context(prior, Capability::Observe);
+        let failure = adapter.observe_acknowledged_announcements_with_publisher(
+            &request, &operation, prior, digest, high_water,
+            |_, _, _| Err::<(), _>(error(ErrorCode::BudgetExceeded, "complete packet does not fit")),
+        );
+        assert!(failure.is_err());
+        assert_eq!(acknowledgment_basis(&adapter)?, (prior, digest, high_water));
+        assert_eq!(adapter.config().announcement_after_id, -1);
+        adapter.observe_acknowledged_announcements_with_publisher(
+            &request, &operation, prior, digest, high_water, |_, _, _| Ok(()),
+        )?;
+        assert_eq!(adapter.config().announcement_after_id, 11);
+        let calls = adapter.source().calls;
+        assert!(adapter.observe_acknowledged_announcements_with_publisher(
+            &request, &operation, prior, digest, high_water, |_, _, _| Ok(()),
+        ).is_err());
+        assert_eq!(adapter.source().calls, calls);
+        Ok(())
+    }
+
+    #[test]
+    fn acknowledgment_checks_expiry_at_the_candidate_tick_before_publication() -> Result<()> {
+        let mut adapter = LiveReadAdapterV1_1::new(
+            source(42, vec![
+                complete_page(42, 12_345, &[0], &[10, 11])?,
+                suffix_page(42, 12_346, 11, 10, 12, &[12],
+                    AnnouncementContinuity::CompleteSuffix)?,
+            ]),
+            config(),
+        )?;
+        adapter.bootstrap()?;
+        let (prior, digest, high_water) = acknowledgment_basis(&adapter)?;
+        let mut operation = context(prior, Capability::Observe);
+        operation.grants[0].expires_at_tick = Some(prior.tick);
+        let mut published = false;
+        assert!(adapter.observe_acknowledged_announcements_with_publisher(
+            &observation_request(Some(prior.cursor)), &operation, prior, digest, high_water,
+            |_, _, _| { published = true; Ok(()) },
+        ).is_err());
+        assert!(!published);
+        assert_eq!(acknowledgment_basis(&adapter)?, (prior, digest, high_water));
+        assert_eq!(adapter.config().announcement_after_id, -1);
+        Ok(())
+    }
+
+    #[test]
+    fn acknowledgment_preserves_source_on_candidate_budget_failure() -> Result<()> {
+        let candidate = page(
+            42, 12_346, &[0, 1, 2],
+            batch(42, 11, 10, 12, &[12], true,
+                AnnouncementContinuity::CompleteSuffix, true, 12_346)?,
+        );
+        let mut adapter = LiveReadAdapterV1_1::new(
+            source(42, vec![complete_page(42, 12_345, &[0], &[10, 11])?, candidate]),
+            config(),
+        )?;
+        adapter.bootstrap()?;
+        let (prior, digest, high_water) = acknowledgment_basis(&adapter)?;
+        let mut request = observation_request(Some(prior.cursor));
+        request.max_entities = 4;
+        let mut operation = context(prior, Capability::Observe);
+        operation.budget.max_entities = 4;
+        assert!(adapter.observe_acknowledged_announcements_with_publisher(
+            &request, &operation, prior, digest, high_water, |_, _, _| Ok(()),
+        ).is_err());
+        assert_eq!(acknowledgment_basis(&adapter)?, (prior, digest, high_water));
+        assert_eq!(adapter.config().announcement_after_id, -1);
+        Ok(())
+    }
+
+    #[test]
+    fn acknowledgment_never_carries_a_report_cursor_across_source_resets() -> Result<()> {
+        for (generation, tick) in [(43, 12_346), (42, 12_344)] {
+            let mut adapter = LiveReadAdapterV1_1::new(
+                source(42, vec![
+                    complete_page(42, 12_345, &[0], &[10, 11])?,
+                    suffix_page(generation, tick, 11, 10, 12, &[12],
+                        AnnouncementContinuity::CompleteSuffix)?,
+                ]),
+                config(),
+            )?;
+            adapter.bootstrap()?;
+            let (prior, digest, high_water) = acknowledgment_basis(&adapter)?;
+            adapter.source_mut().manifest = manifest(generation);
+            assert!(adapter.observe_acknowledged_announcements_with_publisher(
+                &observation_request(Some(prior.cursor)),
+                &context(prior, Capability::Observe),
+                prior, digest, high_water, |_, _, _| Ok(()),
+            ).is_err());
+            assert_eq!(acknowledgment_basis(&adapter)?, (prior, digest, high_water));
+            assert_eq!(adapter.config().announcement_after_id, -1);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn acknowledged_prefix_and_later_native_retention_gap_remain_distinct() -> Result<()> {
+        let mut adapter = LiveReadAdapterV1_1::new(
+            source(42, vec![
+                complete_page(42, 12_345, &[0], &[10, 11])?,
+                suffix_page(42, 12_346, 11, 20, 21, &[20, 21],
+                    AnnouncementContinuity::GapBeforeRetainedWindow)?,
+            ]),
+            config(),
+        )?;
+        adapter.bootstrap()?;
+        let (prior, digest, high_water) = acknowledgment_basis(&adapter)?;
+        adapter.observe_acknowledged_announcements_with_publisher(
+            &observation_request(Some(prior.cursor)),
+            &context(prior, Capability::Observe),
+            prior, digest, high_water,
+            |projection, capsule, frame| {
+                assert!(capsule.announcement_batch.coverage.has_gap());
+                assert!(frame.warnings.iter().any(|warning| warning.contains("intervening")));
+                assert_eq!(projection.receipt.coverage().domains
+                    .get("fortress.announcements.history").map(|domain| domain.status),
+                    Some(CoverageStatus::Partial));
+                Ok(())
+            },
+        )?;
+        Ok(())
+    }
+
+    #[test]
+    fn empty_acknowledged_suffix_is_valid_but_cannot_be_acknowledged_twice() -> Result<()> {
+        let mut adapter = LiveReadAdapterV1_1::new(
+            source(42, vec![
+                complete_page(42, 12_345, &[0], &[10, 11])?,
+                suffix_page(42, 12_346, 11, 10, 11, &[],
+                    AnnouncementContinuity::CompleteSuffix)?,
+            ]),
+            config(),
+        )?;
+        adapter.bootstrap()?;
+        let (prior, digest, high_water) = acknowledgment_basis(&adapter)?;
+        adapter.observe_acknowledged_announcements_with_publisher(
+            &observation_request(Some(prior.cursor)),
+            &context(prior, Capability::Observe),
+            prior, digest, high_water, |_, _, _| Ok(()),
+        )?;
+        let (current, batch, after) = acknowledgment_basis(&adapter)?;
+        assert_eq!(after, 11);
+        assert!(adapter.current_capsule_required()?.announcement_batch.announcements.is_empty());
+        let calls = adapter.source().calls;
+        assert!(adapter.observe_acknowledged_announcements_with_publisher(
+            &observation_request(Some(current.cursor)),
+            &context(current, Capability::Observe),
+            current, batch, after, |_, _, _| Ok(()),
+        ).is_err());
+        assert_eq!(adapter.source().calls, calls);
+        Ok(())
+    }
+
+    #[test]
+    fn first_report_id_zero_can_be_explicitly_acknowledged() -> Result<()> {
+        let mut adapter = LiveReadAdapterV1_1::new(
+            source(42, vec![
+                complete_page(42, 12_345, &[0], &[0])?,
+                suffix_page(42, 12_346, 0, 0, 1, &[1],
+                    AnnouncementContinuity::CompleteSuffix)?,
+            ]),
+            config(),
+        )?;
+        adapter.bootstrap()?;
+        let (prior, digest, high_water) = acknowledgment_basis(&adapter)?;
+        assert_eq!(high_water, 0);
+        adapter.observe_acknowledged_announcements_with_publisher(
+            &observation_request(Some(prior.cursor)),
+            &context(prior, Capability::Observe),
+            prior, digest, high_water, |_, _, _| Ok(()),
+        )?;
+        assert_eq!(adapter.config().announcement_after_id, 0);
+        assert_eq!(adapter.source().requested_after_ids, vec![-1, 0]);
+        assert_eq!(acknowledgment_basis(&adapter)?.2, 1);
+        Ok(())
+    }
+
+    #[test]
+    fn original_request_deadline_refuses_before_reading_or_advancing() -> Result<()> {
+        let mut adapter = LiveReadAdapterV1_1::new(
+            source(42, vec![complete_page(42, 12_345, &[0], &[10, 11])?]),
+            config(),
+        )?;
+        adapter.bootstrap()?;
+        let (prior, digest, high_water) = acknowledgment_basis(&adapter)?;
+        let mut operation = context(prior, Capability::Observe);
+        operation.budget.max_wall_millis = 1;
+        let started = std::time::Instant::now()
+            .checked_sub(std::time::Duration::from_secs(1))
+            .ok_or_else(|| error(ErrorCode::InternalInvariantViolation, "fixture deadline overflow"))?;
+        let mut published = false;
+        let outcome = adapter.observe_acknowledged_announcements_started(
+            &observation_request(Some(prior.cursor)),
+            &operation,
+            prior, digest, high_water, started,
+            |_, _, _| {
+                published = true;
+                Ok(())
+            },
+        );
+        assert!(matches!(outcome, Err(failure) if failure.code == ErrorCode::BudgetExceeded));
+        assert!(!published);
+        assert_eq!(adapter.source().calls, 1);
+        assert_eq!(adapter.config().announcement_after_id, -1);
+        assert_eq!(acknowledgment_basis(&adapter)?, (prior, digest, high_water));
+        Ok(())
+    }
+
 }

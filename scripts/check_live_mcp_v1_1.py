@@ -121,6 +121,31 @@ def check_contract() -> None:
         mcp.get("query_modes") == ["summary", "citizens", "announcements", "all"],
         "runtime query modes drifted",
     )
+    acknowledgment = value.get("announcement_window_acknowledgment", {})
+    require(
+        acknowledgment == {
+            "tool": "fortress.observe",
+            "argument": "announcement_acknowledgment",
+            "optional": True,
+            "schema": "dfmcp.announcement-ack/1",
+            "required_fields": ["schema", "expected_anchor", "source_digest", "next_after_id"],
+            "exact_current_anchor_required": True,
+            "exact_published_batch_digest_required": True,
+            "exact_complete_batch_high_water_required": True,
+            "current_capabilities": ["observe", "query"],
+            "automatic_advancement": False,
+            "transport_continuation": False,
+            "commit_after_complete_response": True,
+            "failure_preserves_published_window": True,
+            "original_request_deadline_required": True,
+            "bridge_generation_or_clock_reset": "refuse_and_open_fresh_session",
+            "retained_query_work": "pure_native_watch_and_baseline_catalogs_without_sampling",
+            "durable_prefix_retention": False,
+            "closes_historical_gaps": False,
+            "initial_or_new_suffix_over_ceiling": "refuse_without_skipping",
+        },
+        "announcement acknowledgment must bind a complete published batch and publish atomically",
+    )
     bridge = value.get("bridge", {})
     require(isinstance(bridge, dict), "runtime bridge contract must be an object")
     require(bridge.get("protocol") == "1.1", "runtime protocol generation drifted")
@@ -212,6 +237,10 @@ def check_server_source() -> None:
         '"announcements" => Ok(vec![EntityKind::Announcement])',
         "MAX_ANNOUNCEMENTS_PER_BATCH",
         "response_byte_limit",
+        "observe_acknowledged_announcements_started",
+        "parse_announcement_acknowledgment",
+        "render_acknowledged_observation",
+        ".tool(announcement_observe_tool::FortressObserve)",
         "final protocol-1.1 Agent Turn exceeded the negotiated response budget",
         "protocol 1.1 is read-only and registers no mutation methods",
         "run_live_v1_1_development_stdio",

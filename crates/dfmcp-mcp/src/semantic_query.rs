@@ -48,6 +48,14 @@ where
     query_watch::laboratory::execute(snapshot, context, input, publish)
 }
 
+/// Pure metadata for a native observation candidate. No watch sampling,
+/// baseline acquisition, journal publication or retained-state change occurs.
+pub(super) fn retained_native_query_work(context: &OperationContext) -> Result<Value> {
+    let watches = query_watch::retained_native_work(context)?;
+    let baselines = query_history::retained_work(context)?;
+    Ok(json!({"watches": watches, "baselines": baselines}))
+}
+
 /// Stateless preflight uses exactly the laboratory watch predicate evaluator.
 pub(super) fn evaluate_laboratory_condition(
     snapshot: &WorldSnapshot,

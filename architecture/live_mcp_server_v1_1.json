@@ -165,5 +165,34 @@
     "runtime admission",
     "complete fortress announcement history",
     "mutation correctness or authority"
-  ]
+  ],
+  "announcement_window_acknowledgment": {
+    "tool": "fortress.observe",
+    "argument": "announcement_acknowledgment",
+    "optional": true,
+    "schema": "dfmcp.announcement-ack/1",
+    "required_fields": [
+      "schema",
+      "expected_anchor",
+      "source_digest",
+      "next_after_id"
+    ],
+    "exact_current_anchor_required": true,
+    "exact_published_batch_digest_required": true,
+    "exact_complete_batch_high_water_required": true,
+    "current_capabilities": [
+      "observe",
+      "query"
+    ],
+    "automatic_advancement": false,
+    "transport_continuation": false,
+    "commit_after_complete_response": true,
+    "failure_preserves_published_window": true,
+    "original_request_deadline_required": true,
+    "bridge_generation_or_clock_reset": "refuse_and_open_fresh_session",
+    "retained_query_work": "pure_native_watch_and_baseline_catalogs_without_sampling",
+    "durable_prefix_retention": false,
+    "closes_historical_gaps": false,
+    "initial_or_new_suffix_over_ceiling": "refuse_without_skipping"
+  }
 }

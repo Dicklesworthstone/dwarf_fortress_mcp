@@ -16,6 +16,18 @@ mod watch_refresh;
 
 use query_response::QueryResponseProjection;
 
+/// Read-only watch and baseline catalogs for an observation publication candidate.
+/// The caller still owns the canonical publication and original wall deadline.
+pub(super) fn with_observation_work<F>(
+    context: &OperationContext,
+    publish: F,
+) -> Result<String>
+where
+    F: FnOnce(JsonValue) -> Result<String>,
+{
+    publish(semantic_query::retained_native_query_work(context)?)
+}
+
 pub(super) fn query(
     session_id: Option<String>,
     mode: Option<String>,

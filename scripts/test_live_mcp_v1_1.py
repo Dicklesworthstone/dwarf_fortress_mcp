@@ -113,6 +113,33 @@ class LiveMcpV1_1ContractTests(unittest.TestCase):
             path.write_text(json.dumps(value) + "\n", encoding="utf-8")
             self.assertNotEqual(self.run_checker(root).returncode, 0)
 
+    def test_announcement_acknowledgment_cannot_skip_or_lose_atomic_publication(self) -> None:
+        for field in [
+            "exact_current_anchor_required",
+            "exact_published_batch_digest_required",
+            "exact_complete_batch_high_water_required",
+            "commit_after_complete_response",
+            "failure_preserves_published_window",
+            "original_request_deadline_required",
+        ]:
+            with self.subTest(field=field):
+                temporary, root = self.fixture()
+                with temporary:
+                    path = root / "architecture/live_mcp_server_v1_1.json"
+                    value = json.loads(path.read_text(encoding="utf-8"))
+                    value["announcement_window_acknowledgment"][field] = False
+                    path.write_text(json.dumps(value) + "\n", encoding="utf-8")
+                    self.assertNotEqual(self.run_checker(root).returncode, 0)
+
+    def test_automatic_announcement_advancement_is_rejected(self) -> None:
+        temporary, root = self.fixture()
+        with temporary:
+            path = root / "architecture/live_mcp_server_v1_1.json"
+            value = json.loads(path.read_text(encoding="utf-8"))
+            value["announcement_window_acknowledgment"]["automatic_advancement"] = True
+            path.write_text(json.dumps(value) + "\n", encoding="utf-8")
+            self.assertNotEqual(self.run_checker(root).returncode, 0)
+
     def test_process_test_loss_is_rejected(self) -> None:
         temporary, root = self.fixture()
         with temporary:

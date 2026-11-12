@@ -102,17 +102,77 @@ type LiveMcpAdapterV1_1 = LiveReadAdapterV1_1<LiveMcpSourceV1_1>;
 type LiveSessionHandleV1_1 = Arc<Mutex<LiveSessionV1_1>>;
 type LiveSessionRegistryV1_1 = BTreeMap<SessionId, LiveSessionHandleV1_1>;
 
-struct LiveSessionV1_1 {
+// The presentation boundary borrows a complete candidate without publishing it.
+// It cannot read the bridge, advance a cursor, or change the session registry.
+trait LivePresentationAdapterV1_1 {
+    fn presentation_projection(&self) -> Option<&dfmcp_adapter::LiveWorldProjectionV1_1>;
+    fn presentation_capsule(&self) -> Option<&dfmcp_adapter::LiveObservationCapsuleV1_1>;
+    fn presentation_identity(&self) -> dfmcp_adapter::AdapterIdentity;
+    fn presentation_poisoned(&self) -> bool;
+    fn presentation_poison_reason(&self) -> Option<&str>;
+}
+
+impl LivePresentationAdapterV1_1 for LiveMcpAdapterV1_1 {
+    fn presentation_projection(&self) -> Option<&dfmcp_adapter::LiveWorldProjectionV1_1> {
+        self.current_projection()
+    }
+
+    fn presentation_capsule(&self) -> Option<&dfmcp_adapter::LiveObservationCapsuleV1_1> {
+        self.last_capsule()
+    }
+
+    fn presentation_identity(&self) -> dfmcp_adapter::AdapterIdentity {
+        self.identity()
+    }
+
+    fn presentation_poisoned(&self) -> bool {
+        self.source().source().is_poisoned()
+    }
+
+    fn presentation_poison_reason(&self) -> Option<&str> {
+        self.source().source().poisoned_reason()
+    }
+}
+
+struct AnnouncementCandidateView<'a> {
+    projection: &'a dfmcp_adapter::LiveWorldProjectionV1_1,
+    capsule: &'a dfmcp_adapter::LiveObservationCapsuleV1_1,
+    identity: dfmcp_adapter::AdapterIdentity,
+}
+
+impl LivePresentationAdapterV1_1 for AnnouncementCandidateView<'_> {
+    fn presentation_projection(&self) -> Option<&dfmcp_adapter::LiveWorldProjectionV1_1> {
+        Some(self.projection)
+    }
+
+    fn presentation_capsule(&self) -> Option<&dfmcp_adapter::LiveObservationCapsuleV1_1> {
+        Some(self.capsule)
+    }
+
+    fn presentation_identity(&self) -> dfmcp_adapter::AdapterIdentity {
+        self.identity.clone()
+    }
+
+    fn presentation_poisoned(&self) -> bool {
+        false
+    }
+
+    fn presentation_poison_reason(&self) -> Option<&str> {
+        None
+    }
+}
+
+struct LiveSessionV1_1<A = LiveMcpAdapterV1_1> {
     session_id: SessionId,
-    adapter: LiveMcpAdapterV1_1,
+    adapter: A,
     grants: Vec<CapabilityGrant>,
     budget: WorkBudget,
     next_request_id: u128,
 }
 
-impl LiveSessionV1_1 {
+impl<A: LivePresentationAdapterV1_1> LiveSessionV1_1<A> {
     fn current_anchor(&self) -> Result<StateAnchor> {
-        self.adapter.current_anchor().ok_or_else(|| {
+        self.adapter.presentation_projection().map(|value| value.snapshot.anchor()).ok_or_else(|| {
             error(
                 ErrorCode::InternalInvariantViolation,
                 "registered protocol-1.1 session has no canonical anchor",
@@ -149,11 +209,11 @@ impl LiveSessionV1_1 {
     }
 
     fn source_poisoned(&self) -> bool {
-        self.adapter.source().source().is_poisoned()
+        self.adapter.presentation_poisoned()
     }
 
     fn source_poison_reason(&self) -> Option<&str> {
-        self.adapter.source().source().poisoned_reason()
+        self.adapter.presentation_poison_reason()
     }
 }
 
@@ -618,8 +678,8 @@ fn budget_json(budget: WorkBudget) -> JsonValue {
     })
 }
 
-fn announcement_state_json(session: &LiveSessionV1_1) -> JsonValue {
-    let Some(capsule) = session.adapter.last_capsule() else {
+fn announcement_state_json(session: &LiveSessionV1_1<impl LivePresentationAdapterV1_1>) -> JsonValue {
+    let Some(capsule) = session.adapter.presentation_capsule() else {
         return JsonValue::Null;
     };
     let coverage = &capsule.announcement_batch.coverage;
@@ -633,11 +693,17 @@ fn announcement_state_json(session: &LiveSessionV1_1) -> JsonValue {
         "complete_through_latest": coverage.complete_through_latest,
         "gap_before_retained_window": coverage.has_gap(),
         "complete_history": false,
+        "acknowledgment": session.current_anchor().ok().and_then(|anchor| {
+            (coverage.complete_through_latest
+                && coverage.next_after_id > coverage.requested_after_id)
+                .then(|| announcement_acknowledgment_json(anchor, capsule))
+        }),
+        "acknowledgment_effect": "explicitly discard the processed prefix from the current projection; no durable history is retained",
     })
 }
 
-fn coverage_json(session: &LiveSessionV1_1) -> JsonValue {
-    let Some(projection) = session.adapter.current_projection() else {
+fn coverage_json(session: &LiveSessionV1_1<impl LivePresentationAdapterV1_1>) -> JsonValue {
+    let Some(projection) = session.adapter.presentation_projection() else {
         return json!({
             "status": "unknown",
             "complete_domains": [],
@@ -675,8 +741,8 @@ fn coverage_json(session: &LiveSessionV1_1) -> JsonValue {
     })
 }
 
-fn announcement_briefing_json(session: &LiveSessionV1_1) -> JsonValue {
-    let Some(capsule) = session.adapter.last_capsule() else {
+fn announcement_briefing_json(session: &LiveSessionV1_1<impl LivePresentationAdapterV1_1>) -> JsonValue {
+    let Some(capsule) = session.adapter.presentation_capsule() else {
         return JsonValue::Null;
     };
     match build_live_announcement_briefing(&capsule.announcement_batch) {
@@ -712,9 +778,9 @@ fn announcement_briefing_json(session: &LiveSessionV1_1) -> JsonValue {
     }
 }
 
-fn briefing_json(session: &LiveSessionV1_1) -> JsonValue {
-    let capsule = session.adapter.last_capsule();
-    let identity = session.adapter.identity();
+fn briefing_json(session: &LiveSessionV1_1<impl LivePresentationAdapterV1_1>) -> JsonValue {
+    let capsule = session.adapter.presentation_capsule();
+    let identity = session.adapter.presentation_identity();
     json!({
         "implementation_phase": LIVE_IMPLEMENTATION_PHASE,
         "runtime": "unadmitted_development",
@@ -742,8 +808,8 @@ fn briefing_json(session: &LiveSessionV1_1) -> JsonValue {
     })
 }
 
-fn announcement_attention(session: &LiveSessionV1_1) -> Vec<JsonValue> {
-    let Some(capsule) = session.adapter.last_capsule() else {
+fn announcement_attention(session: &LiveSessionV1_1<impl LivePresentationAdapterV1_1>) -> Vec<JsonValue> {
+    let Some(capsule) = session.adapter.presentation_capsule() else {
         return Vec::new();
     };
     let Ok(briefing) = build_live_announcement_briefing(&capsule.announcement_batch) else {
@@ -782,7 +848,7 @@ fn announcement_attention(session: &LiveSessionV1_1) -> Vec<JsonValue> {
         .collect()
 }
 
-fn affordances_json(session: &LiveSessionV1_1) -> Vec<JsonValue> {
+fn affordances_json(session: &LiveSessionV1_1<impl LivePresentationAdapterV1_1>) -> Vec<JsonValue> {
     [
         (
             Capability::Observe,
@@ -848,7 +914,7 @@ fn affordances_json(session: &LiveSessionV1_1) -> Vec<JsonValue> {
     .collect()
 }
 
-fn uncertainties_json(session: &LiveSessionV1_1) -> Vec<JsonValue> {
+fn uncertainties_json(session: &LiveSessionV1_1<impl LivePresentationAdapterV1_1>) -> Vec<JsonValue> {
     let mut values = OMITTED_LIVE_DOMAINS
         .iter()
         .map(|(domain, reason)| {
@@ -893,8 +959,8 @@ fn uncertainties_json(session: &LiveSessionV1_1) -> Vec<JsonValue> {
     values
 }
 
-fn references_json(session: &LiveSessionV1_1) -> Vec<JsonValue> {
-    let Some(capsule) = session.adapter.last_capsule() else {
+fn references_json(session: &LiveSessionV1_1<impl LivePresentationAdapterV1_1>) -> Vec<JsonValue> {
+    let Some(capsule) = session.adapter.presentation_capsule() else {
         return Vec::new();
     };
     vec![
@@ -909,7 +975,7 @@ fn references_json(session: &LiveSessionV1_1) -> Vec<JsonValue> {
     ]
 }
 
-fn response_byte_limit(session: &LiveSessionV1_1) -> usize {
+fn response_byte_limit(session: &LiveSessionV1_1<impl LivePresentationAdapterV1_1>) -> usize {
     let byte_budget = usize::try_from(session.budget.max_bytes).unwrap_or(usize::MAX);
     let token_budget = usize::try_from(session.budget.max_output_tokens)
         .ok()
@@ -920,7 +986,7 @@ fn response_byte_limit(session: &LiveSessionV1_1) -> usize {
 
 #[allow(clippy::too_many_arguments)]
 fn attach_turn(
-    session: &LiveSessionV1_1,
+    session: &LiveSessionV1_1<impl LivePresentationAdapterV1_1>,
     operation: &str,
     phase: AgentPhase,
     profile: ObservationProfile,
@@ -1619,9 +1685,237 @@ pub fn fortress_open_session(
     )
 }
 
-#[tool(
-    description = "Refresh an explicitly unadmitted protocol-1.1 read-only session. Returns a heartbeat or a complete citizen-plus-retained-announcement snapshot."
-)]
+fn announcement_acknowledgment_json(
+    anchor: StateAnchor,
+    capsule: &dfmcp_adapter::LiveObservationCapsuleV1_1,
+) -> JsonValue {
+    json!({
+        "schema": "dfmcp.announcement-ack/1",
+        "expected_anchor": anchor_json(anchor),
+        "source_digest": capsule.announcement_batch.content_digest.to_string(),
+        "next_after_id": capsule.announcement_batch.coverage.next_after_id,
+    })
+}
+
+fn parse_announcement_acknowledgment(
+    input: &JsonValue,
+    anchor: StateAnchor,
+    capsule: &dfmcp_adapter::LiveObservationCapsuleV1_1,
+) -> Result<i32> {
+    let fields = input.as_object().ok_or_else(|| {
+        error(ErrorCode::InvalidRequest, "announcement_acknowledgment must be an object")
+    })?;
+    if fields.len() != 4
+        || fields.keys().any(|key| {
+            !matches!(key.as_str(), "schema" | "expected_anchor" | "source_digest" | "next_after_id")
+        })
+        || input["schema"] != "dfmcp.announcement-ack/1"
+    {
+        return Err(error(
+            ErrorCode::InvalidRequest,
+            "announcement_acknowledgment requires exactly schema, expected_anchor, source_digest and next_after_id",
+        ));
+    }
+    if input != &announcement_acknowledgment_json(anchor, capsule) {
+        return Err(error(
+            ErrorCode::StaleAnchor,
+            "copy the acknowledgment from the exact current published announcement window",
+        )
+        .retryable(true));
+    }
+    Ok(capsule.announcement_batch.coverage.next_after_id)
+}
+
+fn render_acknowledged_observation(
+    session: &LiveSessionV1_1<impl LivePresentationAdapterV1_1>,
+    context: &OperationContext,
+    prior: StateAnchor,
+    acknowledgment: JsonValue,
+    frame: &dfmcp_adapter::ObservationFrame,
+    work: JsonValue,
+) -> Result<String> {
+    let current = session.current_anchor()?;
+    let capsule = session.adapter.presentation_capsule().ok_or_else(|| {
+        error(ErrorCode::InternalInvariantViolation, "announcement candidate lost its capsule")
+    })?;
+    let encoded = attach_turn(
+        session,
+        "fortress.observe",
+        AgentPhase::Orient,
+        ObservationProfile::Pulse,
+        context.request_id,
+        ContinuityStatus::Partial,
+        Some(prior),
+        None,
+        vec![json!({
+            "kind": "announcement_window_acknowledged",
+            "epistemic_state": "observed",
+            "acknowledged_window": acknowledgment,
+            "current_requested_after_id": capsule.announcement_batch.coverage.requested_after_id,
+            "prior_prefix_retained_in_current_projection": false,
+            "historical_gap_closed": false,
+            "invalidates": ["prior_announcement_query_continuations"],
+            "evidence": [capsule.announcement_batch.content_digest.to_string()],
+        })],
+        announcement_attention(session),
+        Vec::new(),
+        json!({
+            "ok": true,
+            "session_id": session.session_id.to_string(),
+            "request_id": context.request_id.to_string(),
+            "kind": "snapshot",
+            "anchor": anchor_json(current),
+            "paused": capsule.base.paused,
+            "calendar_year": capsule.base.current_year,
+            "year_tick": capsule.base.current_year_tick,
+            "citizens": capsule.base.citizen_coverage.total,
+            "announcements": announcement_state_json(session),
+            "acknowledged_window": acknowledgment,
+            "warnings": frame.warnings,
+            "evidence": frame.evidence.iter().map(|value| json!({
+                "evidence_id": value.id.to_string(),
+                "digest": value.digest.to_string(),
+                "summary": value.summary,
+            })).collect::<Vec<_>>(),
+        }),
+    );
+    let mut payload: JsonValue = serde_json::from_str(&encoded).map_err(|_| {
+        error(ErrorCode::InternalInvariantViolation, "announcement candidate packet is not JSON")
+    })?;
+    if payload["ok"] != true {
+        return Err(error(
+            ErrorCode::BudgetExceeded,
+            "complete acknowledged announcement packet exceeds the response allowance; the prior window is unchanged",
+        ));
+    }
+    let obligations = work["watches"].get("active_work").ok_or_else(|| {
+        error(ErrorCode::InternalInvariantViolation, "announcement candidate lost retained watch work")
+    })?;
+    payload["agent_turn"]["active_work"]["obligations"] = obligations.clone();
+    payload["retained_query_work"] = json!({
+        "watch_records": work["watches"]["records"],
+        "baselines": work["baselines"],
+        "sampling": "not_evaluated",
+        "durable": false,
+    });
+    let encoded = payload.to_string();
+    if encoded.len() > response_byte_limit(session).min(60_000) {
+        return Err(error(
+            ErrorCode::BudgetExceeded,
+            "acknowledged announcement packet and retained work exceed the complete response allowance",
+        ));
+    }
+    context.authorize(Capability::Observe, RiskTier::ReadOnly, &[], None)?;
+    context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
+    Ok(encoded)
+}
+
+fn observe_acknowledged_announcements(
+    session_id: Option<String>,
+    input: JsonValue,
+) -> String {
+    let started = std::time::Instant::now();
+    let operation = "fortress.observe";
+    let session = match resolve_session(session_id) {
+        Ok(value) => value,
+        Err(failure) => return unbound_error(operation, AgentPhase::Orient, &failure),
+    };
+    let mut guard = match lock_session(&session) {
+        Ok(value) => value,
+        Err(failure) => return unbound_error(operation, AgentPhase::Orient, &failure),
+    };
+    let prior = match guard.current_anchor() {
+        Ok(value) => value,
+        Err(failure) => return unbound_error(operation, AgentPhase::Orient, &failure),
+    };
+    // Reserve a candidate identity, without consuming it on failed parsing,
+    // source acquisition, complete-response admission or publication.
+    let Some(next) = guard.next_request_id.checked_add(1) else {
+        return session_error(
+            &guard, operation, AgentPhase::Orient, ObservationProfile::Pulse,
+            RequestId::NIL, prior, ContinuityStatus::Continuous,
+            &error(ErrorCode::BudgetExceeded, "protocol-1.1 request identity space is exhausted"),
+        );
+    };
+    let context = OperationContext {
+        session_id: guard.session_id,
+        request_id: RequestId::new(next),
+        anchor: prior,
+        budget: guard.budget,
+        grants: guard.grants.clone(),
+        cancellation_requested: false,
+    };
+    let outcome = (|| -> Result<String> {
+        context.authorize(Capability::Observe, RiskTier::ReadOnly, &[], None)?;
+        context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
+        let capsule = guard.adapter.last_capsule().ok_or_else(|| {
+            error(ErrorCode::InternalInvariantViolation, "acknowledgment has no published capsule")
+        })?;
+        let high_water = parse_announcement_acknowledgment(&input, prior, capsule)?;
+        let digest = capsule.announcement_batch.content_digest;
+        let acknowledgment = announcement_acknowledgment_json(prior, capsule);
+        let identity = guard.adapter.identity();
+        let request = ObservationRequest {
+            since: Some(prior.cursor),
+            projection: Projection::Full,
+            interest: InterestSet::default(),
+            max_entities: context.budget.max_entities,
+            max_bytes: context.budget.max_bytes,
+            max_output_tokens: context.budget.max_output_tokens,
+            continuation: None,
+        };
+        guard.adapter.observe_acknowledged_announcements_started(
+            &request, &context, prior, digest, high_water, started,
+            |projection, capsule, frame| {
+                let candidate = LiveSessionV1_1 {
+                    session_id: context.session_id,
+                    adapter: AnnouncementCandidateView { projection, capsule, identity },
+                    grants: context.grants.clone(),
+                    budget: context.budget,
+                    next_request_id: next,
+                };
+                let mut candidate_context = context.clone();
+                candidate_context.anchor = projection.snapshot.anchor();
+                structured_query::with_observation_work(&candidate_context, |work| {
+                    render_acknowledged_observation(
+                        &candidate, &candidate_context, prior, acknowledgment, frame, work,
+                    )
+                })
+            },
+        )
+    })();
+    match outcome {
+        Ok(encoded) => {
+            guard.next_request_id = next;
+            encoded
+        }
+        Err(failure) => session_error(
+            &guard, operation, AgentPhase::Orient, ObservationProfile::Pulse,
+            context.request_id, prior, ContinuityStatus::Stale, &failure,
+        ),
+    }
+}
+
+// Keep the original Rust wrapper callable while the generated wire tool gains
+// one optional, closed semantic argument. The wire name remains fortress_observe.
+mod announcement_observe_tool {
+    use super::*;
+
+    #[tool(
+        description = "Refresh an unadmitted protocol-1.1 read-only session. Omit announcement_acknowledgment to retain the current suffix. After processing a complete published batch, copy its announcements.acknowledgment to explicitly begin the next bounded suffix in the same session; exact source identity, current Observe/Query and complete-response publication are required."
+    )]
+    pub fn fortress_observe(
+        session_id: Option<String>,
+        announcement_acknowledgment: Option<serde_json::Value>,
+    ) -> String {
+        match announcement_acknowledgment {
+            Some(value) => super::observe_acknowledged_announcements(session_id, value),
+            None => super::fortress_observe(session_id),
+        }
+    }
+}
+
+/// Legacy Rust entry point; omitted acknowledgment keeps the configured suffix unchanged.
 pub fn fortress_observe(session_id: Option<String>) -> String {
     let operation = "fortress.observe";
     let session = match resolve_session(session_id) {
@@ -2263,7 +2557,7 @@ pub fn run_live_v1_1_development_stdio() {
         env!("CARGO_PKG_VERSION"),
     )
     .tool(FortressOpenSession)
-    .tool(FortressObserve)
+    .tool(announcement_observe_tool::FortressObserve)
     .tool(FortressQuery)
     .tool(FortressPlan)
     .tool(FortressCommit)
@@ -2392,4 +2686,238 @@ mod tests {
             })
         );
     }
+    fn acknowledgment_fixture(
+        after: i32,
+        reports: &[i32],
+    ) -> Result<(
+        dfmcp_adapter::LiveObservationCapsuleV1_1,
+        dfmcp_adapter::LiveWorldProjectionV1_1,
+        OperationContext,
+    )> {
+        use dfmcp_adapter::{
+            AnnouncementBatchRecord, AnnouncementContinuity, AnnouncementCoverage,
+            BridgeManifest, LiveAnnouncementBatch, ObservationAssemblerV1_1,
+            ObservationPageV1_1,
+        };
+        let latest = reports.last().copied().unwrap_or(after);
+        let batch = LiveAnnouncementBatch::new(
+            42, true, 105, 100, 7,
+            AnnouncementCoverage {
+                requested_after_id: after,
+                oldest_available_id: if reports.first() == Some(&0) { 0 } else { 10 },
+                latest_available_id: latest,
+                returned: reports.len() as u32,
+                complete_through_latest: true,
+                continuity: AnnouncementContinuity::CompleteSuffix,
+                next_after_id: latest,
+            },
+            reports.iter().map(|id| AnnouncementBatchRecord {
+                report_id: *id,
+                report_type: 1,
+                text: format!("announcement {id}"),
+                year: 105,
+                year_tick: 90,
+                repeat_count: 1,
+                continuation: false,
+                unconscious: false,
+                announcement: true,
+            }).collect(),
+        )?;
+        let mut assembler = ObservationAssemblerV1_1::new(BridgeManifest {
+            bridge_version: "0.2.0".to_owned(),
+            dfhack_version: "0.51.11-r1".to_owned(),
+            df_version: "0.51.11".to_owned(),
+            world_loaded: true,
+            fortress_mode: true,
+            bridge_generation: 42,
+            supported_methods: BTreeSet::from([
+                "Handshake".to_owned(), "ReadObservation".to_owned(),
+            ]),
+        });
+        assembler.push_page(ObservationPageV1_1 {
+            bridge_generation: 42,
+            world_loaded: true,
+            fortress_mode: true,
+            paused: true,
+            current_year: 105,
+            current_year_tick: 100,
+            world_name: "Acknowledgment fixture".to_owned(),
+            world_folder: "region1".to_owned(),
+            site_id: 7,
+            citizen_count_total: 0,
+            citizen_offset: 0,
+            complete: true,
+            citizens: Vec::new(),
+            announcement_batch: batch,
+        })?;
+        let capsule = assembler.finalize()?;
+        let projection = dfmcp_adapter::project_live_capsule_v1_1(
+            &capsule,
+            FortressId::new(7),
+            dfmcp_core::ObservationCursor { epoch: 2, sequence: 8 },
+        )?;
+        let context = OperationContext {
+            session_id: SessionId::new(SESSION_NAMESPACE_PREFIX | 31),
+            request_id: RequestId::new(9),
+            anchor: projection.snapshot.anchor(),
+            budget: WorkBudget {
+                max_wall_millis: 5000,
+                max_game_ticks: 1000,
+                max_entities: 1000,
+                max_bytes: 1024 * 1024,
+                max_output_tokens: 65_536,
+                max_actions: 1,
+            },
+            grants: [Capability::Observe, Capability::Query].into_iter().map(|capability| {
+                CapabilityGrant {
+                    capability,
+                    scope: CapabilityScope {
+                        fortress_id: Some(projection.snapshot.fortress_id),
+                        ..CapabilityScope::default()
+                    },
+                    max_risk: RiskTier::ReadOnly,
+                    expires_at_tick: None,
+                    remaining_uses: None,
+                }
+            }).collect(),
+            cancellation_requested: false,
+        };
+        Ok((capsule, projection, context))
+    }
+
+    fn acknowledgment_candidate<'a>(
+        capsule: &'a dfmcp_adapter::LiveObservationCapsuleV1_1,
+        projection: &'a dfmcp_adapter::LiveWorldProjectionV1_1,
+        context: &OperationContext,
+    ) -> LiveSessionV1_1<AnnouncementCandidateView<'a>> {
+        LiveSessionV1_1 {
+            session_id: context.session_id,
+            adapter: AnnouncementCandidateView {
+                capsule,
+                projection,
+                identity: dfmcp_adapter::AdapterIdentity {
+                    name: "announcement-fixture".to_owned(),
+                    adapter_version: "0.1.0".to_owned(),
+                    bridge_protocol_version: "dfmcp-bridge/1.1".to_owned(),
+                    dwarf_fortress_version: capsule.base.bridge.df_version.clone(),
+                    dfhack_version: capsule.base.bridge.dfhack_version.clone(),
+                    compatibility: dfmcp_adapter::CompatibilityLevel::DegradedReadOnly,
+                    capabilities: BTreeSet::from([Capability::Observe, Capability::Query]),
+                    schema_digest: Digest32::of_bytes(b"announcement-fixture"),
+                },
+            },
+            grants: context.grants.clone(),
+            budget: context.budget,
+            next_request_id: 9,
+        }
+    }
+
+    #[test]
+    fn acknowledgment_envelope_binds_the_exact_anchor_batch_and_high_water() -> Result<()> {
+        let (capsule, projection, context) = acknowledgment_fixture(-1, &[0])?;
+        let valid = announcement_acknowledgment_json(context.anchor, &capsule);
+        assert_eq!(parse_announcement_acknowledgment(&valid, context.anchor, &capsule)?, 0);
+        let session = acknowledgment_candidate(&capsule, &projection, &context);
+        assert_eq!(announcement_state_json(&session)["acknowledgment"], valid);
+        for case in 0..8 {
+            let mut input = valid.clone();
+            match case {
+                0 => input["next_after_id"] = json!(1),
+                1 => input["next_after_id"] = json!(-1),
+                2 => input["source_digest"] = json!(Digest32::ZERO.to_string()),
+                3 => input["expected_anchor"]["game_tick"] = json!(0),
+                4 => input["expected_anchor"]["fortress_id"] = json!("99"),
+                5 => input["expected_anchor"]["unexpected"] = json!(true),
+                6 => input["unexpected"] = json!(true),
+                _ => input["schema"] = json!("dfmcp.announcement-ack/2"),
+            }
+            assert!(parse_announcement_acknowledgment(&input, context.anchor, &capsule).is_err());
+        }
+        for malformed in [JsonValue::Null, json!(0), json!({})] {
+            assert!(parse_announcement_acknowledgment(&malformed, context.anchor, &capsule).is_err());
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn acknowledgment_packet_keeps_retained_work_and_admits_the_entire_response() -> Result<()> {
+        let (capsule, projection, mut context) = acknowledgment_fixture(11, &[12])?;
+        let mut session = acknowledgment_candidate(&capsule, &projection, &context);
+        let mut prior = context.anchor;
+        prior.cursor.sequence -= 1;
+        let receipt = json!({
+            "schema":"dfmcp.announcement-ack/1",
+            "expected_anchor":anchor_json(prior),
+            "source_digest":Digest32::of_bytes(b"prior-announcement-batch").to_string(),
+            "next_after_id":11,
+        });
+        let frame = dfmcp_adapter::ObservationFrame {
+            payload: ObservationPayload::Snapshot(projection.snapshot.clone()),
+            evidence: Vec::new(),
+            warnings: vec!["explicit acknowledged prefix is no longer current".to_owned()],
+            truncated: false,
+            continuation: None,
+        };
+        let work = json!({
+            "watches": {
+                "active_work": [{"watch":"watch:active","game_effect":"none","needs_poll":true}],
+                "records": [{"watch":"watch:terminal","terminal":true,"evaluation_current":false}],
+            },
+            "baselines":[{"baseline":"qb1:retained","status":"retained"}],
+        });
+        let before = projection.snapshot.canonical_bytes();
+        let encoded = render_acknowledged_observation(
+            &session, &context, prior, receipt.clone(), &frame, work.clone(),
+        )?;
+        let value: JsonValue = serde_json::from_str(&encoded)
+            .map_err(|_| error(ErrorCode::InternalInvariantViolation, "fixture JSON decode"))?;
+        assert_eq!(value["ok"], true);
+        assert_eq!(value["anchor"], anchor_json(context.anchor));
+        assert_eq!(value["agent_turn"]["continuity"]["basis"], anchor_json(prior));
+        assert_eq!(value["agent_turn"]["continuity"]["status"], "partial");
+        assert_eq!(value["agent_turn"]["active_work"]["obligations"], work["watches"]["active_work"]);
+        assert_eq!(value["retained_query_work"]["watch_records"], work["watches"]["records"]);
+        assert_eq!(value["retained_query_work"]["baselines"], work["baselines"]);
+        assert_eq!(value["retained_query_work"]["sampling"], "not_evaluated");
+        assert_eq!(value["announcements"]["requested_after_id"], 11);
+        assert_eq!(value["agent_turn"]["changes"][0]["historical_gap_closed"], false);
+        assert_eq!(value["agent_turn"]["briefing"]["runtime_admitted"], false);
+        assert_eq!(projection.snapshot.canonical_bytes(), before);
+        session.budget.max_bytes = encoded.len() as u64 / 2;
+        context.budget = session.budget;
+        assert!(matches!(
+            render_acknowledged_observation(
+                &session, &context, prior, receipt.clone(), &frame, work.clone(),
+            ),
+            Err(failure) if failure.code == ErrorCode::BudgetExceeded
+        ));
+        session.budget.max_bytes = 1024 * 1024;
+        context.budget = session.budget;
+        context.grants.retain(|grant| grant.capability != Capability::Query);
+        assert!(render_acknowledged_observation(
+            &session, &context, prior, receipt, &frame, work,
+        ).is_err());
+        assert_eq!(projection.snapshot.canonical_bytes(), before);
+        Ok(())
+    }
+
+    #[test]
+    fn wire_observe_preserves_legacy_wrapper_and_structured_errors() -> Result<()> {
+        let legacy: fn(Option<String>) -> String = fortress_observe;
+        for encoded in [
+            legacy(Some("invalid".to_owned())),
+            announcement_observe_tool::fortress_observe(Some("invalid".to_owned()), None),
+            announcement_observe_tool::fortress_observe(
+                Some("invalid".to_owned()), Some(json!({})),
+            ),
+        ] {
+            let value: JsonValue = serde_json::from_str(&encoded)
+                .map_err(|_| error(ErrorCode::InternalInvariantViolation, "fixture JSON decode"))?;
+            assert_eq!(value["ok"], false);
+            assert_eq!(value["agent_turn"]["operation"], "fortress.observe");
+            assert_eq!(value["agent_turn"]["briefing"]["runtime_admitted"], false);
+        }
+        Ok(())
+    }
+
 }

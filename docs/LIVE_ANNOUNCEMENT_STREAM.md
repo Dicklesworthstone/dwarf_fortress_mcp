@@ -157,6 +157,70 @@ admission status. See `ANNOUNCEMENT_EVENT_WINDOWS.md` for a complete request and
 the unavailable-fact, subject, taint and coverage contract. Schema discovery is
 available through `fortress.query` with `mode: "schema"`.
 
+## Continuing a long-running announcement session
+
+Ordinary `fortress.observe` keeps the configured announcement cursor unchanged.
+After processing the complete current batch, an agent can explicitly acknowledge
+it and begin another complete bounded suffix in the same session. This prevents
+the already-processed prefix from consuming the 512-report publication allowance
+on every later observation.
+
+The current observation's `announcements.acknowledgment` contains a closed
+`dfmcp.announcement-ack/1` object. Copy the entire object unchanged into the
+existing observe tool's optional `announcement_acknowledgment` argument:
+
+```python
+ack = current_observation["announcements"]["acknowledgment"]
+next_arguments = {
+    "session_id": current_observation["session_id"],
+    "announcement_acknowledgment": ack,
+}
+# Submit next_arguments to fortress.observe after processing the current batch.
+```
+
+The object binds `expected_anchor` (the complete current anchor),
+`source_digest` (that exact announcement batch), and `next_after_id` (the
+complete batch's retained high-water). It is a reference to published evidence,
+not an authority token. Acknowledgment requires current Observe and Query
+authority. Report ID zero is valid. Foreign, stale, future, malformed and
+non-progressing acknowledgments refuse without advancing the cursor. Omit the
+argument to retain the existing observe behavior; the original one-argument Rust
+wrapper is also preserved.
+
+The server acquires and validates the new complete citizen-plus-announcement
+candidate, prepares its full Agent Turn and retained query-work catalogs, and
+checks its original request deadline and complete response budget before
+publishing. The full successful response is the transaction boundary: an
+acquisition, projection, capability, deadline or rendering failure keeps the
+prior configured cursor, canonical anchor, capsule and request counter. Source
+I/O has already happened and cannot be rolled back; an underlying transport
+failure can still fence the source permanently.
+
+A successful acknowledgment explicitly removes the processed prefix from the
+**current** projection. It does not create an archive, delete retained query
+baselines, sample or release watches, or close historical gaps. The response
+includes active watch obligations, terminal watch summaries and baseline handles
+under `retained_query_work`, without reevaluating them. Old announcement query
+continuations are invalid after the new anchor is published. Watch evidence and
+captured baseline rows retain their original anchors.
+
+A new native retention gap remains separate from the intentionally acknowledged
+prefix. The retained suffix can still be complete while announcement history
+remains partial. A bridge-generation change or regressed game clock refuses the
+acknowledgment; open a fresh session for that source epoch.
+
+Acknowledgment is never automatic, and it does not accept a partial transport
+page. An initially oversized opening suffix still refuses. If more than the
+configured ceiling of new reports accumulate after the latest acknowledged
+batch, that next suffix also refuses without skipping reports. Agents must
+process and acknowledge complete batches often enough for the existing bound;
+this change does not remove that bound or add durable long-campaign history.
+
+This implementation adds ten adapter, three MCP and two retained-watch Rust
+regressions, plus contract mutation cases. They are checked-in source and have
+not been compiled or executed in the editing environment. Protocol 1.1 remains
+unadmitted development functionality.
+
 ## Version and admission
 
 This is bridge protocol `1.1` and bridge implementation `0.2.0`. Any historical protocol-1.0

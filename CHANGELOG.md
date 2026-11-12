@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased — Continue bounded announcement observation without reopening
+
+- Add an optional exact published-window acknowledgment to protocol-1.1
+  fortress.observe, preserving the original Rust wrapper and eleven tool names.
+- Begin the next complete announcement suffix only after source validation,
+  current authority, the original deadline and the entire successful response
+  fit. Failed publication keeps the prior cursor, anchor and request counter.
+- Preserve native watch and baseline catalogs through a pure metadata reader.
+  Explicitly disclose the acknowledged prefix leaving the current projection,
+  unchanged historical uncertainty and invalidated query continuations.
+- Reject stale/future acknowledgments and cross-reset cursors; retain refusal
+  for initial or newly accumulated suffixes above the configured ceiling.
+- Add fifteen Rust regression scenarios and two Python mutation-test methods,
+  plus matching contract and usage documentation. Independent source review
+  and exact blob checks are complete; compilation, tests and formatting remain
+  unexecuted because the workspace is unavailable.
+
 ## Unreleased — Preserve complete stock goals and prior-order custody
 
 - Retain up to four distinct original furniture stock minima in an existing-worker

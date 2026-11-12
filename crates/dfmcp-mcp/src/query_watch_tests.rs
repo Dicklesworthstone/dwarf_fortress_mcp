@@ -552,3 +552,65 @@ fn strong_kleene_logic_preserves_decisive_known_branches_without_unknown_negatio
     }
     Ok(())
 }
+
+#[test]
+fn native_retained_catalogs_do_not_sample_or_change_terminal_evidence() -> Result<()> {
+    let store = Mutex::new(Store::default());
+    let initial = world(1, 0, true);
+    let active = handle(&run(&store, &initial, create())?)?;
+    let mut terminal_request = create();
+    terminal_request["key"] = json!("terminal-watch");
+    terminal_request["stable_observations"] = json!(1);
+    let terminal = handle(&run(&store, &initial, terminal_request)?)?;
+    let before = lock(&store)?
+        .entries
+        .values()
+        .map(|watch| watch.detail(initial.anchor()))
+        .collect::<Vec<_>>();
+    let serial = lock(&store)?.serial;
+    let current = world(9, 1, false);
+    let ctx = context(&current, 7);
+    let metadata = retained_native_work_in(&store, &ctx)?;
+    assert_eq!(metadata["records"].as_array().map(Vec::len), Some(2));
+    assert_eq!(metadata["active_work"].as_array().map(Vec::len), Some(1));
+    assert_eq!(metadata["active_work"][0]["watch"], active);
+    assert_eq!(metadata["active_work"][0]["needs_poll"], true);
+    let records = metadata["records"].as_array()
+        .ok_or_else(|| invalid("fixture catalog missing"))?;
+    let terminal_record = records.iter()
+        .find(|record| record["watch"] == terminal)
+        .ok_or_else(|| invalid("fixture terminal record missing"))?;
+    assert_eq!(terminal_record["terminal"], true);
+    assert_eq!(terminal_record["evaluation_current"], false);
+    let mut too_small = ctx.clone();
+    too_small.budget.max_bytes = 1;
+    assert!(retained_native_work_in(&store, &too_small).is_err());
+    let after = lock(&store)?
+        .entries
+        .values()
+        .map(|watch| watch.detail(initial.anchor()))
+        .collect::<Vec<_>>();
+    assert_eq!(after, before);
+    assert_eq!(lock(&store)?.serial, serial);
+    Ok(())
+}
+
+#[test]
+fn native_retained_catalog_requires_current_query_and_immutable_native_policy() -> Result<()> {
+    let store = Mutex::new(Store::default());
+    let snapshot = world(1, 0, true);
+    run(&store, &snapshot, create())?;
+    let other = context(&snapshot, 8);
+    assert_eq!(retained_native_work_in(&store, &other)?["records"], json!([]));
+    let mut denied = context(&snapshot, 7);
+    denied.grants.clear();
+    assert!(retained_native_work_in(&store, &denied).is_err());
+    for watch in lock(&store)?.entries.values_mut() {
+        watch.source_policy = SourcePolicy::LaboratoryReference;
+    }
+    assert!(matches!(
+        retained_native_work_in(&store, &context(&snapshot, 7)),
+        Err(failure) if failure.code == ErrorCode::Conflict
+    ));
+    Ok(())
+}

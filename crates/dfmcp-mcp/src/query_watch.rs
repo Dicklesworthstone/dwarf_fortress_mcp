@@ -965,6 +965,45 @@ where
     })
 }
 
+/// Read bounded native watch ownership without sampling, journal staging or
+/// publication. The caller must admit these catalogs in its complete response.
+pub(super) fn retained_native_work(context: &OperationContext) -> Result<Value> {
+    retained_native_work_in(&WATCHES, context)
+}
+
+fn retained_native_work_in(
+    storage: &Mutex<Store>,
+    context: &OperationContext,
+) -> Result<Value> {
+    let budget = counts::EvaluationBudget::new(context.budget.max_wall_millis);
+    context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
+    let store = lock(storage)?;
+    SourcePolicy::Native.check_session(&store, context.session_id)?;
+    let records = store
+        .entries
+        .iter()
+        .filter(|((owner, _), _)| *owner == context.session_id)
+        .map(|(_, watch)| watch.summary(context.anchor))
+        .collect::<Vec<_>>();
+    if records.len() > MAX_PER_SESSION {
+        return Err(failure(
+            ErrorCode::InternalInvariantViolation,
+            "native watch catalog exceeds its session bound",
+        ));
+    }
+    let value = json!({"records": records, "active_work": active_work(&store, context)});
+    let maximum = context
+        .budget
+        .max_bytes
+        .min(u64::from(context.budget.max_output_tokens).saturating_mul(4));
+    if value.to_string().len() as u64 > maximum {
+        return Err(bounded("retained native watch catalogs exceed the output allowance"));
+    }
+    context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
+    budget.check()?;
+    Ok(value)
+}
+
 /// Pure queries retain the current watch projection without sampling it.
 pub fn with_active_work<F>(context: &OperationContext, value: Value, publish: F) -> Result<String>
 where

@@ -147,10 +147,22 @@ It provides:
 The adapter grants only `Observe`, `Query`, and `Doctor` at its semantic boundary. Prepare, commit,
 action polling, cancellation, checkpoint, and restore all reject before reaching an effect path.
 
-The adapter does not accept cross-call announcement continuation. Its configured cursor and total
-ceiling define one complete publishable retained suffix. Wider or incremental runtime policy needs a
-separately reviewed server/session contract; it must not reinterpret a partial bridge page as a
-canonical world snapshot.
+The adapter does not accept partial cross-call announcement transport continuation. Its configured
+cursor and total ceiling still define one complete publishable retained suffix. The existing
+development observe tool now accepts an optional explicit `dfmcp.announcement-ack/1` reference to the
+exact current anchor, complete batch digest and retained high-water. It begins the next bounded
+suffix only after the entire candidate observation and successful Agent Turn are publishable.
+Omitted acknowledgment preserves the existing cursor. Failed acknowledgment preserves the prior
+cursor, capsule, anchor and MCP request counter; bridge reads themselves cannot be rolled back.
+
+Acknowledgment requires current Observe and Query authority. Retained native watch and baseline
+catalogs are read without sampling, journal staging, release or other retained-state changes.
+Successful advancement explicitly removes the processed prefix only from the current projection;
+it does not create durable history or close a native retention gap. Source generation or clock
+reset refuses the old cursor. Initial or newly accumulated suffixes above the configured ceiling
+still fail without skipping. `LIVE_ANNOUNCEMENT_STREAM.md` specifies the request and recovery
+semantics. Ten adapter, three MCP and two retained-watch regression scenarios are registered in
+source; they have not been compiled or executed in this editing environment.
 
 ## Development MCP runtime
 

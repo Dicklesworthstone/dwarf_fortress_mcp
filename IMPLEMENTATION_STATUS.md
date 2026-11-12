@@ -1,5 +1,49 @@
 # Implementation Status
 
+## Unreleased — Acknowledge complete announcement windows in the same live session
+
+The protocol-1.1 development observe tool now accepts an optional closed
+announcement_acknowledgment copied from the current published observation.
+It binds the exact full anchor, announcement batch digest and complete retained
+high-water. After processing that batch, callers can explicitly begin the next
+bounded suffix without reopening the session or repeatedly charging the old
+prefix against the 512-report publication ceiling. Ordinary observe retains its
+existing behavior and the original one-argument Rust wrapper remains available.
+
+The adapter validates the complete citizen-plus-announcement candidate and
+renders the successful Agent Turn before advancing any published state. Current
+Observe/Query authority, candidate-tick expiry, the original request deadline
+including session-lock time, source identity and the complete response allowance
+all precede publication. Failure preserves the configured cursor, anchor,
+capsule and MCP request counter; source I/O itself cannot be rolled back and
+transport faults can still fence the source. Bridge-generation or game-clock
+resets refuse the old acknowledgment.
+
+Retained native watches, terminal watch summaries and query baselines survive.
+A pure metadata reader includes them in the candidate response without sampling,
+journal staging or retained-state writes. Successful advancement explicitly
+removes the processed prefix from the current projection and invalidates old
+announcement-query continuations. It does not establish durable history or
+close native retention gaps. Initially oversized suffixes and new suffixes over
+the configured ceiling still refuse without skipping reports.
+
+Fifteen new Rust regression sources cover exact acknowledgments, ID zero,
+repeated bounded windows, stale and non-progressing references, source resets,
+candidate authority, publication/deadline/response refusals and retained work.
+Two Python contract-mutation test methods cover seven boundary mutations.
+Independent source reviews resolved a pinned tool-macro type mismatch and a
+stale-anchor test fixture error. Final Git blobs were read back and compared,
+the additive contract JSON was parsed, the frozen eleven-tool annotation count
+was checked, and the earlier field_sum changes were verified intact.
+
+None of these new Rust or Python tests has run: the execution workspace remains
+unavailable. No current compile, rustfmt, Clippy, qualification receipt, native
+build or live-game validation is claimed. Protocol 1.1 remains unadmitted
+development functionality; the production protocol map and native method waist
+are unchanged. Owning beads df-typed-event-windows-k4e and
+df-dfhack-bridge-plane-c-pic.3 remain in progress.
+Request and recovery semantics: docs/LIVE_ANNOUNCEMENT_STREAM.md.
+
 ## Unreleased — Complete stock requirements in native production parents
 
 Existing-worker production parents can retain one to four distinct furniture
