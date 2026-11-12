@@ -127,7 +127,7 @@ impl StockTargetsRequest {
         evidence: &PredicateEvidence<'_>,
         workers: &ExistingLaborRequirement,
         c: &OperationContext,
-        origin: Option<Digest32>,
+        origins: impl Into<super::prerequisite_binding::Origins>,
     ) -> Result<PreparedPlan> {
         if self.assign_labor {
             return Err(invalid(
@@ -145,7 +145,14 @@ impl StockTargetsRequest {
             poll_interval_ticks: self.poll_interval_ticks,
             stable_samples: self.stable_samples,
         };
-        request.compile_with_stock_targets(evidence, workers, &baselines, c, origin, Some(&binding))
+        request.compile_with_stock_targets(
+            evidence,
+            workers,
+            &baselines,
+            c,
+            origins,
+            Some(&binding),
+        )
     }
 
     /// A positive vector can explicitly enable one shared labor before all of
@@ -156,7 +163,7 @@ impl StockTargetsRequest {
         assessments: &[StockTargetAssessment],
         evidence: &PredicateEvidence<'_>,
         c: &OperationContext,
-        origin: Option<Digest32>,
+        origins: impl Into<super::prerequisite_binding::Origins>,
     ) -> Result<PreparedPlan> {
         if !self.assign_labor {
             return Err(invalid(
@@ -175,7 +182,7 @@ impl StockTargetsRequest {
             poll_interval_ticks: self.poll_interval_ticks,
             stable_samples: self.stable_samples,
         };
-        request.compile_with_stock_targets(evidence, &baselines, c, origin, Some(&binding))
+        request.compile_with_stock_targets(evidence, &baselines, c, origins, Some(&binding))
     }
 
     fn lower(

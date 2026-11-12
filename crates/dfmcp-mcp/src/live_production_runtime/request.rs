@@ -100,14 +100,24 @@ impl Request {
     ) -> Result<PreparedPlan> {
         self.compile_with_stock_target(evidence, baselines, context, origin, None)
     }
+    pub(crate) fn compile_with_prerequisites(
+        &self,
+        evidence: &PredicateEvidence<'_>,
+        baselines: &InventoryBaselines,
+        context: &OperationContext,
+        origins: super::prerequisite_binding::Origins,
+    ) -> Result<PreparedPlan> {
+        self.compile_with_stock_target(evidence, baselines, context, origins, None)
+    }
     pub(super) fn compile_with_stock_target(
         &self,
         evidence: &PredicateEvidence<'_>,
         baselines: &InventoryBaselines,
         context: &OperationContext,
-        origin: Option<Digest32>,
+        origins: impl Into<super::prerequisite_binding::Origins>,
         stock_target: Option<&super::stock_target_binding::StockTargetBinding>,
     ) -> Result<PreparedPlan> {
+        let origins = origins.into();
         self.validate()?;
         if evidence.snapshot().anchor() != context.anchor {
             return Err(invalid(
@@ -210,7 +220,7 @@ impl Request {
             self.poll_interval_ticks,
             self.stable_samples,
         )?;
-        super::workshop_binding::append_identity(&mut bytes, origin)?;
+        super::prerequisite_binding::append_identity(&mut bytes, origins)?;
         let hash = Digest32::of_bytes(&bytes);
         let id = IntentId::new(u128::from_be_bytes(
             hash.as_bytes()[..16]
@@ -271,9 +281,9 @@ impl Request {
         let intent = Intent {
             id,
             anchor: context.anchor,
-            summary: super::workshop_binding::summary(
+            summary: super::prerequisite_binding::summary(
                 super::stock_target_binding::summary(summary, stock_target)?,
-                origin,
+                origins,
             )?,
             terminal_condition: Predicate::All(vec![labor_goal.clone(), order_goal.clone()]),
             constraints: vec![Constraint::MaxRisk(RiskTier::Guarded)],
@@ -302,8 +312,11 @@ impl Request {
                 },
             ],
         };
-        let mut plan =
-            StaticPlanner::default().prepare_with_evidence(evidence, &intent, context)?;
+        let mut planner = StaticPlanner::default();
+        if origins.manager.is_some() {
+            planner.policy.max_string_bytes = 1024;
+        }
+        let mut plan = planner.prepare_with_evidence(evidence, &intent, context)?;
         for step in &mut plan.steps {
             step.compensation = None;
         }

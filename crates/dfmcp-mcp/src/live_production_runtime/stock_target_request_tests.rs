@@ -489,14 +489,23 @@ fn assigned_stock_target_seals_enable_then_exact_deficit_with_original_growth() 
         name, amount: 2, job_token, conditions
     } if name == "native stock-target/2 wooden_bed goal"
         && job_token == "CONSTRUCT_BED" && conditions.is_empty()));
-    assert!(plan.required_capabilities.contains(&Capability::ConfigureLabor));
-    assert!(plan.required_capabilities.contains(&Capability::ConfigureProduction));
+    assert!(
+        plan.required_capabilities
+            .contains(&Capability::ConfigureLabor)
+    );
+    assert!(
+        plan.required_capabilities
+            .contains(&Capability::ConfigureProduction)
+    );
     let goal = ObservedInventoryIncreaseObjective::from_selected_plan(&plan, StepId::new(1))
         .ok_or_else(|| invalid("assigned stock target lost its original growth objective"))?;
     assert_eq!(&goal, assessment.objective().expect("positive deficit"));
     assert_eq!(goal.target_stack_units(), 7);
     assert_eq!(goal.baseline_stack_units(), 5);
-    let obligation = plan.steps[1].obligation.as_ref().expect("original obligation");
+    let obligation = plan.steps[1]
+        .obligation
+        .as_ref()
+        .expect("original obligation");
     assert_eq!(obligation.deadline_tick, GameTick(300));
     assert_eq!(obligation.poll_interval_ticks, 5);
     assert_eq!(obligation.stable_for_observations, 2);
@@ -625,15 +634,23 @@ fn assigned_stock_identity_preserves_legacy_and_binds_selection_census_and_timin
         manual_plan,
         manual.compile_with_stock_target(&evidence, &baselines, &c, None, None)?
     );
-    assert_eq!(super::super::stock_target_binding::requirement(&manual_plan)?, None);
+    assert_eq!(
+        super::super::stock_target_binding::requirement(&manual_plan)?,
+        None
+    );
     assert_eq!(manual_plan.steps[0].action, original.steps[0].action);
-    assert_eq!(manual_plan.steps[1].obligation, original.steps[1].obligation);
+    assert_eq!(
+        manual_plan.steps[1].obligation,
+        original.steps[1].obligation
+    );
     assert_ne!(manual_plan.intent_id, original.intent_id);
     assert_ne!(legacy.intent_id, original.intent_id);
     assert!(legacy.summary.starts_with("Stock target/1 "));
-    assert!(!super::super::stock_target_binding::requirement(&legacy)?
-        .expect("legacy binding")
-        .assign_labor());
+    assert!(
+        !super::super::stock_target_binding::requirement(&legacy)?
+            .expect("legacy binding")
+            .assign_labor()
+    );
     assert_eq!(
         legacy,
         request.compile(&assessment, &evidence, &stock_workers()?, &c, None)?
@@ -667,8 +684,7 @@ fn assigned_stock_identity_preserves_legacy_and_binds_selection_census_and_timin
         assert_ne!(other.digest, original.digest, "case {case}");
         for index in 0..2 {
             assert_ne!(
-                other.steps[index].idempotency_key,
-                original.steps[index].idempotency_key,
+                other.steps[index].idempotency_key, original.steps[index].idempotency_key,
                 "case {case}, step {index}"
             );
         }
@@ -676,10 +692,15 @@ fn assigned_stock_identity_preserves_legacy_and_binds_selection_census_and_timin
         let (bytes, seal) = dfmcp_intent::plan_archive::encode(&other, limits)?;
         let recovered = dfmcp_intent::plan_archive::decode(&bytes, seal, limits)?;
         assert_eq!(recovered, other);
-        assert_eq!(super::super::workshop_binding::requirement(&recovered)?, origin);
-        assert!(super::super::stock_target_binding::requirement(&recovered)?
-            .expect("assigned binding")
-            .assign_labor());
+        assert_eq!(
+            super::super::workshop_binding::requirement(&recovered)?,
+            origin
+        );
+        assert!(
+            super::super::stock_target_binding::requirement(&recovered)?
+                .expect("assigned binding")
+                .assign_labor()
+        );
         assert!(recovered.summary.len() <= 256);
     }
     let binding = StockTargetBinding::from_assessment_with_assignment(&assessment)?;
@@ -690,5 +711,56 @@ fn assigned_stock_identity_preserves_legacy_and_binds_selection_census_and_timin
             .compile_with_stock_target(&evidence, &baselines, &c, None, Some(&binding))
             .is_err()
     );
+    Ok(())
+}
+
+#[test]
+fn manager_and_workshop_stock_target_preserves_original_sizing_and_keys_on_recovery() -> Result<()>
+{
+    use super::super::prerequisite_binding::{self, Origins};
+    let (projection, mut c) = stock_fixture()?;
+    c.budget.max_actions = 2;
+    let evidence =
+        PredicateEvidence::scoped(&projection.snapshot, stock_policy(&projection.snapshot))?;
+    let assessment = stock_assessment(&c, 7, 100, 5, 99)?;
+    for assignment in [false, true] {
+        let mut request = stock_request(7, 100)?;
+        request.assign_labor = assignment;
+        let compile = |origins: Origins| {
+            if assignment {
+                request.compile_with_labor_assignment(&assessment, &evidence, &c, origins)
+            } else {
+                request.compile(&assessment, &evidence, &stock_workers()?, &c, origins)
+            }
+        };
+        let legacy = compile(Origins::default())?;
+        prerequisite_binding::assert_manager_variants(&legacy, compile)?;
+        let origins = Origins {
+            workshop: Some(Digest32::of_bytes(b"workshop")),
+            manager: Some(Digest32::of_bytes(b"manager")),
+        };
+        let original = compile(origins)?;
+        let bound =
+            super::super::stock_target_binding::requirement(&original)?.expect("exact target");
+        assert_eq!(bound.witness(), assessment.witness());
+        assert_eq!(bound.assign_labor(), assignment);
+        for retained in [
+            Origins::default(),
+            Origins::from(origins.workshop),
+            Origins {
+                workshop: None,
+                manager: origins.manager,
+            },
+        ] {
+            let mut stripped = original.clone();
+            stripped.summary = prerequisite_binding::summary(
+                prerequisite_binding::body(&original)?.to_owned(),
+                retained,
+            )?;
+            stripped.digest = stripped.compute_digest();
+            stripped.id = stripped.expected_id();
+            assert!(super::super::stock_target_binding::requirement(&stripped).is_err());
+        }
+    }
     Ok(())
 }

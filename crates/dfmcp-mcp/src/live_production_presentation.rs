@@ -10,6 +10,16 @@ const LABOR_BLOCKER_LIMIT: usize = 8;
 #[path = "live_production_presentation_stock_targets.rs"]
 mod stock_targets;
 
+#[path = "live_production_presentation_manager.rs"]
+mod manager;
+
+#[path = "live_production_presentation_recovery.rs"]
+mod recovery;
+
+pub(super) fn retain_prerequisite_custody(retained: &mut Value, latest: &Value) {
+    recovery::retain(retained, latest);
+}
+
 pub(super) fn compact(view: &Value) -> Value {
     let entries: Vec<Value> = view["frontier"]["entries"]
         .as_array()
@@ -45,6 +55,7 @@ pub(super) fn compact(view: &Value) -> Value {
         "selected_order_goal":compact_goal(&view["selected_order_goal"]),
         "portfolio":compact_portfolio(&view["portfolio"]),
         "workshop_prerequisite":workshop_summary(&view["workshop_prerequisite"],false),
+        "manager_prerequisite":manager::summary(&view["manager_prerequisite"],false),
         "stock_target":stock_target_summary(&view["stock_target"]),
         "stock_targets":stock_targets::summary(&view["stock_targets"]),
         "selected_parent_goal":null,
@@ -64,6 +75,12 @@ pub(super) fn compact(view: &Value) -> Value {
             json!(digest(&r["workshop_prerequisite_digest"]));
         compacted["recovery"]["workshop_prerequisite_floor"] =
             workshop_floor(&r["workshop_prerequisite_floor"]);
+    }
+    if !r["manager_prerequisite_digest"].is_null() || !r["manager_prerequisite_floor"].is_null() {
+        compacted["recovery"]["manager_prerequisite_digest"] =
+            json!(digest(&r["manager_prerequisite_digest"]));
+        compacted["recovery"]["manager_prerequisite_floor"] =
+            manager::floor(&r["manager_prerequisite_floor"]);
     }
     compacted
 }
@@ -649,6 +666,8 @@ fn encode(
         || stock_targets["revalidation_failed"] == true
         || (!view["stock_targets"].is_null() && stock_targets.is_null());
     let workshop_fenced = view["workshop_prerequisite"]["source_fenced"] == true;
+    let manager_fenced = view["manager_prerequisite"]["source_fenced"] == true;
+    let prerequisite_fenced = workshop_fenced || manager_fenced;
     let portfolio = view["portfolio"]["schema"] == "dfmcp.production-portfolio/1";
     let clock_reconciliation_needed = CLOCK_OWNERS
         .iter()
@@ -666,6 +685,10 @@ fn encode(
         &view["workshop_prerequisite"],
         verified && !uncertain && !workshop_fenced && mode != Some("offline"),
     );
+    let manager = manager::summary(
+        &view["manager_prerequisite"],
+        verified && !uncertain && !manager_fenced && mode != Some("offline"),
+    );
     let clock_invalidates_goal = CLOCK_OWNERS
         .iter()
         .any(|owner| owner.invalidates_goal(view));
@@ -673,10 +696,10 @@ fn encode(
         .as_array()
         .cloned()
         .unwrap_or_default();
-    let workshop_blocks_review = (workshop_fenced || stock_target_failed)
+    let prerequisite_blocks_review = (prerequisite_fenced || stock_target_failed)
         && !(view["review"]["family"] == "workforce/1.17"
             && labor_step(view, &view["review"]["step_id"]));
-    let review = if verified && !uncertain && !workshop_blocks_review {
+    let review = if verified && !uncertain && !prerequisite_blocks_review {
         view["review"].clone()
     } else {
         Value::Null
@@ -1115,7 +1138,7 @@ fn encode(
     } else if view["frontier"]["next_ready"].is_u64()
         && view["original_plan"]["plan_digest"].is_string()
         && !stock_target_failed
-        && (!workshop_fenced || labor_step(view, &view["frontier"]["next_ready"]))
+        && (!prerequisite_fenced || labor_step(view, &view["frontier"]["next_ready"]))
     {
         Some((
             "fortress_plan",
@@ -1237,7 +1260,7 @@ fn encode(
             json!({"request":inspection_source["diagnosis_request"].to_string()}),
         ))
     } else if view["original_plan"].is_null()
-        && !workshop_fenced
+        && !prerequisite_fenced
         && mode == Some("control")
         && view["production_control_enabled"] == true
         && view["observation"]["workforce_choices"]["existing_labor_options"]
@@ -1251,7 +1274,7 @@ fn encode(
             json!({}),
         ))
     } else if view["original_plan"].is_null()
-        && !workshop_fenced
+        && !prerequisite_fenced
         && mode == Some("control")
         && view["labor_control_enabled"] == true
         && view["production_control_enabled"] == true
@@ -1371,6 +1394,9 @@ fn encode(
         ));
     }
     let mut partial_domains = vec!["retained_original_plan"];
+    if manager.is_object() {
+        partial_domains.push("original_manager_prerequisite_custody");
+    }
     if workshop.is_object() {
         partial_domains.push("original_workshop_prerequisite_custody");
     }
@@ -1465,6 +1491,14 @@ fn encode(
             "consumed_tick_floor":workshop["consumed_tick_floor"],
             "finding":"Source continuity for the original workshop prerequisite is fenced; earlier completion is historical only.",
             "resolution":"Preserve the original association and consumed recovery floors. Further order dispatch is withheld; inspect source continuity and reconcile any already attempted effect under its original key."}));
+    }
+    if manager_fenced {
+        uncertainty.push(json!({"scope":"original_manager_dispatch_prerequisite",
+            "epistemic_status":"unknown","state":"source_fenced","retryable_in_session":false,
+            "origin_witness":manager["origin_witness"],"association_digest":manager["association_digest"],
+            "consumed_tick_floor":manager["consumed_tick_floor"],
+            "finding":"The original manager prerequisite lost source continuity or identity; its earlier readiness is historical only.",
+            "resolution":"Preserve the original appointment, association and complete source checkpoint. Further order insertion is withheld; reconcile any attempted original effect before resolving the manager source."}));
     }
     if stock_target_failed {
         uncertainty.push(json!({"scope":if stock_targets.is_object() {
@@ -1562,6 +1596,9 @@ fn encode(
     if result.get("workshop_prerequisite").is_some() {
         result["workshop_prerequisite"] = workshop.clone();
     }
+    if result.get("manager_prerequisite").is_some() {
+        result["manager_prerequisite"] = manager.clone();
+    }
     if result.get("stock_targets").is_some() {
         result["stock_targets"] = stock_targets.clone();
     }
@@ -1601,7 +1638,11 @@ fn encode(
             false,
         );
     }
-    if workshop_blocks_review {
+    if result["retained_reference"]["manager_prerequisite"].is_object() {
+        result["retained_reference"]["manager_prerequisite"] =
+            manager::summary(&result["retained_reference"]["manager_prerequisite"], false);
+    }
+    if prerequisite_blocks_review {
         if result.get("review").is_some() {
             result["review"] = Value::Null;
         }
@@ -1653,6 +1694,11 @@ fn encode(
                 "association_digest":workshop["association_digest"],"source_fenced":workshop["source_fenced"],
                 "consumed_tick_floor":workshop["consumed_tick_floor"],"current_completion_proven":false,
                 "canonical_workshop_evidence":false,"production_feasibility_proven":false}))}else{None},
+            "manager_prerequisite":if manager.is_object() {Some(json!({
+                "scope":"original_manager_dispatch_prerequisite","origin_witness":manager["origin_witness"],
+                "association_digest":manager["association_digest"],"source_fenced":manager["source_fenced"],
+                "consumed_tick_floor":manager["consumed_tick_floor"],"current_readiness_proven":false,
+                "canonical_manager_evidence":false,"production_feasibility_proven":false}))}else{None},
             "clock_control_enabled":clock_authority(ORDER_CLOCK),
             "inventory_clock_control_enabled":clock_authority(INVENTORY_CLOCK),
             "clock_may_be_running":clock_unresolved(&view["clock"]),
@@ -1665,9 +1711,11 @@ fn encode(
         .active_work(json!({"pending_plans":pending_plans,"actions":actions,"clock":clock_views[0],
             "inventory_clock":clock_views[1],
             "workshop_prerequisite":workshop,
+            "manager_prerequisite":manager,
             "stock_target":stock_target,
             "stock_targets":stock_targets,
             "workshop_prerequisite_floor":workshop_floor(&view["recovery"]["workshop_prerequisite_floor"]),
+            "manager_prerequisite_floor":manager::floor(&view["recovery"]["manager_prerequisite_floor"]),
             "production_inspection_source":if inspection_available {Some(inspection_source)} else {None},
             "obligations":if selected_goal.is_null() {vec![]} else {vec![selected_goal]},
             "current_parent_goal":parent_goal,"cancellation_drains":cancellation_drains,
@@ -1788,6 +1836,133 @@ mod stock_target_tests;
 mod tests {
     use super::*;
     use dfmcp_core::{Digest32, FortressId, GameTick, ObservationCursor};
+
+    fn manager_view(anchor: StateAnchor, fenced: bool) -> Value {
+        json!({"schema":"dfmcp.ready-manager-prerequisite/1","source_protocol":"manager/1.23",
+            "origin_witness":"1".repeat(64),"manager_key":"original-manager",
+            "manager_plan_digest":"2".repeat(64),"manager_record_digest":"3".repeat(64),
+            "manager_receipt":"4".repeat(64),"unit_id":256,"historical_figure_id":361,
+            "group_id":35,"assignment_id":600,"association_digest":"5".repeat(64),
+            "source_generation":40,"consumed_tick_floor":anchor.tick.get(),"source_fenced":fenced,
+            "checkpoint":{"origin_witness":"1".repeat(64),"tick":anchor.tick.get(),"generation":40,
+                "sequence":8,"next_event":201,"history_count":101,"group_next_position":10,
+                "group_next_assignment":601,"civ_next_position":40,"civ_next_assignment":700,"fenced":fenced},
+            "last_qualified":{"tick":anchor.tick.get(),"canonical_parent":anchor_value(anchor),
+                "witness":"6".repeat(64),"status":"ready"}})
+    }
+
+    #[test]
+    fn manager_fence_withholds_order_review_and_preserves_labor_and_reconciliation() {
+        let (anchor, _) = joined_order_goal_view("false", false);
+        let mut view = json!({"anchor":anchor_value(anchor),"original_plan":{"plan_digest":"a".repeat(64),
+            "steps":[{"step_id":0,"action":{"kind":"set_labor"}},
+                {"step_id":1,"action":{"kind":"create_work_order"}}]},
+            "frontier":{"next_ready":1,"all_applied":false,"needs_reconciliation":false,"entries":[]},
+            "workshop_prerequisite":workshop_view(anchor,false),"manager_prerequisite":manager_view(anchor,false)});
+        let call =
+            |view: &Value, uncertain| joined_packet(anchor, view, "control", true, uncertain);
+        assert_eq!(
+            call(&view, false)["agent_turn"]["recommendations"][0]["tool"],
+            "fortress_plan"
+        );
+        view["manager_prerequisite"] = manager_view(anchor, true);
+        let blocked = call(&view, false);
+        assert_eq!(blocked["agent_turn"]["recommendations"], json!([]));
+        assert_eq!(
+            blocked["agent_turn"]["briefing"]["manager_prerequisite"]["source_fenced"],
+            true
+        );
+        view["frontier"]["next_ready"] = Value::Null;
+        view["review"] =
+            json!({"step_id":1,"family":"work-orders/1.10","paired_seal":"b".repeat(64)});
+        let blocked = call(&view, false);
+        assert_eq!(
+            blocked["agent_turn"]["active_work"]["confirmations"],
+            json!([])
+        );
+        assert!(blocked["review"].is_null());
+        view["review"] =
+            json!({"step_id":0,"family":"workforce/1.17","paired_seal":"b".repeat(64)});
+        assert_eq!(
+            call(&view, false)["agent_turn"]["recommendations"][0]["tool"],
+            "fortress_commit"
+        );
+        view["frontier"]["needs_reconciliation"] = json!(true);
+        assert_eq!(
+            call(&view, true)["agent_turn"]["recommendations"][0]["tool"],
+            "fortress_wait"
+        );
+    }
+
+    #[test]
+    fn manager_custody_and_all_source_floors_survive_errors_overflow_and_offline_without_readiness()
+    {
+        let (anchor, mut view) = joined_order_goal_view("true", true);
+        view["workshop_prerequisite"] = workshop_view(anchor, false);
+        view["manager_prerequisite"] = manager_view(anchor, false);
+        let checkpoint = view["manager_prerequisite"]["checkpoint"].clone();
+        let mut floor = checkpoint.clone();
+        floor
+            .as_object_mut()
+            .expect("checkpoint")
+            .remove("origin_witness");
+        view["recovery"]["manager_prerequisite_digest"] = json!("5".repeat(64));
+        view["recovery"]["manager_prerequisite_floor"] = floor.clone();
+        let successful = joined_packet(anchor, &view, "control", true, false);
+        let historical = &successful["agent_turn"]["active_work"]["manager_prerequisite"];
+        assert_eq!(historical["last_qualified"]["status"], "ready");
+        assert_eq!(historical["current_readiness_proven"], false);
+        assert_eq!(historical["canonical_manager_evidence"], false);
+        for retained in [compact(&view), compact(&compact(&view))] {
+            assert_eq!(retained["recovery"]["manager_prerequisite_floor"], floor);
+            assert_eq!(retained["manager_prerequisite"]["checkpoint"], checkpoint);
+            assert_eq!(
+                retained["manager_prerequisite"]["manager_record_digest"],
+                "3".repeat(64)
+            );
+            assert!(retained["manager_prerequisite"]["last_qualified"].is_null());
+        }
+        for (mode, verified, uncertain) in [("offline", true, false), ("control", false, true)] {
+            let packet = joined_packet(anchor, &view, mode, verified, uncertain);
+            let manager = &packet["agent_turn"]["active_work"]["manager_prerequisite"];
+            assert_eq!(manager["checkpoint"], checkpoint);
+            assert!(manager["last_qualified"].is_null());
+        }
+        let (raw, overflow) = packet(
+            "fortress.query",
+            Some(SessionId::new(1)),
+            Some(anchor),
+            Some("control"),
+            None,
+            None,
+            json!({"ok":true,"payload":"x".repeat(70_000)}),
+            Some(&view),
+            true,
+            false,
+        );
+        assert!(overflow);
+        let result: Value = serde_json::from_str(&raw).expect("bounded fallback");
+        assert_eq!(
+            result["retained_reference"]["recovery"]["manager_prerequisite_floor"],
+            floor
+        );
+        assert_eq!(
+            result["retained_reference"]["manager_prerequisite"]["checkpoint"],
+            checkpoint
+        );
+        assert!(result["retained_reference"]["manager_prerequisite"]["last_qualified"].is_null());
+        assert!(
+            compact(&json!({"recovery":{}}))["recovery"]
+                .get("manager_prerequisite_floor")
+                .is_none()
+        );
+        view["recovery"] = Value::Null;
+        view["original_plan"] = Value::Null;
+        assert_eq!(
+            compact(&view)["manager_prerequisite"]["checkpoint"],
+            checkpoint
+        );
+    }
 
     fn workshop_view(anchor: StateAnchor, fenced: bool) -> Value {
         json!({"schema":"dfmcp.completed-workshop-prerequisite/1","source_protocol":"workshop/1.20",

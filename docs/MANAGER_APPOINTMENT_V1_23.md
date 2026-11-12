@@ -97,6 +97,7 @@ is valid. Original identity or source-continuity loss fences the reader.
 The owner has no appointment permission and never writes donor custody. Its
 anchor-bound readiness result is a dispatch prerequisite, not proof of office
 sufficiency, recipe feasibility, new goods or production attribution. Later
-fresh-read floors are caller-held recovery data, not new donor ACKs. Combined-host configuration and protected order-gate composition are a
-separate consumer of this adapter API. Existing Manager 1.22/1.23
+fresh-read floors are caller-held recovery data, not new donor ACKs. The [combined-host configuration and recovery contract](COMBINED_PRODUCTION_MCP.md#require-the-original-appointed-production-manager)
+uses this API for optional `manager_prerequisite` policy, alone or alongside the
+original workshop. Positive planning and native order boundaries requalify it. Existing Manager 1.22/1.23
 appointment protocols and their historical evidence remain unchanged.

@@ -104,15 +104,26 @@ impl ExistingLaborRequest {
     ) -> Result<PreparedPlan> {
         self.compile_with_stock_target(evidence, requirement, baselines, c, origin, None)
     }
+    pub(crate) fn compile_with_prerequisites(
+        &self,
+        evidence: &PredicateEvidence<'_>,
+        requirement: &ExistingLaborRequirement,
+        baselines: &InventoryBaselines,
+        c: &OperationContext,
+        origins: super::prerequisite_binding::Origins,
+    ) -> Result<PreparedPlan> {
+        self.compile_with_stock_target(evidence, requirement, baselines, c, origins, None)
+    }
     pub(super) fn compile_with_stock_target(
         &self,
         evidence: &PredicateEvidence<'_>,
         requirement: &ExistingLaborRequirement,
         baselines: &InventoryBaselines,
         c: &OperationContext,
-        origin: Option<Digest32>,
+        origins: impl Into<super::prerequisite_binding::Origins>,
         stock_target: Option<&super::stock_target_binding::StockTargetBinding>,
     ) -> Result<PreparedPlan> {
+        let origins = origins.into();
         self.validate()?;
         let units = self.unit_ids()?;
         if evidence.snapshot().anchor() != c.anchor
@@ -173,7 +184,7 @@ impl ExistingLaborRequest {
             self.poll_interval_ticks,
             self.stable_samples,
         )?;
-        super::workshop_binding::append_identity(&mut bytes, origin)?;
+        super::prerequisite_binding::append_identity(&mut bytes, origins)?;
         let digest = Digest32::of_bytes(&bytes);
         let id = IntentId::new(u128::from_be_bytes(
             digest.as_bytes()[..16]
@@ -209,7 +220,7 @@ impl ExistingLaborRequest {
         let intent = Intent {
             id,
             anchor: c.anchor,
-            summary: super::workshop_binding::summary(
+            summary: super::prerequisite_binding::summary(
                 super::stock_target_binding::summary(
                     format!(
                         "Use existing {} on {} citizens for {} finite {} order units",
@@ -220,7 +231,7 @@ impl ExistingLaborRequest {
                     ),
                     stock_target,
                 )?,
-                origin,
+                origins,
             )?,
             terminal_condition: Predicate::All(vec![prerequisite, goal.clone()]),
             constraints: vec![Constraint::MaxRisk(RiskTier::Guarded)],
@@ -239,7 +250,11 @@ impl ExistingLaborRequest {
                 }),
             }],
         };
-        let mut plan = StaticPlanner::default().prepare_with_evidence(evidence, &intent, c)?;
+        let mut planner = StaticPlanner::default();
+        if origins.manager.is_some() {
+            planner.policy.max_string_bytes = 1024;
+        }
+        let mut plan = planner.prepare_with_evidence(evidence, &intent, c)?;
         for step in &mut plan.steps {
             step.compensation = None;
         }

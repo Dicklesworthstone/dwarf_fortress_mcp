@@ -1,7 +1,7 @@
 //! Complete immutable source and target vector for a finite stock portfolio.
 //! This version is disjoint from the single Stock target/1 and /2 encodings.
+use super::prerequisite_binding;
 use super::request::recipe;
-use super::workshop_binding;
 use crate::semantic_workforce_runtime::{digest, invalid};
 use dfmcp_adapter::live_production::{ExistingLaborRequirement, ProductionLayout};
 use dfmcp_adapter::semantic_work_orders::{
@@ -373,15 +373,8 @@ pub(super) fn requirement(plan: &PreparedPlan) -> Result<Option<StockTargetsBind
             "inventory targets require the sealed original plan",
         ));
     }
-    let workshop = workshop_binding::requirement(plan)?;
-    let body = if workshop.is_some() {
-        plan.summary
-            .split_once('\n')
-            .map(|(_, body)| body)
-            .ok_or_else(|| invalid("inventory targets body is absent after workshop marker"))?
-    } else {
-        plan.summary.as_str()
-    };
+    let origins = prerequisite_binding::requirements(plan)?;
+    let body = prerequisite_binding::body(plan)?;
     let Some(binding) = StockTargetsBinding::parse(body, plan.anchor)? else {
         if plan.steps.iter().any(|step| {
             matches!(&step.action,
@@ -492,7 +485,7 @@ pub(super) fn requirement(plan: &PreparedPlan) -> Result<Option<StockTargetsBind
             .ok_or_else(|| invalid("inventory targets require original existing workers"))?;
         binding.identity(workers, deadline, cadence, stability)?
     };
-    workshop_binding::append_identity(&mut identity, workshop)?;
+    prerequisite_binding::append_identity(&mut identity, origins)?;
     let hash = Digest32::of_bytes(&identity);
     let intent = IntentId::new(u128::from_be_bytes(
         hash.as_bytes()[..16]

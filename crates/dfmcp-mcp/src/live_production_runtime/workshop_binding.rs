@@ -2,7 +2,7 @@
 //! The marker is not a canonical world predicate and gives generic executors no
 //! workshop evidence. This host must verify its association and freshly qualify
 //! the original workshop at each protected native work-order boundary.
-use crate::semantic_workforce_runtime::{digest, invalid};
+use crate::semantic_workforce_runtime::invalid;
 use dfmcp_core::{Digest32, Result};
 use dfmcp_intent::PreparedPlan;
 
@@ -52,19 +52,7 @@ pub(super) fn requirement(plan: &PreparedPlan) -> Result<Option<Digest32>> {
 }
 
 fn parse_summary(summary: &str) -> Result<Option<Digest32>> {
-    if !summary.contains(RESERVED) {
-        return Ok(None);
-    }
-    let (marker, body) = summary
-        .split_once('\n')
-        .ok_or_else(|| invalid("incomplete workshop prerequisite marker"))?;
-    let witness = marker
-        .strip_prefix(PREFIX)
-        .ok_or_else(|| invalid("unsupported or misplaced workshop prerequisite marker"))?;
-    if body.is_empty() || body.contains(RESERVED) {
-        return Err(invalid("empty or repeated workshop prerequisite summary"));
-    }
-    Ok(Some(digest(witness)?))
+    super::prerequisite_binding::parse_summary(summary).map(|(origins, _)| origins.workshop)
 }
 
 #[cfg(test)]

@@ -69,12 +69,17 @@ pub(super) fn truth(value: PredicateTruth) -> &'static str {
 pub(super) fn inventory_requirements_json(
     findings: &[dfmcp_adapter::live_production::SelectedParentInventoryFinding],
 ) -> Value {
-    json!(findings.iter().map(|finding| json!({
-        "item_type":finding.item_type,
-        "minimum_stack_units":finding.minimum_stack_units,
-        "observed_stack_units":finding.observed_stack_units,
-        "current_truth":truth(finding.current_truth)
-    })).collect::<Vec<_>>())
+    json!(
+        findings
+            .iter()
+            .map(|finding| json!({
+                "item_type":finding.item_type,
+                "minimum_stack_units":finding.minimum_stack_units,
+                "observed_stack_units":finding.observed_stack_units,
+                "current_truth":truth(finding.current_truth)
+            }))
+            .collect::<Vec<_>>()
+    )
 }
 
 impl Runtime {
@@ -290,7 +295,10 @@ impl Runtime {
                 "goal monitoring requires every original native effect to be settled",
             ));
         }
-        self.arm(work)?;
+        // History opening/replay uses its own private native custodians. Only
+        // the two outer checks below consume the host's immutable association
+        // allowance; no fresh source callback or dispatch is reachable here.
+        self.arm_custody_verifications(work, 2)?;
         let custody = self
             .custody
             .as_ref()
@@ -302,13 +310,11 @@ impl Runtime {
         let budget = history_budget(work, initialize)?;
         custody.verify(&budget)?;
         let slot = self.order_slot(step)?;
-        let path = self
-            .config
-            .path(&if slot == 1 {
-                "goal.history".into()
-            } else {
-                format!("goal-{slot}.history")
-            });
+        let path = self.config.path(&if slot == 1 {
+            "goal.history".into()
+        } else {
+            format!("goal-{slot}.history")
+        });
         let config = &self.config;
         // A failed private-file create/replay may have published custody. Retain
         // that fact and never replace a possibly existing history on retry.
@@ -377,7 +383,10 @@ impl Runtime {
         }
         let mut work = Work::new(c)?;
         let output = work.take(256 * MIB)?;
-        self.arm(&mut work)?;
+        // Receipt reconciliation calls QueryOrder/QueryLabor and private child
+        // custodians. The two outer host checks do not need the ten-check
+        // allowance reserved later for the current joined goal sample.
+        self.arm_custody_verifications(&mut work, 2)?;
         let custody = self
             .custody
             .as_ref()

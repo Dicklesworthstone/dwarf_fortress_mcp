@@ -115,14 +115,24 @@ impl PortfolioRequest {
     ) -> Result<PreparedPlan> {
         self.compile_with_stock_targets(evidence, baselines, c, origin, None)
     }
+    pub(crate) fn compile_with_prerequisites(
+        &self,
+        evidence: &PredicateEvidence<'_>,
+        baselines: &InventoryBaselines,
+        c: &OperationContext,
+        origins: super::prerequisite_binding::Origins,
+    ) -> Result<PreparedPlan> {
+        self.compile_with_stock_targets(evidence, baselines, c, origins, None)
+    }
     pub(super) fn compile_with_stock_targets(
         &self,
         evidence: &PredicateEvidence<'_>,
         baselines: &InventoryBaselines,
         c: &OperationContext,
-        origin: Option<Digest32>,
+        origins: impl Into<super::prerequisite_binding::Origins>,
         stock_targets: Option<&StockTargetsBinding>,
     ) -> Result<PreparedPlan> {
+        let origins = origins.into();
         self.validate()?;
         let first = self
             .orders
@@ -177,7 +187,7 @@ impl PortfolioRequest {
                 self.stable_samples,
             )?;
         }
-        super::workshop_binding::append_identity(&mut bytes, origin)?;
+        super::prerequisite_binding::append_identity(&mut bytes, origins)?;
         let digest = Digest32::of_bytes(&bytes);
         let id = IntentId::new(u128::from_be_bytes(
             digest.as_bytes()[..16]
@@ -248,7 +258,7 @@ impl PortfolioRequest {
         let intent = Intent {
             id,
             anchor: c.anchor,
-            summary: super::workshop_binding::summary(
+            summary: super::prerequisite_binding::summary(
                 match stock_targets {
                     Some(binding) => binding.summary()?,
                     None => format!(
@@ -258,13 +268,16 @@ impl PortfolioRequest {
                         self.orders.len()
                     ),
                 },
-                origin,
+                origins,
             )?,
             terminal_condition: Predicate::All(terminal),
             constraints: vec![Constraint::MaxRisk(RiskTier::Guarded)],
             requested_actions: actions,
         };
         let mut planner = StaticPlanner::default();
+        if origins.manager.is_some() {
+            planner.policy.max_string_bytes = 1024;
+        }
         if stock_targets.is_some() {
             // Only the complete, closed vector marker needs the larger summary
             // allowance. Legacy plans retain their original policy and bytes.

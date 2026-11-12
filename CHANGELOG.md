@@ -1,5 +1,32 @@
 # Changelog
 
+## Unreleased — Verify the original manager before combined production
+
+- Connect optional independently acknowledged Manager 1.23 originals to the
+  combined `labor-order` host. Require fresh original manager identity, role,
+  position link, getters and production-responsibility cache at positive Plan
+  and each protected native order preparation/insertion boundary.
+- Support manager and completed-workshop prerequisites separately or together
+  across every original request, including both stock-target assignment modes.
+  Seal both donors before deriving intent IDs and keys; retain immutable
+  `original.manager` custody and exact source checkpoints through recovery.
+  Existing no-manager identities and all-met no-effect behavior remain intact.
+- Preserve complete prerequisite checkpoints and association pairs when a failed
+  owner reports unavailable status. Error/overflow/Offline presentation keeps
+  rejection floors and withdraws historical readiness from current proof.
+- Fix lost-reply Wait budget partitioning: receipt reconciliation and history
+  opening reserve their two actual local custody checks instead of repeatedly
+  prepaying the full parent-sampling ceiling. Preserve every check and the
+  existing 8 GiB default, original keys, deadlines and confirmation rules.
+- Add a seventeen-scenario real Runtime/native-TCP-double campaign, including
+  both durable dispatch markers, both donors, no-work without effect grants,
+  exact Offline/Reconcile recovery, changed custody and no redispatch. New
+  config, association, identity, presentation and budget regressions accompany it.
+  All 445 Runtime/presentation and 119 retained adapter component tests pass
+  (564 distinct tests, zero failures), including all 17 new native scenarios.
+  Full MCP transport/supervision, plugin builds and live-game qualification
+  remain outside this evidence; production admission is unchanged.
+
 ## Unreleased — Import an acknowledged production manager safely
 
 - Add read-only `ManagerProductionOrigin` for one complete, independently

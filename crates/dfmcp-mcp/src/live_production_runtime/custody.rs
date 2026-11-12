@@ -1,4 +1,5 @@
 //! Parent-plan custody at each child evidence boundary.
+use super::manager_prerequisite::{self, SharedManager};
 use super::stock_target::{self, SharedStockTarget};
 use super::stock_targets::{self, SharedStockTargets};
 use super::workshop_prerequisite::{self, SharedWorkshop};
@@ -29,11 +30,28 @@ struct Custody {
     identity: CapsuleStore<PrivateBuildFile>,
     original: PreparedPlan,
     workshop: Option<SharedWorkshop>,
+    manager: Option<SharedManager>,
     stock_target: Option<SharedStockTarget>,
     stock_targets: Option<SharedStockTargets>,
     authority_tick_floor: GameTick,
     armed: Option<Armed>,
     generation: u64,
+}
+impl Custody {
+    fn verification_bytes(&self) -> u64 {
+        ARCHIVE_BYTES
+            + IDENTITY_BYTES
+            + if self.workshop.is_some() {
+                workshop_prerequisite::LOCAL_BYTES
+            } else {
+                0
+            }
+            + if self.manager.is_some() {
+                manager_prerequisite::LOCAL_BYTES
+            } else {
+                0
+            }
+    }
 }
 
 #[derive(Clone)]
@@ -66,11 +84,31 @@ impl SharedCustody {
     ) -> Self {
         Self::new_with_stock_targets(archive, identity, original, workshop, stock_target, None)
     }
+    #[cfg(test)]
     pub(super) fn new_with_stock_targets(
         archive: PlanArchiveStore<PrivateBuildFile>,
         identity: CapsuleStore<PrivateBuildFile>,
         original: PreparedPlan,
         workshop: Option<SharedWorkshop>,
+        stock_target: Option<SharedStockTarget>,
+        stock_targets: Option<SharedStockTargets>,
+    ) -> Self {
+        Self::new_with_manager(
+            archive,
+            identity,
+            original,
+            workshop,
+            None,
+            stock_target,
+            stock_targets,
+        )
+    }
+    pub(super) fn new_with_manager(
+        archive: PlanArchiveStore<PrivateBuildFile>,
+        identity: CapsuleStore<PrivateBuildFile>,
+        original: PreparedPlan,
+        workshop: Option<SharedWorkshop>,
+        manager: Option<SharedManager>,
         stock_target: Option<SharedStockTarget>,
         stock_targets: Option<SharedStockTargets>,
     ) -> Self {
@@ -80,6 +118,7 @@ impl SharedCustody {
             authority_tick_floor: original.anchor.tick,
             original,
             workshop,
+            manager,
             stock_target,
             stock_targets,
             armed: None,
@@ -136,6 +175,16 @@ impl SharedCustody {
     pub(super) fn verify(&self, c: &OperationContext) -> Result<()> {
         self.verify_generation(c).map(|_| ())
     }
+    /// The exact prepaid work charged by one complete private-custody check.
+    /// Receipt-only phases can reserve their real number of checks without
+    /// spending the larger allowance needed by a fresh joined source sample.
+    pub(super) fn verification_bytes(&self) -> Result<u64> {
+        Ok(self
+            .0
+            .try_lock()
+            .map_err(|_| denied("custody is unavailable"))?
+            .verification_bytes())
+    }
     fn verify_generation(&self, c: &OperationContext) -> Result<u64> {
         let mut state = self
             .0
@@ -153,6 +202,9 @@ impl SharedCustody {
             .max(GameTick(
                 state.workshop.as_ref().map_or(0, SharedWorkshop::high_tick),
             ))
+            .max(GameTick(
+                state.manager.as_ref().map_or(0, SharedManager::high_tick),
+            ))
             .max(
                 state
                     .stock_target
@@ -160,7 +212,9 @@ impl SharedCustody {
                     .map_or(GameTick(0), SharedStockTarget::high_tick),
             )
             .max(
-                state.stock_targets.as_ref()
+                state
+                    .stock_targets
+                    .as_ref()
                     .map_or(GameTick(0), SharedStockTargets::high_tick),
             );
         let workshop_bytes = if state.workshop.is_some() {
@@ -168,6 +222,12 @@ impl SharedCustody {
         } else {
             0
         };
+        let manager_bytes = if state.manager.is_some() {
+            manager_prerequisite::LOCAL_BYTES
+        } else {
+            0
+        };
+        let needed = state.verification_bytes();
         let armed = state
             .armed
             .as_mut()
@@ -185,7 +245,6 @@ impl SharedCustody {
             return Err(denied("custody operation context changed or was cancelled"));
         }
         c.budget.validate()?;
-        let needed = ARCHIVE_BYTES + IDENTITY_BYTES + workshop_bytes;
         armed.bytes = armed
             .bytes
             .checked_sub(needed)
@@ -241,6 +300,9 @@ impl SharedCustody {
         if let Some(workshop) = &state.workshop {
             workshop.verify(&context(workshop_bytes)?)?;
         }
+        if let Some(manager) = &state.manager {
+            manager.verify(&context(manager_bytes)?)?;
+        }
         context(1)?;
         Ok(state.generation)
     }
@@ -272,6 +334,35 @@ impl SharedCustody {
         state.authority_tick_floor = state
             .authority_tick_floor
             .max(GameTick(workshop.high_tick()));
+        result
+    }
+    /// Fresh Manager readiness is paid from the same original public-call
+    /// allowance and repeated after the native durable dispatch marker.
+    fn qualify_manager(&self, c: &OperationContext, tick: Option<GameTick>) -> Result<()> {
+        let current = self.narrow(c)?;
+        let mut state = self
+            .0
+            .try_lock()
+            .map_err(|_| denied("custody is unavailable"))?;
+        let Some(manager) = state.manager.clone() else {
+            return Ok(());
+        };
+        let tick = tick.ok_or_else(|| denied("original order observation is absent"))?;
+        let armed = state
+            .armed
+            .as_mut()
+            .ok_or_else(|| denied("custody operation is not armed"))?;
+        armed.bytes = armed
+            .bytes
+            .checked_sub(manager_prerequisite::CHECK_BYTES)
+            .ok_or_else(|| exhausted("manager prerequisite allowance exhausted"))?;
+        let mut current = current;
+        current.anchor.tick = tick;
+        current.budget.max_bytes = manager_prerequisite::CHECK_BYTES;
+        let result = manager.qualify(&current);
+        state.authority_tick_floor = state
+            .authority_tick_floor
+            .max(GameTick(manager.high_tick()));
         result
     }
     /// A stock-target original pays for its own complete census at every native
@@ -312,14 +403,22 @@ impl SharedCustody {
         queue: Option<&WorkOrderObservation>,
     ) -> Result<()> {
         let current = self.narrow(c)?;
-        let mut state = self.0.try_lock().map_err(|_| denied("custody is unavailable"))?;
+        let mut state = self
+            .0
+            .try_lock()
+            .map_err(|_| denied("custody is unavailable"))?;
         let Some(targets) = state.stock_targets.clone() else {
             return Ok(());
         };
-        let queue = queue.ok_or_else(|| denied("stock targets lost their original queue capture"))?;
-        let armed = state.armed.as_mut()
+        let queue =
+            queue.ok_or_else(|| denied("stock targets lost their original queue capture"))?;
+        let armed = state
+            .armed
+            .as_mut()
             .ok_or_else(|| denied("custody operation is not armed"))?;
-        armed.bytes = armed.bytes.checked_sub(stock_targets::CHECK_BYTES)
+        armed.bytes = armed
+            .bytes
+            .checked_sub(stock_targets::CHECK_BYTES)
             .ok_or_else(|| exhausted("stock-target portfolio prerequisite allowance exhausted"))?;
         let mut current = current;
         current.anchor.tick = GameTick(queue.tick());
@@ -461,6 +560,8 @@ impl<E: WorkOrderEvidenceOwner> WorkOrderEvidenceOwner for GuardedEvidence<E> {
         self.custody
             .qualify_workshop(&remaining_context(c, start)?, Some(tick))?;
         self.custody
+            .qualify_manager(&remaining_context(c, start)?, Some(tick))?;
+        self.custody
             .qualify_stock_target(&remaining_context(c, start)?, Some(observation))?;
         self.custody
             .qualify_stock_targets(&remaining_context(c, start)?, Some(observation))?;
@@ -487,6 +588,8 @@ impl<E: WorkOrderEvidenceOwner> WorkOrderEvidenceOwner for GuardedEvidence<E> {
         self.inner.revalidate_after_external_read(&current)?;
         self.custody
             .qualify_workshop(&remaining_context(c, start)?, self.order_tick)?;
+        self.custody
+            .qualify_manager(&remaining_context(c, start)?, self.order_tick)?;
         self.custody.qualify_stock_target(
             &remaining_context(c, start)?,
             self.order_observation.as_ref(),

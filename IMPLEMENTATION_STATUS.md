@@ -1,5 +1,74 @@
 # Implementation Status
 
+## Unreleased — Manager prerequisite in the combined production workflow
+
+The combined `serve-gameplay-dev labor-order` host now accepts closed optional
+`manager_prerequisite` and pre-plan `manager_prerequisite_checkpoint` operator
+configuration. It imports the exact independently acknowledged complete Manager
+1.23 original Offline, matches production world/site/software, independently
+pins manager source/selection and reads only with
+`DFMCP_COMBINED_PRODUCTION_MANAGER_TOKEN`. Its owner grants no appointment
+permission, writes no donor files and needs no manager token for Offline custody.
+
+The host freshly verifies that original manager at the current paused tick before
+publishing a positive production plan and at each protected native order prepare
+and post-DispatchStarted evidence boundary. The immutable donor witness binds
+intent identity before every step key and created-order goal. A closed ordered
+prerequisite envelope permits workshop and manager together; existing no-manager
+identity bytes remain exact. All six request families and optional stock-target
+labor assignment use the same envelope. Wholly satisfied stock targets retain
+Plan authority but require neither labor/production-effect authority nor a fresh
+manager dispatch check, and create no original or effect.
+
+Private `original.manager` associates the complete production original with the
+exact donor directory and compact full-record commitment. Recovery requires its
+marked original, same donor/ACK, association digest and complete consumed floors.
+It cannot strip one prerequisite, substitute the other, reinterpret a target or
+restore a confirmation permit. Public and compact responses expose historical
+readiness separately from current proof. A temporarily unavailable owner cannot
+erase its earlier complete checkpoint or recovery association pair. The latest
+complete floors and sticky fences remain available even before an original
+exists; current readiness is withdrawn on failure, overflow and Offline reopening.
+
+Native tests exposed a real budget regression after lost-reply reconciliation:
+the original order reconciled, but repeated worst-case sampling prepayment left
+insufficient work for opening goal history and taking the joined sample. The fix
+reserves the actual two local custody verifications for receipt reconciliation
+and history opening/replay, at most 200 MiB per phase with both prerequisites.
+It retains the full sampling, frontier and history bounds and the unchanged
+8 GiB default, every verification, original deadlines and original-key-only
+reconciliation. Independent source review confirmed the phase counts; both
+manager-only and dual-donor lost-reply paths now execute successfully.
+
+The new native campaign has seventeen deterministic scenarios through the actual
+Runtime, native clients, private donor ACK/journal and parent custody. It covers
+original plan and prepare gates, missing cache/identity/source/tick, altered donor
+custody, all-met requests with independent Plan but no effect grants, both donors,
+normal dual goal Wait, original lost-reply Offline/Reconcile, stripping/corruption
+and no redispatch. The post-marker case independently verifies both the parent
+Dispatch record and native creation DispatchStarted checksum chains before
+withdrawing manager identity; zero CommitOrder calls are required. New pure
+regressions cover configuration, sidecars, all request identity/recovery shapes,
+public presentation, unavailable-state retention and exact budget partitioning.
+
+All 445 Runtime/presentation and 119 retained adapter tests passed
+(564 distinct Rust component tests, zero failures). The Runtime run includes
+all 17 new Manager native scenarios, the 25 existing stock-target scenarios
+and the existing workshop campaign. Final source correspondence verified
+1742 exact copies, two exact excerpts, 617 real path-dependency inputs and
+11 unchanged external lock identities, with 153 explicitly excluded unrelated
+test registrations. Scoped formatting, Python syntax, matching contract paths
+and whitespace checks pass. Contract result metadata was recorded afterward;
+production and test bodies were unchanged and refreshed correspondence passed.
+The component
+uses actual production Runtime/native-client/presentation source and real
+repository core/world/intent/adapter/lab dependencies with unchanged pins and
+features. It excludes full MCP transport/tool macros, Asupersync supervision,
+admission execution, native SDK/plugin builds and live Dwarf Fortress. The full
+MCP build/check remains blocked by compiler memory in unchanged Asupersync. No
+current-source full qualification, new native protocol/tool, live-game result,
+causal-output proof, production admission or broad bead closure is claimed.
+
 ## Unreleased — Acknowledged Manager 1.23 origin for production
 
 The adapter now owns a non-cloneable `ManagerProductionOrigin` imported only from

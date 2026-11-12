@@ -355,7 +355,16 @@
       "crates/dfmcp-mcp/src/live_production_runtime/portfolio_stability_tests.rs",
       "crates/dfmcp-mcp/src/live_production_presentation_stock_targets.rs",
       "crates/dfmcp-mcp/src/live_production_runtime/stock_targets_tests.rs",
-      "tests/stdio/combined_stock_targets_runtime_peer.py"
+      "tests/stdio/combined_stock_targets_runtime_peer.py",
+      "crates/dfmcp-mcp/src/live_production_runtime/prerequisite_binding.rs",
+      "crates/dfmcp-mcp/src/live_production_runtime/manager_config.rs",
+      "crates/dfmcp-mcp/src/live_production_runtime/manager_prerequisite.rs",
+      "crates/dfmcp-mcp/src/live_production_runtime/manager_association_tests.rs",
+      "crates/dfmcp-mcp/src/live_production_runtime/manager_prerequisite_tests.rs",
+      "crates/dfmcp-mcp/src/live_production_presentation_manager.rs",
+      "tests/stdio/combined_manager_prerequisite_runtime_peer.py",
+      "crates/dfmcp-mcp/src/live_production_presentation_recovery.rs",
+      "crates/dfmcp-mcp/src/live_production_runtime/manager_config_tests.rs"
     ],
     "private_custody_platforms": [
       "linux-x86_64",
@@ -1153,6 +1162,153 @@
       },
       "runtime_peer_existing_worker_cases": 11,
       "runtime_peer_assignment_cases": 14
+    },
+    "manager_prerequisite": {
+      "configuration_field": "manager_prerequisite",
+      "response_schema": "dfmcp.ready-manager-prerequisite/1",
+      "response_scope": "original_manager_dispatch_prerequisite",
+      "source_protocol": "manager/1.23",
+      "read_credential_env": "DFMCP_COMBINED_PRODUCTION_MANAGER_TOKEN",
+      "donor_mode": "Offline",
+      "donor_files": [
+        "manager-appointment-v1-23.journal",
+        "manager-appointment-v1-23.ack"
+      ],
+      "donor_pin": "exact latest independently retained ManagerV1_23 Offline acknowledgement, complete original key and plan digest",
+      "donor_kind": "complete cache-bearing original Manager appointment; Manager1.22 refused",
+      "donor_matches_production_sources": [
+        "world_folder",
+        "site_id",
+        "df_version",
+        "dfhack_version"
+      ],
+      "donor_independent_pins": [
+        "endpoint",
+        "generation",
+        "map_dimensions",
+        "unit_id",
+        "histfig_id"
+      ],
+      "qualify_at": [
+        "positive_original_plan",
+        "each_original_order_prepare",
+        "each_original_order_commit_after_dispatch_started"
+      ],
+      "fresh_read": "authenticated ReadManager for original selection, at combined paused fortress tick",
+      "current_requirements": [
+        "original_unit_historical_figure_group_assignment_position",
+        "active_citizen_identity_membership",
+        "ordinary_manager_definition",
+        "original_position_link",
+        "dual_role_getters",
+        "production_responsibility_cache_contains_original_assignment"
+      ],
+      "unrelated_roster_history_and_assignment_growth_allowed": true,
+      "equal_native_sequence_allowed": true,
+      "identity_or_source_loss_fences": true,
+      "missing_cache_authorizes_insertion": false,
+      "original_request_shapes": [
+        "legacy",
+        "existing_labor",
+        "portfolio",
+        "existing_labor_portfolio",
+        "stock_target",
+        "stock_targets"
+      ],
+      "stock_target_assignment_variants_supported": true,
+      "all_met_stock_targets_read_manager": false,
+      "origin_binds_original_request_identity": true,
+      "sealed_original_requirement_marker": "dfmcp-manager-prerequisite/1",
+      "request_identity_domain": "dfmcp-native-combined-manager-prerequisite/1",
+      "combined_summary_order": [
+        "optional_original_workshop",
+        "optional_original_manager",
+        "unchanged_original_request_body"
+      ],
+      "workshop_and_manager_may_coexist": true,
+      "no_manager_identity_bytes_changed": false,
+      "association_file": "original.manager",
+      "association_domain": "dfmcp-combined-manager-prerequisite/1",
+      "descriptor_max_bytes": 4096,
+      "association_max_bytes": 65536,
+      "association_binds": [
+        "complete_original_plan_digest",
+        "exact_donor_directory",
+        "immutable_origin_descriptor"
+      ],
+      "descriptor_commits_to_full_canonical_record": true,
+      "recovery_fields": [
+        "manager_prerequisite_digest",
+        "manager_prerequisite_floor"
+      ],
+      "floor_fields": [
+        "tick",
+        "generation",
+        "sequence",
+        "next_event",
+        "history_count",
+        "group_next_position",
+        "group_next_assignment",
+        "civ_next_position",
+        "civ_next_assignment",
+        "fenced"
+      ],
+      "preplan_checkpoint_field": "manager_prerequisite_checkpoint",
+      "preplan_checkpoint_fields": [
+        "origin_witness",
+        "tick",
+        "generation",
+        "sequence",
+        "next_event",
+        "history_count",
+        "group_next_position",
+        "group_next_assignment",
+        "civ_next_position",
+        "civ_next_assignment",
+        "fenced"
+      ],
+      "preplan_checkpoint_mutually_exclusive_with_original_recovery": true,
+      "consumed_native_floors_retained_after_refusal": true,
+      "source_fence_is_sticky": true,
+      "fresh_read_floor_custody": "caller-held checkpoint or complete recovery; not appended to donor ACK; whole external rollback beyond immutable donor seed not independently detectable",
+      "failed_publication_retains_latest_checkpoint": true,
+      "offline_needs_native_credential": false,
+      "offline_restores_readiness_or_confirmation": false,
+      "last_qualified_is_historical": true,
+      "import_work_bytes": 209715200,
+      "qualification_work_bytes": 83886080,
+      "local_verification_work_bytes": 33554432,
+      "read_custody_work_max": 1207959552,
+      "dispatch_custody_work_max": 2415919104,
+      "stock_targets_dispatch_custody_work_max": 3862953984,
+      "donor_writes": false,
+      "appointment_permission": false,
+      "canonical_manager_evidence": false,
+      "office_sufficiency_proven": false,
+      "production_feasibility_proven": false,
+      "output_attribution_proven": false,
+      "atomic_cross_plugin_transaction": false,
+      "new_native_protocol": false,
+      "new_public_tool": false,
+      "production_admission_added": false,
+      "execution_evidence": "verified_component_execution; full_mcp_transport_supervision_native_plugin_and_live_game_unverified",
+      "runtime_peer_cases": 17,
+      "read_only_phase_custody": {
+        "receipt_reconciliation_verifications": 2,
+        "history_open_replay_verifications": 2,
+        "per_verification_base_bytes": 37748736,
+        "per_donor_verification_bytes": 33554432,
+        "maximum_phase_bytes": 209715200,
+        "parent_sample_full_allowance_retained": true,
+        "public_default_byte_work_changed": false
+      },
+      "component_test_results": {
+        "runtime_and_presentation": 445,
+        "retained_adapter": 119,
+        "distinct_total": 564,
+        "failures": 0,
+        "manager_native_scenarios": 17
+      }
     }
   },
   "selected_work_order_goal_monitor": {

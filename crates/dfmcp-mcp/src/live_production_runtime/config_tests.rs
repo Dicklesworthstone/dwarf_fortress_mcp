@@ -51,7 +51,7 @@ fn portfolio_recovery_retains_actual_zero_or_one_based_order_ids() -> Result<()>
 #[test]
 fn closed_configuration_and_recovery_are_exact() -> Result<()> {
     let raw = json!({"schema":"dfmcp.combined-production-development/1", "directory":"/tmp/combined", "initialize":true});
-    let (directory, initialize, recovery, clock, inventory_clock, workshop, checkpoint) =
+    let (directory, initialize, recovery, clock, inventory_clock, workshop, checkpoint, _, _) =
         parse(&raw.to_string())?;
     assert_eq!(directory, Path::new("/tmp/combined"));
     assert!(initialize && recovery.is_none());
@@ -76,7 +76,7 @@ fn closed_configuration_and_recovery_are_exact() -> Result<()> {
         "anchor":{"fortress_id":"1", "epoch":0, "sequence":2, "tick":3, "state_hash":hash},
         "frontier":{"journal_id":hash, "head":hash, "authority_tick_floor":4}
     });
-    let (_, _, value, _, _, _, _) = parse(&recovered.to_string())?;
+    let (_, _, value, _, _, _, _, _, _) = parse(&recovered.to_string())?;
     assert_eq!(
         value
             .ok_or_else(|| invalid("missing test recovery"))?
@@ -126,10 +126,12 @@ fn custody_and_environment_scope_refuse_substitution() {
         "DFMCP_SEMANTIC_WORKFORCE_ALLOW_LABOR",
         false,
         false,
+        false,
         false
     ));
     assert!(allowed_key(
         "DFMCP_SEMANTIC_WORK_ORDER_ALLOW_PRODUCTION",
+        false,
         false,
         false,
         false
@@ -141,7 +143,7 @@ fn custody_and_environment_scope_refuse_substitution() {
                 "DFMCP_SEMANTIC_WORK_ORDER_CLOCK_TOKEN",
             ] {
                 assert_eq!(
-                    allowed_key(key, clock, inventory_clock, false),
+                    allowed_key(key, clock, inventory_clock, false, false),
                     clock,
                     "{key}"
                 );
@@ -151,7 +153,7 @@ fn custody_and_environment_scope_refuse_substitution() {
                 "DFMCP_SEMANTIC_WORK_ORDER_INVENTORY_CLOCK_TOKEN",
             ] {
                 assert_eq!(
-                    allowed_key(key, clock, inventory_clock, false),
+                    allowed_key(key, clock, inventory_clock, false, false),
                     inventory_clock,
                     "{key}"
                 );
@@ -161,7 +163,10 @@ fn custody_and_environment_scope_refuse_substitution() {
                 "DFMCP_RUN_TOKEN",
                 "DFMCP_UNKNOWN",
             ] {
-                assert!(!allowed_key(key, clock, inventory_clock, false), "{key}");
+                assert!(
+                    !allowed_key(key, clock, inventory_clock, false, false),
+                    "{key}"
+                );
             }
         }
     }
@@ -252,7 +257,7 @@ fn independent_inventory_clock_and_both_recovery_journals_remain_exact() -> Resu
     let mut raw = json!({"schema":"dfmcp.combined-production-development/1",
         "directory":"/tmp/combined-inventory-clock", "initialize":true,
         "inventory_clock":{"generation":60}});
-    let (_, _, _, order_clock, inventory_clock, _, _) = parse(&raw.to_string())?;
+    let (_, _, _, order_clock, inventory_clock, _, _, _, _) = parse(&raw.to_string())?;
     assert!(order_clock.is_none());
     let configured = inventory_clock.ok_or_else(|| invalid("inventory clock"))?;
     assert_eq!(configured.generation, 60);
@@ -306,7 +311,7 @@ fn independent_inventory_clock_and_both_recovery_journals_remain_exact() -> Resu
         "order recovery remains independent"
     );
     raw["recovery"]["clock_journal_id"] = json!(order_id.to_hex());
-    let (_, _, recovery, clock, inventory_clock, _, _) = parse(&raw.to_string())?;
+    let (_, _, recovery, clock, inventory_clock, _, _, _, _) = parse(&raw.to_string())?;
     let recovered = recovery.ok_or_else(|| invalid("recovery"))?;
     assert_eq!(recovered.clock_journal_id, Some(order_id));
     assert_eq!(recovered.inventory_clock_journal_id, Some(inventory_id));
@@ -409,7 +414,7 @@ fn workshop_configuration() -> Value {
 #[test]
 fn optional_workshop_retains_exact_independent_source_and_original_pins() -> Result<()> {
     let raw = workshop_configuration();
-    let (_, initialize, recovery, clock, inventory_clock, workshop, checkpoint) =
+    let (_, initialize, recovery, clock, inventory_clock, workshop, checkpoint, _, _) =
         parse(&raw.to_string())?;
     assert!(initialize && recovery.is_none() && clock.is_none() && inventory_clock.is_none());
     assert!(checkpoint.is_none());
@@ -898,7 +903,13 @@ fn workshop_environment_permits_only_configured_read_credential() {
         for inventory_clock in [false, true] {
             for workshop in [false, true] {
                 assert_eq!(
-                    allowed_key(workshop_config::TOKEN, clock, inventory_clock, workshop),
+                    allowed_key(
+                        workshop_config::TOKEN,
+                        clock,
+                        inventory_clock,
+                        workshop,
+                        false
+                    ),
                     workshop
                 );
                 for key in [
@@ -910,7 +921,10 @@ fn workshop_environment_permits_only_configured_read_credential() {
                     "DFMCP_TREE_HARVEST_TOKEN",
                     "DFMCP_ADMITTED_BRIDGE_PROTOCOL",
                 ] {
-                    assert!(!allowed_key(key, clock, inventory_clock, workshop), "{key}");
+                    assert!(
+                        !allowed_key(key, clock, inventory_clock, workshop, false),
+                        "{key}"
+                    );
                 }
             }
         }

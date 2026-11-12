@@ -105,7 +105,7 @@ impl StockTargetRequest {
         evidence: &PredicateEvidence<'_>,
         requirement: &ExistingLaborRequirement,
         c: &OperationContext,
-        origin: Option<Digest32>,
+        origins: impl Into<super::prerequisite_binding::Origins>,
     ) -> Result<PreparedPlan> {
         self.validate()?;
         if self.assign_labor {
@@ -141,7 +141,7 @@ impl StockTargetRequest {
             requirement,
             &baselines,
             c,
-            origin,
+            origins,
             Some(&binding),
         )
     }
@@ -155,7 +155,7 @@ impl StockTargetRequest {
         assessment: &StockTargetAssessment,
         evidence: &PredicateEvidence<'_>,
         c: &OperationContext,
-        origin: Option<Digest32>,
+        origins: impl Into<super::prerequisite_binding::Origins>,
     ) -> Result<PreparedPlan> {
         self.validate()?;
         if !self.assign_labor {
@@ -197,7 +197,7 @@ impl StockTargetRequest {
             evidence,
             &InventoryBaselines::from_qualified(objective),
             c,
-            origin,
+            origins,
             Some(&binding),
         )
     }

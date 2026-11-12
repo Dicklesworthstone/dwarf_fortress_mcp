@@ -116,15 +116,26 @@ impl ExistingLaborPortfolioRequest {
     ) -> Result<PreparedPlan> {
         self.compile_with_stock_targets(evidence, requirement, baselines, c, origin, None)
     }
+    pub(crate) fn compile_with_prerequisites(
+        &self,
+        evidence: &PredicateEvidence<'_>,
+        requirement: &ExistingLaborRequirement,
+        baselines: &InventoryBaselines,
+        c: &OperationContext,
+        origins: super::prerequisite_binding::Origins,
+    ) -> Result<PreparedPlan> {
+        self.compile_with_stock_targets(evidence, requirement, baselines, c, origins, None)
+    }
     pub(super) fn compile_with_stock_targets(
         &self,
         evidence: &PredicateEvidence<'_>,
         requirement: &ExistingLaborRequirement,
         baselines: &InventoryBaselines,
         c: &OperationContext,
-        origin: Option<Digest32>,
+        origins: impl Into<super::prerequisite_binding::Origins>,
         stock_targets: Option<&StockTargetsBinding>,
     ) -> Result<PreparedPlan> {
+        let origins = origins.into();
         self.validate()?;
         // Reuse the exact single-request citizen, prerequisite and timing
         // admission. This temporary plan never acquires custody or native state.
@@ -153,14 +164,18 @@ impl ExistingLaborPortfolioRequest {
         }
         if let Some(binding) = stock_targets {
             if binding.original_anchor != c.anchor {
-                return Err(denied("stock-target portfolio belongs to another original anchor"));
+                return Err(denied(
+                    "stock-target portfolio belongs to another original anchor",
+                ));
             }
             bytes = binding.identity(
-                requirement, GameTick(self.deadline_tick),
-                self.poll_interval_ticks, self.stable_samples,
+                requirement,
+                GameTick(self.deadline_tick),
+                self.poll_interval_ticks,
+                self.stable_samples,
             )?;
         }
-        super::workshop_binding::append_identity(&mut bytes, origin)?;
+        super::prerequisite_binding::append_identity(&mut bytes, origins)?;
         let digest = Digest32::of_bytes(&bytes);
         let id = IntentId::new(u128::from_be_bytes(
             digest.as_bytes()[..16]
@@ -223,7 +238,7 @@ impl ExistingLaborPortfolioRequest {
         let intent = Intent {
             id,
             anchor: c.anchor,
-            summary: super::workshop_binding::summary(
+            summary: super::prerequisite_binding::summary(
                 match stock_targets {
                     Some(binding) => binding.summary()?,
                     None => format!(
@@ -233,13 +248,16 @@ impl ExistingLaborPortfolioRequest {
                         self.orders.len()
                     ),
                 },
-                origin,
+                origins,
             )?,
             terminal_condition: Predicate::All(terminal),
             constraints: vec![Constraint::MaxRisk(RiskTier::Guarded)],
             requested_actions: actions,
         };
         let mut planner = StaticPlanner::default();
+        if origins.manager.is_some() {
+            planner.policy.max_string_bytes = 1024;
+        }
         if stock_targets.is_some() {
             // The closed marker retains up to four complete source-bound
             // assessments. Native action strings keep their existing bounds;
@@ -254,10 +272,11 @@ impl ExistingLaborPortfolioRequest {
         plan.id = plan.expected_id();
         let layout = live_production::ProductionLayout::from_plan(&plan)?;
         let prerequisite_matches = match (layout.existing_labor(), stock_targets) {
-            (Some(actual), Some(binding)) =>
+            (Some(actual), Some(binding)) => {
                 actual.predicate() == requirement.predicate()
                     && Predicate::All(actual.inventory_minima().to_vec()).normalized()
-                        == Predicate::All(binding.minima()).normalized(),
+                        == Predicate::All(binding.minima()).normalized()
+            }
             (actual, None) => actual == Some(requirement),
             _ => false,
         };
@@ -271,7 +290,9 @@ impl ExistingLaborPortfolioRequest {
         }
         if let Some(binding) = stock_targets {
             if super::stock_targets_binding::requirement(&plan)?.as_ref() != Some(binding) {
-                return Err(denied("compiled stock-target portfolio lost its complete original policy"));
+                return Err(denied(
+                    "compiled stock-target portfolio lost its complete original policy",
+                ));
             }
         }
         Ok(plan)

@@ -35,17 +35,24 @@ mod existing_labor_request;
 mod goals;
 mod inspection;
 mod inventory_clock;
+mod manager_config;
+mod manager_prerequisite;
+#[cfg(all(
+    test,
+    target_os = "linux",
+    any(target_arch = "x86_64", target_arch = "aarch64")
+))]
+#[path = "live_production_runtime/manager_prerequisite_tests.rs"]
+mod manager_prerequisite_tests;
 mod planning_inspection;
 mod portfolio;
 mod portfolio_request;
+mod prerequisite_binding;
 mod request;
 mod review;
 mod stock_target;
 mod stock_target_binding;
 mod stock_target_request;
-mod stock_targets;
-mod stock_targets_binding;
-mod stock_targets_request;
 #[cfg(all(
     test,
     target_os = "linux",
@@ -53,6 +60,9 @@ mod stock_targets_request;
 ))]
 #[path = "live_production_runtime/stock_target_tests.rs"]
 mod stock_target_tests;
+mod stock_targets;
+mod stock_targets_binding;
+mod stock_targets_request;
 #[cfg(all(
     test,
     target_os = "linux",
@@ -79,11 +89,13 @@ pub(crate) use existing_labor_request::ExistingLaborRequest;
 pub(crate) use inspection::InspectionRequest;
 use inspection::InspectionSource;
 use inventory_clock::ProductionInventoryClock;
+use manager_prerequisite::SharedManager;
 use orders::Shell as OrderShell;
 use orders::inventory_baseline::{self, InventoryBaselines};
 use planning_inspection::PlanningInspection;
 use portfolio::PortfolioState;
 pub(crate) use portfolio_request::PortfolioRequest;
+use prerequisite_binding::Origins;
 pub(crate) use request::Request;
 use stock_target::SharedStockTarget;
 pub(crate) use stock_target_request::StockTargetRequest;
@@ -101,6 +113,10 @@ const MIB: u64 = 1024 * 1024;
 const MAX_FRONTIER_BYTES: u64 = 2 * 1024 * MIB;
 const WORKSHOP_CUSTODY_READ_BYTES: u64 = 768 * MIB;
 const WORKSHOP_CUSTODY_DISPATCH_BYTES: u64 = 2 * 1024 * MIB;
+// Ten read checks or thirteen dispatch checks can retain both independent
+// prerequisites. Dispatch also repeats each fresh prerequisite at six edges.
+const MANAGER_CUSTODY_READ_BYTES: u64 = 1152 * MIB;
+const MANAGER_CUSTODY_DISPATCH_BYTES: u64 = 2304 * MIB;
 type W = workforce::native::NativeShell;
 type O = orders::native::NativeShell;
 type File = dfmcp_adapter::build_placement::journal::private_file::PrivateBuildFile;
@@ -247,6 +263,7 @@ pub(crate) struct Runtime {
     frontier: Option<Coordinator<File>>,
     custody: Option<SharedCustody>,
     workshop: Option<SharedWorkshop>,
+    manager: Option<SharedManager>,
     stock_target: Option<SharedStockTarget>,
     stock_target_no_work: Option<Value>,
     stock_targets: Option<SharedStockTargets>,
@@ -407,6 +424,7 @@ impl Runtime {
             frontier: None,
             custody: None,
             workshop: None,
+            manager: None,
             stock_target: None,
             stock_target_no_work: None,
             stock_targets: None,
@@ -446,6 +464,18 @@ impl Runtime {
                 )
             })
             .transpose()?;
+        out.manager = out
+            .config
+            .manager_prerequisite
+            .clone()
+            .map(|config| {
+                SharedManager::open(
+                    config,
+                    out.config.read_guard(),
+                    &work.take(manager_prerequisite::OPEN_BYTES)?,
+                )
+            })
+            .transpose()?;
         if let Some(checkpoint) = out.config.workshop_prerequisite_checkpoint {
             let workshop = out
                 .workshop
@@ -462,10 +492,24 @@ impl Runtime {
                 &work.take(MIB)?,
             )?;
         }
+        if let Some(checkpoint) = out.config.manager_prerequisite_checkpoint {
+            let manager = out
+                .manager
+                .as_ref()
+                .ok_or_else(|| denied("manager checkpoint lost its original donor"))?;
+            if checkpoint.origin_witness != manager.witness()? {
+                return Err(denied("manager checkpoint names another original donor"));
+            }
+            manager.restore_floor(checkpoint.floor.into(), &work.take(MIB)?)?;
+        }
         out.observation_tick_floor = out.authority_tick_floor();
         if out.config.recovery.is_none() {
             workshop_prerequisite::require_absent(
                 &out.config.path(workshop_prerequisite::FILE_NAME),
+                &work.take(MIB)?,
+            )?;
+            manager_prerequisite::require_absent(
+                &out.config.path(manager_prerequisite::FILE_NAME),
                 &work.take(MIB)?,
             )?;
         }
@@ -508,8 +552,9 @@ impl Runtime {
                     "combined original anchor differs from external recovery",
                 ));
             }
+            let origins = prerequisite_binding::requirements(&original)?;
             match (
-                workshop_binding::requirement(&original)?,
+                origins.workshop,
                 &out.workshop,
                 recovery.workshop_prerequisite_digest,
                 recovery.workshop_prerequisite_floor,
@@ -538,6 +583,33 @@ impl Runtime {
                 _ => {
                     return Err(denied(
                         "recovery must retain the original plan's exact workshop prerequisite",
+                    ));
+                }
+            }
+            match (
+                origins.manager,
+                &out.manager,
+                recovery.manager_prerequisite_digest,
+                recovery.manager_prerequisite_floor,
+            ) {
+                (Some(witness), Some(manager), Some(seal), Some(floor))
+                    if witness == manager.witness()? =>
+                {
+                    manager.restore_floor(floor.into(), &work.take(MIB)?)?;
+                    manager.reopen(
+                        &out.config.path(manager_prerequisite::FILE_NAME),
+                        &original,
+                        seal,
+                        &work.take(64 * MIB)?,
+                    )?;
+                }
+                (None, None, None, None) => manager_prerequisite::require_absent(
+                    &out.config.path(manager_prerequisite::FILE_NAME),
+                    &work.take(MIB)?,
+                )?,
+                _ => {
+                    return Err(denied(
+                        "recovery must retain the original plan's exact manager prerequisite",
                     ));
                 }
             }
@@ -576,11 +648,12 @@ impl Runtime {
                 out.config.orders.clone(),
                 out.authority_tick_floor(),
             )?;
-            out.custody = Some(SharedCustody::new_with_stock_targets(
+            out.custody = Some(SharedCustody::new_with_manager(
                 archive,
                 identity,
                 original.clone(),
                 out.workshop.clone(),
+                out.manager.clone(),
                 out.stock_target.clone(),
                 out.stock_targets.clone(),
             ));
@@ -720,13 +793,17 @@ impl Runtime {
             .max(GameTick(
                 self.workshop.as_ref().map_or(0, SharedWorkshop::high_tick),
             ))
+            .max(GameTick(
+                self.manager.as_ref().map_or(0, SharedManager::high_tick),
+            ))
             .max(
                 self.stock_target
                     .as_ref()
                     .map_or(GameTick(0), SharedStockTarget::high_tick),
             )
             .max(
-                self.stock_targets.as_ref()
+                self.stock_targets
+                    .as_ref()
                     .map_or(GameTick(0), SharedStockTargets::high_tick),
             )
     }
@@ -760,26 +837,43 @@ impl Runtime {
         Ok(())
     }
     fn arm(&self, work: &mut Work) -> Result<()> {
-        // Parent sampling makes ten custody checks (68 MiB each with the
-        // donor). It does not acquire native workshop completion. Preserve the
-        // remaining allowance for reconciliation, history and that sample.
-        let ceiling = if self.workshop.is_some() {
+        // Parent sampling makes ten custody checks (100 MiB each with both
+        // donors). It does not acquire fresh prerequisite readiness. Receipt
+        // reconciliation and history opening reserve their smaller exact count.
+        let ceiling = if self.manager.is_some() {
+            MANAGER_CUSTODY_READ_BYTES
+        } else if self.workshop.is_some() {
             WORKSHOP_CUSTODY_READ_BYTES
         } else {
             512 * MIB
         };
         self.arm_with_ceiling(work, ceiling)
     }
+    fn arm_custody_verifications(&self, work: &mut Work, checks: u64) -> Result<()> {
+        let Some(custody) = &self.custody else {
+            return Ok(());
+        };
+        let ceiling = custody
+            .verification_bytes()?
+            .checked_mul(checks)
+            .ok_or_else(|| exhausted("custody verification allowance overflow"))?;
+        self.arm_with_ceiling(work, ceiling)
+    }
     fn arm_dispatch(&self, work: &mut Work) -> Result<()> {
+        let prerequisites = if self.manager.is_some() {
+            MANAGER_CUSTODY_DISPATCH_BYTES
+        } else {
+            WORKSHOP_CUSTODY_DISPATCH_BYTES
+        };
         let ceiling = if self.stock_targets.is_some() {
-            WORKSHOP_CUSTODY_DISPATCH_BYTES + 6 * stock_targets::CHECK_BYTES
+            prerequisites + 6 * stock_targets::CHECK_BYTES
         } else if self.stock_target.is_some() {
             // Existing-labor dispatch can revalidate after both independent
             // workforce reads. Prepay six complete inventory acquisitions in
             // addition to the ordinary parent and optional Workshop custody.
-            WORKSHOP_CUSTODY_DISPATCH_BYTES + 6 * stock_target::CHECK_BYTES
-        } else if self.workshop.is_some() {
-            WORKSHOP_CUSTODY_DISPATCH_BYTES
+            prerequisites + 6 * stock_target::CHECK_BYTES
+        } else if self.workshop.is_some() || self.manager.is_some() {
+            prerequisites
         } else {
             512 * MIB
         };
@@ -893,6 +987,11 @@ impl Runtime {
         {
             self.fenced = true;
         }
+        if let Some(manager) = &self.manager
+            && manager.withdraw().is_err()
+        {
+            self.fenced = true;
+        }
         self.invalidate_portfolio_samples();
         self.clock_review = None;
         self.inventory_clock_review = None;
@@ -949,6 +1048,11 @@ impl Runtime {
                         json!(workshop.seal().map(|seal| seal.to_hex()));
                     value["workshop_prerequisite_floor"] = workshop.recovery_floor();
                 }
+                if let Some(manager) = &self.manager {
+                    value["manager_prerequisite_digest"] =
+                        json!(manager.seal().map(|seal| seal.to_hex()));
+                    value["manager_prerequisite_floor"] = manager.recovery_floor();
+                }
                 value
             }
             _ => Value::Null,
@@ -958,6 +1062,7 @@ impl Runtime {
         let selected_goal = self.selected_goal_json();
         json!({"mode":self.mode.as_str(),"anchor":anchor_json(self.anchor),"recovery":self.recovery_json(),
             "workshop_prerequisite":self.workshop.as_ref().map(SharedWorkshop::status),
+            "manager_prerequisite":self.manager.as_ref().map(SharedManager::status),
             "stock_target":self.stock_target_json(),
             "stock_targets":self.stock_targets_json(),
             "portfolio":self.portfolio_json(),
@@ -988,8 +1093,13 @@ impl Runtime {
         self.arm(work)?;
         if let Some(custody) = &self.custody {
             custody.verify(&work.current()?)?;
-        } else if let Some(workshop) = &self.workshop {
-            workshop.verify(&work.take(workshop_prerequisite::LOCAL_BYTES)?)?;
+        } else {
+            if let Some(workshop) = &self.workshop {
+                workshop.verify(&work.take(workshop_prerequisite::LOCAL_BYTES)?)?;
+            }
+            if let Some(manager) = &self.manager {
+                manager.verify(&work.take(manager_prerequisite::LOCAL_BYTES)?)?;
+            }
         }
         let frontier = if let Some(frontier) = &mut self.frontier {
             Some(frontier.inspect(&work.take(8 * MIB)?)?)
@@ -1060,6 +1170,7 @@ impl Runtime {
         let selected_goal = self.selected_goal_json();
         let value = json!({"ok":true,"mode":self.mode.as_str(),"anchor":anchor_json(self.anchor),
             "workshop_prerequisite":self.workshop.as_ref().map(SharedWorkshop::status),
+            "manager_prerequisite":self.manager.as_ref().map(SharedManager::status),
             "stock_target":self.stock_target_json(),
             "stock_targets":self.stock_targets_json(),
             "portfolio":self.portfolio_json(),
@@ -1216,7 +1327,7 @@ impl Runtime {
             &objectives,
             c,
             |evidence, baselines, current, origin| {
-                request.compile_with_workshop(evidence, baselines, current, origin)
+                request.compile_with_prerequisites(evidence, baselines, current, origin)
             },
         )
     }
@@ -1237,7 +1348,7 @@ impl Runtime {
             &objectives,
             c,
             |evidence, baselines, current, origin| {
-                request.compile_with_workshop(evidence, baselines, current, origin)
+                request.compile_with_prerequisites(evidence, baselines, current, origin)
             },
         )
     }
@@ -1255,7 +1366,13 @@ impl Runtime {
             &objectives,
             c,
             |evidence, requirement, baselines, current, origin| {
-                request.compile_with_workshop(evidence, requirement, baselines, current, origin)
+                request.compile_with_prerequisites(
+                    evidence,
+                    requirement,
+                    baselines,
+                    current,
+                    origin,
+                )
             },
         )
     }
@@ -1277,7 +1394,13 @@ impl Runtime {
             &objectives,
             c,
             |evidence, requirement, baselines, current, origin| {
-                request.compile_with_workshop(evidence, requirement, baselines, current, origin)
+                request.compile_with_prerequisites(
+                    evidence,
+                    requirement,
+                    baselines,
+                    current,
+                    origin,
+                )
             },
         )
     }
@@ -1293,7 +1416,7 @@ impl Runtime {
             &ExistingLaborRequirement,
             &InventoryBaselines,
             &OperationContext,
-            Option<Digest32>,
+            Origins,
         ) -> Result<PreparedPlan>,
     ) -> Result<View> {
         let (selected, labor) = selection;
@@ -1362,7 +1485,7 @@ impl Runtime {
             &PredicateEvidence<'_>,
             &InventoryBaselines,
             &OperationContext,
-            Option<Digest32>,
+            Origins,
         ) -> Result<PreparedPlan>,
     ) -> Result<View> {
         self.check(c, true)?;
@@ -1403,15 +1526,24 @@ impl Runtime {
         } else {
             InventoryBaselines::default()
         };
-        let origin = if let Some(workshop) = &self.workshop {
+        let workshop = if let Some(workshop) = &self.workshop {
             workshop.qualify(&work.take(workshop_prerequisite::CHECK_BYTES)?)?;
             Some(workshop.witness()?)
         } else {
             None
         };
-        let plan = compile(&evidence, &baselines, &work.take(8 * MIB)?, origin)?;
-        if workshop_binding::requirement(&plan)? != origin {
-            return Err(denied("compiled plan lost its exact workshop prerequisite"));
+        let manager = if let Some(manager) = &self.manager {
+            manager.qualify(&work.take(manager_prerequisite::CHECK_BYTES)?)?;
+            Some(manager.witness()?)
+        } else {
+            None
+        };
+        let origins = Origins { workshop, manager };
+        let plan = compile(&evidence, &baselines, &work.take(8 * MIB)?, origins)?;
+        if prerequisite_binding::requirements(&plan)? != origins {
+            return Err(denied(
+                "compiled plan lost an exact original dispatch prerequisite",
+            ));
         }
         let stock_target = SharedStockTarget::from_original(
             &plan,
@@ -1450,6 +1582,13 @@ impl Runtime {
                 &work.take(64 * MIB)?,
             )?;
         }
+        if let Some(manager) = &self.manager {
+            manager.bind(
+                &self.config.path(manager_prerequisite::FILE_NAME),
+                &plan,
+                &work.take(64 * MIB)?,
+            )?;
+        }
         let recovery = durable::initial_recovery(&plan, &work.take(2 * MIB)?)?;
         self.seal = Some(expected);
         self.identity_digest = Some(identity_digest);
@@ -1457,11 +1596,12 @@ impl Runtime {
         self.layout = Some(layout);
         self.stock_target = stock_target;
         self.stock_targets = stock_targets;
-        self.custody = Some(SharedCustody::new_with_stock_targets(
+        self.custody = Some(SharedCustody::new_with_manager(
             archive,
             identity,
             plan.clone(),
             self.workshop.clone(),
+            self.manager.clone(),
             self.stock_target.clone(),
             self.stock_targets.clone(),
         ));

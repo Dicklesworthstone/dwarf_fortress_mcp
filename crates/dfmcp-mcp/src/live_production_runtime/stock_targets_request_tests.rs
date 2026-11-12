@@ -729,3 +729,70 @@ fn assigned_stock_targets_four_deficits_require_all_five_original_actions() -> R
     );
     Ok(())
 }
+
+#[test]
+fn manager_and_workshop_four_target_original_recovers_all_minima_and_exact_policies() -> Result<()>
+{
+    use super::super::prerequisite_binding::{self, Origins};
+    let (projection, c) = portfolio_fixture()?;
+    let evidence =
+        PredicateEvidence::scoped(&projection.snapshot, stock_policy(&projection.snapshot))?;
+    for assignment in [false, true] {
+        let mut request = request()?;
+        request.assign_labor = assignment;
+        request.targets.extend([
+            StockTarget {
+                recipe: "wooden_chair".into(),
+                minimum_stack_units: 1,
+                max_order_amount: 100,
+            },
+            StockTarget {
+                recipe: "wooden_table".into(),
+                minimum_stack_units: 1,
+                max_order_amount: 100,
+            },
+        ]);
+        request.targets.sort_by(|a, b| a.recipe.cmp(&b.recipe));
+        let values = assessments(&request, &c, 2, 1)?;
+        let compile = |origins: Origins| {
+            if assignment {
+                request.compile_with_labor_assignment(&values, &evidence, &c, origins)
+            } else {
+                request.compile(&values, &evidence, &stock_workers()?, &c, origins)
+            }
+        };
+        let legacy = compile(Origins::default())?;
+        prerequisite_binding::assert_manager_variants(&legacy, compile)?;
+        let origins = Origins {
+            workshop: Some(Digest32::of_bytes(b"workshop")),
+            manager: Some(Digest32::of_bytes(b"manager")),
+        };
+        let original = compile(origins)?;
+        assert!(original.summary.len() <= 1024);
+        assert_eq!(
+            ProductionLayout::from_plan(&original)?
+                .inventory_minima()
+                .len(),
+            4
+        );
+        assert!(stock_targets_binding::requirement(&original)?.is_some());
+        for retained in [
+            Origins::default(),
+            Origins::from(origins.workshop),
+            Origins {
+                workshop: None,
+                manager: origins.manager,
+            },
+        ] {
+            let mut stripped = original.clone();
+            stripped.summary = prerequisite_binding::summary(
+                prerequisite_binding::body(&original)?.to_owned(),
+                retained,
+            )?;
+            stripped.digest = stripped.compute_digest();
+            stripped.id = stripped.expected_id();
+            assert!(stock_targets_binding::requirement(&stripped).is_err());
+        }
+    }
+    Ok(())
+}

@@ -1,8 +1,8 @@
 //! Immutable identity for one bounded, census-derived native stock target.
 //! This is combined-host dispatch policy, not canonical workshop feasibility,
 //! stock usability, causal output, or an instruction to maintain stock forever.
+use super::prerequisite_binding;
 use super::request::recipe;
-use super::workshop_binding;
 use crate::semantic_workforce_runtime::{digest, invalid};
 use dfmcp_adapter::live_production::{ExistingLaborRequirement, ProductionLayout};
 use dfmcp_adapter::semantic_work_orders::{
@@ -318,15 +318,8 @@ pub(super) fn requirement(plan: &PreparedPlan) -> Result<Option<StockTargetBindi
     if !plan.digest_is_valid() || !plan.id_is_valid() {
         return Err(invalid("stock target requires the sealed original plan"));
     }
-    let workshop = workshop_binding::requirement(plan)?;
-    let body = if workshop.is_some() {
-        plan.summary
-            .split_once('\n')
-            .map(|(_, body)| body)
-            .ok_or_else(|| invalid("missing stock target body after workshop prerequisite"))?
-    } else {
-        plan.summary.as_str()
-    };
+    let origins = prerequisite_binding::requirements(plan)?;
+    let body = prerequisite_binding::body(plan)?;
     let Some(marker) = parse_summary(body)? else {
         if plan.steps.iter().any(|step| {
             matches!(&step.action, Action::CreateWorkOrder { name, .. }
@@ -428,7 +421,7 @@ pub(super) fn requirement(plan: &PreparedPlan) -> Result<Option<StockTargetBindi
             obligation.stable_for_observations,
         )?
     };
-    workshop_binding::append_identity(&mut identity, workshop)?;
+    prerequisite_binding::append_identity(&mut identity, origins)?;
     let hash = Digest32::of_bytes(&identity);
     let intent = IntentId::new(u128::from_be_bytes(
         hash.as_bytes()[..16]

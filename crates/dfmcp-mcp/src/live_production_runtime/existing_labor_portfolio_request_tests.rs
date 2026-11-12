@@ -309,3 +309,20 @@ fn portfolio_requires_qualified_identity_exact_selected_workers_and_original_tim
     assert!(request.compile(&evidence, &required, &c).is_err());
     Ok(())
 }
+
+#[test]
+fn manager_and_workshop_bound_existing_portfolio_rebuilds_every_order_and_preserves_worker_requirement()
+-> Result<()> {
+    let (_, projection) = observation(&[42, 43])?;
+    let mut c = context(&projection.snapshot);
+    c.budget.max_actions = 4;
+    let evidence = PredicateEvidence::scoped(&projection.snapshot, policy(&projection.snapshot))?;
+    let baselines =
+        crate::semantic_work_order_runtime::inventory_baseline::InventoryBaselines::default();
+    let required = requirement()?;
+    let request = ExistingLaborPortfolioRequest::parse(&raw().to_string())?;
+    let legacy = request.compile(&evidence, &required, &c)?;
+    super::super::prerequisite_binding::assert_manager_variants(&legacy, |origins| {
+        request.compile_with_prerequisites(&evidence, &required, &baselines, &c, origins)
+    })
+}

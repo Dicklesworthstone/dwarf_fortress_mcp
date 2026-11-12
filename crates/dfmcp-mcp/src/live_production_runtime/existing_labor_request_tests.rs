@@ -286,3 +286,19 @@ fn existing_labor_requires_independent_current_source_policy_without_assignment_
     assert!(acceptance.existing_labor(&observed, &c).is_err());
     Ok(())
 }
+
+#[test]
+fn manager_and_workshop_bound_existing_labor_rebuilds_order_identity_without_an_assignment()
+-> Result<()> {
+    let (_, projection) = observation(&[42, 43])?;
+    let c = context(&projection.snapshot);
+    let evidence = PredicateEvidence::scoped(&projection.snapshot, policy(&projection.snapshot))?;
+    let baselines =
+        crate::semantic_work_order_runtime::inventory_baseline::InventoryBaselines::default();
+    let request = request()?;
+    let required = requirement()?;
+    let legacy = request.compile(&evidence, &required, &c)?;
+    super::super::prerequisite_binding::assert_manager_variants(&legacy, |origins| {
+        request.compile_with_prerequisites(&evidence, &required, &baselines, &c, origins)
+    })
+}

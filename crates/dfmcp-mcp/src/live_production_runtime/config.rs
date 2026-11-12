@@ -1,4 +1,7 @@
 //! Fixed operator configuration for the combined, unadmitted development owner.
+use super::manager_config::{
+    self, ManagerConfig, ManagerPrerequisiteCheckpoint, ManagerRecoveryFloor,
+};
 use super::workshop_config::{self, WorkshopConfig};
 use crate::semantic_workforce_runtime::{denied, digest, invalid};
 use crate::{semantic_work_order_runtime as orders, semantic_workforce_runtime as workforce};
@@ -47,6 +50,8 @@ pub(crate) struct Recovery {
     pub(crate) portfolio: Option<[Option<PortfolioRecovery>; 4]>,
     pub(crate) workshop_prerequisite_digest: Option<Digest32>,
     pub(super) workshop_prerequisite_floor: Option<WorkshopRecoveryFloor>,
+    pub(crate) manager_prerequisite_digest: Option<Digest32>,
+    pub(super) manager_prerequisite_floor: Option<ManagerRecoveryFloor>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
@@ -170,6 +175,9 @@ struct Input {
     workshop_prerequisite: Option<workshop_config::Input>,
     #[serde(default, deserialize_with = "workshop_checkpoint")]
     workshop_prerequisite_checkpoint: Option<WorkshopPrerequisiteCheckpoint>,
+    manager_prerequisite: Option<manager_config::Input>,
+    #[serde(default, deserialize_with = "manager_config::checkpoint")]
+    manager_prerequisite_checkpoint: Option<ManagerPrerequisiteCheckpoint>,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -188,6 +196,10 @@ struct RecoveryInput {
     workshop_prerequisite_digest: Option<String>,
     #[serde(default, deserialize_with = "workshop_floor")]
     workshop_prerequisite_floor: Option<WorkshopRecoveryFloor>,
+    #[serde(default, deserialize_with = "journal_identity")]
+    manager_prerequisite_digest: Option<String>,
+    #[serde(default, deserialize_with = "manager_config::recovery_floor")]
+    manager_prerequisite_floor: Option<ManagerRecoveryFloor>,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -222,6 +234,8 @@ pub(crate) struct Config {
     pub(crate) inventory_clock: Option<ClockConfig>,
     pub(super) workshop_prerequisite: Option<WorkshopConfig>,
     pub(super) workshop_prerequisite_checkpoint: Option<WorkshopPrerequisiteCheckpoint>,
+    pub(super) manager_prerequisite: Option<ManagerConfig>,
+    pub(super) manager_prerequisite_checkpoint: Option<ManagerPrerequisiteCheckpoint>,
     pub(crate) workforce: workforce::native::NativeShell,
     pub(crate) orders: orders::native::NativeShell,
     check: Arc<dyn Fn() -> Result<()> + Send + Sync>,
@@ -254,7 +268,7 @@ fn environment() -> Result<[String; 3]> {
         Ok(raw)
     };
     let raw = [read(CONFIG)?, read(WORKFORCE_CONFIG)?, read(ORDER_CONFIG)?];
-    let (_, _, _, clock, inventory_clock, workshop, _) = parse(&raw[0])?;
+    let (_, _, _, clock, inventory_clock, workshop, _, manager, _) = parse(&raw[0])?;
     for (key, _) in std::env::vars_os() {
         let key = key.to_string_lossy();
         if !allowed_key(
@@ -262,6 +276,7 @@ fn environment() -> Result<[String; 3]> {
             clock.is_some(),
             inventory_clock.is_some(),
             workshop.is_some(),
+            manager.is_some(),
         ) {
             return Err(denied(
                 "combined development rejects other DFMCP state and unconfigured native credentials",
@@ -271,9 +286,16 @@ fn environment() -> Result<[String; 3]> {
     Ok(raw)
 }
 
-fn allowed_key(key: &str, clock: bool, inventory_clock: bool, workshop: bool) -> bool {
+fn allowed_key(
+    key: &str,
+    clock: bool,
+    inventory_clock: bool,
+    workshop: bool,
+    manager: bool,
+) -> bool {
     match key {
         workshop_config::TOKEN => workshop,
+        manager_config::TOKEN => manager,
         "DFMCP_SEMANTIC_WORK_ORDER_ALLOW_CLOCK" | "DFMCP_SEMANTIC_WORK_ORDER_CLOCK_TOKEN" => clock,
         "DFMCP_SEMANTIC_WORK_ORDER_ALLOW_INVENTORY_CLOCK"
         | "DFMCP_SEMANTIC_WORK_ORDER_INVENTORY_CLOCK_TOKEN" => inventory_clock,
@@ -297,6 +319,8 @@ fn parse(
     Option<ClockConfig>,
     Option<WorkshopConfig>,
     Option<WorkshopPrerequisiteCheckpoint>,
+    Option<ManagerConfig>,
+    Option<ManagerPrerequisiteCheckpoint>,
 )> {
     if raw.is_empty() || raw.len() > MAX_CONFIG_BYTES {
         return Err(invalid("combined operator configuration exceeds 16 KiB"));
@@ -329,6 +353,18 @@ fn parse(
         .map(|workshop| workshop.validate(&input.directory))
         .transpose()?;
     let workshop_prerequisite_checkpoint = input.workshop_prerequisite_checkpoint;
+    let manager_prerequisite = input
+        .manager_prerequisite
+        .map(|manager| manager.validate(&input.directory))
+        .transpose()?;
+    let manager_prerequisite_checkpoint = input.manager_prerequisite_checkpoint;
+    if let (Some(workshop), Some(manager)) = (&workshop_prerequisite, &manager_prerequisite)
+        && !distinct_directories([&workshop.directory, &manager.directory])
+    {
+        return Err(denied(
+            "workshop and manager donors require disjoint private custody",
+        ));
+    }
     if let Some(checkpoint) = workshop_prerequisite_checkpoint {
         let workshop = workshop_prerequisite.as_ref().ok_or_else(|| {
             denied("pre-plan workshop checkpoint requires its exact configured donor")
@@ -341,6 +377,19 @@ fn parse(
         checkpoint
             .floor
             .validate(workshop.binding.generation(), checkpoint.floor.tick)?;
+    }
+    if let Some(checkpoint) = manager_prerequisite_checkpoint {
+        let manager = manager_prerequisite.as_ref().ok_or_else(|| {
+            denied("pre-plan manager checkpoint requires its exact configured donor")
+        })?;
+        if input.recovery.is_some() {
+            return Err(denied(
+                "pre-plan manager checkpoint cannot compete with complete original recovery",
+            ));
+        }
+        checkpoint
+            .floor
+            .validate(manager.binding.generation, checkpoint.floor.tick)?;
     }
     let recovery = input
         .recovery
@@ -416,6 +465,12 @@ fn parse(
                     .map(digest)
                     .transpose()?,
                 workshop_prerequisite_floor: r.workshop_prerequisite_floor,
+                manager_prerequisite_digest: r
+                    .manager_prerequisite_digest
+                    .as_deref()
+                    .map(digest)
+                    .transpose()?,
+                manager_prerequisite_floor: r.manager_prerequisite_floor,
             })
         })
         .transpose()?;
@@ -432,6 +487,21 @@ fn parse(
         {
             floor.validate(
                 workshop.binding.generation(),
+                recovery.frontier.authority_tick_floor,
+            )?;
+        }
+        if recovery.manager_prerequisite_digest.is_some() != manager_prerequisite.is_some()
+            || recovery.manager_prerequisite_floor.is_some() != manager_prerequisite.is_some()
+        {
+            return Err(denied(
+                "combined recovery requires the exact manager prerequisite association and consumed floors",
+            ));
+        }
+        if let (Some(manager), Some(floor)) =
+            (&manager_prerequisite, recovery.manager_prerequisite_floor)
+        {
+            floor.validate(
+                manager.binding.generation,
                 recovery.frontier.authority_tick_floor,
             )?;
         }
@@ -467,6 +537,8 @@ fn parse(
         inventory_clock,
         workshop_prerequisite,
         workshop_prerequisite_checkpoint,
+        manager_prerequisite,
+        manager_prerequisite_checkpoint,
     ))
 }
 
@@ -504,6 +576,8 @@ impl Config {
             inventory_clock,
             workshop_prerequisite,
             workshop_prerequisite_checkpoint,
+            manager_prerequisite,
+            manager_prerequisite_checkpoint,
         ) = parse(&raw[0])?;
         let check: Arc<dyn Fn() -> Result<()> + Send + Sync> = Arc::new(move || {
             let current = environment()?;
@@ -545,6 +619,14 @@ impl Config {
                     &workshop.directory,
                 ])
             })
+            || manager_prerequisite.as_ref().is_some_and(|manager| {
+                !distinct_directories([
+                    &directory,
+                    w.custody_directory(),
+                    o.custody_directory(),
+                    &manager.directory,
+                ])
+            })
             || w.endpoint() != o.endpoint()
             || w.initializing() != initialize
             || o.initializing() != initialize
@@ -561,6 +643,9 @@ impl Config {
             || workshop_prerequisite
                 .as_ref()
                 .is_some_and(|workshop| !workshop.matching_sources(wa, oa))
+            || manager_prerequisite
+                .as_ref()
+                .is_some_and(|manager| !manager.matching_sources(wa, oa))
             || recovery.is_some_and(|r| r.anchor.fortress_id != wa.fortress())
         {
             return Err(denied(
@@ -577,6 +662,8 @@ impl Config {
             inventory_clock,
             workshop_prerequisite,
             workshop_prerequisite_checkpoint,
+            manager_prerequisite,
+            manager_prerequisite_checkpoint,
             workforce,
             orders,
             check,
@@ -603,3 +690,7 @@ impl Config {
 #[cfg(test)]
 #[path = "config_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "manager_config_tests.rs"]
+mod manager_tests;

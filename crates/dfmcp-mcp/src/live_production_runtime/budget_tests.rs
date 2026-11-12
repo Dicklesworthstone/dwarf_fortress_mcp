@@ -1,6 +1,92 @@
 use super::*;
 
 #[test]
+fn manager_and_workshop_fit_four_target_dispatch_with_all_original_receipt_prefixes() {
+    let local =
+        4 * MIB + 32 * MIB + workshop_prerequisite::LOCAL_BYTES + manager_prerequisite::LOCAL_BYTES;
+    assert_eq!(local, 100 * MIB);
+    assert!(10 * local <= MANAGER_CUSTODY_READ_BYTES);
+    // Two semantic order edges each make two source refreshes and one final
+    // external-read check; each edge also rechecks its existing-labor policy.
+    // Together with the caller's initial custody check this is thirteen local
+    // verifications and six complete qualifications per prerequisite.
+    let original_guards =
+        13 * local + 6 * (workshop_prerequisite::CHECK_BYTES + manager_prerequisite::CHECK_BYTES);
+    assert!(original_guards <= MANAGER_CUSTODY_DISPATCH_BYTES);
+    let custody = MANAGER_CUSTODY_DISPATCH_BYTES + 6 * stock_targets::CHECK_BYTES;
+    let public = 8 * 1024 * MIB - 512 * MIB - 128 * 1024;
+    let output = 256 * MIB;
+    assert!(custody < (public - output) / 2);
+    // The last of four order leaves may read all three earlier Created receipts.
+    let prefix = 3 * 512 * MIB;
+    assert!(custody + prefix + MAX_FRONTIER_BYTES + output + 8 * MIB < public);
+}
+
+#[test]
+fn manager_reconciliation_keeps_the_first_joined_sample_within_the_public_allowance() -> Result<()>
+{
+    // The public server keeps its reply allowance before entering Runtime.
+    // Exercise the diminishing Work owner used by a lost-reply Wait, including
+    // empty-history initialization and the final independently reserved view.
+    for workshop in [false, true] {
+        let public = 8 * 1024 * MIB - 512 * MIB - 128 * 1024;
+        let c = OperationContext {
+            session_id: SessionId::new(1),
+            request_id: RequestId::new(1),
+            anchor: StateAnchor {
+                fortress_id: dfmcp_core::FortressId::new(1),
+                cursor: ObservationCursor::ORIGIN,
+                tick: GameTick(1),
+                state_hash: Digest32::of_bytes(b"manager reconciliation budget"),
+            },
+            budget: WorkBudget {
+                max_bytes: public,
+                max_wall_millis: MAX_WALL_MILLIS,
+                ..WorkBudget::CONSERVATIVE_DEFAULT
+            },
+            grants: Vec::new(),
+            cancellation_requested: false,
+        };
+        let local = 4 * MIB
+            + 32 * MIB
+            + manager_prerequisite::LOCAL_BYTES
+            + if workshop {
+                workshop_prerequisite::LOCAL_BYTES
+            } else {
+                0
+            };
+        let mut work = Work::new(&c)?;
+        let deadline = work.until;
+        let output = work.take(256 * MIB)?;
+        let receipt_checks = work.take(2 * local)?;
+        work.take(16 * MIB)?; // Frontier views before and after reconciliation.
+        let reconciliation = work.rest(MAX_FRONTIER_BYTES)?;
+        work.take(8 * MIB)?; // History's settled-frontier check.
+        let history_checks = work.take(2 * local)?;
+        let final_history_check = work.take(1)?;
+        let history = goals::history_budget(&mut work, true)?;
+        let sample_checks = work.take((work.bytes / 2).min(MANAGER_CUSTODY_READ_BYTES))?;
+        work.take(MIB)?; // Original citizen mapping before the joined sample.
+        let sample = work.rest(MAX_BYTES)?;
+        assert_eq!(reconciliation.budget.max_bytes, MAX_FRONTIER_BYTES);
+        assert_eq!(receipt_checks.budget.max_bytes, 2 * local);
+        assert_eq!(history_checks.budget.max_bytes, 2 * local);
+        assert_eq!(history.budget.max_bytes, 1536 * MIB);
+        assert_eq!(final_history_check.budget.max_bytes, 1);
+        assert!(sample_checks.budget.max_bytes >= 10 * local);
+        assert!(sample.budget.max_bytes >= 2 * 1024 * MIB);
+        assert_eq!(work.bytes, 0);
+        assert_eq!(work.until, deadline);
+        assert!(work.take(1).is_err());
+        let mut publication = Work::new(&output)?;
+        let publication_check = publication.take(publication.bytes / 2)?;
+        assert!(publication_check.budget.max_bytes >= local);
+        assert!(publication.bytes >= 3 * 8 * MIB);
+    }
+    Ok(())
+}
+
+#[test]
 fn stock_target_dispatch_budget_fits_with_workshop_and_native_frontier() {
     let source = 33 * MIB
         + dfmcp_adapter::semantic_work_orders::INVENTORY_BASELINE_PROJECTION_BYTES

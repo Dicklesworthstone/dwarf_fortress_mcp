@@ -60,7 +60,8 @@ generations remain independently pinned; they need not equal each other.
 `DFMCP_COMBINED_PRODUCTION_CONFIG` is a closed JSON object with schema
 `dfmcp.combined-production-development/1`, an absolute normalized `directory`,
 Boolean `initialize`, and optional `recovery`, `clock`, `inventory_clock`,
-`workshop_prerequisite` and `workshop_prerequisite_checkpoint`. All three custody directories
+`workshop_prerequisite`, `workshop_prerequisite_checkpoint`,
+`manager_prerequisite` and `manager_prerequisite_checkpoint`. All three custody directories
 must be separate and nonnested. Existing private-file owners require real
 owner-private directories and regular no-follow files with canonical modes;
 the host neither repairs nor silently replaces custody.
@@ -262,6 +263,127 @@ durably acknowledge later read floors. Preserve the latest complete external
 state across failures and close/reopen. The host does not claim independent
 durable acknowledgement or complete native continuity for omitted or rolled-back
 externally held state.
+
+## Require the original appointed production manager
+
+The combined host can also require the cache-bearing appointment made by the
+[Manager 1.23 owner](MANAGER_APPOINTMENT_V1_23.md). This closes the handoff between
+appointing a manager and inserting production orders. The host imports one
+complete independently acknowledged original appointment Offline, then reads
+that same manager at the current paused production tick. It never appoints a
+replacement or changes the responsibility cache.
+
+Add `manager_prerequisite` to the parent configuration. It can be used alone or
+alongside `workshop_prerequisite`:
+
+```json
+{
+  "manager_prerequisite": {
+    "directory": "/private/appointed-manager",
+    "endpoint": "127.0.0.1:5001",
+    "world_folder": "region1",
+    "site_id": 7,
+    "df_version": "<exact donor DF version>",
+    "dfhack_version": "<exact donor DFHack version>",
+    "generation": 40,
+    "map_dimensions": [64, 64, 4],
+    "unit_id": 256,
+    "histfig_id": 361,
+    "acknowledged": {
+      "journal_id": "<64 lowercase hexadecimal digits>",
+      "head": "<64 lowercase hexadecimal digits>",
+      "frames": 4
+    },
+    "original_key": "original-manager.1",
+    "original_plan_digest": "<64 lowercase hexadecimal digits>"
+  }
+}
+```
+
+These are illustrative values; use the exact donor configuration and latest
+externally retained acknowledgement. The source must match the production
+world, site and software, with independently pinned manager generation,
+dimensions and numeric IPv4 loopback endpoint. Its private directory must be
+disjoint from the parent, both child owners and any workshop donor. The closed
+configuration admits only Manager 1.23. A 1.22 appointment does not contain the
+required responsibility-cache evidence and cannot be substituted.
+
+Online checks use the separate read credential
+`DFMCP_COMBINED_PRODUCTION_MANAGER_TOKEN`. The combined host rejects every
+manager write through its connection permission closure. The appointment
+journal and ACK remain untouched. Local custody inspection and Offline reopening
+need no manager token and make no native contact.
+
+### What is freshly checked
+
+Before publishing a positive original plan, and at each protected native order
+preparation and insertion boundary, the host reads the original selected
+citizen using `ReadManager`. It checks the exact unit, historical figure, group
+and assignment; current active citizenship, identity and membership; the
+ordinary Manager definition; the original position link; both native role
+getters; and the production-responsibility cache containing that assignment.
+The source must be the independently pinned Manager 1.23 incarnation at the
+same paused fortress tick as the combined operation. Donor journal/ACK custody
+and the parent association are checked around the read.
+
+The check allows unrelated roster, history and other assignment changes. The
+entire historical appointment poststate is not required to remain frozen.
+Native sequence values must not regress; equal sequence values on repeated
+reads are valid. Loss of the original identity or source continuity fences the
+owner. A missing production cache cannot authorize insertion even when a
+historical appointment succeeded.
+
+The immutable manager witness is included before the original IntentId, step
+keys and created-order identities are derived. The sealed summary contains a
+closed versioned `dfmcp-manager-prerequisite/1` marker, after the workshop marker
+when both are configured. Every request family supports this composition,
+including both stock-target modes and portfolios with explicit labor assignment.
+Existing plans without manager policy retain their previous identity bytes.
+Wholly satisfied stock targets still return a no-work observation without
+planning labor, creating an original or performing a fresh manager dispatch
+check.
+
+The parent retains private `original.manager` association custody. Its compact
+immutable descriptor commits to the full canonical donor record digest, exact
+original key/plan, source binding and acknowledged journal pin; it does not copy
+the potentially large appointment record into the association. Removing the
+configuration or association cannot downgrade a marked recovered original.
+Both prerequisites can coexist without losing either marker during stock-target
+recovery.
+
+### Retain the complete manager checkpoint
+
+The response's `manager_prerequisite` reports original identity, record/receipt
+commitments, association digest and `source_fenced`. `last_qualified` is a
+historical read, explicitly `fresh_for_current_call=false`. Query, error
+compaction and Offline recovery do not turn it into current readiness or an
+order-dispatch permission.
+
+Preserve the complete returned checkpoint, including `origin_witness`, `tick`,
+`generation`, `sequence`, `next_event`, `history_count`,
+`group_next_position`, `group_next_assignment`, `civ_next_position`,
+`civ_next_assignment` and `fenced`. Decoded source floors are retained even when
+later checks or response publication fail. Before a production original exists,
+supply that exact object as `manager_prerequisite_checkpoint` on reopening.
+After original publication, retain the full `recovery` object with
+`manager_prerequisite_digest` and `manager_prerequisite_floor`, together with
+`original.manager` and the donor
+`manager-appointment-v1-23.journal`/`manager-appointment-v1-23.ack` pair.
+Reopening restores neither current readiness nor a confirmation permit.
+
+The fresh-source checkpoint is caller-held recovery custody. The donor ACK
+proves the original appointment; it does not durably acknowledge these later
+reads. As with the workshop checkpoint, a new process cannot independently
+detect every rollback of an entire external checkpoint beyond the donor seed.
+The retained owner rejects regressions it has consumed and never clears its
+fence through a lower-floor restore.
+
+This prerequisite establishes the manager facts required by this dispatch
+policy. It does not prove office sufficiency, materials, path access, recipe
+feasibility, productivity, output attribution or the complete production goal.
+The independent native plugins do not provide an atomic fortress transaction.
+No bridge method, native writer, public MCP tool or production admission is
+added by this handoff.
 
 ## Public sequence
 
@@ -1695,8 +1817,22 @@ original order, at most three. These reservations share the same default 8 GiB
 call allowance and shrinking wall deadline. The prefix must exactly match the
 earlier original Created queue readback; arbitrary rows are not classified by
 this receipt check.
+When the manager prerequisite is configured, its owner uses the same 200 MiB
+import, 80 MiB fresh-read and 32 MiB local-verification reservations. Read custody
+can reserve 1,152 MiB and ordinary dispatch 2,304 MiB, accounting for both optional
+donors together. With a four-target vector, dispatch custody can reserve
+3,684 MiB for repeated prerequisite, census and queue checks. The existing 8 GiB
+default public allowance covers this reservation plus the bounded prior-order
+receipt inspections and frontier work. Configurations without manager policy
+retain their previous ceilings. Receipt-only reconciliation and history opening
+or replay reserve their two actual local custody verifications separately:
+36 MiB per check for the original archive/identity plus 32 MiB for each configured
+donor, at most 200 MiB per phase. The joined parent sample keeps its full allowance.
+This lets lost-reply reconciliation open original goal history and publish a
+fresh joined sample without repeatedly reserving the ten-check sample allowance.
+
 These are logical work charges, not native frame sizes or eager allocations;
-the immutable association itself remains at most 64 KiB.
+each immutable prerequisite association remains at most 64 KiB.
 
 The machine description is
 [`live_production_executor_v1.json`](../architecture/live_production_executor_v1.json),
