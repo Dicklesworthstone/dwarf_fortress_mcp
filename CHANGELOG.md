@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased — Replay conditions across retained laboratory history
+
+- Add `condition_replay` to the existing query tool, evaluating an exact
+  retained interval through the real laboratory watch state machine.
+- Preserve cadence, stable samples, unknowns, failure precedence, generation
+  fences and first terminal evidence. Charge and validate every selected source,
+  including observations after a terminal outcome.
+- Refuse collected interiors, unretained endpoints and cross-epoch history;
+  expose canonical cursor gaps without reconstructing missing observations.
+- Preserve current authority, pending game work, baselines and watches. Read-only
+  syntax refusals cannot publish durable progress or retain a new world version.
+- Add 17 focused regression sources and a closed schema. Owned-source formatting
+  and schema vectors pass. The full pinned MCP attempt stopped when unchanged
+  Asupersync received SIGKILL; actual-source component validation is underway,
+  and no new Rust test has executed at this checkpoint. No full-runtime or live
+  admission claim is added.
+
 ## Unreleased — Authorize future project stages before simulation accounting
 
 Complete-project forecasts now check each newly compiled stage's exact effect

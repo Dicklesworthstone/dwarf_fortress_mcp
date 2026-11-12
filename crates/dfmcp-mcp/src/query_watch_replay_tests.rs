@@ -343,3 +343,64 @@ fn all_samples_share_one_population_evaluation_work_allowance() -> Result<()> {
     assert!(replay.finish(false, &c).is_err());
     Ok(())
 }
+
+#[test]
+fn laboratory_replay_uses_registered_facts_without_broadening_native_replay() -> Result<()> {
+    let mut source = snapshot(1, 1, true, 1);
+    let fact = source
+        .graph
+        .entities
+        .get_mut(&EntityId::new(1))
+        .and_then(|entity| entity.fields.get_mut("ready"))
+        .ok_or_else(|| invalid("test fact absent"))?;
+    fact.source = FactSource::Derived("dfmcp.lab-scenario/1".into());
+    fact.source_digest = Digest32::ZERO;
+    source.refresh_hash();
+    let c = context(source.anchor());
+    let mut input = definition(1, 1, 50);
+    input["condition"] = json!({"op":"field","entity_id":"1","generation":1,
+        "field":"ready","comparison":"eq","value":{"type":"bool","value":true}});
+    let binding = Digest32::of_bytes(b"same-sampled-input");
+    let mut native = Replay::new(&input, source.anchor(), 1, 1, binding, &c)?;
+    let mut laboratory = Replay::laboratory(&input, source.anchor(), 1, binding, &c)?;
+    native.advance(1, &source, &c)?;
+    laboratory.advance(1, &source, &c)?;
+    let native = native.finish(true, &c)?;
+    let laboratory = laboratory.finish(true, &c)?;
+    assert_eq!(native["status"], "blocked_unknown");
+    assert_eq!(laboratory["status"], "satisfied");
+    assert_ne!(native["replay_id"], laboratory["replay_id"]);
+    assert_ne!(native["evidence_digest"], laboratory["evidence_digest"]);
+    assert!(native.get("evidence_policy").is_none());
+    assert_eq!(laboratory["evidence_policy"], "laboratory_reference/1");
+    Ok(())
+}
+
+#[test]
+fn laboratory_replay_refuses_native_predicates_and_validates_after_terminal() -> Result<()> {
+    let source = snapshot(1, 1, true, 1);
+    let c = context(source.anchor());
+    let binding = Digest32::of_bytes(b"laboratory-range");
+    let native_only = json!({"condition":{"op":"item_quantity","scope":"observed_projection",
+        "quantity_unit":"stack_units","predicate":{"op":"always"},"comparison":"ge","value":1},
+        "deadline_tick":50,"stable_observations":1});
+    assert!(Replay::new(&native_only, source.anchor(), 1, 1, binding, &c).is_ok());
+    assert!(
+        matches!(Replay::laboratory(&native_only, source.anchor(), 1, binding, &c), Err(e) if e.code == ErrorCode::InvalidRequest)
+    );
+    let mut replay = Replay::laboratory(&definition(1, 1, 50), source.anchor(), 2, binding, &c)?;
+    replay.advance(1, &source, &c)?;
+    let mut changed = snapshot(2, 2, true, 1);
+    let entity = changed
+        .graph
+        .entities
+        .remove(&EntityId::new(1))
+        .ok_or_else(|| invalid("test entity absent"))?;
+    changed.graph.entities.insert(EntityId::new(2), entity);
+    changed.refresh_hash();
+    assert!(
+        matches!(replay.advance(2, &changed, &c), Err(e) if e.code == ErrorCode::InternalInvariantViolation)
+    );
+    assert!(replay.finish(false, &c).is_err());
+    Ok(())
+}

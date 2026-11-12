@@ -11,7 +11,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
-use dfmcp_core::Digest32;
+use dfmcp_core::{DfmcpError, Digest32, ErrorCode, Result};
 
 use crate::model::WorldSnapshot;
 
@@ -161,6 +161,72 @@ impl VersionRetention {
         self.versions.get(hash).map(|(_, snapshot)| snapshot)
     }
 
+    /// Read an exact inclusive interval of consecutively recorded versions.
+    ///
+    /// Retained endpoints do not imply retained history between them: a plan or
+    /// checkpoint may pin old endpoints after an interior version is collected.
+    /// Refuse such holes rather than silently stitching the surviving versions.
+    /// Recording continuity does not establish observation-cursor continuity;
+    /// consumers must preserve any gaps in the snapshots' original cursors.
+    pub fn consecutive_range(
+        &self,
+        from: &Digest32,
+        through: &Digest32,
+        max_versions: usize,
+    ) -> Result<Vec<&WorldSnapshot>> {
+        if max_versions == 0 {
+            return Err(DfmcpError::new(
+                ErrorCode::InvalidRequest,
+                "retained interval requires a positive version bound",
+            ));
+        }
+        let (first, _) = self.versions.get(from).ok_or_else(|| {
+            DfmcpError::new(
+                ErrorCode::StaleAnchor,
+                "retained interval start is unavailable",
+            )
+        })?;
+        let (last, _) = self.versions.get(through).ok_or_else(|| {
+            DfmcpError::new(
+                ErrorCode::StaleAnchor,
+                "retained interval end is unavailable",
+            )
+        })?;
+        let length = last
+            .checked_sub(*first)
+            .and_then(|span| span.checked_add(1))
+            .ok_or_else(|| {
+                DfmcpError::new(
+                    ErrorCode::InvalidRequest,
+                    "retained interval endpoints are in reverse recording order",
+                )
+            })?;
+        if length > max_versions as u64 {
+            return Err(DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                "retained interval exceeds its complete version bound",
+            ));
+        }
+        let mut versions: Vec<_> = self
+            .versions
+            .values()
+            .filter(|(sequence, _)| sequence >= first && sequence <= last)
+            .collect();
+        versions.sort_by_key(|(sequence, _)| *sequence);
+        if versions.len() as u64 != length
+            || versions
+                .iter()
+                .enumerate()
+                .any(|(offset, (sequence, _))| *sequence != first.saturating_add(offset as u64))
+        {
+            return Err(DfmcpError::new(
+                ErrorCode::StaleAnchor,
+                "retained interval contains collected observations; incomplete history cannot be replayed",
+            ));
+        }
+        Ok(versions.into_iter().map(|(_, snapshot)| snapshot).collect())
+    }
+
     /// The most recently recorded version.
     #[must_use]
     pub fn newest(&self) -> Option<&WorldSnapshot> {
@@ -296,5 +362,66 @@ mod tests {
         assert!(peak <= 16 + 4, "retained {peak}");
         assert_eq!(store.len(), 20);
         assert!(store.tombstones.len() <= MAX_TOMBSTONES);
+    }
+
+    #[test]
+    fn consecutive_range_preserves_recorded_order_and_original_cursor_gaps() -> Result<()> {
+        let mut store = VersionRetention::new(4, 0);
+        let versions = [version(1, 1), version(3, 1), version(8, 1)];
+        for snapshot in &versions {
+            store.record(snapshot);
+        }
+        let range = store.consecutive_range(&versions[0].state_hash, &versions[2].state_hash, 3)?;
+        assert_eq!(range, versions.iter().collect::<Vec<_>>());
+        assert_eq!(range[1].cursor.sequence, 3);
+        assert_eq!(
+            store.consecutive_range(&versions[1].state_hash, &versions[1].state_hash, 1)?,
+            vec![&versions[1]]
+        );
+        assert_eq!(
+            store
+                .consecutive_range(&versions[0].state_hash, &versions[2].state_hash, 2)
+                .unwrap_err()
+                .code,
+            ErrorCode::BudgetExceeded
+        );
+        assert_eq!(
+            store
+                .consecutive_range(&versions[2].state_hash, &versions[0].state_hash, 3)
+                .unwrap_err()
+                .code,
+            ErrorCode::InvalidRequest
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn pinned_endpoints_do_not_hide_a_collected_interior() {
+        let mut store = VersionRetention::new(1, 2);
+        let versions: Vec<_> = (1..=4).map(|tick| version(tick, 1)).collect();
+        for snapshot in &versions {
+            store.record(snapshot);
+        }
+        store.collect(
+            &[versions[0].state_hash, versions[2].state_hash]
+                .into_iter()
+                .collect(),
+        );
+        assert!(store.get(&versions[0].state_hash).is_some());
+        assert!(store.get(&versions[2].state_hash).is_some());
+        assert_eq!(
+            store
+                .consecutive_range(&versions[0].state_hash, &versions[2].state_hash, 3)
+                .unwrap_err()
+                .code,
+            ErrorCode::StaleAnchor
+        );
+        assert_eq!(
+            store
+                .consecutive_range(&versions[1].state_hash, &versions[3].state_hash, 4)
+                .unwrap_err()
+                .code,
+            ErrorCode::StaleAnchor
+        );
     }
 }

@@ -81,6 +81,19 @@ pub(crate) type WatchJournalGuard = query_watch::WatchJournalGuard;
 /// Request-owned sampled replay; this type has no retained watch-store ownership.
 pub(crate) type HistoricalWatchReplay = query_watch::HistoricalWatchReplay;
 
+/// The laboratory owner resolves every retained version and admits the complete
+/// interval before constructing this request-local monitor. Client input never
+/// chooses its evidence policy, and no retained watch handle is created.
+pub(super) fn laboratory_condition_replay(
+    definition: &Value,
+    first: StateAnchor,
+    records: u64,
+    binding: Digest32,
+    context: &OperationContext,
+) -> Result<HistoricalWatchReplay> {
+    HistoricalWatchReplay::laboratory(definition, first, records, binding, context)
+}
+
 /// The runtime must exclusively own the resolved session across this call.
 /// This release-only path returns no world facts, does not evaluate predicates,
 /// and never changes journal bytes. Render failure leaves both registries intact.

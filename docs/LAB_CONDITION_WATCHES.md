@@ -338,3 +338,14 @@ complete publication, existing game work, source/output budgets and public
 labor/clock flows. Their execution and qualification status is recorded in the
 repository implementation status; source registration alone is not runtime or
 native-game evidence.
+
+## Replay a sampled condition over retained observations
+
+Use the separate read-only `mode: "condition_replay"` query to run this same
+condition and temporal state machine over an exact interval of already retained
+laboratory versions. It can reveal a failure or stability reset hidden by an
+endpoint comparison without registering or sampling a live watch. Collected
+interior versions refuse, and original cursor gaps reset positive stability;
+the result never claims continuous history. The request, evidence fields and
+full-interval budget contract are in
+[`LAB_CONDITION_REPLAY.md`](LAB_CONDITION_REPLAY.md).

@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dwarf-fortress-mcp.org/schemas/0.1.0/lab_condition_replay.schema.json",
+  "title": "Sampled condition replay over an exact retained laboratory interval",
+  "description": "Decoded mode-string request for the existing fortress_query tool. Reuses the foreground laboratory watch state machine on 1..32 consecutively recorded retained versions under current Query authority. Creates no watch, baseline, game effect or observation and establishes no continuous history or mutation evidence.",
+  "$comment": "Runtime rejects duplicate wrapper, definition and condition fields from original bytes; caps the UTF-8 request at 65536 bytes; admits every complete selected source before evaluation; refuses collected interior versions and wrong-epoch/future/forked anchors; and preserves original cursor gaps, cadence, unknowns, generation fencing, failure precedence and terminal freezing. The first retained version acts as registration. The deadline must be later than its tick and does not confer permission to advance game time.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["mode", "from", "definition"],
+  "properties": {
+    "mode": {"const": "condition_replay"},
+    "from": {"$ref": "#/$defs/state_hash"},
+    "to": {
+      "anyOf": [{"$ref": "#/$defs/state_hash"}, {"type": "null"}],
+      "description": "Exact inclusive final retained version. Omitted or null selects the current world, which must already be retained by this session. Observe a newly encountered shared frontier first."
+    },
+    "definition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["condition", "deadline_tick"],
+      "properties": {
+        "condition": {"$ref": "./lab_query_watches.schema.json#/$defs/condition"},
+        "failure_condition": {
+          "anyOf": [
+            {"$ref": "./lab_query_watches.schema.json#/$defs/condition"},
+            {"type": "null"}
+          ]
+        },
+        "deadline_tick": {"type": "integer", "minimum": 0, "maximum": 18446744073709551615},
+        "poll_interval_ticks": {"type": ["integer", "null"], "minimum": 1, "maximum": 1000000, "default": 1},
+        "stable_observations": {"type": ["integer", "null"], "minimum": 1, "maximum": 64, "default": 2}
+      }
+    },
+    "detail": {
+      "enum": ["summary", "evidence"],
+      "default": "summary",
+      "description": "Both projections evaluate the complete interval and have the same evidence identity. Evidence additionally includes status transitions and the last predicate evaluation."
+    }
+  },
+  "$defs": {
+    "state_hash": {"type": "string", "minLength": 64, "maxLength": 64, "pattern": "^[0-9a-f]{64}$"}
+  }
+}

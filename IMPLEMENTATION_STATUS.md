@@ -1,5 +1,37 @@
 # Implementation Status
 
+## Unreleased — Retrospective laboratory condition monitoring
+
+The existing `fortress.query` accepts the closed `condition_replay` wrapper.
+It evaluates one to 32 consecutive retained versions through the actual
+laboratory watch evaluator and temporal state machine, preserving cadence,
+failure guards, unknown facts, generation fences, stability resets at cursor
+gaps and the first terminal outcome. Complete source admission and validation
+include later versions after early satisfaction. The result binds the exact
+ordered interval and definition, retains historical/current anchors separately,
+and cannot authorize effects or establish truth between samples.
+
+A new exact retention-range reader refuses a collected interior even when plans
+or checkpoints keep both endpoints alive. Unobserved current shared frontiers
+require an explicit Observe first; replay does not reconstruct observations.
+Current Query authority precedes history selection. All selected source records
+and canonical bytes share the original allowances, predicate work is bounded,
+and the complete result plus Agent Turn is lossless or refused. Pending game
+work, baselines and watches remain intact. Malformed query bodies use immutable
+ownership, preventing a refusal from publishing history or durable progress.
+
+Validation checkpoint: 17 new Rust regression sources cover the interval reader,
+actual watch policy isolation, full wrapper semantics and public labor history.
+Latest nightly rustfmt and whitespace checks pass. Three composed schema
+metaschemas and positive/negative request vectors pass. The official latest
+nightly (rustc1.102.0-nightly,9c5648833,2026-11-10) and all exact locked dependencies
+were restored. The actual pinned MCP attempt stopped in unchanged asupersync
+0.5.0 when rustc received SIGKILL (one build job, without a Rust source diagnostic).
+Focused actual-source component validation is underway; no new Rust test has
+executed at this checkpoint. Full transport/native/release qualification and
+live admission remain separate. Owning bead df-lab-structured-query-f7q.3 stays
+in progress. See docs/LAB_CONDITION_REPLAY.md for inputs and evidence limits.
+
 ## Unreleased — Authorize future project stages before simulation accounting
 
 Complete-project forecasts now check each newly compiled stage's exact effect

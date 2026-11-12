@@ -37,6 +37,47 @@ impl Replay {
         binding: Digest32,
         context: &OperationContext,
     ) -> Result<Self> {
+        Self::with_policy(
+            input,
+            first,
+            first_record,
+            last_record,
+            binding,
+            context,
+            SourcePolicy::Native,
+        )
+    }
+
+    /// The laboratory owner supplies exact retained canonical versions. This
+    /// private constructor cannot broaden native evidence or select a policy
+    /// from client JSON, and it never acquires either retained watch store.
+    pub(crate) fn laboratory(
+        input: &Value,
+        first: StateAnchor,
+        records: u64,
+        binding: Digest32,
+        context: &OperationContext,
+    ) -> Result<Self> {
+        Self::with_policy(
+            input,
+            first,
+            1,
+            records,
+            binding,
+            context,
+            SourcePolicy::LaboratoryReference,
+        )
+    }
+
+    fn with_policy(
+        input: &Value,
+        first: StateAnchor,
+        first_record: u64,
+        last_record: u64,
+        binding: Digest32,
+        context: &OperationContext,
+        policy: SourcePolicy,
+    ) -> Result<Self> {
         context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
         if first.fortress_id != context.anchor.fortress_id || binding == Digest32::ZERO {
             return Err(failure(
@@ -66,17 +107,22 @@ impl Replay {
             stable_observations: input.stable_observations.unwrap_or(2),
         };
         validate_definition(&definition)?;
+        policy.validate_definition(&definition)?;
         if definition.deadline_tick <= first.tick.0 {
             return Err(invalid(
                 "historical monitor deadline must follow its first selected capture",
             ));
         }
-        let identity = digest(&json!({"domain":"dfmcp-historical-watch-replay/1",
+        let domain = match policy {
+            SourcePolicy::Native => "dfmcp-historical-watch-replay/1",
+            SourcePolicy::LaboratoryReference => "dfmcp-laboratory-historical-watch-replay/1",
+        };
+        let identity = digest(&json!({"domain":domain,
             "binding":binding.to_string(),"first_record":first_record,"last_record":last_record,
             "basis":anchor(first),"definition":definition}))?;
         let watch = Watch {
             handle: format!("replay:{identity}"),
-            source_policy: SourcePolicy::Native,
+            source_policy: policy,
             definition,
             created_at: first,
             last_seen: first,
@@ -152,6 +198,7 @@ impl Replay {
                 "historical monitor snapshot hash is invalid",
             ));
         }
+        self.watch.source_policy.validate_snapshot(snapshot)?;
         let initial = self.visited == 0;
         if initial && snapshot.anchor() != self.watch.created_at {
             return Err(failure(
@@ -188,7 +235,13 @@ impl Replay {
                 "historical monitor cannot publish an incomplete replay",
             ));
         }
-        let proof = digest(&json!({"domain":"dfmcp-historical-watch-replay-result/1",
+        let domain = match self.watch.source_policy {
+            SourcePolicy::Native => "dfmcp-historical-watch-replay-result/1",
+            SourcePolicy::LaboratoryReference => {
+                "dfmcp-laboratory-historical-watch-replay-result/1"
+            }
+        };
+        let proof = digest(&json!({"domain":domain,
             "identity":self.identity.to_string(),"terminal_record":self.first_terminal_record,
             "visited":self.visited,"evaluated":self.evaluated,
             "monitor_evidence":self.watch.evidence_digest.to_string()}))?;
@@ -217,6 +270,10 @@ impl Replay {
         if details {
             value["status_changes"] = json!(self.changes);
             value["evaluation"] = self.watch.evaluation;
+        }
+        if self.watch.source_policy == SourcePolicy::LaboratoryReference {
+            value["evidence_policy"] = json!("laboratory_reference/1");
+            value["durable"] = json!(false);
         }
         let maximum = context
             .budget

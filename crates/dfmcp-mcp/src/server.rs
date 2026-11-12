@@ -102,6 +102,13 @@ mod query_response;
 #[path = "lab_query_comparison.rs"]
 mod query_comparison;
 
+#[path = "lab_condition_replay.rs"]
+mod condition_replay;
+
+#[cfg(test)]
+#[path = "lab_condition_replay_mcp_tests.rs"]
+mod condition_replay_mcp_tests;
+
 #[cfg(test)]
 #[path = "lab_query_comparison_mcp_tests.rs"]
 mod query_comparison_mcp_tests;
@@ -3409,16 +3416,16 @@ impl PreparedProjectedQuery {
     }
 }
 
-/// Baselines and watches own private query state, not durable-world progress. Keep
-/// the same admission/owner/world/session fences without starting persistence
-/// or retaining another world version after their accepted publication.
+/// Private query state, historical analysis and syntax refusals do not publish
+/// durable-world progress. Keep the same admission/owner/world/session fences
+/// without persistence or retaining a new world version as a read side effect.
 fn with_query_session<T>(
     session: &Arc<Mutex<LabSession>>,
-    temporal: bool,
+    read_only: bool,
     poisoned: impl FnOnce() -> T,
     body: impl FnOnce(&mut LabSession) -> T,
 ) -> T {
-    if !temporal {
+    if !read_only {
         return with_session(session, poisoned, body);
     }
     let _admission = match LAB_ADMISSION.read() {
@@ -3448,9 +3455,12 @@ fn query_publication(
     let mode = mode.map_or_else(|| "summary".to_owned(), |value| value);
     let structured = structured_query::parse(&mode);
     let comparison = query_comparison::parse(&mode);
+    let replay = condition_replay::parse(&mode);
     let temporal = temporal_query::parse(&mode);
     let is_structured = matches!(&structured, Ok(Some(_)));
     let is_temporal = matches!(&temporal, Ok(Some(_)));
+    let is_replay = matches!(&replay, Ok(Some(_)));
+    let invalid_query = structured.is_err() || comparison.is_err() || replay.is_err() || temporal.is_err();
     let session = match resolve_session(session_id) {
         Ok(value) => value,
         Err(error) => {
@@ -3459,7 +3469,7 @@ fn query_publication(
     };
     with_query_session(
         &session,
-        is_temporal,
+        is_temporal || is_replay || invalid_query,
         || QueryPublication::Pending(mutex_poisoned_payload("fortress.query")),
         |guard| {
             let (_, ctx) = match next_context(guard) {
@@ -3475,9 +3485,11 @@ fn query_publication(
                 authorize_entry(&ctx, Capability::Query, RiskTier::ReadOnly).and_then(|()| {
                     let structured = structured?;
                     let comparison = comparison?;
+                    let replay = replay?;
                     let temporal = temporal?;
                     if structured.is_none()
                         && comparison.is_none()
+                        && replay.is_none()
                         && temporal.is_none()
                         && mode.len() > MAX_MODE_BYTES
                     {
@@ -3501,6 +3513,21 @@ fn query_publication(
                             );
                         }
                         return Ok(QueryPublication::Published(response));
+                    }
+                    if let Some(request) = &replay {
+                        let spent_millis = started.elapsed().as_nanos().div_ceil(1_000_000);
+                        if spent_millis >= u128::from(ctx.budget.max_wall_millis) {
+                            return Err(DfmcpError::new(ErrorCode::BudgetExceeded,
+                                "condition replay exhausted its wall-time allowance before owning the session"));
+                        }
+                        let mut remaining = ctx.clone();
+                        remaining.budget.max_wall_millis -= spent_millis as u64;
+                        let payload = condition_replay::execute(
+                            &guard.history, guard.adapter.snapshot(), &remaining, request,
+                        )?;
+                        return Ok(QueryPublication::Pending(query_budget::response(
+                            Ok(payload), &ctx, false,
+                        )));
                     }
                     // Select historical state only after authorizing at the current
                     // game tick. Neither an old source nor its cursor renews a grant.

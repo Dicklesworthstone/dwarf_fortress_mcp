@@ -344,6 +344,13 @@ atomic laboratory action, tick, cancellation, restore and recovery publication.
 Its `coverage.producer` describes bounded retention and omitted details;
 [`docs/LAB_EVENT_HISTORY.md`](docs/LAB_EVENT_HISTORY.md) defines the source model.
 
+Laboratory `condition_replay` evaluates a closed temporal definition over one
+to 32 exact retained consecutive versions. It preserves ordinary sampled watch
+semantics, refuses collected interiors, charges the complete selected interval,
+and retains current authority and Agent Turn anchors separately from historical
+evidence. It creates no watch or game effect and cannot prove continuous truth
+between observations. See [retained condition replay](docs/LAB_CONDITION_REPLAY.md).
+
 ### `fortress.plan`
 
 Compiles an objective/intent without effects. Returns immutable candidate plan(s), digest, action
