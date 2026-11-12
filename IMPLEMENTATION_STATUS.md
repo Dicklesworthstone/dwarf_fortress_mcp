@@ -1,5 +1,41 @@
 # Implementation Status
 
+## Unreleased — Complete stock requirements in native production parents
+
+Existing-worker production parents can retain one to four distinct furniture
+stack-unit minima in addition to their original order objectives and positive
+citizen/labor requirements. Minima use the closed BED/CHAIR/DOOR/TABLE quantity
+grammar with bounds of 1..1,000,000. The exact archive must reconstruct every
+original requirement. Selected and complete parent results expose sorted current
+inventory findings independently qualified against the original inventory source
+policy, before joining workforce evidence. Missing coverage remains Unknown;
+a source union cannot strengthen an independently unqualified stock finding.
+
+Complete portfolio composition now checks all inventory findings together with
+the already-required identical operations/workforce captures and native progress
+bracket. Originally sufficient stock remains a current parent requirement even
+when it has no associated action. Historical leaf achievement remains separate
+from current whole-parent truth.
+
+The executor also exposes read-only retained-order custody inspection. It checks
+the original semantic association, Created native record, dependency receipts,
+private view integrity and current Query authority while preserving another
+original order's process-local preparation. It performs no native read or effect;
+failure abandons preparation through the existing conservative path.
+
+Seven added adapter regression sources cover the closed/archive shape, initially
+met stock loss, incomplete inventory authority, cross-leaf census drift, commit
+continuity after prior-order inspection, query-only recovery and corrupt custody.
+Independent source review is complete. The execution workspace disconnected, so
+these exact changes have not been compiled, formatted or executed; mandatory
+verification and live-game qualification remain outstanding. This foundation
+does not yet expose the multi-target MCP planning request or add whole-parent
+temporal stability; those are the next integration checkpoint.
+
+Owning bead df-native-stock-target-3m9 remains in progress. Production admission,
+source grants, bridge protocols, original leaf timing and the eleven MCP tools
+are unchanged.
+
 ## Unreleased — Monitor aggregate laboratory stock quantities
 
 The closed laboratory condition grammar now includes `field_sum` over an

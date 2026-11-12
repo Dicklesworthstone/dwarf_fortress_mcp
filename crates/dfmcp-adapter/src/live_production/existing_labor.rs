@@ -43,6 +43,7 @@ fn refused(message: &str) -> DfmcpError {
 pub struct ExistingLaborRequirement {
     labor: String,
     units: Vec<(EntityId, u32)>,
+    inventory_minima: Vec<Predicate>,
 }
 
 impl ExistingLaborRequirement {
@@ -68,7 +69,11 @@ impl ExistingLaborRequirement {
                 "existing labor citizen identities must be distinct",
             ));
         }
-        Ok(Self { labor, units })
+        Ok(Self {
+            labor,
+            units,
+            inventory_minima: Vec::new(),
+        })
     }
 
     pub fn units(&self) -> Vec<EntityId> {
@@ -77,6 +82,13 @@ impl ExistingLaborRequirement {
 
     pub fn labor(&self) -> &str {
         &self.labor
+    }
+
+    /// Additional original current-stock requirements, including targets that
+    /// needed no production action. These never become workforce evidence.
+    /// Every entry is a closed furniture stack-unit minimum in item-type order.
+    pub fn inventory_minima(&self) -> &[Predicate] {
+        &self.inventory_minima
     }
 
     pub fn predicate(&self) -> Predicate {
@@ -170,8 +182,21 @@ impl ExistingLaborRequirement {
             }
         }
         let mut labor = None;
+        let mut inventory_minima = BTreeMap::<String, Predicate>::new();
         let mut selected = BTreeMap::<EntityId, (bool, bool, Option<u32>)>::new();
         for predicate in parent {
+            if let Some(item_type) = inventory_minimum_type(predicate) {
+                if inventory_minima.len() >= ProductionLayout::MAX_ORDERS
+                    || inventory_minima
+                        .insert(item_type.to_owned(), predicate.clone())
+                        .is_some()
+                {
+                    return Err(refused(
+                        "existing labor stock requirements must name at most four distinct furniture types",
+                    ));
+                }
+                continue;
+            }
             let Predicate::FieldCompare {
                 entity_id,
                 field,
@@ -220,17 +245,41 @@ impl ExistingLaborRequirement {
                 ))
             })
             .collect::<Result<Vec<_>>>()?;
-        let requirement = Self::new(
+        let mut requirement = Self::new(
             labor.ok_or_else(|| refused("existing labor key is absent"))?,
             units,
         )?;
+        requirement.inventory_minima = inventory_minima.into_values().collect();
         terminals.push(requirement.predicate());
+        terminals.extend(requirement.inventory_minima.iter().cloned());
         if plan.terminal_condition != Predicate::All(terminals).normalized() {
             return Err(refused(
                 "existing labor parent differs from its complete declared requirement",
             ));
         }
         Ok(Some(requirement))
+    }
+}
+
+/// A closed extension to the complete parent, never an arbitrary predicate or
+/// a source grant. Selected order objectives retain their existing shape.
+fn inventory_minimum_type(predicate: &Predicate) -> Option<&str> {
+    match predicate {
+        Predicate::EntityQuantity {
+            kind: EntityKind::Item,
+            filter_field,
+            filter_value: Value::Text(item_type),
+            quantity_field: Some(quantity_field),
+            op: CompareOp::Ge,
+            value,
+        } if filter_field == "type_key"
+            && quantity_field == "stack_size"
+            && matches!(item_type.as_str(), "BED" | "CHAIR" | "DOOR" | "TABLE")
+            && (1..=1_000_000).contains(value) =>
+        {
+            Some(item_type)
+        }
+        _ => None,
     }
 }
 

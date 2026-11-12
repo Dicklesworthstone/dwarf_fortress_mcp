@@ -47,7 +47,8 @@ mod goal_monitor;
 pub use goal_monitor::{SelectedWorkOrderGoalMonitor, SelectedWorkOrderGoalResult};
 mod parent_goal;
 pub use parent_goal::{
-    SelectedParentGoalProgress, SelectedParentGoalResult, SelectedParentLaborFinding,
+    SelectedParentGoalProgress, SelectedParentGoalResult, SelectedParentInventoryFinding,
+    SelectedParentLaborFinding,
 };
 mod portfolio_goal;
 pub use portfolio_goal::{

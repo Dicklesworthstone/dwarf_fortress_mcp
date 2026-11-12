@@ -16,6 +16,7 @@ pub struct ProductionPortfolioGoalProgress {
     pub source_digest: Digest32,
     pub workforce_source_digest: Digest32,
     pub labor: Vec<SelectedParentLaborFinding>,
+    pub inventory_requirements: Vec<SelectedParentInventoryFinding>,
 }
 
 /// The outer capture brackets every selected durable sample. Each leaf has
@@ -128,7 +129,9 @@ where
     let (first_workforce, first_capture, _) = workforce(first, existing)?;
     let first_order = first.selected.inner.projection();
     let mut terminal = if let Some(requirement) = layout.existing_labor() {
-        vec![requirement.predicate()]
+        let mut predicates = vec![requirement.predicate()];
+        predicates.extend(requirement.inventory_minima().iter().cloned());
+        predicates
     } else {
         policy::selected(original, layout.assignment_step().ok_or_else(custody)?)?
             .postconditions.clone()
@@ -180,6 +183,7 @@ where
                 && sample.existing_labor.as_ref().map(ExistingLaborProjection::requirement)
                     != layout.existing_labor())
             || sample.parent.labor != first.parent.labor
+            || sample.parent.inventory_requirements != first.parent.inventory_requirements
             || order.operations() != first_order.operations()
             || order.queue_capture() != first_order.queue_capture()
             || order.progress_manifest() != first_order.progress_manifest()
@@ -294,5 +298,6 @@ where
         source_digest: Digest32::of_bytes(&identity),
         workforce_source_digest: first.parent.workforce_source_digest,
         labor: first.parent.labor.clone(),
+        inventory_requirements: first.parent.inventory_requirements.clone(),
     })
 }

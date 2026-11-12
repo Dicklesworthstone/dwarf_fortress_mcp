@@ -267,6 +267,54 @@ where
         result
     }
 
+    /// Inspect a Created original order without selecting it for native work.
+    /// This lets an embedding verify an earlier receipt prefix while preserving
+    /// the separately reviewed next order's process-local preparation.
+    pub fn inspect_retained_order_custody(
+        &mut self,
+        step: StepId,
+        context: &OperationContext,
+    ) -> Result<SemanticWorkOrderResult> {
+        let mut call = self.call(context)?;
+        let result = (|| {
+            let selected = policy::selected(&self.original, step)?.clone();
+            if policy::route(&selected)?.family != LiveFamily::WorkOrdersV1_10 {
+                return Err(custody());
+            }
+            let inventory = self.inventory(&mut call)?;
+            let record = inventory.orders.iter()
+                .find(|record| record.plan().key() == selected.idempotency_key)
+                .ok_or_else(blocked)?;
+            if record.state() != CreationState::Created {
+                return Err(blocked());
+            }
+            let dependencies = self.dependencies(&selected, &inventory, &mut call)?;
+            let inspected = self.orders.inspect_selected_retained(
+                self.selection(step)?, &call.take(2 * ORDER_VIEW_BYTES)?,
+            )?;
+            self.retain_floor(&mut call);
+            if inspected.review().original_plan() != &self.original
+                || inspected.review().step_id() != step
+                || inspected.native_record() != record
+                || !matches!(inspected.creation_result(), NativeOrderCreation::Inserted { .. })
+            {
+                return Err(custody());
+            }
+            let publication = call.take(WORKFORCE_VIEW_BYTES + ORDER_VIEW_BYTES + 2 * MIB)?;
+            let check = call.take(dependencies.check_bytes)?;
+            self.final_check(&publication, &mut call)?;
+            dependencies.verify(&mut self.workforce, &call.edge(&check, self.high_tick)?)?;
+            self.retain_floor(&mut call);
+            call.current()?.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
+            Ok(inspected)
+        })();
+        self.retain_floor(&mut call);
+        if result.is_err() {
+            self.abandon_preparation();
+        }
+        result
+    }
+
     /// Open or recover a selected objective over caller-owned bounded storage.
     /// Only a proved original insertion with every original labor predecessor
     /// can acquire this owner. Recovery performs no native I/O or redispatch.

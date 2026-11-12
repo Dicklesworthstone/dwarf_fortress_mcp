@@ -33,6 +33,17 @@ pub struct SelectedParentLaborFinding {
     pub current_truth: PredicateTruth,
 }
 
+/// One original furniture stock minimum under independently qualified current
+/// inventory evidence. A missing grant or incomplete census is Unknown, never
+/// a zero count. The original planning baseline cannot populate this finding.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SelectedParentInventoryFinding {
+    pub item_type: String,
+    pub minimum_stack_units: u64,
+    pub observed_stack_units: Option<u64>,
+    pub current_truth: PredicateTruth,
+}
+
 /// Current evidence, not a durable achievement record or an authority token.
 /// Reopening never reconstructs this value from selected-inventory history.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -45,6 +56,8 @@ pub struct SelectedParentGoalProgress {
     pub workforce_source_digest: Digest32,
     /// The original selection only, in numeric canonical-ID order, at most 32.
     pub labor: Vec<SelectedParentLaborFinding>,
+    /// Additional complete-parent stock requirements, in item-type order.
+    pub inventory_requirements: Vec<SelectedParentInventoryFinding>,
 }
 
 #[derive(Clone, Debug)]
@@ -156,6 +169,46 @@ pub(super) fn labor_findings(
                 labor: labor.clone(),
                 requested_enabled: *enabled,
                 observed_enabled,
+                current_truth,
+            })
+        })
+        .collect()
+}
+
+pub(super) fn inventory_findings(
+    requirement: &ExistingLaborRequirement,
+    inventory: &PredicateEvidence<'_>,
+) -> Result<Vec<SelectedParentInventoryFinding>> {
+    requirement
+        .inventory_minima()
+        .iter()
+        .map(|minimum| {
+            let Predicate::EntityQuantity {
+                kind: EntityKind::Item,
+                filter_field,
+                filter_value: Value::Text(item_type),
+                quantity_field: Some(quantity_field),
+                op: CompareOp::Ge,
+                value,
+            } = minimum
+            else {
+                return Err(custody());
+            };
+            let observed_stack_units = inventory.entity_quantity_total(
+                &EntityKind::Item,
+                filter_field,
+                &Value::Text(item_type.clone()),
+                Some(quantity_field),
+            )?;
+            let current_truth = match observed_stack_units {
+                Some(observed) if observed >= *value => PredicateTruth::True,
+                Some(_) => PredicateTruth::False,
+                None => PredicateTruth::Unknown,
+            };
+            Ok(SelectedParentInventoryFinding {
+                item_type: item_type.clone(),
+                minimum_stack_units: *value,
+                observed_stack_units,
                 current_truth,
             })
         })
@@ -331,6 +384,7 @@ fn compose(
         source_digest: Digest32::of_bytes(&identity),
         workforce_source_digest: workforce.source_digest(),
         labor,
+        inventory_requirements: Vec::new(),
     })
 }
 

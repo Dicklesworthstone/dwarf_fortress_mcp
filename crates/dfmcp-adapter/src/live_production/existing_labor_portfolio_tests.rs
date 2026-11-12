@@ -139,6 +139,22 @@ fn portfolio_sample(
     progress_sequence: u64,
     units: usize,
 ) -> Result<SelectedParentGoalResult> {
+    portfolio_sample_with_policy(
+        f, monitor, source_sequence, progress_sequence, units, |p, _| Ok(grant(p)),
+    )
+}
+
+fn portfolio_sample_with_policy<A>(
+    f: &mut ProductionFixture,
+    monitor: &mut SelectedWorkOrderGoalMonitor<Storage>,
+    source_sequence: u64,
+    progress_sequence: u64,
+    units: usize,
+    order_policy: A,
+) -> Result<SelectedParentGoalResult>
+where
+    A: FnMut(&WorkOrderGoalProjection, &OperationContext) -> Result<EvidencePolicy>,
+{
     let queue = f.orders.borrow().queue.clone();
     let step = monitor.step_id().get();
     let before = cohort_progress(&queue, &[step], progress_sequence)?;
@@ -167,7 +183,7 @@ fn portfolio_sample(
             }),
             |_| Ok(Operations(operations)),
         ),
-        (|p, _| Ok(grant(p)), |_, _| Err(invalid("assignment policy must not be consulted"))),
+        (order_policy, |_, _| Err(invalid("assignment policy must not be consulted"))),
         ObservationCursor { epoch: cursor.epoch, sequence: source_sequence * 4 + u64::from(step) },
     )
 }
@@ -396,5 +412,178 @@ fn existing_portfolio_history_reopen_keeps_original_deadline_and_withdraws_curre
     assert!(!sample.selected_goal_proven());
     assert!(!sample.original_goal_proven());
     assert!(matches!(sample.progress().obligation, Some(ObligationStatus::Failed { .. })));
+    Ok(())
+}
+
+fn stock_minimum(item_type: &str, minimum: u64) -> Predicate {
+    Predicate::EntityQuantity {
+        kind: EntityKind::Item,
+        filter_field: "type_key".into(),
+        filter_value: Value::Text(item_type.into()),
+        quantity_field: Some("stack_size".into()),
+        op: CompareOp::Ge,
+        value: minimum,
+    }
+}
+
+fn portfolio_with_minima(
+    count: usize,
+    minima: &[(&str, u64)],
+) -> Result<ProductionFixture> {
+    let mut f = portfolio_fixture(count)?;
+    let mut terminal = vec![f.plan.terminal_condition.clone()];
+    terminal.extend(minima.iter().map(|(item_type, minimum)| stock_minimum(item_type, *minimum)));
+    f.plan.terminal_condition = Predicate::All(terminal).normalized();
+    reseal(&mut f.plan);
+    let Executor { workforce, orders, evidence, factory, .. } = f.executor;
+    f.executor = Executor::new(f.plan.clone(), workforce, orders, evidence, factory, &f.c)?;
+    Ok(f)
+}
+
+#[test]
+fn original_stock_minima_are_closed_complete_and_preserved_by_archive() -> Result<()> {
+    let f = portfolio_with_minima(
+        1, &[("TABLE", 2), ("BED", 3), ("DOOR", 2), ("CHAIR", 2)],
+    )?;
+    let requirement = ExistingLaborRequirement::from_plan(&f.plan)?
+        .ok_or_else(|| invalid("stock requirement absent"))?;
+    assert_eq!(requirement.inventory_minima(), &[
+        stock_minimum("BED", 3), stock_minimum("CHAIR", 2),
+        stock_minimum("DOOR", 2), stock_minimum("TABLE", 2),
+    ]);
+    assert_eq!(
+        requirement.predicate(),
+        ExistingLaborRequirement::new("CARPENTRY".into(), vec![(EntityId::new(43), 142)])?
+            .predicate(),
+        "inventory minima do not grant or require workforce inventory coverage",
+    );
+    assert_eq!(f.plan.steps.len(), 1, "already met stock has no fabricated action");
+    let (bytes, seal) = dfmcp_intent::plan_archive::encode(
+        &f.plan, crate::live_production::archive_limits(),
+    )?;
+    let reopened = dfmcp_intent::plan_archive::decode(
+        &bytes, seal, crate::live_production::archive_limits(),
+    )?;
+    assert_eq!(reopened, f.plan);
+    assert_eq!(ExistingLaborRequirement::from_plan(&reopened)?, Some(requirement));
+
+    let base = portfolio_fixture(1)?.plan;
+    for case in 0..8 {
+        let mut added = stock_minimum("DOOR", 2);
+        if let Predicate::EntityQuantity {
+            kind, filter_field, filter_value, quantity_field, op, value,
+        } = &mut added {
+            match case {
+                0 => *kind = EntityKind::Building,
+                1 => *filter_field = "label".into(),
+                2 => *filter_value = Value::Text("FOOD".into()),
+                3 => *quantity_field = None,
+                4 => *quantity_field = Some("count".into()),
+                5 => *op = CompareOp::Eq,
+                6 => *value = 0,
+                _ => *value = 1_000_001,
+            }
+        }
+        let mut plan = base.clone();
+        plan.terminal_condition = Predicate::All(vec![plan.terminal_condition, added]).normalized();
+        reseal(&mut plan);
+        assert!(ExistingLaborRequirement::from_plan(&plan).is_err(), "case {case}");
+        assert!(validate_plan(&plan).is_err(), "case {case}");
+    }
+    let mut duplicate = base;
+    duplicate.terminal_condition = Predicate::All(vec![
+        duplicate.terminal_condition, stock_minimum("DOOR", 2), stock_minimum("DOOR", 3),
+    ]).normalized();
+    reseal(&mut duplicate);
+    assert!(ExistingLaborRequirement::from_plan(&duplicate).is_err());
+    Ok(())
+}
+
+#[test]
+fn no_action_stock_target_must_remain_true_in_every_fresh_parent() -> Result<()> {
+    let mut f = portfolio_with_minima(1, &[("DOOR", 2)])?;
+    let original = f.plan.clone();
+    f.applied(0)?;
+    let history = Storage::default();
+    let mut monitor = portfolio_open(&mut f, 0, history.clone(), true)?;
+    for (cohort, tick, item_types) in [(1, 125, 3), (2, 130, 1), (3, 135, 3)] {
+        set_tick(&mut f, tick, true)?;
+        let sample = portfolio_sample(&mut f, &mut monitor, cohort, cohort * 100 + 1, item_types)?;
+        let finding = &sample.parent_progress().inventory_requirements[0];
+        assert_eq!(finding.item_type, "DOOR");
+        assert_eq!(finding.minimum_stack_units, 2);
+        assert_eq!(finding.observed_stack_units, Some(if item_types == 3 { 2 } else { 0 }));
+        assert_eq!(finding.current_truth, if item_types == 3 {
+            PredicateTruth::True
+        } else {
+            PredicateTruth::False
+        });
+        if cohort >= 2 {
+            assert!(sample.selected_goal_proven(), "the original BED temporal history remains fulfilled");
+        }
+        let result = join(&f, &[sample], cohort * 100)?;
+        assert_eq!(result.inventory_requirements.len(), 1);
+        assert_eq!(result.original_goal_proven, cohort == 3);
+        if cohort == 2 {
+            assert_eq!(result.current_truth, PredicateTruth::False);
+            retire(&f, 100)?;
+        }
+    }
+    assert_eq!(f.orders.borrow().commits, 1);
+    assert_eq!(&f.workforce.data.borrow().calls[1..], &[0; 4]);
+    assert_eq!(f.executor.original_plan(), &original);
+    drop(monitor);
+    let reopened = portfolio_open(&mut f, 0, history, false)?;
+    assert!(reopened.latest().is_none(), "history does not restore all-target current proof");
+    assert_eq!(reopened.original_plan(), &original);
+    assert!(reopened.first_satisfied_anchor().is_some());
+    Ok(())
+}
+
+fn incomplete_inventory(p: &WorkOrderGoalProjection) -> EvidencePolicy {
+    let mut policy = grant(p);
+    policy.entity_kinds.insert(EntityKind::Item, EvidenceCoverage::Observed);
+    policy
+}
+
+#[test]
+fn unqualified_no_action_stock_is_unknown_instead_of_a_zero_or_historical_count() -> Result<()> {
+    let mut f = portfolio_with_minima(1, &[("DOOR", 2)])?;
+    f.applied(0)?;
+    let mut monitor = portfolio_open(&mut f, 0, Storage::default(), true)?;
+    set_tick(&mut f, 125, true)?;
+    let sample = portfolio_sample_with_policy(
+        &mut f, &mut monitor, 1, 101, 3, |p, _| Ok(incomplete_inventory(p)),
+    )?;
+    let finding = &sample.parent_progress().inventory_requirements[0];
+    assert_eq!(finding.observed_stack_units, None);
+    assert_eq!(finding.current_truth, PredicateTruth::Unknown);
+    let queue = f.orders.borrow().queue.clone();
+    let before = cohort_progress(&queue, &[0], 100)?;
+    let after = cohort_progress(&queue, &[0], 120)?;
+    let result = compose_existing_labor_portfolio_goal(
+        &f.plan, &[sample], &before, &after, &f.c,
+        |_, p, _| Ok(incomplete_inventory(p)), |p, _| Ok(policy(p.snapshot())),
+    )?;
+    assert_eq!(result.current_truth, PredicateTruth::Unknown);
+    assert!(!result.original_goal_proven);
+    assert_eq!(result.inventory_requirements[0].observed_stack_units, None);
+    Ok(())
+}
+
+#[test]
+fn all_original_stock_minima_must_share_the_complete_portfolio_census() -> Result<()> {
+    let mut f = portfolio_with_minima(2, &[("DOOR", 2)])?;
+    f.applied(0)?;
+    f.applied(1)?;
+    let mut first = portfolio_open(&mut f, 0, Storage::default(), true)?;
+    let mut second = portfolio_open(&mut f, 1, Storage::default(), true)?;
+    set_tick(&mut f, 125, true)?;
+    let a = portfolio_sample(&mut f, &mut first, 1, 101, 3)?;
+    let b = portfolio_sample(&mut f, &mut second, 1, 103, 2)?;
+    assert_eq!(a.parent_progress().current_truth, PredicateTruth::True);
+    assert_eq!(b.parent_progress().current_truth, PredicateTruth::False);
+    assert!(join(&f, &[a, b], 100).is_err(), "a met target cannot be borrowed from an earlier leaf");
+    assert_eq!(f.orders.borrow().commits, 2);
     Ok(())
 }

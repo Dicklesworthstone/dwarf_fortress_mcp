@@ -295,3 +295,73 @@ fn shared_clock_custody_rejects_uncreated_results_and_foreign_parent_bindings() 
     assert!(!result.original_goal_proven());
     Ok(())
 }
+
+#[test]
+fn retained_order_custody_preserves_another_original_order_preparation() -> Result<()> {
+    let mut f = ProductionFixture::new(2)?;
+    f.applied(0)?;
+    f.applied(1)?;
+    let prepared = f.prepare(2)?;
+    let original_preparation = f.executor.prepared;
+    let calls = native_calls(&f);
+    let bytes = custody_bytes(&f);
+    let mut query = f.c.clone();
+    query.grants.retain(|grant| grant.capability == Capability::Query);
+    let inspected = f.executor.inspect_retained_order_custody(StepId::new(1), &query)?;
+    assert_eq!(inspected.review().original_plan(), &f.plan);
+    assert_eq!(inspected.review().step_id(), StepId::new(1));
+    assert_eq!(inspected.native_record().state(), CreationState::Created);
+    assert_eq!(f.executor.prepared, original_preparation);
+    assert_eq!(native_calls(&f), calls);
+    assert_eq!(custody_bytes(&f), bytes);
+    let Some(StepEvidence::WorkOrder(latest)) = f.executor.latest_step_evidence() else {
+        return Err(invalid("retained inspection replaced the prepared step evidence"));
+    };
+    assert_eq!(latest.review().step_id(), StepId::new(2));
+    assert_eq!(latest.native_record().state(), CreationState::Prepared);
+    // This exercises the real native owner's still-current queue selection and
+    // exact single-use preparation, not just the executor's bookkeeping.
+    f.commit(2, prepared)?;
+    assert_eq!(f.orders.borrow().commits, 2);
+    assert!(f.executor.prepared.is_none());
+    Ok(())
+}
+
+#[test]
+fn retained_order_custody_recovery_is_read_only_and_rejects_uncreated_steps() -> Result<()> {
+    let mut f = ProductionFixture::new(2)?;
+    f.applied(0)?;
+    f.applied(1)?;
+    let expected = f.executor.inspect_retained_order_custody(StepId::new(1), &f.c)?;
+    let mut f = f.reopen_query()?;
+    let calls = native_calls(&f);
+    let bytes = custody_bytes(&f);
+    let inspected = f.executor.inspect_retained_order_custody(StepId::new(1), &f.c)?;
+    assert_eq!(inspected.review().seal(), expected.review().seal());
+    assert_eq!(inspected.native_record(), expected.native_record());
+    for step in [StepId::ZERO, StepId::new(2), StepId::new(3)] {
+        assert!(f.executor.inspect_retained_order_custody(step, &f.c).is_err());
+    }
+    assert!(f.executor.prepared.is_none());
+    assert!(f.prepare(2).is_err());
+    assert_eq!(native_calls(&f), calls);
+    assert_eq!(custody_bytes(&f), bytes);
+    assert!(!inspected.original_goal_proven());
+    Ok(())
+}
+
+#[test]
+fn retained_order_custody_refuses_corrupt_association_without_native_contact() -> Result<()> {
+    let mut f = ProductionFixture::new(2)?;
+    f.applied(0)?;
+    f.applied(1)?;
+    f.prepare(2)?;
+    f.order_associations.0.borrow_mut().file.get_mut()[0] ^= 1;
+    let calls = native_calls(&f);
+    let bytes = custody_bytes(&f);
+    assert!(f.executor.inspect_retained_order_custody(StepId::new(1), &f.c).is_err());
+    assert!(f.executor.prepared.is_none());
+    assert_eq!(native_calls(&f), calls);
+    assert_eq!(custody_bytes(&f), bytes);
+    Ok(())
+}

@@ -1089,6 +1089,40 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage, N: WorkOrderSource>
         )?;
         self.finish(review, record, &mut call)
     }
+    /// Inspect another retained original step without replacing the current
+    /// attached review or clearing its native prepared selection. This is
+    /// historical custody only: no native observation, preparation or permit.
+    pub(crate) fn inspect_selected_retained(
+        &mut self,
+        selection: SelectedSemanticStep,
+        context: &OperationContext,
+    ) -> Result<SemanticWorkOrderResult> {
+        let (plan, step_id) = selection.into_parts();
+        selected_original(&plan, step_id)?;
+        let mut call = Call::new(context)?;
+        call.reserve(LOCAL_BYTES)?;
+        let (summary, records) = self.view(&mut call)?;
+        let key = &selected_step(&plan, step_id)?.idempotency_key;
+        let association = self.associations.get(key).ok_or_else(custody)?.clone();
+        if association.semantic != plan.digest
+            || association.anchor != plan.anchor
+            || association.step != step_id
+        {
+            return Err(custody());
+        }
+        let record = records.into_iter()
+            .find(|record| record.plan().key() == key)
+            .ok_or_else(custody)?;
+        let review = SemanticWorkOrderReview {
+            seal: association.seal(summary.journal_id),
+            original: plan,
+            step: step_id,
+            native: record.plan().clone(),
+            association,
+        };
+        self.finish(review, record, &mut call)
+    }
+
     pub fn inspect(
         &mut self,
         seal: Digest32,

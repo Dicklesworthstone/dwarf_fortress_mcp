@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased — Preserve complete stock goals and prior-order custody
+
+- Retain up to four distinct original furniture stock minima in an existing-worker
+  production parent, including stock that needs no new order. Expose independently
+  qualified current quantities; missing inventory authority remains Unknown.
+- Require the complete portfolio to share the same inventory and workforce
+  captures. An achieved order cannot conceal a now-unmet original stock minimum.
+- Add read-only inspection of retained original Created-order custody while
+  preserving a separately prepared next order. Revalidate associations, receipts,
+  dependencies and current authority without native observation or mutation.
+- Add seven adapter regression sources for closed shapes, archive preservation,
+  stock loss, incomplete coverage, mixed captures, prepared-order continuity and
+  read-only recovery. Source-reviewed only: the execution workspace is unavailable;
+  Rust compilation, formatting and test execution remain unverified.
+
 ## Unreleased — Observe aggregate stock thresholds through the control loop
 
 - Add laboratory `field_sum` predicates with dynamic membership and qualified
