@@ -176,14 +176,16 @@ impl StockTargetBinding {
 /// Validate the complete canonical citizen identity guard, not just whichever
 /// subset a malformed labor postcondition happens to mention. The original
 /// anchor and archive still supply source authority and custody separately.
-fn assignment_goal(assignment: &Action, preconditions: &Predicate) -> Result<Predicate> {
+pub(super) fn assignment_goal(assignment: &Action, preconditions: &Predicate) -> Result<Predicate> {
     let Action::SetLabor {
         units,
         labor,
         enabled: true,
     } = assignment
     else {
-        return Err(invalid("stock target requires one enabling labor assignment"));
+        return Err(invalid(
+            "stock target requires one enabling labor assignment",
+        ));
     };
     if units.is_empty()
         || units.len() > 32

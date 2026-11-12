@@ -56,7 +56,9 @@ def inventory_capture(combined, tick, inventory):
     return raw + struct.pack(">I", 0)
 
 
-def run_case(executable, test_name, case):
+def run_case(executable, test_name, requested_case):
+    assignment = requested_case.startswith("assignment_")
+    case = requested_case.removeprefix("assignment_")
     portfolio = helpers.load(
         "stock_targets_portfolio_native_fixture", "combined_portfolio.py"
     )
@@ -70,10 +72,10 @@ def run_case(executable, test_name, case):
         class StockTargetsPeer(portfolio.PortfolioPeer):
             def __init__(self):
                 super().__init__(production)
-                self.existing_labor_ready = True
+                self.existing_labor_ready = not assignment
                 self.inventory = {
                     "BED": 6 if case == "already" else 2,
-                    "DOOR": 1 if case.startswith("multiple") else 3,
+                    "DOOR": 1 if case.startswith("multiple") or case == "four" else 3,
                 }
                 self.last_stage = None
                 self.injected_after_dispatch = False
@@ -87,7 +89,8 @@ def run_case(executable, test_name, case):
                     for unit in capture["units"]:
                         unit["labors"] = [1, 0]
 
-                self.workforce_capture_hook = enabled_labor
+                if not assignment:
+                    self.workforce_capture_hook = enabled_labor
 
             def operations(self):
                 return inventory_capture(combined, self.order_tick, self.inventory)
@@ -171,14 +174,23 @@ def run_case(executable, test_name, case):
             environment[helpers.STAGE] = str(stage)
             retained_path = directory / "retained.json"
             helpers.run_child(
-                executable, test_name, "control", case, environment,
+                executable, test_name, "control", requested_case, environment,
                 directory / "unused.json", retained_path,
             )
             calls = [operation for _, operation in peer.calls]
-            assert not peer.workforce_applied and peer.workforce_plan is None
-            assert not any(operation in (
-                "PrepareAssignment", "CommitAssignment", "QueryAssignment"
-            ) for operation in calls), calls
+            no_assignment = not assignment or case in ("already", "cap", "denied", "budget")
+            if no_assignment:
+                assert not peer.workforce_applied and peer.workforce_plan is None
+                assert not any(operation in (
+                    "PrepareAssignment", "CommitAssignment", "QueryAssignment"
+                ) for operation in calls), calls
+            else:
+                assert peer.workforce_applied and peer.workforce_plan["assigned"]
+                assert calls.count("PrepareAssignment") == calls.count("CommitAssignment") == 1
+                if "PrepareOrder" in calls:
+                    assert calls.index("CommitAssignment") < calls.index("PrepareOrder")
+                retained = json.loads(retained_path.read_text())
+                assert peer.workforce_plan["key"] == retained["original_plan"]["steps"][0]["key"]
             assert not peer.clock_commits
             if case == "parent_clock":
                 assert len(peer.inventory_clock_commits) == 1
@@ -189,33 +201,37 @@ def run_case(executable, test_name, case):
             else:
                 assert not peer.inventory_clock_commits
 
-            if case in ("mixed", "parent_regression", "parent_clock", "lost", "multiple",
+            if case in ("mixed", "parent_regression", "parent_clock", "lost", "multiple", "four",
                         "multiple_extra", "multiple_retired"):
-                expected_count = 2 if case == "multiple" else 1
+                expected_count = 4 if case == "four" else 2 if case == "multiple" else 1
                 assert calls.count("PrepareOrder") == expected_count
                 assert calls.count("CommitOrder") == expected_count
                 assert len(peer.created_keys) == expected_count
                 assert peer.order_created
                 retained = json.loads(retained_path.read_text())
                 original = retained["original_plan"]["steps"]
+                order_index = int(assignment)
                 assert [key.decode() for key in peer.created_keys] == [
-                    step["key"] for step in original[:expected_count]
+                    step["key"] for step in original[order_index:order_index + expected_count]
                 ]
-                for index, (recipe, amount) in enumerate(((1, 4), (2, 2))[:expected_count]):
+                expected_orders = ((1, 4), (4, 1), (2, 2), (3, 1)) if case == "four" else ((1, 4), (2, 2))
+                for index, (recipe, amount) in enumerate(expected_orders[:expected_count]):
                     plan = peer.plans[peer.created_keys[index]]
                     assert (plan["id"], plan["recipe"], plan["amount"]) == (
                         100 + index, recipe, amount
                     )
                 first = peer.plans[peer.created_keys[0]]
                 assert peer.effect(first, True) == peer.first_created_record
-                if case == "multiple":
-                    second = peer.plans[peer.created_keys[1]]
-                    assert second["before"] == first["after"]
-                    assert second["sequence"] == first["sequence"] + 1
-                    assert set(peer.orders) == {100, 101}
+                if expected_count > 1:
+                    for index in range(1, expected_count):
+                        earlier = peer.plans[peer.created_keys[index - 1]]
+                        following = peer.plans[peer.created_keys[index]]
+                        assert following["before"] == earlier["after"]
+                        assert following["sequence"] == earlier["sequence"] + 1
+                    assert set(peer.orders) == set(range(100, 100 + expected_count))
                 if case in ("multiple_extra", "multiple_retired"):
                     assert peer.injected_prefix_change, "queue change missed second prepare"
-                    assert len(original) == 2 and len(peer.plans) == 1
+                    assert len(original) == 2 + order_index and len(peer.plans) == 1
             elif case == "after_stock":
                 assert peer.injected_after_dispatch, "late change missed durable dispatch"
                 assert 2 in helpers.creation_states(production)
@@ -224,8 +240,11 @@ def run_case(executable, test_name, case):
             else:
                 # No-op, oversized or early source-drift refusals must never
                 # prepare a native mutation.
-                assert not any(operation.startswith(("Prepare", "Commit", "Cancel"))
+                assert not any(operation in ("PrepareOrder", "CommitOrder", "CancelOrder")
                                for operation in calls), calls
+                if no_assignment:
+                    assert not any(operation.startswith(("Prepare", "Commit", "Cancel"))
+                                   for operation in calls), calls
                 assert not peer.order_created
 
             if case == "lost":
@@ -246,7 +265,7 @@ def run_case(executable, test_name, case):
                 before_calls = list(peer.calls)
                 before_files = combined.custody_files(production)
                 helpers.run_child(
-                    executable, test_name, "offline", case, offline,
+                    executable, test_name, "offline", requested_case, offline,
                     retained_path, directory / "offline.json",
                 )
                 assert before_calls == peer.calls, "Offline contacted a native source"
@@ -254,7 +273,7 @@ def run_case(executable, test_name, case):
                     "Offline changed original custody"
                 )
                 helpers.run_child(
-                    executable, test_name, "reconcile", case, reopened,
+                    executable, test_name, "reconcile", requested_case, reopened,
                     retained_path, directory / "reconciled.json",
                 )
                 after = [operation for _, operation in peer.calls]
@@ -263,8 +282,11 @@ def run_case(executable, test_name, case):
                 assert len(peer.created_keys) == len(peer.plans) == 1
                 plan = peer.plans[peer.created_keys[0]]
                 assert plan["amount"] == 4
-                assert plan["key"].decode() == retained["original_plan"]["steps"][0]["key"]
+                assert plan["key"].decode() == retained["original_plan"]["steps"][int(assignment)]["key"]
                 assert peer.effect(plan, True) == peer.first_created_record
+                if assignment:
+                    assert after.count("PrepareAssignment") == after.count("CommitAssignment") == 1
+                    assert peer.workforce_plan["key"] == retained["original_plan"]["steps"][0]["key"]
         finally:
             if peer is not None:
                 peer.close()
@@ -280,6 +302,11 @@ def main():
         "all": ("mixed", "already", "multiple", "cap", "before_stock",
                 "after_stock", "lost", "parent_regression", "parent_clock",
                 "multiple_extra", "multiple_retired"),
+        "assignment": ("assignment_mixed", "assignment_already", "assignment_multiple",
+                       "assignment_four", "assignment_cap", "assignment_denied", "assignment_budget",
+                       "assignment_before_stock", "assignment_after_stock", "assignment_lost",
+                       "assignment_multiple_extra", "assignment_multiple_retired",
+                       "assignment_parent_regression", "assignment_parent_clock"),
     }[campaign]
     for case in cases:
         run_case(executable, test_name, case)

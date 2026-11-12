@@ -1,7 +1,7 @@
 //! A closed portfolio of finite inventory minima, sized from one qualified census.
 use super::existing_labor_portfolio_request::ExistingLaborPortfolioRequest;
 use super::existing_labor_request::ExistingLaborRequest;
-use super::portfolio_request::PortfolioOrder;
+use super::portfolio_request::{PortfolioOrder, PortfolioRequest};
 use super::request::recipe;
 use super::stock_targets_binding::StockTargetsBinding;
 use crate::semantic_work_order_runtime::inventory_baseline::InventoryBaselines;
@@ -30,6 +30,10 @@ pub(crate) struct StockTargetsRequest {
     pub expected_observation: String,
     pub units: Vec<String>,
     pub labor: String,
+    /// Explicitly enable the selected labor before the original order leaves.
+    /// Omission and false preserve the existing-worker version-one identity.
+    #[serde(default)]
+    pub assign_labor: bool,
     pub targets: Vec<StockTarget>,
     pub deadline_tick: u64,
     #[serde(default = "interval")]
@@ -38,14 +42,22 @@ pub(crate) struct StockTargetsRequest {
     pub stable_samples: u32,
 }
 
-fn maximum() -> u32 { 100 }
-fn interval() -> u64 { 10 }
-fn samples() -> u32 { 1 }
+fn maximum() -> u32 {
+    100
+}
+fn interval() -> u64 {
+    10
+}
+fn samples() -> u32 {
+    1
+}
 
 impl StockTargetsRequest {
     pub(crate) fn parse(raw: &str) -> Result<Self> {
         if raw.len() > 8192 {
-            return Err(exhausted("stock-target portfolio request exceeds 8192 bytes"));
+            return Err(exhausted(
+                "stock-target portfolio request exceeds 8192 bytes",
+            ));
         }
         let mut value: Self = serde_json::from_str(raw)
             .map_err(|_| invalid("invalid closed stock-target portfolio request"))?;
@@ -74,7 +86,8 @@ impl StockTargetsRequest {
     }
 
     pub(crate) fn unit_ids(&self) -> Result<Vec<EntityId>> {
-        self.targets.first()
+        self.targets
+            .first()
             .ok_or_else(|| invalid("stock-target portfolio is empty"))
             .and_then(|target| self.worker_request(target).unit_ids())
     }
@@ -83,15 +96,22 @@ impl StockTargetsRequest {
         if self.kind != "stock_targets"
             || self.targets.is_empty()
             || self.targets.len() > 4
-            || self.targets.windows(2).any(|pair| pair[0].recipe >= pair[1].recipe)
+            || self
+                .targets
+                .windows(2)
+                .any(|pair| pair[0].recipe >= pair[1].recipe)
         {
-            return Err(invalid("stock_targets requires one to four distinct canonical recipes"));
+            return Err(invalid(
+                "stock_targets requires one to four distinct canonical recipes",
+            ));
         }
         for target in &self.targets {
             if !(1..=1_000_000).contains(&target.minimum_stack_units)
                 || !(1..=100).contains(&target.max_order_amount)
             {
-                return Err(invalid("stock-target portfolio minimum or finite order limit is invalid"));
+                return Err(invalid(
+                    "stock-target portfolio minimum or finite order limit is invalid",
+                ));
             }
             self.worker_request(target).validate()?;
         }
@@ -109,24 +129,90 @@ impl StockTargetsRequest {
         c: &OperationContext,
         origin: Option<Digest32>,
     ) -> Result<PreparedPlan> {
+        if self.assign_labor {
+            return Err(invalid(
+                "assigned inventory targets require the explicit assignment compiler",
+            ));
+        }
+        let (binding, orders, baselines) = self.lower(assessments, c)?;
+        let request = ExistingLaborPortfolioRequest {
+            kind: "existing_labor_portfolio".into(),
+            expected_observation: self.expected_observation.clone(),
+            units: self.units.clone(),
+            labor: self.labor.clone(),
+            orders,
+            deadline_tick: self.deadline_tick,
+            poll_interval_ticks: self.poll_interval_ticks,
+            stable_samples: self.stable_samples,
+        };
+        request.compile_with_stock_targets(evidence, workers, &baselines, c, origin, Some(&binding))
+    }
+
+    /// A positive vector can explicitly enable one shared labor before all of
+    /// its dependent original orders. Already-met vectors never enter either
+    /// compiler, and every met minimum remains in the complete parent.
+    pub(crate) fn compile_with_labor_assignment(
+        &self,
+        assessments: &[StockTargetAssessment],
+        evidence: &PredicateEvidence<'_>,
+        c: &OperationContext,
+        origin: Option<Digest32>,
+    ) -> Result<PreparedPlan> {
+        if !self.assign_labor {
+            return Err(invalid(
+                "inventory target assignment requires explicit assign_labor=true",
+            ));
+        }
+        let (binding, orders, baselines) = self.lower(assessments, c)?;
+        let request = PortfolioRequest {
+            kind: "portfolio".into(),
+            expected_observation: self.expected_observation.clone(),
+            units: self.units.clone(),
+            labor: self.labor.clone(),
+            enabled: true,
+            orders,
+            deadline_tick: self.deadline_tick,
+            poll_interval_ticks: self.poll_interval_ticks,
+            stable_samples: self.stable_samples,
+        };
+        request.compile_with_stock_targets(evidence, &baselines, c, origin, Some(&binding))
+    }
+
+    fn lower(
+        &self,
+        assessments: &[StockTargetAssessment],
+        c: &OperationContext,
+    ) -> Result<(StockTargetsBinding, Vec<PortfolioOrder>, InventoryBaselines)> {
         self.validate()?;
         if assessments.len() != self.targets.len()
-            || assessments.iter().zip(&self.targets).any(|(assessment, target)| {
-                recipe(&target.recipe).map_or(true, |(native, _)| native != assessment.recipe())
-                    || assessment.target_stack_units() != target.minimum_stack_units
-                    || assessment.max_order_amount() != target.max_order_amount
-                    || assessment.original_anchor() != c.anchor
-            })
+            || assessments
+                .iter()
+                .zip(&self.targets)
+                .any(|(assessment, target)| {
+                    recipe(&target.recipe).map_or(true, |(native, _)| native != assessment.recipe())
+                        || assessment.target_stack_units() != target.minimum_stack_units
+                        || assessment.max_order_amount() != target.max_order_amount
+                        || assessment.original_anchor() != c.anchor
+                })
         {
-            return Err(invalid("stock-target portfolio differs from its complete original census"));
+            return Err(invalid(
+                "stock-target portfolio differs from its complete original census",
+            ));
         }
-        let binding = StockTargetsBinding::from_assessments(assessments)?;
+        let binding = if self.assign_labor {
+            StockTargetsBinding::from_assessments_with_assignment(assessments)?
+        } else {
+            StockTargetsBinding::from_assessments(assessments)?
+        };
         let mut orders = Vec::new();
         let mut objectives = Vec::new();
         for assessment in assessments {
             if let Some(amount) = assessment.amount() {
-                let objective = assessment.objective()
-                    .ok_or_else(|| invalid("positive stock target lacks its qualified growth goal"))?
+                let objective = assessment
+                    .objective()
+                    .ok_or_else(|| {
+                        invalid("positive stock target lacks its qualified growth goal")
+                    })?
                     .clone();
                 orders.push(PortfolioOrder {
                     recipe: assessment.recipe().as_str().into(),
@@ -140,22 +226,15 @@ impl StockTargetsRequest {
             }
         }
         if orders.is_empty() {
-            return Err(invalid("an already-satisfied portfolio has no original effects"));
+            return Err(invalid(
+                "an already-satisfied portfolio has no original effects",
+            ));
         }
-        let request = ExistingLaborPortfolioRequest {
-            kind: "existing_labor_portfolio".into(),
-            expected_observation: self.expected_observation.clone(),
-            units: self.units.clone(),
-            labor: self.labor.clone(),
+        Ok((
+            binding,
             orders,
-            deadline_tick: self.deadline_tick,
-            poll_interval_ticks: self.poll_interval_ticks,
-            stable_samples: self.stable_samples,
-        };
-        request.compile_with_stock_targets(
-            evidence, workers, &InventoryBaselines::from_qualified_many(objectives)?,
-            c, origin, Some(&binding),
-        )
+            InventoryBaselines::from_qualified_many(objectives)?,
+        ))
     }
 }
 

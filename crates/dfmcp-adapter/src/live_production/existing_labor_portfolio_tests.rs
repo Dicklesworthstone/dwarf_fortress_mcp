@@ -26,10 +26,10 @@ fn portfolio_fixture(count: usize) -> Result<ProductionFixture> {
             job_token: (*job).into(),
             amount: 2,
             conditions: Vec::new(),
-        }.normalized();
-        step.idempotency_key = derive_step_idempotency_key(
-            f.plan.intent_id, f.plan.anchor, step.id, &step.action,
-        );
+        }
+        .normalized();
+        step.idempotency_key =
+            derive_step_idempotency_key(f.plan.intent_id, f.plan.anchor, step.id, &step.action);
         let goal = Predicate::EntityQuantity {
             kind: EntityKind::Item,
             filter_field: "type_key".into(),
@@ -39,14 +39,23 @@ fn portfolio_fixture(count: usize) -> Result<ProductionFixture> {
             value: 2,
         };
         step.postconditions = vec![goal.clone()];
-        step.obligation.as_mut().ok_or_else(|| invalid("fixture obligation absent"))?.terminal = goal.clone();
+        step.obligation
+            .as_mut()
+            .ok_or_else(|| invalid("fixture obligation absent"))?
+            .terminal = goal.clone();
         terminal.push(goal);
         f.plan.steps.push(step);
     }
     f.plan.terminal_condition = Predicate::All(terminal).normalized();
     f.plan.summary = "Complete a furniture portfolio with observed existing workers".into();
     reseal(&mut f.plan);
-    let Executor { workforce, orders, evidence, factory, .. } = f.executor;
+    let Executor {
+        workforce,
+        orders,
+        evidence,
+        factory,
+        ..
+    } = f.executor;
     f.executor = Executor::new(f.plan.clone(), workforce, orders, evidence, factory, &f.c)?;
     Ok(f)
 }
@@ -71,8 +80,14 @@ fn cohort_progress(
     sequence: u64,
 ) -> Result<ProgressObservation> {
     let mut raw = b"DFMWP012".to_vec();
-    for value in [501u64, sequence, queue.tick()] { raw.extend_from_slice(&value.to_be_bytes()); }
-    for value in [queue.site_id(), queue.next_order_id(), queue.order_ids().len() as u32] {
+    for value in [501u64, sequence, queue.tick()] {
+        raw.extend_from_slice(&value.to_be_bytes());
+    }
+    for value in [
+        queue.site_id(),
+        queue.next_order_id(),
+        queue.order_ids().len() as u32,
+    ] {
         raw.extend_from_slice(&value.to_be_bytes());
     }
     raw.push(1);
@@ -89,9 +104,13 @@ fn cohort_progress(
             let (_, _, recipe, job) = RECIPES[*step as usize];
             raw.extend_from_slice(&77i32.to_be_bytes());
             raw.push(recipe);
-            for value in [2i32, 2] { raw.extend_from_slice(&value.to_be_bytes()); }
+            for value in [2i32, 2] {
+                raw.extend_from_slice(&value.to_be_bytes());
+            }
             raw.extend_from_slice(&3u32.to_be_bytes());
-            for value in [0i32, -1, 1, 0, 0] { raw.extend_from_slice(&value.to_be_bytes()); }
+            for value in [0i32, -1, 1, 0, 0] {
+                raw.extend_from_slice(&value.to_be_bytes());
+            }
             raw.extend_from_slice(&0u32.to_be_bytes());
             raw.extend_from_slice(&0u32.to_be_bytes());
             text(&mut raw, job);
@@ -128,7 +147,12 @@ fn portfolio_open(
     initialize: bool,
 ) -> Result<SelectedWorkOrderGoalMonitor<Storage>> {
     f.executor.begin_portfolio_order_goal_monitor(
-        StepId::new(step), storage, initialize, false, &f.c, |p, _| Ok(grant(p)),
+        StepId::new(step),
+        storage,
+        initialize,
+        false,
+        &f.c,
+        |p, _| Ok(grant(p)),
     )
 }
 
@@ -140,7 +164,12 @@ fn portfolio_sample(
     units: usize,
 ) -> Result<SelectedParentGoalResult> {
     portfolio_sample_with_policy(
-        f, monitor, source_sequence, progress_sequence, units, |p, _| Ok(grant(p)),
+        f,
+        monitor,
+        source_sequence,
+        progress_sequence,
+        units,
+        |p, _| Ok(grant(p)),
     )
 }
 
@@ -166,25 +195,35 @@ where
         &original,
         &capsule,
     )?;
-    let cursor = ObservationCursor { epoch: f.c.anchor.cursor.epoch, sequence: source_sequence };
+    let cursor = ObservationCursor {
+        epoch: f.c.anchor.cursor.epoch,
+        sequence: source_sequence,
+    };
     f.executor.poll_selected_portfolio_goal(
         monitor,
         &identity,
         cursor,
         &f.c,
         (
-            |_| Ok(Progress {
-                manifest: ProgressManifest {
-                    generation: 501,
-                    df_version: "0.51.11".into(),
-                    dfhack_version: "0.51.11-r1".into(),
-                },
-                captures: vec![before, after],
-            }),
+            |_| {
+                Ok(Progress {
+                    manifest: ProgressManifest {
+                        generation: 501,
+                        df_version: "0.51.11".into(),
+                        dfhack_version: "0.51.11-r1".into(),
+                    },
+                    captures: vec![before, after],
+                })
+            },
             |_| Ok(Operations(operations)),
         ),
-        (order_policy, |_, _| Err(invalid("assignment policy must not be consulted"))),
-        ObservationCursor { epoch: cursor.epoch, sequence: source_sequence * 4 + u64::from(step) },
+        (order_policy, |_, _| {
+            Err(invalid("assignment policy must not be consulted"))
+        }),
+        ObservationCursor {
+            epoch: cursor.epoch,
+            sequence: source_sequence * 4 + u64::from(step),
+        },
     )
 }
 
@@ -198,18 +237,29 @@ fn join(
     let before = cohort_progress(&queue, &steps, sequence)?;
     let after = cohort_progress(&queue, &steps, sequence + 20)?;
     compose_existing_labor_portfolio_goal(
-        &f.plan, samples, &before, &after, &f.c,
-        |_, p, _| Ok(grant(p)), |p, _| Ok(policy(p.snapshot())),
+        &f.plan,
+        samples,
+        &before,
+        &after,
+        &f.c,
+        |_, p, _| Ok(grant(p)),
+        |p, _| Ok(policy(p.snapshot())),
     )
 }
 
 #[test]
-fn existing_portfolio_layout_retains_zero_based_orders_and_rejects_incomplete_shapes() -> Result<()> {
+fn existing_portfolio_layout_retains_zero_based_orders_and_rejects_incomplete_shapes() -> Result<()>
+{
     for count in 1..=4 {
         let f = portfolio_fixture(count)?;
         let layout = ProductionLayout::from_plan(&f.plan)?;
         assert_eq!(layout.assignment_step(), None);
-        assert_eq!(layout.order_steps(), &(0..count).map(|n| StepId::new(n as u32)).collect::<Vec<_>>());
+        assert_eq!(
+            layout.order_steps(),
+            &(0..count)
+                .map(|n| StepId::new(n as u32))
+                .collect::<Vec<_>>()
+        );
         assert_eq!(layout.archive_seal(), validate_plan(&f.plan)?);
         assert_eq!(layout.order_ordinal(StepId::ZERO), Some(0));
         assert_eq!(layout.order_ordinal(StepId::new(count as u32)), None);
@@ -220,20 +270,39 @@ fn existing_portfolio_layout_retains_zero_based_orders_and_rejects_incomplete_sh
         let mut plan = f.plan.clone();
         match case {
             0 => {
-                let terminal = plan.steps[2].obligation.as_ref().ok_or_else(|| invalid("fixture"))?.terminal.clone();
-                if let Predicate::All(predicates) = &mut plan.terminal_condition { predicates.retain(|p| p != &terminal); }
+                let terminal = plan.steps[2]
+                    .obligation
+                    .as_ref()
+                    .ok_or_else(|| invalid("fixture"))?
+                    .terminal
+                    .clone();
+                if let Predicate::All(predicates) = &mut plan.terminal_condition {
+                    predicates.retain(|p| p != &terminal);
+                }
             }
             1 => {
                 plan.steps[1].action = plan.steps[0].action.clone();
                 plan.steps[1].postconditions = plan.steps[0].postconditions.clone();
                 plan.steps[1].obligation = plan.steps[0].obligation.clone();
                 plan.steps[1].idempotency_key = derive_step_idempotency_key(
-                    plan.intent_id, plan.anchor, plan.steps[1].id, &plan.steps[1].action,
+                    plan.intent_id,
+                    plan.anchor,
+                    plan.steps[1].id,
+                    &plan.steps[1].action,
                 );
             }
             2 => plan.steps[1].depends_on = vec![StepId::ZERO],
-            3 => plan.steps[2].obligation.as_mut().ok_or_else(|| invalid("fixture"))?.failure = Some(Predicate::False),
-            _ => plan.terminal_condition = Predicate::All(vec![plan.terminal_condition, Predicate::Paused(true)]),
+            3 => {
+                plan.steps[2]
+                    .obligation
+                    .as_mut()
+                    .ok_or_else(|| invalid("fixture"))?
+                    .failure = Some(Predicate::False)
+            }
+            _ => {
+                plan.terminal_condition =
+                    Predicate::All(vec![plan.terminal_condition, Predicate::Paused(true)])
+            }
         }
         plan.terminal_condition = plan.terminal_condition.normalized();
         reseal(&mut plan);
@@ -241,7 +310,22 @@ fn existing_portfolio_layout_retains_zero_based_orders_and_rejects_incomplete_sh
         assert!(validate_plan(&plan).is_err(), "case {case}");
     }
     let legacy = ProductionFixture::new(2)?;
-    let layout = ProductionLayout::from_plan(&legacy.plan)?;
+    // The generic sequencing fixture deliberately uses an unrelated parent
+    // terminal. It remains executable, but cannot claim this complete-parent
+    // layout until it retains its own labor and every original order goal.
+    assert_eq!(legacy.executor.original_plan(), &legacy.plan);
+    assert!(ProductionLayout::from_plan(&legacy.plan).is_err());
+    let mut complete = legacy.plan;
+    complete.terminal_condition = Predicate::All(
+        complete
+            .steps
+            .iter()
+            .flat_map(|step| step.postconditions.iter().cloned())
+            .collect(),
+    )
+    .normalized();
+    reseal(&mut complete);
+    let layout = ProductionLayout::from_plan(&complete)?;
     assert_eq!(layout.assignment_step(), Some(StepId::ZERO));
     assert_eq!(layout.order_steps(), &[StepId::new(1), StepId::new(2)]);
     assert!(layout.existing_labor().is_none());
@@ -249,18 +333,32 @@ fn existing_portfolio_layout_retains_zero_based_orders_and_rejects_incomplete_sh
 }
 
 #[test]
-fn four_existing_worker_orders_execute_with_original_keys_and_zero_assignment_effects() -> Result<()> {
+fn four_existing_worker_orders_execute_with_original_keys_and_zero_assignment_effects() -> Result<()>
+{
     let mut f = portfolio_fixture(4)?;
     let original = f.plan.clone();
     let workforce_bytes = f.workforce.journal.0.borrow().file.get_ref().clone();
     let association_bytes = f.workforce.associations.0.borrow().file.get_ref().clone();
-    for step in 0..4 { f.applied(step)?; }
+    for step in 0..4 {
+        f.applied(step)?;
+    }
     assert_eq!(f.orders.borrow().commits, 4);
     assert_eq!(&f.workforce.data.borrow().calls[1..], &[0; 4]);
-    assert_eq!(*f.workforce.journal.0.borrow().file.get_ref(), workforce_bytes);
-    assert_eq!(*f.workforce.associations.0.borrow().file.get_ref(), association_bytes);
+    assert_eq!(
+        *f.workforce.journal.0.borrow().file.get_ref(),
+        workforce_bytes
+    );
+    assert_eq!(
+        *f.workforce.associations.0.borrow().file.get_ref(),
+        association_bytes
+    );
     for step in &original.steps {
-        assert!(f.orders.borrow().retained.contains_key(&step.idempotency_key));
+        assert!(
+            f.orders
+                .borrow()
+                .retained
+                .contains_key(&step.idempotency_key)
+        );
         let inspected = f.executor.inspect_selected_order_custody(step.id, &f.c)?;
         assert_eq!(inspected.review().original_plan(), &original);
         assert_eq!(inspected.review().step_id(), step.id);
@@ -274,7 +372,8 @@ fn four_existing_worker_orders_execute_with_original_keys_and_zero_assignment_ef
 }
 
 #[test]
-fn later_existing_order_rechecks_labor_after_marker_without_changing_prior_receipts() -> Result<()> {
+fn later_existing_order_rechecks_labor_after_marker_without_changing_prior_receipts() -> Result<()>
+{
     let mut f = portfolio_fixture(3)?;
     f.applied(0)?;
     let original_receipt = f.orders.borrow().retained[&f.plan.steps[0].idempotency_key].clone();
@@ -282,25 +381,39 @@ fn later_existing_order_rechecks_labor_after_marker_without_changing_prior_recei
     f.workforce.data.borrow_mut().fixture.citizens[0].labors[1] = 0;
     assert!(f.commit(1, prepared).is_err());
     assert_eq!(f.orders.borrow().commits, 1);
-    assert_eq!(f.orders.borrow().retained[&f.plan.steps[0].idempotency_key], original_receipt);
+    assert_eq!(
+        f.orders.borrow().retained[&f.plan.steps[0].idempotency_key],
+        original_receipt
+    );
     f.workforce.data.borrow_mut().fixture.citizens[0].labors[1] = 1;
-    assert!(f.prepare(2).is_err(), "uncertain original second order must fence later work");
+    assert!(
+        f.prepare(2).is_err(),
+        "uncertain original second order must fence later work"
+    );
     assert_eq!(&f.workforce.data.borrow().calls[1..], &[0; 4]);
     Ok(())
 }
 
 #[test]
-fn complete_existing_portfolio_needs_every_temporal_leaf_and_shared_current_workers() -> Result<()> {
+fn complete_existing_portfolio_needs_every_temporal_leaf_and_shared_current_workers() -> Result<()>
+{
     let mut f = portfolio_fixture(4)?;
-    for step in 0..4 { f.applied(step)?; }
-    let mut monitors = (0..4).map(|step| portfolio_open(&mut f, step, Storage::default(), true)).collect::<Result<Vec<_>>>()?;
+    for step in 0..4 {
+        f.applied(step)?;
+    }
+    let mut monitors = (0..4)
+        .map(|step| portfolio_open(&mut f, step, Storage::default(), true))
+        .collect::<Result<Vec<_>>>()?;
     for (cohort, tick, enabled) in [(1, 125, true), (2, 130, true), (3, 135, false)] {
         set_tick(&mut f, tick, enabled)?;
         let base = cohort * 100;
         let mut samples = Vec::new();
         for (index, monitor) in monitors.iter_mut().enumerate() {
             let sample = portfolio_sample(&mut f, monitor, cohort, base + 1 + 2 * index as u64, 4)?;
-            assert!(!sample.original_goal_proven(), "a selected leaf is not the complete portfolio");
+            assert!(
+                !sample.original_goal_proven(),
+                "a selected leaf is not the complete portfolio"
+            );
             assert_eq!(sample.step_id(), StepId::new(index as u32));
             samples.push(sample);
         }
@@ -308,19 +421,33 @@ fn complete_existing_portfolio_needs_every_temporal_leaf_and_shared_current_work
         let result = join(&f, &samples, base)?;
         assert_eq!(result.selected_anchors.len(), 4);
         assert_eq!(result.original_goal_proven, cohort == 2);
-        assert_eq!(result.current_truth, if enabled { PredicateTruth::True } else { PredicateTruth::False });
+        assert_eq!(
+            result.current_truth,
+            if enabled {
+                PredicateTruth::True
+            } else {
+                PredicateTruth::False
+            }
+        );
         if cohort == 2 {
-            for id in 100..104 { retire(&f, id)?; }
+            for id in 100..104 {
+                retire(&f, id)?;
+            }
         }
     }
-    assert!(monitors.iter().all(|monitor| monitor.first_satisfied_anchor().is_some()));
+    assert!(
+        monitors
+            .iter()
+            .all(|monitor| monitor.first_satisfied_anchor().is_some())
+    );
     assert_eq!(f.orders.borrow().commits, 4);
     assert_eq!(&f.workforce.data.borrow().calls[1..], &[0; 4]);
     Ok(())
 }
 
 #[test]
-fn existing_portfolio_join_refuses_cross_leaf_stock_drift_policy_loss_and_wrong_mode() -> Result<()> {
+fn existing_portfolio_join_refuses_cross_leaf_stock_drift_policy_loss_and_wrong_mode() -> Result<()>
+{
     let mut f = portfolio_fixture(2)?;
     f.applied(0)?;
     f.applied(1)?;
@@ -335,31 +462,56 @@ fn existing_portfolio_join_refuses_cross_leaf_stock_drift_policy_loss_and_wrong_
     let before = cohort_progress(&queue, &[0, 1], 100)?;
     let after = cohort_progress(&queue, &[0, 1], 120)?;
     let samples = [a, b];
-    assert!(compose_existing_labor_portfolio_goal(
-        &f.plan, &samples, &before, &after, &f.c, |_, p, _| Ok(grant(p)),
-        |p, _| Ok(EvidencePolicy::at(p.anchor())),
-    ).is_err());
-    assert!(compose_production_portfolio_goal(
-        &f.plan, &samples, &before, &after, &f.c, |_, p, _| Ok(grant(p)),
-        |p, _| Ok(policy(p.snapshot())),
-    ).is_err());
+    assert!(
+        compose_existing_labor_portfolio_goal(
+            &f.plan,
+            &samples,
+            &before,
+            &after,
+            &f.c,
+            |_, p, _| Ok(grant(p)),
+            |p, _| Ok(EvidencePolicy::at(p.anchor())),
+        )
+        .is_err()
+    );
+    assert!(
+        compose_production_portfolio_goal(
+            &f.plan,
+            &samples,
+            &before,
+            &after,
+            &f.c,
+            |_, p, _| Ok(grant(p)),
+            |p, _| Ok(policy(p.snapshot())),
+        )
+        .is_err()
+    );
     assert!(!join(&f, &samples, 100)?.original_goal_proven);
     Ok(())
 }
 
 #[test]
-fn existing_portfolio_independent_clock_custody_binds_actual_step_zero_and_every_original_key() -> Result<()> {
+fn existing_portfolio_independent_clock_custody_binds_actual_step_zero_and_every_original_key()
+-> Result<()> {
     let mut f = portfolio_fixture(4)?;
-    for step in 0..4 { f.applied(step)?; }
+    for step in 0..4 {
+        f.applied(step)?;
+    }
     let archive = validate_plan(&f.plan)?;
-    let journal = WorkOrderJournal::open(f.order_journal.clone(), &f.c, JournalMode::Offline, false)?.summary(&f.c)?.journal_id;
+    let journal =
+        WorkOrderJournal::open(f.order_journal.clone(), &f.c, JournalMode::Offline, false)?
+            .summary(&f.c)?
+            .journal_id;
     let mut identities = BTreeSet::new();
     for index in 0..4 {
         let step = StepId::new(index);
         let result = f.executor.inspect_selected_order_custody(step, &f.c)?;
         let custody = SelectedOrderClockCustody::new(&f.plan, archive, journal, &result)?;
         assert_eq!(custody.step_id(), step);
-        assert_eq!(custody.native_plan().key(), f.plan.steps[index as usize].idempotency_key);
+        assert_eq!(
+            custody.native_plan().key(),
+            f.plan.steps[index as usize].idempotency_key
+        );
         assert_eq!(custody.deadline_tick(), GameTick(220));
         assert!(identities.insert(custody.identity_bytes().to_vec()));
     }
@@ -369,7 +521,8 @@ fn existing_portfolio_independent_clock_custody_binds_actual_step_zero_and_every
 }
 
 #[test]
-fn existing_portfolio_lost_reply_reconciles_only_original_leaf_and_never_repeats_insertions() -> Result<()> {
+fn existing_portfolio_lost_reply_reconciles_only_original_leaf_and_never_repeats_insertions()
+-> Result<()> {
     let mut f = portfolio_fixture(3)?;
     f.applied(0)?;
     f.orders.borrow_mut().lose_reply = true;
@@ -379,7 +532,11 @@ fn existing_portfolio_lost_reply_reconciles_only_original_leaf_and_never_repeats
     let original = f.plan.clone();
     let mut f = f.reopen_query()?;
     let route = f.route(1)?;
-    assert!(matches!(f.executor.recover_step(&f.plan, &f.plan.steps[1], &route, &f.c)?, RecoveredFamily::Applied(_)));
+    assert!(matches!(
+        f.executor
+            .recover_step(&f.plan, &f.plan.steps[1], &route, &f.c)?,
+        RecoveredFamily::Applied(_)
+    ));
     assert_eq!(f.executor.original_plan(), &original);
     assert_eq!(f.orders.borrow().commits, 2);
     assert_eq!(&f.workforce.data.borrow().calls[1..], &[0; 4]);
@@ -388,7 +545,8 @@ fn existing_portfolio_lost_reply_reconciles_only_original_leaf_and_never_repeats
 }
 
 #[test]
-fn existing_portfolio_history_reopen_keeps_original_deadline_and_withdraws_current_proof() -> Result<()> {
+fn existing_portfolio_history_reopen_keeps_original_deadline_and_withdraws_current_proof()
+-> Result<()> {
     let mut f = portfolio_fixture(2)?;
     f.applied(0)?;
     f.applied(1)?;
@@ -398,8 +556,14 @@ fn existing_portfolio_history_reopen_keeps_original_deadline_and_withdraws_curre
     set_tick(&mut f, 221, true)?;
     let a = portfolio_sample(&mut f, &mut first, 1, 101, 2)?;
     let b = portfolio_sample(&mut f, &mut second, 1, 103, 2)?;
-    assert!(matches!(a.progress().obligation, Some(ObligationStatus::Failed { .. })));
-    assert!(matches!(b.progress().obligation, Some(ObligationStatus::Failed { .. })));
+    assert!(matches!(
+        a.progress().obligation,
+        Some(ObligationStatus::Failed { .. })
+    ));
+    assert!(matches!(
+        b.progress().obligation,
+        Some(ObligationStatus::Failed { .. })
+    ));
     assert!(!join(&f, &[a, b], 100)?.original_goal_proven);
     let status = first.historical_obligation_status().cloned();
     drop(first);
@@ -411,7 +575,10 @@ fn existing_portfolio_history_reopen_keeps_original_deadline_and_withdraws_curre
     let sample = portfolio_sample(&mut f, &mut reopened, 2, 201, 2)?;
     assert!(!sample.selected_goal_proven());
     assert!(!sample.original_goal_proven());
-    assert!(matches!(sample.progress().obligation, Some(ObligationStatus::Failed { .. })));
+    assert!(matches!(
+        sample.progress().obligation,
+        Some(ObligationStatus::Failed { .. })
+    ));
     Ok(())
 }
 
@@ -426,53 +593,74 @@ fn stock_minimum(item_type: &str, minimum: u64) -> Predicate {
     }
 }
 
-fn portfolio_with_minima(
-    count: usize,
-    minima: &[(&str, u64)],
-) -> Result<ProductionFixture> {
+fn portfolio_with_minima(count: usize, minima: &[(&str, u64)]) -> Result<ProductionFixture> {
     let mut f = portfolio_fixture(count)?;
     let mut terminal = vec![f.plan.terminal_condition.clone()];
-    terminal.extend(minima.iter().map(|(item_type, minimum)| stock_minimum(item_type, *minimum)));
+    terminal.extend(
+        minima
+            .iter()
+            .map(|(item_type, minimum)| stock_minimum(item_type, *minimum)),
+    );
     f.plan.terminal_condition = Predicate::All(terminal).normalized();
     reseal(&mut f.plan);
-    let Executor { workforce, orders, evidence, factory, .. } = f.executor;
+    let Executor {
+        workforce,
+        orders,
+        evidence,
+        factory,
+        ..
+    } = f.executor;
     f.executor = Executor::new(f.plan.clone(), workforce, orders, evidence, factory, &f.c)?;
     Ok(f)
 }
 
 #[test]
 fn original_stock_minima_are_closed_complete_and_preserved_by_archive() -> Result<()> {
-    let f = portfolio_with_minima(
-        1, &[("TABLE", 2), ("BED", 3), ("DOOR", 2), ("CHAIR", 2)],
-    )?;
+    let f = portfolio_with_minima(1, &[("TABLE", 2), ("BED", 3), ("DOOR", 2), ("CHAIR", 2)])?;
     let requirement = ExistingLaborRequirement::from_plan(&f.plan)?
         .ok_or_else(|| invalid("stock requirement absent"))?;
-    assert_eq!(requirement.inventory_minima(), &[
-        stock_minimum("BED", 3), stock_minimum("CHAIR", 2),
-        stock_minimum("DOOR", 2), stock_minimum("TABLE", 2),
-    ]);
+    assert_eq!(
+        requirement.inventory_minima(),
+        &[
+            stock_minimum("BED", 3),
+            stock_minimum("CHAIR", 2),
+            stock_minimum("DOOR", 2),
+            stock_minimum("TABLE", 2),
+        ]
+    );
     assert_eq!(
         requirement.predicate(),
         ExistingLaborRequirement::new("CARPENTRY".into(), vec![(EntityId::new(43), 142)])?
             .predicate(),
         "inventory minima do not grant or require workforce inventory coverage",
     );
-    assert_eq!(f.plan.steps.len(), 1, "already met stock has no fabricated action");
-    let (bytes, seal) = dfmcp_intent::plan_archive::encode(
-        &f.plan, crate::live_production::archive_limits(),
-    )?;
-    let reopened = dfmcp_intent::plan_archive::decode(
-        &bytes, seal, crate::live_production::archive_limits(),
-    )?;
+    assert_eq!(
+        f.plan.steps.len(),
+        1,
+        "already met stock has no fabricated action"
+    );
+    let (bytes, seal) =
+        dfmcp_intent::plan_archive::encode(&f.plan, crate::live_production::archive_limits())?;
+    let reopened =
+        dfmcp_intent::plan_archive::decode(&bytes, seal, crate::live_production::archive_limits())?;
     assert_eq!(reopened, f.plan);
-    assert_eq!(ExistingLaborRequirement::from_plan(&reopened)?, Some(requirement));
+    assert_eq!(
+        ExistingLaborRequirement::from_plan(&reopened)?,
+        Some(requirement)
+    );
 
     let base = portfolio_fixture(1)?.plan;
     for case in 0..8 {
         let mut added = stock_minimum("DOOR", 2);
         if let Predicate::EntityQuantity {
-            kind, filter_field, filter_value, quantity_field, op, value,
-        } = &mut added {
+            kind,
+            filter_field,
+            filter_value,
+            quantity_field,
+            op,
+            value,
+        } = &mut added
+        {
             match case {
                 0 => *kind = EntityKind::Building,
                 1 => *filter_field = "label".into(),
@@ -487,13 +675,19 @@ fn original_stock_minima_are_closed_complete_and_preserved_by_archive() -> Resul
         let mut plan = base.clone();
         plan.terminal_condition = Predicate::All(vec![plan.terminal_condition, added]).normalized();
         reseal(&mut plan);
-        assert!(ExistingLaborRequirement::from_plan(&plan).is_err(), "case {case}");
+        assert!(
+            ExistingLaborRequirement::from_plan(&plan).is_err(),
+            "case {case}"
+        );
         assert!(validate_plan(&plan).is_err(), "case {case}");
     }
     let mut duplicate = base;
     duplicate.terminal_condition = Predicate::All(vec![
-        duplicate.terminal_condition, stock_minimum("DOOR", 2), stock_minimum("DOOR", 3),
-    ]).normalized();
+        duplicate.terminal_condition,
+        stock_minimum("DOOR", 2),
+        stock_minimum("DOOR", 3),
+    ])
+    .normalized();
     reseal(&mut duplicate);
     assert!(ExistingLaborRequirement::from_plan(&duplicate).is_err());
     Ok(())
@@ -512,14 +706,23 @@ fn no_action_stock_target_must_remain_true_in_every_fresh_parent() -> Result<()>
         let finding = &sample.parent_progress().inventory_requirements[0];
         assert_eq!(finding.item_type, "DOOR");
         assert_eq!(finding.minimum_stack_units, 2);
-        assert_eq!(finding.observed_stack_units, Some(if item_types == 3 { 2 } else { 0 }));
-        assert_eq!(finding.current_truth, if item_types == 3 {
-            PredicateTruth::True
-        } else {
-            PredicateTruth::False
-        });
+        assert_eq!(
+            finding.observed_stack_units,
+            Some(if item_types == 3 { 2 } else { 0 })
+        );
+        assert_eq!(
+            finding.current_truth,
+            if item_types == 3 {
+                PredicateTruth::True
+            } else {
+                PredicateTruth::False
+            }
+        );
         if cohort >= 2 {
-            assert!(sample.selected_goal_proven(), "the original BED temporal history remains fulfilled");
+            assert!(
+                sample.selected_goal_proven(),
+                "the original BED temporal history remains fulfilled"
+            );
         }
         let result = join(&f, &[sample], cohort * 100)?;
         assert_eq!(result.inventory_requirements.len(), 1);
@@ -534,7 +737,10 @@ fn no_action_stock_target_must_remain_true_in_every_fresh_parent() -> Result<()>
     assert_eq!(f.executor.original_plan(), &original);
     drop(monitor);
     let reopened = portfolio_open(&mut f, 0, history, false)?;
-    assert!(reopened.latest().is_none(), "history does not restore all-target current proof");
+    assert!(
+        reopened.latest().is_none(),
+        "history does not restore all-target current proof"
+    );
     assert_eq!(reopened.original_plan(), &original);
     assert!(reopened.first_satisfied_anchor().is_some());
     Ok(())
@@ -542,7 +748,9 @@ fn no_action_stock_target_must_remain_true_in_every_fresh_parent() -> Result<()>
 
 fn incomplete_inventory(p: &WorkOrderGoalProjection) -> EvidencePolicy {
     let mut policy = grant(p);
-    policy.entity_kinds.insert(EntityKind::Item, EvidenceCoverage::Observed);
+    policy
+        .entity_kinds
+        .insert(EntityKind::Item, EvidenceCoverage::Observed);
     policy
 }
 
@@ -552,9 +760,9 @@ fn unqualified_no_action_stock_is_unknown_instead_of_a_zero_or_historical_count(
     f.applied(0)?;
     let mut monitor = portfolio_open(&mut f, 0, Storage::default(), true)?;
     set_tick(&mut f, 125, true)?;
-    let sample = portfolio_sample_with_policy(
-        &mut f, &mut monitor, 1, 101, 3, |p, _| Ok(incomplete_inventory(p)),
-    )?;
+    let sample = portfolio_sample_with_policy(&mut f, &mut monitor, 1, 101, 3, |p, _| {
+        Ok(incomplete_inventory(p))
+    })?;
     let finding = &sample.parent_progress().inventory_requirements[0];
     assert_eq!(finding.observed_stack_units, None);
     assert_eq!(finding.current_truth, PredicateTruth::Unknown);
@@ -562,8 +770,13 @@ fn unqualified_no_action_stock_is_unknown_instead_of_a_zero_or_historical_count(
     let before = cohort_progress(&queue, &[0], 100)?;
     let after = cohort_progress(&queue, &[0], 120)?;
     let result = compose_existing_labor_portfolio_goal(
-        &f.plan, &[sample], &before, &after, &f.c,
-        |_, p, _| Ok(incomplete_inventory(p)), |p, _| Ok(policy(p.snapshot())),
+        &f.plan,
+        &[sample],
+        &before,
+        &after,
+        &f.c,
+        |_, p, _| Ok(incomplete_inventory(p)),
+        |p, _| Ok(policy(p.snapshot())),
     )?;
     assert_eq!(result.current_truth, PredicateTruth::Unknown);
     assert!(!result.original_goal_proven);
@@ -583,7 +796,10 @@ fn all_original_stock_minima_must_share_the_complete_portfolio_census() -> Resul
     let b = portfolio_sample(&mut f, &mut second, 1, 103, 2)?;
     assert_eq!(a.parent_progress().current_truth, PredicateTruth::True);
     assert_eq!(b.parent_progress().current_truth, PredicateTruth::False);
-    assert!(join(&f, &[a, b], 100).is_err(), "a met target cannot be borrowed from an earlier leaf");
+    assert!(
+        join(&f, &[a, b], 100).is_err(),
+        "a met target cannot be borrowed from an earlier leaf"
+    );
     assert_eq!(f.orders.borrow().commits, 2);
     Ok(())
 }

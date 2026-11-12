@@ -1,5 +1,6 @@
 //! Explicit bounded production portfolio. Legacy request identities are unchanged.
 use super::request::{Request, recipe};
+use super::stock_targets_binding::StockTargetsBinding;
 use super::*;
 use dfmcp_core::{IntentId, StepId};
 use dfmcp_intent::effects::created_entity_id;
@@ -112,6 +113,16 @@ impl PortfolioRequest {
         c: &OperationContext,
         origin: Option<Digest32>,
     ) -> Result<PreparedPlan> {
+        self.compile_with_stock_targets(evidence, baselines, c, origin, None)
+    }
+    pub(super) fn compile_with_stock_targets(
+        &self,
+        evidence: &PredicateEvidence<'_>,
+        baselines: &InventoryBaselines,
+        c: &OperationContext,
+        origin: Option<Digest32>,
+        stock_targets: Option<&StockTargetsBinding>,
+    ) -> Result<PreparedPlan> {
         self.validate()?;
         let first = self
             .orders
@@ -152,6 +163,20 @@ impl PortfolioRequest {
                 objective.append_identity(&mut bytes, baselines, c.anchor)?;
             }
         }
+        if let Some(binding) = stock_targets {
+            if binding.original_anchor != c.anchor {
+                return Err(denied(
+                    "assigned inventory targets belong to another original anchor",
+                ));
+            }
+            bytes = binding.assignment_identity(
+                &labor.action,
+                &Predicate::All(labor.preconditions.clone()),
+                GameTick(self.deadline_tick),
+                self.poll_interval_ticks,
+                self.stable_samples,
+            )?;
+        }
         super::workshop_binding::append_identity(&mut bytes, origin)?;
         let digest = Digest32::of_bytes(&bytes);
         let id = IntentId::new(u128::from_be_bytes(
@@ -163,6 +188,9 @@ impl PortfolioRequest {
             return Err(invalid("reserved portfolio intent identity"));
         }
         let mut terminal = labor.postconditions.clone();
+        if let Some(binding) = stock_targets {
+            terminal.extend(binding.minima());
+        }
         let mut actions = vec![RequestedAction {
             action: labor.action.clone(),
             preconditions: labor.preconditions.clone(),
@@ -174,7 +202,11 @@ impl PortfolioRequest {
         for (index, requested) in self.orders.iter().enumerate() {
             let (native, job) = recipe(&requested.recipe)?;
             let action = Action::CreateWorkOrder {
-                name: format!("native portfolio {} goal", native.as_str()),
+                name: if stock_targets.is_some() {
+                    format!("native inventory-targets/2 {} goal", native.as_str())
+                } else {
+                    format!("native portfolio {} goal", native.as_str())
+                },
                 job_token: job.into(),
                 amount: requested.amount,
                 conditions: Vec::new(),
@@ -217,19 +249,28 @@ impl PortfolioRequest {
             id,
             anchor: c.anchor,
             summary: super::workshop_binding::summary(
-                format!(
-                    "Production portfolio: configure {} for {} citizens and satisfy {} original finite furniture goals",
-                    self.labor,
-                    units.len(),
-                    self.orders.len()
-                ),
+                match stock_targets {
+                    Some(binding) => binding.summary()?,
+                    None => format!(
+                        "Production portfolio: configure {} for {} citizens and satisfy {} original finite furniture goals",
+                        self.labor,
+                        units.len(),
+                        self.orders.len()
+                    ),
+                },
                 origin,
             )?,
             terminal_condition: Predicate::All(terminal),
             constraints: vec![Constraint::MaxRisk(RiskTier::Guarded)],
             requested_actions: actions,
         };
-        let mut plan = StaticPlanner::default().prepare_with_evidence(evidence, &intent, c)?;
+        let mut planner = StaticPlanner::default();
+        if stock_targets.is_some() {
+            // Only the complete, closed vector marker needs the larger summary
+            // allowance. Legacy plans retain their original policy and bytes.
+            planner.policy.max_string_bytes = 1024;
+        }
+        let mut plan = planner.prepare_with_evidence(evidence, &intent, c)?;
         for step in &mut plan.steps {
             step.compensation = None;
         }
@@ -237,6 +278,13 @@ impl PortfolioRequest {
         plan.id = plan.expected_id();
         plan.validate_structure()?;
         live_production::validate_plan(&plan)?;
+        if let Some(binding) = stock_targets
+            && super::stock_targets_binding::requirement(&plan)?.as_ref() != Some(binding)
+        {
+            return Err(denied(
+                "compiled assigned inventory targets lost their complete original policy",
+            ));
+        }
         Ok(plan)
     }
 }

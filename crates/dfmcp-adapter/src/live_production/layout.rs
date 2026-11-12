@@ -6,10 +6,10 @@ use std::collections::BTreeMap;
 
 use super::*;
 
-/// The complete closed labor/production shape, not current source authority or
-/// proof that any original action or goal has succeeded. Legacy assignment
-/// layouts retain their existing predicate semantics; the goal composer still
-/// checks the entire original terminal before publishing complete-parent proof.
+/// The complete original labor/production proof shape. Its parent must retain
+/// every original step requirement, with optional closed furniture stock minima.
+/// Recognition carries no current source authority or goal proof; the generic
+/// executor can still sequence originals outside this complete-parent grammar.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProductionLayout {
     archive: PlanArchiveSeal,

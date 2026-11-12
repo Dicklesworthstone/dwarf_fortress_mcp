@@ -84,10 +84,16 @@ against a single independently qualified census. It refuses the entire proposal
 if any positive deficit is over its limit, creates no original when every target
 is met, and emits original orders only for positive deficits. All requested
 minima remain explicit complete-parent requirements, including already-met stock.
-The selected eligible workers must already have the requested labor enabled.
+The selected eligible workers must already have the requested labor enabled by
+default. Explicit `assign_labor=true` instead creates one reviewed enable at
+StepId zero and one to four dependent orders at StepIds one through four. A wholly
+met vector creates neither assignment nor order, even with the opt-in.
 
 The separate `Inventory targets/1` archive identity binds the common census,
-all target assessments, workers and unchanged timing. Positive leaves retain
+all target assessments, workers and unchanged timing. The assignment variant
+uses `Inventory targets/2` and a separate identity domain, binding the exact
+assignment action and original citizen identity guards. Omitted/false assignment
+keeps `/1` bytes unchanged. Positive leaves retain
 typed inventory-increase objectives; distinct complete-parent minimum predicates
 preserve every target without fabricating an order. Before each real insertion,
 the complete census must still match and the native queue must contain exactly
@@ -100,7 +106,9 @@ that was later consumed. An unfinished cohort streak resets on False, Unknown or
 failure; a completed in-process achievement remains historical while current
 truth determines current proof. Reopening restores no cohort achievement or new
 deadline. Original per-order recovery, read-only custody and independently
-authorized clocks retain their normal boundaries.
+authorized clocks retain their normal boundaries. Assignment is not a stability
+sample: the complete-parent tracker reads timing only from the original positive
+order obligations, and clock requests use the actual order StepIds.
 
 ## Evidence boundary
 
@@ -123,16 +131,18 @@ explicit opt-in, exact assignment/order layout, original identities, archive
 round trips, bounded deficits and rejection of weakened recovery predicates.
 The vector request/binding/runtime and presentation sources additionally cover
 whole-proposal bounds, no-action minima, exact original queue prefixes, lost-reply
-recovery and whole-parent temporal stability. These new sources are unexecuted
-while the execution workspace is unavailable.
+recovery and whole-parent temporal stability. The assignment vector adds exact
+StepId offsets, explicit authority and full five-action budget coverage.
 
 The runtime suite uses the real combined Runtime and native clients against
-the existing TCP fixtures. Its assignment campaigns cover eleven cases,
+the existing TCP fixtures. The single-target assignment campaigns cover eleven cases,
 including independent step confirmation, zero work, missing current labor
 authority, action budgets, source drift after assignment and original-key
 lost-reply recovery without redispatch. Presentation tests retain assignment
 intent and actual StepId through compaction and overflow while withdrawing
-current proof and review.
+current proof and review. The vector campaigns cover eleven existing-worker
+cases and fourteen assigned-worker cases, including two and four actual orders,
+exact prior-order queue prefixes, no-action target loss and independent clocks.
 
 Run the focused suite in a working latest-nightly environment with the locked
 dependencies:
@@ -141,6 +151,10 @@ dependencies:
 cargo +nightly test --locked --offline -p dfmcp-mcp --lib stock_target -- --nocapture
 ```
 
-These are regression sources awaiting execution for this increment. They are
-not real-game production evidence; see the exact execution limits in
-`IMPLEMENTATION_STATUS.md`.
+Verified focused execution passes all 78 live-production adapter tests and all
+418 Runtime/presentation component tests, including 66 presentation tests and
+all 25 vector Runtime/native-peer cases. Full MCP build/check is still
+memory-blocked in the unchanged pinned runtime dependency; component execution
+excludes MCP transport/supervision and admission. Execution details and full
+qualification limits are recorded in `IMPLEMENTATION_STATUS.md`. Deterministic native-peer results do not establish
+real-game production or production admission.

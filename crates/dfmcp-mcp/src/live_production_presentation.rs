@@ -816,10 +816,13 @@ fn encode(
     let cohort_covers_selected = portfolio
         && parent_goal.is_object()
         && selected_goal["step_id"] == view["portfolio"]["selected_order_step_id"]
-        && view["portfolio"]["orders"].as_array().is_some_and(|orders| {
-            orders.iter().any(|order| order["step_id"] == selected_goal["step_id"]
-                && order["goal"] == selected_goal)
-        });
+        && view["portfolio"]["orders"]
+            .as_array()
+            .is_some_and(|orders| {
+                orders.iter().any(|order| {
+                    order["step_id"] == selected_goal["step_id"] && order["goal"] == selected_goal
+                })
+            });
     let clock_parent = if joined_goal.is_object() {
         &joined_goal
     } else if cohort_covers_selected {
@@ -834,7 +837,9 @@ fn encode(
             || (cohort_covers_selected && parent_goal["parent_stability"]["status"] == "pending"))
         && stock_targets::inventory_truth(view, clock_parent) == Some("true")
         && (view["current_parent_goal"].is_null() || parent_goal.is_object())
-        && deadline.zip(known_tick).is_some_and(|(deadline, tick)| tick < deadline);
+        && deadline
+            .zip(known_tick)
+            .is_some_and(|(deadline, tick)| tick < deadline);
     let current_goal_ready = !uncertain
         && !clock_invalidates_goal
         && !parent_fenced
@@ -1256,7 +1261,7 @@ fn encode(
     {
         Some((
             "fortress_plan",
-            "Compile kind=stock_target with assign_labor=true to size one finite inventory deficit and review enabling the selected workers before its order, or supply an explicit amount in the original labor-and-order request. Assignment and order each require their own review and confirmation.",
+            "Compile kind=stock_targets with assign_labor=true to size up to four finite inventory deficits and review enabling the selected workers before their orders, kind=stock_target for one deficit, or supply explicit amounts with kind=portfolio. The assignment and every order require separate review and confirmation; all requested stock minima remain in the original goal.",
             false,
             json!({}),
         ))

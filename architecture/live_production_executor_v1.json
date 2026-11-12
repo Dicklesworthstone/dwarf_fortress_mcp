@@ -89,12 +89,12 @@
       "labor-order"
     ],
     "configuration_schema": "dfmcp.combined-production-development/1",
-    "request_schema": "closed legacy labor/citizens/finite furniture request; kind=existing_labor for one independently qualified current-worker order; kind=portfolio to assign labor before one to four distinct recipes; kind=existing_labor_portfolio for one to four distinct recipes using the same current workers; each leaf may select an inventory minimum or an independently qualified original inventory increase; kind=stock_target derives one finite deficit from a fresh complete census using existing enabled workers by default, or explicit assign_labor=true for a separately reviewed enable and dependent order, with a typed no-work outcome and no caller amount/baseline; kind=stock_targets sizes one to four distinct minima from one fresh complete census using existing enabled workers, creates only positive deficits, and retains all requested minima in a complete original portfolio",
+    "request_schema": "closed legacy labor/citizens/finite furniture request; kind=existing_labor for one independently qualified current-worker order; kind=portfolio to assign labor before one to four distinct recipes; kind=existing_labor_portfolio for one to four distinct recipes using the same current workers; each leaf may select an inventory minimum or an independently qualified original inventory increase; kind=stock_target derives one finite deficit from a fresh complete census using existing enabled workers by default, or explicit assign_labor=true for a separately reviewed enable and dependent order, with a typed no-work outcome and no caller amount/baseline; kind=stock_targets sizes one to four distinct minima from one fresh complete census using existing enabled workers by default or explicit assign_labor=true for one separately reviewed enable and dependent orders, creates only positive deficits, and retains all requested minima in a complete original portfolio",
     "original_steps": [
       "SetLabor",
       "CreateWorkOrder"
     ],
-    "order_depends_on_original_labor_step": "legacy and portfolio only; existing_labor and existing_labor_portfolio retain exact observed worker prerequisites with dependency-free original orders; stock_targets has dependency-free positive-deficit orders and complete original current stock prerequisites",
+    "order_depends_on_original_labor_step": "legacy and portfolio assignment orders depend on StepId0; existing_labor and existing_labor_portfolio retain exact observed worker prerequisites with independent orders; stock_target and stock_targets orders are independent by default or depend on StepId0 with explicit assign_labor=true; stock_targets retains every requested current stock minimum",
     "steps": {
       "legacy": 2,
       "portfolio_min": 2,
@@ -106,7 +106,9 @@
       "stock_target_with_assignment": 2,
       "stock_targets_min": 1,
       "stock_targets_max": 4,
-      "stock_targets_all_satisfied": 0
+      "stock_targets_all_satisfied": 0,
+      "stock_targets_assignment_min": 2,
+      "stock_targets_assignment_max": 5
     },
     "selected_citizens_max": 32,
     "workforce_choices": {
@@ -1057,8 +1059,8 @@
       ],
       "default_max_order_amount": 100,
       "normalization": "recipe_ascending",
-      "selected_labor": "independently qualified existing enabled and eligible workers",
-      "assignment_supported": false,
+      "selected_labor": "default: independently qualified existing enabled and eligible workers; assign_labor=true: one separately reviewed enable before the dependent orders",
+      "assignment_supported": true,
       "client_amount_or_baseline": false,
       "fresh_plan_census_required": true,
       "one_shared_complete_census": true,
@@ -1068,7 +1070,7 @@
       "all_requested_minima_retained": true,
       "positive_objectives": "typed original EntityQuantityIncrease",
       "complete_parent_minima": "closed EntityQuantity Ge type_key/stack_size requirements",
-      "original_order_step_ids": "0..positive_deficits-1",
+      "original_order_step_ids": "0..positive_deficits-1 by default; 1..positive_deficits after explicit assignment at StepId0",
       "zero_deficit_step_id": null,
       "one_positive_uses_complete_portfolio_runtime": true,
       "complete_recovery_vector_required": true,
@@ -1097,7 +1099,7 @@
       "new_protocol": false,
       "new_public_tool": false,
       "production_admission_added": false,
-      "execution_evidence": "source_review_only_pending_rust_execution",
+      "execution_evidence": "verified_component_execution; full_mcp_transport_and_supervision_unverified",
       "source_paths": [
         "crates/dfmcp-mcp/src/live_production_runtime/stock_targets_request.rs",
         "crates/dfmcp-mcp/src/live_production_runtime/stock_targets_binding.rs",
@@ -1117,10 +1119,40 @@
         "crates/dfmcp-mcp/src/live_production_presentation_stock_targets.rs",
         "crates/dfmcp-mcp/src/live_production_presentation_portfolio_tests.rs",
         "crates/dfmcp-mcp/src/live_production_runtime/stock_targets_tests.rs",
-        "tests/stdio/combined_stock_targets_runtime_peer.py"
+        "tests/stdio/combined_stock_targets_runtime_peer.py",
+        "crates/dfmcp-adapter/src/live_production/layout.rs",
+        "crates/dfmcp-adapter/src/live_production/parent_goal.rs",
+        "crates/dfmcp-adapter/src/live_production/portfolio_goal.rs",
+        "crates/dfmcp-adapter/src/live_production/assigned_inventory_goal_tests.rs",
+        "crates/dfmcp-mcp/src/live_production_runtime/portfolio_request.rs"
       ],
-      "runtime_peer_cases": 11,
-      "runtime_peer_evidence": "actual Rust Runtime and native TCP clients against deterministic doubles; source only until execution"
+      "runtime_peer_cases": 25,
+      "runtime_peer_evidence": "actual Rust Runtime and native TCP clients against deterministic doubles;11 existing-worker and14 assignment scenarios passed; no native-plugin or live-game qualification",
+      "optional_assignment": {
+        "request_field": "assign_labor",
+        "default": false,
+        "enable_only": true,
+        "assignment_archive_marker": "Inventory targets/2",
+        "assignment_identity_domain": "dfmcp-native-assigned-stock-targets-portfolio/2",
+        "default_identity_bytes_changed": false,
+        "assignment_step_id": 0,
+        "maximum_original_steps": 5,
+        "positive_orders_depend_on_assignment": true,
+        "separate_review_and_confirmation_per_step": true,
+        "positive_plan_requires_current_configure_labor": true,
+        "positive_plan_requires_current_configure_production": true,
+        "already_satisfied_assigns_labor": false,
+        "already_satisfied_requires_configure_labor": false,
+        "assignment_action_and_identity_preconditions_sealed": true,
+        "all_requested_minima_preserved": true,
+        "assignment_is_enabled_worker_evidence_at_plan": false,
+        "order_prefix_counts_order_ordinals_only": true,
+        "parent_stability_uses_original_order_obligations": true,
+        "clock_requests_use_actual_original_order_step_ids": true,
+        "recovery_validates_complete_assignment_layout": true
+      },
+      "runtime_peer_existing_worker_cases": 11,
+      "runtime_peer_assignment_cases": 14
     }
   },
   "selected_work_order_goal_monitor": {

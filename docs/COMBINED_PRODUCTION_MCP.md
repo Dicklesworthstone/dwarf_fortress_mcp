@@ -15,7 +15,9 @@ inventory census and uses already enabled workers by default. Explicit
 the dependent order; an already-met target creates neither effect.
 The additive `kind="stock_targets"` request sizes up to four distinct furniture
 targets together from one census, retaining already-met minima in the original
-parent and using the selected existing workers for every positive deficit.
+parent and using the selected existing workers by default. Explicit
+`assign_labor=true` adds one reviewed enable before all positive order leaves;
+a fully met vector still creates no work.
 The source is explicitly unadmitted development work. Current executed checks,
 qualification and real-game evidence belong in `IMPLEMENTATION_STATUS.md`.
 The private custody implementation supports Linux x86_64/aarch64; unsupported
@@ -672,12 +674,17 @@ minimum throughout progress and recovery:
 }
 ```
 
+Add `"assign_labor": true` at the top level to enable the selected workers before
+the needed orders. Omit it when the chosen labor is already enabled.
+
 The closed request is bounded to 8,192 bytes and accepts one to four distinct
 recipes, selected from wooden_bed, wooden_door, wooden_table and wooden_chair. Each minimum is
 1–1,000,000 observed stack units; each optional finite order limit is 1–100,
 defaulting to 100. It uses one through 32 exact selected citizen IDs and one
-observed supported labor. The selected workers must already be eligible with
-that labor enabled. This request rejects `assign_labor`, client amounts,
+observed supported labor. By default the selected workers must already be eligible
+with that labor enabled. Optional Boolean `assign_labor=true` instead adds one
+reviewed labor-enable step before the dependent orders. Omitted or false keeps
+the existing-worker request identity unchanged. The request rejects client amounts,
 baselines, source witnesses and unknown fields.
 
 Plan obtains one fresh complete source-qualified operations/1.3 census at the
@@ -686,7 +693,8 @@ observed BED=4, DOOR=2 and TABLE=1 yields two orders: three beds and three table
 The door target creates no order, but DOOR>=2 remains part of the complete
 original goal. If all targets are met, the result is a count-only
 `status="already_satisfied"` with no original plan, keys, archive or native
-effect, and no workforce-prerequisite proof. If any positive deficit exceeds its
+effect, and no workforce-prerequisite proof. This also holds with `assign_labor=true`: an
+all-met request neither assigns labor nor requires ConfigureLabor authority. If any positive deficit exceeds its
 selected limit or any required sizing evidence is unavailable, the whole proposal
 refuses. Matching production jobs and unknown reaction output retain the
 single-target policy; no pending output is credited to stock.
@@ -697,10 +705,25 @@ The result's `stock_targets` object has schema `dfmcp.stock-targets/1`, a common
 `baseline_anchor`, source digest/generation/counters, assessment witness and a
 bounded `targets` array. Every requested row survives, including a row with
 `amount=0` and `order_step_id=null`. Positive deficits receive deterministic
-original StepIds starting at zero. Each is a finite inventory-increase objective
+original StepIds starting at zero for existing workers, or at one after the
+explicit assignment at StepId zero. Each is a finite inventory-increase objective
 with the qualified original baseline, while the complete parent separately
 retains all requested minima. The strict `Inventory targets/1` archive marker
-binds these values before deriving any original intent or step key.
+binds the existing-worker request; `Inventory targets/2` binds the assignment
+action and complete original citizen guards as well. Each identity is sealed
+before deriving any original intent or step key. Recovery validates the full
+original layout and the same version; it cannot reinterpret one mode as the other.
+
+The shared `labor_assignment_requested` flag records the explicit opt-in.
+`labor_assignment_planned` is true only when a positive vector includes the
+assignment; a met row retains the request flag but never claims its own labor
+action or order. The complete request has at most five steps: one assignment
+and four orders. Current ConfigureLabor and ConfigureProduction authority and
+the full action budget are required for a positive assignment plan.
+
+With `assign_labor=true`, review and confirm the original labor step first.
+Its verified receipt releases the order dependencies. It does not supply current
+labor truth, certify inventory, or bypass the unchanged census and queue checks.
 
 Prepare and confirm each positive original order through the existing
 `kind="step"` and paired-seal workflow. Use the returned actual StepIds rather

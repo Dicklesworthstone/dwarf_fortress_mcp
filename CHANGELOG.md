@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased — Assign labor before fulfilling a native stock portfolio
+
+- Add explicit `stock_targets.assign_labor=true`: one independently reviewed
+  labor enable followed by up to four dependent finite orders. A fully met vector
+  creates no effects and requires no labor-effect authority.
+- Bind exact assignment/citizen guards, every target, the census and original
+  timing in `Inventory targets/2`; preserve omitted/false `/1` identities.
+  Recover exact original keys and reject weakened or reinterpreted layouts.
+- Keep native queue-prefix checks on actual prior order receipts, skipping the
+  assignment step. Preserve census checks at every insertion boundary.
+- Monitor all current target minima with the original order timing. Preserve
+  actual order IDs in proof, compact recovery and separately authorized clocks.
+- Add request/recovery, timing, presentation and routing regressions plus a
+  fourteen-case assigned Runtime/native-peer campaign alongside eleven existing
+  vector cases. Correct the vector test fixture's action allowance. Source review,
+  scoped formatting, Python syntax and matching contracts pass. Verified focused
+  execution passes all 78 adapter and 418 Runtime/presentation tests, including
+  66 presentation tests and all 25 native scenarios. Full MCP build/check remains
+  blocked by pinned dependency compiler
+  memory; component execution excludes transport/supervision and live-game proof.
+
 ## Unreleased — Preserve stock requirements with assigned production workers
 
 - Retain closed original furniture minima in assignment-and-order layouts,
@@ -9,8 +30,8 @@
   complete original order set. Retain Unknown coverage and reject mixed captures.
 - Add five adapter regressions for archive fidelity, bounded shapes, consumed
   stock, restored histories and complete cohorts. Sources are reviewed and
-  formatted; their execution is pending. The prior adapter suite now passes
-  73 tests in the restored latest-nightly environment.
+  formatted; the focused original-source adapter group passes all 78 tests. The
+  earlier unmodified adapter baseline passed 73 standard-crate tests.
 
 ## Unreleased — Plan and complete a native furniture stock portfolio
 

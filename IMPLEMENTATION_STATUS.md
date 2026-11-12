@@ -1,5 +1,87 @@
 # Implementation Status
 
+## Unreleased — Assign workers for a complete native stock-target portfolio
+
+The closed `stock_targets` Plan request now accepts optional Boolean
+`assign_labor=true`. A positive vector compiles one enabled SetLabor at original
+StepId zero followed by its one to four finite positive-deficit orders at actual
+StepIds one through four, each dependent on the verified assignment. The assignment
+and every order require their own review and confirmation. Positive plans require
+current ConfigureLabor and ConfigureProduction authority and the entire action
+budget. All-met requests return before those effect checks and create no original,
+assignment, order, keys or custody.
+
+The separately versioned `Inventory targets/2` marker and assigned identity domain
+bind the exact enabled action, full canonical citizen guards, complete census and
+target vector, original timing and optional workshop origin before deriving keys.
+Omitted or false assignment preserves the existing-worker `/1` path and identity.
+Recovery verifies the complete original assignment and dependent-order layout;
+it cannot strip targets, weaken citizen identity or reinterpret either version.
+
+Every native insertion still requalifies the unchanged original census and exact
+receipt-backed prefix. Prefix selection uses actual order ordinals and skips the
+labor step, so the first assigned order requires an empty queue and later orders
+accept only their own prior Created receipts. Historical assignment receipts
+release dependencies but do not replace current labor or inventory evidence.
+
+Whole-parent monitoring uses the common layout's complete inventory minima and
+reads cadence/stability only from the original order obligations. The labor step
+has no inventory obligation. Public proof validates the assignment shape, real
+order IDs, per-target assignment flags, all current minima and full parent
+stability. Independent clocks select the actual order ID after the assignment.
+Compaction and overflow preserve assignment intent and every target while
+withdrawing current proof; met rows keep null order IDs and no planned effect.
+
+New regression sources include three request/identity/archive/authority tests,
+two parent-timing tests, four public proof/compaction/clock tests, a closed public
+Boolean-routing test and a fourteen-case actual Runtime/native-TCP campaign.
+The existing eleven-case vector campaign remains. The assigned campaign covers
+independent assignment then two/four order insertions, no-work, caps, missing
+authority, insufficient actions, early/post-marker census drift, lost-reply
+Offline/Reconcile, extra/retired prefix members and complete-parent clocks.
+The vector request fixture now uses an explicit multi-action allowance; deliberate
+insufficient-budget cases retain their own narrowed budget.
+
+Independent source review, scoped nightly formatting, Python peer syntax and
+matching machine-contract checks passed. A verified component build compiled the
+actual Runtime/native-client and presentation sources with the repository's real
+core/world/intent/adapter/lab dependencies and unchanged serde pins/features.
+The complete live-production adapter group passed all 78 tests. The final
+Runtime/presentation component suite passed all 418 tests with no failures or
+ignored cases, including all 66 presentation tests and both Runtime campaigns'
+25 native TCP-double scenarios (11 existing-worker and 14 assigned-worker).
+This is 496 distinct focused Rust component tests; all five new adapter cases
+and the corrected request/timing regressions passed. One old layout test was corrected: its generic dispatcher fixture has an
+unrelated final predicate, so it must not claim a complete production proof layout.
+The valid legacy compiler shape retains its unchanged assignment/order IDs.
+The broader run also identified two test-only assumptions: the assigned timing
+fixture needed a three-action allowance, and pure compilation requires Plan
+while retaining effect capabilities for later dispatch. Corrected tests verify
+identical sealed plans under Plan-only grants, retained labor/production effect
+requirements, and refusal without Plan; production authority checks are unchanged.
+
+These are component results, not full MCP execution. The component explicitly
+excludes MCP transport/macros/service dispatch, Asupersync supervision, admission
+execution, native plugin builds and actual Dwarf Fortress. Its production and test
+implementations are original source; unrelated test registrations and two small
+source excerpts are enumerated, and copied files are distinguished from compiled
+inputs. The source-correspondence manifest is
+`fcd09c41184d469b17c2001d01ef58a6dfe8ad2ae383f8a8a7df41f369ef9fe3`.
+
+Standard full MCP test compilation and metadata-only checking were killed while
+compiling unchanged pinned asupersync0.5.0, before project diagnostics, despite
+one Cargo job, one compiler frontend/backend and disabled debug/incremental work.
+Whole-adapter test builds also hit shared memory pressure; the earlier unmodified
+main baseline's standard adapter group had passed 73 tests. Dependencies, pins
+and repository feature selections were preserved. The clean baseline verify.sh
+passed its preceding static gates and stopped because br was unavailable.
+qualify_local.sh was attempted, passed its static gates and several Python suites,
+and was interrupted before completion to prioritize the feature checks; it did
+not qualify a release. Full workspace, full MCP transport, real-game and production
+admission remain unverified. Post-run source correspondence verification passed
+for the final component manifest above. The subsequent commit preserves the
+tested production/test bytes and records these bounded results.
+
 ## Unreleased — Preserve complete stock goals after labor assignment
 
 The closed production layout now preserves up to four original furniture stock
@@ -16,12 +98,13 @@ stock. Complete cohorts reject mixed captures and partial order sets.
 
 Five new adapter regressions cover strict layouts and archives, missing or
 unbounded requirements, current stock/labor loss after leaf achievement, reopening,
-independent inventory coverage and complete multi-order cohorts. The new adapter
-sources have been independently reviewed and formatted. Execution is pending
-while the recovered environment builds the actual MCP dependency graph; the
-previous main revision's adapter live-production suite passed all 73 tests.
-This adapter checkpoint prepares the explicit multi-target assignment consumer;
-it does not add a public request option by itself or change production admission.
+independent inventory coverage and complete multi-order cohorts. The adapter
+sources have been independently reviewed and formatted. The verified focused
+component now passes all 78 live-production tests, including these five cases;
+standard whole-crate test builds remain memory-constrained. The previous main
+revision's standard adapter live-production suite passed all 73 tests. This adapter
+checkpoint supplies the complete-parent support used by the explicit multi-target
+assignment consumer above; production admission remains unchanged.
 
 ## Unreleased — Reachable multi-target native stock planning and completion
 

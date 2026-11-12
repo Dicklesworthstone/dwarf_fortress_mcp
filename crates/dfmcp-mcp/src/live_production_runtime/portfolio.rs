@@ -43,7 +43,9 @@ impl ParentStability {
             || poll_interval_ticks == 0
             || required_samples == 0
         {
-            return Err(denied("whole-target stability requires the original finite timing bounds"));
+            return Err(denied(
+                "whole-target stability requires the original finite timing bounds",
+            ));
         }
         Ok(Self {
             original_anchor,
@@ -61,18 +63,38 @@ impl ParentStability {
     }
 
     fn for_plan(original: &PreparedPlan) -> Result<Self> {
-        let spec = original.steps.first().and_then(|step| step.obligation.as_ref())
+        let layout = live_production::ProductionLayout::from_plan(original)?;
+        let orders = layout
+            .order_steps()
+            .iter()
+            .map(|id| {
+                original
+                    .steps
+                    .iter()
+                    .find(|step| step.id == *id)
+                    .ok_or_else(|| denied("whole-target stability lacks an original order"))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let spec = orders
+            .first()
+            .and_then(|step| step.obligation.as_ref())
             .ok_or_else(|| denied("whole-target stability lacks its original obligation"))?;
-        if original.steps.iter().any(|step| step.obligation.as_ref().is_none_or(|other| {
-            other.deadline_tick != spec.deadline_tick
-                || other.poll_interval_ticks != spec.poll_interval_ticks
-                || other.stable_for_observations != spec.stable_for_observations
-                || other.failure.is_some()
-        })) {
-            return Err(denied("whole-target stability must retain one original timing contract"));
+        if orders.iter().any(|step| {
+            step.obligation.as_ref().is_none_or(|other| {
+                other.deadline_tick != spec.deadline_tick
+                    || other.poll_interval_ticks != spec.poll_interval_ticks
+                    || other.stable_for_observations != spec.stable_for_observations
+                    || other.failure.is_some()
+            })
+        }) {
+            return Err(denied(
+                "whole-target stability must retain one original timing contract",
+            ));
         }
         Self::new(
-            original.anchor, spec.deadline_tick, spec.poll_interval_ticks,
+            original.anchor,
+            spec.deadline_tick,
+            spec.poll_interval_ticks,
             spec.stable_for_observations,
         )
     }
@@ -90,7 +112,8 @@ impl ParentStability {
     }
 
     fn needs_time(&self, anchor: StateAnchor) -> bool {
-        !self.expired && !self.fulfilled()
+        !self.expired
+            && !self.fulfilled()
             && anchor.fortress_id == self.original_anchor.fortress_id
             && anchor.cursor.epoch == self.original_anchor.cursor.epoch
             && anchor.tick >= self.original_anchor.tick
@@ -103,12 +126,15 @@ impl ParentStability {
             || anchor.tick < self.original_anchor.tick
             || anchor.cursor.sequence < self.original_anchor.cursor.sequence
             || self.last_anchor.is_some_and(|last| {
-                anchor.tick < last.tick || anchor.cursor.sequence < last.cursor.sequence
+                anchor.tick < last.tick
+                    || anchor.cursor.sequence < last.cursor.sequence
                     || (anchor.cursor == last.cursor && anchor != last)
             })
         {
             self.interrupt();
-            return Err(denied("whole-target stability source regressed or changed lineage"));
+            return Err(denied(
+                "whole-target stability source regressed or changed lineage",
+            ));
         }
         self.last_anchor = Some(anchor);
         // Like the original leaf histories, an achieved temporal requirement
@@ -125,7 +151,9 @@ impl ParentStability {
         if truth != PredicateTruth::True {
             self.interrupt();
         }
-        let basis = self.last_evaluated_tick.unwrap_or(self.original_anchor.tick);
+        let basis = self
+            .last_evaluated_tick
+            .unwrap_or(self.original_anchor.tick);
         let due = self.last_evaluated_tick != Some(anchor.tick)
             && anchor.tick.get().saturating_sub(basis.get()) >= self.poll_interval_ticks;
         if due {
@@ -194,23 +222,31 @@ fn cohort_covers_selected(
     step: StepId,
     selected_anchor: StateAnchor,
 ) -> bool {
-    parent.anchor == current_anchor && parent.current_truth == PredicateTruth::True
+    parent.anchor == current_anchor
+        && parent.current_truth == PredicateTruth::True
         && parent.selected_anchors.contains(&(step, selected_anchor))
 }
 
 impl Runtime {
     pub(super) fn selected_order_step(&self) -> Option<StepId> {
-        self.portfolio.as_ref().map(|p| p.active).or_else(||
-            self.layout.as_ref().and_then(|layout| layout.order_steps().first().copied()))
+        self.portfolio.as_ref().map(|p| p.active).or_else(|| {
+            self.layout
+                .as_ref()
+                .and_then(|layout| layout.order_steps().first().copied())
+        })
     }
     fn portfolio_ids(&self) -> Vec<StepId> {
-        self.layout.as_ref().map_or_else(Vec::new, |layout| layout.order_steps().to_vec())
+        self.layout
+            .as_ref()
+            .map_or_else(Vec::new, |layout| layout.order_steps().to_vec())
     }
     /// Private filenames use fixed one-based slots, not original StepIds.
     /// Both the old labor predecessor layout and the dependency-free layout
     /// retain their actual original StepIds everywhere else.
     pub(super) fn order_slot(&self, step: StepId) -> Result<u32> {
-        self.layout.as_ref().and_then(|layout| layout.order_ordinal(step))
+        self.layout
+            .as_ref()
+            .and_then(|layout| layout.order_ordinal(step))
             .and_then(|ordinal| u32::try_from(ordinal + 1).ok())
             .ok_or_else(|| denied("selected step is not in the original production layout"))
     }
@@ -224,8 +260,11 @@ impl Runtime {
             || ids.len() > 4
             || self.portfolio.is_some()
             || recovery.is_some_and(|r| r.iter().filter(|r| r.is_some()).count() != ids.len())
-            || recovery.is_some_and(|r| ids.iter().enumerate().any(|(index, step)|
-                r[index].is_none_or(|entry| entry.step_id != step.get())))
+            || recovery.is_some_and(|r| {
+                ids.iter()
+                    .enumerate()
+                    .any(|(index, step)| r[index].is_none_or(|entry| entry.step_id != step.get()))
+            })
         {
             return Err(denied(
                 "portfolio custody does not match every original order leaf",
@@ -234,12 +273,16 @@ impl Runtime {
         self.config
             .orders
             .require_absent_portfolio_clocks(ids.len() as u32 + 1)?;
-        let parent_stability = if self.layout.as_ref()
-            .and_then(|layout| layout.existing_labor())
-            .is_some_and(|requirement| !requirement.inventory_minima().is_empty())
+        let parent_stability = if self
+            .layout
+            .as_ref()
+            .is_some_and(|layout| !layout.inventory_minima().is_empty())
         {
-            Some(ParentStability::for_plan(self.original.as_ref()
-                .ok_or_else(|| denied("original stock-target portfolio absent"))?)?)
+            Some(ParentStability::for_plan(
+                self.original
+                    .as_ref()
+                    .ok_or_else(|| denied("original stock-target portfolio absent"))?,
+            )?)
         } else {
             None
         };
@@ -604,7 +647,11 @@ impl Runtime {
         }
     }
     pub(super) fn interrupt_portfolio_parent_stability(&mut self) {
-        if let Some(stability) = self.portfolio.as_mut().and_then(|p| p.parent_stability.as_mut()) {
+        if let Some(stability) = self
+            .portfolio
+            .as_mut()
+            .and_then(|p| p.parent_stability.as_mut())
+        {
             stability.interrupt();
         }
     }
@@ -622,27 +669,45 @@ impl Runtime {
     /// without relabelling its older child anchor as the public composite.
     /// The clock's native effect still acquires a new selected parent sample.
     pub(super) fn portfolio_covers_selected_goal(
-        &self, step: StepId, selected_anchor: StateAnchor,
+        &self,
+        step: StepId,
+        selected_anchor: StateAnchor,
     ) -> bool {
-        self.portfolio.as_ref().and_then(|p| p.current.as_ref())
-            .is_some_and(|parent| cohort_covers_selected(parent, self.anchor, step, selected_anchor))
+        self.portfolio
+            .as_ref()
+            .and_then(|p| p.current.as_ref())
+            .is_some_and(|parent| {
+                cohort_covers_selected(parent, self.anchor, step, selected_anchor)
+            })
     }
 
     pub(super) fn parent_stability_needs_time(&self) -> bool {
-        let pending = self.portfolio.as_ref().and_then(|p| p.parent_stability.as_ref())
+        let pending = self
+            .portfolio
+            .as_ref()
+            .and_then(|p| p.parent_stability.as_ref())
             .is_some_and(|stability| stability.needs_time(self.anchor));
         let selected = self.parent_goal.as_ref().is_some_and(|parent| {
-            parent.anchor == self.anchor && parent.current_truth == PredicateTruth::True
+            parent.anchor == self.anchor
+                && parent.current_truth == PredicateTruth::True
                 && !parent.inventory_requirements.is_empty()
-                && parent.inventory_requirements.iter().all(|finding|
-                    finding.current_truth == PredicateTruth::True)
+                && parent
+                    .inventory_requirements
+                    .iter()
+                    .all(|finding| finding.current_truth == PredicateTruth::True)
         });
-        let complete = self.portfolio.as_ref().and_then(|p| p.current.as_ref())
+        let complete = self
+            .portfolio
+            .as_ref()
+            .and_then(|p| p.current.as_ref())
             .is_some_and(|parent| {
-                parent.anchor == self.anchor && parent.current_truth == PredicateTruth::True
+                parent.anchor == self.anchor
+                    && parent.current_truth == PredicateTruth::True
                     && !parent.inventory_requirements.is_empty()
-                    && parent.inventory_requirements.iter().all(|finding|
-                        finding.current_truth == PredicateTruth::True)
+                    && parent
+                        .inventory_requirements
+                        .iter()
+                        .all(|finding| finding.current_truth == PredicateTruth::True)
             });
         pending && (selected || complete)
     }
@@ -908,37 +973,55 @@ impl Runtime {
                 .ok_or_else(|| denied("original portfolio absent"))?;
             let current = work.narrow(&final_proof)?;
             self.config.current()?;
-            let mut result = if self.layout.as_ref().is_some_and(|layout| layout.existing_labor().is_some()) {
+            let mut result = if self
+                .layout
+                .as_ref()
+                .is_some_and(|layout| layout.existing_labor().is_some())
+            {
                 live_production::compose_existing_labor_portfolio_goal(
-                    original, &samples, &before, &after, &current,
+                    original,
+                    &samples,
+                    &before,
+                    &after,
+                    &current,
                     |step, projection, context| {
                         self.config.current()?;
-                        self.config.orders.acceptance().goal_for_selected(original, step, projection, context)
+                        self.config
+                            .orders
+                            .acceptance()
+                            .goal_for_selected(original, step, projection, context)
                     },
                     |projection, context| {
                         self.config.current()?;
-                        self.config.workforce.acceptance().existing_labor(projection, context)
+                        self.config
+                            .workforce
+                            .acceptance()
+                            .existing_labor(projection, context)
                     },
                 )?
-            } else { live_production::compose_production_portfolio_goal(
-                original,
-                &samples,
-                &before,
-                &after,
-                &current,
-                |step, projection, context| {
-                    self.config.current()?;
-                    self.config
-                        .orders
-                        .acceptance()
-                        .goal_for_selected(original, step, projection, context)
-                },
-                |projection, context| {
-                    self.config.current()?;
-                    self.config.workforce.acceptance().goal(projection, context)
-                },
-            )? };
-            let portfolio = self.portfolio.as_mut()
+            } else {
+                live_production::compose_production_portfolio_goal(
+                    original,
+                    &samples,
+                    &before,
+                    &after,
+                    &current,
+                    |step, projection, context| {
+                        self.config.current()?;
+                        self.config
+                            .orders
+                            .acceptance()
+                            .goal_for_selected(original, step, projection, context)
+                    },
+                    |projection, context| {
+                        self.config.current()?;
+                        self.config.workforce.acceptance().goal(projection, context)
+                    },
+                )?
+            };
+            let portfolio = self
+                .portfolio
+                .as_mut()
                 .ok_or_else(|| denied("portfolio absent"))?;
             if let Some(stability) = &mut portfolio.parent_stability {
                 // Count only complete qualified cohorts. The conjunction keeps

@@ -44,13 +44,19 @@ fn repeated_ticks_never_count_and_off_cadence_negative_evidence_interrupts() -> 
         let mut state = pending()?;
         assert!(!state.observe(anchor(125, 1), PredicateTruth::True)?);
         assert!(!state.observe(anchor(125, 2), PredicateTruth::True)?);
-        assert_eq!(state.accepted_samples, 1, "a new cursor is not elapsed game time");
+        assert_eq!(
+            state.accepted_samples, 1,
+            "a new cursor is not elapsed game time"
+        );
         assert!(!state.observe(anchor(126, 3), contradiction)?);
         assert_eq!(state.accepted_samples, 0);
         assert_eq!(state.first_candidate_tick, None);
         assert_eq!(state.last_sample_tick, None);
         assert!(!state.observe(anchor(127, 4), PredicateTruth::True)?);
-        assert_eq!(state.accepted_samples, 0, "an interruption does not renew cadence");
+        assert_eq!(
+            state.accepted_samples, 0,
+            "an interruption does not renew cadence"
+        );
         assert!(!state.observe(anchor(130, 5), PredicateTruth::True)?);
         assert!(state.observe(anchor(135, 6), PredicateTruth::True)?);
     }
@@ -95,7 +101,8 @@ fn original_deadline_does_not_supply_a_shortened_or_repeated_final_interval() ->
 }
 
 #[test]
-fn achieved_parent_history_requires_fresh_truth_and_keeps_its_original_achievement_tick() -> Result<()> {
+fn achieved_parent_history_requires_fresh_truth_and_keeps_its_original_achievement_tick()
+-> Result<()> {
     let mut state = pending()?;
     state.observe(anchor(125, 1), PredicateTruth::True)?;
     assert!(state.observe(anchor(130, 2), PredicateTruth::True)?);
@@ -123,7 +130,10 @@ fn lineage_regression_and_same_cursor_forks_cannot_advance_parent_stability() ->
             2 => rejected.tick = GameTick(124),
             _ => rejected.cursor.sequence = 1,
         }
-        assert!(state.observe(rejected, PredicateTruth::True).is_err(), "case {case}");
+        assert!(
+            state.observe(rejected, PredicateTruth::True).is_err(),
+            "case {case}"
+        );
         assert_eq!(state.accepted_samples, 0);
         assert_eq!(state.fulfilled_at_tick, None);
         assert!(!state.observe(anchor(130, 2), PredicateTruth::True)?);
@@ -149,15 +159,127 @@ fn initial_clock_basis_requires_the_exact_current_cohort_member_without_anchor_r
         labor: Vec::new(),
         inventory_requirements: Vec::new(),
     };
-    assert!(cohort_covers_selected(&parent, current, StepId::ZERO, selected));
-    assert!(!cohort_covers_selected(&parent, current, StepId::new(1), selected));
-    assert!(!cohort_covers_selected(&parent, anchor(130, 10), StepId::ZERO, selected));
+    assert!(cohort_covers_selected(
+        &parent,
+        current,
+        StepId::ZERO,
+        selected
+    ));
+    assert!(!cohort_covers_selected(
+        &parent,
+        current,
+        StepId::new(1),
+        selected
+    ));
+    assert!(!cohort_covers_selected(
+        &parent,
+        anchor(130, 10),
+        StepId::ZERO,
+        selected
+    ));
     let mut wrong_source = selected;
     wrong_source.state_hash = Digest32::of_bytes(b"another-same-tick-source");
-    assert!(!cohort_covers_selected(&parent, current, StepId::ZERO, wrong_source));
-    assert_ne!(current, selected, "the complete parent and selected projection keep different anchors");
+    assert!(!cohort_covers_selected(
+        &parent,
+        current,
+        StepId::ZERO,
+        wrong_source
+    ));
+    assert_ne!(
+        current, selected,
+        "the complete parent and selected projection keep different anchors"
+    );
     for truth in [PredicateTruth::False, PredicateTruth::Unknown] {
         parent.current_truth = truth;
-        assert!(!cohort_covers_selected(&parent, current, StepId::ZERO, selected));
+        assert!(!cohort_covers_selected(
+            &parent,
+            current,
+            StepId::ZERO,
+            selected
+        ));
     }
+}
+
+fn assigned_portfolio() -> Result<PreparedPlan> {
+    use super::super::portfolio_request::PortfolioRequest;
+    use super::super::stock_target_request::tests::{stock_fixture, stock_policy};
+    use dfmcp_world::{CompareOp, EntityKind, Predicate, Value as FactValue};
+
+    let (projection, mut c) = stock_fixture()?;
+    c.budget.max_actions = 3;
+    let evidence =
+        PredicateEvidence::scoped(&projection.snapshot, stock_policy(&projection.snapshot))?;
+    let request = PortfolioRequest::parse(
+        &json!({
+            "kind":"portfolio", "expected_observation":"11".repeat(32),
+            "units":["43","44"], "labor":"CARPENTER", "enabled":true,
+            "orders":[{"recipe":"wooden_bed","amount":4},{"recipe":"wooden_door","amount":2}],
+            "deadline_tick":300, "poll_interval_ticks":5, "stable_samples":2
+        })
+        .to_string(),
+    )?;
+    let mut plan = request.compile(&evidence, &c)?;
+    let mut terminal = vec![plan.terminal_condition.clone()];
+    for (item_type, minimum) in [("BED", 6), ("DOOR", 3)] {
+        terminal.push(Predicate::EntityQuantity {
+            kind: EntityKind::Item,
+            filter_field: "type_key".into(),
+            filter_value: FactValue::Text(item_type.into()),
+            quantity_field: Some("stack_size".into()),
+            op: CompareOp::Ge,
+            value: minimum,
+        });
+    }
+    plan.terminal_condition = Predicate::All(terminal).normalized();
+    plan.digest = plan.compute_digest();
+    plan.id = plan.expected_id();
+    plan.validate_structure()?;
+    Ok(plan)
+}
+
+#[test]
+fn assigned_parent_stability_uses_order_timing_without_requiring_a_labor_obligation() -> Result<()>
+{
+    let plan = assigned_portfolio()?;
+    let layout = live_production::ProductionLayout::from_plan(&plan)?;
+    assert_eq!(layout.assignment_step(), Some(StepId::ZERO));
+    assert_eq!(layout.inventory_minima().len(), 2);
+    assert!(plan.steps[0].obligation.is_none());
+    let mut state = ParentStability::for_plan(&plan)?;
+    assert_eq!(state.original_anchor, plan.anchor);
+    assert_eq!(state.deadline_tick, GameTick(300));
+    assert_eq!(state.poll_interval_ticks, 5);
+    assert_eq!(state.required_samples, 2);
+    let mut current = plan.anchor;
+    current.tick = GameTick(plan.anchor.tick.get() + 5);
+    current.cursor.sequence += 1;
+    current.state_hash = Digest32::of_bytes(b"first complete assigned portfolio");
+    assert!(!state.observe(current, PredicateTruth::True)?);
+    current.tick = GameTick(current.tick.get() + 5);
+    current.cursor.sequence += 1;
+    current.state_hash = Digest32::of_bytes(b"second complete assigned portfolio");
+    assert!(state.observe(current, PredicateTruth::True)?);
+    Ok(())
+}
+
+#[test]
+fn assigned_parent_stability_refuses_mismatched_original_order_timing() -> Result<()> {
+    let original = assigned_portfolio()?;
+    for case in 0..3 {
+        let mut plan = original.clone();
+        let timing = plan.steps[2]
+            .obligation
+            .as_mut()
+            .ok_or_else(|| denied("original fixture order lacks its obligation"))?;
+        match case {
+            0 => timing.deadline_tick = GameTick(timing.deadline_tick.get() + 1),
+            1 => timing.poll_interval_ticks += 1,
+            _ => timing.stable_for_observations += 1,
+        }
+        plan.digest = plan.compute_digest();
+        plan.id = plan.expected_id();
+        plan.validate_structure()?;
+        assert!(ParentStability::for_plan(&plan).is_err(), "case {case}");
+    }
+    Ok(())
 }
