@@ -220,6 +220,9 @@ fn decode_saved(bytes: &[u8], anchors: &BTreeMap<StateAnchor, usize>) -> Result<
         validate_handle(&w.handle).map_err(|_| corrupt("invalid durable watch handle"))?;
         validate_definition(&w.definition)
             .map_err(|_| corrupt("invalid durable watch definition"))?;
+        SourcePolicy::Native
+            .validate_definition(&w.definition)
+            .map_err(|_| corrupt("durable watch definition is not eligible for native evidence"))?;
         parse_digest(&w.evidence_digest)?;
         let state = status(&w.status)?;
         let created = w.created_at.decode()?;

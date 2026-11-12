@@ -602,3 +602,36 @@ fn checkpoint_bytes_match_independent_python_vectors() -> Result<()> {
     );
     Ok(())
 }
+
+
+#[test]
+fn native_checkpoint_rejects_nested_laboratory_sums_even_for_terminal_watches() -> Result<()> {
+    let files = Files::new()?;
+    let first = world(1, 0, true);
+    let (id, _, guard) = open(&files, &first, &[first.anchor()])?;
+    run(&first, id, create(1))?;
+    let saved = journals()?
+        .get(&id)
+        .and_then(|entry| entry.saved.clone())
+        .ok_or_else(|| invalid("missing saved sum-boundary fixture"))?;
+    assert_eq!(saved.watches[0].status, "satisfied");
+    let anchors = BTreeMap::from([(first.anchor(), 0)]);
+    let selected = json!({"op":"field_sum","scope":"observed_projection","kind":"stock_ledger",
+        "field":"stock.drink","predicate":{"op":"always"},"comparison":"ge","value":1});
+    for failure_position in [false, true] {
+        let mut bad = saved.clone();
+        let nested = serde_json::from_value(json!({"op":"not","arg":{
+            "op":"all","args":[selected.clone()]}}))
+            .map_err(|_| invalid("fixture sum condition"))?;
+        if failure_position {
+            bad.watches[0].definition.failure_condition = Some(nested);
+        } else {
+            bad.watches[0].definition.condition = nested;
+        }
+        let bytes = serde_json::to_vec(&bad).map_err(|_| invalid("fixture serialization"))?;
+        assert!(matches!(decode_saved(&bytes, &anchors), Err(error)
+            if error.code == ErrorCode::CorruptLedger));
+    }
+    drop(guard);
+    Ok(())
+}

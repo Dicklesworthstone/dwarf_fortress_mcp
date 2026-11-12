@@ -88,9 +88,6 @@ impl SourcePolicy {
     }
 
     pub(super) fn validate_definition(self, definition: &Definition) -> Result<()> {
-        if self == Self::Native {
-            return Ok(());
-        }
         let mut pending = vec![&definition.condition];
         if let Some(condition) = &definition.failure_condition {
             pending.push(condition);
@@ -100,7 +97,19 @@ impl SourcePolicy {
                 Condition::Field { .. }
                 | Condition::Paused { .. }
                 | Condition::TickAtLeast { .. } => {}
-                Condition::EntityCount { predicate, .. } => validate_population(predicate)?,
+                Condition::FieldSum { predicate, .. } => {
+                    if self != Self::LaboratoryReference {
+                        return Err(invalid(
+                            "field_sum requires the owner-issued laboratory reference evidence policy",
+                        ));
+                    }
+                    validate_population(predicate)?;
+                }
+                Condition::EntityCount { predicate, .. } => {
+                    if self == Self::LaboratoryReference {
+                        validate_population(predicate)?;
+                    }
+                }
                 Condition::All { args } | Condition::Any { args } => {
                     pending.extend(args);
                 }
@@ -109,9 +118,11 @@ impl SourcePolicy {
                 | Condition::FurnitureSet { .. }
                 | Condition::ItemQuantity { .. }
                 | Condition::TerrainCount { .. } => {
-                    return Err(invalid(
-                        "laboratory monitors support fields, projected entity counts, pause, ticks and boolean conditions",
-                    ));
+                    if self == Self::LaboratoryReference {
+                        return Err(invalid(
+                            "laboratory monitors support fields, projected entity counts and unsigned field sums, pause, ticks and boolean conditions",
+                        ));
+                    }
                 }
             }
         }
@@ -180,7 +191,7 @@ impl SourcePolicy {
     }
 }
 
-fn validate_population(predicate: &counts::Predicate) -> Result<()> {
+pub(super) fn validate_population(predicate: &counts::Predicate) -> Result<()> {
     let mut pending = vec![predicate];
     while let Some(predicate) = pending.pop() {
         match predicate {

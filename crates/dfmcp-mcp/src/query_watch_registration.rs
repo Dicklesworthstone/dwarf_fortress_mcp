@@ -50,6 +50,7 @@ fn definition(input: Value) -> Result<Definition> {
                 stable_observations: stable_observations.unwrap_or(2),
             };
             validate_definition(&result)?;
+            SourcePolicy::Native.validate_definition(&result)?;
             Ok(result)
         }
         _ => Err(invalid("registration set accepts watch definitions only")),

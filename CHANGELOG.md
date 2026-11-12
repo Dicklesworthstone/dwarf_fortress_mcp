@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased — Observe aggregate stock thresholds through the control loop
+
+- Add laboratory `field_sum` predicates with dynamic membership and qualified
+  unsigned quantities, including the simulator's actual stock_ledger kind.
+- Share the condition across preflight, retained watches, foreground waits and
+  historical replay; disclose exact totals or conservative lower/upper bounds.
+- Preserve unknown evidence, checked overflow, canonical identity and existing
+  budgets. Keep native watch entry points and checkpoint restoration closed to
+  this laboratory-only predicate.
+- Add seventeen regression sources, including real brewing through the public
+  facade. Source review and JSON syntax checks are complete; Rust execution and
+  formatting remain unverified after the workspace disconnected.
+
 ## Unreleased — Discover exact retained history for laboratory replay
 
 - Add bounded history discovery to fortress_query, including full anchors,

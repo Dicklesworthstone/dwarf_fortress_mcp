@@ -113,6 +113,14 @@ enum Condition {
         comparison: Comparison,
         value: u64,
     },
+    FieldSum {
+        scope: counts::Scope,
+        kind: counts::field_sum::Kind,
+        field: String,
+        predicate: counts::Predicate,
+        comparison: Comparison,
+        value: u64,
+    },
     ItemQuantity {
         scope: counts::Scope,
         quantity_unit: counts::quantity::QuantityUnit,
@@ -454,8 +462,12 @@ fn validate_definition(definition: &Definition) -> Result<()> {
                 }
             }
             Condition::EntityCount { predicate, .. }
+            | Condition::FieldSum { predicate, .. }
             | Condition::ItemQuantity { predicate, .. }
             | Condition::TerrainCount { predicate, .. } => {
+                if let Condition::FieldSum { field, .. } = condition {
+                    name(field, 128)?;
+                }
                 if let Condition::TerrainCount { areas, .. } = condition {
                     counts::terrain::validate(areas)?;
                 }
@@ -562,6 +574,25 @@ impl Probe {
                 predicate,
                 *comparison,
                 *value,
+                budget,
+            ),
+            Condition::FieldSum {
+                kind,
+                field,
+                predicate,
+                comparison,
+                value,
+                ..
+            } => counts::field_sum::evaluate(
+                self,
+                snapshot,
+                counts::field_sum::Selection {
+                    kind: *kind,
+                    field,
+                    predicate,
+                    comparison: *comparison,
+                    threshold: *value,
+                },
                 budget,
             ),
             Condition::ItemQuantity {

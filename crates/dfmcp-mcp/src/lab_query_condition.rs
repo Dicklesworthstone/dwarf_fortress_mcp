@@ -69,6 +69,18 @@ pub(super) enum CountPredicate {
     },
 }
 
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum SumKind {
+    Unit,
+    Job,
+    Building,
+    Item,
+    TileFeature,
+    Announcement,
+    StockLedger,
+}
+
 /// Only predicates with an explicit laboratory evidence policy are reachable.
 /// Native stack, relationship, terrain, furniture and shelter probes retain
 /// their existing independently scoped native entry points.
@@ -85,6 +97,14 @@ pub(super) enum Condition {
     EntityCount {
         scope: CountScope,
         kind: CountKind,
+        predicate: CountPredicate,
+        comparison: Comparison,
+        value: u64,
+    },
+    FieldSum {
+        scope: CountScope,
+        kind: SumKind,
+        field: String,
         predicate: CountPredicate,
         comparison: Comparison,
         value: u64,

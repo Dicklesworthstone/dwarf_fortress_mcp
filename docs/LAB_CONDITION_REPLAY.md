@@ -69,8 +69,10 @@ cursor gap; no unrecorded game tick or observation is reconstructed.
 
 ## Same predicates and temporal rules
 
-The closed definition accepts the laboratory `field`, `entity_count`, `paused`,
-`tick_at_least`, `all`, `any` and `not` conditions. An optional
+The closed definition accepts the laboratory `field`, `entity_count`, `field_sum`,
+`paused`, `tick_at_least`, `all`, `any` and `not` conditions. A `field_sum` recomputes
+its selected observed population and source-qualified unsigned sum at each
+historical anchor; it never fills missing values from a later observation. An optional
 `failure_condition` uses the same grammar. Native-only stack, relationship,
 terrain, furniture and shelter predicates remain outside this laboratory
 boundary. The caller cannot select a source policy or supply a native archive,

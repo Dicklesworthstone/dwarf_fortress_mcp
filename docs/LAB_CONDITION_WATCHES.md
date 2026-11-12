@@ -184,7 +184,8 @@ no detached poller or automatic sampling outside that call is started.
 ## Supported conditions and exact source policy
 
 The closed condition grammar supports exact generation-bound `field`,
-`entity_count`, `paused`, `tick_at_least`, nonempty `all` and `any`, and `not`.
+`entity_count`, `field_sum`, `paused`, `tick_at_least`, nonempty `all` and `any`,
+and `not`.
 Comparisons are `eq`, `ne`, `lt`, `le`, `gt`, and `ge`. Scalar literals support
 null, Boolean, signed or unsigned 64-bit integer, text, and fixed point with an
 exact matching scale. Type mismatches remain unknown.
@@ -214,6 +215,75 @@ For example, this counts units whose laboratory mining setting is known enabled:
   "value": 1
 }
 ```
+
+## Monitor a quantity across changing stock holders
+
+Use `field_sum` when the desired condition is a total quantity rather than a
+count of entity records. It recomputes membership at each sampled anchor and
+adds the named unsigned 64-bit field once per selected entity. The same
+condition works in preflight, foreground watches, single-watch and watch-set
+waits, and retrospective condition replay.
+
+The starter scenario represents provisions and material stocks as
+`Other("stock_ledger")` entities. The closed `stock_ledger` kind selects that
+canonical name; a native item record is not a laboratory stock ledger.
+
+```json
+{
+  "op": "field_sum",
+  "scope": "observed_projection",
+  "kind": "stock_ledger",
+  "field": "stock.drink",
+  "predicate": {"op": "always"},
+  "comparison": "ge",
+  "value": 60
+}
+```
+
+Place this condition in the ordinary registration, preflight or replay wrapper.
+It can continue to observe the total when another ledger enters or leaves the
+observed projection. `stock.food`, `stock.material.WOOD` and
+`stock.material.PLANT` use the same field syntax when those fields are present
+in the selected laboratory source. Do not sum different resources into one
+condition. Use a Boolean `all` of separate sums for a food-and-drink reserve.
+
+The sum-specific kind grammar accepts `stock_ledger` and the six existing
+projection kinds (`unit`, `job`, `building`, `item`, `tile_feature` and
+`announcement`). Its membership predicate uses the same bounded typed
+`always`, `field`, `all`, `any` and `not` grammar as `entity_count`.
+This addition does not widen the kind grammar of `entity_count`. Sum selection
+uses canonical kind names: in-memory variants that encode to the same canonical
+name must produce the same sum for the same source hash.
+
+Only known, eligible `U64` values contribute an exact amount. Missing,
+wrong-type, redacted, future, conflicting and untrusted values remain unknown.
+In particular, a native `stack_size` label does not establish usable
+laboratory inventory. Every row contributes a conservative interval:
+
+| Membership | Qualified amount | Contribution |
+|---|---|---|
+| False | Any | Exactly zero. |
+| True | Known unsigned value | Exactly that value. |
+| Unknown | Known unsigned value | Between zero and that value. |
+| True or unknown | Unavailable or ineligible | Nonnegative, with no established upper bound. |
+
+A threshold is true or false only when the entire resulting interval proves
+it; otherwise its result is unknown. The evidence reports the lower and upper
+sum bounds, exactness, row counts and bounded examples. A null upper bound
+means no upper bound was established, never zero. Checked arithmetic refuses
+an overflowing representable bound instead of wrapping or saturating it.
+
+An empty selected projection has an exact zero sum only within that explicitly
+named projection. It does not prove that an unseen fortress, native inventory,
+container or region contains no stock. This condition proves sampled numeric
+field truth; it does not certify material usability, availability for a plan,
+future reserves, action causation or mutation authority.
+
+The registered laboratory evidence policy and existing full-source, predicate,
+wall-time and output limits apply to every sum. Membership and values are
+reevaluated together at each selected source, without a cached total or a
+second observation. Native watch entry points reject `field_sum`, including
+when nested inside a Boolean or supplied as a failure condition.
 
 The owner selects an explicit laboratory evidence policy. A field can establish
 truth only through the existing `laboratory_fact_value` qualification: a known,

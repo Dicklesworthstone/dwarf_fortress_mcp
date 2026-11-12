@@ -4,6 +4,8 @@ use super::*;
 use dfmcp_world::{EntityKind, EntityRecord};
 use std::time::Instant;
 
+#[path = "query_watch_field_sum.rs"]
+pub(super) mod field_sum;
 #[path = "query_watch_quantity.rs"]
 pub(super) mod quantity;
 #[path = "query_watch_relationship.rs"]

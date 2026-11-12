@@ -318,3 +318,35 @@ fn authority_anchor_and_expired_replay_preserve_single_watch_rules() -> Result<(
     );
     Ok(())
 }
+
+
+#[test]
+fn native_set_admission_rejects_lab_sums_before_any_publication_or_store_change() -> Result<()> {
+    let store = Mutex::new(Store::default());
+    let s = snapshot(0, 1);
+    let c = context(&s);
+    run(&store, &s, &c, vec![watch("existing")])?;
+    let prior = fingerprint(&store, &c)?;
+    let selected = json!({"op":"field_sum","scope":"observed_projection","kind":"stock_ledger",
+        "field":"stock.drink","predicate":{"op":"always"},"comparison":"ge","value":1});
+    for failure_position in [false, true] {
+        let mut rejected = watch("z-lab-only");
+        let nested = json!({"op":"any","args":[{"op":"paused","value":true},
+            {"op":"not","arg":selected.clone()}]});
+        if failure_position {
+            rejected["failure_condition"] = nested;
+        } else {
+            rejected["condition"] = nested;
+        }
+        let mut published = false;
+        let result = execute_in(&store, &s, &c, &input(vec![watch("a-valid"), rejected]), |value| {
+            published = true;
+            encode(value)
+        });
+        assert!(matches!(result, Err(error) if error.code == ErrorCode::InvalidRequest));
+        assert!(!published);
+        assert_eq!(fingerprint(&store, &c)?, prior);
+        assert_eq!(lock(&store)?.entries.len(), 1);
+    }
+    Ok(())
+}

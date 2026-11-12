@@ -1,5 +1,47 @@
 # Implementation Status
 
+## Unreleased — Monitor aggregate laboratory stock quantities
+
+The closed laboratory condition grammar now includes `field_sum` over an
+explicit observed-projection kind, a bounded membership predicate and one
+unsigned field. Its separate kind grammar includes the actual canonical
+stock_ledger source as well as the existing six named entity kinds. Membership
+and qualified values are recomputed together at every selected observation.
+The shared evaluator makes the condition available to stateless preflight,
+foreground watches, single and selected-set waits, and retained-history replay.
+
+Only the owner-issued laboratory reference policy can supply quantity evidence.
+Unknown membership contributes a bounded possible amount when its value is
+qualified; unavailable, redacted, conflicting, wrongly typed, future or
+untrusted values leave the upper sum unestablished. Exact zero remains distinct
+from an unknown quantity. Interval comparisons retain three-valued truth,
+overflow refuses, and all rows share existing source, predicate-work, wall-time
+and complete-response limits. Canonical kind aliases produce the same result
+for the same world hash. A sum establishes neither usable supply nor
+complete-world absence, action completion or mutation authority.
+
+Native single/batch registration, condition inspection, replay and checkpoint
+restoration reject the laboratory-only condition, including nested and failure
+predicates. Terminal checkpoint records cannot bypass that policy check.
+Existing native quantities, observation protocols, production admission and
+the eleven-tool surface remain unchanged.
+
+Seventeen new regression sources cover interval truth tables, unknown-zero
+and missing values, exact source/presence/type rules, dynamic membership,
+identity and canonical-kind behavior, arithmetic/work/authority limits,
+temporal replay, duplicate-safe grammar, native batch/checkpoint rejection,
+and a public facade flow from real brewing through a selected quantity watch
+to current/historical inspection and replay.
+
+The source and integration were independently reviewed, and the edited JSON
+schema was parsed with its exact unsigned integer bound lexemes preserved.
+These new Rust tests have not run. The execution workspace disconnected while
+installing the latest nightly and fetching the unchanged locked dependencies,
+before compilation; it remained unavailable for implementation. No current
+Rust compile, rustfmt, Clippy, workspace qualification or live-game validation
+is claimed. Owning bead df-lab-structured-query-f7q.3 remains in progress.
+Usage and interval semantics: docs/LAB_CONDITION_WATCHES.md.
+
 ## Unreleased — Discover retained laboratory history and replay intervals
 
 The existing fortress_query tool accepts a closed history mode that pages exact

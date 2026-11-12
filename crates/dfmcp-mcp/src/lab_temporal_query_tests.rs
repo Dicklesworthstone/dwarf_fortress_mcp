@@ -962,3 +962,46 @@ fn watch_session_cleanup_and_epoch_changes_preserve_other_owners() -> TestResult
     );
     Ok(())
 }
+
+
+#[test]
+fn field_sum_wrapper_is_closed_unsigned_and_duplicate_safe() -> TestResult {
+    let selected = json!({"op":"field_sum","scope":"observed_projection","kind":"stock_ledger",
+        "field":"stock.drink","predicate":{"op":"always"},"comparison":"ge","value":60});
+    for kind in ["unit", "job", "building", "item", "tile_feature", "announcement", "stock_ledger"] {
+        let mut valid = selected.clone();
+        valid["kind"] = json!(kind);
+        request(watch("sum", valid))?;
+    }
+    for (field, value) in [
+        ("kind", json!("other")),
+        ("kind", json!("StockLedger")),
+        ("scope", json!("world")),
+        ("value", json!(-1)),
+        ("value", json!(1.5)),
+        ("value", json!("60")),
+        ("quantity_unit", json!("stack_units")),
+        ("source_policy", json!("laboratory_reference/1")),
+        ("predicate", json!({"op":"related","entity_id":"1","generation":1,
+            "relation":"contains","direction":"outgoing"})),
+    ] {
+        let mut invalid = selected.clone();
+        invalid[field] = value;
+        assert!(request(watch("invalid", invalid)).is_err(), "{field}");
+    }
+    // The sum-specific stock-ledger kind must not widen existing count grammar.
+    let mut count = selected;
+    count["op"] = json!("entity_count");
+    count.as_object_mut().ok_or("condition object")?.remove("field");
+    assert!(request(watch("count", count)).is_err());
+    let valid = r#"{"mode":"temporal","request":{"schema":"dfmcp.query/1","query":{"kind":"watch","key":"sum-duplicates","deadline_tick":100,"condition":{"op":"field_sum","scope":"observed_projection","kind":"unit","field":"stock","predicate":{"op":"not","arg":{"op":"always"}},"comparison":"ge","value":1}}}}"#;
+    assert!(parse(valid)?.is_some());
+    for raw in [
+        r#"{"mode":"temporal","request":{"schema":"dfmcp.query/1","query":{"kind":"watch","key":"sum-duplicates","deadline_tick":100,"condition":{"op":"field_sum","scope":"observed_projection","kind":"unit","field":"stock","field":"other","predicate":{"op":"always"},"comparison":"ge","value":1}}}}"#,
+        r#"{"mode":"temporal","request":{"schema":"dfmcp.query/1","query":{"kind":"watch","key":"sum-duplicates","deadline_tick":100,"condition":{"op":"field_sum","scope":"observed_projection","kind":"unit","field":"stock","predicate":{"op":"always"},"comparison":"ge","value":1,"value":2}}}}"#,
+        r#"{"mode":"temporal","request":{"schema":"dfmcp.query/1","query":{"kind":"watch","key":"sum-duplicates","deadline_tick":100,"condition":{"op":"field_sum","scope":"observed_projection","kind":"unit","field":"stock","predicate":{"op":"not","arg":{"op":"always"},"arg":{"op":"always"}},"comparison":"ge","value":1}}}}"#,
+    ] {
+        assert!(matches!(parse(raw), Err(error) if error.code == ErrorCode::InvalidRequest), "{raw}");
+    }
+    Ok(())
+}

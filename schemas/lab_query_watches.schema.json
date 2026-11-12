@@ -333,6 +333,63 @@
           "additionalProperties": false,
           "required": [
             "op",
+            "scope",
+            "kind",
+            "field",
+            "predicate",
+            "comparison",
+            "value"
+          ],
+          "properties": {
+            "op": {
+              "const": "field_sum"
+            },
+            "scope": {
+              "const": "observed_projection"
+            },
+            "kind": {
+              "enum": [
+                "unit",
+                "job",
+                "building",
+                "item",
+                "tile_feature",
+                "announcement",
+                "stock_ledger"
+              ]
+            },
+            "field": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[^\\u0000]+$",
+              "description": "Source-qualified unsigned 64-bit field to sum once per selected entity in the observed projection."
+            },
+            "predicate": {
+              "$ref": "#/$defs/count_predicate"
+            },
+            "comparison": {
+              "enum": [
+                "eq",
+                "ne",
+                "lt",
+                "le",
+                "gt",
+                "ge"
+              ]
+            },
+            "value": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "op",
             "args"
           ],
           "properties": {
