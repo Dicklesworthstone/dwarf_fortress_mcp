@@ -494,7 +494,7 @@ impl Runtime {
                 "clock requires a fresh joined original labor and production-goal sample",
             ));
         }
-        if sample.current_goal_proven() {
+        if sample.current_goal_proven() && !self.parent_stability_needs_time() {
             return Err(denied(
                 "the original production objective is already proved",
             ));

@@ -268,6 +268,7 @@ impl Runtime {
         request.validate()?;
         self.check(c, true)?;
         self.stock_target_no_work = None;
+        self.stock_targets_no_work = None;
         self.planning_inspection.withdraw();
         if self.original.is_some() {
             return Err(invalid(

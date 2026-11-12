@@ -33,6 +33,32 @@ impl InventoryBaselines {
         }
     }
 
+    /// Combine distinct adapter-qualified quantities without another source read.
+    /// All values must retain the same complete original census.
+    pub(crate) fn from_qualified_many(
+        values: Vec<ObservedInventoryIncreaseObjective>,
+    ) -> Result<Self> {
+        if values.is_empty() || values.len() > 4 {
+            return Err(invalid("qualified inventory portfolio requires one to four values"));
+        }
+        let first = &values[0];
+        if values.iter().any(|value| {
+            value.baseline_anchor() != first.baseline_anchor()
+                || value.baseline_source_digest() != first.baseline_source_digest()
+                || value.source_generation() != first.source_generation()
+                || value.baseline_source_counters() != first.baseline_source_counters()
+        }) {
+            return Err(invalid("qualified inventory portfolio mixes original censuses"));
+        }
+        let mut result = Self::default();
+        for value in values {
+            if result.values.insert(value.item_type().to_owned(), value).is_some() {
+                return Err(invalid("qualified inventory portfolio repeats an item type"));
+            }
+        }
+        Ok(result)
+    }
+
     /// Recovery and repetition use only the exact retained original. No source
     /// is consulted and no baseline is silently renewed.
     pub(crate) fn from_original(plan: &PreparedPlan) -> Result<Self> {

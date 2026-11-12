@@ -43,6 +43,9 @@ mod review;
 mod stock_target;
 mod stock_target_binding;
 mod stock_target_request;
+mod stock_targets;
+mod stock_targets_binding;
+mod stock_targets_request;
 #[cfg(all(
     test,
     target_os = "linux",
@@ -50,6 +53,13 @@ mod stock_target_request;
 ))]
 #[path = "live_production_runtime/stock_target_tests.rs"]
 mod stock_target_tests;
+#[cfg(all(
+    test,
+    target_os = "linux",
+    any(target_arch = "x86_64", target_arch = "aarch64")
+))]
+#[path = "live_production_runtime/stock_targets_tests.rs"]
+mod stock_targets_tests;
 mod workshop_binding;
 mod workshop_config;
 mod workshop_prerequisite;
@@ -77,6 +87,8 @@ pub(crate) use portfolio_request::PortfolioRequest;
 pub(crate) use request::Request;
 use stock_target::SharedStockTarget;
 pub(crate) use stock_target_request::StockTargetRequest;
+use stock_targets::SharedStockTargets;
+pub(crate) use stock_targets_request::StockTargetsRequest;
 pub(crate) use workforce::Mode;
 use workforce::Shell as WorkforceShell;
 use workforce::{denied, exhausted, invalid};
@@ -237,6 +249,8 @@ pub(crate) struct Runtime {
     workshop: Option<SharedWorkshop>,
     stock_target: Option<SharedStockTarget>,
     stock_target_no_work: Option<Value>,
+    stock_targets: Option<SharedStockTargets>,
+    stock_targets_no_work: Option<Value>,
     original: Option<PreparedPlan>,
     layout: Option<ProductionLayout>,
     seal: Option<PlanArchiveSeal>,
@@ -395,6 +409,8 @@ impl Runtime {
             workshop: None,
             stock_target: None,
             stock_target_no_work: None,
+            stock_targets: None,
+            stock_targets_no_work: None,
             original: None,
             layout: None,
             seal: None,
@@ -555,12 +571,18 @@ impl Runtime {
                 out.config.orders.clone(),
                 out.authority_tick_floor(),
             )?;
-            out.custody = Some(SharedCustody::new_with_prerequisites(
+            out.stock_targets = SharedStockTargets::from_original(
+                &original,
+                out.config.orders.clone(),
+                out.authority_tick_floor(),
+            )?;
+            out.custody = Some(SharedCustody::new_with_stock_targets(
                 archive,
                 identity,
                 original.clone(),
                 out.workshop.clone(),
                 out.stock_target.clone(),
+                out.stock_targets.clone(),
             ));
             out.original = Some(original.clone());
             out.layout = Some(layout);
@@ -580,6 +602,7 @@ impl Runtime {
                     .layout
                     .as_ref()
                     .is_some_and(|layout| layout.order_steps().len() > 1)
+                    || out.stock_targets.is_some()
                 {
                     return Err(denied(
                         "portfolio recovery must retain every original goal and clock slot",
@@ -702,6 +725,10 @@ impl Runtime {
                     .as_ref()
                     .map_or(GameTick(0), SharedStockTarget::high_tick),
             )
+            .max(
+                self.stock_targets.as_ref()
+                    .map_or(GameTick(0), SharedStockTargets::high_tick),
+            )
     }
     fn check(&self, c: &OperationContext, control: bool) -> Result<()> {
         self.config.current()?;
@@ -744,7 +771,9 @@ impl Runtime {
         self.arm_with_ceiling(work, ceiling)
     }
     fn arm_dispatch(&self, work: &mut Work) -> Result<()> {
-        let ceiling = if self.stock_target.is_some() {
+        let ceiling = if self.stock_targets.is_some() {
+            WORKSHOP_CUSTODY_DISPATCH_BYTES + 6 * stock_targets::CHECK_BYTES
+        } else if self.stock_target.is_some() {
             // Existing-labor dispatch can revalidate after both independent
             // workforce reads. Prepay six complete inventory acquisitions in
             // addition to the ordinary parent and optional Workshop custody.
@@ -852,8 +881,12 @@ impl Runtime {
     pub(crate) fn abandon_preparation(&mut self) {
         self.planning_inspection.withdraw();
         self.stock_target_no_work = None;
+        self.stock_targets_no_work = None;
         if let Some(target) = &self.stock_target {
             target.withdraw();
+        }
+        if let Some(targets) = &self.stock_targets {
+            targets.withdraw();
         }
         if let Some(workshop) = &self.workshop
             && workshop.withdraw().is_err()
@@ -926,6 +959,7 @@ impl Runtime {
         json!({"mode":self.mode.as_str(),"anchor":anchor_json(self.anchor),"recovery":self.recovery_json(),
             "workshop_prerequisite":self.workshop.as_ref().map(SharedWorkshop::status),
             "stock_target":self.stock_target_json(),
+            "stock_targets":self.stock_targets_json(),
             "portfolio":self.portfolio_json(),
             "selected_parent_goal":null,
             "production_inspection_source":null,"production_inspection":null,
@@ -1027,6 +1061,7 @@ impl Runtime {
         let value = json!({"ok":true,"mode":self.mode.as_str(),"anchor":anchor_json(self.anchor),
             "workshop_prerequisite":self.workshop.as_ref().map(SharedWorkshop::status),
             "stock_target":self.stock_target_json(),
+            "stock_targets":self.stock_targets_json(),
             "portfolio":self.portfolio_json(),
             "selected_parent_goal":if self.portfolio.is_some(){self.selected_parent_goal_json()}else{Value::Null},
             "runtime_admitted":false,"observation":observation,"original_plan":self.original.as_ref().map(plan_json),
@@ -1069,6 +1104,7 @@ impl Runtime {
         self.check(c, false)?;
         self.planning_inspection.withdraw();
         self.stock_target_no_work = None;
+        self.stock_targets_no_work = None;
         if self.mode == Mode::Offline {
             return Err(denied(
                 "offline combined recovery cannot acquire live observations",
@@ -1332,6 +1368,7 @@ impl Runtime {
         self.check(c, true)?;
         self.planning_inspection.withdraw();
         self.stock_target_no_work = None;
+        self.stock_targets_no_work = None;
         if self.original.is_some() {
             return Err(invalid(
                 "retain original combined plan; prepare its next step without recompiling",
@@ -1381,6 +1418,11 @@ impl Runtime {
             self.config.orders.clone(),
             self.authority_tick_floor(),
         )?;
+        let stock_targets = SharedStockTargets::from_original(
+            &plan,
+            self.config.orders.clone(),
+            self.authority_tick_floor(),
+        )?;
         let layout = host_plan(&plan)?;
         let expected = layout.archive_seal();
         // From this point failures preserve partial publication and forbid another
@@ -1414,12 +1456,14 @@ impl Runtime {
         self.original = Some(plan.clone());
         self.layout = Some(layout);
         self.stock_target = stock_target;
-        self.custody = Some(SharedCustody::new_with_prerequisites(
+        self.stock_targets = stock_targets;
+        self.custody = Some(SharedCustody::new_with_stock_targets(
             archive,
             identity,
             plan.clone(),
             self.workshop.clone(),
             self.stock_target.clone(),
+            self.stock_targets.clone(),
         ));
         self.frontier = Some(durable::open_private_coordinator(
             &self.config.path("execution.journal"),
@@ -1449,7 +1493,7 @@ impl Runtime {
         if self.original.as_ref().map(|p| p.digest) != Some(expected) {
             return Err(denied("next step must name the exact original plan"));
         }
-        self.delegate(c, true, |frontier, execution, c| {
+        self.delegate(c, true, true, |frontier, execution, c| {
             frontier.prepare_next(execution, c).map(|_| ())
         })
     }
@@ -1460,7 +1504,7 @@ impl Runtime {
         c: &OperationContext,
     ) -> Result<View> {
         self.check(c, true)?;
-        self.delegate(c, false, |frontier, execution, c| {
+        self.delegate(c, false, true, |frontier, execution, c| {
             frontier.commit(seal, confirmed, execution, c).map(|_| ())
         })
     }
@@ -1473,7 +1517,7 @@ impl Runtime {
     }
     pub(crate) fn cancel(&mut self, c: &OperationContext) -> Result<View> {
         self.check(c, true)?;
-        self.delegate(c, false, |frontier, execution, c| {
+        self.delegate(c, false, false, |frontier, execution, c| {
             let step = frontier
                 .inspect(c)?
                 .entries
@@ -1490,9 +1534,10 @@ impl Runtime {
         &mut self,
         c: &OperationContext,
         prime_labor: bool,
+        insertion_guard: bool,
         action: impl FnOnce(&mut Coordinator<File>, &mut Execution, &OperationContext) -> Result<()>,
     ) -> Result<View> {
-        let result = self.delegate_inner(c, prime_labor, action);
+        let result = self.delegate_inner(c, prime_labor, insertion_guard, action);
         if result.is_err() {
             self.abandon_preparation();
         }
@@ -1502,6 +1547,7 @@ impl Runtime {
         &mut self,
         c: &OperationContext,
         prime_labor: bool,
+        insertion_guard: bool,
         action: impl FnOnce(&mut Coordinator<File>, &mut Execution, &OperationContext) -> Result<()>,
     ) -> Result<View> {
         let mut work = Work::new(c)?;
@@ -1509,6 +1555,9 @@ impl Runtime {
         self.arm_dispatch(&mut work)?;
         if let Some(custody) = &self.custody {
             custody.verify(&work.current()?)?;
+        }
+        if insertion_guard {
+            self.arm_stock_targets_prefix(&mut work)?;
         }
         let frontier = self
             .frontier

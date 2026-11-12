@@ -3,7 +3,8 @@
 use super::*;
 use dfmcp_adapter::live_production::{ProductionPortfolioGoalProgress, SelectedParentGoalResult};
 use dfmcp_adapter::work_order_progress::{ProgressObservation, ProgressSource};
-use dfmcp_core::StepId;
+use dfmcp_core::{GameTick, StateAnchor, StepId};
+use dfmcp_world::PredicateTruth;
 use std::collections::BTreeMap;
 
 // Both existing clock journals are capped at 2 MiB. The order opener pays
@@ -12,6 +13,158 @@ use std::collections::BTreeMap;
 // Six additional fixed slots therefore fit without reducing any per-target
 // custody check or borrowing the separately reserved response allowance.
 const CLOCK_OPEN_BYTES: u64 = 16 * MIB;
+
+/// Current whole-target proof has its own bounded sampling window. A target
+/// with no action cannot borrow another leaf's historical stability. This
+/// process-local state is never reconstructed from separate leaf histories.
+#[derive(Clone, Debug)]
+struct ParentStability {
+    original_anchor: StateAnchor,
+    deadline_tick: GameTick,
+    poll_interval_ticks: u64,
+    required_samples: u32,
+    accepted_samples: u32,
+    first_candidate_tick: Option<GameTick>,
+    fulfilled_at_tick: Option<GameTick>,
+    last_sample_tick: Option<GameTick>,
+    last_evaluated_tick: Option<GameTick>,
+    last_anchor: Option<StateAnchor>,
+    expired: bool,
+}
+
+impl ParentStability {
+    fn new(
+        original_anchor: StateAnchor,
+        deadline_tick: GameTick,
+        poll_interval_ticks: u64,
+        required_samples: u32,
+    ) -> Result<Self> {
+        if deadline_tick <= original_anchor.tick
+            || poll_interval_ticks == 0
+            || required_samples == 0
+        {
+            return Err(denied("whole-target stability requires the original finite timing bounds"));
+        }
+        Ok(Self {
+            original_anchor,
+            deadline_tick,
+            poll_interval_ticks,
+            required_samples,
+            accepted_samples: 0,
+            first_candidate_tick: None,
+            fulfilled_at_tick: None,
+            last_sample_tick: None,
+            last_evaluated_tick: None,
+            last_anchor: None,
+            expired: false,
+        })
+    }
+
+    fn for_plan(original: &PreparedPlan) -> Result<Self> {
+        let spec = original.steps.first().and_then(|step| step.obligation.as_ref())
+            .ok_or_else(|| denied("whole-target stability lacks its original obligation"))?;
+        if original.steps.iter().any(|step| step.obligation.as_ref().is_none_or(|other| {
+            other.deadline_tick != spec.deadline_tick
+                || other.poll_interval_ticks != spec.poll_interval_ticks
+                || other.stable_for_observations != spec.stable_for_observations
+                || other.failure.is_some()
+        })) {
+            return Err(denied("whole-target stability must retain one original timing contract"));
+        }
+        Self::new(
+            original.anchor, spec.deadline_tick, spec.poll_interval_ticks,
+            spec.stable_for_observations,
+        )
+    }
+
+    fn fulfilled(&self) -> bool {
+        self.accepted_samples >= self.required_samples
+    }
+
+    fn interrupt(&mut self) {
+        if !self.fulfilled() {
+            self.accepted_samples = 0;
+            self.first_candidate_tick = None;
+            self.last_sample_tick = None;
+        }
+    }
+
+    fn needs_time(&self, anchor: StateAnchor) -> bool {
+        !self.expired && !self.fulfilled()
+            && anchor.fortress_id == self.original_anchor.fortress_id
+            && anchor.cursor.epoch == self.original_anchor.cursor.epoch
+            && anchor.tick >= self.original_anchor.tick
+            && anchor.tick < self.deadline_tick
+    }
+
+    fn observe(&mut self, anchor: StateAnchor, truth: PredicateTruth) -> Result<bool> {
+        if anchor.fortress_id != self.original_anchor.fortress_id
+            || anchor.cursor.epoch != self.original_anchor.cursor.epoch
+            || anchor.tick < self.original_anchor.tick
+            || anchor.cursor.sequence < self.original_anchor.cursor.sequence
+            || self.last_anchor.is_some_and(|last| {
+                anchor.tick < last.tick || anchor.cursor.sequence < last.cursor.sequence
+                    || (anchor.cursor == last.cursor && anchor != last)
+            })
+        {
+            self.interrupt();
+            return Err(denied("whole-target stability source regressed or changed lineage"));
+        }
+        self.last_anchor = Some(anchor);
+        // Like the original leaf histories, an achieved temporal requirement
+        // remains historical. Fresh current truth is still mandatory.
+        if self.fulfilled() {
+            self.last_sample_tick = Some(anchor.tick);
+            return Ok(truth == PredicateTruth::True);
+        }
+        if self.expired || anchor.tick > self.deadline_tick {
+            self.interrupt();
+            self.expired = true;
+            return Ok(false);
+        }
+        if truth != PredicateTruth::True {
+            self.interrupt();
+        }
+        let basis = self.last_evaluated_tick.unwrap_or(self.original_anchor.tick);
+        let due = self.last_evaluated_tick != Some(anchor.tick)
+            && anchor.tick.get().saturating_sub(basis.get()) >= self.poll_interval_ticks;
+        if due {
+            self.last_evaluated_tick = Some(anchor.tick);
+            if truth == PredicateTruth::True {
+                self.accepted_samples = self.accepted_samples.saturating_add(1);
+                if self.first_candidate_tick.is_none() {
+                    self.first_candidate_tick = Some(anchor.tick);
+                }
+            }
+        }
+        if self.accepted_samples > 0 {
+            self.last_sample_tick = Some(anchor.tick);
+        }
+        if self.fulfilled() {
+            self.fulfilled_at_tick = Some(anchor.tick);
+        }
+        if !self.fulfilled() && anchor.tick >= self.deadline_tick {
+            self.interrupt();
+            self.expired = true;
+        }
+        Ok(self.fulfilled() && truth == PredicateTruth::True)
+    }
+
+    fn to_json(&self, proven: bool) -> Value {
+        json!({
+            "required_samples":self.required_samples,
+            "accepted_samples":self.accepted_samples,
+            "poll_interval_ticks":self.poll_interval_ticks,
+            "deadline_tick":self.deadline_tick.get(),
+            "first_candidate_tick":self.first_candidate_tick.map(GameTick::get),
+            "fulfilled_at_tick":self.fulfilled_at_tick.map(GameTick::get),
+            "last_sample_tick":self.last_sample_tick.map(GameTick::get),
+            "status":if self.fulfilled() { "fulfilled" } else if self.expired { "expired" } else { "pending" },
+            "proven_at_anchor":proven && self.fulfilled(),
+            "restored_from_history":false
+        })
+    }
+}
 
 #[derive(Default)]
 struct Leaf {
@@ -33,7 +186,18 @@ pub(super) struct PortfolioState {
     leaves: BTreeMap<StepId, Leaf>,
     cohort: Option<(ProgressObservation, Vec<SelectedParentGoalResult>)>,
     pub(super) current: Option<ProductionPortfolioGoalProgress>,
+    parent_stability: Option<ParentStability>,
 }
+fn cohort_covers_selected(
+    parent: &ProductionPortfolioGoalProgress,
+    current_anchor: StateAnchor,
+    step: StepId,
+    selected_anchor: StateAnchor,
+) -> bool {
+    parent.anchor == current_anchor && parent.current_truth == PredicateTruth::True
+        && parent.selected_anchors.contains(&(step, selected_anchor))
+}
+
 impl Runtime {
     pub(super) fn selected_order_step(&self) -> Option<StepId> {
         self.portfolio.as_ref().map(|p| p.active).or_else(||
@@ -70,11 +234,21 @@ impl Runtime {
         self.config
             .orders
             .require_absent_portfolio_clocks(ids.len() as u32 + 1)?;
+        let parent_stability = if self.layout.as_ref()
+            .and_then(|layout| layout.existing_labor())
+            .is_some_and(|requirement| !requirement.inventory_minima().is_empty())
+        {
+            Some(ParentStability::for_plan(self.original.as_ref()
+                .ok_or_else(|| denied("original stock-target portfolio absent"))?)?)
+        } else {
+            None
+        };
         self.portfolio = Some(PortfolioState {
             active: ids[0],
             leaves: BTreeMap::new(),
             cohort: None,
             current: None,
+            parent_stability,
         });
         if let Some(first) = recovery.and_then(|r| r[0]) {
             self.goal_history_present = first.goal_history_present;
@@ -416,6 +590,7 @@ impl Runtime {
     /// existing conservative unfinished-stability reset in this case.
     pub(super) fn invalidate_portfolio_samples(&mut self) {
         self.withdraw_portfolio_current();
+        self.interrupt_portfolio_parent_stability();
         if let Some(p) = &mut self.portfolio {
             for leaf in p.leaves.values_mut() {
                 if leaf
@@ -428,6 +603,50 @@ impl Runtime {
             }
         }
     }
+    pub(super) fn interrupt_portfolio_parent_stability(&mut self) {
+        if let Some(stability) = self.portfolio.as_mut().and_then(|p| p.parent_stability.as_mut()) {
+            stability.interrupt();
+        }
+    }
+
+    /// A fresh selected sample already contains every original inventory
+    /// minimum. A contradiction interrupts the unfinished complete-cohort
+    /// streak even during a partial cohort or a guarded clock read.
+    pub(super) fn observe_portfolio_parent_truth(&mut self, truth: PredicateTruth) {
+        if truth != PredicateTruth::True {
+            self.interrupt_portfolio_parent_stability();
+        }
+    }
+
+    /// A complete cohort can justify a selected clock's initial read boundary
+    /// without relabelling its older child anchor as the public composite.
+    /// The clock's native effect still acquires a new selected parent sample.
+    pub(super) fn portfolio_covers_selected_goal(
+        &self, step: StepId, selected_anchor: StateAnchor,
+    ) -> bool {
+        self.portfolio.as_ref().and_then(|p| p.current.as_ref())
+            .is_some_and(|parent| cohort_covers_selected(parent, self.anchor, step, selected_anchor))
+    }
+
+    pub(super) fn parent_stability_needs_time(&self) -> bool {
+        let pending = self.portfolio.as_ref().and_then(|p| p.parent_stability.as_ref())
+            .is_some_and(|stability| stability.needs_time(self.anchor));
+        let selected = self.parent_goal.as_ref().is_some_and(|parent| {
+            parent.anchor == self.anchor && parent.current_truth == PredicateTruth::True
+                && !parent.inventory_requirements.is_empty()
+                && parent.inventory_requirements.iter().all(|finding|
+                    finding.current_truth == PredicateTruth::True)
+        });
+        let complete = self.portfolio.as_ref().and_then(|p| p.current.as_ref())
+            .is_some_and(|parent| {
+                parent.anchor == self.anchor && parent.current_truth == PredicateTruth::True
+                    && !parent.inventory_requirements.is_empty()
+                    && parent.inventory_requirements.iter().all(|finding|
+                        finding.current_truth == PredicateTruth::True)
+            });
+        pending && (selected || complete)
+    }
+
     pub(super) fn clear_portfolio_cohort(&mut self) {
         self.portfolio_sample = None;
         if let Some(p) = &mut self.portfolio {
@@ -529,6 +748,9 @@ impl Runtime {
                 "source_digest":p.source_digest.to_hex(),"workforce_source_digest":p.workforce_source_digest.to_hex(),
                 "labor":p.labor.iter().map(|f|json!({"unit_id":f.unit_id.get().to_string(),"labor":f.labor,"requested_enabled":f.requested_enabled,
                     "observed_enabled":f.observed_enabled,"current_truth":goals::truth(f.current_truth)})).collect::<Vec<_>>(),
+                "inventory_requirements":goals::inventory_requirements_json(&p.inventory_requirements),
+                "parent_stability":self.portfolio.as_ref().and_then(|portfolio|portfolio.parent_stability.as_ref())
+                    .map(|stability|stability.to_json(p.current_truth == PredicateTruth::True)),
                 "restored_from_history":false,"production_attribution":"unknown"}))
     }
     fn portfolio_capture(
@@ -686,7 +908,7 @@ impl Runtime {
                 .ok_or_else(|| denied("original portfolio absent"))?;
             let current = work.narrow(&final_proof)?;
             self.config.current()?;
-            let result = if self.layout.as_ref().is_some_and(|layout| layout.existing_labor().is_some()) {
+            let mut result = if self.layout.as_ref().is_some_and(|layout| layout.existing_labor().is_some()) {
                 live_production::compose_existing_labor_portfolio_goal(
                     original, &samples, &before, &after, &current,
                     |step, projection, context| {
@@ -716,13 +938,23 @@ impl Runtime {
                     self.config.workforce.acceptance().goal(projection, context)
                 },
             )? };
+            let portfolio = self.portfolio.as_mut()
+                .ok_or_else(|| denied("portfolio absent"))?;
+            if let Some(stability) = &mut portfolio.parent_stability {
+                // Count only complete qualified cohorts. The conjunction keeps
+                // each selected original temporal requirement mandatory too.
+                result.original_goal_proven &=
+                    stability.observe(result.anchor, result.current_truth)?;
+            }
             self.anchor = result.anchor;
-            self.portfolio
-                .as_mut()
-                .ok_or_else(|| denied("portfolio absent"))?
-                .current = Some(result);
+            portfolio.current = Some(result);
         }
         work.context.anchor = self.anchor;
         self.view(&mut Work::new(&work.narrow(&output)?)?)
     }
+}
+
+#[cfg(test)]
+mod stability_tests {
+    include!("portfolio_stability_tests.rs");
 }

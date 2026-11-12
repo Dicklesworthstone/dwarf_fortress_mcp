@@ -3,6 +3,7 @@
 use super::existing_labor_request::ExistingLaborRequest;
 use super::portfolio_request::{MAX_ORDERS, PortfolioOrder};
 use super::request::recipe;
+use super::stock_targets_binding::StockTargetsBinding;
 use super::*;
 use dfmcp_core::{IntentId, StepId};
 use dfmcp_intent::effects::created_entity_id;
@@ -113,6 +114,17 @@ impl ExistingLaborPortfolioRequest {
         c: &OperationContext,
         origin: Option<Digest32>,
     ) -> Result<PreparedPlan> {
+        self.compile_with_stock_targets(evidence, requirement, baselines, c, origin, None)
+    }
+    pub(super) fn compile_with_stock_targets(
+        &self,
+        evidence: &PredicateEvidence<'_>,
+        requirement: &ExistingLaborRequirement,
+        baselines: &InventoryBaselines,
+        c: &OperationContext,
+        origin: Option<Digest32>,
+        stock_targets: Option<&StockTargetsBinding>,
+    ) -> Result<PreparedPlan> {
         self.validate()?;
         // Reuse the exact single-request citizen, prerequisite and timing
         // admission. This temporary plan never acquires custody or native state.
@@ -139,6 +151,15 @@ impl ExistingLaborPortfolioRequest {
                 objective.append_identity(&mut bytes, baselines, c.anchor)?;
             }
         }
+        if let Some(binding) = stock_targets {
+            if binding.original_anchor != c.anchor {
+                return Err(denied("stock-target portfolio belongs to another original anchor"));
+            }
+            bytes = binding.identity(
+                requirement, GameTick(self.deadline_tick),
+                self.poll_interval_ticks, self.stable_samples,
+            )?;
+        }
         super::workshop_binding::append_identity(&mut bytes, origin)?;
         let digest = Digest32::of_bytes(&bytes);
         let id = IntentId::new(u128::from_be_bytes(
@@ -150,11 +171,18 @@ impl ExistingLaborPortfolioRequest {
             return Err(invalid("reserved existing-labor portfolio intent identity"));
         }
         let mut terminal = vec![prerequisite];
+        if let Some(binding) = stock_targets {
+            terminal.extend(binding.minima());
+        }
         let mut actions = Vec::with_capacity(self.orders.len());
         for (index, requested) in self.orders.iter().enumerate() {
             let (native, job) = recipe(&requested.recipe)?;
             let action = Action::CreateWorkOrder {
-                name: format!("native existing-labor portfolio {} goal", native.as_str()),
+                name: if stock_targets.is_some() {
+                    format!("native inventory-targets/1 {} goal", native.as_str())
+                } else {
+                    format!("native existing-labor portfolio {} goal", native.as_str())
+                },
                 job_token: job.into(),
                 amount: requested.amount,
                 conditions: Vec::new(),
@@ -196,32 +224,55 @@ impl ExistingLaborPortfolioRequest {
             id,
             anchor: c.anchor,
             summary: super::workshop_binding::summary(
-                format!(
-                    "Use existing {} on {} citizens for {} original finite furniture goals",
-                    self.labor,
-                    requirement.units().len(),
-                    self.orders.len()
-                ),
+                match stock_targets {
+                    Some(binding) => binding.summary()?,
+                    None => format!(
+                        "Use existing {} on {} citizens for {} original finite furniture goals",
+                        self.labor,
+                        requirement.units().len(),
+                        self.orders.len()
+                    ),
+                },
                 origin,
             )?,
             terminal_condition: Predicate::All(terminal),
             constraints: vec![Constraint::MaxRisk(RiskTier::Guarded)],
             requested_actions: actions,
         };
-        let mut plan = StaticPlanner::default().prepare_with_evidence(evidence, &intent, c)?;
+        let mut planner = StaticPlanner::default();
+        if stock_targets.is_some() {
+            // The closed marker retains up to four complete source-bound
+            // assessments. Native action strings keep their existing bounds;
+            // legacy originals retain the default policy and identical bytes.
+            planner.policy.max_string_bytes = 1024;
+        }
+        let mut plan = planner.prepare_with_evidence(evidence, &intent, c)?;
         for step in &mut plan.steps {
             step.compensation = None;
         }
         plan.digest = plan.compute_digest();
         plan.id = plan.expected_id();
         let layout = live_production::ProductionLayout::from_plan(&plan)?;
-        if layout.existing_labor() != Some(requirement)
+        let prerequisite_matches = match (layout.existing_labor(), stock_targets) {
+            (Some(actual), Some(binding)) =>
+                actual.predicate() == requirement.predicate()
+                    && Predicate::All(actual.inventory_minima().to_vec()).normalized()
+                        == Predicate::All(binding.minima()).normalized(),
+            (actual, None) => actual == Some(requirement),
+            _ => false,
+        };
+        if !prerequisite_matches
             || layout.assignment_step().is_some()
             || layout.order_steps().len() != self.orders.len()
         {
             return Err(denied(
                 "compiled existing-labor portfolio lost its original prerequisite",
             ));
+        }
+        if let Some(binding) = stock_targets {
+            if super::stock_targets_binding::requirement(&plan)?.as_ref() != Some(binding) {
+                return Err(denied("compiled stock-target portfolio lost its complete original policy"));
+            }
         }
         Ok(plan)
     }

@@ -7,6 +7,9 @@ pub(super) const RESPONSE_RESERVE: u64 = 128 * 1024;
 const TEXT_LIMIT: usize = 60_000;
 const LABOR_BLOCKER_LIMIT: usize = 8;
 
+#[path = "live_production_presentation_stock_targets.rs"]
+mod stock_targets;
+
 pub(super) fn compact(view: &Value) -> Value {
     let entries: Vec<Value> = view["frontier"]["entries"]
         .as_array()
@@ -43,6 +46,7 @@ pub(super) fn compact(view: &Value) -> Value {
         "portfolio":compact_portfolio(&view["portfolio"]),
         "workshop_prerequisite":workshop_summary(&view["workshop_prerequisite"],false),
         "stock_target":stock_target_summary(&view["stock_target"]),
+        "stock_targets":stock_targets::summary(&view["stock_targets"]),
         "selected_parent_goal":null,
         "production_inspection_source":null,"production_inspection":null,
         "current_parent_goal":null,
@@ -256,6 +260,14 @@ fn portfolio_parent_valid(view: &Value, parent: &Value, anchor: Option<StateAnch
         false_goal |= labor["current_truth"] == "false";
         unknown |= labor["current_truth"] == "unknown";
     }
+    let Some(inventory_truth) = stock_targets::inventory_truth(view, parent) else {
+        return false;
+    };
+    false_goal |= inventory_truth == "false";
+    unknown |= inventory_truth == "unknown";
+    let Some(cohort_proven) = stock_targets::stability_proven(view, parent) else {
+        return false;
+    };
     let truth = if false_goal {
         "false"
     } else if unknown {
@@ -273,7 +285,9 @@ fn portfolio_parent_valid(view: &Value, parent: &Value, anchor: Option<StateAnch
         (_, expected, Some(actual)) => expected == actual,
         _ => false,
     };
-    consistent && parent["original_goal_proven"] == (reported_truth == Some("true") && all_proven)
+    consistent
+        && parent["original_goal_proven"]
+            == (reported_truth == Some("true") && all_proven && cohort_proven)
 }
 
 #[cfg(test)]
@@ -630,7 +644,10 @@ fn encode(
     };
     let view = retained.unwrap_or(&Value::Null);
     let stock_target = stock_target_summary(&view["stock_target"]);
-    let stock_target_failed = stock_target["revalidation_failed"] == true;
+    let stock_targets = stock_targets::summary(&view["stock_targets"]);
+    let stock_target_failed = stock_target["revalidation_failed"] == true
+        || stock_targets["revalidation_failed"] == true
+        || (!view["stock_targets"].is_null() && stock_targets.is_null());
     let workshop_fenced = view["workshop_prerequisite"]["source_fenced"] == true;
     let portfolio = view["portfolio"]["schema"] == "dfmcp.production-portfolio/1";
     let clock_reconciliation_needed = CLOCK_OWNERS
@@ -715,6 +732,8 @@ fn encode(
         && !parent_fenced
         && mode != Some("offline")
         && candidate["scope"] == parent_scope
+        && (view["stock_targets"].is_null() || portfolio)
+        && stock_targets::current_inventory_consistent(view, candidate)
         && matches!(
             candidate["current_truth"].as_str(),
             Some("true" | "false" | "unknown")
@@ -792,10 +811,34 @@ fn encode(
     });
     let current_tick = anchor
         .is_some_and(|a| view["anchor"] == anchor_value(a) && known_tick == Some(a.tick.get()));
+    // A complete cohort has its own public anchor. Its exact selected leaf
+    // remains usable clock evidence without relabeling the selected anchor.
+    let cohort_covers_selected = portfolio
+        && parent_goal.is_object()
+        && selected_goal["step_id"] == view["portfolio"]["selected_order_step_id"]
+        && view["portfolio"]["orders"].as_array().is_some_and(|orders| {
+            orders.iter().any(|order| order["step_id"] == selected_goal["step_id"]
+                && order["goal"] == selected_goal)
+        });
+    let clock_parent = if joined_goal.is_object() {
+        &joined_goal
+    } else if cohort_covers_selected {
+        &parent_goal
+    } else {
+        &Value::Null
+    };
+    let parent_stability_needs_time = portfolio
+        && stock_targets.is_object()
+        && clock_parent["current_truth"] == "true"
+        && (joined_goal["parent_stability_pending"] == true
+            || (cohort_covers_selected && parent_goal["parent_stability"]["status"] == "pending"))
+        && stock_targets::inventory_truth(view, clock_parent) == Some("true")
+        && (view["current_parent_goal"].is_null() || parent_goal.is_object())
+        && deadline.zip(known_tick).is_some_and(|(deadline, tick)| tick < deadline);
     let current_goal_ready = !uncertain
         && !clock_invalidates_goal
         && !parent_fenced
-        && joined_goal.is_object()
+        && clock_parent.is_object()
         && !parent_proven
         && view["frontier"]["all_applied"] == true
         && view["frontier"]["needs_reconciliation"] != true
@@ -808,7 +851,7 @@ fn encode(
                     | "retained_order_completion"
             )
         )
-        && !selected_proven
+        && (!selected_proven || parent_stability_needs_time)
         && selected_goal["terminal_failure"] != true
         && selected_goal["history"]["fenced"] != true
         && current_tick;
@@ -819,13 +862,13 @@ fn encode(
                     selected_goal["kind"].as_str(),
                     Some("observed_inventory_minimum" | "observed_inventory_increase")
                 ) && selected_goal["current_truth"] == "true"
-                    && joined_goal["current_truth"] == "true"
+                    && clock_parent["current_truth"] == "true"
             } else {
                 selected_goal["receipt_linked"] == true
                     && ((selected_goal["current_truth"] == "false"
-                        && joined_goal["current_truth"] == "false")
+                        && clock_parent["current_truth"] == "false")
                         || (selected_goal["current_truth"] == "true"
-                            && joined_goal["current_truth"] == "true"))
+                            && clock_parent["current_truth"] == "true"))
             }
     };
     let allowed_ticks = deadline
@@ -1163,13 +1206,14 @@ fn encode(
             false,
             json!({}),
         ))
-    } else if stock_target["status"] == "already_satisfied"
+    } else if (stock_target["status"] == "already_satisfied"
+        || stock_targets["status"] == "already_satisfied")
         && view["original_plan"].is_null()
         && mode != Some("offline")
     {
         Some((
             "fortress_observe",
-            "The observed stock target already held and no order was planned. Acquire a new observation before considering a later production goal.",
+            "All requested stock targets already held at the reported anchor and no order was planned. Acquire a new observation before considering a later production goal.",
             false,
             json!({}),
         ))
@@ -1197,7 +1241,7 @@ fn encode(
     {
         Some((
             "fortress_plan",
-            "Compile kind=stock_target to calculate one finite inventory deficit, kind=existing_labor for an explicit amount, or kind=existing_labor_portfolio for up to four recipes using observed eligible workers whose selected labor is already enabled. Each order retains the original deadline and rechecks current labor without assigning it.",
+            "Compile kind=stock_targets to calculate up to four distinct furniture deficits from one qualified census while retaining every requested minimum, kind=stock_target for one target, kind=existing_labor for an explicit amount, or kind=existing_labor_portfolio for up to four recipes using observed eligible workers whose selected labor is already enabled. Each order retains the original deadline and rechecks current labor without assigning it.",
             false,
             json!({}),
         ))
@@ -1325,6 +1369,9 @@ fn encode(
     if workshop.is_object() {
         partial_domains.push("original_workshop_prerequisite_custody");
     }
+    if stock_targets.is_object() {
+        partial_domains.push("original_stock_target_portfolio");
+    }
     if preplan_inspection_available {
         partial_domains.push("preplan_captured_operations");
     }
@@ -1415,10 +1462,14 @@ fn encode(
             "resolution":"Preserve the original association and consumed recovery floors. Further order dispatch is withheld; inspect source continuity and reconcile any already attempted effect under its original key."}));
     }
     if stock_target_failed {
-        uncertainty.push(json!({"scope":"original_stock_target_dispatch_basis",
+        uncertainty.push(json!({"scope":if stock_targets.is_object() {
+                "original_stock_targets_dispatch_basis"
+            } else {"original_stock_target_dispatch_basis"},
             "epistemic_status":"unknown","state":"revalidation_failed",
-            "assessment_witness":stock_target["assessment_witness"],
-            "finding":"The original inventory basis or empty-queue requirement was not re-established. The sealed amount has not been resized.",
+            "assessment_witness":if stock_targets.is_object() {
+                &stock_targets["assessment_witness"]
+            } else {&stock_target["assessment_witness"]},
+            "finding":"The original inventory basis or exact queue requirement was not re-established. Sealed amounts and target minima have not been changed.",
             "resolution":"Retain the exact original recovery reference and reconcile any attempted effect. Inspect the failed source or authority check; changing the target or amount requires a new original, never a replacement key for uncertain work."}));
     }
     for owner in CLOCK_OWNERS {
@@ -1506,6 +1557,32 @@ fn encode(
     if result.get("workshop_prerequisite").is_some() {
         result["workshop_prerequisite"] = workshop.clone();
     }
+    if result.get("stock_targets").is_some() {
+        result["stock_targets"] = stock_targets.clone();
+    }
+    if result["retained_reference"]["stock_targets"].is_object() {
+        result["retained_reference"]["stock_targets"] =
+            stock_targets::summary(&result["retained_reference"]["stock_targets"]);
+    }
+    if !view["stock_targets"].is_null()
+        || view["current_parent_goal"]["inventory_requirements"]
+            .as_array()
+            .is_some_and(|rows| !rows.is_empty())
+    {
+        // A partial cohort or missing target cannot survive in top-level
+        // fields after the Agent Turn has correctly withheld its proof.
+        result["original_goal_proven"] = json!(parent_proven);
+        result["current_state_proven"] = json!(false);
+        if result.get("current_parent_goal").is_some() {
+            result["current_parent_goal"] = parent_goal.clone();
+        }
+        if result.get("selected_parent_goal").is_some() {
+            result["selected_parent_goal"] = joined_goal.clone();
+        }
+        if result["portfolio"].is_object() {
+            result["portfolio"]["complete_original_goal_proven"] = json!(parent_proven);
+        }
+    }
     if result.get("stock_target").is_some() {
         result["stock_target"] = stock_target.clone();
     }
@@ -1557,12 +1634,15 @@ fn encode(
             "retained_state_currently_verified":verified,"current_state_proven":false,"original_goal_proven":parent_proven,
             "current_parent_goal_truth":parent_truth,
             "current_parent_labor":labor.as_ref().map(|labor| &labor.summary),
+            "current_parent_inventory":parent_goal["inventory_requirements"],
+            "current_parent_stability":parent_goal["parent_stability"],
             "production_inspection_available":inspection_available,
             "production_inspection_scope":if inspection_available {inspection_source["scope"].as_str()} else {None},
             "preplan_production_inspection_available":preplan_inspection_available,
             "observed_production_conditions":if diagnosis_seen {Some(&inspection["summary"])} else {None},
             "parent_goal_observation_fenced":parent_fenced,
             "stock_target":stock_target,
+            "stock_targets":stock_targets,
             "workshop_prerequisite":if workshop.is_object() {Some(json!({
                 "scope":"original_workshop_dispatch_prerequisite","origin_witness":workshop["origin_witness"],
                 "association_digest":workshop["association_digest"],"source_fenced":workshop["source_fenced"],
@@ -1581,6 +1661,7 @@ fn encode(
             "inventory_clock":clock_views[1],
             "workshop_prerequisite":workshop,
             "stock_target":stock_target,
+            "stock_targets":stock_targets,
             "workshop_prerequisite_floor":workshop_floor(&view["recovery"]["workshop_prerequisite_floor"]),
             "production_inspection_source":if inspection_available {Some(inspection_source)} else {None},
             "obligations":if selected_goal.is_null() {vec![]} else {vec![selected_goal]},

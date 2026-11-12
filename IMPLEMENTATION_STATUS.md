@@ -1,5 +1,84 @@
 # Implementation Status
 
+## Unreleased — Reachable multi-target native stock planning and completion
+
+The combined `serve-gameplay-dev labor-order` host now accepts the closed
+`stock_targets` Plan request with one to four distinct furniture recipes,
+1..1,000,000 stack-unit minima and 1..100 finite-order caps. One fresh complete
+operations/1.3 census at the original paused citizen tick sizes every target.
+Only positive deficits become dependency-free original orders, using the same
+qualified existing enabled workers; every requested minimum remains an explicit
+complete-parent requirement. All-met requests publish source-qualified no-work
+without an original, keys or custody. Any excessive deficit refuses the entire
+proposal. This mode does not assign labor or credit outstanding production.
+
+The distinct `Inventory targets/1` marker binds the full vector, including met
+targets, complete census metadata and assessment witnesses, worker identity and
+unchanged temporal requirements before deriving intent and step keys. Positive
+leaves use typed inventory-increase predicates; separate minimum predicates
+preserve all target diagnostics. The compiler's 1,024-byte summary allowance is
+limited to this new closed shape. Existing request identities and policies remain
+unchanged. Recovery requires the exact archive, original keys and complete
+portfolio history/clock vector, even with only one positive leaf.
+
+Every preparation and insertion requalifies the unchanged original census and
+the native manager queue. A nonempty queue is accepted only as the exact earlier
+original Created prefix, checked against actual frontier family receipts,
+semantic associations and each native post-insertion witness. Extra/missing
+members, retirement, allocation-horizon or sequence/source drift refuse under
+the original identity. Protocol 1.10 membership does not prove current recipe
+configuration or anticipated output. Read-only prior-order inspection preserves
+the next order's preparation. These checks repeat at the existing native
+evidence boundaries, including after durable dispatch starts. Cancellation does
+not acquire the insertion-prefix authority requirement.
+
+Wait uses a complete portfolio even for one positive deficit. Independently
+qualified current findings retain every original minimum, including no-action
+targets. A process-local parent tracker additionally requires complete True
+cohorts at the original cadence and stable-sample count. Repeated/off-cadence
+True reads do not count; False, Unknown and failed acquisition/publication reset
+an unfinished streak. Achievement must occur within the original deadline and
+remains historical in-process; current whole-goal proof still requires current
+True evidence and every original leaf's temporal proof. Reopening reconstructs
+no parent achievement or unfinished continuity from separate leaf histories and
+never renews timing.
+
+The separately configured clocks can finish remaining parent stability after
+a selected leaf has fulfilled. Initial inventory-clock eligibility can use a
+currently qualified complete cohort containing the exact selected step/anchor;
+it consumes that basis before withdrawing the cohort. Prepared clock handoff
+uses a fresh selected all-target parent and a readiness-only
+`parent_stability_pending` diagnostic. Complete-parent and selected anchors stay
+distinct. Native guards still reobserve after dispatch markers; independent
+clock authority, game-tick budgets, current confirmation and original deadlines
+remain required. No pending diagnostic or clock receipt establishes completion.
+
+Agent Turn and compact/error responses retain all target amounts, minima, source
+identity and actual StepId/no-action status. Current proof is withheld for
+missing/contradictory target rows or incomplete temporal evidence. Last-check
+metadata is withdrawn on stale/error publication; the frontier remains the
+authority for choosing the next original action.
+
+This checkpoint adds 26 Rust regression sources: two public routing/recovery
+tests, eight presentation/clock-proof tests, seven temporal/cohort tests, six
+request/archive/budget tests, two queue-prefix tests and one actual Runtime
+campaign driving eleven native TCP-double scenarios. The campaign covers
+two actual original insertions, met no-work, over-cap refusal, early/post-marker
+census drift, extra/retired queue members, lost-reply Offline/Reconcile without
+redispatch, all-target stability and an independently confirmed inventory clock.
+
+Independent source review and structural source/JSON checks are complete.
+The exact changes have not been compiled, formatted or executed: the execution
+workspace is unavailable, and the repository has no automatic hosted CI run
+available for this increment. Full workspace verification, Python/Rust execution,
+source-bound DFHack/game trials and production qualification remain outstanding.
+These are source implementations and regression sources, not passing-test or
+live-game evidence. Registry admission, protocols and the eleven MCP tools are
+unchanged; bead df-native-stock-target-3m9 remains in progress.
+
+See docs/COMBINED_PRODUCTION_MCP.md for the complete request and lifecycle and
+architecture/native_stock_target_v1.json for the bounded portfolio contract.
+
 ## Unreleased — Acknowledge complete announcement windows in the same live session
 
 The protocol-1.1 development observe tool now accepts an optional closed

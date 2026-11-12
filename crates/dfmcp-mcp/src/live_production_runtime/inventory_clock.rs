@@ -347,20 +347,27 @@ impl Runtime {
             .ok_or_else(|| {
                 denied("inventory clock requires a fresh qualified True inventory sample")
             })?;
-        if self.parent_goal.as_ref().is_none_or(|parent| {
-            parent.anchor != self.anchor
-                || parent.selected_anchor != sample.anchor
-                || parent.current_truth != PredicateTruth::True
-        }) || self.clock_withholds_goal()
-        {
+        let selected_parent_true = self.parent_goal.as_ref().is_some_and(|parent| {
+            parent.anchor == self.anchor
+                && parent.selected_anchor == sample.anchor
+                && parent.current_truth == PredicateTruth::True
+        });
+        let complete_parent_true =
+            self.portfolio_covers_selected_goal(monitor.step_id(), sample.anchor);
+        if (!selected_parent_true && !complete_parent_true) || self.clock_withholds_goal() {
             return Err(denied(
                 "inventory clock requires fresh True original labor and inventory evidence",
             ));
         }
-        if !matches!(
+        let selected_pending = matches!(
             monitor.historical_obligation_status(),
             Some(ObligationStatus::Pending | ObligationStatus::Active { .. })
-        ) {
+        );
+        let parent_pending = matches!(
+            monitor.historical_obligation_status(),
+            Some(ObligationStatus::Fulfilled { .. })
+        ) && self.parent_stability_needs_time();
+        if !selected_pending && !parent_pending {
             return Err(denied(
                 "inventory clock requires unfinished original stability, without a new deadline",
             ));
@@ -502,7 +509,6 @@ impl Runtime {
         advancing: bool,
     ) -> Result<View> {
         self.check_inventory_clock_control(c, true)?;
-        self.clear_portfolio_cohort();
         let mut work = Work::new(c)?;
         self.refresh_inventory_clock_view(&work.take(VIEW_BYTES)?)?;
         if self.clock.is_some() {
@@ -537,6 +543,10 @@ impl Runtime {
             self.restore_inventory_clock_target(&mut work)?;
         }
         let target = self.sample_inventory_clock_target(&work.rest(MAX_BYTES)?, reviewing)?;
+        // The explicit prior Wait may have published a complete cohort at a
+        // distinct composite anchor. Consume that qualified initial basis
+        // before withdrawing it; the native guard below still reobserves.
+        self.clear_portfolio_cohort();
         work.context.anchor = self.anchor;
         let source_context = self
             .config

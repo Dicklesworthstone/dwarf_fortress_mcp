@@ -66,6 +66,17 @@ pub(super) fn truth(value: PredicateTruth) -> &'static str {
     }
 }
 
+pub(super) fn inventory_requirements_json(
+    findings: &[dfmcp_adapter::live_production::SelectedParentInventoryFinding],
+) -> Value {
+    json!(findings.iter().map(|finding| json!({
+        "item_type":finding.item_type,
+        "minimum_stack_units":finding.minimum_stack_units,
+        "observed_stack_units":finding.observed_stack_units,
+        "current_truth":truth(finding.current_truth)
+    })).collect::<Vec<_>>())
+}
+
 impl Runtime {
     fn selected_objective(&self) -> Option<(StepId, SelectedObjective)> {
         selected(self.original.as_ref()?, self.selected_order_step()?)
@@ -134,6 +145,10 @@ impl Runtime {
                     "observed_enabled":finding.observed_enabled,
                     "current_truth":truth(finding.current_truth)
                 })).collect::<Vec<_>>(),
+                "inventory_requirements":inventory_requirements_json(&parent.inventory_requirements),
+                // Clock eligibility only; a selected sample cannot publish
+                // the complete portfolio's temporal proof.
+                "parent_stability_pending":self.portfolio.is_some() && self.parent_stability_needs_time(),
                 "historical_labor_receipt_is_current_evidence":false,
                 "restored_from_history":false,
                 "production_attribution":"unknown"
@@ -572,6 +587,7 @@ impl Runtime {
             disarmed?;
             // The joined snapshot has its own digest; the selected production
             // anchor remains separately visible and is never relabelled.
+            self.observe_portfolio_parent_truth(result.parent_progress().current_truth);
             self.anchor = result.parent_progress().anchor;
             self.parent_goal = Some(result.parent_progress().clone());
             self.inspection_source = Some(InspectionSource::from_sample(&result));

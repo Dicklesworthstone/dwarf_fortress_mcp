@@ -1,5 +1,6 @@
 //! Parent-plan custody at each child evidence boundary.
 use super::stock_target::{self, SharedStockTarget};
+use super::stock_targets::{self, SharedStockTargets};
 use super::workshop_prerequisite::{self, SharedWorkshop};
 use crate::semantic_workforce_runtime::{denied, exhausted, identity::CapsuleStore};
 use dfmcp_adapter::build_placement::journal::private_file::PrivateBuildFile;
@@ -29,6 +30,7 @@ struct Custody {
     original: PreparedPlan,
     workshop: Option<SharedWorkshop>,
     stock_target: Option<SharedStockTarget>,
+    stock_targets: Option<SharedStockTargets>,
     authority_tick_floor: GameTick,
     armed: Option<Armed>,
     generation: u64,
@@ -54,12 +56,23 @@ impl SharedCustody {
     ) -> Self {
         Self::new_with_prerequisites(archive, identity, original, workshop, None)
     }
+    #[cfg(test)]
     pub(super) fn new_with_prerequisites(
         archive: PlanArchiveStore<PrivateBuildFile>,
         identity: CapsuleStore<PrivateBuildFile>,
         original: PreparedPlan,
         workshop: Option<SharedWorkshop>,
         stock_target: Option<SharedStockTarget>,
+    ) -> Self {
+        Self::new_with_stock_targets(archive, identity, original, workshop, stock_target, None)
+    }
+    pub(super) fn new_with_stock_targets(
+        archive: PlanArchiveStore<PrivateBuildFile>,
+        identity: CapsuleStore<PrivateBuildFile>,
+        original: PreparedPlan,
+        workshop: Option<SharedWorkshop>,
+        stock_target: Option<SharedStockTarget>,
+        stock_targets: Option<SharedStockTargets>,
     ) -> Self {
         Self(Arc::new(Mutex::new(Custody {
             archive,
@@ -68,6 +81,7 @@ impl SharedCustody {
             original,
             workshop,
             stock_target,
+            stock_targets,
             armed: None,
             generation: 0,
         })))
@@ -144,6 +158,10 @@ impl SharedCustody {
                     .stock_target
                     .as_ref()
                     .map_or(GameTick(0), SharedStockTarget::high_tick),
+            )
+            .max(
+                state.stock_targets.as_ref()
+                    .map_or(GameTick(0), SharedStockTargets::high_tick),
             );
         let workshop_bytes = if state.workshop.is_some() {
             workshop_prerequisite::LOCAL_BYTES
@@ -288,6 +306,28 @@ impl SharedCustody {
         state.authority_tick_floor = state.authority_tick_floor.max(target.high_tick());
         result
     }
+    fn qualify_stock_targets(
+        &self,
+        c: &OperationContext,
+        queue: Option<&WorkOrderObservation>,
+    ) -> Result<()> {
+        let current = self.narrow(c)?;
+        let mut state = self.0.try_lock().map_err(|_| denied("custody is unavailable"))?;
+        let Some(targets) = state.stock_targets.clone() else {
+            return Ok(());
+        };
+        let queue = queue.ok_or_else(|| denied("stock targets lost their original queue capture"))?;
+        let armed = state.armed.as_mut()
+            .ok_or_else(|| denied("custody operation is not armed"))?;
+        armed.bytes = armed.bytes.checked_sub(stock_targets::CHECK_BYTES)
+            .ok_or_else(|| exhausted("stock-target portfolio prerequisite allowance exhausted"))?;
+        let mut current = current;
+        current.anchor.tick = GameTick(queue.tick());
+        current.budget.max_bytes = stock_targets::CHECK_BYTES;
+        let result = targets.qualify(queue, &current);
+        state.authority_tick_floor = state.authority_tick_floor.max(targets.high_tick());
+        result
+    }
     fn narrow(&self, c: &OperationContext) -> Result<OperationContext> {
         let state = self
             .0
@@ -422,6 +462,8 @@ impl<E: WorkOrderEvidenceOwner> WorkOrderEvidenceOwner for GuardedEvidence<E> {
             .qualify_workshop(&remaining_context(c, start)?, Some(tick))?;
         self.custody
             .qualify_stock_target(&remaining_context(c, start)?, Some(observation))?;
+        self.custody
+            .qualify_stock_targets(&remaining_context(c, start)?, Some(observation))?;
         let generation = self
             .custody
             .verify_generation(&remaining_context(c, start)?)?;
@@ -446,6 +488,10 @@ impl<E: WorkOrderEvidenceOwner> WorkOrderEvidenceOwner for GuardedEvidence<E> {
         self.custody
             .qualify_workshop(&remaining_context(c, start)?, self.order_tick)?;
         self.custody.qualify_stock_target(
+            &remaining_context(c, start)?,
+            self.order_observation.as_ref(),
+        )?;
+        self.custody.qualify_stock_targets(
             &remaining_context(c, start)?,
             self.order_observation.as_ref(),
         )?;

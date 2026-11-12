@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased — Plan and complete a native furniture stock portfolio
+
+- Add closed `kind="stock_targets"` planning for one to four distinct furniture
+  minima using existing enabled workers. Size every deficit from one fresh
+  qualified census; retain all requested minima, create only positive orders,
+  return all-met no-work, and refuse any over-limit proposal atomically.
+- Bind the complete target vector, source, worker prerequisite and timing into
+  the original archive and keys. Require the unchanged census and an exact
+  receipt-backed prefix of earlier original Created orders at native insertion.
+- Give the complete target set its own original cadence/stability window.
+  Initially sufficient stock must remain true; individual achieved leaves cannot
+  conceal later consumption or supply missing whole-parent stable samples.
+- Keep separately authorized clock reviews reachable after leaf fulfillment,
+  through complete-cohort and prepared selected-parent handoffs. Preserve the
+  distinct source anchors, deadline, confirmation and post-marker native checks.
+- Preserve every target through compact/error recovery and reject incomplete
+  whole-goal proof. Keep cancellation outside the insertion-only prefix gate.
+- Add 26 Rust regression sources, including an eleven-case actual Runtime/native
+  TCP-double campaign for two-order dispatch, drift, recovery and clocked parent
+  stability. These sources were independently reviewed but remain unexecuted
+  and uncompiled while the execution workspace is unavailable.
+
 ## Unreleased — Continue bounded announcement observation without reopening
 
 - Add an optional exact published-window acknowledgment to protocol-1.1

@@ -7,7 +7,8 @@ qualified current inventory. The reusable adapter entry is
 `InventoryBaselineProjection::stock_target`. This is an explicitly bounded
 stock-sizing policy, not a background stock-maintenance service or a native
 recipe-feasibility proof. The combined MCP consumer exposes `kind="stock_target"` through the existing
-Plan tool; see [COMBINED_PRODUCTION_MCP.md](COMBINED_PRODUCTION_MCP.md) for the
+Plan tool and additive `kind="stock_targets"` for a bounded complete target set;
+see [COMBINED_PRODUCTION_MCP.md](COMBINED_PRODUCTION_MCP.md) for the
 complete request, no-work result, native guards and recovery flow.
 
 ## Qualified sizing
@@ -53,9 +54,11 @@ already sealed amount, move the target or renew the deadline.
 
 The complete manager-order membership observation is a separate source.
 Protocol 1.10 supplies no recipe or remaining-quantity detail for those rows.
-The combined host therefore requires its queue to be empty before stock-target
-preparation and insertion. It does not assume that an unclassified existing
-order is unrelated, subtract expected future output, or change protocol 1.10.
+The single-target combined path therefore requires its queue to be empty before
+stock-target preparation and insertion. The vector path permits only the exact
+receipt-backed prefix of earlier original orders from that same sealed plan.
+Neither assumes that an unclassified existing order is unrelated, subtracts
+expected future output, or changes protocol 1.10.
 
 ## Explicit labor prerequisite
 
@@ -73,6 +76,31 @@ assignment evidence releases the dependency but cannot replace current source
 checks or the inventory goal. Stock and queue drift after labor changes refuses
 the order under its original identity, without a new count or replacement key.
 The complete parent monitor still checks current labor and stock together.
+
+## A bounded original target portfolio
+
+The `stock_targets` consumer assesses one to four distinct furniture recipes
+against a single independently qualified census. It refuses the entire proposal
+if any positive deficit is over its limit, creates no original when every target
+is met, and emits original orders only for positive deficits. All requested
+minima remain explicit complete-parent requirements, including already-met stock.
+The selected eligible workers must already have the requested labor enabled.
+
+The separate `Inventory targets/1` archive identity binds the common census,
+all target assessments, workers and unchanged timing. Positive leaves retain
+typed inventory-increase objectives; distinct complete-parent minimum predicates
+preserve every target without fabricating an order. Before each real insertion,
+the complete census must still match and the native queue must contain exactly
+the prior original receipt-backed insertion prefix.
+
+Current complete-parent proof requires independently qualified quantities for
+all targets and the original cadence/stability across complete cohorts. A leaf's
+historical success cannot supply the missing stability of an initially met target
+that was later consumed. An unfinished cohort streak resets on False, Unknown or
+failure; a completed in-process achievement remains historical while current
+truth determines current proof. Reopening restores no cohort achievement or new
+deadline. Original per-order recovery, read-only custody and independently
+authorized clocks retain their normal boundaries.
 
 ## Evidence boundary
 
@@ -93,6 +121,11 @@ Executed checks and current-source limitations are recorded in
 The `stock_target_request` and `stock_target_binding` test modules cover
 explicit opt-in, exact assignment/order layout, original identities, archive
 round trips, bounded deficits and rejection of weakened recovery predicates.
+The vector request/binding/runtime and presentation sources additionally cover
+whole-proposal bounds, no-action minima, exact original queue prefixes, lost-reply
+recovery and whole-parent temporal stability. These new sources are unexecuted
+while the execution workspace is unavailable.
+
 The runtime suite uses the real combined Runtime and native clients against
 the existing TCP fixtures. Its assignment campaigns cover eleven cases,
 including independent step confirmation, zero work, missing current labor

@@ -13,6 +13,9 @@ same observed worker prerequisite, also without assigning labor.
 inventory census and uses already enabled workers by default. Explicit
 `assign_labor=true` instead retains a separately reviewed labor enable before
 the dependent order; an already-met target creates neither effect.
+The additive `kind="stock_targets"` request sizes up to four distinct furniture
+targets together from one census, retaining already-met minima in the original
+parent and using the selected existing workers for every positive deficit.
 The source is explicitly unadmitted development work. Current executed checks,
 qualification and real-game evidence belong in `IMPLEMENTATION_STATUS.md`.
 The private custody implementation supports Linux x86_64/aarch64; unsupported
@@ -645,6 +648,137 @@ stone table can contribute to a TABLE minimum even when the selected finite
 recipe is wooden_table. This is one finite stock goal, with no recurring
 maintenance, automatic order renewal or background time advancement.
 See [NATIVE_STOCK_TARGET.md](NATIVE_STOCK_TARGET.md) for the qualified adapter.
+
+## Plan several stock targets from one census
+
+Use `kind="stock_targets"` to ask for a complete set of furniture minima in one
+original plan. The server sizes only the deficits and retains every requested
+minimum throughout progress and recovery:
+
+```json
+{
+  "kind": "stock_targets",
+  "expected_observation": "<latest observation.seal>",
+  "units": ["<observed canonical citizen ID>"],
+  "labor": "CARPENTER",
+  "targets": [
+    {"recipe": "wooden_bed", "minimum_stack_units": 7, "max_order_amount": 10},
+    {"recipe": "wooden_door", "minimum_stack_units": 2},
+    {"recipe": "wooden_table", "minimum_stack_units": 4}
+  ],
+  "deadline_tick": 12000,
+  "poll_interval_ticks": 10,
+  "stable_samples": 2
+}
+```
+
+The closed request is bounded to 8,192 bytes and accepts one to four distinct
+recipes, selected from wooden_bed, wooden_door, wooden_table and wooden_chair. Each minimum is
+1–1,000,000 observed stack units; each optional finite order limit is 1–100,
+defaulting to 100. It uses one through 32 exact selected citizen IDs and one
+observed supported labor. The selected workers must already be eligible with
+that labor enabled. This request rejects `assign_labor`, client amounts,
+baselines, source witnesses and unknown fields.
+
+Plan obtains one fresh complete source-qualified operations/1.3 census at the
+original paused citizen tick. Every target uses that same census. For example,
+observed BED=4, DOOR=2 and TABLE=1 yields two orders: three beds and three tables.
+The door target creates no order, but DOOR>=2 remains part of the complete
+original goal. If all targets are met, the result is a count-only
+`status="already_satisfied"` with no original plan, keys, archive or native
+effect, and no workforce-prerequisite proof. If any positive deficit exceeds its
+selected limit or any required sizing evidence is unavailable, the whole proposal
+refuses. Matching production jobs and unknown reaction output retain the
+single-target policy; no pending output is credited to stock.
+
+### Review each original order without changing the target set
+
+The result's `stock_targets` object has schema `dfmcp.stock-targets/1`, a common
+`baseline_anchor`, source digest/generation/counters, assessment witness and a
+bounded `targets` array. Every requested row survives, including a row with
+`amount=0` and `order_step_id=null`. Positive deficits receive deterministic
+original StepIds starting at zero. Each is a finite inventory-increase objective
+with the qualified original baseline, while the complete parent separately
+retains all requested minima. The strict `Inventory targets/1` archive marker
+binds these values before deriving any original intent or step key.
+
+Prepare and confirm each positive original order through the existing
+`kind="step"` and paired-seal workflow. Use the returned actual StepIds rather
+than positions in the target array: already-met rows have no action. A native
+receipt for one insertion does not confirm the next order, and Wait does not
+dispatch it.
+
+Before every insertion, a fresh independently qualified census must still match
+the exact original source and paused tick. The native manager queue must contain
+all and only the receipt-backed prefix of earlier original insertions.
+The first order therefore requires an empty queue; later orders permit only
+those exact prior original Created orders. Arbitrary queue rows cannot be treated
+as harmless because protocol 1.10 does not classify their recipes or remaining
+output. Inspecting prefix receipts preserves the next order's separate native
+preparation. The checks repeat at the existing native evidence boundaries,
+including after the durable dispatch marker. Drift refuses under the original
+identity; it never resizes an amount or substitutes a replacement key.
+
+### Prove the whole requested stock set
+
+After all insertions settle, Wait samples the full original portfolio, even when
+only one target needed an order. A coherent current parent includes current
+labor, every original leaf and every requested inventory minimum under the same
+paused source bracket. Its sorted `inventory_requirements` rows contain
+`item_type`, `minimum_stack_units`, independently qualified
+`observed_stack_units` or null, and `current_truth`. A missing grant or
+incomplete census gives Unknown, not zero. The historical planning counts do
+not supply current evidence.
+
+The parent also reports `parent_stability`: the original cadence, deadline and
+required sample count, accepted samples, first candidate tick, fulfillment tick,
+latest cohort tick, status and proof at the current anchor. A new original
+all-target streak must meet the unchanged cadence and stability together.
+For example, with two required samples, an achieved bed leaf cannot complete
+the parent on a single good door sample after doors were missing in the preceding
+cohort. Repeated reads at one tick do not advance the streak. False, Unknown,
+failed acquisition and failed publication interrupt an unfinished streak.
+
+Once the complete cohort has achieved stability within the original deadline,
+that achievement remains process-local history. Current proof still requires
+every current requirement to be True. Later stock loss withdraws current proof;
+a later coherent True cohort can re-establish it, including after the original
+deadline, because the original timed achievement already occurred. Restart
+restores neither that complete-parent achievement nor unfinished continuity from
+the separate leaf histories. It needs new full-cohort samples within the
+unchanged deadline; the source explicitly reports `restored_from_history=false`.
+
+Separately configured and confirmed order/inventory clocks can finish the
+remaining parent stability interval when the selected leaf has already
+fulfilled. That allowance requires a fresh True complete parent, an unfinished
+parent streak and remaining time before the original deadline. It adds no clock
+authority or automatic advancement; successful owned runs preserve unfinished
+continuity and failures withdraw it. Native clock receipts still do not prove
+inventory, parent completion or the current pause state. Preparing a clock can
+withdraw the full current cohort while retaining a freshly qualified selected
+parent. Its `parent_stability_pending` diagnostic keeps the separate clock review
+reachable when more complete-parent samples are required; this Boolean supplies
+no whole-goal proof or new authority.
+
+### Retain original recovery and complete target diagnostics
+
+The existing original archive, frontier and per-order histories retain exact
+targets, finite amounts and original keys. The stock-vector policy is rebuilt
+from the sealed archive; it introduces no private sidecar and requires no native
+credential for Offline recovery. An uncertain insertion must reconcile its
+original key. Reopening does not create a local review or dispatch permit.
+
+Compact/error/overflow responses retain every requested target and its actual
+StepId or no-action status, while withdrawing current proof and reviews. The
+Agent Turn briefing reports the complete inventory findings and parent stability
+when a coherent current cohort exists. A missing target row, inconsistent minimum
+or incomplete temporal proof cannot become a successful whole-goal claim.
+
+These remain finite furniture stock goals. Counts include all observed matching
+type/stack units; they do not establish material, usability, availability for
+placement, production attribution or native recipe feasibility. Existing
+single-target assignment behavior and all other original request identities
+remain unchanged.
 
 ## Inspect observed production conditions and declared inventory
 
@@ -1530,6 +1664,14 @@ A stock-target dispatch reserves up to 3,140 MiB of parent custody, covering six
 such checks plus the existing 2 GiB prerequisite ceiling, within the unchanged
 8 GiB default public allowance. Read-only goal and Offline custody retain their
 earlier ceilings.
+The vector `stock_targets` path prepays 225 MiB for its one complete census and
+up to four independent target qualifications. Each fresh census/queue guard
+reserves 230 MiB; six guards plus the existing 2 GiB parent ceiling require
+3,428 MiB. Prior-order receipt inspection separately reserves 512 MiB per earlier
+original order, at most three. These reservations share the same default 8 GiB
+call allowance and shrinking wall deadline. The prefix must exactly match the
+earlier original Created queue readback; arbitrary rows are not classified by
+this receipt check.
 These are logical work charges, not native frame sizes or eager allocations;
 the immutable association itself remains at most 64 KiB.
 

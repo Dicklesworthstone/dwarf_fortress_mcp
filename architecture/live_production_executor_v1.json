@@ -89,12 +89,12 @@
       "labor-order"
     ],
     "configuration_schema": "dfmcp.combined-production-development/1",
-    "request_schema": "closed legacy labor/citizens/finite furniture request; kind=existing_labor for one independently qualified current-worker order; kind=portfolio to assign labor before one to four distinct recipes; kind=existing_labor_portfolio for one to four distinct recipes using the same current workers; each leaf may select an inventory minimum or an independently qualified original inventory increase; kind=stock_target derives one finite deficit from a fresh complete census using existing enabled workers by default, or explicit assign_labor=true for a separately reviewed enable and dependent order, with a typed no-work outcome and no caller amount/baseline",
+    "request_schema": "closed legacy labor/citizens/finite furniture request; kind=existing_labor for one independently qualified current-worker order; kind=portfolio to assign labor before one to four distinct recipes; kind=existing_labor_portfolio for one to four distinct recipes using the same current workers; each leaf may select an inventory minimum or an independently qualified original inventory increase; kind=stock_target derives one finite deficit from a fresh complete census using existing enabled workers by default, or explicit assign_labor=true for a separately reviewed enable and dependent order, with a typed no-work outcome and no caller amount/baseline; kind=stock_targets sizes one to four distinct minima from one fresh complete census using existing enabled workers, creates only positive deficits, and retains all requested minima in a complete original portfolio",
     "original_steps": [
       "SetLabor",
       "CreateWorkOrder"
     ],
-    "order_depends_on_original_labor_step": "legacy and portfolio only; existing_labor and existing_labor_portfolio retain exact observed worker prerequisites with dependency-free original orders",
+    "order_depends_on_original_labor_step": "legacy and portfolio only; existing_labor and existing_labor_portfolio retain exact observed worker prerequisites with dependency-free original orders; stock_targets has dependency-free positive-deficit orders and complete original current stock prerequisites",
     "steps": {
       "legacy": 2,
       "portfolio_min": 2,
@@ -103,7 +103,10 @@
       "existing_labor_portfolio_min": 1,
       "existing_labor_portfolio_max": 4,
       "stock_target": 1,
-      "stock_target_with_assignment": 2
+      "stock_target_with_assignment": 2,
+      "stock_targets_min": 1,
+      "stock_targets_max": 4,
+      "stock_targets_all_satisfied": 0
     },
     "selected_citizens_max": 32,
     "workforce_choices": {
@@ -341,7 +344,16 @@
       "crates/dfmcp-mcp/src/live_production_runtime/stock_target_request_tests.rs",
       "crates/dfmcp-mcp/src/live_production_runtime/stock_target_tests.rs",
       "crates/dfmcp-mcp/src/live_production_presentation_stock_target_tests.rs",
-      "tests/stdio/combined_stock_target_runtime_peer.py"
+      "tests/stdio/combined_stock_target_runtime_peer.py",
+      "crates/dfmcp-mcp/src/live_production_runtime/stock_targets_request.rs",
+      "crates/dfmcp-mcp/src/live_production_runtime/stock_targets_binding.rs",
+      "crates/dfmcp-mcp/src/live_production_runtime/stock_targets.rs",
+      "crates/dfmcp-mcp/src/live_production_runtime/stock_targets_request_tests.rs",
+      "crates/dfmcp-mcp/src/live_production_runtime/stock_targets_guard_tests.rs",
+      "crates/dfmcp-mcp/src/live_production_runtime/portfolio_stability_tests.rs",
+      "crates/dfmcp-mcp/src/live_production_presentation_stock_targets.rs",
+      "crates/dfmcp-mcp/src/live_production_runtime/stock_targets_tests.rs",
+      "tests/stdio/combined_stock_targets_runtime_peer.py"
     ],
     "private_custody_platforms": [
       "linux-x86_64",
@@ -399,7 +411,51 @@
       "restored_from_inventory_history": false,
       "restored_from_order_history": false,
       "new_deadline_or_obligation": false,
-      "production_attribution_proven": false
+      "production_attribution_proven": false,
+      "inventory_requirements": {
+        "maximum": 4,
+        "order": "item_type_ascending",
+        "scope": "every original stock_targets minimum including no-action targets",
+        "fields": [
+          "item_type",
+          "minimum_stack_units",
+          "observed_stack_units",
+          "current_truth"
+        ],
+        "qualification": "independent complete inventory policy before joining workforce sources",
+        "unqualified_observed_stack_units": null,
+        "planning_count_supplies_current_evidence": false,
+        "coherent_complete_cohort_required": true
+      },
+      "parent_stability": {
+        "applies_to": "complete original portfolios retaining explicit inventory minima",
+        "fields": [
+          "required_samples",
+          "accepted_samples",
+          "poll_interval_ticks",
+          "deadline_tick",
+          "first_candidate_tick",
+          "fulfilled_at_tick",
+          "last_sample_tick",
+          "status",
+          "proven_at_anchor",
+          "restored_from_history"
+        ],
+        "original_timing_unchanged": true,
+        "complete_cohorts_only": true,
+        "off_cadence_or_repeated_true_counts": false,
+        "false_unknown_or_failure_resets_unfinished": true,
+        "historical_fulfillment_process_local": true,
+        "historical_fulfillment_requires_original_deadline": true,
+        "current_proof_requires_current_truth": true,
+        "restart_reconstructs_from_leaf_histories": false,
+        "new_deadline_on_recovery": false,
+        "expired_unfinished_at_original_deadline": true,
+        "successful_owned_clock_preserves_unfinished": true,
+        "original_proof_requires_every_leaf_and_parent_stability": true,
+        "selected_parent_clock_eligibility_field": "parent_stability_pending",
+        "selected_pending_flag_is_goal_proof": false
+      }
     },
     "selected_order_goal": {
       "kind": "retained_order_completion",
@@ -508,7 +564,8 @@
       "supports_retired_original_order": false,
       "supports_standalone_inventory_clock": false,
       "existing_selected_target_digest_bytes_changed": false,
-      "legacy_single_step_clock_target_bytes_changed": false
+      "legacy_single_step_clock_target_bytes_changed": false,
+      "additional_stability_consumer": "an already fulfilled selected leaf may advance pending original whole-target stability only with fresh True all-target/labor evidence and before the unchanged deadline"
     },
     "optional_inventory_clock": {
       "status": "implemented_unadmitted_development_only",
@@ -554,7 +611,8 @@
       "supported_original_objectives": [
         "observed_inventory_minimum",
         "observed_inventory_increase"
-      ]
+      ],
+      "additional_stability_consumer": "an already fulfilled selected leaf may advance pending original whole-target stability only with fresh True all-target/labor evidence and before the unchanged deadline"
     },
     "portfolio": {
       "request_kind": "portfolio",
@@ -979,6 +1037,90 @@
         "new_native_protocol": false,
         "execution_evidence": "source_review_only_pending_rust_execution"
       }
+    },
+    "stock_targets": {
+      "profile": "serve-gameplay-dev labor-order",
+      "request_kind": "stock_targets",
+      "schema": "dfmcp.stock-targets/1",
+      "archive_marker": "Inventory targets/1",
+      "request_identity_domain": "dfmcp-native-stock-targets-portfolio/1",
+      "request_bytes_max": 8192,
+      "targets_min": 1,
+      "targets_max": 4,
+      "target_stack_units": [
+        1,
+        1000000
+      ],
+      "finite_order_amount": [
+        1,
+        100
+      ],
+      "default_max_order_amount": 100,
+      "normalization": "recipe_ascending",
+      "selected_labor": "independently qualified existing enabled and eligible workers",
+      "assignment_supported": false,
+      "client_amount_or_baseline": false,
+      "fresh_plan_census_required": true,
+      "one_shared_complete_census": true,
+      "all_met": "count-only no-work with complete targets; no original, keys, custody or native effect",
+      "positive_deficits_only_create_orders": true,
+      "any_oversized_deficit_refuses_complete_proposal": true,
+      "all_requested_minima_retained": true,
+      "positive_objectives": "typed original EntityQuantityIncrease",
+      "complete_parent_minima": "closed EntityQuantity Ge type_key/stack_size requirements",
+      "original_order_step_ids": "0..positive_deficits-1",
+      "zero_deficit_step_id": null,
+      "one_positive_uses_complete_portfolio_runtime": true,
+      "complete_recovery_vector_required": true,
+      "original_queue_policy": "exact receipt-backed earlier original Created prefix",
+      "queue_source": "work-orders/1.10 membership, incarnation, tick, sequence and allocation horizon",
+      "arbitrary_native_queue_recipe_or_remaining_output_known": false,
+      "actual_original_receipts_required": true,
+      "retained_prefix_inspection_preserves_next_native_preparation": true,
+      "exact_original_census_required_before_every_insertion": true,
+      "fresh_independent_queue_after_each_census": true,
+      "native_evidence_guards_after_dispatch_started": true,
+      "changed_census_resizes_or_rekeys": false,
+      "additional_private_sidecar": false,
+      "offline_native_credential_required": false,
+      "recovered_review_or_commit_permit": false,
+      "current_counts_independently_qualified": true,
+      "complete_parent_stability_required": true,
+      "retained_summary_preserves_every_target": true,
+      "retained_summary_proves_current_inventory": false,
+      "plan_census_bytes": 235929600,
+      "read_qualification_bytes": 241172480,
+      "dispatch_custody_max_bytes": 3594518528,
+      "prefix_custody_bytes_per_previous_order": 536870912,
+      "previous_orders_max": 3,
+      "maximum_fresh_checks_per_prepare": 6,
+      "new_protocol": false,
+      "new_public_tool": false,
+      "production_admission_added": false,
+      "execution_evidence": "source_review_only_pending_rust_execution",
+      "source_paths": [
+        "crates/dfmcp-mcp/src/live_production_runtime/stock_targets_request.rs",
+        "crates/dfmcp-mcp/src/live_production_runtime/stock_targets_binding.rs",
+        "crates/dfmcp-mcp/src/live_production_runtime/stock_targets.rs",
+        "crates/dfmcp-mcp/src/live_production_runtime/stock_targets_request_tests.rs",
+        "crates/dfmcp-mcp/src/live_production_runtime/stock_targets_guard_tests.rs",
+        "crates/dfmcp-mcp/src/live_production_runtime/existing_labor_portfolio_request.rs",
+        "crates/dfmcp-mcp/src/live_production_runtime/custody.rs",
+        "crates/dfmcp-mcp/src/live_production_runtime.rs",
+        "crates/dfmcp-mcp/src/semantic_work_order_runtime/inventory_baseline.rs",
+        "crates/dfmcp-mcp/src/live_production_runtime/stock_target.rs",
+        "crates/dfmcp-mcp/src/live_production_runtime/portfolio.rs",
+        "crates/dfmcp-mcp/src/live_production_runtime/goals.rs",
+        "crates/dfmcp-mcp/src/live_production_runtime/clock.rs",
+        "crates/dfmcp-mcp/src/live_production_runtime/inventory_clock.rs",
+        "crates/dfmcp-mcp/src/live_production_runtime/portfolio_stability_tests.rs",
+        "crates/dfmcp-mcp/src/live_production_presentation_stock_targets.rs",
+        "crates/dfmcp-mcp/src/live_production_presentation_portfolio_tests.rs",
+        "crates/dfmcp-mcp/src/live_production_runtime/stock_targets_tests.rs",
+        "tests/stdio/combined_stock_targets_runtime_peer.py"
+      ],
+      "runtime_peer_cases": 11,
+      "runtime_peer_evidence": "actual Rust Runtime and native TCP clients against deterministic doubles; source only until execution"
     }
   },
   "selected_work_order_goal_monitor": {
