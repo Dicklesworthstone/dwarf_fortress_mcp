@@ -82,6 +82,15 @@ pub(crate) fn record(
     if let Some(object) = arguments.as_object_mut() {
         object.remove("session_id");
     }
+    if ok && tool == "fortress.open_session" && arguments["existing_session"] == true {
+        // Metadata-only transitions can share a canonical anchor. Bind their
+        // accepted before/after allowances so an out-of-order concurrent log
+        // cannot replay successfully into a different final session budget.
+        let receipt: Value = serde_json::from_str(payload).unwrap_or(Value::Null);
+        arguments["previous_max_output_tokens"] =
+            receipt["previous_budget"]["max_output_tokens"].clone();
+        arguments["admitted_max_output_tokens"] = receipt["budget"]["max_output_tokens"].clone();
+    }
     let Ok(mut guard) = session.lock() else {
         return;
     };
@@ -198,7 +207,12 @@ fn invoke(tool: &str, session: Option<String>, args: &Value) -> Result<String, S
             .ok_or_else(|| format!("{name} needs a session opened earlier in the bundle"))
     };
     Ok(match tool {
-        "fortress.open_session" => f::fortress_open_session(
+        "fortress.open_session" => f::fortress_open_session_with_session(
+            if args["existing_session"] == true {
+                Some(session_or(tool)?)
+            } else {
+                None
+            },
             opt_bool(args, "paused"),
             opt_string(args, "fortress_selector"),
             capabilities(args),
@@ -310,6 +324,23 @@ pub fn replay_bundle(bundle: &Value) -> Value {
                 "replayed": seq + 1,
                 "first_divergence": divergence(seq, tool, "error_code", &call["error_code"], &json!(error_code)),
             });
+        }
+        if ok && tool == "fortress.open_session" && call["arguments"]["existing_session"] == true {
+            let receipt: Value = serde_json::from_str(&payload).unwrap_or(Value::Null);
+            for (field, budget) in [
+                ("previous_max_output_tokens", "previous_budget"),
+                ("admitted_max_output_tokens", "budget"),
+            ] {
+                let expected = &call["arguments"][field];
+                let observed = &receipt[budget]["max_output_tokens"];
+                if !expected.is_u64() || observed != expected {
+                    return json!({
+                        "ok": false,
+                        "replayed": seq + 1,
+                        "first_divergence": divergence(seq, tool, field, expected, observed),
+                    });
+                }
+            }
         }
         let observed = session
             .as_deref()

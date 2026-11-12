@@ -134,6 +134,7 @@ fn condition_replay_public_real_labor_history_keeps_current_work_and_terminal_ev
         "stable_observations":2}),
     )?;
     assert_eq!(watched["ok"], true, "{watched}");
+    let watch_id = watched["record"]["watch"].as_str().ok_or("watch handle")?;
     let baseline = temporal(
         &owner,
         json!({"kind":"capture","key":"unrelated-units",
@@ -141,6 +142,9 @@ fn condition_replay_public_real_labor_history_keeps_current_work_and_terminal_ev
         "max_game_ticks":1000}),
     )?;
     assert_eq!(baseline["ok"], true, "{baseline}");
+    let baseline_id = baseline["captured"]["baseline"]
+        .as_str()
+        .ok_or("baseline handle")?;
     let pending = parsed(&crate::agent_facade::fortress_plan(
         Some(owner.0.clone()),
         Some("keep a separate pending review".into()),
@@ -159,7 +163,10 @@ fn condition_replay_public_real_labor_history_keeps_current_work_and_terminal_ev
     let replayed = query(&owner, ask(&first))?;
     assert_eq!(replayed["ok"], true, "{replayed}");
     assert_eq!(replayed["status"], "satisfied", "{replayed}");
-    assert_eq!(replayed["last_evaluated_anchor"]["game_tick"], 2);
+    // The starter world begins at tick 1. Its first sample consumes that
+    // cadence slot, so the same-tick labor change earns no positive sample.
+    // The two explicit one-tick waits supply stable samples at ticks 2 and 3.
+    assert_eq!(replayed["last_evaluated_anchor"]["game_tick"], 3);
     assert!(
         replayed["records_after_terminal"]
             .as_u64()
@@ -176,17 +183,28 @@ fn condition_replay_public_real_labor_history_keeps_current_work_and_terminal_ev
     assert_eq!(replayed["watch_registered"], false);
     assert_eq!(replayed["advances_game"], false);
     assert_eq!(replayed["eligible_as_mutation_evidence"], false);
-    assert!(
-        !replayed["agent_turn"]["active_work"]["query_watches"]
-            .as_array()
-            .ok_or("query watches")?
-            .is_empty()
+    let current_work = &replayed["agent_turn"]["active_work"];
+    assert_eq!(current_work["query_work_coverage"]["status"], "available");
+    assert_eq!(
+        current_work["query_work_coverage"]["anchor"],
+        anchor_json(&current.anchor())
     );
-    assert!(
-        !replayed["agent_turn"]["active_work"]["query_baselines"]
-            .as_array()
-            .ok_or("query baselines")?
-            .is_empty()
+    assert_eq!(
+        current_work["query_watches"].as_array().map(Vec::len),
+        Some(1),
+        "{replayed}"
+    );
+    assert_eq!(current_work["query_watches"][0]["watch"], watch_id);
+    assert_eq!(current_work["condition_watches"][0]["watch"], watch_id);
+    assert_eq!(
+        current_work["query_baselines"].as_array().map(Vec::len),
+        Some(1),
+        "{replayed}"
+    );
+    assert_eq!(current_work["query_baselines"][0]["baseline"], baseline_id);
+    assert_eq!(
+        current_work["pending_plans"][0]["plan_digest"],
+        pending["plan_digest"]
     );
     let now = query(
         &owner,

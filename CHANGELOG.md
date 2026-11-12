@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased — Recover oversized reviews in an existing session
+
+- Add explicit `session_id` plus `max_output_tokens` negotiation through the
+  existing opening tool, preserving the original Rust opening API and eleven
+  tool names. Other opening arguments are rejected for this alternative.
+- Preserve world, pending seals, original goals, action/query work, grant scopes
+  and expiry, and every non-output allowance. Current owner/Observe/Query and
+  combined world/retained-work admission precede a complete acknowledgement;
+  refusal leaves budget and semantic request sequence unchanged.
+- Read authoritative response limits outside the presentation cache. Order
+  budget hints by semantic request ID without regressing newer world hints,
+  and compare accepted previous/new allowances during portable replay.
+- Pass 11 owner invariants, four semantic facade/replay cases and the public
+  two-bedroom recovery workflow: default review refusal, explicit 8192-token
+  allowance, exact complete review, commit and original room completion in the
+  same private session, with harvested inputs and original proof preserved.
+  All three existing portable replay compatibility cases also pass.
+- Execution uses actual semantic implementations on current nightly with locked
+  dependencies. Transport registration and an installed TaskService remain
+  outside the isolated component evidence; full qualification stays open.
+
 ## Unreleased — Replay conditions across retained laboratory history
 
 - Add `condition_replay` to the existing query tool, evaluating an exact
@@ -11,11 +32,15 @@
   expose canonical cursor gaps without reconstructing missing observations.
 - Preserve current authority, pending game work, baselines and watches. Read-only
   syntax refusals cannot publish durable progress or retain a new world version.
-- Add 17 focused regression sources and a closed schema. Owned-source formatting
-  and schema vectors pass. The full pinned MCP attempt stopped when unchanged
-  Asupersync received SIGKILL; actual-source component validation is underway,
-  and no new Rust test has executed at this checkpoint. No full-runtime or live
-  admission claim is added.
+- Pass all 30 focused historical/watch/retention tests, including all 17 new
+  regressions and three actual public facade workflows. The public labor-history
+  regression caught and fixed omitted current baseline/watch handles; historical
+  results now retain that catalog under the original shared deadline.
+- Owned-source formatting and schema vectors pass. Original-source execution
+  uses the latest nightly and exact locked dependencies, excluding transport
+  startup/macros and an installed TaskService. The full pinned build stopped
+  when unchanged Asupersync received SIGKILL. No full-runtime or live admission
+  claim is added.
 
 ## Unreleased — Authorize future project stages before simulation accounting
 

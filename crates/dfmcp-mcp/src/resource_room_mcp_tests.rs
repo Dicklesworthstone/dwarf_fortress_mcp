@@ -423,6 +423,99 @@ fn two_bedroom_resource_projects_with_existing_workshops_fit_8192_token_reviews(
 }
 
 #[test]
+fn an_oversized_room_review_recovers_without_reopening_its_private_session() -> TestResult {
+    fn finish_public(session: &str, digest: &str) -> TestResult<Json> {
+        for _ in 0..256 {
+            // Internal inspection supplies assertions only. All game progress
+            // crosses the actual public facade, including its output shaping.
+            let observed = goal(session, digest)?;
+            if observed["physical_quiescent"] == true {
+                return Ok(observed);
+            }
+            let waited = parsed(&facade::fortress_wait(Some(session.to_owned()), Some(100)))?;
+            assert_eq!(waited["ok"], true, "{waited}");
+        }
+        Err("public room workflow did not reach physical quiescence".into())
+    }
+
+    let _serial = serialized_durable_tests();
+    let session = open_resources_with_budget("9654129", false, false, 4_096)?;
+    require_finite_stock(&session, false)?;
+    let mut request = original_room();
+    request
+        .as_object_mut()
+        .ok_or("room request missing")?
+        .remove("prerequisites");
+    let acquisition = plan_room(&session, &request)?;
+    assert_stage(&acquisition, "acquire_resources", false);
+    only_wood_harvest(&session, 2)?;
+    let root = identity(&acquisition, "plan_digest")?;
+    commit_ok(&session, &acquisition)?;
+    let harvest_history = finish_public(&session, &root)?;
+    assert_eq!(
+        harvest_history["predicate_truth"], "true",
+        "{harvest_history}"
+    );
+    assert_eq!(harvest_history["semantic_room_goal"]["truth"], "false");
+    let budget = in_session(&session, |guard| Ok(guard.budget))?;
+    let before = effects_before(&session)?;
+    let prior_pending = pending_digest(&session)?;
+    let refused = continuation(&session, &root)?;
+    assert_eq!(
+        refused["ok"], false,
+        "fixture must exceed the default complete-review allowance: {refused}"
+    );
+    assert_eq!(refused["error"]["code"], "budget_exceeded", "{refused}");
+    assert_eq!(pending_digest(&session)?, prior_pending);
+    assert_eq!(effects_before(&session)?, before);
+
+    let accepted = parsed(&facade::fortress_open_session_with_session(
+        Some(session.clone()),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        Some(8_192),
+        None,
+        None,
+        None,
+        None,
+    ))?;
+    assert_eq!(accepted["ok"], true, "{accepted}");
+    assert_eq!(accepted["session_id"], session);
+    assert_eq!(accepted["previous_budget"]["max_output_tokens"], 4_096);
+    assert_eq!(accepted["budget"]["max_output_tokens"], 8_192);
+    let mut expected = budget;
+    expected.max_output_tokens = 8_192;
+    assert_eq!(in_session(&session, |guard| Ok(guard.budget))?, expected);
+    assert_eq!(effects_before(&session)?, before);
+    assert_eq!(pending_digest(&session)?, prior_pending);
+    assert_eq!(wood(&session)?, 2);
+
+    let reviewed = continuation(&session, &root)?;
+    assert_stage(&reviewed, "room", true);
+    assert!(reviewed.to_string().len() <= 8_192 * 4, "{reviewed}");
+    assert_eq!(reviewed["room"]["continuation"]["root_plan_digest"], root);
+    let sealed = pending_plan(&session)?;
+    assert_eq!(
+        json!(crate::sealed_plan_review::expanded_steps(&reviewed)?),
+        crate::lab_world::plan_steps_json(&sealed),
+    );
+    commit_ok(&session, &reviewed)?;
+    let completed = finish_public(&session, &identity(&reviewed, "plan_digest")?)?;
+    assert_eq!(completed["predicate_truth"], "true", "{completed}");
+    assert_eq!(completed["semantic_room_goal"]["truth"], "true");
+    let original_now = goal(&session, &root)?;
+    assert_history_unchanged(&harvest_history, &original_now);
+    assert_eq!(original_now["semantic_room_goal"]["truth"], "true");
+    assert_eq!(original_now["needs_replan"], false);
+    Ok(())
+}
+
+#[test]
 fn resource_room_reviews_preserve_complete_proof_or_pending_under_default_budget() -> TestResult {
     let _serial = serialized_durable_tests();
     for (index, (connected, missing_workshop)) in

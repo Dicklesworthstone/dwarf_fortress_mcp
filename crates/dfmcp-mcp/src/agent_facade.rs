@@ -43,6 +43,9 @@ const MAX_SURPRISES: usize = 32;
 struct SessionOrientation {
     anchor: Option<Value>,
     budget: Value,
+    /// Latest accepted output negotiation, ordered by semantic request ID.
+    /// Presentation turn IDs cannot order concurrent owner publications.
+    output_budget_request_id: u128,
     grants: Vec<String>,
     paused: Option<bool>,
     adapter: Option<String>,
@@ -81,6 +84,7 @@ impl SessionOrientation {
                 Some(value) => value.clone(),
                 None => Value::Null,
             },
+            output_budget_request_id: 0,
             grants: string_array(payload.get("granted_capabilities")),
             paused: payload.get("paused").and_then(Value::as_bool),
             adapter: payload
@@ -1781,6 +1785,35 @@ fn refresh_published_plan_orientation(raw: &str) {
     }
 }
 
+fn refresh_published_output_budget_orientation(raw: &str) {
+    let Ok(payload) = serde_json::from_str::<Value>(raw) else {
+        return;
+    };
+    let Some(id) = payload["session_id"].as_str() else {
+        return;
+    };
+    let Some(request_id) = payload["request_id"]
+        .as_str()
+        .and_then(|id| u128::from_str_radix(id, 16).ok())
+    else {
+        return;
+    };
+    if is_ok(&payload)
+        && payload["kind"] == "output_budget_renegotiation"
+        && let Some(state) = orientation_sessions().get_mut(id)
+    {
+        // A later owner transaction may have completed while an earlier reply
+        // waited for this presentation lock. Old replies cannot restore its cap.
+        if request_id > state.output_budget_request_id {
+            state.budget = payload["budget"].clone();
+            state.output_budget_request_id = request_id;
+            // Negotiation changes no world facts. A later Observe/Wait may
+            // already have advanced these hints while this reply was delayed.
+        }
+        state.advance_turn();
+    }
+}
+
 fn project_response(
     raw: String,
     operation: &str,
@@ -1862,10 +1895,26 @@ impl ResponsePresentation {
 
     fn from_state(
         session_id: Option<String>,
-        state: SessionOrientation,
+        mut state: SessionOrientation,
         previous_anchor: Option<Value>,
         turn_sequence: u64,
     ) -> Self {
+        // A cache is never response-budget authority. A concurrent negotiation
+        // can commit before its presentation hint arrives; read the owner's
+        // current allowance after releasing the orientation lock. The returned
+        // value is this response's immutable capture, like its other inputs.
+        if let Some(id) = session_id.as_deref()
+            && let Ok(current) = crate::server::session_output_budget::current_budget(id)
+        {
+            state.budget = json!({
+                "max_wall_millis": current.max_wall_millis,
+                "max_game_ticks": current.max_game_ticks,
+                "max_entities": current.max_entities,
+                "max_bytes": current.max_bytes,
+                "max_output_tokens": current.max_output_tokens,
+                "max_actions": current.max_actions,
+            });
+        }
         // World changes disclose entity facts only under observation authority.
         let world_delta = if has_grant(&state, "observe") {
             world_changes(
@@ -2034,7 +2083,8 @@ impl ResponsePresentation {
             .budget({
                 let mut limits = budget(state);
                 if operation == "fortress.wait" && payload["wait_response_budget"].is_object() {
-                    limits["admitted"]["max_bytes"] = payload["wait_response_budget"]["max_bytes"].clone();
+                    limits["admitted"]["max_bytes"] =
+                        payload["wait_response_budget"]["max_bytes"].clone();
                     limits["admitted"]["max_output_tokens"] =
                         payload["wait_response_budget"]["max_output_tokens"].clone();
                 }
@@ -2047,16 +2097,29 @@ impl ResponsePresentation {
         if let Some(anchor) = current_anchor {
             builder = builder.anchor(anchor);
         }
-        let max_output_tokens = if operation == "fortress.wait"
-            && payload["wait_response_budget"].is_object()
-        {
-            let bytes = payload["wait_response_budget"]["maximum_response_bytes"].as_u64().unwrap_or(0);
-            let tokens = payload["wait_response_budget"]["max_output_tokens"].as_u64().unwrap_or(0);
-            tokens.min(bytes / 4)
-        } else {
-            state.budget.get("max_output_tokens").and_then(Value::as_u64)
-                .unwrap_or(crate::output_budget::DEFAULT_MAX_OUTPUT_TOKENS)
-        };
+        let max_output_tokens =
+            if operation == "fortress.wait" && payload["wait_response_budget"].is_object() {
+                let bytes = payload["wait_response_budget"]["maximum_response_bytes"]
+                    .as_u64()
+                    .unwrap_or(0);
+                let tokens = payload["wait_response_budget"]["max_output_tokens"]
+                    .as_u64()
+                    .unwrap_or(0);
+                tokens.min(bytes / 4)
+            } else {
+                state
+                    .budget
+                    .get("max_output_tokens")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(crate::output_budget::DEFAULT_MAX_OUTPUT_TOKENS)
+            };
+        let max_output_tokens = max_output_tokens.min(
+            state
+                .budget
+                .get("max_bytes")
+                .and_then(Value::as_u64)
+                .map_or(u64::MAX, |bytes| bytes / 4),
+        );
         // Query publication uses the current authority-bearing budget, not this
         // orientation's opening budget. Its final guard preserves whole legacy
         // pages/cursors and permits only lossless structured-page compaction.
@@ -2071,9 +2134,7 @@ impl ResponsePresentation {
     }
 }
 
-#[tool(
-    description = "Open an agent-oriented fortress session against the deterministic laboratory. Returns negotiated authority and budget plus the canonical orientation packet. scenario: \"empty\" (default), \"starter_fortress\" (rock level z=10 with a carved hall, seven dwarves, a stockpile, a burrow and a squad), \"besieged_fortress\" (starter plus an approaching raider), \"starter_fortress_workforce\" (starter with an explicit finite shared pool for mining, construction, brewing, cooking and carpentry), \"starter_fortress_economy\" (the shared workforce plus one WOOD input per new Still, Kitchen or Carpenters workshop), or \"starter_fortress_provisions\" (the economy plus 20 shared PLANT ingredients; each completed brewing or cooking batch consumes one ingredient and yields five outputs), or \"starter_fortress_multilevel\" (the provisions model with five observed rock levels z=8..12, permitting connected-room shafts to furnished rooms at z=9 or z=11). \"starter_fortress_history\" adds bounded publication event history to the provisions model. The additional starter_fortress_resources scenario extends provisions with finite observed WOOD and PLANT sources, explicit WOODCUTTING and PLANT_GATHERING workers, and reviewed harvest_resource actions. starter_fortress_multilevel_resources combines those same finite sources and workers with observed rock levels z=8..12, so resource-aware connected rooms can gather missing inputs and build paired-stair access across levels. The workforce scenarios report current assignments and blockers; the economy also reports available, held, consumed and released construction wood. The provisions scenario reports current plant stock, historical consumption, pending demand and ingredient blockers; production quotas jointly budget food, drink and consumption reserves against those finite ingredients. Existing connected_room and provisioned_room plans use these explicit reference models, budget workshop setup jointly with furniture, and release held wood once when unfinished setup is cancelled. Effect capabilities (designate, construct, configure_labor, configure_production, configure_logistics, configure_military) must be requested explicitly. shared=true joins (or creates) one fortress per fortress_selector shared by several agent sessions: one world, clock and lease book; excavation/construction regions are leased exclusively at commit; a plan made stale by another member is replayed at the current anchor for an explicit re-commit; restore is refused while others share the fortress. durable=true makes the fortress crash-durable when the operator configured DFMCP_LAB_STATE_DIR: every state change and checkpoint is persisted, and reopening the same fortress_selector with durable=true after a restart (or a lost session) resumes the last persisted world in a new observation epoch with its checkpoints restorable; older sessions of it are fenced."
-)]
+/// Preserve the original direct Rust opening API.
 #[allow(clippy::too_many_arguments)]
 pub fn fortress_open_session(
     paused: Option<bool>,
@@ -2089,7 +2150,94 @@ pub fn fortress_open_session(
     shared: Option<bool>,
     durable: Option<bool>,
 ) -> String {
+    fortress_open_session_with_session(
+        None,
+        paused,
+        fortress_selector,
+        requested_capabilities,
+        max_wall_millis,
+        max_game_ticks,
+        max_entities,
+        max_bytes,
+        max_output_tokens,
+        max_actions,
+        scenario,
+        shared,
+        durable,
+    )
+}
+
+/// Opening is also the explicit negotiation boundary for an existing session's
+/// output allowance. Every other source, work and authority limit stays fixed.
+#[tool(
+    name = "fortress_open_session",
+    description = "Open an agent-oriented deterministic laboratory session with explicit capability and work budgets. Without session_id, scenario selects empty (default), starter_fortress, besieged_fortress, starter_fortress_workforce, starter_fortress_economy, starter_fortress_provisions, starter_fortress_multilevel, starter_fortress_history, starter_fortress_resources or starter_fortress_multilevel_resources. Effect capabilities must be requested explicitly. Workforce/economy/provisions scenarios model finite workers, workshop wood and shared ingredients; resource scenarios add finite WOOD/PLANT harvesting, and multilevel scenarios provide observed rock at z=8..12 for paired-stair access. shared=true joins a fortress_selector's world and clock with independently scoped sessions. durable=true requires operator DFMCP_LAB_STATE_DIR and resumes persisted custody in a new observation epoch, fencing older owners. With session_id, supply only max_output_tokens (1..65536) to explicitly renegotiate that same session's response allowance, for example after an oversized complete plan review. Current whole-fortress Observe and Query authority are required. The complete current-work acknowledgement must fit before the new limit is installed. World, pending reviews, actions, grants, expiry, source bytes/entities, work/tick/action budgets, watches and baselines remain intact; max_bytes still caps responses. No clock progress, grant renewal or implicit commit occurs. All other opening arguments must be omitted for this alternative."
+)]
+#[allow(clippy::too_many_arguments)]
+pub fn fortress_open_session_with_session(
+    session_id: Option<String>,
+    paused: Option<bool>,
+    fortress_selector: Option<String>,
+    requested_capabilities: Option<Vec<(String, String)>>,
+    max_wall_millis: Option<u64>,
+    max_game_ticks: Option<u64>,
+    max_entities: Option<u32>,
+    max_bytes: Option<u64>,
+    max_output_tokens: Option<u32>,
+    max_actions: Option<u32>,
+    scenario: Option<String>,
+    shared: Option<bool>,
+    durable: Option<bool>,
+) -> String {
+    let started = std::time::Instant::now();
     let recorded = json!({"paused": paused, "fortress_selector": fortress_selector.clone(), "requested_capabilities": requested_capabilities.clone(), "max_wall_millis": max_wall_millis, "max_game_ticks": max_game_ticks, "max_entities": max_entities, "max_bytes": max_bytes, "max_output_tokens": max_output_tokens, "max_actions": max_actions, "scenario": scenario.clone(), "shared": shared, "durable": durable});
+    if let Some(id) = session_id {
+        let mut recorded = recorded;
+        // Replay remaps this marker to the replay's existing session, keeping
+        // process-local handles out of the portable call log.
+        recorded["existing_session"] = json!(true);
+        let result = if paused.is_some()
+            || fortress_selector.is_some()
+            || requested_capabilities.is_some()
+            || max_wall_millis.is_some()
+            || max_game_ticks.is_some()
+            || max_entities.is_some()
+            || max_bytes.is_some()
+            || max_actions.is_some()
+            || scenario.is_some()
+            || shared.is_some()
+            || durable.is_some()
+        {
+            Err(dfmcp_core::DfmcpError::new(
+                dfmcp_core::ErrorCode::InvalidRequest,
+                "existing-session negotiation accepts only session_id and max_output_tokens; other opening arguments must be omitted",
+            ))
+        } else if let Some(tokens) = max_output_tokens {
+            crate::server::session_output_budget::renegotiate(id.clone(), tokens, started)
+        } else {
+            Err(dfmcp_core::DfmcpError::new(
+                dfmcp_core::ErrorCode::InvalidRequest,
+                "existing-session negotiation requires an explicit max_output_tokens allowance",
+            ))
+        };
+        let response = match result {
+            Ok(raw) => {
+                // Complete publication preceded the budget change. Refresh only
+                // presentation hints; no later fitting can reverse this receipt.
+                refresh_published_output_budget_orientation(&raw);
+                raw
+            }
+            Err(error) => project_response(
+                crate::server::dfmcp_error_payload("fortress.open_session", &error),
+                "fortress.open_session",
+                AgentPhase::Orient,
+                ObservationProfile::Briefing,
+                Some(&id),
+            ),
+        };
+        crate::replay::record("fortress.open_session", Some(&id), recorded, &response);
+        return response;
+    }
     let response = project_response(
         crate::server::open_session_in_scenario(
             paused,
@@ -2113,6 +2261,9 @@ pub fn fortress_open_session(
     crate::replay::record("fortress.open_session", None, recorded, &response);
     response
 }
+
+// Existing Rust integrations keep the registered handler's original name.
+pub use FortressOpenSessionWithSession as FortressOpenSession;
 
 #[tool(
     description = "Observe the current laboratory fortress through the canonical agent orientation packet. Live DFHack state remains explicitly unknown."
@@ -2285,21 +2436,23 @@ pub fn fortress_wait_for_selection(
         recorded["watch_id"] = json!(watch);
     }
     let publication = match (plan_digest, watch_id) {
-        (Some(_), Some(_)) => crate::server::WaitPublication::Pending(
-            crate::server::coded_error_payload(
-                "fortress.wait", dfmcp_core::ErrorCode::InvalidRequest,
+        (Some(_), Some(_)) => {
+            crate::server::WaitPublication::Pending(crate::server::coded_error_payload(
+                "fortress.wait",
+                dfmcp_core::ErrorCode::InvalidRequest,
                 "plan_digest and watch_id are mutually exclusive wait selectors",
-            ),
-        ),
-        (None, Some(watch)) => crate::server::wait_for_watch(
-            session_id.clone(), max_game_ticks, watch,
-        ),
+            ))
+        }
+        (None, Some(watch)) => {
+            crate::server::wait_for_watch(session_id.clone(), max_game_ticks, watch)
+        }
         (Some(digest), None) => crate::server::WaitPublication::Pending(
             crate::server::wait_for_plan(session_id.clone(), max_game_ticks, digest),
         ),
-        (None, None) => crate::server::WaitPublication::Pending(
-            crate::server::wait_with_ticks(session_id.clone(), max_game_ticks),
-        ),
+        (None, None) => crate::server::WaitPublication::Pending(crate::server::wait_with_ticks(
+            session_id.clone(),
+            max_game_ticks,
+        )),
     };
     let response = match publication {
         crate::server::WaitPublication::Pending(raw) => project_response(
@@ -2852,3 +3005,7 @@ mod dpor_tests;
 #[cfg(test)]
 #[path = "selected_wait_facade_tests.rs"]
 mod selected_wait_facade_tests;
+
+#[cfg(test)]
+#[path = "session_output_budget_facade_tests.rs"]
+mod session_output_budget_facade_tests;

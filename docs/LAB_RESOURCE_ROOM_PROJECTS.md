@@ -171,8 +171,13 @@ Complete furnished-room reviews can still exceed a session's default
 `max_output_tokens: 4096`. Component measurements of two bedrooms with an
 existing Carpenter workshop fit `max_output_tokens: 8192`, including connected
 access, retained harvesting evidence and the complete continuation lineage.
-Select that explicit allowance when opening such a session. Missing-workshop
-setup requires more room in the response. Bounds are never raised implicitly;
+Select that explicit allowance when opening such a session, or use
+`fortress_open_session` with only the existing `session_id` and
+`max_output_tokens: 8192` after a default-sized review refuses. The latter
+preserves the private world, observed harvest and complete original goal;
+repeat the same `continue_goal` request after its acknowledgement. See
+[same-session output negotiation](LAB_SESSION_OUTPUT_BUDGET.md).
+Missing-workshop setup requires more room in the response. Bounds are never raised implicitly;
 an oversized review refuses and preserves the prior pending plan. These are
 measured component limits, with full facade execution tracked separately in
 `IMPLEMENTATION_STATUS.md`.

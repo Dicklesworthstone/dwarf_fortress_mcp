@@ -284,6 +284,14 @@ Negotiates fortress, versions, compatibility, requested capability scopes, obser
 and hard budgets. Returns a concrete initial anchor, grants, bootstrap briefing, supported
 profiles, current affordances, implementation uncertainty, and the safest first inspection step.
 
+The reference laboratory also accepts only `session_id` and an explicit
+`max_output_tokens` to renegotiate that existing session's response allowance.
+Current whole-fortress Observe/Query and owner fencing remain required. The
+complete current-work acknowledgement must fit the proposed cap before it is
+installed; all source/work limits, grants, world state and pending reviews stay
+intact. This lets an oversized later review be retried without reopening a
+private fortress. See [same-session output negotiation](docs/LAB_SESSION_OUTPUT_BUDGET.md).
+
 The semantic work-order development server accepts optional `max_game_ticks`,
 defaulting to zero and capped at 1200; opening never unpauses. Original-order
 insertion and optional clock control have separate operator gates and

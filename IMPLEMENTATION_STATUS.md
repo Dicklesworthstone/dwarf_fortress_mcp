@@ -1,5 +1,49 @@
 # Implementation Status
 
+## Unreleased — Same-session recovery from oversized complete reviews
+
+The laboratory opening tool now accepts an explicit existing `session_id` plus
+`max_output_tokens`, with every other opening argument omitted. This changes
+only that session's response allowance within the existing hard ceiling. It
+keeps the exact private/shared/durable owner, world, pending plan, original goal,
+capabilities, expiry, action and query custody, and all source/work limits.
+Current whole-fortress Observe/Query and late durable-owner fencing precede
+inspection. World source, retained records/steps, source text and full work
+projections share the original entity/byte/wall limits. The entire current-work
+acknowledgement must fit the proposed output allowance before either the budget
+or successful request sequence changes; narrowing and failures are atomic.
+
+Presentation reads the authoritative current budget rather than trusting an
+opening cache. Canonical session IDs and monotonic request IDs prevent delayed
+replies from restoring an obsolete allowance; metadata refresh cannot overwrite
+newer world orientation. Replay remaps the existing-session request and compares
+both accepted previous/new allowances, exposing reordered metadata transitions
+even when their success flags and canonical anchors match. No game observation,
+clock progress, proof refresh, grant renewal or effect is performed by negotiation.
+
+Validation passed all 16 focused original-source cases: 11 owner/source/budget/
+publication invariants, four public facade/replay cases and a complete public
+room workflow. That workflow starts with 4096 output tokens, performs finite
+harvesting through public game calls, refuses the oversized continuation while
+preserving custody, explicitly obtains 8192 tokens in the same private session,
+reconstructs the full reviewed steps exactly from the typed seal, commits and
+finishes the original two-bedroom room through public waits. The original
+harvest proof remains unchanged. The finite-stock test source is initialized
+explicitly; manufacture, excavation, furnishing and observation use the real
+MemoryAdapter and public semantic path. All three existing portable replay
+compatibility tests also pass, including the checked-in golden bundle.
+
+These tests run the complete core/world/intent/adapter/lab crates and actual
+server/facade implementations on rustc 1.102.0-nightly (9c5648833, 2026-11-10), with
+exact locked serialization dependencies. The component excludes transport
+startup/macros/resource routing and an installed TaskService, retaining its
+actual empty-service branch. The generated wire-definition test is authored but
+not executed. The full pinned build was SIGKILLed in unchanged asupersync 0.5.0;
+verify.sh passed its initial contracts and stopped at missing br. No full
+workspace, MCP transport, native, release or live admission claim follows.
+Owning bead df-lab-session-output-b5r remains in progress for broader runtime
+qualification. Usage: docs/LAB_SESSION_OUTPUT_BUDGET.md.
+
 ## Unreleased — Retrospective laboratory condition monitoring
 
 The existing `fortress.query` accepts the closed `condition_replay` wrapper.
@@ -20,17 +64,27 @@ and the complete result plus Agent Turn is lossless or refused. Pending game
 work, baselines and watches remain intact. Malformed query bodies use immutable
 ownership, preventing a refusal from publishing history or durable progress.
 
-Validation checkpoint: 17 new Rust regression sources cover the interval reader,
-actual watch policy isolation, full wrapper semantics and public labor history.
-Latest nightly rustfmt and whitespace checks pass. Three composed schema
-metaschemas and positive/negative request vectors pass. The official latest
-nightly (rustc1.102.0-nightly,9c5648833,2026-11-10) and all exact locked dependencies
-were restored. The actual pinned MCP attempt stopped in unchanged asupersync
-0.5.0 when rustc received SIGKILL (one build job, without a Rust source diagnostic).
-Focused actual-source component validation is underway; no new Rust test has
-executed at this checkpoint. Full transport/native/release qualification and
-live admission remain separate. Owning bead df-lab-structured-query-f7q.3 stays
-in progress. See docs/LAB_CONDITION_REPLAY.md for inputs and evidence limits.
+Validation passed all 30 focused cases: 13 shared watch replay tests, four
+retention tests, ten wrapper tests and three actual public facade workflows.
+These include all 17 newly added historical regressions. The public labor-history
+case verifies first terminal truth despite a later reversal, current-anchor
+separation, and the exact retained baseline, watch and pending-plan handles.
+It caught and fixed a missing current query-work catalog in the replay branch;
+that metadata now shares the original operation deadline without sampling or
+rescanning historical sources. Unavailable catalog coverage stays explicit.
+The cadence fixture correctly expects tick 3: the starter begins at tick 1 and
+the same-tick labor change cannot manufacture another eligible observation.
+
+Formatting of the new modules, whitespace checks, three composed schema
+metaschemas and positive/negative request vectors pass. Execution uses the complete five semantic
+crates and original server/facade bodies on rustc 1.102.0-nightly
+(9c5648833, 2026-11-10), with exact locked dependencies. The frozen component
+excludes transport startup/macros/resource routing and an installed TaskService;
+its actual empty-service branch remains. The full pinned MCP attempt stopped
+in unchanged asupersync 0.5.0 when rustc received SIGKILL, without a Rust source
+diagnostic. Full transport/native/release qualification and live admission
+remain separate. Owning bead df-lab-structured-query-f7q.3 stays in progress.
+See docs/LAB_CONDITION_REPLAY.md for inputs and evidence limits.
 
 ## Unreleased — Authorize future project stages before simulation accounting
 

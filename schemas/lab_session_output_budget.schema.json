@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dwarf-fortress-mcp.dev/schemas/lab_session_output_budget.schema.json",
+  "title": "Existing laboratory session output negotiation",
+  "description": "An alternative input to the existing fortress_open_session tool. Omit session_id for ordinary new-session opening. This alternative changes only the explicitly requested response-token allowance after current owner/Observe/Query checks and complete acknowledgement publication. All other opening arguments must be omitted.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["session_id", "max_output_tokens"],
+  "properties": {
+    "session_id": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{32}$",
+      "description": "Exact current session identifier; old durable owners remain fenced."
+    },
+    "max_output_tokens": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 65536,
+      "description": "Explicit desired output allowance. The complete current-work acknowledgement must fit before this is installed. max_bytes remains an independent ceiling."
+    }
+  },
+  "examples": [{
+    "session_id": "00000000000000000000000000000001",
+    "max_output_tokens": 8192
+  }]
+}

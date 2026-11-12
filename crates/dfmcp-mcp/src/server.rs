@@ -122,6 +122,9 @@ mod temporal_response;
 #[path = "lab_temporal_handler.rs"]
 mod temporal_handler;
 
+#[path = "lab_session_output_budget.rs"]
+pub(crate) mod session_output_budget;
+
 #[cfg(test)]
 #[path = "lab_temporal_mcp_tests.rs"]
 mod temporal_mcp_tests;
@@ -3522,9 +3525,22 @@ fn query_publication(
                         }
                         let mut remaining = ctx.clone();
                         remaining.budget.max_wall_millis -= spent_millis as u64;
-                        let payload = condition_replay::execute(
+                        let mut payload = condition_replay::execute(
                             &guard.history, guard.adapter.snapshot(), &remaining, request,
                         )?;
+                        // Historical evidence does not replace current retained
+                        // work. Capture the owned catalogs without sampling, and
+                        // charge their acquisition to the same operation clock.
+                        let spent_millis = started.elapsed().as_nanos().div_ceil(1_000_000);
+                        if spent_millis >= u128::from(ctx.budget.max_wall_millis) {
+                            return Err(DfmcpError::new(ErrorCode::BudgetExceeded,
+                                "condition replay exhausted its wall-time allowance before publishing current query work"));
+                        }
+                        remaining.budget.max_wall_millis =
+                            ctx.budget.max_wall_millis - spent_millis as u64;
+                        // An unavailable catalog stays explicit; absence of
+                        // descriptors must never imply an empty work registry.
+                        payload["query_work"] = query_work_json(&remaining);
                         return Ok(QueryPublication::Pending(query_budget::response(
                             Ok(payload), &ctx, false,
                         )));
