@@ -1,6 +1,8 @@
 //! Bounded original layout shared by execution consumers and proof owners.
 //! Ordinals select private storage slots; they never replace original StepIds.
 use dfmcp_intent::Action;
+use dfmcp_world::Predicate;
+use std::collections::BTreeMap;
 
 use super::*;
 
@@ -14,6 +16,7 @@ pub struct ProductionLayout {
     assignment: Option<StepId>,
     orders: Vec<StepId>,
     existing_labor: Option<ExistingLaborRequirement>,
+    inventory_minima: Vec<Predicate>,
 }
 
 impl ProductionLayout {
@@ -47,6 +50,7 @@ impl ProductionLayout {
                 archive,
                 assignment: None,
                 orders: plan.steps.iter().map(|step| step.id).collect(),
+                inventory_minima: requirement.inventory_minima().to_vec(),
                 existing_labor: Some(requirement),
             });
         }
@@ -70,6 +74,7 @@ impl ProductionLayout {
             assignment: Some(first.id),
             orders: plan.steps.iter().skip(1).map(|step| step.id).collect(),
             existing_labor: None,
+            inventory_minima: assignment_inventory_minima(plan)?,
         })
     }
 
@@ -89,4 +94,70 @@ impl ProductionLayout {
     pub fn existing_labor(&self) -> Option<&ExistingLaborRequirement> {
         self.existing_labor.as_ref()
     }
+
+    /// Complete-parent stock requirements independent of how the original
+    /// workers were obtained. These contain no labor effect or source grant.
+    /// Every entry is a closed furniture stack-unit minimum, in item-type order.
+    pub fn inventory_minima(&self) -> &[Predicate] {
+        &self.inventory_minima
+    }
+}
+
+/// Preserve the original labor and every order requirement before accepting
+/// additional stock minima. In particular, a target needing no order cannot
+/// disappear from the complete parent when a labor assignment precedes it.
+fn assignment_inventory_minima(plan: &PreparedPlan) -> Result<Vec<Predicate>> {
+    let required = Predicate::All(
+        plan.steps
+            .iter()
+            .flat_map(|step| step.postconditions.iter().cloned())
+            .collect(),
+    )
+    .normalized();
+    let mut parent = Vec::new();
+    super::existing_labor::atoms(&plan.terminal_condition, &mut parent);
+    let mut required_atoms = Vec::new();
+    super::existing_labor::atoms(&required, &mut required_atoms);
+    for predicate in required_atoms {
+        let at = parent
+            .iter()
+            .position(|value| *value == predicate)
+            .ok_or_else(|| {
+                error(
+                    ErrorCode::AdapterRejected,
+                    "production parent omits an original step requirement",
+                )
+            })?;
+        parent.remove(at);
+    }
+    let mut minima = BTreeMap::new();
+    for predicate in parent {
+        let item_type =
+            super::existing_labor::inventory_minimum_type(predicate).ok_or_else(|| {
+                error(
+                    ErrorCode::AdapterRejected,
+                    "production parent contains an unsupported stock requirement",
+                )
+            })?;
+        if minima.len() >= ProductionLayout::MAX_ORDERS
+            || minima
+                .insert(item_type.to_owned(), predicate.clone())
+                .is_some()
+        {
+            return Err(error(
+                ErrorCode::AdapterRejected,
+                "production parent stock requirements must name at most four distinct furniture types",
+            ));
+        }
+    }
+    let minima: Vec<Predicate> = minima.into_values().collect();
+    let mut complete = vec![required];
+    complete.extend(minima.iter().cloned());
+    if plan.terminal_condition != Predicate::All(complete).normalized() {
+        return Err(error(
+            ErrorCode::AdapterRejected,
+            "production parent differs from its complete original requirements",
+        ));
+    }
+    Ok(minima)
 }

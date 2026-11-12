@@ -45,7 +45,7 @@ fn compose(
     }
     let current_inventory = order.evidence(selected.inner.policy().clone())?;
     let inventory_requirements =
-        super::parent_goal::inventory_findings(workforce.requirement(), &current_inventory)?;
+        super::parent_goal::inventory_findings(layout.inventory_minima(), &current_inventory)?;
     let current_workers = workforce.evidence(workforce_policy.clone())?;
     let labor = workforce
         .requirement()
@@ -144,18 +144,22 @@ fn compose(
         }
         let mut predicates = selected_step.postconditions.clone();
         predicates.push(workforce.requirement().predicate());
-        predicates.extend(workforce.requirement().inventory_minima().iter().cloned());
+        predicates.extend(layout.inventory_minima().iter().cloned());
         evidence.evaluate(&Predicate::All(predicates))?
     };
     // These findings were qualified before the workforce policy was joined.
     // The complete parent cannot borrow item authority from another domain.
-    let current_truth = inventory_requirements.iter().fold(current_truth, |truth, finding| {
-        match (truth, finding.current_truth) {
-            (PredicateTruth::False, _) | (_, PredicateTruth::False) => PredicateTruth::False,
-            (PredicateTruth::Unknown, _) | (_, PredicateTruth::Unknown) => PredicateTruth::Unknown,
-            _ => PredicateTruth::True,
-        }
-    });
+    let current_truth = inventory_requirements
+        .iter()
+        .fold(current_truth, |truth, finding| {
+            match (truth, finding.current_truth) {
+                (PredicateTruth::False, _) | (_, PredicateTruth::False) => PredicateTruth::False,
+                (PredicateTruth::Unknown, _) | (_, PredicateTruth::Unknown) => {
+                    PredicateTruth::Unknown
+                }
+                _ => PredicateTruth::True,
+            }
+        });
     let mut identity = if parent_cursor.is_some() {
         b"dfmcp-existing-labor-parent-goal/2\0".to_vec()
     } else {

@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased — Preserve stock requirements with assigned production workers
+
+- Retain closed original furniture minima in assignment-and-order layouts,
+  including stock that requires no new order; preserve every original step goal
+  and reject weakened or arbitrary parent requirements during recovery.
+- Join independently qualified current inventory with assigned labor and the
+  complete original order set. Retain Unknown coverage and reject mixed captures.
+- Add five adapter regressions for archive fidelity, bounded shapes, consumed
+  stock, restored histories and complete cohorts. Sources are reviewed and
+  formatted; their execution is pending. The prior adapter suite now passes
+  73 tests in the restored latest-nightly environment.
+
 ## Unreleased — Plan and complete a native furniture stock portfolio
 
 - Add closed `kind="stock_targets"` planning for one to four distinct furniture

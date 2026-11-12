@@ -263,7 +263,7 @@ impl ExistingLaborRequirement {
 
 /// A closed extension to the complete parent, never an arbitrary predicate or
 /// a source grant. Selected order objectives retain their existing shape.
-fn inventory_minimum_type(predicate: &Predicate) -> Option<&str> {
+pub(super) fn inventory_minimum_type(predicate: &Predicate) -> Option<&str> {
     match predicate {
         Predicate::EntityQuantity {
             kind: EntityKind::Item,
@@ -308,7 +308,7 @@ fn has_labor_requirement(predicate: &Predicate) -> bool {
     }
 }
 
-fn atoms<'a>(predicate: &'a Predicate, out: &mut Vec<&'a Predicate>) {
+pub(super) fn atoms<'a>(predicate: &'a Predicate, out: &mut Vec<&'a Predicate>) {
     if let Predicate::All(children) = predicate {
         for child in children {
             atoms(child, out);

@@ -176,11 +176,10 @@ pub(super) fn labor_findings(
 }
 
 pub(super) fn inventory_findings(
-    requirement: &ExistingLaborRequirement,
+    minima: &[Predicate],
     inventory: &PredicateEvidence<'_>,
 ) -> Result<Vec<SelectedParentInventoryFinding>> {
-    requirement
-        .inventory_minima()
+    minima
         .iter()
         .map(|minimum| {
             let Predicate::EntityQuantity {
@@ -277,7 +276,9 @@ fn compose(
     }
     // Each child independently enforces its source/domain ceiling before any
     // grants are combined. Unit observation never expands inventory coverage.
-    order.evidence(selected.inner.policy().clone())?;
+    let inventory_evidence = order.evidence(selected.inner.policy().clone())?;
+    let inventory_requirements =
+        inventory_findings(layout.inventory_minima(), &inventory_evidence)?;
     let workforce_evidence = workforce.evidence(workforce_policy.clone())?;
     let assignment = policy::selected(original, layout.assignment_step().ok_or_else(custody)?)?;
     let labor = labor_findings(&assignment.action, &workforce_evidence)?;
@@ -353,8 +354,22 @@ fn compose(
             .ok_or_else(custody)?;
         let mut predicates = assignment.postconditions.clone();
         predicates.extend(order_step.postconditions.clone());
+        predicates.extend(layout.inventory_minima().iter().cloned());
         evidence.evaluate(&Predicate::All(predicates))?
     };
+    // The independent inventory policy qualified these findings before source
+    // grants were joined. Workforce permission cannot supply missing Item facts.
+    let current_truth = inventory_requirements
+        .iter()
+        .fold(current_truth, |truth, finding| {
+            match (truth, finding.current_truth) {
+                (PredicateTruth::False, _) | (_, PredicateTruth::False) => PredicateTruth::False,
+                (PredicateTruth::Unknown, _) | (_, PredicateTruth::Unknown) => {
+                    PredicateTruth::Unknown
+                }
+                _ => PredicateTruth::True,
+            }
+        });
     let mut identity = if parent_cursor.is_some() {
         b"dfmcp-selected-parent-goal/2\0".to_vec()
     } else {
@@ -384,7 +399,7 @@ fn compose(
         source_digest: Digest32::of_bytes(&identity),
         workforce_source_digest: workforce.source_digest(),
         labor,
-        inventory_requirements: Vec::new(),
+        inventory_requirements,
     })
 }
 

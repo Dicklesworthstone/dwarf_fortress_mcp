@@ -44,7 +44,12 @@ where
     ) -> Result<dfmcp_world::EvidencePolicy>,
 {
     compose(
-        original, samples, before, after, c, order_policy,
+        original,
+        samples,
+        before,
+        after,
+        c,
+        order_policy,
         |sample, context| workforce_policy(sample.workforce.as_ref().ok_or_else(custody)?, context),
         false,
     )
@@ -68,14 +73,18 @@ where
         &crate::semantic_work_orders::WorkOrderGoalProjection,
         &OperationContext,
     ) -> Result<dfmcp_world::EvidencePolicy>,
-    W: FnMut(
-        &ExistingLaborProjection,
-        &OperationContext,
-    ) -> Result<dfmcp_world::EvidencePolicy>,
+    W: FnMut(&ExistingLaborProjection, &OperationContext) -> Result<dfmcp_world::EvidencePolicy>,
 {
     compose(
-        original, samples, before, after, c, order_policy,
-        |sample, context| workforce_policy(sample.existing_labor.as_ref().ok_or_else(custody)?, context),
+        original,
+        samples,
+        before,
+        after,
+        c,
+        order_policy,
+        |sample, context| {
+            workforce_policy(sample.existing_labor.as_ref().ok_or_else(custody)?, context)
+        },
         true,
     )
 }
@@ -86,10 +95,14 @@ fn workforce(
 ) -> Result<(&WorldSnapshot, &WorkforceCapture, StateAnchor)> {
     match (&sample.workforce, &sample.existing_labor, existing) {
         (Some(projection), None, false) => Ok((
-            projection.snapshot(), projection.capture(), projection.original_anchor(),
+            projection.snapshot(),
+            projection.capture(),
+            projection.original_anchor(),
         )),
         (None, Some(projection), true) => Ok((
-            projection.snapshot(), projection.capture(), projection.original_anchor(),
+            projection.snapshot(),
+            projection.capture(),
+            projection.original_anchor(),
         )),
         _ => Err(custody()),
     }
@@ -111,10 +124,7 @@ where
         &crate::semantic_work_orders::WorkOrderGoalProjection,
         &OperationContext,
     ) -> Result<dfmcp_world::EvidencePolicy>,
-    W: FnMut(
-        &SelectedParentGoalResult,
-        &OperationContext,
-    ) -> Result<dfmcp_world::EvidencePolicy>,
+    W: FnMut(&SelectedParentGoalResult, &OperationContext) -> Result<dfmcp_world::EvidencePolicy>,
 {
     c.authorize(Capability::Observe, RiskTier::ReadOnly, &[], None)?;
     let layout = ProductionLayout::from_plan(original)?;
@@ -129,13 +139,13 @@ where
     let (first_workforce, first_capture, _) = workforce(first, existing)?;
     let first_order = first.selected.inner.projection();
     let mut terminal = if let Some(requirement) = layout.existing_labor() {
-        let mut predicates = vec![requirement.predicate()];
-        predicates.extend(requirement.inventory_minima().iter().cloned());
-        predicates
+        vec![requirement.predicate()]
     } else {
         policy::selected(original, layout.assignment_step().ok_or_else(custody)?)?
-            .postconditions.clone()
+            .postconditions
+            .clone()
     };
+    terminal.extend(layout.inventory_minima().iter().cloned());
     let mut ids = Vec::with_capacity(samples.len());
     let mut graph = first_order.snapshot().graph.clone();
     let mut cursor = c.anchor.cursor;
@@ -154,7 +164,8 @@ where
     for (step_id, sample) in layout.order_steps().iter().zip(samples) {
         let step = policy::selected(original, *step_id)?;
         let order = sample.selected.inner.projection();
-        let (workforce_snapshot, workforce_capture, workforce_original) = workforce(sample, existing)?;
+        let (workforce_snapshot, workforce_capture, workforce_original) =
+            workforce(sample, existing)?;
         let mut authorization = c.clone();
         authorization.budget.max_bytes = c.budget.max_bytes / 16;
         authorization.anchor = order.anchor();
@@ -180,7 +191,10 @@ where
             || workforce_original != original.anchor
             || workforce_capture != first_capture
             || (existing
-                && sample.existing_labor.as_ref().map(ExistingLaborProjection::requirement)
+                && sample
+                    .existing_labor
+                    .as_ref()
+                    .map(ExistingLaborProjection::requirement)
                     != layout.existing_labor())
             || sample.parent.labor != first.parent.labor
             || sample.parent.inventory_requirements != first.parent.inventory_requirements

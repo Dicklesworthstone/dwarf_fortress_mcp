@@ -14,6 +14,9 @@ use dfmcp_world::PredicateTruth;
 mod parent_goal_tests {
     include!("parent_goal_tests.rs");
 }
+mod assigned_inventory_goal_tests {
+    include!("assigned_inventory_goal_tests.rs");
+}
 mod existing_labor_tests {
     include!("existing_labor_tests.rs");
 }

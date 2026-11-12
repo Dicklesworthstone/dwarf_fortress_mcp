@@ -1,5 +1,28 @@
 # Implementation Status
 
+## Unreleased — Preserve complete stock goals after labor assignment
+
+The closed production layout now preserves up to four original furniture stock
+minima for an explicit labor assignment followed by dependent orders, including
+targets requiring no order. The shared layout exposes the same ordered minima
+for assignment and existing-worker plans. Assignment recovery must retain every
+original step requirement and accepts only the bounded furniture-minimum grammar.
+
+Selected and complete-parent goal sampling now includes independently qualified
+current inventory findings alongside assigned labor and every original order.
+Missing Item coverage remains Unknown after workforce grants are joined; a
+historically fulfilled order cannot conceal later loss of initially sufficient
+stock. Complete cohorts reject mixed captures and partial order sets.
+
+Five new adapter regressions cover strict layouts and archives, missing or
+unbounded requirements, current stock/labor loss after leaf achievement, reopening,
+independent inventory coverage and complete multi-order cohorts. The new adapter
+sources have been independently reviewed and formatted. Execution is pending
+while the recovered environment builds the actual MCP dependency graph; the
+previous main revision's adapter live-production suite passed all 73 tests.
+This adapter checkpoint prepares the explicit multi-target assignment consumer;
+it does not add a public request option by itself or change production admission.
+
 ## Unreleased — Reachable multi-target native stock planning and completion
 
 The combined `serve-gameplay-dev labor-order` host now accepts the closed
