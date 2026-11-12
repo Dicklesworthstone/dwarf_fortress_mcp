@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased — Foreground waiting for multiple laboratory conditions
+
+- Add optional watch_ids (one to eight unique owned handles) and watch_policy
+  (all_satisfied or any_satisfied) to the existing fortress_wait tool, preserving
+  the scalar watch, selected-plan and ordinary wait APIs.
+- Keep every selected watch's original cadence, deadline and stable-sample
+  count; evaluate and publish one complete candidate set at each frontier.
+  Failure and unknown outcomes take precedence over group success.
+- Return full retained records with historical/current anchors and aggregate
+  sampling work. Group completion does not establish simultaneous current truth.
+- Preserve pending game work, baselines and unselected watches. Admit current
+  authority, shared source/wall allowances and the complete output packet before
+  changing roots; retain actual elapsed progress on a later refusal.
+- Add thirteen regression sources for public workflows, boundaries and atomic
+  refusal. Tests and formatting remain unexecuted: dependency fetch exhausted
+  disk space and the executor disconnected before project compilation.
+
 ## Unreleased — Recover oversized reviews in an existing session
 
 - Add explicit `session_id` plus `max_output_tokens` negotiation through the

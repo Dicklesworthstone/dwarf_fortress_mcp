@@ -66,6 +66,25 @@ pub(super) fn laboratory_watch_record(context: &OperationContext, handle: &str) 
     query_watch::laboratory::selected_record(context, handle)
 }
 
+pub(super) fn laboratory_watch_records(
+    context: &OperationContext,
+    handles: &[String],
+) -> Result<Vec<Value>> {
+    query_watch::laboratory::selected_records(context, handles)
+}
+
+pub(super) fn execute_laboratory_watch_set_with_publisher<F>(
+    snapshot: &WorldSnapshot,
+    context: &OperationContext,
+    handles: &[String],
+    publish: F,
+) -> Result<String>
+where
+    F: FnOnce(Value) -> Result<String>,
+{
+    query_watch::laboratory::execute_detailed_batch(snapshot, context, handles, publish)
+}
+
 pub(super) fn laboratory_baseline_work(context: &OperationContext) -> Result<Value> {
     query_history::retained_work(context)
 }

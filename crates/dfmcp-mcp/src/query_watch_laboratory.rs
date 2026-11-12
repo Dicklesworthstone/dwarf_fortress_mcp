@@ -259,6 +259,77 @@ pub(crate) fn selected_record(context: &OperationContext, handle: &str) -> Resul
     Ok(record)
 }
 
+/// Pin an explicit set in one metadata read before admitting foreground time.
+/// Returned details use canonical handle order and do not add predicate samples.
+pub(crate) fn selected_records(context: &OperationContext, handles: &[String]) -> Result<Vec<Value>> {
+    let budget = counts::EvaluationBudget::new(context.budget.max_wall_millis);
+    context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
+    if handles.is_empty() || handles.len() > MAX_PER_SESSION {
+        return Err(invalid("select one to eight explicit watch handles"));
+    }
+    let mut selected = handles.to_vec();
+    selected.sort();
+    if selected.windows(2).any(|pair| pair[0] == pair[1]) {
+        return Err(invalid("selected watch handles must be unique"));
+    }
+    for handle in &selected {
+        validate_handle(handle)?;
+    }
+    let store = lock(&WATCHES)?;
+    SourcePolicy::LaboratoryReference.check_session(&store, context.session_id)?;
+    let details = selected.iter().map(|handle| {
+        store.entries.get(&(context.session_id, handle.clone()))
+            .map(|watch| watch.detail(context.anchor))
+            .ok_or_else(|| invalid("selected watch is not retained by this session"))
+    }).collect::<Result<Vec<_>>>()?;
+    let maximum = context.budget.max_bytes.min(u64::from(context.budget.max_output_tokens) * 4);
+    if json!(&details).to_string().len() as u64 > maximum {
+        return Err(bounded("selected watch definitions exceed their inspection allowance"));
+    }
+    context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
+    budget.check()?;
+    Ok(details)
+}
+
+/// Complete one laboratory batch with full candidate details, under the same
+/// atomic store transaction as ordinary batch polls. No clock or native I/O.
+pub(crate) fn execute_detailed_batch<F>(
+    snapshot: &WorldSnapshot,
+    context: &OperationContext,
+    handles: &[String],
+    publisher: F,
+) -> Result<String>
+where
+    F: FnOnce(Value) -> Result<String>,
+{
+    let budget = counts::EvaluationBudget::new(context.budget.max_wall_millis);
+    if handles.is_empty() || handles.len() > MAX_PER_SESSION {
+        return Err(invalid("detailed laboratory batch needs one to eight explicit handles"));
+    }
+    let prepared = batch::prepare_in_policy(
+        &WATCHES, snapshot, context,
+        &json!({"schema":"dfmcp.query/1","query":{"kind":"poll_watches","watches":handles}}),
+        SourcePolicy::LaboratoryReference,
+        |value| {
+            context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
+            budget.check()?;
+            Ok(value.to_string())
+        },
+    )?;
+    budget.check()?;
+    batch::complete_laboratory_detailed_in(
+        &WATCHES, snapshot, context, prepared,
+        |candidate| {
+            context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
+            budget.check()?;
+            let encoded = publisher(candidate)?;
+            context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
+            budget.check()?;
+            Ok(encoded)
+        },
+    )
+}
+
 fn retained_work_in(storage: &Mutex<Store>, context: &OperationContext) -> Result<Value> {
     let budget = counts::EvaluationBudget::new(context.budget.max_wall_millis);
     context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;

@@ -1,0 +1,137 @@
+{
+  "schema": "dfmcp.laboratory-selected-watch-set-wait-contract/1",
+  "owning_bead": "df-lab-structured-query-f7q.3",
+  "logical_tool": "fortress.wait",
+  "wire_tool": "fortress_wait",
+  "selector": {
+    "field": "watch_ids",
+    "optional": true,
+    "format": "explicit array of one to eight unique retained laboratory watch handles owned by the addressed session",
+    "minimum_members": 1,
+    "maximum_members": 8,
+    "mutually_exclusive_with": [
+      "plan_digest",
+      "watch_id"
+    ],
+    "omitted_behavior": "existing duration-based, selected-original-plan or scalar-watch wait",
+    "order": "canonical lexicographic handle order",
+    "membership_changes_during_call": false
+  },
+  "policy": {
+    "field": "watch_policy",
+    "allowed": [
+      "all_satisfied",
+      "any_satisfied"
+    ],
+    "omitted_or_null": "all_satisfied",
+    "valid_only_with": "non-null watch_ids",
+    "completion_scope": "retained_watch_outcomes",
+    "historical_satisfied_members_count": true,
+    "simultaneous_current_truth_proven": false
+  },
+  "immutable_definition": [
+    "success condition",
+    "failure condition",
+    "entity generations",
+    "created anchor",
+    "absolute deadline",
+    "poll cadence",
+    "required stable observations",
+    "laboratory evidence policy"
+  ],
+  "required_read_capabilities": [
+    "observe",
+    "query"
+  ],
+  "positive_tick_capability": "control_clock",
+  "authority_scope": "current whole-fortress grants; preauthorize the whole requested positive horizon when initially unpaused; recheck every sampled frontier",
+  "zero_tick_behavior": "evaluate the selected set at the current published snapshot without requiring a prior committed action or clock authority",
+  "response_schema": "dfmcp.selected-watch-set-wait/1",
+  "response_field": "selected_watch_set_wait",
+  "records": "complete Watch::detail values in canonical handle order, including exact definitions and bounded evidence, without transient batch row flags",
+  "attention_priority": [
+    "failed",
+    "expired",
+    "invalidated",
+    "cancelled",
+    "blocked_unknown"
+  ],
+  "stop_reasons": [
+    "failed",
+    "expired",
+    "invalidated",
+    "cancelled",
+    "blocked_unknown",
+    "all_satisfied",
+    "any_satisfied",
+    "paused",
+    "tick_limit"
+  ],
+  "attention_precedes_group_success": true,
+  "progression": {
+    "owner": "existing shared foreground progression",
+    "clip_at": [
+      "ordinary slice ceiling",
+      "action and recovery cadence/deadline",
+      "earliest unfinished selected watch next sample",
+      "earliest unfinished selected watch original deadline",
+      "remaining requested ticks"
+    ],
+    "terminal_members_constrain_next_slice": false,
+    "other_committed_work_continues": true,
+    "unselected_watches_are_sampled": false,
+    "unpauses": false
+  },
+  "evidence": {
+    "source_policy": "laboratory_reference/1",
+    "one_complete_source_per_frontier": true,
+    "shared_predicate_evaluation_budget": true,
+    "same_anchor_adds_samples": false,
+    "positive_stability_requires_due_observation": true,
+    "internal_sequence_gaps_reset_stability": true,
+    "failure_precedes_success": true,
+    "exact_due_deadline_can_satisfy": true,
+    "late_samples_cannot_satisfy": true,
+    "terminal_outcomes_are_historical": true,
+    "per_record_currentness_and_last_evaluated_anchor": true,
+    "continuous_between_observations": false,
+    "game_effect_success_proven": false,
+    "mutation_authority": false
+  },
+  "publication": [
+    "validate all members and pinned definitions before progression; refuse invalid membership as one set",
+    "fit the complete initial selected set and current game work before any progression",
+    "persist each accepted game frontier or expose a durability fence before returning",
+    "prepare all selected updates in one candidate store against that published frontier",
+    "render complete selected records, current anchors, retained catalogs, pending plans, actions and obligations before replacing the watch root",
+    "publish all candidate members atomically; no sequential scalar polls or fallible work after the root swap",
+    "return the admitted Agent Turn unchanged without facade refitting",
+    "late refusal retains real prior game time and accepted earlier samples, leaving every current candidate member uncommitted",
+    "authorized partial errors preserve complete selected records and elapsed progress together at every fitting output tier, with incomplete evaluation freshness explicit"
+  ],
+  "budgets": {
+    "size_limit_scope": "each_complete_observed_source",
+    "shared_wall_deadline": true,
+    "maximum_foreground_slices": 4096,
+    "maximum_selected_inspections": 4097,
+    "maximum_selected_watches": 8,
+    "source_cost": "checked accumulated canonical records and bytes for accepted inspection rounds",
+    "full_packet": "min(max_bytes, max_output_tokens * 4)",
+    "refusals": "current owning byte/token caps; standard explicit irreducible-error exception below the minimal JSON envelope"
+  },
+  "compatibility": {
+    "scalar_watch_response_unchanged": true,
+    "public_native_batch_response_unchanged": true,
+    "laboratory_query_batch_response_unchanged": true,
+    "existing_four_argument_rust_selection_wrapper_preserved": true,
+    "existing_rust_handler_aliases_preserved": true,
+    "logical_tool_count": 11
+  },
+  "process_local": true,
+  "durable_watch_state": false,
+  "replay": "exact raw watch_ids and optional watch_policy are recorded; process-local set waits make the bundle nonreplayable",
+  "automatic_continuation": false,
+  "automatic_cancellation": false,
+  "native_protocol_change": false,
+  "production_admission_change": false
+}

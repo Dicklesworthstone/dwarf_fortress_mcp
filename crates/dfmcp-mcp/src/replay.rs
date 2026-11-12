@@ -112,7 +112,9 @@ pub(crate) fn record(
             "query continuations are bound to the original session and cannot be replayed into a new session",
         );
     }
-    if tool == "fortress.wait" && arguments["watch_id"].is_string() {
+    if tool == "fortress.wait"
+        && (arguments["watch_id"].is_string() || arguments["watch_ids"].is_array())
+    {
         log.mark_not_replayable(
             "watch-selected waits name process-local handles owned by the original session",
         );
@@ -173,6 +175,17 @@ pub(crate) fn bundle_json(log: &ReplayLog) -> Value {
 
 fn opt_string(args: &Value, key: &str) -> Option<String> {
     args[key].as_str().map(str::to_owned)
+}
+
+fn opt_watch_ids(args: &Value) -> Result<Option<Vec<String>>, String> {
+    let Some(value) = args.get("watch_ids").filter(|value| !value.is_null()) else {
+        return Ok(None);
+    };
+    let handles = value.as_array().filter(|handles| !handles.is_empty() && handles.len() <= 8)
+        .ok_or_else(|| "recorded watch_ids must be a nonempty set of at most eight strings".to_owned())?;
+    handles.iter().map(|handle| handle.as_str().map(str::to_owned)
+        .ok_or_else(|| "recorded watch_ids contains a non-string handle".to_owned()))
+        .collect::<Result<Vec<_>, _>>().map(Some)
 }
 
 fn opt_bool(args: &Value, key: &str) -> Option<bool> {
@@ -239,11 +252,13 @@ fn invoke(tool: &str, session: Option<String>, args: &Value) -> Result<String, S
             Some(session_or(tool)?),
             opt_string(args, "plan_digest").unwrap_or_default(),
         ),
-        "fortress.wait" => f::fortress_wait_for_selection(
+        "fortress.wait" => f::fortress_wait_for_targets(
             Some(session_or(tool)?),
             opt_u64(args, "max_game_ticks"),
             opt_string(args, "plan_digest"),
             opt_string(args, "watch_id"),
+            opt_watch_ids(args)?,
+            opt_string(args, "watch_policy"),
         ),
         "fortress.cancel" => f::fortress_cancel(
             Some(session_or(tool)?),

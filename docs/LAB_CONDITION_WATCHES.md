@@ -11,7 +11,9 @@ JSON below as the contents of its `mode` string, alongside the owning
 `session_id`. They share the `temporal` wrapper with
 [query baselines](LAB_QUERY_BASELINES.md). To advance the laboratory while
 sampling one retained condition, pass its handle as `watch_id` to the existing
-`fortress_wait` tool.
+`fortress_wait` tool. To preserve several independent watch cadences during the
+same bounded advance, supply an explicit `watch_ids` set and an optional
+`watch_policy`; see [waiting for several conditions](LAB_SELECTED_WATCH_SET_WAIT.md).
 
 ## Register and inspect a stock condition
 
@@ -93,8 +95,8 @@ needs attention. Pause and the requested tick cap also stop the call.
 
 This selects one exact retained definition: its success and failure conditions,
 entity generations, deadline, cadence and required stability never change.
-`plan_digest` and `watch_id` are mutually exclusive. Omitting both preserves
-ordinary duration-based waiting; selecting a plan preserves
+`plan_digest`, `watch_id` and `watch_ids` are mutually exclusive. Omitting all
+three preserves ordinary duration-based waiting; selecting a plan preserves
 [original-project waiting](LAB_SELECTED_PLAN_WAIT.md). No new tool is added.
 Direct Rust callers can use
 `fortress_wait_for_watch(session_id, max_game_ticks, watch_id)`; existing
@@ -333,6 +335,9 @@ The additive wait arguments are described by
 [`lab_wait.schema.json`](../schemas/lab_wait.schema.json), and the selected-watch
 contract by
 [`laboratory_selected_watch_wait_v1.json`](../architecture/laboratory_selected_watch_wait_v1.json).
+The exact-set foreground variant has its own
+[`laboratory_selected_watch_set_wait_v1.json`](../architecture/laboratory_selected_watch_set_wait_v1.json)
+contract and [usage guide](LAB_SELECTED_WATCH_SET_WAIT.md).
 Rust tests cover the real reference source policy, lifecycle, atomic batches,
 complete publication, existing game work, source/output budgets and public
 labor/clock flows. Their execution and qualification status is recorded in the

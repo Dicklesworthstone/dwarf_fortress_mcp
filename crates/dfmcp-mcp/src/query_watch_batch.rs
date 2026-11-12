@@ -315,6 +315,42 @@ pub(super) fn complete_in<F>(
 where
     F: FnOnce(Value) -> Result<String>,
 {
+    complete_in_mode(
+        watches, snapshot, context, prepared, observation_acquired, false, publisher,
+    )
+}
+
+/// Laboratory foreground waits need every original definition and its complete
+/// candidate evidence before accepting a set publication. This owner-only path
+/// cannot change the slim public/native batch representation or acquire a source.
+pub(super) fn complete_laboratory_detailed_in<F>(
+    watches: &Mutex<Store>,
+    snapshot: &WorldSnapshot,
+    context: &OperationContext,
+    prepared: Prepared,
+    publisher: F,
+) -> Result<String>
+where
+    F: FnOnce(Value) -> Result<String>,
+{
+    if prepared.source_policy != SourcePolicy::LaboratoryReference || prepared.awaiting {
+        return Err(invalid("detailed wait publication requires a laboratory poll batch"));
+    }
+    complete_in_mode(watches, snapshot, context, prepared, false, true, publisher)
+}
+
+fn complete_in_mode<F>(
+    watches: &Mutex<Store>,
+    snapshot: &WorldSnapshot,
+    context: &OperationContext,
+    prepared: Prepared,
+    observation_acquired: bool,
+    complete_details: bool,
+    publisher: F,
+) -> Result<String>
+where
+    F: FnOnce(Value) -> Result<String>,
+{
     let started = Instant::now();
     check(context, started)?;
     authorize(snapshot, context)?;
@@ -355,7 +391,15 @@ where
             .ok_or_else(|| invalid("selected batch watch disappeared"))?;
         watch.advance_bounded(snapshot, false, &mut evaluation_budget)?;
     }
-    let value = output(&store, &candidate, context, &prepared)?;
+    let mut value = output(&store, &candidate, context, &prepared)?;
+    if complete_details {
+        let details = prepared.selected.iter()
+            .map(|handle| record(&candidate, context.session_id, handle)
+                .map(|watch| watch.detail(context.anchor)))
+            .collect::<Result<Vec<_>>>()?;
+        value["records"] = json!(details);
+        value["record_detail"] = json!("complete_definition_and_evidence");
+    }
     let encoded = publish_for_policy(
         &candidate,
         context,

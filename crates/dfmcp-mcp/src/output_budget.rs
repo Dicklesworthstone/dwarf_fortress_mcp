@@ -515,10 +515,14 @@ fn minimal(payload: &Value) -> Value {
     // A selected wait may already have advanced the shared world. Preserve its
     // exact stop decision and elapsed work as one unit at every output tier;
     // falling back to the incidental latest action would change the answer.
-    if payload.get("selected_plan_wait").is_some() || payload.get("selected_watch_wait").is_some() {
+    if payload.get("selected_plan_wait").is_some()
+        || payload.get("selected_watch_wait").is_some()
+        || payload.get("selected_watch_set_wait").is_some()
+    {
         for key in [
             "selected_plan_wait",
             "selected_watch_wait",
+            "selected_watch_set_wait",
             "wait_progress",
             "advanced_game_ticks",
             "game_tick",

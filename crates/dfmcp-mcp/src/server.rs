@@ -193,6 +193,13 @@ mod selected_plan_wait;
 #[path = "selected_watch_wait.rs"]
 mod selected_watch_wait;
 
+#[path = "selected_watch_set_wait.rs"]
+mod selected_watch_set_wait;
+
+#[cfg(test)]
+#[path = "lab_watch_set_wait_tests.rs"]
+mod watch_set_wait_mcp_tests;
+
 #[cfg(test)]
 #[path = "lab_watch_wait_tests.rs"]
 mod watch_wait_mcp_tests;
@@ -5776,6 +5783,81 @@ fn wait_progress_error(
     payload.to_string()
 }
 
+/// Preserve the single-watch result and error contract while both selectors
+/// share exactly the same bounded world-progression and publication owner.
+enum WaitWatchSelection {
+    Single(selected_watch_wait::SelectedWatchWait),
+    Set(selected_watch_set_wait::SelectedWatchSetWait),
+}
+
+impl WaitWatchSelection {
+    fn check(&self, session: &LabSession) -> Result<()> {
+        match self {
+            Self::Single(watch) => watch.check(session),
+            Self::Set(watches) => watches.check(session),
+        }
+    }
+
+    fn stopped(&self) -> bool {
+        match self {
+            Self::Single(watch) => watch.stopped(),
+            Self::Set(watches) => watches.stopped(),
+        }
+    }
+
+    fn ceiling(&self, now: u64, other: Option<u64>) -> Option<u64> {
+        match self {
+            Self::Single(watch) => watch.ceiling(now, other),
+            Self::Set(watches) => watches.ceiling(now, other),
+        }
+    }
+
+    fn sample(&mut self, session: &LabSession, base: serde_json::Value) -> Result<()> {
+        match self {
+            Self::Single(watch) => watch.sample(session, base),
+            Self::Set(watches) => watches.sample(session, base),
+        }
+    }
+
+    fn take_published(&mut self) -> Option<String> {
+        match self {
+            Self::Single(watch) => watch.take_published(),
+            Self::Set(watches) => watches.take_published(),
+        }
+    }
+}
+
+fn wait_selection_error(
+    session: &LabSession,
+    error: &DfmcpError,
+    progress: &lab_progress::ForegroundProgress,
+    receipts: &BTreeMap<ActionId, dfmcp_adapter::ActionReceipt>,
+    selected: Option<&selected_plan_wait::SelectedPlanWait>,
+    watch: Option<&WaitWatchSelection>,
+) -> String {
+    let single = watch.and_then(|watch| match watch {
+        WaitWatchSelection::Single(watch) => Some(watch),
+        WaitWatchSelection::Set(_) => None,
+    });
+    let raw = wait_progress_error(session, error, progress, receipts, selected, single);
+    let Some(WaitWatchSelection::Set(watches)) = watch else {
+        return raw;
+    };
+    let current = read_context(session);
+    if authorize_entry(&current, Capability::Observe, RiskTier::ReadOnly).is_err()
+        || authorize_entry(&current, Capability::Query, RiskTier::ReadOnly).is_err()
+    {
+        return raw;
+    }
+    match serde_json::from_str::<serde_json::Value>(&raw) {
+        Ok(mut payload) => {
+            payload["selected_watch_set_wait"] = watches.projection(session, false);
+            payload.to_string()
+        }
+        Err(_) => raw,
+    }
+}
+
 /// Recovered work has no live adapter action handle, but its original cadence
 /// and deadline must constrain the same foreground observation loop.
 fn carried_wait_ceiling(session: &LabSession) -> Option<u64> {
@@ -5836,7 +5918,7 @@ fn with_wait_session<T>(
 /// Let authorized laboratory time pass in bounded slices, observing all owned
 /// work in dependency order and publishing each frontier before continuing.
 pub(crate) fn wait_with_ticks(session_id: Option<String>, max_game_ticks: Option<u64>) -> String {
-    wait_with_selection(session_id, max_game_ticks, None, None).into_response()
+    wait_with_selection(session_id, max_game_ticks, None, None, None).into_response()
 }
 
 /// Progress the same owned work, stopping at one exact original plan's goal,
@@ -5850,7 +5932,7 @@ pub(crate) fn wait_for_plan(
         Ok(digest) => digest,
         Err(error) => return dfmcp_error_payload("fortress.wait", &error),
     };
-    wait_with_selection(session_id, max_game_ticks, Some(digest), None).into_response()
+    wait_with_selection(session_id, max_game_ticks, Some(digest), None, None).into_response()
 }
 
 /// Select one exact session-owned laboratory condition, preserving its original
@@ -5860,7 +5942,19 @@ pub(crate) fn wait_for_watch(
     max_game_ticks: Option<u64>,
     watch_id: String,
 ) -> WaitPublication {
-    wait_with_selection(session_id, max_game_ticks, None, Some(watch_id))
+    wait_with_selection(session_id, max_game_ticks, None, Some(watch_id), None)
+}
+
+/// Progress one explicit watch set with one atomic detailed sample per frontier.
+pub(crate) fn wait_for_watches(
+    session_id: Option<String>,
+    max_game_ticks: Option<u64>,
+    watch_ids: Vec<String>,
+    watch_policy: Option<String>,
+) -> WaitPublication {
+    wait_with_selection(
+        session_id, max_game_ticks, None, None, Some((watch_ids, watch_policy)),
+    )
 }
 
 fn wait_with_selection(
@@ -5868,13 +5962,22 @@ fn wait_with_selection(
     max_game_ticks: Option<u64>,
     selected_digest: Option<Digest32>,
     watch_id: Option<String>,
+    watch_set: Option<(Vec<String>, Option<String>)>,
 ) -> WaitPublication {
     let started = std::time::Instant::now();
+    if usize::from(selected_digest.is_some()) + usize::from(watch_id.is_some())
+        + usize::from(watch_set.is_some()) > 1
+    {
+        return WaitPublication::Pending(coded_error_payload(
+            "fortress.wait", ErrorCode::InvalidRequest,
+            "plan_digest, watch_id and watch_ids are mutually exclusive wait selectors",
+        ));
+    }
     let session = match resolve_session(session_id) {
         Ok(value) => value,
         Err(error) => return WaitPublication::Pending(dfmcp_error_payload("fortress.wait", &error)),
     };
-    let watch_selected = watch_id.is_some();
+    let watch_selected = watch_id.is_some() || watch_set.is_some();
     let mut published = false;
     let mut response_budget = None;
     let response = with_wait_session(
@@ -5930,12 +6033,19 @@ fn wait_with_selection(
                 Ok(selected) => selected,
                 Err(error) => return dfmcp_error_payload("fortress.wait", &error),
             };
-            let mut watcher = match watch_id
-                .map(|handle| selected_watch_wait::SelectedWatchWait::new(
+            let admitted_watch = match (watch_id, watch_set) {
+                (Some(handle), None) => selected_watch_wait::SelectedWatchWait::new(
                     guard, handle, requested_ticks, started,
-                ))
-                .transpose()
-            {
+                ).map(|watch| Some(WaitWatchSelection::Single(watch))),
+                (None, Some((handles, policy))) => selected_watch_set_wait::SelectedWatchSetWait::new(
+                    guard, handles, policy, requested_ticks, started,
+                ).map(|watches| Some(WaitWatchSelection::Set(watches))),
+                (None, None) => Ok(None),
+                (Some(_), Some(_)) => Err(DfmcpError::new(
+                    ErrorCode::InvalidRequest, "watch_id and watch_ids are mutually exclusive",
+                )),
+            };
+            let mut watcher = match admitted_watch {
                 Ok(watcher) => watcher,
                 Err(error) => return dfmcp_error_payload("fortress.wait", &error),
             };
@@ -5965,12 +6075,12 @@ fn wait_with_selection(
                     guard, action_id, &tracked_order, &latest_receipts, &progress, true,
                 ) {
                     Ok(payload) => payload,
-                    Err(error) => return wait_progress_error(
+                    Err(error) => return wait_selection_error(
                         guard, &error, &progress, &latest_receipts, selected.as_ref(), Some(watch),
                     ),
                 };
                 if let Err(error) = watch.sample(guard, payload) {
-                    return wait_progress_error(
+                    return wait_selection_error(
                         guard, &error, &progress, &latest_receipts, selected.as_ref(), Some(watch),
                     );
                 }
@@ -5983,14 +6093,14 @@ fn wait_with_selection(
                         break;
                     }
                     if let Err(error) = watch.check(guard) {
-                        return wait_progress_error(
+                        return wait_selection_error(
                             guard, &error, &progress, &latest_receipts, selected.as_ref(), Some(watch),
                         );
                     }
                 }
                 if let Some(selected) = &selected {
                     if let Err(error) = selected.check(guard) {
-                        return wait_progress_error(
+                        return wait_selection_error(
                             guard,
                             &error,
                             &progress,
@@ -6006,7 +6116,7 @@ fn wait_with_selection(
                 let (_, ctx) = match next_context(guard) {
                     Ok(value) => value,
                     Err(error) => {
-                        return wait_progress_error(guard, &error, &progress, &latest_receipts, selected.as_ref(), watcher.as_ref());
+                        return wait_selection_error(guard, &error, &progress, &latest_receipts, selected.as_ref(), watcher.as_ref());
                     }
                 };
                 let carried_ceiling = carried_wait_ceiling(guard);
@@ -6022,7 +6132,7 @@ fn wait_with_selection(
                     Ok(Some(slice)) => slice,
                     Ok(None) => break,
                     Err(error) => {
-                        return wait_progress_error(guard, &error, &progress, &latest_receipts, selected.as_ref(), watcher.as_ref());
+                        return wait_selection_error(guard, &error, &progress, &latest_receipts, selected.as_ref(), watcher.as_ref());
                     }
                 };
                 let finished = slice.finished;
@@ -6049,7 +6159,7 @@ fn wait_with_selection(
                             remember_version(guard);
                         }
                     }
-                    return wait_progress_error(
+                    return wait_selection_error(
                         guard, &error, &progress, &latest_receipts,
                         selected.as_ref(), watcher.as_ref(),
                     );
@@ -6062,13 +6172,13 @@ fn wait_with_selection(
                             "wait stopped at an unpublished durable frontier ({fault}); further progress requires successful persistence"
                         ),
                     );
-                    return wait_progress_error(guard, &error, &progress, &latest_receipts, selected.as_ref(), watcher.as_ref());
+                    return wait_selection_error(guard, &error, &progress, &latest_receipts, selected.as_ref(), watcher.as_ref());
                 }
                 remember_version(guard);
                 if let Some(selected) = &mut selected
                     && let Err(error) = selected.inspect(guard)
                 {
-                    return wait_progress_error(
+                    return wait_selection_error(
                         guard,
                         &error,
                         &progress,
@@ -6082,12 +6192,12 @@ fn wait_with_selection(
                         guard, action_id, &tracked_order, &latest_receipts, &progress, true,
                     ) {
                         Ok(payload) => payload,
-                        Err(error) => return wait_progress_error(
+                        Err(error) => return wait_selection_error(
                             guard, &error, &progress, &latest_receipts, selected.as_ref(), Some(watch),
                         ),
                     };
                     if let Err(error) = watch.sample(guard, payload) {
-                        return wait_progress_error(
+                        return wait_selection_error(
                             guard, &error, &progress, &latest_receipts, selected.as_ref(), Some(watch),
                         );
                     }
@@ -6101,7 +6211,7 @@ fn wait_with_selection(
                     published = true;
                     return response;
                 }
-                return wait_progress_error(
+                return wait_selection_error(
                     guard,
                     &DfmcpError::new(ErrorCode::InternalInvariantViolation,
                         "selected watch wait has no admitted publication"),
@@ -6113,7 +6223,7 @@ fn wait_with_selection(
                 max_game_ticks.is_some(),
             ) {
                 Ok(payload) => payload,
-                Err(error) => return wait_progress_error(
+                Err(error) => return wait_selection_error(
                     guard, &error, &progress, &latest_receipts, selected.as_ref(), None,
                 ),
             };
@@ -6124,7 +6234,7 @@ fn wait_with_selection(
             if let Some(selected) = &selected
                 && let Err(error) = selected.check(guard)
             {
-                return wait_progress_error(
+                return wait_selection_error(
                     guard,
                     &error,
                     &progress,

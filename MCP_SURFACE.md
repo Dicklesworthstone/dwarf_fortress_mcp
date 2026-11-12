@@ -559,7 +559,8 @@ another explicit plan and confirmation.
 In the reference laboratory, a positive `max_game_ticks` request requires
 current `ControlClock` authority. An unpaused advance must remain within both
 clock and observation grants through its final tick, and within the negotiated
-game-tick budget. Zero-tick polling requires observation authority only.
+game-tick budget. Untargeted zero-tick polling requires observation authority
+only; selected plans and watches also require current Query authority.
 Goal outcome and observed physical work are reported separately.
 
 Laboratory waits interleave bounded time slices with dependency-ordered polling
@@ -581,8 +582,26 @@ verified actions and quiet physical work agree, or when a stage, failure or
 unknown outcome needs attention. Other retained work progresses during the same
 shared time; selection does not follow descendants or dispatch a continuation.
 `selected_plan_wait` separates original goal truth, stage proof, physical work
-and exact reserve evidence. The optional selector is recorded in replay, and
-omitting it preserves duration-based waiting. See `docs/LAB_SELECTED_PLAN_WAIT.md`.
+and exact reserve evidence. The optional selector is recorded in replay. See
+`docs/LAB_SELECTED_PLAN_WAIT.md`.
+
+A laboratory condition can instead be selected with `watch_id`, or an explicit
+set of one to eight distinct owned handles with `watch_ids`. The optional
+`watch_policy` is valid only with `watch_ids`: `all_satisfied` (default) or
+`any_satisfied`. All three selectors are mutually exclusive; omitting them
+preserves duration-based waiting. At each bounded published world, the selected
+set is sampled in one atomic transaction, with each unfinished watch's original
+cadence and deadline constraining advancement. Failure, expiry, invalidation,
+cancellation and unknown evidence take precedence over group satisfaction.
+`selected_watch_set_wait` returns complete original definitions and evidence in
+canonical handle order. Group success aggregates retained outcomes, including
+historical terminal records; it does not claim the predicates are all currently
+or simultaneously true. Existing game work continues and unselected watches
+remain unsampled. The initial complete response must fit before time advances,
+and every later complete packet must fit before any selected watch root changes.
+Watch handles are process-local, so these waits are recorded but make replay
+bundles nonreplayable. See `docs/LAB_CONDITION_WATCHES.md` and
+`docs/LAB_SELECTED_WATCH_SET_WAIT.md`.
 
 ### `fortress.cancel`
 

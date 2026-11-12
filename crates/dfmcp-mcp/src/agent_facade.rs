@@ -2416,17 +2416,39 @@ pub fn fortress_wait_for_watch(
     fortress_wait_for_selection(session_id, max_game_ticks, None, Some(watch_id))
 }
 
-/// The wire still exposes one fortress_wait tool. A selector changes when its
-/// bounded foreground work returns; every authority is checked independently.
-#[tool(
-    name = "fortress_wait",
-    description = "Progress retained laboratory work in bounded foreground intervals. max_game_ticks caps time advanced while unpaused; each interval observes prerequisites and dispatches authorized ready successors, then persists progress before continuing. Optional plan_digest selects one exact original commit owned by this session, stopping when its original goal, action proofs and physical work complete or need attention. Optional watch_id instead selects one retained laboratory condition returned by temporal watch registration; intervals stop at its original cadence and deadline, sample the exact published world, and return early on satisfaction, failure, expiry, invalidation, cancellation or unknown evidence. plan_digest and watch_id are mutually exclusive. Watch selection requires current whole-fortress Observe and Query; positive time also requires ControlClock, with the requested horizon authorized before advancement. A zero-tick watch wait samples only the current world. Selection never changes predicates, deadlines, required stability, unpauses, cancels, follows descendant plans or grants mutation authority. Other committed work continues during shared world time. selected_watch_wait preserves the original definition and exact sample evidence; cursor gaps reset positive stability. Without either selector, duration-based behavior is unchanged. Reports actual elapsed and remaining ticks; pause and progression errors stop further advancement."
-)]
+/// Preserve the original four-argument selected-wait Rust API.
 pub fn fortress_wait_for_selection(
     session_id: Option<String>,
     max_game_ticks: Option<u64>,
     plan_digest: Option<String>,
     watch_id: Option<String>,
+) -> String {
+    fortress_wait_for_targets(session_id, max_game_ticks, plan_digest, watch_id, None, None)
+}
+
+/// Foreground wait for one explicit set of independent laboratory conditions.
+pub fn fortress_wait_for_watches(
+    session_id: Option<String>,
+    max_game_ticks: Option<u64>,
+    watch_ids: Vec<String>,
+    watch_policy: Option<String>,
+) -> String {
+    fortress_wait_for_targets(session_id, max_game_ticks, None, None, Some(watch_ids), watch_policy)
+}
+
+/// The wire still exposes one fortress_wait tool. A selector changes when its
+/// bounded foreground work returns; every authority is checked independently.
+#[tool(
+    name = "fortress_wait",
+    description = "Progress retained laboratory work in bounded foreground intervals. max_game_ticks caps time advanced while unpaused; each interval observes prerequisites and dispatches authorized ready successors, then persists progress before continuing. Optional plan_digest selects one exact original commit owned by this session, stopping when its original goal, action proofs and physical work complete or need attention. Optional watch_id instead selects one retained laboratory condition returned by temporal watch registration; intervals stop at its original cadence and deadline, sample the exact published world, and return early on satisfaction, failure, expiry, invalidation, cancellation or unknown evidence. Alternatively watch_ids selects one to eight unique owned handles with watch_policy=all_satisfied (default) or any_satisfied. The whole selected set is sampled atomically at each published frontier using each original cadence and deadline. Failed, expired, invalidated, cancelled and blocked_unknown members take precedence over group completion. Group success aggregates retained watch outcomes, including historical terminals; it never proves simultaneous current truth. plan_digest, watch_id and watch_ids are mutually exclusive, and watch_policy is valid only with watch_ids. Watch selection requires current whole-fortress Observe and Query; positive time also requires ControlClock, with the requested horizon authorized before advancement. A zero-tick watch wait samples only the current world. Selection never changes predicates, deadlines, required stability, unpauses, cancels, follows descendant plans or grants mutation authority. Other committed work continues during shared world time. selected_watch_wait preserves the original definition and exact sample evidence; cursor gaps reset positive stability. Without a selector, duration-based behavior is unchanged. Reports actual elapsed and remaining ticks; pause and progression errors stop further advancement."
+)]
+pub fn fortress_wait_for_targets(
+    session_id: Option<String>,
+    max_game_ticks: Option<u64>,
+    plan_digest: Option<String>,
+    watch_id: Option<String>,
+    watch_ids: Option<Vec<String>>,
+    watch_policy: Option<String>,
 ) -> String {
     let mut recorded = json!({"max_game_ticks": max_game_ticks});
     if let Some(digest) = &plan_digest {
@@ -2435,24 +2457,53 @@ pub fn fortress_wait_for_selection(
     if let Some(watch) = &watch_id {
         recorded["watch_id"] = json!(watch);
     }
-    let publication = match (plan_digest, watch_id) {
-        (Some(_), Some(_)) => {
-            crate::server::WaitPublication::Pending(crate::server::coded_error_payload(
-                "fortress.wait",
-                dfmcp_core::ErrorCode::InvalidRequest,
-                "plan_digest and watch_id are mutually exclusive wait selectors",
-            ))
+    if let Some(watches) = &watch_ids {
+        recorded["watch_ids"] = json!(watches);
+    }
+    if let Some(policy) = &watch_policy {
+        recorded["watch_policy"] = json!(policy);
+    }
+    let selector_error = if watch_policy.is_some() && watch_ids.is_none() {
+        Some("watch_policy requires an explicit watch_ids selection")
+    } else if watch_policy.as_deref().is_some_and(|policy| {
+        !matches!(policy, "all_satisfied" | "any_satisfied")
+    }) {
+        Some("watch_policy must be all_satisfied or any_satisfied")
+    } else if plan_digest.is_some() && watch_id.is_some() && watch_ids.is_none() {
+        Some("plan_digest and watch_id are mutually exclusive wait selectors")
+    } else if usize::from(plan_digest.is_some()) + usize::from(watch_id.is_some())
+        + usize::from(watch_ids.is_some()) > 1
+    {
+        Some("plan_digest, watch_id and watch_ids are mutually exclusive wait selectors")
+    } else {
+        None
+    };
+    let publication = if let Some(message) = selector_error {
+        crate::server::WaitPublication::Pending(crate::server::coded_error_payload(
+            "fortress.wait", dfmcp_core::ErrorCode::InvalidRequest, message,
+        ))
+    } else if let Some(watches) = watch_ids {
+        crate::server::wait_for_watches(
+            session_id.clone(), max_game_ticks, watches, watch_policy,
+        )
+    } else {
+        match (plan_digest, watch_id) {
+            (Some(_), Some(_)) => crate::server::WaitPublication::Pending(
+                crate::server::coded_error_payload(
+                    "fortress.wait", dfmcp_core::ErrorCode::InvalidRequest,
+                    "plan_digest and watch_id are mutually exclusive wait selectors",
+                ),
+            ),
+            (None, Some(watch)) => {
+                crate::server::wait_for_watch(session_id.clone(), max_game_ticks, watch)
+            }
+            (Some(digest), None) => crate::server::WaitPublication::Pending(
+                crate::server::wait_for_plan(session_id.clone(), max_game_ticks, digest),
+            ),
+            (None, None) => crate::server::WaitPublication::Pending(
+                crate::server::wait_with_ticks(session_id.clone(), max_game_ticks),
+            ),
         }
-        (None, Some(watch)) => {
-            crate::server::wait_for_watch(session_id.clone(), max_game_ticks, watch)
-        }
-        (Some(digest), None) => crate::server::WaitPublication::Pending(
-            crate::server::wait_for_plan(session_id.clone(), max_game_ticks, digest),
-        ),
-        (None, None) => crate::server::WaitPublication::Pending(crate::server::wait_with_ticks(
-            session_id.clone(),
-            max_game_ticks,
-        )),
     };
     let response = match publication {
         crate::server::WaitPublication::Pending(raw) => project_response(
@@ -2477,9 +2528,10 @@ pub fn fortress_wait_for_selection(
     response
 }
 
-// Existing Rust integrations keep both registered handler names.
-pub use FortressWaitForSelection as FortressWait;
-pub use FortressWaitForSelection as FortressWaitForPlan;
+// Existing Rust integrations retain every prior registered handler alias.
+pub use FortressWaitForTargets as FortressWait;
+pub use FortressWaitForTargets as FortressWaitForPlan;
+pub use FortressWaitForTargets as FortressWaitForSelection;
 
 #[tool(
     description = "Request, drain, compensate when authorized, and finalize cancellation while preserving recovery state. mode: compensate_reversible (default) | stop_future_steps | emergency_pause_and_drain. scope: last_action (default), plan (last committed plan), plan:<64-lowercase-original-plan-digest> (one exact commit owned by this session, leaving other plans and descendants alone), oldest_open_plan (earliest retained original plan, for bounded cleanup), or session (all retained open work across this session's plans). Drain dependents first and return a finalize_certificate only when goal states are terminal and physical work is proven quiescent. Failed and Verified receipts remain history; their remaining work can be stopped with separate evidence."

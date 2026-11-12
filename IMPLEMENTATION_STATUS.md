@@ -1,5 +1,39 @@
 # Implementation Status
 
+## Unreleased — Wait for a selected set of laboratory conditions
+
+The existing fortress_wait tool accepts an explicit watch_ids set of one to
+eight unique session-owned handles and an all_satisfied or any_satisfied policy.
+Each watch keeps its original predicate, failure guard, cadence, deadline and
+stability requirement. Foreground slices stop at the earliest selected cadence
+or deadline; all selected records at a frontier are evaluated and published in
+one candidate transaction. Failure, expiry, invalidation, cancellation and
+unknown evidence take precedence over a successful member.
+
+Complete results retain each immutable definition, full historical evidence,
+current-anchor status and aggregate sampling/work counts. Satisfaction describes
+retained watch outcomes; it does not claim simultaneous current truth. Current
+Observe/Query and requested-span Clock authority, complete source admission and
+one wall deadline precede publication. Pending plans, baselines, committed work
+and unselected watches remain intact. Complete group packets fit before any
+watch root changes; a late refusal keeps actual elapsed time separate from the
+last accepted evidence. Existing scalar/plan Rust entry points and all eleven
+wire tool names remain available. Raw selected handles remain nonportable.
+
+Thirteen new regression sources cover interleaved cadences, both completion
+policies, historical truth, terminal/unknown precedence, deadlines, malformed
+or foreign sets, bounds, zero-tick/pause behavior, current authority and budget
+refusals, real brewing with retained work, atomic late publication refusal and
+generated wire discovery. These tests have not run. On the restored executor,
+cargo +nightly fetch --locked failed with ENOSPC while unpacking an unchanged
+dependency; the executor then disconnected before compilation or formatting.
+Recovered source and integration were reviewed through GitHub, but compilation,
+Rust formatting, generated wire behavior and full runtime qualification remain
+unverified. No new native admission or live-game qualification is claimed.
+
+Owning bead df-lab-structured-query-f7q.3 remains in progress.
+See docs/LAB_SELECTED_WATCH_SET_WAIT.md for the selected-set workflow.
+
 ## Unreleased — Same-session recovery from oversized complete reviews
 
 The laboratory opening tool now accepts an explicit existing `session_id` plus
