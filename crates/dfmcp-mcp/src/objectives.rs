@@ -1084,18 +1084,11 @@ pub(super) fn objective_evictions(session: &LabSession, digest: Digest32) -> Res
         if !matches!(completion, Ok(PredicateTruth::True)) {
             continue;
         }
-        match objective.future_reserve_source() {
-            Ok(Some(source)) => match objective.future_reserve_status(session, &source) {
-                Ok(
-                    ProductionReserveStatus::FundedFromCurrentStock
-                    | ProductionReserveStatus::Expired,
-                ) => {}
-                // A presently true quota can still have unfinished future
-                // reserve work. Missing qualification never frees that intent.
-                Ok(ProductionReserveStatus::WorkRequired) | Err(_) => continue,
-            },
-            Ok(None) => {}
-            Err(_) => continue,
+        // An exact observed endpoint, not predicted funding or an expired
+        // horizon, establishes that a reserve original may release its history.
+        // Missing, false, unknown or unverifiable endpoints retain capacity.
+        if !matches!(reserve::eviction_is_complete(objective, session), Ok(true)) {
+            continue;
         }
         if session.durable_scenario.is_some()
             && with_durable_store(|store| {

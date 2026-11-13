@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased — Retain unproved original reserve goals at capacity
+
+- Keep future-reserve originals when their exact endpoint is missing, false,
+  unknown or unverifiable, including after the horizon has passed. Current
+  ample stock and predicted funding no longer discard unresolved history.
+- Recheck immutable endpoint snapshots, original ledger identity, accepted
+  recovery lineage, durable custody, current read grants and source budgets
+  before allowing otherwise-complete quiet goals to release bounded capacity.
+- Add full-book pre-effect refusal and valid local/recovered endpoint regression
+  sources. Independent source review completed; Rust tests and formatting were
+  not run because the execution environment was unavailable.
+
 ## Unreleased — Keep lexical search usable with long announcements
 
 - Bound only the announcement display title on a valid UTF-8 boundary; keep

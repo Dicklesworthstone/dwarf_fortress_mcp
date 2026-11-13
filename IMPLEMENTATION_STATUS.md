@@ -1,5 +1,31 @@
 # Implementation Status
 
+## Unreleased — Retain unproved original reserve goals at capacity
+
+Original-goal admission no longer treats projected reserve funding or an elapsed
+horizon as completed reserve evidence. When the bounded goal book fills, a
+future-reserve original now requires its first exact-horizon observation to be
+True before its history can be evicted. Missing, false, unknown, wrong-horizon
+or unverifiable endpoints retain the original even when current stock is ample.
+Existing historical achievement, current original predicate, physical quiet and
+unfinished durable-commit checks remain mandatory.
+
+The read-only eligibility check rederives endpoint truth from the immutable
+snapshot and original sealed output ledger under current Observe and Query
+authority and source budgets. It validates the active lineage and exact durable
+endpoint binding; verified recovery can retain a prior process epoch. Capacity
+inspection neither captures a new endpoint nor repairs or overwrites history.
+A refused admission preserves the pending plan and current world before effects.
+
+Two regression tests cover full-book admission before a funded horizon and
+after a missed horizon, plus process-local and durable recovered True endpoints,
+missing/false/unknown records, incorrect horizons/lineage, revoked Query and
+exhausted source budgets. The source received independent review; these tests,
+Rust compilation and formatting remain unexecuted after the execution
+environment disconnected. No full-workspace, live-game or admission evidence
+is claimed. Bead `df-lab-selected-plan-wait-s4q` retains its broader in-progress
+scope.
+
 ## Unreleased — Keep lexical search usable with long announcements
 
 Snapshot indexing now derives a UTF-8-safe display title of at most 256 bytes

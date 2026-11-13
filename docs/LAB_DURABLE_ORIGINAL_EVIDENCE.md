@@ -100,6 +100,16 @@ record bound; source request text remains in its own original record. Exact
 receipt and endpoint objects are compaction roots. Eligible original-history
 eviction releases only that original's archive and endpoint roots.
 
+Capacity admission retains every unresolved future reserve. Predicted funding
+before the horizon and expiration after it cannot substitute for the first
+selected exact-horizon observation. That endpoint must be True when rederived
+from its immutable snapshot and original output ledger, with current read
+authority, source budgets and accepted active recovery lineage. Missing, false,
+unknown or unverifiable endpoints cannot release an original's capacity or
+history roots. Existing current-goal, historical-achievement, physical-quiet
+and unfinished-commit checks still apply. This inspection never records or
+replaces endpoint evidence and refuses admission before a new effect.
+
 On reopen, every retained object is content-verified and every metadata anchor
 must equal its decoded snapshot anchor. Receipt frontiers must follow the
 original seal, except an explicit abandoned disposition at the original's exact

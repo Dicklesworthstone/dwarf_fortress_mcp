@@ -70,6 +70,80 @@ pub(super) fn recover_reserve_observation(
     Ok(())
 }
 
+/// Capacity admission must retain an original reserve until its exact endpoint
+/// is proved. Predicted funding and elapsed time do not complete that history.
+/// Use the same original ledger, immutable source and accepted observation
+/// lineage as selected waits; this read never records or repairs an endpoint.
+pub(super) fn eviction_is_complete(objective: &Objective, session: &LabSession) -> Result<bool> {
+    let Some(until) = objective.selected_wait_reserve_horizon()? else {
+        return Ok(true);
+    };
+    let Some((anchor, PredicateTruth::True)) = objective.selected_wait_reserve_observation else {
+        return Ok(false);
+    };
+    let context = read_context(session);
+    authorize_entry(&context, Capability::Observe, RiskTier::ReadOnly)?;
+    authorize_entry(&context, Capability::Query, RiskTier::ReadOnly)?;
+    let sealed = objective
+        .sealed_anchor
+        .ok_or_else(|| conflict("reserve eviction lacks its verified original seal"))?;
+    let active = objective
+        .active_observation_anchor
+        .ok_or_else(|| conflict("reserve eviction lacks its accepted active lineage"))?;
+    let current = session.adapter.snapshot();
+    if objective.abandoned(session)
+        || objective.verification_error.is_some()
+        || anchor.tick.0 != until
+        || !precedes(sealed, anchor)
+        || !precedes(anchor, current.anchor())
+        || active.cursor.epoch != current.cursor.epoch
+        || !precedes(active, current.anchor())
+        || (anchor.cursor.epoch != current.cursor.epoch
+            && (objective.originating_process || !objective.selected_wait_reserve_durable))
+    {
+        return Err(conflict(
+            "reserve eviction requires the exact original endpoint in its accepted active lineage",
+        ));
+    }
+    let snapshot = if objective.selected_wait_reserve_durable {
+        if session.durable_scenario.is_none() {
+            return Err(conflict("durable reserve endpoint lost its owning store"));
+        }
+        with_durable_store(|store| {
+            if store.objective_reserve_observation(session.fortress_id, objective.plan_digest)
+                != Some(anchor)
+            {
+                return Err(conflict(
+                    "durable reserve endpoint changed or lost original custody",
+                ));
+            }
+            store.load_snapshot(anchor.state_hash)
+        })?
+    } else if current.anchor() == anchor {
+        current.clone()
+    } else {
+        session
+            .history
+            .get(&anchor.state_hash)
+            .filter(|snapshot| snapshot.anchor() == anchor)
+            .cloned()
+            .ok_or_else(|| conflict("the exact original reserve snapshot is no longer retained"))?
+    };
+    let sources = if current.anchor() == anchor {
+        vec![current]
+    } else {
+        vec![current, &snapshot]
+    };
+    query_budget::admit_sources(&sources, &context)?;
+    if !snapshot.hash_is_valid() || snapshot.anchor() != anchor {
+        return Err(DfmcpError::new(
+            ErrorCode::CorruptLedger,
+            "reserve eviction has no exact content-verified endpoint snapshot",
+        ));
+    }
+    Ok(endpoint_truth(objective, &snapshot)? == PredicateTruth::True)
+}
+
 /// Load an admitted exact recovered endpoint into the ordinary bounded version
 /// book. Subsequent source budgeting and canonical state reads share those
 /// same bytes; no new current observation or world mutation occurs.
