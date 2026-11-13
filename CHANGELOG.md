@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased — Resume the exact original laboratory plan after restart
+
+- Extend `fortress.wait(plan_digest=...)` to an exactly identified durable
+  original whose source, active recovery lineage and complete anchored step
+  receipts can be verified. Reuse the carried proof monitors and shared
+  foreground driver without recreating action handles or dispatch authority.
+- Preserve verified prerequisites that recovery no longer carries as active
+  work. Keep historical action proof, current original goal truth and current
+  physical quiet separate; never infer successful actions from an achieved goal.
+- Expose recovery provenance, original owner and never-dispatched action counts.
+  Deferred original steps remain undispatched; observation can return a separately
+  reviewable continuation when the existing semantic planner supports one.
+- Require current Observe/Query and positive-time ControlClock authority, retain
+  exact deadlines and observation cadence, refuse restored or incomplete custody,
+  and allow a zero-tick reinspection after recovered work completes. Preserve
+  the existing eleven tools and live original-selection behavior.
+- Add five focused custody tests and three public facade restart regressions.
+  Scoped Rustfmt and whitespace checks pass. A resource-capped ordinary MCP check
+  was SIGKILLed in unchanged Asupersync before project compilation; the new MCP
+  tests have not executed. The earlier 424 pure-crate passes were baseline evidence.
+  Legacy retired commits without complete action receipts remain unavailable to
+  recovered selection. No native admission or full qualification is claimed.
+
 ## Unreleased — Enforce original input supply and inspect production chains
 
 - Connect optional conserved furniture inputs to all six combined-production

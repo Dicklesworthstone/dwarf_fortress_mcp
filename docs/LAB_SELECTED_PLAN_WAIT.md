@@ -1,7 +1,8 @@
 # Wait for one original laboratory project
 
 The existing laboratory `fortress_wait` MCP tool accepts an optional
-`plan_digest`. It identifies one original commit owned by the current session.
+`plan_digest`. It identifies one original commit owned by the current session,
+or an exact original recovered from a durable fortress with complete step evidence.
 The wait advances the same shared laboratory world and observes the same
 retained actions, but returns at a meaningful outcome for that selected project
 instead of always consuming the entire requested time allowance.
@@ -20,8 +21,8 @@ instead of always consuming the entire requested time allowance.
 Use the original commit's digest even when a later plan is now the session's
 most recent work. The requested and actual sealed digests are reported
 separately when witness rebase created a retained alias. A pending review,
-another session's commit, or restored source history cannot substitute for
-the exact session-owned original commit and its complete action set.
+another live session's commit, or restored source history cannot substitute for
+the exact original and its complete action evidence.
 
 Omitting `plan_digest`, `watch_id` and `watch_ids` preserves the existing
 duration-based wait. The additive [single-watch selector](LAB_CONDITION_WATCHES.md)
@@ -91,6 +92,44 @@ alongside the current source. This read-derived cache is process-local:
 past reserve evidence from current stock.
 
 ## Authority, bounds and recovery
+
+### Resume an interrupted durable project
+
+After reopening a durable fortress, pass the original `plan_digest` returned
+before the restart. The new session can monitor that exact project with current
+Observe and Query authority; positive game ticks additionally require
+ControlClock. Designate, Construct, production, labor and Plan permissions are
+not reconstructed from historical custody. Existing physical world work can
+progress without a new dispatch of its original action.
+
+The recovered selector verifies the original source and sealed archive, the
+accepted recovery lineage, and every original step's archived receipt or
+matching carried obligation. This includes verified prerequisite steps that
+have already retired from active monitoring. Unfinished obligations keep their
+original deadline and cadence and require new stability observations after
+recovery. A current true goal does not substitute for missing action evidence.
+
+Recovered responses use `selection_scope: "exact_recovered_original"` and
+`selection_origin: "durable_recovery"`. They retain the originating owner as
+historical metadata and report `owns_original_dispatch: false` and
+`dispatch_handles_restored: false`. The exact original digest is required;
+recovery does not infer live request aliases or adopt another live session's work.
+
+Deferred steps that were never dispatched remain untouched. Once the actual
+world work is quiet, the response reports the unmet original goal and
+`not_dispatched_actions`. A supported semantic goal can offer the existing
+separately reviewed continuation. A raw action list requires a new explicit
+review. Selected waiting never executes a recovered deferred step.
+
+After a carried project completes, a zero-tick selected wait can inspect the
+same recovered outcome without committing more work. Restore abandons the old
+pursuit and makes it ineligible. Missing, duplicated, contradictory or
+unanchored step evidence refuses before time advances. Old fully retired
+commits whose durable history no longer contains complete action receipts
+remain ineligible: verified historical goal achievement alone does not prove
+all original actions.
+
+### Live selection and shared bounds
 
 Selection validates the complete original commit, action identities and step
 order before progression. Current Observe and Query authority admit the

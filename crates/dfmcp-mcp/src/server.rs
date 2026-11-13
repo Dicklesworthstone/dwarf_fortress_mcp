@@ -6059,6 +6059,7 @@ fn wait_with_selection(
                 && guard.carried.iter().all(CarriedStep::is_final)
                 && max_game_ticks.is_none_or(|ticks| ticks == 0)
                 && !watch_selected
+                && selected_digest.is_none()
             {
                 return coded_error_payload(
                     "fortress.wait",

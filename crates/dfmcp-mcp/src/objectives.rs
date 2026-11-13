@@ -57,6 +57,10 @@ pub(super) struct Objective {
     /// Live adapter handles can still own deferred dispatch. Recovery and
     /// restore never reconstruct that authority from the retained plan.
     original_handles_live: bool,
+    /// Exact archived action dispositions, captured before recovery may retire
+    /// the original commit. This book grants observation only and never
+    /// reconstructs missing terminal receipts from an achieved goal.
+    recovered_wait_custody: Option<super::selected_plan_wait::RecoveredPlanCustody>,
     /// Positive retired-step custody, verified against the original seal and
     /// exact archived frontier. A missing entity never populates this map.
     retired_never_dispatched: BTreeMap<u32, goal_custody::RetiredNondispatchProof>,
@@ -157,6 +161,43 @@ impl Objective {
         }
     }
 
+    pub(super) fn selected_wait_recovery(
+        &self,
+        session: &LabSession,
+    ) -> Result<&super::selected_plan_wait::RecoveredPlanCustody> {
+        if self.originating_process
+            || self.original_handles_live
+            || self.abandoned(session)
+            || self.verification_error.is_some()
+        {
+            return Err(DfmcpError::new(
+                ErrorCode::Conflict,
+                "selected recovery requires a verified, un-abandoned original with retired dispatch handles",
+            ));
+        }
+        let plan = self.plan.as_ref().ok_or_else(|| {
+            DfmcpError::new(
+                ErrorCode::CorruptLedger,
+                "the recovered original plan is unavailable",
+            )
+        })?;
+        let active = self.active_observation_anchor.ok_or_else(|| {
+            DfmcpError::new(
+                ErrorCode::Conflict,
+                "the recovered original has no verified active observation lineage",
+            )
+        })?;
+        let custody = self.recovered_wait_custody.as_ref().ok_or_else(|| {
+            DfmcpError::new(
+                ErrorCode::Conflict,
+                "the recovered original has no complete retained action receipts",
+            )
+            .with_detail("reason", "action_evidence_unavailable")
+        })?;
+        custody.validate(plan, active, session.adapter.snapshot().anchor())?;
+        Ok(custody)
+    }
+
     pub(super) fn selected_wait_stage_truth(&self, session: &LabSession) -> Result<PredicateTruth> {
         self.current_truth(session)
     }
@@ -166,7 +207,9 @@ impl Objective {
     }
 
     pub(super) fn selected_wait_reserve_horizon(&self) -> Result<Option<u64>> {
-        Ok(self.future_reserve_source()?.and_then(|source| source.reserve_until_tick()))
+        Ok(self
+            .future_reserve_source()?
+            .and_then(|source| source.reserve_until_tick()))
     }
 
     /// The immutable absolute frontier is not an action deadline. Remaining
@@ -180,7 +223,10 @@ impl Objective {
             return Ok(None);
         };
         let until = source.reserve_until_tick().ok_or_else(|| {
-            DfmcpError::new(ErrorCode::CorruptLedger, "original reserve horizon is missing")
+            DfmcpError::new(
+                ErrorCode::CorruptLedger,
+                "original reserve horizon is missing",
+            )
         })?;
         let required = match self.future_reserve_status(session, &source)? {
             ProductionReserveStatus::WorkRequired => Some(true),
@@ -340,6 +386,7 @@ impl Objective {
             resource_output_ledger: None,
             active_observation_anchor: Some(plan.anchor),
             original_handles_live: true,
+            recovered_wait_custody: None,
             retired_never_dispatched: BTreeMap::new(),
             first_satisfied_anchor: None,
             historical_proof_verified: false,
@@ -1214,6 +1261,7 @@ pub(super) fn recover_objective(
         resource_output_ledger: None,
         active_observation_anchor: None,
         original_handles_live: false,
+        recovered_wait_custody: None,
         retired_never_dispatched: BTreeMap::new(),
         first_satisfied_anchor: retained.first_satisfied_anchor,
         historical_proof_verified: false,
@@ -1325,6 +1373,10 @@ pub(super) fn recover_objective(
                 ));
             }
             objective.active_observation_anchor = Some(recovery.active_anchor());
+            objective.recovered_wait_custody =
+                Some(super::selected_plan_wait::RecoveredPlanCustody::capture(
+                    store, retained, &plan, recovery,
+                ));
         }
         objective.plan = Some(plan);
         objective.retired_never_dispatched = retired;

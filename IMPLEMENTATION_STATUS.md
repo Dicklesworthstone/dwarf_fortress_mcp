@@ -1,5 +1,63 @@
 # Implementation Status
 
+## Unreleased — Resume the exact original laboratory plan after restart
+
+`fortress.wait` now accepts an exact recovered original plan digest when its
+original source and sealed archive verify against the accepted durable recovery
+lineage. Selection remains observation-only: it follows the original carried
+obligations through the existing bounded foreground driver, with their original
+absolute deadlines, cadence and freshly established stability. It neither
+recreates dispatch handles nor adopts another live session's commit. Existing
+live selection remains authoritative whenever a live receipt is present.
+
+Recovery captures the complete original step census before terminal commits can
+be retired. Every disposition has its own exact atomic snapshot anchor. Verified
+historical steps must establish their original terminal predicates and completion
+identities; never-dispatched steps require positive original absence custody.
+Current matching carried monitors can advance only their own original steps.
+The selected result independently reports original goal truth, verified action
+count and current physical work. A true goal cannot replace a missing receipt,
+and a historic terminal receipt cannot establish present physical quiet.
+
+The response adds `selection_scope=exact_recovered_original`,
+`selection_origin=durable_recovery`, original owner, explicit false dispatch
+ownership/restoration and `not_dispatched_actions`. Recovery proof includes a
+bounded custody digest and archived-source census. Source records, retained plan
+bytes and carried rows remain within the existing observation budget. Current
+Observe/Query is required even at zero ticks; positive advancement additionally
+requires ControlClock. A zero-tick call can inspect a completed recovered project
+after its final monitor becomes quiet. Restore abandonment, foreign/duplicate or
+missing step evidence, changed lineage and stale grants refuse selection.
+
+Previously deferred effects remain undispatched. When physical work becomes
+quiet, incomplete raw action plans return `goal_unmet`; supported original
+semantic projects can offer a separately reviewed continuation. This preserves
+the distinction between advancing existing physical work and approving a new
+effect. The existing eleven-tool waist, optional argument and replay selector
+remain unchanged. See `docs/LAB_SELECTED_PLAN_WAIT.md` and
+`architecture/laboratory_selected_plan_wait_v1.json`.
+
+Five focused custody tests cover complete, missing, unanchored, false/contradictory
+terminal and future-frontier evidence, active recovery identity and carried
+monitor binding. Three new public facade regression sources cover an archived immediate prerequisite
+with unfinished excavation, exact early completion after restart without effect
+grants, a deferred successor that must remain absent, current read/clock grants,
+zero-tick reinspection and checkpoint restore rejection. Scoped Rustfmt and
+whitespace checks pass. The new MCP tests have not executed; the 424 passing tests in
+`dfmcp-core`, `dfmcp-intent` and `dfmcp-world` preceded these edits and do not
+validate this increment. Ordinary MCP checking was interrupted by executor loss.
+A final jobs=1/debug=0 metadata check with a 3 GiB per-process virtual-memory cap
+was SIGKILLed in unchanged `asupersync v0.5.0` before project compilation; an
+earlier ordinary lab build was SIGKILLed in unchanged adapter codegen.
+No full transport, native-game, production admission or broad acceptance closure
+is claimed. Bead `df-lab-selected-plan-wait-s4q` remains in progress.
+
+At this checkpoint, legacy originals whose terminal action commits were already
+retired before this process opened lack complete retained action receipts and
+remain unavailable to recovered selection. The separately retained goal remains
+observable. Exact reserve endpoints still use the existing process-local cache;
+durable endpoint and retired-receipt retention are the next functional increment.
+
 ## Unreleased — Enforce complete input supply through original production
 
 The combined production host now consumes the furniture input-supply adapter

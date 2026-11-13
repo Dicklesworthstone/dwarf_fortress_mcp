@@ -19,6 +19,10 @@ use super::{LabSession, Objective, anchor_json, authorize_entry, read_context};
 const MAX_SOURCE_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_STEPS: usize = 64;
 
+#[path = "recovered_plan_wait.rs"]
+mod recovered;
+pub(super) use recovered::RecoveredPlanCustody;
+
 fn refused(message: &str) -> DfmcpError {
     DfmcpError::new(ErrorCode::Conflict, message)
 }
@@ -51,6 +55,7 @@ struct Actions {
     total: usize,
     verified: usize,
     terminal: usize,
+    not_dispatched: usize,
     active: usize,
     unknown: usize,
     failed: bool,
@@ -95,12 +100,36 @@ struct ReserveObservation {
     truth: PredicateTruth,
 }
 
+#[derive(Clone)]
+struct RecoveredSelection {
+    custody_digest: Digest32,
+    evidence: Value,
+}
+
+fn exact_original(session: &LabSession, digest: Digest32) -> Result<&Objective> {
+    let mut originals = session
+        .objectives
+        .iter()
+        .filter(|objective| objective.plan_digest == digest);
+    let original = originals
+        .next()
+        .ok_or_else(|| refused("selected wait has no retained original goal"))?;
+    if originals.next().is_some() {
+        return Err(refused(
+            "selected wait has ambiguous retained original goal custody",
+        ));
+    }
+    Ok(original)
+}
+
 /// One request's selector and observation state, held under the session owner.
 /// Historical reserve evidence is never inferred from a later current stock.
 /// Exact observations survive subsequent bounded calls only with the same
 /// original owner and retained snapshot; recovery and restore do not import it.
 pub(super) struct SelectedPlanWait {
     selected: super::plan_cancellation::Selection,
+    recovered: Option<RecoveredSelection>,
+    original_owner_session_id: String,
     started: Instant,
     retained_plan_bytes: usize,
     archive_digest: Digest32,
@@ -124,25 +153,47 @@ pub(super) struct SelectedPlanWait {
 }
 
 impl SelectedPlanWait {
-    pub(super) fn new(session: &mut LabSession, digest: Digest32, started: Instant) -> Result<Self> {
+    pub(super) fn new(
+        session: &mut LabSession,
+        digest: Digest32,
+        started: Instant,
+    ) -> Result<Self> {
         let context = read_context(session);
         context.budget.validate()?;
         authorize_entry(&context, Capability::Observe, RiskTier::ReadOnly)?;
         authorize_entry(&context, Capability::Query, RiskTier::ReadOnly)?;
-        let selected = super::plan_cancellation::select(session, digest)?;
-        let original = session
-            .objectives
-            .iter()
-            .find(|objective| objective.plan_digest == selected.actual)
-            .ok_or_else(|| refused("selected wait has no retained original goal"))?;
+        // A present live receipt is authoritative for selection. Malformed or
+        // foreign live custody cannot be bypassed by trying recovery instead.
+        let (selected, recovered) = if session.commit_receipts.contains_key(&digest.to_hex()) {
+            (super::plan_cancellation::select(session, digest)?, None)
+        } else {
+            let original = exact_original(session, digest)?;
+            let custody = original.selected_wait_recovery(session)?;
+            let plan = original
+                .resource_plan()
+                .ok_or_else(|| refused("selected recovered original plan is unavailable"))?;
+            (
+                super::plan_cancellation::Selection {
+                    requested: digest,
+                    actual: digest,
+                    plan_id: plan.id.to_string(),
+                    actions: Vec::new(),
+                },
+                Some(RecoveredSelection {
+                    custody_digest: custody.digest()?,
+                    evidence: custody.evidence_json()?,
+                }),
+            )
+        };
+        let original = exact_original(session, selected.actual)?;
         let entry = original.resource_goal(session);
-        if !entry.owned_by_current_session
+        if (recovered.is_none() && !entry.owned_by_current_session)
             || entry.restore_abandoned_anchor.is_some()
             || entry.abandonment_publication_pending
             || entry.verification_error.is_some()
         {
             return Err(refused(
-                "selected wait requires the current owner's verified, un-abandoned original goal",
+                "selected wait requires verified, un-abandoned original goal custody",
             ));
         }
         let plan = entry
@@ -150,14 +201,24 @@ impl SelectedPlanWait {
             .ok_or_else(|| refused("selected original plan is unavailable"))?;
         if plan.digest != selected.actual
             || plan.id.to_string() != selected.plan_id
-            || plan.steps.len() != selected.actions.len()
             || plan.anchor.fortress_id != context.anchor.fortress_id
-            || plan.anchor.cursor.epoch != context.anchor.cursor.epoch
+            || (recovered.is_none()
+                && (plan.steps.len() != selected.actions.len()
+                    || plan.anchor.cursor.epoch != context.anchor.cursor.epoch))
         {
             return Err(refused(
-                "selected original plan, epoch and commit custody disagree",
+                "selected original plan, epoch and action custody disagree",
             ));
         }
+        if plan.steps.is_empty()
+            || plan.steps.len() > MAX_STEPS
+            || plan.steps.len() > context.budget.max_actions as usize
+        {
+            return Err(exhausted(
+                "selected original action census exceeds the request budget",
+            ));
+        }
+        let original_owner_session_id = entry.owner_session_id.to_string();
         let (archive, seal) = plan_archive::encode_with_check(
             plan,
             plan_archive::ArchiveLimits {
@@ -209,6 +270,8 @@ impl SelectedPlanWait {
         }
         let mut selected = Self {
             selected,
+            recovered,
+            original_owner_session_id,
             started,
             retained_plan_bytes,
             archive_digest: seal.object_digest,
@@ -235,11 +298,21 @@ impl SelectedPlanWait {
     }
 
     fn original<'a>(&self, session: &'a LabSession) -> Result<&'a Objective> {
-        session
-            .objectives
-            .iter()
-            .find(|objective| objective.plan_digest == self.selected.actual)
-            .ok_or_else(|| refused("selected original goal lost custody during wait"))
+        exact_original(session, self.selected.actual)
+    }
+
+    fn recovery_custody<'a>(&self, session: &'a LabSession) -> Result<&'a RecoveredPlanCustody> {
+        let selected = self
+            .recovered
+            .as_ref()
+            .ok_or_else(|| refused("selected wait has no recovered action custody"))?;
+        let custody = self.original(session)?.selected_wait_recovery(session)?;
+        if custody.digest()? != selected.custody_digest {
+            return Err(refused(
+                "selected recovered original action custody changed",
+            ));
+        }
+        Ok(custody)
     }
 
     pub(super) fn check(&self, session: &LabSession) -> Result<()> {
@@ -257,7 +330,9 @@ impl SelectedPlanWait {
         let mut context = read_context(session);
         let spent = self.started.elapsed().as_nanos().div_ceil(1_000_000);
         if spent >= u128::from(context.budget.max_wall_millis) {
-            return Err(exhausted("selected wait has no source-inspection wall budget"));
+            return Err(exhausted(
+                "selected wait has no source-inspection wall budget",
+            ));
         }
         context.budget.max_wall_millis -= spent as u64;
         let mut snapshots = vec![session.adapter.snapshot()];
@@ -306,15 +381,30 @@ impl SelectedPlanWait {
             }
         }
         records = records.saturating_add(session.carried.len() as u64);
-        bytes = bytes
-            .saturating_add(self.retained_plan_bytes as u64)
-            .saturating_add(
+        bytes = bytes.saturating_add(self.retained_plan_bytes as u64);
+        if self.recovered.is_some() {
+            let custody = self.recovery_custody(session)?;
+            let plan = self
+                .original(session)?
+                .resource_plan()
+                .ok_or_else(|| refused("selected recovered original plan disappeared"))?;
+            records = records.saturating_add(plan.steps.len() as u64);
+            bytes = bytes.saturating_add(custody.bytes()? as u64);
+            // The original proof monitor and continuation oracle can inspect
+            // carried work from siblings. Count every retained row, not only
+            // the selected entries projected in the compact outcome.
+            for row in &session.carried {
+                bytes = bytes.saturating_add(row.to_json().to_string().len() as u64);
+            }
+        } else {
+            bytes = bytes.saturating_add(
                 session
                     .commit_receipts
                     .get(&self.selected.requested.to_hex())
                     .ok_or_else(|| refused("selected original commit custody disappeared"))?
                     .len() as u64,
             );
+        }
         if records > u64::from(context.budget.max_entities)
             || bytes > context.budget.max_bytes.min(MAX_SOURCE_BYTES)
         {
@@ -331,6 +421,13 @@ impl SelectedPlanWait {
     }
 
     fn inspect_actions(&self, session: &LabSession) -> Result<Actions> {
+        if self.recovered.is_some() {
+            let original = self.original(session)?;
+            let plan = original
+                .resource_plan()
+                .ok_or_else(|| refused("selected recovered original plan disappeared"))?;
+            return self.recovery_custody(session)?.inspect(session, plan);
+        }
         let mut actions = Actions {
             total: self.selected.actions.len(),
             ..Actions::default()
@@ -344,14 +441,18 @@ impl SelectedPlanWait {
             actions.verified += usize::from(receipt.state == CommitState::Verified);
             actions.terminal += usize::from(receipt.state.is_terminal());
             actions.failed |= receipt.state == CommitState::Failed;
-            actions.cancelled |=
-                matches!(receipt.state, CommitState::Cancelled | CommitState::Compensated);
+            actions.cancelled |= matches!(
+                receipt.state,
+                CommitState::Cancelled | CommitState::Compensated
+            );
             actions.cancelling |= matches!(
                 receipt.state,
                 CommitState::CancelRequested | CommitState::CompensationPending
             );
-            actions.indeterminate |=
-                matches!(receipt.state, CommitState::Indeterminate | CommitState::Committing);
+            actions.indeterminate |= matches!(
+                receipt.state,
+                CommitState::Indeterminate | CommitState::Committing
+            );
             match session.adapter.action_work_state(*id)? {
                 EffectWorkState::Active { .. } => actions.active += 1,
                 EffectWorkState::Unknown { .. } => actions.unknown += 1,
@@ -403,7 +504,8 @@ impl SelectedPlanWait {
             self.actions,
             self.goal_truth,
             self.reserve_until,
-            self.reserve_observation.map(|observation| observation.truth),
+            self.reserve_observation
+                .map(|observation| observation.truth),
             self.remaining_reserve_work,
             self.reserve_error.is_some(),
             session.adapter.snapshot().tick.0,
@@ -480,7 +582,16 @@ impl SelectedPlanWait {
             "plan_digest":self.selected.actual.to_hex(),
             "plan_id":self.selected.plan_id,
             "plan_object_digest":self.archive_digest.to_hex(),
-            "selection_scope":"exact_original_commit",
+            "selection_scope":if self.recovered.is_some() {
+                "exact_recovered_original"
+            } else { "exact_original_commit" },
+            "selection_origin":if self.recovered.is_some() {
+                "durable_recovery"
+            } else { "current_session_commit" },
+            "original_owner_session_id":self.original_owner_session_id,
+            "owns_original_dispatch":self.recovered.is_none(),
+            "dispatch_handles_restored":false,
+            "recovery_evidence":self.recovered.as_ref().map(|recovered| &recovered.evidence),
             "descendant_plans_included":false,
             "other_session_work_progresses":true,
             "complete":inspection_complete && self.stop == Some("complete"),
@@ -497,6 +608,7 @@ impl SelectedPlanWait {
             "action_count":self.actions.total,
             "verified_actions":self.actions.verified,
             "terminal_actions":self.actions.terminal,
+            "not_dispatched_actions":self.actions.not_dispatched,
             "active_work_actions":self.actions.active,
             "unknown_work_actions":self.actions.unknown,
             "reserve_frontier":reserve,
@@ -512,7 +624,8 @@ impl SelectedPlanWait {
             },
         });
         if inspection_complete && matches!(self.stop, Some("needs_continuation" | "goal_unmet")) {
-            match super::objectives::continuation_source(session, self.selected.actual, None, None) {
+            match super::objectives::continuation_source(session, self.selected.actual, None, None)
+            {
                 Ok(_) => {
                     let next = super::goal_continuation::request_json(
                         &session.session_id.to_string(),

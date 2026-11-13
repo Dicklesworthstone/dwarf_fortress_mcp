@@ -14,6 +14,18 @@
     ]
   },
   "selection_scope": "exact_original_commit",
+  "recovered_selection_scope": "exact_recovered_original",
+  "recovered_selection_origin": "durable_recovery",
+  "recovered_selection_requires": [
+    "exact original digest without inferred live aliases",
+    "verified original source and sealed archive",
+    "accepted active durable recovery lineage",
+    "complete original step evidence from anchored archived receipts and matching carried obligations",
+    "current observation and query authority"
+  ],
+  "recovery_restores_dispatch_handles": false,
+  "recovery_dispatches_deferred_steps": false,
+  "historical_goal_truth_substitutes_for_action_receipts": false,
   "descendant_plans_included": false,
   "required_read_capabilities": [
     "observe",
