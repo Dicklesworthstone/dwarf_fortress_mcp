@@ -94,8 +94,8 @@ Archives never appear in the store's unfinished-commit iterator and cannot
 resurrect work.
 
 The store allows at most one terminal archive and one endpoint per retained
-original, using the existing bound of 64 originals per fortress and 256 recorded
-steps per commit. Each new record stays within the existing 64 KiB ordinary
+original, with 64 active originals and up to 256 explicitly withdrawn archives per
+fortress, and 256 recorded steps per commit. Each new record stays within the existing 64 KiB ordinary
 record bound; source request text remains in its own original record. Exact
 receipt and endpoint objects are compaction roots. Eligible original-history
 eviction releases only that original's archive and endpoint roots.
@@ -117,6 +117,17 @@ stored restore-abandonment frontier, where game time may move backwards. The
 semantic owner separately checks active recovery continuity before using any
 history. Duplicate, malformed, missing-object or mismatched-anchor records fail
 closed; only an incomplete final journal line is discarded as a torn append.
+
+## Explicit withdrawal archives
+
+A separate explicit [goal-withdrawal operation](LAB_GOAL_WITHDRAWAL.md) can
+archive a terminal and physically quiet original whose goal or reserve was not
+achieved. Its additive `U` record preserves the original `E`, `T` and source
+history, releases an active slot, and retains an exact historical withdrawal
+frontier. This is deliberate abandonment of pursuit, not automatic successful
+history eviction. Archived originals never acquire new endpoint or achievement
+evidence and cannot resume selected waiting or continuation. The archive has
+its own 256-original bound alongside the existing 64 active-original bound.
 
 ## Compatibility and restore
 

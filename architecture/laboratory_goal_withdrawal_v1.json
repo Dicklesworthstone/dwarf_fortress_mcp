@@ -1,0 +1,69 @@
+{
+  "schema": "dfmcp.laboratory-goal-withdrawal/1",
+  "bead": "df-lab-goal-withdrawal-g6w",
+  "scope": "deterministic_laboratory_only",
+  "surface": {
+    "tool": "fortress.cancel",
+    "mode": "withdraw_goal",
+    "scope": "goal:<exact_actual_original_plan_digest>",
+    "scope_requires_explicit_mode": true,
+    "accepts_rebase_request_alias": false,
+    "adds_tools": false,
+    "authority": {"observe": "read_only", "query": "read_only", "plan": "reversible"}
+  },
+  "admission": {
+    "complete_verified_original_source_and_seal": true,
+    "current_process_owner_or_verified_durable_recovery": true,
+    "complete_terminal_action_census": true,
+    "exact_current_physical_quiet": true,
+    "no_unfinished_durable_commit": true,
+    "positive_nondispatch_custody_required": true,
+    "missing_creator_proves_nondispatch": false,
+    "restore_abandoned_pursuit": "refuse_without_active_withdrawal_lineage",
+    "source_budget": "complete_current_sealed_and_receipt_snapshots_plus_original_request_and_plan",
+    "output_budget": "complete_withdrawal_receipt_and_reserved_agent_turn_before_publication"
+  },
+  "disposition": {
+    "frees_one_active_goal_slot": true,
+    "goal_success_claimed": false,
+    "changes_physical_work_or_clock": false,
+    "changes_historical_receipts_or_achievement": false,
+    "changes_first_reserve_endpoint": false,
+    "descendants_included": false,
+    "new_selected_wait_or_continuation": "refused",
+    "repeat": "same_immutable_certificate_under_current_authority",
+    "source_and_evidence_queryable": true
+  },
+  "durable_record": {
+    "tag": "U",
+    "fields": ["fortress_id", "plan_digest", "state_hash", "game_tick", "epoch", "sequence", "requester_session_id", "proof_digest", "nondispatch_count", "ordered_nondispatch_step_ids"],
+    "proof": "original_source_owner_seal_complete_terminal_census_withdrawal_frontier_requester_and_nondispatch_set",
+    "requires_exact_already_published_head": true,
+    "in_memory_marker_only_after_durable_publication": true,
+    "publication_failure": "retain_active_custody_and_fence_later_effects",
+    "compaction": "retain_original_final_receipts_endpoint_withdrawal_and_exact_snapshot_roots",
+    "semantic_recovery": "reverify_complete_original_and_physical_quiet_at_exact_historical_withdrawal_snapshot",
+    "invalid_semantic_recovery": "unverifiable_history_cannot_release_capacity",
+    "restore": "preserve_archive_without_renewing_pursuit",
+    "older_reader": "fails_closed_on_unknown_U_tag",
+    "legacy_original_source_T_N_E_bytes_changed": false
+  },
+  "bounds": {
+    "max_active_originals_per_fortress": 64,
+    "max_withdrawn_originals_per_fortress": 256,
+    "max_retained_originals_per_fortress": 320,
+    "max_selected_steps": 64,
+    "max_source_bytes": 16777216,
+    "max_session_pinned_versions": 4096,
+    "archive_full": "refuse_without_deleting_history"
+  },
+  "implementation": [
+    "crates/dfmcp-lab/src/durable_withdrawal.rs",
+    "crates/dfmcp-mcp/src/objective_withdrawal.rs",
+    "crates/dfmcp-mcp/src/objectives.rs",
+    "crates/dfmcp-mcp/src/server.rs",
+    "crates/dfmcp-mcp/src/lab_goal_explanation.rs",
+    "crates/dfmcp-mcp/src/resources/goals.rs"
+  ],
+  "evidence_scope": "named_laboratory_checks_only_not_full_workspace_or_native_admission"
+}

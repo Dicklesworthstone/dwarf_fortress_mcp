@@ -91,6 +91,15 @@ An offer is not a grant; cancellation checks current authority again.
 This foreground operation is independent of modern Tasks monitoring. It does
 not change the pinned runtime's single-active-monitor ownership contract.
 
+## Stop pursuing a quiet goal
+
+After a complete drain, explicit `scope: "goal:<digest>"` with
+`mode: "withdraw_goal"` can archive the unwanted original and release its active
+goal slot. It requires current Observe, Query and reversible Plan authority and
+retains all original proof without declaring success. Active/unknown work must
+be resolved first. See [goal withdrawal](LAB_GOAL_WITHDRAWAL.md) for the exact
+request, durable history, archive bounds and recovery limits.
+
 ## Regression coverage
 
 `plan_cancellation_mcp_tests.rs` exercises the actual public cancellation

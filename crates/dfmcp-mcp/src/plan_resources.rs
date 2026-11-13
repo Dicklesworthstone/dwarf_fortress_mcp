@@ -28,6 +28,7 @@ pub(crate) struct GoalEntry<'a> {
     pub first_satisfied_anchor: Option<StateAnchor>,
     pub historical_proof_verified: bool,
     pub restore_abandoned_anchor: Option<StateAnchor>,
+    pub withdrawal: Option<&'a dfmcp_lab::durable::DurableObjectiveWithdrawal>,
     pub abandonment_publication_pending: bool,
     pub verification_error: Option<&'a str>,
 }
@@ -61,7 +62,11 @@ pub(crate) fn entries(session: &LabSession) -> impl Iterator<Item = Entry<'_>> {
         .chain(session.objectives.iter().map(|objective| Entry {
             digest: objective.plan_digest,
             plan: objective.resource_plan(),
-            retention: "retained_objective",
+            retention: if objective.is_withdrawn() {
+                "withdrawn_objective"
+            } else {
+                "retained_objective"
+            },
             source_kind: objective.resource_source_kind(),
         }))
 }

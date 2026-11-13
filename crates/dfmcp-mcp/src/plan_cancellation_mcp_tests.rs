@@ -349,3 +349,98 @@ fn explanation_offers_only_current_owned_cancellation_without_changing_state() -
     assert_eq!(snapshot(&session)?, before);
     Ok(())
 }
+
+#[test]
+fn goal_withdrawal_requires_its_explicit_exact_selector_without_stopping_work() -> TestResult {
+    let _serial = crate::test_serial();
+    let session = open("73648")?;
+    let original = plan_and_commit(
+        &session,
+        &order(
+            "retain work during invalid withdrawal",
+            "BREW_DRINK",
+            20,
+            json!([]),
+        ),
+    )?;
+    let digest = original["plan_digest"].as_str().ok_or("digest missing")?;
+    let before = snapshot(&session)?;
+    let (id, _) = last_effect(&session)?;
+    let prior_receipt = receipt(&session, id)?;
+    for (mode, scope) in [
+        ("withdraw_goal", "plan".to_owned()),
+        ("withdraw_goal", format!("plan:{digest}")),
+        ("stop_future_steps", format!("goal:{digest}")),
+        ("withdraw_goal", "goal:abc".to_owned()),
+        ("withdraw_goal", format!("goal:{}", "A".repeat(64))),
+        ("withdraw_goal", format!("goal:{digest}~source")),
+    ] {
+        let refused = cancel(&session, mode, &scope)?;
+        assert_eq!(refused["error"]["code"], "invalid_request", "{refused}");
+        assert_eq!(snapshot(&session)?, before);
+        assert_eq!(receipt(&session, id)?, prior_receipt);
+    }
+    let active = cancel(&session, "withdraw_goal", &format!("goal:{digest}"))?;
+    assert_eq!(active["ok"], false, "{active}");
+    assert_eq!(snapshot(&session)?, before);
+    assert_eq!(receipt(&session, id)?, prior_receipt);
+    Ok(())
+}
+
+#[test]
+fn withdrawal_is_discoverable_preserves_compact_receipt_and_invalidates_old_explanation_pages()
+-> TestResult {
+    let _serial = crate::test_serial();
+    let session = open("73649")?;
+    let original = plan_and_commit(
+        &session,
+        &order("archive unwanted original", "BREW_DRINK", 20, json!([])),
+    )?;
+    let digest = original["plan_digest"].as_str().ok_or("digest missing")?;
+    let selected = format!("goal:{digest}");
+    assert_certificate(&cancel(
+        &session,
+        "stop_future_steps",
+        &format!("plan:{digest}"),
+    )?);
+    let explained = parsed(&facade::fortress_explain(
+        Some(session.clone()),
+        Some(selected.clone()),
+    ))?;
+    assert_eq!(explained["ok"], true, "{explained}");
+    assert_eq!(explained["withdrawal"]["available"], true, "{explained}");
+    assert_eq!(
+        explained["withdrawal"]["request"]["arguments"]["scope"],
+        selected
+    );
+    let old_page = explained["original_steps"]["arguments"]["entity_id"]
+        .as_str()
+        .ok_or("missing pinned explanation page")?
+        .to_owned();
+    let before = snapshot(&session)?;
+    let withdrawn = cancel(&session, "withdraw_goal", &selected)?;
+    assert_eq!(withdrawn["ok"], true, "{withdrawn}");
+    assert_eq!(withdrawn["status"], "withdrawn");
+    assert_eq!(withdrawn["goal_success_claimed"], false);
+    assert_eq!(snapshot(&session)?, before);
+    let compact = parsed(&crate::output_budget::fit(&withdrawn.to_string(), 1_024))?;
+    assert_eq!(compact["status"], "withdrawn", "{compact}");
+    assert_eq!(compact["withdrawal"], withdrawn["withdrawal"]);
+    assert_eq!(compact["goal_success_claimed"], false);
+    assert_eq!(compact["physical_work_changed"], false);
+    let stale = parsed(&facade::fortress_explain(
+        Some(session.clone()),
+        Some(old_page),
+    ))?;
+    assert_eq!(stale["error"]["code"], "cursor_gap", "{stale}");
+    let archived = parsed(&facade::fortress_explain(
+        Some(session.clone()),
+        Some(selected),
+    ))?;
+    assert_eq!(archived["ok"], true, "{archived}");
+    assert_eq!(archived["conclusion"], "original_goal_explicitly_withdrawn");
+    assert_eq!(archived["withdrawal"]["available"], false);
+    assert_eq!(archived["goal"]["withdrawal"], withdrawn["withdrawal"]);
+    assert_eq!(snapshot(&session)?, before);
+    Ok(())
+}

@@ -243,6 +243,14 @@ achievement does not establish its parent room or production project's success.
 Current goal truth, semantic project truth and physical quiescence are not
 evaluated by this resource, and no continuation or effect authority is granted.
 
+Explicitly withdrawn originals remain inspectable through these same exact
+resources. The manifest adds `archived` and the immutable `withdrawal` anchor,
+requester, proof digest and positive nondispatch step set. This disposition does
+not change the source digest or historical achievement. Plan catalogs label
+these records `withdrawn_objective`. Typed Explain includes the separate
+withdrawal affordance and any retained historical reserve endpoint; it does not
+reopen pursuit. See [goal withdrawal](LAB_GOAL_WITHDRAWAL.md).
+
 The source pin identifies the immutable original, **not** a frozen history
 report. Achievement and abandonment custody may change after ordinary tools
 publish progress. Each manifest reports the current authorized anchor and

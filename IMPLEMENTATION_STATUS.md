@@ -1,5 +1,44 @@
 # Implementation Status
 
+## Unreleased — Explicitly archive quiet original goals and release active capacity
+
+The laboratory now accepts `fortress.cancel(scope="goal:<exact original digest>",
+mode="withdraw_goal")`. A current owner, or a freshly authorized verified durable
+recovery, can stop pursuing an unwanted original only after every original
+receipt is terminal and exact physical work is proven quiet. Current Observe,
+Query and reversible Plan authority, complete source/step custody and budgets
+are checked before publication. Active/unknown work, unfinished durable commits,
+foreign live ownership, aliases and restore-abandoned pursuits refuse.
+
+Withdrawal releases an active slot without rewriting success, receipts, reserve
+endpoints or the pending review. The original remains queryable in a separate
+bounded archive: 64 active originals plus at most 256 withdrawn originals.
+The additive immutable U record binds the exact original, terminal census,
+withdrawal frontier, requesting session and positive deferred nondispatch
+custody. Compaction and reopen retain and verify the exact source, receipts,
+endpoint and historical quiet snapshot. Failed publication retains active
+custody and fences later effects; unverifiable recovered archives cannot release
+capacity or claim historical physical quiet. Restore preserves archive history
+without renewing pursuit.
+
+Typed Explain exposes an authorized withdrawal request and invalidates old
+pages when disposition changes at the same world anchor. Goal/source resources,
+plan catalogs and compact receipts preserve the archive identity and separate
+historical reserve evidence. Selected waits and continuations reject withdrawn
+originals; no dispatch or cancellation handle is reconstructed.
+
+All 61 actual `dfmcp-lab` durable-module tests passed with normal latest-nightly
+locked/offline Cargo, including four new withdrawal storage regressions. These
+execute the full local core/world/intent/adapter/lab dependency path. Seven new
+owner/facade tests cover full-book recovery, authority and budgets, deferred
+cancellation, repeated durable reopening and publication failure; two more
+public facade tests cover exact selector/mode boundaries, discovery, immutable
+compact receipts and explanation-page invalidation. These MCP tests remain
+unexecuted while the lower-memory MCP typecheck is underway. Source review and
+scoped formatting completed; no full-workspace or live/native admission claim
+is made. Contract: `architecture/laboratory_goal_withdrawal_v1.json`.
+Owner: `df-lab-goal-withdrawal-g6w`.
+
 ## Unreleased — Complete Tasks against original project and reserve evidence
 
 Laboratory MCP Tasks now use a read-only projection of the same exact original

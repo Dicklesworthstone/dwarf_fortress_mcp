@@ -8,12 +8,23 @@
     "adds_tools": false,
     "restores_dispatch_authority": false,
     "restores_cancellation_authority": false,
-    "requires_current_read_authority": ["observe", "query"]
+    "requires_current_read_authority": [
+      "observe",
+      "query"
+    ]
   },
   "reserve_endpoint": {
     "record_tag": "E",
-    "key": ["fortress_id", "original_plan_digest"],
-    "value": ["state_hash", "game_tick", "observation_epoch", "observation_sequence"],
+    "key": [
+      "fortress_id",
+      "original_plan_digest"
+    ],
+    "value": [
+      "state_hash",
+      "game_tick",
+      "observation_epoch",
+      "observation_sequence"
+    ],
     "one_immutable_first_sample": true,
     "first_capture_requires_exact_published_head": true,
     "semantic_horizon": "unchanged_original_absolute_game_tick",
@@ -30,12 +41,22 @@
   },
   "terminal_receipts": {
     "record_tag": "T",
-    "key": ["fortress_id", "original_plan_digest"],
+    "key": [
+      "fortress_id",
+      "original_plan_digest"
+    ],
     "value": "strictly_ordered_step_id_final_state_and_complete_atomic_anchor",
     "source_identity": "unchanged_separate_retained_original_record",
     "capture": "W_or_R_retirement_with_nonempty_complete_anchored_recorded_map",
     "semantic_admission": "exact_original_expected_step_census_source_seal_anchors_and_active_recovery_lineage",
-    "accepted_storage_states": ["verified", "failed", "cancelled", "compensated", "not_dispatched", "abandoned"],
+    "accepted_storage_states": [
+      "verified",
+      "failed",
+      "cancelled",
+      "compensated",
+      "not_dispatched",
+      "abandoned"
+    ],
     "dispatched_or_missing_anchors_qualify": false,
     "never_dispatched_subset_must_match_N": true,
     "appears_in_unfinished_commits": false,
@@ -45,19 +66,22 @@
     "survives_retirement_compaction_and_repeated_restart": true
   },
   "bounds": {
-    "max_originals_per_fortress": 64,
+    "max_originals_per_fortress": 320,
     "max_endpoint_records_per_original": 1,
     "max_terminal_archives_per_original": 1,
     "max_recorded_steps_per_commit": 256,
     "max_ordinary_record_bytes": 65536,
-    "selected_wait_source_budget": "negotiated_complete_current_and_archived_sources_with_existing_16_MiB_ceiling"
+    "selected_wait_source_budget": "negotiated_complete_current_and_archived_sources_with_existing_16_MiB_ceiling",
+    "max_active_originals_per_fortress": 64,
+    "max_withdrawn_originals_per_fortress": 256
   },
   "retention": {
     "object_roots": "all_exact_endpoint_and_terminal_receipt_snapshot_hashes",
     "eviction": "existing_eligible_original_history_eviction_releases_only_matching_roots",
     "reopen": "strict_content_address_anchor_and_original_binding_validation",
     "restore": "historical_bytes_retained_active_original_evidence_abandoned",
-    "older_reader_of_E_or_T": "fails_closed_on_unknown_record_tag"
+    "older_reader_of_E_or_T": "fails_closed_on_unknown_record_tag",
+    "explicit_withdrawal": "U_record_retains_all_original_roots_in_separate_bounded_archive_without_claiming_success"
   },
   "implementation": [
     "crates/dfmcp-lab/src/durable.rs",

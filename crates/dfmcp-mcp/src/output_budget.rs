@@ -93,6 +93,9 @@ fn compact_objective(item: &mut Value) {
                 | "historical_achievement"
                 | "first_satisfied_anchor"
                 | "restore_abandoned_anchor"
+                | "withdrawal"
+                | "archived"
+                | "retained_reserve_endpoint"
                 | "abandonment_publication_pending"
                 | "semantic_room_goal"
                 | "semantic_output_goal"
@@ -530,6 +533,29 @@ fn minimal(payload: &Value) -> Value {
             "paused",
             "partial_progress",
             "durability_pending",
+        ] {
+            if let Some(value) = payload.get(key) {
+                out.insert(key.to_owned(), value.clone());
+            }
+        }
+    }
+    // Withdrawal has already changed pursuit custody. Its exact historical
+    // disposition cannot disappear into a generic successful cancellation.
+    if payload.get("withdrawal").is_some_and(Value::is_object) {
+        for key in [
+            "status",
+            "selection_scope",
+            "descendant_plans_included",
+            "already_withdrawn",
+            "withdrawal",
+            "archived",
+            "physical_work_changed",
+            "goal_success_claimed",
+            "active_objectives",
+            "archived_objectives",
+            "active_objective_limit",
+            "archive_limit",
+            "observed_anchor",
         ] {
             if let Some(value) = payload.get(key) {
                 out.insert(key.to_owned(), value.clone());

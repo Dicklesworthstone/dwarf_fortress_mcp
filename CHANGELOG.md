@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased — Explicit goal withdrawal with durable retained history
+
+- Add exact `goal:<digest>` plus `withdraw_goal` cancellation mode for terminal,
+  physically quiet originals under current Observe, Query and reversible Plan
+  authority. Free an active slot while retaining the original and pending review.
+- Preserve immutable withdrawal, source, action and reserve evidence through
+  the additive U journal record, compaction, restart and later restore. Keep a
+  separate bounded archive and fence failed or unverifiable publication/recovery.
+- Expose withdrawal in Explain and retained goal resources; preserve the receipt
+  in compact output and refuse renewed selected waiting or continuation.
+- Pass all 61 durable-module tests, including four new archive regressions, with
+  normal locked/offline Cargo. Add nine owner/public-facade regressions; MCP
+  execution is pending the lower-memory compile attempt after Asupersync SIGKILL.
+
 ## Unreleased — Complete Tasks against original project and reserve evidence
 
 - Keep future-reserve Tasks pending until an explicit selected wait records the

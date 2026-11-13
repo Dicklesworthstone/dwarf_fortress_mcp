@@ -218,7 +218,10 @@ fn original_source(
     work.input_bytes = 512usize
         .saturating_add(entry.summary.len())
         .saturating_add(entry.request_json.map_or(0, str::len))
-        .saturating_add(entry.verification_error.map_or(0, str::len));
+        .saturating_add(entry.verification_error.map_or(0, str::len))
+        .saturating_add(entry.withdrawal.map_or(0, |withdrawal| {
+            256usize.saturating_add(withdrawal.never_dispatched_steps.len().saturating_mul(11))
+        }));
     if work.bytes() as u64 > budget.max_bytes.min(MAX_SOURCE_BYTES) {
         return Err(exhausted(
             "the complete original goal source exceeds its byte budget",
@@ -228,6 +231,7 @@ fn original_source(
         entry.sealed_anchor,
         entry.first_satisfied_anchor,
         entry.restore_abandoned_anchor,
+        entry.withdrawal.map(|withdrawal| withdrawal.anchor),
     ]
     .into_iter()
     .flatten()
@@ -238,6 +242,14 @@ fn original_source(
                 "retained original goal history belongs to another fortress",
             ));
         }
+    }
+    if entry.withdrawal.is_some_and(|withdrawal| {
+        withdrawal.plan_digest != entry.digest || withdrawal.fortress_id != current.fortress_id
+    }) {
+        return Err(DfmcpError::new(
+            ErrorCode::CorruptLedger,
+            "retained withdrawal belongs to another original goal",
+        ));
     }
     if entry
         .sealed_anchor
@@ -446,6 +458,14 @@ fn manifest(
         "historical_achievement_scope": "original_sealed_terminal_condition",
         "restore_abandoned_anchor": entry.restore_abandoned_anchor.as_ref().map(anchor_json),
         "abandonment_publication_pending": entry.abandonment_publication_pending,
+        "withdrawal": entry.withdrawal.map(|withdrawal| json!({
+            "anchor": anchor_json(&withdrawal.anchor),
+            "requester_session_id": withdrawal.requester_session_id.to_string(),
+            "proof_digest": withdrawal.proof_digest.to_hex(),
+            "never_dispatched_steps": withdrawal.never_dispatched_steps.iter().copied().collect::<Vec<_>>(),
+            "goal_achievement_recorded": false,
+        })),
+        "archived": entry.withdrawal.is_some(),
         "original_source_verification": if entry.plan.is_some() { "verified" } else { "unavailable" },
         "verification_error": entry.verification_error,
         "source": {"format": SOURCE_FORMAT, "sha256": original.digest.to_hex(),

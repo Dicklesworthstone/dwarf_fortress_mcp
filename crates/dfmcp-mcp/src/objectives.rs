@@ -6,12 +6,26 @@
 //! authority to dispatch it again.
 
 use super::*;
-use dfmcp_lab::durable::{DurableLabStore, DurableObjective, MAX_OBJECTIVES_PER_FORTRESS};
+use dfmcp_lab::durable::{
+    DurableLabStore, DurableObjective, DurableObjectiveWithdrawal, MAX_OBJECTIVES_PER_FORTRESS,
+    MAX_RETAINED_OBJECTIVES_PER_FORTRESS, MAX_WITHDRAWN_OBJECTIVES_PER_FORTRESS,
+};
 use serde_json::Value;
 
 #[path = "objective_reserve.rs"]
 mod reserve;
 pub(super) use reserve::{ensure_reserve_snapshot, retain_reserve_observation};
+
+#[path = "objective_withdrawal.rs"]
+mod withdrawal;
+
+pub(super) fn withdraw_goal(session: &mut LabSession, digest: &Digest32) -> Result<Value> {
+    withdrawal::withdraw_goal(session, digest)
+}
+
+pub(super) fn withdrawal_offer(session: &LabSession, digest: Digest32) -> Value {
+    withdrawal::offer(session, digest)
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ProductionReserveStatus {
@@ -76,10 +90,14 @@ pub(super) struct Objective {
     pub(super) selected_wait_reserve_observation: Option<(StateAnchor, PredicateTruth)>,
     pub(super) selected_wait_reserve_durable: bool,
     restore_abandoned_anchor: Option<StateAnchor>,
+    withdrawal: Option<DurableObjectiveWithdrawal>,
     verification_error: Option<String>,
 }
 
 impl Objective {
+    pub(super) fn is_withdrawn(&self) -> bool {
+        self.withdrawal.is_some()
+    }
     /// Resource inspection may export only the exact, verified retained plan.
     /// It never reconstructs missing custody or evaluates a current predicate.
     pub(super) fn resource_plan(&self) -> Option<&PreparedPlan> {
@@ -127,6 +145,7 @@ impl Objective {
             first_satisfied_anchor: self.first_satisfied_anchor,
             historical_proof_verified: self.historical_proof_verified,
             restore_abandoned_anchor: self.restore_abandoned_anchor,
+            withdrawal: self.withdrawal.as_ref(),
             abandonment_publication_pending: session.objective_restore.contains(&self.plan_digest),
             verification_error: self.verification_error.as_deref(),
         }
@@ -173,6 +192,7 @@ impl Objective {
         if self.originating_process
             || self.original_handles_live
             || self.abandoned(session)
+            || self.is_withdrawn()
             || self.verification_error.is_some()
         {
             return Err(DfmcpError::new(
@@ -248,6 +268,7 @@ impl Objective {
         query_budget::admit_sources(&[session.adapter.snapshot()], &context)?;
         if !self.is_resource_aware_room()
             || self.abandoned(session)
+            || self.is_withdrawn()
             || self.verification_error.is_some()
             || self.plan.is_none()
         {
@@ -338,7 +359,11 @@ impl Objective {
         authorize_entry(&context, Capability::Observe, RiskTier::ReadOnly)?;
         authorize_entry(&context, Capability::Query, RiskTier::ReadOnly)?;
         query_budget::admit_sources(&[session.adapter.snapshot()], &context)?;
-        if self.abandoned(session) || self.verification_error.is_some() || self.plan.is_none() {
+        if self.abandoned(session)
+            || self.is_withdrawn()
+            || self.verification_error.is_some()
+            || self.plan.is_none()
+        {
             return Err(DfmcpError::new(
                 ErrorCode::PreconditionsFailed,
                 "the original production goal has no verified active stock-ledger custody",
@@ -405,6 +430,7 @@ impl Objective {
             selected_wait_reserve_observation: None,
             selected_wait_reserve_durable: false,
             restore_abandoned_anchor: None,
+            withdrawal: None,
             verification_error: None,
         }
     }
@@ -417,10 +443,10 @@ impl Objective {
     fn current_truth(&self, session: &LabSession) -> Result<PredicateTruth> {
         let ctx = context_for(session, session.next_request_id);
         authorize_entry(&ctx, Capability::Observe, RiskTier::ReadOnly)?;
-        if self.abandoned(session) {
+        if self.abandoned(session) || self.is_withdrawn() {
             return Err(DfmcpError::new(
                 ErrorCode::PreconditionsFailed,
-                "restore abandoned pursuit of this original goal; its historical proof does not authorize a new pursuit",
+                "this original pursuit was abandoned or explicitly withdrawn; retained history does not authorize renewed pursuit",
             ));
         }
         if let Some(reason) = &self.verification_error {
@@ -450,6 +476,7 @@ impl Objective {
             .unwrap_or(PredicateTruth::Unknown);
         let mut result = crate::observation_projection::laboratory_objective_evidence(observed);
         let abandoned = self.abandoned(session);
+        let withdrawn = self.is_withdrawn();
         let continuation_truth = if self.is_resource_aware_room() {
             let project = self.current_resource_room_truth(session);
             let truth = project.as_ref().copied().unwrap_or(PredicateTruth::Unknown);
@@ -559,6 +586,25 @@ impl Objective {
             .as_ref()
             .map(anchor_json)
             .unwrap_or(Value::Null);
+        result["withdrawal"] = self
+            .withdrawal
+            .as_ref()
+            .map(withdrawal::projection)
+            .unwrap_or(Value::Null);
+        if withdrawn && self.verification_error.is_some() {
+            result["withdrawal"]["verification"] = json!("unverifiable");
+            result["withdrawal"]["physical_quiescent_at_withdrawal"] = Value::Null;
+        }
+        result["archived"] = json!(withdrawn);
+        if reserve_source.is_some() {
+            result["retained_reserve_endpoint"] = self.selected_wait_reserve_observation.map(|(anchor, truth)| json!({
+                "anchor":anchor_json(&anchor),
+                "truth":match truth { PredicateTruth::True => "true", PredicateTruth::False => "false", PredicateTruth::Unknown => "unknown" },
+                "durable":self.selected_wait_reserve_durable,
+                "historical_only":withdrawn,
+                "continuous_maintenance_proven":false,
+            })).unwrap_or(Value::Null);
+        }
         result["abandonment_publication_pending"] =
             json!(session.objective_restore.contains(&self.plan_digest));
         result["physical_quiescent"] = json!(quiet);
@@ -574,16 +620,23 @@ impl Objective {
         );
         result["pursuit_active"] = json!(
             !abandoned
+                && !withdrawn
                 && (truth != PredicateTruth::True
                     || reserve_source.is_some()
                     || (self.is_resource_aware_room()
                         && continuation_truth != PredicateTruth::True))
                 && quiet != Some(true)
         );
-        result["needs_replan"] = json!(!abandoned && continuation_needed && quiet == Some(true));
+        result["needs_replan"] =
+            json!(!abandoned && !withdrawn && continuation_needed && quiet == Some(true));
         result["replacement_work_dispatched"] = json!(false);
         result["blind_retry_allowed"] = json!(false);
-        if !abandoned && continuation_needed && quiet == Some(true) && self.source.can_continue() {
+        if !abandoned
+            && !withdrawn
+            && continuation_needed
+            && quiet == Some(true)
+            && self.source.can_continue()
+        {
             // An affordance carries no new authority. Reuse the exact intake
             // gate so active/unknown sibling pursuits are not offered duplicate
             // work; commit repeats the check even if this proposal was possible.
@@ -600,7 +653,11 @@ impl Objective {
                 }
             }
         }
-        if abandoned {
+        if withdrawn && self.verification_error.is_some() {
+            result["status"] = json!("indeterminate");
+        } else if withdrawn {
+            result["status"] = json!("withdrawn");
+        } else if abandoned {
             result["status"] = json!("abandoned");
         } else if self.verification_error.is_some() {
             result["status"] = json!("indeterminate");
@@ -683,7 +740,7 @@ pub(super) fn continuation_source(
     let context = context_for(session, session.next_request_id);
     authorize_entry(&context, Capability::Observe, RiskTier::ReadOnly)?;
     authorize_entry(&context, Capability::Plan, RiskTier::ReadOnly)?;
-    if session.objectives.len() > MAX_OBJECTIVES_PER_FORTRESS
+    if session.objectives.len() > MAX_RETAINED_OBJECTIVES_PER_FORTRESS
         || session.objectives.len() > context.budget.max_entities as usize
     {
         return Err(DfmcpError::new(
@@ -694,10 +751,10 @@ pub(super) fn continuation_source(
     let objective = session.objectives.iter().find(|goal| goal.plan_digest == parent)
         .ok_or_else(|| DfmcpError::new(ErrorCode::PreconditionsFailed,
             "the original goal is not retained; no replacement request can be inferred from action receipts"))?;
-    if objective.abandoned(session) {
+    if objective.abandoned(session) || objective.is_withdrawn() {
         return Err(DfmcpError::new(
             ErrorCode::PreconditionsFailed,
-            "restore abandoned pursuit of this original goal; explicitly request a new goal in the current epoch",
+            "this original pursuit was abandoned or explicitly withdrawn; request and review a new goal",
         ));
     }
     if objective.source.requires_complete_source_review() || objective.is_consumption_reserve() {
@@ -831,6 +888,9 @@ pub(super) fn continuation_source(
                         other.plan_digest.to_hex()
                     ),
                 ));
+            }
+            if other.is_withdrawn() {
+                continue;
             }
             if continuation.requires_semantic_sibling_check() {
                 let sibling_truth = if continuation.is_resource_aware_room() {
@@ -1013,6 +1073,14 @@ fn goal_work_quiescent(session: &LabSession, objective: &Objective) -> Result<bo
             }
             continue;
         }
+        if let Some(withdrawal) = &objective.withdrawal
+            && withdrawal.never_dispatched_steps.contains(&step.id.get())
+        {
+            if !withdrawal::nondispatch_covers(withdrawal, step, session.adapter.snapshot()) {
+                return Ok(false);
+            }
+            continue;
+        }
         if objective.original_handles_live {
             return Ok(false);
         }
@@ -1059,15 +1127,39 @@ pub(super) fn objective_evictions(session: &LabSession, digest: Digest32) -> Res
     if session
         .objectives
         .iter()
+        .any(|objective| objective.is_withdrawn() && objective.verification_error.is_some())
+    {
+        return Err(DfmcpError::new(
+            ErrorCode::CorruptLedger,
+            "withdrawn original evidence is unverifiable; reconcile its archive before admitting new effects",
+        ));
+    }
+    let active = session
+        .objectives
+        .iter()
+        .filter(|objective| !objective.is_withdrawn())
+        .count();
+    if session.objectives.len() > MAX_RETAINED_OBJECTIVES_PER_FORTRESS
+        || session.objectives.len().saturating_sub(active) > MAX_WITHDRAWN_OBJECTIVES_PER_FORTRESS
+    {
+        return Err(DfmcpError::new(
+            ErrorCode::BudgetExceeded,
+            "the retained original goal archive exceeds its explicit bound",
+        ));
+    }
+    if session
+        .objectives
+        .iter()
         .any(|objective| objective.plan_digest == digest)
-        || session.objectives.len() < MAX_OBJECTIVES_PER_FORTRESS
+        || active < MAX_OBJECTIVES_PER_FORTRESS
     {
         return Ok(Vec::new());
     }
-    let required = session.objectives.len() + 1 - MAX_OBJECTIVES_PER_FORTRESS;
+    let required = active + 1 - MAX_OBJECTIVES_PER_FORTRESS;
     let mut evicted = Vec::new();
     for objective in &session.objectives {
-        if !objective.historical_proof_verified
+        if objective.is_withdrawn()
+            || !objective.historical_proof_verified
             || objective.first_satisfied_anchor.is_none()
             || !goal_work_quiescent(session, objective).unwrap_or(false)
         {
@@ -1173,7 +1265,8 @@ pub(super) fn newly_satisfied_objectives(session: &LabSession) -> Vec<Digest32> 
         .objectives
         .iter()
         .filter(|objective| {
-            objective.first_satisfied_anchor.is_none()
+            !objective.is_withdrawn()
+                && objective.first_satisfied_anchor.is_none()
                 && matches!(objective.current_truth(session), Ok(PredicateTruth::True))
         })
         .map(|objective| objective.plan_digest)
@@ -1187,6 +1280,9 @@ pub(super) fn record_objective_progress(
     abandoned: &[Digest32],
 ) {
     for objective in &mut session.objectives {
+        if objective.is_withdrawn() {
+            continue;
+        }
         if abandoned.contains(&objective.plan_digest)
             && objective.restore_abandoned_anchor.is_none()
         {
@@ -1208,6 +1304,9 @@ pub(super) fn record_objective_progress(
 
 pub(super) fn stage_objective_abandonment(session: &mut LabSession) {
     for objective in &mut session.objectives {
+        if objective.is_withdrawn() {
+            continue;
+        }
         objective.original_handles_live = false;
         objective.active_observation_anchor = None;
         objective.selected_wait_reserve_observation = None;
@@ -1217,7 +1316,9 @@ pub(super) fn stage_objective_abandonment(session: &mut LabSession) {
         session
             .objectives
             .iter()
-            .filter(|objective| objective.restore_abandoned_anchor.is_none())
+            .filter(|objective| {
+                !objective.is_withdrawn() && objective.restore_abandoned_anchor.is_none()
+            })
             .map(|objective| objective.plan_digest),
     );
 }
@@ -1225,6 +1326,12 @@ pub(super) fn stage_objective_abandonment(session: &mut LabSession) {
 pub(super) fn objective_history_roots(session: &LabSession) -> impl Iterator<Item = Digest32> + '_ {
     session.objectives.iter().flat_map(|objective| {
         std::iter::once(objective.sealed_state_hash)
+            .chain(
+                objective
+                    .withdrawal
+                    .as_ref()
+                    .map(|withdrawal| withdrawal.anchor.state_hash),
+            )
             .chain(
                 objective
                     .first_satisfied_anchor
@@ -1275,6 +1382,9 @@ pub(super) fn recover_objective(
         selected_wait_reserve_observation: None,
         selected_wait_reserve_durable: false,
         restore_abandoned_anchor: retained.restore_abandoned_anchor,
+        withdrawal: store
+            .objective_withdrawal(retained.fortress_id, retained.plan_digest)
+            .cloned(),
         verification_error: None,
     };
     let checked = (|| -> Result<()> {
@@ -1332,6 +1442,9 @@ pub(super) fn recover_objective(
         }
         let mut retired = BTreeMap::new();
         for (step, anchor) in &retained.retired_never_dispatched {
+            if objective.is_withdrawn() {
+                continue;
+            }
             let archived = store.load_snapshot(anchor.state_hash)?;
             let proof = goal_custody::RetiredNondispatchProof::verify(
                 &plan, retained, *step, &archived, recovery,
@@ -1366,7 +1479,7 @@ pub(super) fn recover_objective(
                 ));
             }
         }
-        if retained.restore_abandoned_anchor.is_none() {
+        if retained.restore_abandoned_anchor.is_none() && !objective.is_withdrawn() {
             let prior = recovery.previous_anchor();
             if prior.fortress_id != retained.fortress_id
                 || plan.anchor.cursor.epoch > prior.cursor.epoch
@@ -1388,7 +1501,11 @@ pub(super) fn recover_objective(
         }
         objective.plan = Some(plan);
         objective.retired_never_dispatched = retired;
-        reserve::recover_reserve_observation(&mut objective, store, recovery)?;
+        if objective.is_withdrawn() {
+            withdrawal::recover(&mut objective, store, retained)?;
+        } else {
+            reserve::recover_reserve_observation(&mut objective, store, recovery)?;
+        }
         Ok(())
     })();
     if let Err(error) = checked {
@@ -1396,3 +1513,7 @@ pub(super) fn recover_objective(
     }
     objective
 }
+
+#[cfg(test)]
+#[path = "objective_withdrawal_tests.rs"]
+mod withdrawal_tests;

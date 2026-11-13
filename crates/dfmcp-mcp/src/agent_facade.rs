@@ -1885,7 +1885,11 @@ impl ResponsePresentation {
         let previous_state = state.clone();
         update_orientation("fortress.query", orientation, &mut state);
         let success = Self::from_state_with_changes(
-            session_id, state, previous_anchor, turn_sequence, include_world_changes,
+            session_id,
+            state,
+            previous_anchor,
+            turn_sequence,
+            include_world_changes,
         );
         let failure = Self {
             session_id: success.session_id.clone(),
@@ -2330,17 +2334,22 @@ pub fn fortress_query(session_id: Option<String>, mode: Option<String>) -> Strin
                 let mut payload = response_payload(&raw, "fortress.query");
                 if payload["mode"] == "history" {
                     let (presentation, failure) = ResponsePresentation::capture_metadata_query(
-                        &payload, session_id.as_deref(),
+                        &payload,
+                        session_id.as_deref(),
                     );
                     // No world-diff acquisition and no acknowledged observation
                     // publication for a metadata-only retained catalog.
                     presentation.finish_query(&failure, payload, started)
                 } else {
                     let presentation = ResponsePresentation::capture(
-                        "fortress.query", &mut payload, session_id.as_deref(),
+                        "fortress.query",
+                        &mut payload,
+                        session_id.as_deref(),
                     );
                     let projected = presentation.render(
-                        payload, "fortress.query", AgentPhase::Inspect,
+                        payload,
+                        "fortress.query",
+                        AgentPhase::Inspect,
                         ObservationProfile::Tactical,
                     );
                     crate::task_service::notify_progress();
@@ -2463,7 +2472,14 @@ pub fn fortress_wait_for_selection(
     plan_digest: Option<String>,
     watch_id: Option<String>,
 ) -> String {
-    fortress_wait_for_targets(session_id, max_game_ticks, plan_digest, watch_id, None, None)
+    fortress_wait_for_targets(
+        session_id,
+        max_game_ticks,
+        plan_digest,
+        watch_id,
+        None,
+        None,
+    )
 }
 
 /// Foreground wait for one explicit set of independent laboratory conditions.
@@ -2473,7 +2489,14 @@ pub fn fortress_wait_for_watches(
     watch_ids: Vec<String>,
     watch_policy: Option<String>,
 ) -> String {
-    fortress_wait_for_targets(session_id, max_game_ticks, None, None, Some(watch_ids), watch_policy)
+    fortress_wait_for_targets(
+        session_id,
+        max_game_ticks,
+        None,
+        None,
+        Some(watch_ids),
+        watch_policy,
+    )
 }
 
 /// The wire still exposes one fortress_wait tool. A selector changes when its
@@ -2505,14 +2528,17 @@ pub fn fortress_wait_for_targets(
     }
     let selector_error = if watch_policy.is_some() && watch_ids.is_none() {
         Some("watch_policy requires an explicit watch_ids selection")
-    } else if watch_policy.as_deref().is_some_and(|policy| {
-        !matches!(policy, "all_satisfied" | "any_satisfied")
-    }) {
+    } else if watch_policy
+        .as_deref()
+        .is_some_and(|policy| !matches!(policy, "all_satisfied" | "any_satisfied"))
+    {
         Some("watch_policy must be all_satisfied or any_satisfied")
     } else if plan_digest.is_some() && watch_id.is_some() && watch_ids.is_none() {
         Some("plan_digest and watch_id are mutually exclusive wait selectors")
-    } else if usize::from(plan_digest.is_some()) + usize::from(watch_id.is_some())
-        + usize::from(watch_ids.is_some()) > 1
+    } else if usize::from(plan_digest.is_some())
+        + usize::from(watch_id.is_some())
+        + usize::from(watch_ids.is_some())
+        > 1
     {
         Some("plan_digest, watch_id and watch_ids are mutually exclusive wait selectors")
     } else {
@@ -2520,20 +2546,21 @@ pub fn fortress_wait_for_targets(
     };
     let publication = if let Some(message) = selector_error {
         crate::server::WaitPublication::Pending(crate::server::coded_error_payload(
-            "fortress.wait", dfmcp_core::ErrorCode::InvalidRequest, message,
+            "fortress.wait",
+            dfmcp_core::ErrorCode::InvalidRequest,
+            message,
         ))
     } else if let Some(watches) = watch_ids {
-        crate::server::wait_for_watches(
-            session_id.clone(), max_game_ticks, watches, watch_policy,
-        )
+        crate::server::wait_for_watches(session_id.clone(), max_game_ticks, watches, watch_policy)
     } else {
         match (plan_digest, watch_id) {
-            (Some(_), Some(_)) => crate::server::WaitPublication::Pending(
-                crate::server::coded_error_payload(
-                    "fortress.wait", dfmcp_core::ErrorCode::InvalidRequest,
+            (Some(_), Some(_)) => {
+                crate::server::WaitPublication::Pending(crate::server::coded_error_payload(
+                    "fortress.wait",
+                    dfmcp_core::ErrorCode::InvalidRequest,
                     "plan_digest and watch_id are mutually exclusive wait selectors",
-                ),
-            ),
+                ))
+            }
             (None, Some(watch)) => {
                 crate::server::wait_for_watch(session_id.clone(), max_game_ticks, watch)
             }
@@ -2574,7 +2601,7 @@ pub use FortressWaitForTargets as FortressWaitForPlan;
 pub use FortressWaitForTargets as FortressWaitForSelection;
 
 #[tool(
-    description = "Request, drain, compensate when authorized, and finalize cancellation while preserving recovery state. mode: compensate_reversible (default) | stop_future_steps | emergency_pause_and_drain. scope: last_action (default), plan (last committed plan), plan:<64-lowercase-original-plan-digest> (one exact commit owned by this session, leaving other plans and descendants alone), oldest_open_plan (earliest retained original plan, for bounded cleanup), or session (all retained open work across this session's plans). Drain dependents first and return a finalize_certificate only when goal states are terminal and physical work is proven quiescent. Failed and Verified receipts remain history; their remaining work can be stopped with separate evidence."
+    description = "Request, drain, compensate when authorized, and finalize cancellation while preserving recovery state. mode: compensate_reversible (default) | stop_future_steps | emergency_pause_and_drain. scope: last_action (default), plan (last committed plan), plan:<64-lowercase-original-plan-digest> (one exact commit owned by this session, leaving other plans and descendants alone), oldest_open_plan (earliest retained original plan, for bounded cleanup), or session (all retained open work across this session's plans). Drain dependents first and return a finalize_certificate only when goal states are terminal and physical work is proven quiescent. Failed and Verified receipts remain history; their remaining work can be stopped with separate evidence. Separately, mode withdraw_goal with exact scope goal:<original-plan-digest> archives one verified, physically quiet original under current Observe, Query and reversible Plan authority, freeing an active goal slot while retaining its source and proof. Withdrawal does not stop work, prove success, withdraw descendants, or permit continuation of that original."
 )]
 pub fn fortress_cancel(
     session_id: Option<String>,

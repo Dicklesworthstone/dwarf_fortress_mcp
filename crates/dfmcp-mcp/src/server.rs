@@ -179,8 +179,6 @@ mod room_continuation_mcp_tests;
 #[path = "plan_forecast.rs"]
 mod plan_forecast;
 use plan_forecast::forecast_plan;
-#[path = "lab_project_forecast.rs"]
-mod project_forecast;
 #[path = "lab_plan_comparison.rs"]
 mod plan_comparison;
 #[path = "lab_plan_comparison_handler.rs"]
@@ -190,6 +188,8 @@ mod plan_comparison_handler;
 mod plan_comparison_mcp_tests;
 #[path = "lab_plan_comparison_response.rs"]
 mod plan_comparison_response;
+#[path = "lab_project_forecast.rs"]
+mod project_forecast;
 
 #[path = "lab_progress.rs"]
 mod lab_progress;
@@ -344,8 +344,10 @@ pub(crate) fn objectives_json(session: &LabSession) -> serde_json::Value {
 
 /// Most recent world versions each session retains for change reporting.
 const MAX_SESSION_HISTORY: usize = 32;
-/// Older versions a session may keep alive because live work names them.
-const MAX_PINNED_VERSIONS: usize = 1_100;
+/// Older versions named by live work, checkpoints and explicitly archived
+/// originals. This remains a fixed retention ceiling; archive admission does
+/// not remove source-budget or per-call work limits.
+const MAX_PINNED_VERSIONS: usize = 4_096;
 
 fn new_history() -> dfmcp_world::retention::VersionRetention {
     dfmcp_world::retention::VersionRetention::new(MAX_SESSION_HISTORY, MAX_PINNED_VERSIONS)
@@ -5704,10 +5706,13 @@ fn wait_payload(
         .collect::<Vec<_>>();
     let task = action_id
         .map(|id| {
-            session.adapter.action_receipt(id)
+            session
+                .adapter
+                .action_receipt(id)
                 .map(crate::tasks::project_action_receipt)
-                .ok_or_else(|| DfmcpError::new(
-                    ErrorCode::InvalidRequest, format!("unknown action {id}")))
+                .ok_or_else(|| {
+                    DfmcpError::new(ErrorCode::InvalidRequest, format!("unknown action {id}"))
+                })
         })
         .transpose()?;
     let snapshot = session.adapter.snapshot();
@@ -5753,7 +5758,11 @@ fn wait_payload(
         payload["objectives"] = objectives_json(session);
         if !session.carried.is_empty() {
             payload["carried_obligations"] = json!(
-                session.carried.iter().map(CarriedStep::to_json).collect::<Vec<_>>()
+                session
+                    .carried
+                    .iter()
+                    .map(CarriedStep::to_json)
+                    .collect::<Vec<_>>()
             );
         }
         if requested > advanced && snapshot.paused {
@@ -6009,7 +6018,11 @@ pub(crate) fn wait_for_watches(
     watch_policy: Option<String>,
 ) -> WaitPublication {
     wait_with_selection(
-        session_id, max_game_ticks, None, None, Some((watch_ids, watch_policy)),
+        session_id,
+        max_game_ticks,
+        None,
+        None,
+        Some((watch_ids, watch_policy)),
     )
 }
 
@@ -6021,17 +6034,22 @@ fn wait_with_selection(
     watch_set: Option<(Vec<String>, Option<String>)>,
 ) -> WaitPublication {
     let started = std::time::Instant::now();
-    if usize::from(selected_digest.is_some()) + usize::from(watch_id.is_some())
-        + usize::from(watch_set.is_some()) > 1
+    if usize::from(selected_digest.is_some())
+        + usize::from(watch_id.is_some())
+        + usize::from(watch_set.is_some())
+        > 1
     {
         return WaitPublication::Pending(coded_error_payload(
-            "fortress.wait", ErrorCode::InvalidRequest,
+            "fortress.wait",
+            ErrorCode::InvalidRequest,
             "plan_digest, watch_id and watch_ids are mutually exclusive wait selectors",
         ));
     }
     let session = match resolve_session(session_id) {
         Ok(value) => value,
-        Err(error) => return WaitPublication::Pending(dfmcp_error_payload("fortress.wait", &error)),
+        Err(error) => {
+            return WaitPublication::Pending(dfmcp_error_payload("fortress.wait", &error));
+        }
     };
     let watch_selected = watch_id.is_some() || watch_set.is_some();
     let mut published = false;
@@ -6092,14 +6110,26 @@ fn wait_with_selection(
             };
             let admitted_watch = match (watch_id, watch_set) {
                 (Some(handle), None) => selected_watch_wait::SelectedWatchWait::new(
-                    guard, handle, requested_ticks, started,
-                ).map(|watch| Some(WaitWatchSelection::Single(watch))),
-                (None, Some((handles, policy))) => selected_watch_set_wait::SelectedWatchSetWait::new(
-                    guard, handles, policy, requested_ticks, started,
-                ).map(|watches| Some(WaitWatchSelection::Set(watches))),
+                    guard,
+                    handle,
+                    requested_ticks,
+                    started,
+                )
+                .map(|watch| Some(WaitWatchSelection::Single(watch))),
+                (None, Some((handles, policy))) => {
+                    selected_watch_set_wait::SelectedWatchSetWait::new(
+                        guard,
+                        handles,
+                        policy,
+                        requested_ticks,
+                        started,
+                    )
+                    .map(|watches| Some(WaitWatchSelection::Set(watches)))
+                }
                 (None, None) => Ok(None),
                 (Some(_), Some(_)) => Err(DfmcpError::new(
-                    ErrorCode::InvalidRequest, "watch_id and watch_ids are mutually exclusive",
+                    ErrorCode::InvalidRequest,
+                    "watch_id and watch_ids are mutually exclusive",
                 )),
             };
             let mut watcher = match admitted_watch {
@@ -6129,16 +6159,33 @@ fn wait_with_selection(
             // Admit the complete first watch result before any game effect.
             if let Some(watch) = &mut watcher {
                 let payload = match wait_payload(
-                    guard, action_id, &tracked_order, &latest_receipts, &progress, true,
+                    guard,
+                    action_id,
+                    &tracked_order,
+                    &latest_receipts,
+                    &progress,
+                    true,
                 ) {
                     Ok(payload) => payload,
-                    Err(error) => return wait_selection_error(
-                        guard, &error, &progress, &latest_receipts, selected.as_ref(), Some(watch),
-                    ),
+                    Err(error) => {
+                        return wait_selection_error(
+                            guard,
+                            &error,
+                            &progress,
+                            &latest_receipts,
+                            selected.as_ref(),
+                            Some(watch),
+                        );
+                    }
                 };
                 if let Err(error) = watch.sample(guard, payload) {
                     return wait_selection_error(
-                        guard, &error, &progress, &latest_receipts, selected.as_ref(), Some(watch),
+                        guard,
+                        &error,
+                        &progress,
+                        &latest_receipts,
+                        selected.as_ref(),
+                        Some(watch),
                     );
                 }
             }
@@ -6151,7 +6198,12 @@ fn wait_with_selection(
                     }
                     if let Err(error) = watch.check(guard) {
                         return wait_selection_error(
-                            guard, &error, &progress, &latest_receipts, selected.as_ref(), Some(watch),
+                            guard,
+                            &error,
+                            &progress,
+                            &latest_receipts,
+                            selected.as_ref(),
+                            Some(watch),
                         );
                     }
                 }
@@ -6173,7 +6225,14 @@ fn wait_with_selection(
                 let (_, ctx) = match next_context(guard) {
                     Ok(value) => value,
                     Err(error) => {
-                        return wait_selection_error(guard, &error, &progress, &latest_receipts, selected.as_ref(), watcher.as_ref());
+                        return wait_selection_error(
+                            guard,
+                            &error,
+                            &progress,
+                            &latest_receipts,
+                            selected.as_ref(),
+                            watcher.as_ref(),
+                        );
                     }
                 };
                 let carried_ceiling = carried_wait_ceiling(guard);
@@ -6184,12 +6243,18 @@ fn wait_with_selection(
                     watch.ceiling(guard.adapter.snapshot().tick.0, ceiling)
                 });
                 let tracked = guard.open_actions.clone();
-                let slice = match progress.step(&mut guard.adapter, &tracked, &ctx, ceiling)
-                {
+                let slice = match progress.step(&mut guard.adapter, &tracked, &ctx, ceiling) {
                     Ok(Some(slice)) => slice,
                     Ok(None) => break,
                     Err(error) => {
-                        return wait_selection_error(guard, &error, &progress, &latest_receipts, selected.as_ref(), watcher.as_ref());
+                        return wait_selection_error(
+                            guard,
+                            &error,
+                            &progress,
+                            &latest_receipts,
+                            selected.as_ref(),
+                            watcher.as_ref(),
+                        );
                     }
                 };
                 let finished = slice.finished;
@@ -6217,8 +6282,12 @@ fn wait_with_selection(
                         }
                     }
                     return wait_selection_error(
-                        guard, &error, &progress, &latest_receipts,
-                        selected.as_ref(), watcher.as_ref(),
+                        guard,
+                        &error,
+                        &progress,
+                        &latest_receipts,
+                        selected.as_ref(),
+                        watcher.as_ref(),
                     );
                 }
                 persist_durable_head(guard);
@@ -6229,7 +6298,14 @@ fn wait_with_selection(
                             "wait stopped at an unpublished durable frontier ({fault}); further progress requires successful persistence"
                         ),
                     );
-                    return wait_selection_error(guard, &error, &progress, &latest_receipts, selected.as_ref(), watcher.as_ref());
+                    return wait_selection_error(
+                        guard,
+                        &error,
+                        &progress,
+                        &latest_receipts,
+                        selected.as_ref(),
+                        watcher.as_ref(),
+                    );
                 }
                 remember_version(guard);
                 if let Some(selected) = &mut selected
@@ -6246,16 +6322,33 @@ fn wait_with_selection(
                 }
                 if let Some(watch) = &mut watcher {
                     let payload = match wait_payload(
-                        guard, action_id, &tracked_order, &latest_receipts, &progress, true,
+                        guard,
+                        action_id,
+                        &tracked_order,
+                        &latest_receipts,
+                        &progress,
+                        true,
                     ) {
                         Ok(payload) => payload,
-                        Err(error) => return wait_selection_error(
-                            guard, &error, &progress, &latest_receipts, selected.as_ref(), Some(watch),
-                        ),
+                        Err(error) => {
+                            return wait_selection_error(
+                                guard,
+                                &error,
+                                &progress,
+                                &latest_receipts,
+                                selected.as_ref(),
+                                Some(watch),
+                            );
+                        }
                     };
                     if let Err(error) = watch.sample(guard, payload) {
                         return wait_selection_error(
-                            guard, &error, &progress, &latest_receipts, selected.as_ref(), Some(watch),
+                            guard,
+                            &error,
+                            &progress,
+                            &latest_receipts,
+                            selected.as_ref(),
+                            Some(watch),
                         );
                     }
                 }
@@ -6270,19 +6363,35 @@ fn wait_with_selection(
                 }
                 return wait_selection_error(
                     guard,
-                    &DfmcpError::new(ErrorCode::InternalInvariantViolation,
-                        "selected watch wait has no admitted publication"),
-                    &progress, &latest_receipts, selected.as_ref(), Some(watch),
+                    &DfmcpError::new(
+                        ErrorCode::InternalInvariantViolation,
+                        "selected watch wait has no admitted publication",
+                    ),
+                    &progress,
+                    &latest_receipts,
+                    selected.as_ref(),
+                    Some(watch),
                 );
             }
             let mut payload = match wait_payload(
-                guard, action_id, &tracked_order, &latest_receipts, &progress,
+                guard,
+                action_id,
+                &tracked_order,
+                &latest_receipts,
+                &progress,
                 max_game_ticks.is_some(),
             ) {
                 Ok(payload) => payload,
-                Err(error) => return wait_selection_error(
-                    guard, &error, &progress, &latest_receipts, selected.as_ref(), None,
-                ),
+                Err(error) => {
+                    return wait_selection_error(
+                        guard,
+                        &error,
+                        &progress,
+                        &latest_receipts,
+                        selected.as_ref(),
+                        None,
+                    );
+                }
             };
             if let Some(selected) = &mut selected {
                 selected.finish(guard.adapter.snapshot().paused);
@@ -6347,6 +6456,49 @@ pub(crate) fn cancel_in_scope(
     mode: Option<String>,
     scope: Option<String>,
 ) -> String {
+    let selected_goal = match scope
+        .as_deref()
+        .and_then(|value| value.strip_prefix("goal:"))
+    {
+        Some(raw) => {
+            if mode.as_deref() != Some("withdraw_goal") {
+                return coded_error_payload(
+                    "fortress.cancel",
+                    ErrorCode::InvalidRequest,
+                    "goal:<original-plan-digest> requires explicit mode withdraw_goal",
+                );
+            }
+            if raw.len() != 64
+                || !raw
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+            {
+                return coded_error_payload(
+                    "fortress.cancel",
+                    ErrorCode::InvalidRequest,
+                    "goal withdrawal requires exactly 64 lowercase hexadecimal original-plan-digest digits",
+                );
+            }
+            match Digest32::from_hex(raw) {
+                Some(digest) => Some(digest),
+                None => {
+                    return coded_error_payload(
+                        "fortress.cancel",
+                        ErrorCode::InvalidRequest,
+                        "invalid original goal digest",
+                    );
+                }
+            }
+        }
+        None if mode.as_deref() == Some("withdraw_goal") => {
+            return coded_error_payload(
+                "fortress.cancel",
+                ErrorCode::InvalidRequest,
+                "withdraw_goal requires an exact goal:<original-plan-digest> scope",
+            );
+        }
+        None => None,
+    };
     let selected_plan = match scope.as_deref().filter(|value| value.starts_with("plan:")) {
         Some(raw) => match plan_cancellation::parse_scope(raw) {
             Ok(digest) => Some(digest),
@@ -6359,12 +6511,12 @@ pub(crate) fn cancel_in_scope(
         Some("plan") => Some("plan"),
         Some("session") => Some("session"),
         Some("oldest_open_plan") => Some("oldest_open_plan"),
-        Some(_) if selected_plan.is_some() => None,
+        Some(_) if selected_plan.is_some() || selected_goal.is_some() => None,
         Some(_) => {
             return coded_error_payload(
                 "fortress.cancel",
                 ErrorCode::InvalidRequest,
-                "unsupported cancellation scope; use last_action, plan, plan:<original-plan-digest>, oldest_open_plan or session",
+                "unsupported cancellation scope; use last_action, plan, plan:<original-plan-digest>, oldest_open_plan, session, or goal:<original-plan-digest> with withdraw_goal",
             );
         }
     };
@@ -6413,6 +6565,12 @@ pub(crate) fn cancel_in_scope(
                         "cancellation requires a capability above read_only",
                     );
                 }
+            }
+            if let Some(digest) = selected_goal {
+                return match objectives::withdraw_goal(guard, &digest) {
+                    Ok(payload) => payload.to_string(),
+                    Err(error) => dfmcp_error_payload("fortress.cancel", &error),
+                };
             }
             let cancel_mode = match mode.as_deref() {
                 Some("emergency_pause_and_drain") => CancelMode::EmergencyPauseAndDrain,

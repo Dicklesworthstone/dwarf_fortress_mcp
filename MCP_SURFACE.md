@@ -654,6 +654,14 @@ separate evidence. Finalize certificates require both terminal action states
 and observed physical quiescence. Active or unknown work retains ownership
 fences even after an obligation deadline or a spatial lease TTL expires.
 
+The laboratory also accepts explicit `mode: "withdraw_goal"` with exact
+`scope: "goal:<original-plan-digest>"`. It archives one terminal, physically
+quiet original under current Observe, Query and reversible Plan authority.
+The active slot is released while source, receipts, achievement and reserve
+history remain inspectable. Withdrawal creates no game effect or success claim;
+it refuses active/unknown work and restore-abandoned pursuits. Explain exposes
+a current withdrawal affordance. See [goal withdrawal](docs/LAB_GOAL_WITHDRAWAL.md).
+
 ### `fortress.checkpoint`
 
 Creates and verifies a content-addressed recovery point and reports its publication and evidence

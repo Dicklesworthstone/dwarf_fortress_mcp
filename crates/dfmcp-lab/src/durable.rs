@@ -67,6 +67,11 @@ pub const MAX_COMMITS_PER_FORTRESS: usize = 256;
 /// Most retained original objectives per fortress. Unresolved objectives are
 /// never evicted to admit new work.
 pub const MAX_OBJECTIVES_PER_FORTRESS: usize = 64;
+/// Explicitly withdrawn originals retain their evidence in a separate bounded
+/// archive. They no longer consume an active pursuit slot.
+pub const MAX_WITHDRAWN_OBJECTIVES_PER_FORTRESS: usize = 256;
+pub const MAX_RETAINED_OBJECTIVES_PER_FORTRESS: usize =
+    MAX_OBJECTIVES_PER_FORTRESS + MAX_WITHDRAWN_OBJECTIVES_PER_FORTRESS;
 /// Most step records per durable commit.
 pub const MAX_STEPS_PER_COMMIT: usize = 256;
 /// Largest atomic step frontier, including all unfinished plans of a fortress.
@@ -82,6 +87,10 @@ pub const STEP_STATES: [&str; 7] = [
     "not_dispatched",
     "abandoned",
 ];
+
+#[path = "durable_withdrawal.rs"]
+mod withdrawal;
+pub use withdrawal::DurableObjectiveWithdrawal;
 
 fn invalid(message: impl Into<String>) -> DfmcpError {
     DfmcpError::new(ErrorCode::InvalidRequest, message)
@@ -347,6 +356,8 @@ enum Record {
         plan_digest: Digest32,
         anchor: StateAnchor,
     },
+    /// Explicit withdrawal is an audit disposition, never goal achievement.
+    ObjectiveWithdrawal(DurableObjectiveWithdrawal),
     Step {
         fortress_id: FortressId,
         plan_digest: Digest32,
@@ -769,6 +780,7 @@ impl Record {
                 anchor.cursor.epoch,
                 anchor.cursor.sequence,
             ),
+            Self::ObjectiveWithdrawal(withdrawal) => withdrawal.payload(),
             Self::ObjectiveRetiredCommit {
                 fortress_id,
                 plan_digest,
@@ -844,6 +856,9 @@ impl Record {
         }
         if payload.starts_with("T ") {
             return Self::parse_retired_commit(payload);
+        }
+        if payload.starts_with("U ") {
+            return DurableObjectiveWithdrawal::parse(payload).map(Self::ObjectiveWithdrawal);
         }
         let fields: Vec<&str> = payload.split(' ').collect();
         match fields.as_slice() {
@@ -1530,6 +1545,7 @@ impl DurableLabStore {
                 ));
             }
         }
+        store.validate_withdrawal_history(&verified_anchors)?;
         store.remove_crash_leftovers();
         Ok(store)
     }
@@ -1630,6 +1646,13 @@ impl DurableLabStore {
                     .flat_map(BTreeMap::values)
                     .flat_map(|commit| commit.step_anchors.values())
                     .map(|anchor| anchor.state_hash),
+            )
+            .chain(
+                self.index
+                    .withdrawals
+                    .values()
+                    .flat_map(BTreeMap::values)
+                    .map(|withdrawal| withdrawal.anchor.state_hash),
             )
             .collect()
     }
@@ -1926,6 +1949,11 @@ impl DurableLabStore {
         }
         let mut satisfied = Vec::new();
         for digest in satisfied_set {
+            if self.objective_withdrawal(fortress, digest).is_some() {
+                return Err(invalid(
+                    "withdrawn original cannot acquire new goal achievement",
+                ));
+            }
             let objective = self
                 .objective(fortress, digest)
                 .ok_or_else(|| invalid("satisfaction names an unknown durable objective"))?;
@@ -1940,6 +1968,11 @@ impl DurableLabStore {
         }
         let mut abandoned = Vec::new();
         for digest in abandoned_set {
+            if self.objective_withdrawal(fortress, digest).is_some() {
+                return Err(invalid(
+                    "withdrawn original history cannot be rewritten by restore",
+                ));
+            }
             let objective = self
                 .objective(fortress, digest)
                 .ok_or_else(|| invalid("abandonment names an unknown durable objective"))?;
@@ -2261,7 +2294,9 @@ impl DurableLabStore {
         let objective = self.objective(fortress, plan_digest).ok_or_else(|| {
             invalid("reserve observation names an unknown retained original objective")
         })?;
-        if objective.restore_abandoned_anchor.is_some() {
+        if objective.restore_abandoned_anchor.is_some()
+            || self.objective_withdrawal(fortress, plan_digest).is_some()
+        {
             return Err(invalid(
                 "abandoned original cannot acquire reserve observations",
             ));
@@ -2437,6 +2472,14 @@ impl DurableLabStore {
                             .collect(),
                     }),
             )
+            .chain(
+                self.index
+                    .withdrawals
+                    .values()
+                    .flat_map(BTreeMap::values)
+                    .cloned()
+                    .map(Record::ObjectiveWithdrawal),
+            )
             .collect();
         for record in live {
             let payload = record.payload();
@@ -2511,6 +2554,7 @@ struct Index {
     /// At most one complete anchored final receipt book per retained original.
     /// This archive is never returned by `commits` and cannot resume dispatch.
     retired_commits: BTreeMap<FortressId, BTreeMap<Digest32, DurableCommit>>,
+    withdrawals: BTreeMap<FortressId, BTreeMap<Digest32, DurableObjectiveWithdrawal>>,
 }
 
 impl Index {
@@ -2547,16 +2591,24 @@ impl Index {
                 .ok_or_else(|| corrupt("history eviction names an unknown durable objective"))?;
             if previous.first_satisfied_anchor.is_none()
                 || commits.is_some_and(|book| book.contains_key(digest))
+                || self
+                    .withdrawals
+                    .get(&objective.fortress_id)
+                    .is_some_and(|book| book.contains_key(digest))
             {
                 return Err(corrupt(
                     "history eviction would discard an unfinished objective",
                 ));
             }
         }
-        let remaining = book
-            .map_or(0, BTreeMap::len)
+        let remaining = self
+            .active_objective_count(objective.fortress_id)
             .saturating_sub(evicted_history.len());
         if remaining >= MAX_OBJECTIVES_PER_FORTRESS
+            || book
+                .map_or(0, BTreeMap::len)
+                .saturating_sub(evicted_history.len())
+                >= MAX_RETAINED_OBJECTIVES_PER_FORTRESS
             || (book.is_none() && self.objectives.len() >= MAX_FORTRESSES)
         {
             return Err(DfmcpError::new(
@@ -2662,6 +2714,13 @@ impl Index {
                 let fortress_id = head.fortress_id;
                 let anchor = head.anchor;
                 for digest in satisfied.iter().chain(&abandoned) {
+                    if self
+                        .withdrawals
+                        .get(&fortress_id)
+                        .is_some_and(|book| book.contains_key(digest))
+                    {
+                        return Err(corrupt("withdrawn original acquired new pursuit evidence"));
+                    }
                     let objective = self
                         .objectives
                         .get(&fortress_id)
@@ -2784,13 +2843,20 @@ impl Index {
                 if book.contains_key(&objective.plan_digest) {
                     return Err(corrupt("durable objective recorded twice"));
                 }
-                if book.len() >= MAX_OBJECTIVES_PER_FORTRESS {
+                if book.len() >= MAX_RETAINED_OBJECTIVES_PER_FORTRESS {
                     return Err(DfmcpError::new(
                         ErrorCode::BudgetExceeded,
                         "durable objective book reached its retained-goal bound",
                     ));
                 }
                 book.insert(objective.plan_digest, objective);
+            }
+            Record::ObjectiveWithdrawal(withdrawal) => {
+                self.validate_withdrawal(&withdrawal)?;
+                let book = self.withdrawals.entry(withdrawal.fortress_id).or_default();
+                if book.insert(withdrawal.plan_digest, withdrawal).is_some() {
+                    return Err(corrupt("original goal withdrawal was recorded twice"));
+                }
             }
             Record::ObjectiveCustody {
                 fortress_id,
@@ -2832,6 +2898,10 @@ impl Index {
                 anchor,
             } => {
                 if anchor.fortress_id != fortress_id
+                    || self
+                        .withdrawals
+                        .get(&fortress_id)
+                        .is_some_and(|book| book.contains_key(&plan_digest))
                     || !self
                         .objectives
                         .get(&fortress_id)

@@ -241,12 +241,13 @@ impl SelectedPlanWait {
         let original = exact_original(session, selected.actual)?;
         let entry = original.resource_goal(session);
         if (recovered.is_none() && !entry.owned_by_current_session)
+            || original.is_withdrawn()
             || entry.restore_abandoned_anchor.is_some()
             || entry.abandonment_publication_pending
             || entry.verification_error.is_some()
         {
             return Err(refused(
-                "selected wait requires verified, un-abandoned original goal custody",
+                "selected wait requires verified original goal custody whose pursuit was neither abandoned nor withdrawn",
             ));
         }
         let plan = entry
