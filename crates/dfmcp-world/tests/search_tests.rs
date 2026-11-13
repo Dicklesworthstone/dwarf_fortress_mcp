@@ -247,3 +247,120 @@ fn rebuilding_search_withdraws_newly_unavailable_values()
     assert!(!visible[0].snippet.contains("withdrawnmarker"));
     Ok(())
 }
+
+#[test]
+fn long_announcement_titles_preserve_suffix_matches_and_identity_ties()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mut snapshot = snapshot_with_fields(BTreeMap::new());
+    let summary = format!("{}buriedmarker", "routine report ".repeat(30));
+    assert!(summary.len() > 256);
+    for id in [92, 91] {
+        let event = WorldEvent {
+            id: EventId::new(id),
+            tick: snapshot.tick,
+            kind: WorldEventKind::Announcement,
+            subject: None,
+            summary: summary.clone(),
+            fields: BTreeMap::new(),
+        };
+        snapshot.graph.events.insert(event.id, event);
+    }
+    snapshot.refresh_hash();
+
+    let mut engine = FrankenSearchEngine::new();
+    engine.index_snapshot(&snapshot)?;
+    let hits = engine.search("buriedmarker", 5)?;
+    assert_eq!(
+        hits.iter().map(|hit| hit.event_id).collect::<Vec<_>>(),
+        vec![Some(EventId::new(91)), Some(EventId::new(92))]
+    );
+    assert_eq!(hits[0].score_micros, hits[1].score_micros);
+    for hit in &hits {
+        assert_eq!(hit.entity_id, None);
+        assert!(hit.title.len() <= 256);
+        assert!(hit.title.ends_with("..."));
+        assert!(!hit.title.contains("buriedmarker"));
+        assert!(hit.matched_terms.contains(&"buriedmarker".to_owned()));
+    }
+    let unrelated = engine.search("Urist", 5)?;
+    assert_eq!(unrelated.len(), 1);
+    assert_eq!(unrelated[0].entity_id, Some(EntityId::new(10)));
+    engine.index_snapshot(&snapshot)?;
+    assert_eq!(engine.search("buriedmarker", 5)?, hits);
+    Ok(())
+}
+
+#[test]
+fn announcement_display_titles_preserve_exact_bounds_and_utf8()
+-> Result<(), Box<dyn std::error::Error>> {
+    for (summary, expected_title, query) in [
+        ("a".repeat(256), "a".repeat(256), "a".repeat(256)),
+        (
+            format!("{}🪨 suffixmarker", "岩".repeat(85)),
+            format!("{}...", "岩".repeat(84)),
+            "suffixmarker".to_owned(),
+        ),
+    ] {
+        let mut snapshot = snapshot_with_fields(BTreeMap::new());
+        let event = WorldEvent {
+            id: EventId::new(91),
+            tick: snapshot.tick,
+            kind: WorldEventKind::Announcement,
+            subject: None,
+            summary,
+            fields: BTreeMap::new(),
+        };
+        snapshot.graph.events.insert(event.id, event);
+        snapshot.refresh_hash();
+        let mut engine = FrankenSearchEngine::new();
+        engine.index_snapshot(&snapshot)?;
+        let hits = engine.search(&query, 5)?;
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].event_id, Some(EventId::new(91)));
+        assert_eq!(hits[0].title, expected_title);
+        assert!(hits[0].title.len() <= 256);
+    }
+    Ok(())
+}
+
+#[test]
+fn direct_document_title_and_body_limits_remain_atomic() -> Result<(), Box<dyn std::error::Error>> {
+    let mut engine = FrankenSearchEngine::new();
+    engine.index_document(
+        Some(EntityId::new(10)),
+        None,
+        "retained".to_owned(),
+        "beforemarker".to_owned(),
+    )?;
+    let before = engine.search("beforemarker", 5)?;
+    for (title, body) in [
+        ("a".repeat(257), "latermarker".to_owned()),
+        ("valid".to_owned(), "x".repeat(65_537)),
+    ] {
+        let refused = engine.index_document(None, Some(EventId::new(91)), title, body);
+        assert_eq!(
+            refused.err().ok_or("oversized document was admitted")?.code,
+            dfmcp_core::ErrorCode::BudgetExceeded
+        );
+        assert_eq!(engine.search("beforemarker", 5)?, before);
+        assert!(engine.search("latermarker", 5)?.is_empty());
+    }
+    let mut oversized = snapshot_with_fields(BTreeMap::new());
+    let event = WorldEvent {
+        id: EventId::new(91),
+        tick: oversized.tick,
+        kind: WorldEventKind::Announcement,
+        subject: None,
+        summary: "x".repeat(65_537),
+        fields: BTreeMap::new(),
+    };
+    oversized.graph.events.insert(event.id, event);
+    oversized.refresh_hash();
+    let refused = engine.index_snapshot(&oversized);
+    assert_eq!(
+        refused.err().ok_or("oversized snapshot body was admitted")?.code,
+        dfmcp_core::ErrorCode::BudgetExceeded
+    );
+    assert_eq!(engine.search("beforemarker", 5)?, before);
+    Ok(())
+}

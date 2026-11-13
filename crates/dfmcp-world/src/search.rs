@@ -39,6 +39,19 @@ fn tokenize(text: &str) -> Vec<String> {
         .collect()
 }
 
+/// Titles are bounded display labels, not the searchable event payload.
+/// Keep the complete summary in the body and mark any abbreviated title.
+fn event_title(summary: &str) -> String {
+    if summary.len() <= MAX_SEARCH_TITLE_BYTES {
+        return summary.to_owned();
+    }
+    let mut end = MAX_SEARCH_TITLE_BYTES - 3;
+    while !summary.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}...", &summary[..end])
+}
+
 /// Fixed-point full-text and attention ranking laboratory.
 #[derive(Clone, Debug, Default)]
 pub struct FrankenSearchEngine {
@@ -191,7 +204,7 @@ impl FrankenSearchEngine {
                 .map(|(name, val)| format!("{}: {:?}", name, val))
                 .collect();
             let body = format!("{} {}", event.summary, fields_text.join(" "));
-            replacement.index_document(None, Some(event.id), event.summary.clone(), body)?;
+            replacement.index_document(None, Some(event.id), event_title(&event.summary), body)?;
         }
         *self = replacement;
         Ok(())

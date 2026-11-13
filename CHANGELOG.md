@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased — Keep lexical search usable with long announcements
+
+- Bound only the announcement display title on a valid UTF-8 boundary; keep
+  the complete summary searchable so a long event cannot disable all retrieval.
+- Preserve strict direct-document and body/index/token limits, deterministic
+  ordering, and atomic replacement of the previous index.
+- Add three world and one public-facade regression tests. Source reviewed;
+  Rust execution and formatting were blocked by the disconnected environment.
+
 ## Unreleased — Preserve original identity in recovered action proof
 
 - Share original terminal identity/custody validation across ordinary

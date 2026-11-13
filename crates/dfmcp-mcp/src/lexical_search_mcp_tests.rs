@@ -5,9 +5,10 @@
 
 use std::collections::BTreeMap;
 
-use dfmcp_core::{Capability, Digest32, EntityId};
+use dfmcp_core::{Capability, Digest32, EntityId, EventId};
 use dfmcp_world::{
-    EntityKind, EntityRecord, Fact, FactPresence, FactSource, Value as WorldValue, WorldSnapshot,
+    EntityKind, EntityRecord, Fact, FactPresence, FactSource, Value as WorldValue, WorldEvent,
+    WorldEventKind, WorldSnapshot,
 };
 use serde_json::{Value, json};
 
@@ -219,5 +220,60 @@ fn public_lexical_query_withdraws_a_fact_when_the_current_presence_changes() -> 
             .snapshot(),
         &after
     );
+    Ok(())
+}
+
+#[test]
+fn public_lexical_search_accepts_long_announcements_without_losing_their_suffix() -> TestResult {
+    let _serial = crate::test_serial();
+    let (session_id, _) = open_fixture()?;
+    let session = crate::server::resolve_session(Some(session_id.clone()))?;
+    let snapshot = {
+        let mut guard = session.lock().map_err(|_| "session poisoned")?;
+        let mut snapshot = guard.adapter.snapshot().clone();
+        let event = WorldEvent {
+            id: EventId::new(96_102),
+            tick: snapshot.tick,
+            kind: WorldEventKind::Announcement,
+            subject: None,
+            summary: format!("{}🪨 tailannouncementmarker", "岩".repeat(85)),
+            fields: BTreeMap::new(),
+        };
+        snapshot.graph.events.insert(event.id, event);
+        snapshot.cursor = snapshot.cursor.checked_next().ok_or("cursor exhausted")?;
+        snapshot.refresh_hash();
+        guard.adapter.inject_snapshot(snapshot.clone())?;
+        snapshot
+    };
+    let expected_anchor = crate::observation_projection::anchor_json(&snapshot.anchor());
+    let result = search(&session_id, "tailannouncementmarker")?;
+    assert_eq!(result["ok"], true, "{result}");
+    assert_eq!(result["returned"], 1);
+    assert_eq!(result["hits"][0]["event_id"], "96102");
+    assert_eq!(result["hits"][0]["entity_id"], Value::Null);
+    assert_eq!(result["hits"][0]["title"], format!("{}...", "岩".repeat(84)));
+    assert_eq!(result["anchor"], expected_anchor);
+    assert_eq!(result["agent_turn"]["anchor"], expected_anchor);
+    assert_eq!(
+        result["agent_turn"]["coverage"]["absence_proof_scope"],
+        json!([])
+    );
+
+    // One long event must not disable unrelated entity retrieval.
+    let unrelated = search(&session_id, "needle")?;
+    assert_eq!(unrelated["ok"], true, "{unrelated}");
+    assert_eq!(unrelated["returned"], 1);
+    assert_eq!(unrelated["hits"][0]["entity_id"], SEARCH_ENTITY.to_string());
+    {
+        let mut guard = session.lock().map_err(|_| "session poisoned")?;
+        assert_eq!(guard.adapter.snapshot(), &snapshot);
+        guard
+            .grants
+            .retain(|grant| grant.capability != Capability::Query);
+    }
+    let denied = search(&session_id, "tailannouncementmarker")?;
+    assert_eq!(denied["ok"], false, "{denied}");
+    assert_eq!(denied["error"]["code"], "capability_denied");
+    assert!(denied.get("hits").is_none());
     Ok(())
 }

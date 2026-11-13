@@ -1,5 +1,23 @@
 # Implementation Status
 
+## Unreleased — Keep lexical search usable with long announcements
+
+Snapshot indexing now derives a UTF-8-safe display title of at most 256 bytes
+from a long announcement while retaining its complete summary in the searchable
+body. Previously one event over the title limit refused the entire replacement
+index, including unrelated entity searches. Short and exactly bounded titles
+retain their bytes; direct document admission and body/index/token limits remain
+strict, and failed replacement still preserves the previous index.
+
+Three world regressions cover suffix retrieval, deterministic event identity
+ties, Unicode boundaries, unchanged exact-limit titles and atomic oversize
+refusals. One public laboratory facade regression covers suffix and unrelated
+entity queries, exact anchors, read-only behavior and current Query authority.
+The changes received source review only. The execution environment disconnected
+before compilation or tests; no Rust, formatting, full-workspace or native
+qualification is claimed. The broader owned FrankenSearch integration bead
+`dfmcp-reality-wiring-proof-4bf.9` remains open.
+
 ## Unreleased — Preserve original identity in recovered action proof
 
 Recovered obligation publication now checks original entity generation and
