@@ -7,7 +7,7 @@ use dfmcp_core::{
     Capability, CapabilityGrant, CapabilityScope, CommitState, FortressId, IntentId,
     OperationContext, RequestId, RiskTier, SessionId, WorkBudget,
 };
-use dfmcp_intent::StaticPlanner;
+use dfmcp_intent::{Action, StaticPlanner};
 use dfmcp_lab::{MemoryAdapter, durable::DurableStepUpdate};
 
 struct StateDir(std::path::PathBuf);

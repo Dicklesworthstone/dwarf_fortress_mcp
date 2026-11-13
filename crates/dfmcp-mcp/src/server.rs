@@ -247,6 +247,10 @@ mod production_objective_tests;
 #[path = "objective_lifecycle_tests.rs"]
 mod objective_lifecycle_tests;
 
+#[cfg(test)]
+#[path = "recovered_action_identity_tests.rs"]
+mod recovered_action_identity_tests;
+
 /// One granted capability record returned to the client.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct NegotiatedCapability {
@@ -590,11 +594,11 @@ fn observe_carried(session: &mut LabSession) -> Result<()> {
             if step.state == "verified"
                 && let Some(work) = &step.work_step
             {
-                dfmcp_intent::effects::validate_harvest_completion(
-                    snapshot,
-                    dfmcp_intent::effects::created_entity_id(&work.idempotency_key, 0),
-                    &work.action,
-                )?;
+                // Recovery has the same proof obligations as live execution.
+                // Matching field predicates cannot certify a replaced entity or
+                // broken input/item custody. Refusal discards the shadow rows,
+                // so neither the monitor nor durable state becomes Verified.
+                dfmcp_intent::effects::validate_terminal_action_identity(snapshot, work)?;
             }
         }
         Ok(next)

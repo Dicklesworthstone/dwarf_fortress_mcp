@@ -1,5 +1,24 @@
 # Implementation Status
 
+## Unreleased — Preserve original identity in recovered action proof
+
+Recovered obligation publication now checks original entity generation and
+input/item custody before recording a verified terminal receipt. Construction,
+provisions and furniture receive the same completion checks already used during
+ordinary execution and archived verification. Matching field values cannot
+certify replacement work, a replaced or ambiguous input ledger, a replaced
+furniture item or duplicate attachment. Refusal leaves the prior carried monitor
+and durable proof frontier intact. The three proof publishers share one validator.
+
+Two recovered-owner regression tests exercise nine identity/custody refusals and
+three valid durable retirement paths. All 710 core/world/intent unit and
+integration tests passed with the new shared validator and unchanged source
+inputs across execution; doctests were not completed. The new MCP owner tests
+remain unexecuted. Resource-capped full MCP checks stopped in a dependency
+build-script linker or were interrupted under shared memory pressure before
+local MCP compilation. No full-workspace or live-game qualification is claimed.
+Bead `df-predicate-evidence-authority-r7m` retains its broader in-progress scope.
+
 ## Unreleased — Preserve completed originals and exact reserve evidence
 
 Completed original laboratory projects now retain a bounded terminal receipt

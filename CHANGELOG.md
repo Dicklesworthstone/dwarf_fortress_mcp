@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased — Preserve original identity in recovered action proof
+
+- Share original terminal identity/custody validation across ordinary
+  execution, carried recovery and archived verification. Recovered construction,
+  provisions and furniture cannot certify matching replacement entities or
+  contradictory input/item custody.
+- Preserve the prior monitor and durable frontier on refusal. Add nine negative
+  and three positive recovered-owner cases with real durable commit/restart.
+- Execute 710 core/world/intent tests with the shared validator, zero failures.
+  New MCP owner tests remain unexecuted after dependency build/resource limits;
+  full compilation and broader qualification are not established.
+
 ## Unreleased — Preserve completed originals and exact reserve evidence
 
 - Retain complete anchored final action maps when original laboratory commits

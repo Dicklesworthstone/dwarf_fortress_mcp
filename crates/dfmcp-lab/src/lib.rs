@@ -1677,36 +1677,7 @@ fn validate_terminal_action_identity(
     state: CommitState,
 ) -> Result<()> {
     if state == CommitState::Verified {
-        effects::validate_construction_material_completion(
-            snapshot,
-            effects::created_entity_id(&step.idempotency_key, 0),
-            &step.action,
-        )?;
-        effects::validate_provisions_completion(
-            snapshot,
-            effects::created_entity_id(&step.idempotency_key, 0),
-            &step.action,
-        )?;
-        effects::validate_harvest_completion(
-            snapshot,
-            effects::created_entity_id(&step.idempotency_key, 0),
-            &step.action,
-        )?;
-    }
-    if state == CommitState::Verified
-        && let Action::PlaceFurniture {
-            kind,
-            item,
-            location,
-        } = &step.action
-    {
-        effects::validate_furniture_completion(
-            snapshot,
-            effects::created_entity_id(&step.idempotency_key, 0),
-            *kind,
-            *item,
-            *location,
-        )?;
+        effects::validate_terminal_action_identity(snapshot, step)?;
     }
     Ok(())
 }

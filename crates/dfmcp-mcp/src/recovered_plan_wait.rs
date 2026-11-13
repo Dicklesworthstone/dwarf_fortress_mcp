@@ -7,7 +7,7 @@
 use std::collections::BTreeMap;
 
 use dfmcp_core::{DfmcpError, Digest32, ErrorCode, Result, StateAnchor, StepId};
-use dfmcp_intent::{Action, EffectWorkState, ObligationStatus, PlanStep, PreparedPlan, effects};
+use dfmcp_intent::{EffectWorkState, ObligationStatus, PlanStep, PreparedPlan, effects};
 use dfmcp_lab::durable::{DurableLabStore, DurableObjective};
 use dfmcp_world::{Predicate, PredicateEvidence, PredicateTruth, WorldSnapshot};
 use serde_json::{Value, json};
@@ -519,19 +519,7 @@ fn verify_terminal(step: &PlanStep, snapshot: &WorldSnapshot) -> Result<()> {
             "the exact archived verified action does not prove its original terminal predicate",
         ));
     }
-    let entity = effects::created_entity_id(&step.idempotency_key, 0);
-    effects::validate_construction_material_completion(snapshot, entity, &step.action)?;
-    effects::validate_provisions_completion(snapshot, entity, &step.action)?;
-    effects::validate_harvest_completion(snapshot, entity, &step.action)?;
-    if let Action::PlaceFurniture {
-        kind,
-        item,
-        location,
-    } = &step.action
-    {
-        effects::validate_furniture_completion(snapshot, entity, *kind, *item, *location)?;
-    }
-    Ok(())
+    effects::validate_terminal_action_identity(snapshot, step)
 }
 
 fn append_anchor(bytes: &mut Vec<u8>, anchor: StateAnchor) {

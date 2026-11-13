@@ -89,6 +89,32 @@ pub use furniture::{
     validate_furniture_location,
 };
 
+/// Validate the original identity and material custody behind a terminal action.
+///
+/// Field predicates cannot establish original entity generations or exclusive
+/// reciprocal inventory custody. Every laboratory proof publisher, including
+/// recovered monitors and archived receipt verification, applies these same
+/// checks only after its ordinary predicates and temporal policy establish
+/// completion. This function performs no effect and grants no dispatch authority.
+pub fn validate_terminal_action_identity(
+    snapshot: &WorldSnapshot,
+    step: &crate::PlanStep,
+) -> Result<()> {
+    let entity = created_entity_id(&step.idempotency_key, 0);
+    validate_construction_material_completion(snapshot, entity, &step.action)?;
+    validate_provisions_completion(snapshot, entity, &step.action)?;
+    validate_harvest_completion(snapshot, entity, &step.action)?;
+    if let Action::PlaceFurniture {
+        kind,
+        item,
+        location,
+    } = &step.action
+    {
+        validate_furniture_completion(snapshot, entity, *kind, *item, *location)?;
+    }
+    Ok(())
+}
+
 /// Field holding whether a labor is enabled on a unit: `labor.<labor>`.
 pub const LABOR_FIELD_PREFIX: &str = "labor.";
 /// Field holding burrow membership on a unit: `burrow.<burrow entity id>`.
