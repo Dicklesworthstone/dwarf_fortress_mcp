@@ -58,6 +58,12 @@ impl LabTaskStore {
         principal: Option<Sha256Digest>,
     ) -> McpResult<()> {
         let work = TaskWork::parse(descriptor.as_value())?;
+        if work.is_observer() {
+            // Recheck the current complete census at the creation boundary.
+            // Do not hold the Task record lock while acquiring a session lock.
+            crate::server::task_session::validate_observation(&work.session_id, &work.plan_digest)
+                .map_err(|error| McpError::invalid_params(error.to_string()))?;
+        }
         // Admission and the upstream create share this lock. A concurrent
         // task call cannot slip past the single-monitor bound.
         let mut records = self.records()?;
@@ -143,6 +149,9 @@ impl LabTaskStore {
         work: &TaskWork,
         payload: &mut Value,
     ) -> McpResult<()> {
+        if work.is_observer() {
+            return Ok(());
+        }
         if payload["physical_quiescent"] != true {
             return Ok(());
         }
@@ -152,6 +161,7 @@ impl LabTaskStore {
             .filter(|record| {
                 record.work.session_id == work.session_id
                     && record.work.plan_digest == work.plan_digest
+                    && !record.work.is_observer()
                     && record.terminal_failure.is_none()
             })
             .filter_map(|record| {
@@ -200,6 +210,11 @@ impl LabTaskStore {
         let record = records
             .get_mut(id)
             .ok_or_else(|| McpError::invalid_params("Task not found"))?;
+        if record.work.is_observer() {
+            return Err(McpError::invalid_params(
+                "observation Tasks cannot enter original dispatch",
+            ));
+        }
         let previously_started = record.dispatch_started;
         record.dispatch_started = true;
         Ok(previously_started)
@@ -225,6 +240,28 @@ impl LabTaskStore {
             })?;
             (record.work.clone(), record.progress.clone())
         };
+        if work.is_observer() {
+            // Cancellation releases only this process-local observation. It is
+            // independent of original goal truth, dispatch custody, Query or
+            // effect grants, and cannot run the owning-plan drain below.
+            crate::server::task_session::read_authority(&work.session_id)
+                .map_err(|error| McpError::invalid_params(error.to_string()))?;
+            if progress["stage"] == "monitor_finalized" {
+                return Ok(());
+            }
+            return self.record_progress(
+                id,
+                json!({
+                    "stage":"monitor_finalized","monitor_kind":"observe_original",
+                    "session_id":work.session_id,"plan_digest":work.plan_digest,
+                    "cancellation_scope":"monitor_only","monitor_stopped":true,
+                    "effect_cancellation_requested":false,"effects_dispatched_by_task":false,
+                    "physical_work_changed":false,"physical_quiescence_certified":false,
+                    "original_receipts_changed":false,"dispatch_handles_restored":false,
+                    "last_observation":progress,
+                }),
+            );
+        }
         if progress["stage"] == "finalized"
             && progress["finalization"]["finalize_certificate"].is_object()
         {
@@ -278,6 +315,8 @@ impl LabTaskStore {
             );
             rows.push((active, record.ordinal, json!({
                 "task_id": id.as_str(), "plan_digest": record.work.plan_digest,
+                "monitor_kind":record.work.monitor_kind(),
+                "cancellation_scope":record.work.cancellation_scope(),
                 "status": task.base().status, "stage": record.progress["stage"],
                 "get": {"method": "tasks/get", "params": {"taskId": id.as_str()}},
                 "details": format!("df://session/{}/task-{}", record.work.session_id, id.as_str()),
@@ -321,6 +360,7 @@ impl LabTaskStore {
             .ok_or_else(|| McpError::invalid_params("Task not found"))?;
         Ok(
             json!({"task_id": id.as_str(), "plan_digest": record.work.plan_digest,
+            "monitor_kind":record.work.monitor_kind(),"cancellation_scope":record.work.cancellation_scope(),
             "task": task, "progress": record.progress, "final_evidence": record.final_evidence,
             "scope": "laboratory_process_only"}),
         )
@@ -657,8 +697,13 @@ impl FinalTaskStore for LabTaskStore {
             return Ok(None);
         }
         let work = self.original_work(id)?;
-        crate::server::task_session::cancellation_admission(&work.session_id, &work.plan_digest)
+        if !work.is_observer() {
+            crate::server::task_session::cancellation_admission(
+                &work.session_id,
+                &work.plan_digest,
+            )
             .map_err(|error| McpError::invalid_params(error.to_string()))?;
+        }
         self.ensure_drained(id)?;
         self.inner.request_cancellation_and_clear_input_if_current(
             expected,

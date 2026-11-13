@@ -2737,7 +2737,7 @@ pub fn run_stdio() {
         .tool(FortressQuery)
         .tool(FortressPlan)
         .tool(crate::task_service::TaskAwareCommit)
-        .tool(FortressWait)
+        .tool(crate::task_service::TaskAwareWait)
         .tool(FortressCancel)
         .tool(FortressCheckpoint)
         .tool(FortressRestore)
@@ -2756,10 +2756,14 @@ pub fn run_stdio() {
              success; only authoritative observation and postcondition proof count. The current \
              adapter is process-local and does not claim live Dwarf Fortress or DFHack control. \
              fortress_commit(as_task=true) retains one original plan as a modern MCP Task. \
+             fortress_wait(plan_digest=..., as_task=true) attaches a passive Task to an exact \
+             existing or durable recovered original; omit max_game_ticks or set it to zero. \
              Only one task monitor may be active in this process; up to 256 task records are \
              retained until process exit. tasks/get includes completed results and failed \
-             evidence; tasks/cancel drains the original plan. Explicit fortress_wait calls \
-             advance laboratory game time. Discover session tasks through the handoff or \
+             evidence. tasks/cancel drains a commit Task's original plan, but stops only \
+             observation for a passive Task, leaving original physical work unchanged. \
+             Explicit foreground fortress_wait calls advance laboratory game time. \
+             Discover session tasks through the handoff or \
              df://session/{session_id}/tasks resource.",
         );
     let server = match server.final_tasks(tasks.runtime.clone()) {

@@ -384,10 +384,14 @@ def check_facade(failures: list[Failure]) -> None:
             failures,
         )
     registrations = re.findall(
-        r"\.tool\((Fortress[A-Za-z]+|crate::task_service::TaskAwareCommit)\)", source
+        r"\.tool\((Fortress[A-Za-z]+|crate::task_service::TaskAware(?:Commit|Wait))\)", source
     )
+    task_wrappers = {
+        "crate::task_service::TaskAwareCommit": "FortressCommit",
+        "crate::task_service::TaskAwareWait": "FortressWait",
+    }
     registrations = [
-        "FortressCommit" if name == "crate::task_service::TaskAwareCommit" else name
+        task_wrappers.get(name, name)
         for name in registrations
     ]
     require(
@@ -402,6 +406,14 @@ def check_facade(failures: list[Failure]) -> None:
             "crate::agent_facade::FortressCommit.definition()" in task_source,
             path,
             "task-aware commit must preserve the existing fortress.commit wire definition",
+            failures,
+        )
+    if "crate::task_service::TaskAwareWait" in source:
+        task_source = read_text("crates/dfmcp-mcp/src/task_service.rs")
+        require(
+            "crate::agent_facade::FortressWait.definition()" in task_source,
+            path,
+            "task-aware wait must preserve the existing fortress.wait wire definition",
             failures,
         )
     require(

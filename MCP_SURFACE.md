@@ -556,6 +556,16 @@ Polls or follows plans/actions/obligations under bounded wall/game time. Returns
 progress only and may provide continuation. Stable no-change progress becomes a compact
 heartbeat.
 
+The modern laboratory registration also accepts `as_task: true` with an
+explicit session and exact committed or verified recovered original digest.
+This creates a passive observation Task under current Observe/Query authority;
+omit `max_game_ticks` or set it to zero and omit watch selectors. The Task
+observes retained original proof without dispatching work, advancing time or
+capturing reserve endpoints. Its `tasks/cancel` stops only the monitor and
+leaves original physical work unchanged. Discovery and terminal evidence state
+`monitor_kind: "observe_original"` and `cancellation_scope: "monitor_only"`.
+See `docs/LAB_MCP_TASKS.md` for the shared bounds and explicit foreground progress.
+
 The semantic work-order and workforce development servers first reconcile a
 retained clock run, then attempt a fresh paused original-goal sample only when
 the clock state permits it. Running or unresolved clock effects remain visible and prevent

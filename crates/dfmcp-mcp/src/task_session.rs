@@ -475,6 +475,133 @@ pub(crate) fn view(session_id: &str, digest: &str) -> Result<PlanTaskView> {
     })
 }
 
+/// Attach a passive monitor only after the complete exact original is readable.
+/// The selector itself admits both current-session and verified recovered
+/// custody; neither a pending plan nor another live owner's work is eligible.
+pub(crate) fn validate_observation(session_id: &str, digest: &str) -> Result<()> {
+    observation_view(session_id, digest).map(|_| ())
+}
+
+/// Observe an original without acquiring its commit, dispatch or cancellation
+/// handles. Meaningful selected stops finish this monitor even when physical
+/// work needs separate owner-authorized cleanup.
+pub(crate) fn observation_view(session_id: &str, digest: &str) -> Result<PlanTaskView> {
+    with_task_read(session_id, |session| {
+        let ctx = read_context(session);
+        authorize_entry(&ctx, Capability::Observe, RiskTier::ReadOnly)?;
+        authorize_entry(&ctx, Capability::Query, RiskTier::ReadOnly)?;
+        if session.budget.max_output_tokens < 1_500 || session.budget.max_bytes < 6_000 {
+            return Err(DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                "original observation Tasks require at least 1500 output tokens and 6000 bytes for their bounded retained result",
+            ));
+        }
+        let requested = super::selected_plan_wait::parse_digest(digest)?;
+        let selected =
+            super::selected_plan_wait::SelectedPlanWait::observe_retained(session, requested)?;
+        let outcome = &selected.projection;
+        let actual = outcome["plan_digest"].as_str().ok_or_else(session_error)?;
+        let (_, mut goal) = original_goal_observation(session, actual)?;
+        let anchor = anchor_json(&session.adapter.snapshot().anchor());
+        goal["requested_plan_digest"] = json!(digest);
+        goal["plan_digest"] = json!(actual);
+        goal["observed_anchor"] = anchor.clone();
+        goal["completion_inferred_from_action_states"] = json!(false);
+        let status = if outcome["complete"] == true {
+            McpTaskStatus::Completed
+        } else if outcome["stop_reason"].is_string() {
+            McpTaskStatus::Failed
+        } else {
+            McpTaskStatus::Working
+        };
+        let total = outcome["action_count"].as_u64().ok_or_else(session_error)?;
+        let terminal = outcome["terminal_actions"]
+            .as_u64()
+            .ok_or_else(session_error)?;
+        let active = outcome["active_work_actions"]
+            .as_u64()
+            .ok_or_else(session_error)?;
+        let unknown = outcome["unknown_work_actions"]
+            .as_u64()
+            .ok_or_else(session_error)?;
+        let quiet = outcome["physical_quiescent"].as_bool();
+        let action_status = if outcome["actions_verified"] == true {
+            McpTaskStatus::Completed
+        } else if outcome["actions_terminal"] == true {
+            McpTaskStatus::Failed
+        } else {
+            McpTaskStatus::Working
+        };
+        let needs_replan = quiet == Some(true)
+            && matches!(
+                outcome["stop_reason"].as_str(),
+                Some("needs_continuation" | "goal_unmet" | "reserve_unmet")
+            );
+        let goal_unconfirmed = quiet == Some(true)
+            && action_status == McpTaskStatus::Completed
+            && selected.truth != PredicateTruth::True
+            && !selected.pending;
+        let unresolved =
+            unknown > 0 || (selected.truth == PredicateTruth::Unknown && !selected.pending);
+        let next_step = if let Some(next) = outcome
+            .get("continuation_request")
+            .filter(|next| next.is_object())
+        {
+            next.clone()
+        } else if status == McpTaskStatus::Working {
+            json!({"tool":"fortress.wait","arguments":{
+                "session_id":session_id,"plan_digest":digest,
+                "max_game_ticks":if outcome["reserve_capture_required"] == true { 0 } else { 100 },
+            },"note":"only an explicit foreground selected wait can progress the world or retain an exact reserve endpoint"})
+        } else if status == McpTaskStatus::Failed {
+            json!({"tool":"fortress.explain","arguments":{
+                "session_id":session_id,"entity_id":format!("goal:{actual}"),
+            },"note":"inspect this exact original before any separately authorized continuation or physical cleanup; cancelling this Task only stops observation"})
+        } else {
+            Value::Null
+        };
+        let packet = crate::AgentTurnBuilder::new("fortress.wait", crate::AgentPhase::Verify)
+            .session_id(session.session_id.to_string())
+            .anchor(anchor.clone())
+            .briefing(json!({"objective_status":[goal.clone()]}))
+            .build();
+        Ok(PlanTaskView {
+            status,
+            payload: json!({
+                "ok":status != McpTaskStatus::Failed,
+                "schema":"dfmcp.lab-original-observer-task/1",
+                "session_id":session.session_id.to_string(),"plan_digest":digest,
+                "status":status.as_str(),"proof_status":status.as_str(),
+                "monitor_kind":"observe_original","cancellation_scope":"monitor_only",
+                "owns_original_dispatch":false,"dispatch_handles_restored":false,
+                "effects_dispatched_by_task":false,"effect_cancellation_allowed":false,
+                "replacement_work_dispatched":false,"automatic_continuation":false,
+                "action_proof_status":action_status.as_str(),"action_count":total,
+                "original_goal":goal,"selected_plan_wait":outcome,
+                "original_goal_satisfied":selected.truth == PredicateTruth::True && !selected.pending,
+                "original_goal_pending":selected.pending,
+                "goal_unconfirmed_after_work":goal_unconfirmed,"needs_replan":needs_replan,
+                "remaining_work":if unknown == 0 { json!(active) } else { Value::Null },
+                "physical_quiescent":outcome["physical_quiescent"],
+                "cleanup_required":status == McpTaskStatus::Failed && quiet != Some(true),
+                "drain_progress":{"inspection_only":true,"actions_total":total,
+                    "remaining_nonterminal":total.saturating_sub(terminal),
+                    "remaining_work":active.saturating_add(unknown),"unknown_work":unknown,
+                    "physical_quiescent":outcome["physical_quiescent"],
+                    "quiescent":quiet == Some(true) && terminal == total,
+                    "cancellation_drains_work":false},
+                "observed_anchor":anchor,"game_tick":session.adapter.snapshot().tick.0,
+                "paused":session.adapter.snapshot().paused,"indeterminate":unresolved,
+                "recovery_class":if unresolved { "reconciliation_required" }
+                    else if status == McpTaskStatus::Failed { "operator_action_required" }
+                    else { "never_unchanged" },
+                "blind_retry_allowed":false,"next_step":next_step,
+                "agent_turn":packet,"scope":"laboratory_process_only",
+            }),
+        })
+    })
+}
+
 /// The Tasks store checks the engine before recording cancellation. A stale
 /// task projection cannot cancel an already verified and physically quiet
 /// plan. Loss of action authority cannot be hidden by transport cancellation.
@@ -1249,3 +1376,7 @@ mod tests {
 #[cfg(test)]
 #[path = "task_reserve_tests.rs"]
 mod reserve_tests;
+
+#[cfg(test)]
+#[path = "task_observer_tests.rs"]
+mod observer_tests;

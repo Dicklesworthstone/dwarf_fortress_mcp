@@ -1,5 +1,48 @@
 # Implementation Status
 
+## Unreleased — Observe existing and recovered originals with passive MCP Tasks
+
+The laboratory modern stdio facade now accepts `fortress_wait` with explicit
+`session_id`, exact original `plan_digest`, `as_task: true`, and omitted or zero
+`max_game_ticks`. It creates a new process-local observation Task for an
+existing committed or verified durable recovered original. Current Observe
+and Query authority, complete original custody and the existing source/output
+budgets are rechecked at creation. Pending reviews, foreign live ownership,
+incomplete evidence, withdrawn or restore-abandoned pursuit, clock advancement
+and watch selectors are refused.
+
+A disjoint observer work schema leaves original commit Task descriptors
+unchanged. The observer supervisor never enters commit dispatch, restores
+handles, advances time, polls actions, captures reserve endpoints or publishes
+history. It consumes the exact read-only original outcome and reports explicit
+continuation/reconciliation stops. Cancelling an observer only stops its
+monitor, retaining evidence that original receipts and physical work were
+unchanged; every upstream cancellation entry bypasses effect drain. Discovery,
+detail and fitted terminal evidence expose the monitor kind and cancellation
+scope. Both modes share the one-active/256-retained Task bound.
+
+Successful goal withdrawal now also has a bounded response tier that retains
+its complete disposition and certificate when a large retained pending-plan
+orientation would otherwise crowd it out. Omitted orientation is explicitly
+marked partial and unknown, with a read-only follow-up; it cannot replace a
+published success with a generic output-budget refusal.
+
+All 20 inline tests in the exact complete `output_budget.rs` passed, including
+two new withdrawal receipt regressions. The unchanged source was compiled
+directly with nightly `rustc --test` and the already-built real pinned
+serde_json 1.0.151 dependency artifacts; no copied implementation or stubs were
+used. This verifies that module, not the full MCP crate or facade integration.
+Nine observer regression cases remain source-present but unexecuted. Scoped
+Rustfmt and source review completed. The normal MCP build was killed in
+unchanged Asupersync before local compilation, and the lower-memory metadata
+attempt was interrupted by an executor restart while checking dependencies.
+Full MCP compilation and runtime qualification remain unestablished.
+The previously completed real world-search (8) and durable-storage (61) tests
+remain passing evidence for those components only. The eleven-tool lexical
+audit recognizes the wait wrapper without adding a tool or weakening checks.
+See `docs/LAB_MCP_TASKS.md`; owners: `df-fastmcp-conformance-5pj.3`,
+`df-tasks-projection-tests-yy4`, and `df-lab-goal-withdrawal-g6w`.
+
 ## Unreleased — Explicitly archive quiet original goals and release active capacity
 
 The laboratory now accepts `fortress.cancel(scope="goal:<exact original digest>",
@@ -34,8 +77,8 @@ owner/facade tests cover full-book recovery, authority and budgets, deferred
 cancellation, repeated durable reopening and publication failure; two more
 public facade tests cover exact selector/mode boundaries, discovery, immutable
 compact receipts and explanation-page invalidation. These MCP tests remain
-unexecuted while the lower-memory MCP typecheck is underway. Source review and
-scoped formatting completed; no full-workspace or live/native admission claim
+unexecuted; the lower-memory MCP typecheck was interrupted during dependency
+compilation by an executor restart. Source review and scoped formatting completed; no full-workspace or live/native admission claim
 is made. Contract: `architecture/laboratory_goal_withdrawal_v1.json`.
 Owner: `df-lab-goal-withdrawal-g6w`.
 

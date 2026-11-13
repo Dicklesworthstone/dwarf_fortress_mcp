@@ -5,6 +5,10 @@ real **MCP 2026-07-28 Task**. Use `fortress_commit(as_task=true)` when the clien
 needs an opaque handle for the original plan's completion, failure or
 cancellation. The ordinary commit call remains available. Both paths use the
 same session authority, plan digest, idempotency receipts and obligation engine.
+Use `fortress_wait(plan_digest=..., as_task=true)` to attach a new passive Task
+to an existing original, including a verified durable recovered original.
+That second kind of Task observes the original without acquiring its effect
+or cancellation ownership.
 
 This is process-local laboratory execution. It does not admit a live DFHack
 tuple, add a production protocol, or qualify native game behavior. Task handles
@@ -17,6 +21,8 @@ first achievement and restore abandonment even after its action commit retires
 or the process restarts. Current Observe authority gates that history. Recovery
 does not recreate a Task handle or grant another session ownership of the old
 task; it exposes the retained goal for observation and explicit follow-up.
+An explicitly requested observation Task receives a new process-local handle
+and preserves the original owner's identity as evidence.
 
 ## Negotiate and create a task
 
@@ -71,6 +77,75 @@ Omitting `as_task`, or setting it to `false`, preserves the normal synchronous
 commit response. Requesting a task without negotiated Tasks support is refused
 before a task or effect is created. No additional fortress tool is registered.
 
+## Attach a Task to an existing or recovered original
+
+An already committed original can be observed through the same negotiated
+Tasks API, without repeating its commit. Supply the exact original digest and
+the current session explicitly:
+
+```json
+{
+  "name": "fortress_wait",
+  "arguments": {
+    "session_id": "<current session ID>",
+    "plan_digest": "<exact committed original digest>",
+    "max_game_ticks": 0,
+    "as_task": true
+  }
+}
+```
+
+The current session needs `observe` and `query`, complete eligible original
+custody and the Task output/source budgets. It does not need the original
+mutation capabilities merely to observe. Admission verifies the complete
+action census both before returning a Task request and at the store's creation
+boundary. A pending uncommitted plan, another live session's original,
+incomplete or mismatched evidence, restore-abandoned or explicitly withdrawn
+pursuit, and lost current read authority are refused. A recovered original
+must pass the same exact durable-custody checks as a selected foreground wait;
+opening a new session alone does not grant original dispatch handles.
+
+Omit `max_game_ticks` or set it to zero. A positive tick request, any non-null
+watch selector or policy, an unknown argument, a malformed digest or a
+non-Boolean `as_task` is refused before Task creation. Ordinary foreground
+waits with `as_task` omitted or false retain their existing behavior.
+
+The two Task modes make their cancellation scope explicit in discovery,
+detail and terminal evidence:
+
+| Creation | `monitor_kind` | `cancellation_scope` | Effect ownership |
+|---|---|---|---|
+| `fortress_commit(as_task=true)` | `commit_original` | `original_plan` | Retains the original commit and authorized drain behavior. |
+| `fortress_wait(plan_digest=..., as_task=true)` | `observe_original` | `monitor_only` | Observes the exact original; commits, clock changes, replacement actions and physical drains are never dispatched by this Task. |
+
+An observation Task consumes only already-retained evidence. Its creation,
+supervisor wakeups, reads and cancellation do not advance time, poll actions,
+hydrate an archived reserve snapshot, capture an endpoint or publish durable
+history. Use an explicit selected foreground `fortress_wait` to make progress
+or retain a required exact endpoint, and inspect the Task again. If an archived
+reserve snapshot is not yet available in the current version book, the Task
+reports the missing evidence; a selected zero-tick foreground wait can perform
+the separately explicit load or observation when it is eligible.
+
+Completion still requires the complete original goal and exact selected-plan
+proof, including the original reserve horizon. Verified harvesting alone does
+not finish a larger room or production project. A meaningful selected stop,
+such as a failed action, unavailable physical identity, unmet original goal or
+required continuation, finishes the observation Task as `failed` with its
+selected outcome and follow-up request. Its failure may coexist with active
+physical work. Review the exact original and explicitly authorize any cleanup
+or continuation through the existing foreground tools.
+
+**Cancelling an observation Task stops only that monitor.** It requires current
+Observe authority but does not require Query or mutation grants just to stop
+observing. The retained `monitor_finalized` record states that no effect
+cancellation was requested and no physical-quiescence certificate was issued.
+The original action receipts and physical work remain unchanged. Its
+`owns_original_dispatch: false` refers to the Task; the nested selected-plan
+projection can separately identify the current session as the original owner.
+Recovered projections always retain the historical owner and state that
+dispatch handles were not restored.
+
 ## Observe progress and prove completion
 
 The pinned modern API provides these methods:
@@ -78,7 +153,7 @@ The pinned modern API provides these methods:
 | Method | Laboratory behavior |
 |---|---|
 | `tasks/get` with `{"taskId":"…"}` | Returns the retained task state; a completed task includes its result, and a failed task includes failure evidence. |
-| `tasks/cancel` with `{"taskId":"…"}` | Requests cancellation of the task's original plan and runs the bounded drain. |
+| `tasks/cancel` with `{"taskId":"…"}` | For a commit Task, cancels its original plan through the bounded drain. For an observation Task, stops only the monitor and leaves physical work unchanged. |
 | `tasks/update` | The framework's typed input-response method. Laboratory plan tasks do not request client input, so it cannot be used to alter action state or manufacture completion. |
 
 There is no modern `tasks/list` or separate `tasks/result` method on this pin.
@@ -148,7 +223,7 @@ the current stage. When the original complete project remains unmet and the
 physical work is quiet, the Task fails with `needs_replan: true` and the
 eligible explicit continuation request. It never dispatches the next stage.
 
-For a failed goal, `status: "working"` therefore means retained monitoring or
+For a commit Task with a failed goal, `status: "working"` therefore means retained monitoring or
 cleanup, not that its failed proof is still pending. Terminal but active actions
 remain in `agent_turn.active_work.actions`, and `cleanup_required` identifies
 the need for an explicit stop. Use `tasks/cancel` with that task's opaque handle
@@ -156,12 +231,15 @@ to drain its original plan, even after another plan has been committed.
 Observation and request-phase cancellation do not stop these effects. Cleanup
 requires the current original action capability and scope at finalization.
 
-Completion payloads retain the original plan digest, each action's exact
+Commit Task completion payloads retain the original plan digest, each action's exact
 receipt digest, observed anchor and evidence references. A later unrelated
 commit does not replace those original action identities. Normal retries of
 the same sealed commit still return the original receipt; creating a task is
 not a new idempotency namespace for effects. Repeated reads of a terminal task
-return the same retained terminal result.
+return the same retained terminal result. Observation Task payloads retain the
+complete selected action census, original and stage goal outcomes, exact
+reserve frontier, recovery identity and custody diagnostics. They do not
+reconstruct action handles or borrow another Task's effect ownership.
 
 At smaller output budgets, a terminal result contains a bounded summary,
 action counts, the observed anchor and a digest of the complete retained
@@ -188,7 +266,7 @@ the continuation to complete evidence.
 
 ## Cancel the original plan
 
-`tasks/cancel` targets the session and plan digest captured at task creation.
+For a commit Task, `tasks/cancel` targets the session and plan digest captured at task creation.
 It continues to target that plan after the session prepares or commits other
 work. Ordinary `fortress_cancel(scope="plan")` continues to refer to the last
 committed plan.
@@ -239,7 +317,8 @@ reproduce the session.
 ## Capacity and retention
 
 The first implementation admits **one active task monitor per server process**
-and retains at most **256 task records**. The upstream runner owns one active
+and retains at most **256 task records**, shared by both commit and observation
+Tasks. The upstream runner owns one active
 supervisor handoff at a time, and this bound is enforced before dispatch so a
 second accepted task cannot starve behind an unfinished monitor. Ordinary
 fortress tools can still operate on multiple plans and sessions.
@@ -261,6 +340,7 @@ stages for adapters that cannot drain in one bounded call.
 ```bash
 cargo test --locked --offline -p dfmcp-mcp --test tasks_tests
 cargo test --locked --offline -p dfmcp-mcp --lib server::task_session
+cargo test --locked --offline -p dfmcp-mcp --lib task_service::observer_request_tests
 cargo test --locked --offline -p dwarf-fortress-mcp --test modern_tasks_golden
 ```
 
@@ -270,6 +350,13 @@ negotiation, task discovery, original-plan progress, completion evidence,
 idempotent effects, capacity refusal, cancellation and deadline failure. Test
 results qualify only their exercised laboratory behavior; they do not replace
 the repository's full qualification gates.
+
+The observation regressions exercise current-session and durable-recovered
+originals, complete-census admission, current grants, malformed clock/watch
+selectors, shared Task capacity, and each upstream store cancellation entry.
+They compare snapshots, request counters and original action receipts before
+and after passive observation and cancellation; physical work must remain
+active when only its monitor is stopped.
 
 ## Foreground stop of a selected original plan
 

@@ -20,6 +20,7 @@ use crate::task_store::LabTaskStore;
 use crate::tasks::McpTaskStatus;
 
 const WORK_SCHEMA: &str = "dfmcp.lab-plan-task-work/1";
+const OBSERVATION_WORK_SCHEMA: &str = "dfmcp.lab-original-observer-task-work/1";
 
 fn unresolved_drain_progress() -> Value {
     json!({
@@ -41,7 +42,7 @@ impl TaskWork {
     pub(crate) fn parse(value: &Value) -> McpResult<Self> {
         let mut work: Self = serde_json::from_value(value.clone())
             .map_err(|_| McpError::invalid_params("invalid laboratory task work descriptor"))?;
-        if work.schema != WORK_SCHEMA
+        if !matches!(work.schema.as_str(), WORK_SCHEMA | OBSERVATION_WORK_SCHEMA)
             || work.session_id.len() != 32
             || work.plan_digest.len() != 64
             || !work
@@ -49,6 +50,11 @@ impl TaskWork {
                 .bytes()
                 .chain(work.plan_digest.bytes())
                 .all(|byte| byte.is_ascii_hexdigit())
+            || (work.is_observer()
+                && work
+                    .plan_digest
+                    .bytes()
+                    .any(|byte| byte.is_ascii_uppercase()))
         {
             return Err(McpError::invalid_params(
                 "laboratory task work must bind one exact session and sealed plan digest",
@@ -57,6 +63,26 @@ impl TaskWork {
         work.session_id.make_ascii_lowercase();
         work.plan_digest.make_ascii_lowercase();
         Ok(work)
+    }
+
+    pub(crate) fn is_observer(&self) -> bool {
+        self.schema == OBSERVATION_WORK_SCHEMA
+    }
+
+    pub(crate) fn monitor_kind(&self) -> &'static str {
+        if self.is_observer() {
+            "observe_original"
+        } else {
+            "commit_original"
+        }
+    }
+
+    pub(crate) fn cancellation_scope(&self) -> &'static str {
+        if self.is_observer() {
+            "monitor_only"
+        } else {
+            "original_plan"
+        }
     }
 }
 
@@ -113,6 +139,13 @@ fn compact_selected_outcome(payload: &Value) -> Value {
         "stop_reason": selected["stop_reason"],
         "goal_truth": selected.get("goal_truth").cloned().unwrap_or_else(|| json!("unknown")),
         "stage_goal_truth": selected.get("stage_goal_truth").cloned().unwrap_or_else(|| json!("unknown")),
+        "selection_origin": selected["selection_origin"],
+        "selection_scope": selected["selection_scope"],
+        "original_owner_session_id": selected["original_owner_session_id"],
+        "dispatch_handles_restored": false,
+        "action_count": selected["action_count"],
+        "verified_actions": selected["verified_actions"],
+        "not_dispatched_actions": selected["not_dispatched_actions"],
         "goal_observed_anchor": selected["goal_observed_anchor"],
         "reserve_frontier": if reserve.is_object() { json!({
             "reserve_until_tick": reserve["reserve_until_tick"],
@@ -251,38 +284,51 @@ impl LabTaskService {
                 "reason": "the retained terminal evidence does not prove physical quiescence",
             }]);
         }
-        let turn = crate::AgentTurnBuilder::new("fortress.commit", crate::AgentPhase::Verify)
+        let operation = if work.is_observer() {
+            "fortress.wait"
+        } else {
+            "fortress.commit"
+        };
+        let turn = crate::AgentTurnBuilder::new(operation, crate::AgentPhase::Verify)
             .session_id(work.session_id.clone())
             .anchor(anchor.clone())
             .active_work(active)
             .build();
         let original_goal = compact_original_goal(work, id.as_str(), payload);
         let compact = json!({"ok": failure.is_none(), "schema": "dfmcp.lab-task-summary/1",
-            "session_id": work.session_id, "plan_digest": work.plan_digest,
-            "status": if failure.is_some() { "failed" } else { "completed" },
-            "proof_status": payload.get("proof_status").cloned().unwrap_or_else(|| json!("unknown")),
-            "action_proof_status": payload.get("action_proof_status").cloned().unwrap_or_else(|| json!("unknown")),
-            "original_goal_satisfied": payload["original_goal_satisfied"].as_bool().unwrap_or(false),
-            "original_goal_pending": payload["original_goal_pending"].as_bool().unwrap_or(false),
-            "goal_unconfirmed_after_work": payload["goal_unconfirmed_after_work"],
-            "needs_replan": payload["needs_replan"].as_bool().unwrap_or(false),
-            "replacement_work_dispatched": false,
-            "original_goal": original_goal,
-            "selected_plan_wait": compact_selected_outcome(payload),
-            "remaining_work": payload["remaining_work"],
-            "physical_quiescent": payload["physical_quiescent"].as_bool().unwrap_or(false),
-            "cleanup_required": payload.get("cleanup_required").cloned().unwrap_or(Value::Bool(true)),
-            "drain_progress": payload.get("drain_progress").cloned().unwrap_or_else(unresolved_drain_progress),
-            "physical_work": payload["physical_work"],
-            "observed_anchor": anchor, "action_counts": counts,
-            "indeterminate": payload["indeterminate"], "recovery_class": payload["recovery_class"],
-            "blind_retry_allowed": false, "agent_turn": turn, "scope": "laboratory_process_only",
-            "evidence": {"coverage": "summary_with_complete_evidence_retained",
-                "digest": dfmcp_core::Digest32::of_bytes(full.as_bytes()).to_hex(), "bytes": full.len(),
-                "details": format!("df://session/{}/task-{}", work.session_id, id.as_str()),
-                "next": format!("df://session/{}/task-{}~evidence-0", work.session_id, id.as_str())},
-            "output_budget": {"max_output_tokens": budget.max_output_tokens, "max_bytes": max_bytes,
-                "clipped": true, "omitted": "full per-action proof is retained in digest-checked evidence pages"}});
+        "session_id": work.session_id, "plan_digest": work.plan_digest,
+        "monitor_kind":work.monitor_kind(),"cancellation_scope":work.cancellation_scope(),
+        "owns_original_dispatch":if work.is_observer() { json!(false) } else { payload["owns_original_dispatch"].clone() },
+        "effects_dispatched_by_task":if work.is_observer() { json!(false) } else { payload["effects_dispatched_by_task"].clone() },
+        "effect_cancellation_allowed":!work.is_observer(),
+        "status": if failure.is_some() { "failed" } else { "completed" },
+        "proof_status": payload.get("proof_status").cloned().unwrap_or_else(|| json!("unknown")),
+        "action_proof_status": payload.get("action_proof_status").cloned().unwrap_or_else(|| json!("unknown")),
+        "original_goal_satisfied": payload["original_goal_satisfied"].as_bool().unwrap_or(false),
+        "original_goal_pending": payload["original_goal_pending"].as_bool().unwrap_or(false),
+        "goal_unconfirmed_after_work": payload["goal_unconfirmed_after_work"],
+        "needs_replan": payload["needs_replan"].as_bool().unwrap_or(false),
+        "replacement_work_dispatched": false,
+        "original_goal": original_goal,
+        "selected_plan_wait": compact_selected_outcome(payload),
+        "remaining_work": payload["remaining_work"],
+        "physical_quiescent": payload["physical_quiescent"].as_bool().unwrap_or(false),
+        "cleanup_required": payload.get("cleanup_required").cloned().unwrap_or(Value::Bool(true)),
+        "drain_progress": payload.get("drain_progress").cloned().unwrap_or_else(unresolved_drain_progress),
+        "physical_work": payload["physical_work"],
+        "observed_anchor": anchor, "action_counts": counts,
+        "indeterminate": payload["indeterminate"], "recovery_class": payload["recovery_class"],
+        "blind_retry_allowed": false, "agent_turn": turn, "scope": "laboratory_process_only",
+        "evidence": {"coverage": "summary_with_complete_evidence_retained",
+            "digest": dfmcp_core::Digest32::of_bytes(full.as_bytes()).to_hex(), "bytes": full.len(),
+            "details": format!("df://session/{}/task-{}", work.session_id, id.as_str()),
+            "next": format!("df://session/{}/task-{}~evidence-0", work.session_id, id.as_str())},
+        "output_budget": {"max_output_tokens": budget.max_output_tokens, "max_bytes": max_bytes,
+            "clipped": true, "omitted": if work.is_observer() {
+                "complete original observation and custody diagnostics are retained in digest-checked evidence pages"
+            } else {
+                "full per-action proof is retained in digest-checked evidence pages"
+            }}});
         if !fits(&compact)? {
             return Err(McpError::invalid_params(
                 "bounded task summary exceeds negotiated output budget; full evidence remains retained and the task must not be retried",
@@ -395,7 +441,11 @@ impl ApplicationTaskSupervisor for LabTaskService {
                 .map_err(|error| McpError::internal_error(error.to_string()))?;
             if work.is_cancellation_requested()? {
                 work.honor_cancellation(Some(
-                    "the original plan has a retained cancellation certificate".to_owned(),
+                    if definition.is_observer() {
+                        "observation stopped; the Task did not cancel or drain original physical work"
+                    } else {
+                        "the original plan has a retained cancellation certificate"
+                    }.to_owned(),
                 ))?;
                 return Ok(());
             }
@@ -428,43 +478,44 @@ impl ApplicationTaskSupervisor for LabTaskService {
                 }
                 return Ok(());
             }
-            let recovering = self.store.mark_dispatch_started(work.task_id())?;
-            let commit = if recovering {
-                // Receipt loss after restore must never reopen the original
-                // mutation. A recovered monitor observes retained actions;
-                // it does not invoke commit again.
-                Value::Null
-            } else {
-                self.store
-                    .record_progress(work.task_id(), json!({"stage": "dispatch_started"}))?;
-                let commit = crate::agent_facade::fortress_commit(
-                    Some(definition.session_id.clone()),
-                    definition.plan_digest.clone(),
-                );
-                let commit: Value = serde_json::from_str(&commit).map_err(|_| {
-                    McpError::internal_error("laboratory commit response is invalid")
-                })?;
-                self.store.record_progress(
-                    work.task_id(),
-                    json!({"stage": "commit_returned", "commit_response": commit}),
-                )?;
-                commit
-            };
-            // Output shaping cannot decide whether an effect happened. The
-            // original receipt is authoritative even if the facade needed to
-            // replace a large success response with a budget refusal.
-            if !crate::server::task_session::has_original_receipt(
-                &definition.session_id,
-                &definition.plan_digest,
-            )
-            .map_err(|error| McpError::invalid_params(error.to_string()))?
-            {
-                let failure = if recovering {
-                    "the original receipt is unavailable after recovery; past effects are unknown and must not be retried"
+            if !definition.is_observer() {
+                let recovering = self.store.mark_dispatch_started(work.task_id())?;
+                let commit = if recovering {
+                    // Receipt loss after restore must never reopen the original
+                    // mutation. A recovered monitor observes retained actions;
+                    // it does not invoke commit again.
+                    Value::Null
                 } else {
-                    "the original plan was not dispatched; inspect refusal or required shared-world consent"
+                    self.store
+                        .record_progress(work.task_id(), json!({"stage": "dispatch_started"}))?;
+                    let commit = crate::agent_facade::fortress_commit(
+                        Some(definition.session_id.clone()),
+                        definition.plan_digest.clone(),
+                    );
+                    let commit: Value = serde_json::from_str(&commit).map_err(|_| {
+                        McpError::internal_error("laboratory commit response is invalid")
+                    })?;
+                    self.store.record_progress(
+                        work.task_id(),
+                        json!({"stage": "commit_returned", "commit_response": commit}),
+                    )?;
+                    commit
                 };
-                let payload = json!({"ok": false, "session_id": definition.session_id,
+                // Output shaping cannot decide whether an effect happened. The
+                // original receipt is authoritative even if the facade needed to
+                // replace a large success response with a budget refusal.
+                if !crate::server::task_session::has_original_receipt(
+                    &definition.session_id,
+                    &definition.plan_digest,
+                )
+                .map_err(|error| McpError::invalid_params(error.to_string()))?
+                {
+                    let failure = if recovering {
+                        "the original receipt is unavailable after recovery; past effects are unknown and must not be retried"
+                    } else {
+                        "the original plan was not dispatched; inspect refusal or required shared-world consent"
+                    };
+                    let payload = json!({"ok": false, "session_id": definition.session_id,
                     "plan_digest": definition.plan_digest, "status": "failed",
                     "proof_status": if recovering { "unknown" } else { "failed" },
                     "original_plan_dispatched": if recovering { Value::Null } else { json!(false) },
@@ -484,20 +535,21 @@ impl ApplicationTaskSupervisor for LabTaskService {
                     "next_step": {"tool": "fortress.observe", "arguments": {"session_id": definition.session_id},
                         "note": "inspect current state and the retained refusal or shared-world consent before choosing a new plan"},
                     "commit_response": commit});
-                let bounded = self.bounded_terminal_evidence(
-                    work.task_id(),
-                    &definition,
-                    &payload,
-                    Some(failure),
-                )?;
-                work.fail_task(
-                    task_error(failure, bounded)?,
-                    Some(
-                        "commit refused; inspect the retained Agent Turn before replanning"
-                            .to_owned(),
-                    ),
-                )?;
-                return Ok(());
+                    let bounded = self.bounded_terminal_evidence(
+                        work.task_id(),
+                        &definition,
+                        &payload,
+                        Some(failure),
+                    )?;
+                    work.fail_task(
+                        task_error(failure, bounded)?,
+                        Some(
+                            "commit refused; inspect the retained Agent Turn before replanning"
+                                .to_owned(),
+                        ),
+                    )?;
+                    return Ok(());
+                }
             }
             std::future::poll_fn(|task_context| {
                 self.signal.register(task_context.waker());
@@ -507,14 +559,27 @@ impl ApplicationTaskSupervisor for LabTaskService {
                         // phases and proved quiescence before the upstream
                         // store accepted cancellation intent. Lease recovery
                         // therefore cannot erase unresolved engine work.
-                        work.honor_cancellation(Some("original plan drained before transport cancellation was admitted; both drain phases and the finalize certificate are retained".to_owned()))?;
+                        work.honor_cancellation(Some(if definition.is_observer() {
+                            "observation stopped; original physical work and its receipts were unchanged"
+                        } else {
+                            "original plan drained before transport cancellation was admitted; both drain phases and the finalize certificate are retained"
+                        }.to_owned()))?;
                         return Ok(Some(()));
                     }
-                    let mut view = match crate::server::task_session::view(&definition.session_id, &definition.plan_digest) {
+                    let observed = if definition.is_observer() {
+                        crate::server::task_session::observation_view(&definition.session_id, &definition.plan_digest)
+                    } else {
+                        crate::server::task_session::view(&definition.session_id, &definition.plan_digest)
+                    };
+                    let mut view = match observed {
                         Ok(view) => view,
                         Err(error) => {
                             let payload = json!({"ok": false, "session_id": definition.session_id,
                                 "plan_digest": definition.plan_digest, "error": error.to_string(),
+                                "monitor_kind":definition.monitor_kind(),"cancellation_scope":definition.cancellation_scope(),
+                                "owns_original_dispatch":if definition.is_observer() { json!(false) } else { Value::Null },
+                                "effects_dispatched_by_task":if definition.is_observer() { json!(false) } else { Value::Null },
+                                "effect_cancellation_allowed":!definition.is_observer(),
                                 "status": "failed", "proof_status": "unknown", "indeterminate": true,
                                 "remaining_work": null, "physical_quiescent": false, "cleanup_required": true,
                                 "drain_progress": unresolved_drain_progress(),
@@ -528,7 +593,9 @@ impl ApplicationTaskSupervisor for LabTaskService {
                             return Ok(Some(()));
                         }
                     };
-                    self.store.retain_original_actions(&definition, &mut view.payload)?;
+                    if !definition.is_observer() {
+                        self.store.retain_original_actions(&definition, &mut view.payload)?;
+                    }
                     self.store.record_progress(work.task_id(), json!({"stage": "observed", "obligation": view.payload}))?;
                     match view.status {
                         McpTaskStatus::Working | McpTaskStatus::InputRequired => Ok(None),
@@ -550,6 +617,9 @@ impl ApplicationTaskSupervisor for LabTaskService {
                             Ok(Some(()))
                         }
                         McpTaskStatus::Cancelled => {
+                            if definition.is_observer() {
+                                return Err(McpError::internal_error("an observation Task cannot request original-plan cancellation"));
+                            }
                             // A foreground fortress.cancel may have drained
                             // the plan before the transport cancellation.
                             self.runtime.cancel_task(work.task_id())?;
@@ -652,6 +722,120 @@ impl ToolHandler for TaskAwareCommit {
     }
 }
 
+fn observation_request(arguments: &Value) -> McpResult<TaskWork> {
+    let fields = arguments
+        .as_object()
+        .ok_or_else(|| McpError::invalid_params("observation Task arguments must be an object"))?;
+    if fields.keys().any(|key| {
+        !matches!(
+            key.as_str(),
+            "session_id"
+                | "plan_digest"
+                | "max_game_ticks"
+                | "as_task"
+                | "watch_id"
+                | "watch_ids"
+                | "watch_policy"
+        )
+    }) || ["watch_id", "watch_ids", "watch_policy"]
+        .iter()
+        .any(|field| fields.get(*field).is_some_and(|value| !value.is_null()))
+        || fields
+            .get("max_game_ticks")
+            .is_some_and(|value| !value.is_null() && value.as_u64() != Some(0))
+    {
+        return Err(McpError::invalid_params(
+            "an observation Task requires one exact plan_digest, no watch selectors and omitted or zero max_game_ticks; use an explicit foreground wait to advance time",
+        ));
+    }
+    if fields.get("as_task") != Some(&Value::Bool(true)) {
+        return Err(McpError::invalid_params(
+            "observation Tasks require as_task=true",
+        ));
+    }
+    let session_id = fields
+        .get("session_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| McpError::invalid_params("as_task requires an explicit session_id"))?;
+    let plan_digest = fields
+        .get("plan_digest")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            McpError::invalid_params("as_task requires the exact original plan_digest")
+        })?;
+    TaskWork::parse(&json!({"schema":OBSERVATION_WORK_SCHEMA,
+        "session_id":session_id,"plan_digest":plan_digest}))
+}
+
+/// The same wait tool can return a process-local passive Task for one already
+/// committed original. Ordinary foreground waits keep their original handler.
+pub(crate) struct TaskAwareWait;
+
+impl ToolHandler for TaskAwareWait {
+    fn definition(&self) -> Tool {
+        let mut definition = crate::agent_facade::FortressWait.definition();
+        if let Some(properties) = definition
+            .input_schema
+            .get_mut("properties")
+            .and_then(Value::as_object_mut)
+        {
+            properties.insert("as_task".to_owned(), json!({"type":"boolean",
+                "description":"Observe one exact committed or durable recovered original as a modern MCP Task. Requires explicit session_id and plan_digest, omitted or zero max_game_ticks, no watch selector, and current Observe/Query. One active monitor per process. This Task never commits, advances time, captures reserve endpoints or cancels original work; tasks/cancel stops only its observation."}));
+        }
+        definition
+    }
+
+    fn declares_final_tasks(&self) -> bool {
+        true
+    }
+
+    fn call(&self, ctx: &McpContext, mut arguments: Value) -> McpResult<Vec<Content>> {
+        if arguments
+            .get("as_task")
+            .is_some_and(|value| !value.is_boolean())
+        {
+            return Err(McpError::invalid_params("as_task must be a boolean"));
+        }
+        if arguments.get("as_task") == Some(&Value::Bool(true)) {
+            return Err(McpError::invalid_params(
+                "as_task requires negotiated modern Tasks dispatch",
+            ));
+        }
+        if let Some(fields) = arguments.as_object_mut() {
+            fields.remove("as_task");
+        }
+        crate::agent_facade::FortressWait.call(ctx, arguments)
+    }
+
+    fn call_final_outcome(
+        &self,
+        ctx: &McpContext,
+        mut arguments: Value,
+    ) -> McpResult<FinalToolOutcome> {
+        if arguments
+            .get("as_task")
+            .is_some_and(|value| !value.is_boolean())
+        {
+            return Err(McpError::invalid_params("as_task must be a boolean"));
+        }
+        if arguments.get("as_task") != Some(&Value::Bool(true)) {
+            if let Some(fields) = arguments.as_object_mut() {
+                fields.remove("as_task");
+            }
+            return crate::agent_facade::FortressWait.call_final_outcome(ctx, arguments);
+        }
+        ctx.checkpoint()?;
+        let work = observation_request(&arguments)?;
+        crate::server::task_session::validate_observation(&work.session_id, &work.plan_digest)
+            .map_err(|error| McpError::invalid_params(error.to_string()))?;
+        Ok(FinalToolOutcome::CreateTask {
+            work_descriptor:FinalTaskWorkDescriptor::new(serde_json::to_value(work)
+                .map_err(|_| McpError::internal_error("could not encode original observation work"))?)?,
+            status_message:Some("original observation queued; no effect or clock is dispatched and cancellation stops only this monitor".to_owned()),
+        })
+    }
+}
+
 /// Both futures live in the caller-owned root context. Poll Tasks first so
 /// readiness exists before ingress; neither future escapes its owner.
 pub(crate) async fn serve_with_tasks(
@@ -703,6 +887,10 @@ pub(crate) async fn serve_with_tasks(
         }
     }
 }
+
+#[cfg(test)]
+#[path = "task_observer_request_tests.rs"]
+mod observer_request_tests;
 
 #[cfg(test)]
 mod tests {

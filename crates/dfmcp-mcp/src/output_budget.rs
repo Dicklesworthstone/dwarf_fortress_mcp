@@ -15,6 +15,9 @@
 //!    marker, least essential first;
 //! 4. `minimal` — only the outcome, error, session, anchor, active work, the
 //!    top recommendation and the budget record survive.
+//! A published goal withdrawal has one final receipt tier: its exact outcome
+//! and certificate remain complete while oversized orientation is explicitly
+//! omitted with a read-only inspection step.
 //!
 //! Every response carries `output_budget` with the estimate and the tier.
 
@@ -578,6 +581,64 @@ fn minimal(payload: &Value) -> Value {
     Value::Object(out)
 }
 
+/// Withdrawal publishes an immutable disposition before the facade attaches
+/// orientation. A single retained replan recommendation may contain a large
+/// original blueprint, so even the ordinary minimal turn need not fit the
+/// receipt's pre-admitted envelope. Keep the whole receipt and explicitly defer
+/// orientation instead of reporting failure after the archive was published.
+///
+/// The fixed turn and budget record add less than the 2,048 bytes reserved by
+/// `objective_withdrawal::admit_receipt`, including maximum-width canonical
+/// anchors and session IDs. No source text, work catalog, or truncation trace
+/// is copied into this final tier.
+fn withdrawal_receipt(payload: &Value, budget: u64, original: u64) -> Option<String> {
+    if payload["ok"] != true
+        || payload["status"] != "withdrawn"
+        || payload["withdrawal"]["schema"] != "dfmcp.original-goal-withdrawal/1"
+        || payload["archived"] != true
+        || payload["physical_work_changed"] != false
+        || payload["goal_success_claimed"] != false
+    {
+        return None;
+    }
+    let status = match payload["agent_turn"]["continuity"]["status"].as_str() {
+        Some(
+            status @ ("bootstrap" | "continuous" | "heartbeat" | "partial" | "gap" | "reset"
+            | "stale" | "indeterminate"),
+        ) => status,
+        _ => "indeterminate",
+    };
+    let next = json!({
+        "tool":"fortress.observe",
+        "arguments":{"session_id":payload["session_id"],"profile":"briefing"},
+    });
+    let mut small = minimal(payload);
+    small["truncated"] = json!(true);
+    small["agent_turn"] = json!({
+        "schema":"dfmcp.agent_turn/1", "operation":"fortress.cancel", "phase":"reconcile",
+        "anchor":payload["observed_anchor"],
+        "continuity":{"status":status,"detail_omitted_for_output_budget":true},
+        "profile":"tactical",
+        "active_work":{"status":"omitted_for_output_budget","absence_proven":false},
+        "recommendations":[{
+            "tool":next["tool"], "arguments":next["arguments"],
+            "reason":"withdrawal succeeded; inspect retained work before further action",
+            "risk":"read_only", "reversibility":"not_applicable", "requires_confirmation":false,
+        }],
+        "coverage":{
+            "status":"partial", "complete_domains":["original_goal_withdrawal_receipt"],
+            "absence_proof_scope":[], "omitted_domains":["session_orientation"],
+            "continuation":next,
+        },
+    });
+    let record = json!({
+        "max_output_tokens":budget, "full_estimate_tokens":original,
+        "estimator":"ceil(bytes / 4)", "tier":"withdrawal_receipt",
+        "note":"complete withdrawal receipt; session orientation omitted for output budget",
+    });
+    fits(&small, &record, budget)
+}
+
 /// Fit one finished response into `max_output_tokens`.
 #[must_use]
 pub(crate) fn fit(response: &str, max_output_tokens: u64) -> String {
@@ -681,6 +742,9 @@ pub(crate) fn fit(response: &str, max_output_tokens: u64) -> String {
     match fits(&small, &record, max_output_tokens) {
         Some(text) => text,
         None => {
+            if let Some(receipt) = withdrawal_receipt(&payload, max_output_tokens, original) {
+                return receipt;
+            }
             // The budget is below even the minimal envelope: say so in the
             // smallest valid form rather than exceed it silently.
             json!({
@@ -806,6 +870,120 @@ mod tests {
             let pulse: Value =
                 serde_json::from_str(&shape_for_profile(&payload.to_string(), "pulse"))?;
             assert_eq!(pulse["agent_turn"]["active_work"][key], json!([]));
+        }
+        Ok(())
+    }
+
+    fn withdrawal_with_oversized_orientation(status: &str) -> (Value, Value) {
+        let anchor = json!({
+            "fortress_id":u128::MAX.to_string(), "game_tick":u64::MAX,
+            "epoch":u64::MAX, "sequence":u64::MAX, "state_hash":"f".repeat(64),
+        });
+        let raw = json!({
+            "ok":true, "session_id":"f".repeat(32), "plan_digest":"e".repeat(64),
+            "status":"withdrawn", "selection_scope":"exact_original_goal",
+            "descendant_plans_included":false, "already_withdrawn":false,
+            "withdrawal":{
+                "schema":"dfmcp.original-goal-withdrawal/1", "anchor":anchor,
+                "requester_session_id":"f".repeat(32), "proof_digest":"d".repeat(64),
+                "verification":"verified",
+                "never_dispatched_steps":(u32::MAX - 63..=u32::MAX).collect::<Vec<_>>(),
+                "physical_quiescent_at_withdrawal":true, "goal_success_claimed":false,
+                "historical_evidence_retained":true, "dispatch_authority_restored":false,
+            },
+            "archived":true, "physical_work_changed":false, "goal_success_claimed":false,
+            "active_objectives":64, "archived_objectives":256,
+            "active_objective_limit":64, "archive_limit":256, "observed_anchor":anchor,
+        });
+        // A stale resource proposal retains its complete blueprint both in the
+        // pending plan's safe next step and in the replan recommendation. Each
+        // list has one element, so ordinary array fitting cannot shorten it.
+        let next = json!({"tool":"fortress.plan","arguments":{
+            "blueprint":format!("{{\"summary\":\"{}\"}}", "original source ".repeat(2_000)),
+        }});
+        let mut response = raw.clone();
+        response["agent_turn"] = json!({
+            "schema":"dfmcp.agent_turn/1", "operation":"fortress.cancel",
+            "anchor":anchor, "continuity":{"status":status},
+            "coverage":{"status":"complete_for_named_projection","complete_domains":["laboratory.anchor"]},
+            "active_work":{"pending_plans":[{
+                "plan_digest":"c".repeat(64), "state":"review_required",
+                "minimum_safe_next_step":next,
+            }]},
+            "recommendations":[next],
+        });
+        (raw, response)
+    }
+
+    #[test]
+    fn published_withdrawal_receipt_fits_its_admitted_reserve_despite_large_single_work_records()
+    -> Result<(), serde_json::Error> {
+        for status in [
+            "continuous",
+            "heartbeat",
+            "gap",
+            "reset",
+            "stale",
+            "indeterminate",
+        ] {
+            let (raw, response) = withdrawal_with_oversized_orientation(status);
+            // This is the exact admission boundary used before publishing U;
+            // the anchor and receipt use conservative maximum-width values.
+            let raw_bytes = raw.to_string().len() as u64;
+            let budget = (raw_bytes + 2_048).div_ceil(4);
+            let original = response.to_string();
+            let fitted = fit(&original, budget);
+            let output: Value = serde_json::from_str(&fitted)?;
+            assert_eq!(output["ok"], true, "{fitted}");
+            assert_eq!(output["output_budget"]["tier"], "withdrawal_receipt");
+            if let Some(fields) = raw.as_object() {
+                for (key, value) in fields {
+                    assert_eq!(&output[key], value, "lost original receipt field {key}");
+                }
+            }
+            assert!(fitted.len() as u64 <= raw_bytes + 2_048);
+            assert!(estimate_tokens(&fitted) <= budget);
+            assert_eq!(fit(&original, budget), fitted);
+            let turn = &output["agent_turn"];
+            assert_eq!(turn["anchor"], raw["observed_anchor"]);
+            assert_eq!(turn["continuity"]["status"], status);
+            assert_eq!(turn["active_work"]["status"], "omitted_for_output_budget");
+            assert_eq!(turn["active_work"]["absence_proven"], false);
+            assert_eq!(turn["coverage"]["status"], "partial");
+            assert_eq!(turn["coverage"]["absence_proof_scope"], json!([]));
+            assert_eq!(turn["coverage"]["continuation"]["tool"], "fortress.observe");
+            assert_eq!(turn["recommendations"][0]["risk"], "read_only");
+            assert_eq!(
+                turn["recommendations"][0]["arguments"]["session_id"],
+                raw["session_id"]
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn withdrawal_receipt_fallback_neither_rewrites_fitting_turns_nor_invents_success()
+    -> Result<(), serde_json::Error> {
+        let (raw, response) = withdrawal_with_oversized_orientation("continuous");
+        let source = response.to_string();
+        let full: Value = serde_json::from_str(&fit(&source, estimate_tokens(&source) + 1_000))?;
+        assert_eq!(full["output_budget"]["tier"], "full");
+        assert_eq!(full["agent_turn"], response["agent_turn"]);
+        assert_eq!(full["withdrawal"], raw["withdrawal"]);
+        let budget = (raw.to_string().len() as u64 + 2_048).div_ceil(4);
+        for (key, value) in [
+            ("ok", json!(false)),
+            ("status", json!("cancelled")),
+            ("archived", json!(false)),
+            ("physical_work_changed", json!(true)),
+            ("goal_success_claimed", json!(true)),
+        ] {
+            let mut unproven = response.clone();
+            unproven[key] = value;
+            let fitted: Value = serde_json::from_str(&fit(&unproven.to_string(), budget))?;
+            assert_eq!(fitted["ok"], false, "{key}: {fitted}");
+            assert_eq!(fitted["output_budget"]["tier"], "refused");
+            assert!(fitted.get("withdrawal").is_none());
         }
         Ok(())
     }

@@ -119,6 +119,17 @@ frontier. Later restore preserves the archive without turning it back into an
 active pursuit. Older executables fail closed on the unknown `U` tag rather than
 silently dropping its history.
 
+## Bounded responses
+
+Withdrawal admits its complete receipt plus a fixed response allowance before
+publishing the archive marker. If a large retained pending-plan recommendation
+subsequently prevents ordinary response fitting, the `withdrawal_receipt` tier
+preserves every disposition and certificate field. It explicitly marks session
+orientation partial and active-work detail omitted, without proving other work
+absent, and offers a read-only `fortress.observe` continuation. A published
+withdrawal must not turn into a generic output-budget failure or lose its exact
+receipt merely because unrelated orientation is large.
+
 ## Validation scope
 
 Storage regressions exercise active capacity, separate archive capacity,
@@ -126,5 +137,12 @@ compaction and repeated reopen, exact endpoint preservation, immutable retries,
 forged custody and failed publication. Owner/facade regressions cover a full
 unmet goal book, current authority and budgets, deferred cancellation, recovered
 withdrawal, publication fencing, exact public selectors, discovery and retained
-compact evidence. Executed results are recorded in `IMPLEMENTATION_STATUS.md`;
+compact evidence. Two output-fitting regressions cover the exact admitted
+receipt boundary, oversized singleton recommendations, complete certificates,
+continuity hazards and refusal to invent success. Executed results are recorded in `IMPLEMENTATION_STATUS.md`;
 authored tests alone are not execution evidence.
+
+The 20 inline output-budget tests, including both receipt cases, passed against
+the exact unchanged source with direct nightly `rustc --test` and real pinned
+serde_json artifacts. This module result does not establish facade integration
+or complete MCP crate compilation; those remain separately qualified.

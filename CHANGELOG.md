@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased — Passive Tasks for existing and recovered originals
+
+- Add opt-in `fortress_wait(plan_digest=..., as_task=true)` under current
+  Observe/Query and complete original custody. Preserve the existing eleven
+  tools and synchronous waits; reject clock advancement and watch selectors.
+- Observe original project/reserve outcomes without committing, polling,
+  dispatching, capturing endpoints or recreating recovered effect handles.
+  Make observer cancellation monitor-only across all upstream store entries.
+- Expose mode/cancellation scope in discovery and terminal evidence; retain
+  the shared one-active/256-history bound. Add nine observer regressions.
+- Preserve a successful withdrawal's complete certificate when large retained
+  orientation exceeds output budget, explicitly marking that orientation
+  omitted rather than discarding the published disposition.
+- Pass all 20 tests in the unchanged complete output-budget module, including
+  both new receipt regressions, using direct nightly rustc and real pinned
+  serde_json artifacts. This does not establish full MCP qualification.
+- Record scoped formatting/source review and existing component test passes;
+  full MCP compilation/runtime remain unverified after dependency SIGKILL and
+  an executor restart interrupted the metadata-only fallback.
+
 ## Unreleased — Explicit goal withdrawal with durable retained history
 
 - Add exact `goal:<digest>` plus `withdraw_goal` cancellation mode for terminal,
@@ -12,7 +32,8 @@
   in compact output and refuse renewed selected waiting or continuation.
 - Pass all 61 durable-module tests, including four new archive regressions, with
   normal locked/offline Cargo. Add nine owner/public-facade regressions; MCP
-  execution is pending the lower-memory compile attempt after Asupersync SIGKILL.
+  execution remains unestablished after Asupersync SIGKILL and interruption of
+  the lower-memory dependency compilation by an executor restart.
 
 ## Unreleased — Complete Tasks against original project and reserve evidence
 
