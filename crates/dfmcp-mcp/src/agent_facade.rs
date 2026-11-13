@@ -3103,6 +3103,10 @@ mod selected_wait_facade_tests;
 mod recovered_plan_wait_facade_tests;
 
 #[cfg(test)]
+#[path = "durable_reserve_wait_facade_tests.rs"]
+mod durable_reserve_wait_facade_tests;
+
+#[cfg(test)]
 #[path = "session_output_budget_facade_tests.rs"]
 mod session_output_budget_facade_tests;
 

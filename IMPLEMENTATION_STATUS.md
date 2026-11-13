@@ -1,5 +1,83 @@
 # Implementation Status
 
+## Unreleased — Preserve completed originals and exact reserve evidence
+
+Completed original laboratory projects now retain a bounded terminal receipt
+archive when their active commit retires. Selected recovery accepts either the
+retained open commit or its retired archive, never both, and applies the same
+exact original source, reconstructed seal, expected step census and anchored
+proof checks. The result identifies `retained_commit_at_recovery` or
+`archived_retired_commit` in its recovery evidence. The archive is excluded from
+unfinished commits and grants no dispatch or cancellation handles. Current
+original goal truth and present physical quiet remain independently evaluated.
+This also preserves original prerequisites through repeated completed-project
+restarts and compaction. An achieved goal cannot repair missing action history.
+
+The first selected reserve observation is now durable when the fortress uses
+the durable laboratory store. Capture requires the exact already-published
+world head at the unchanged original absolute horizon. Recovery checks the
+original source, sealed stock-ledger identity and accepted active lineage, then
+derives truth again from that exact snapshot. No Boolean truth is journaled.
+False and unknown samples are immutable even if another observation at the
+same tick or later replenishment would be more favorable. A missed endpoint
+remains `reserve_unobserved`. A historically true endpoint still requires the
+current original goal and current work to qualify before completion.
+
+The selected result reports `durable`, `survives_restart` and
+`retention=durable_original_exact_snapshot` only after confirmed publication or
+verified recovery. The existing process-local behavior remains available.
+Recovered endpoint bytes enter the bounded version book under current read
+authority and are charged alongside the current source. Failed publication
+installs no reusable cache and stops that selected request before another slice.
+A known failed write can be retried while the same exact frontier is current;
+uncertain storage writes retain the existing reopen/replay fence. Advancing past
+an uncaptured endpoint does not create evidence. Restore clears active endpoint
+custody and abandons the original pursuit while retaining historical objects.
+
+Additive hash-chained `E` and `T` records preserve old original-source encodings
+and existing record/objective/step bounds. Compaction retains all exact endpoint
+and terminal-proof objects; eligible original eviction removes only its own
+history roots. The terminal map must match the existing never-dispatched subset.
+Reopen verifies every content object and exact anchor. An explicit abandoned
+disposition may refer to that original's exact restore-abandonment frontier
+when restore reverses game time; this remains historical, inactive evidence.
+Older readable journals can preserve complete anchored rows already present;
+already-discarded or unanchored legacy evidence is never reconstructed. Older
+executables refuse stores containing unfamiliar `E`/`T` records. See
+`docs/LAB_DURABLE_ORIGINAL_EVIDENCE.md` and its machine contract.
+
+Archived verified actions now require the original failure predicate to be
+known false, matching the ordinary obligation monitor. Both true and unknown
+failure evidence refuse. Focused fixture corrections use the actual
+`AppliedAwaitingVerification` adapter state, a required Checkpoint grant and
+real completed progress before retirement. Public reserve fixtures reopen after
+snapshot injection so they exercise real archived receipts rather than invalid
+live handles. Seven focused custody, six public facade and two private reserve
+consumer tests are present; the public/owner integration tests have not executed.
+
+Validation: all 123 exact-source laboratory component tests passed with zero
+failures or ignored tests, including eight new reserve and seven new terminal
+history cases. All 186 source/manifest inputs matched the repository after the
+run. The component retains complete core/world/intent/lab code and narrows only
+the adapter root to its original API module, excluding unrelated native modules.
+Five separately authored recovered-verifier component tests also passed using
+real MemoryAdapter progression and durable storage. They execute the exact
+custody, archived-terminal, carried-monitor and lineage verifier functions;
+the whole session-access `inspect` method, original full-server fixture module,
+Objective/reserve integration, public facade and transport are excluded. All
+eleven external dependency identities match Cargo.lock. Lab source-manifest
+SHA-256 is `cd112003952c9e60dc98d809f0becfd6120bc58eadb6c3865171a8558bb13f3a`;
+helper source-manifest SHA-256 is
+`942be1f94a8f8627d1a691691f20dc0ebeb3048aff4ebadc787c7ff0183429b6`.
+
+Scoped formatting, whitespace, repository integrity, all 34 dependency-policy
+declarations and all 22 work-package bead mappings pass. Full MCP compilation
+remains unestablished: the final resource-capped ordinary metadata attempt was
+SIGKILLed in unchanged `asupersync v0.5.0` before compiling the local MCP crate.
+No full workspace qualification, live-game proof or production admission is
+claimed. `df-lab-selected-plan-wait-s4q` remains in progress for its broader
+acceptance obligations. No dependency pin, native method or public tool is added.
+
 ## Unreleased — Resume the exact original laboratory plan after restart
 
 `fortress.wait` now accepts an exact recovered original plan digest when its

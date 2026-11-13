@@ -1,0 +1,75 @@
+{
+  "schema": "dfmcp.laboratory-durable-original-evidence/1",
+  "bead": "df-lab-selected-plan-wait-s4q",
+  "scope": "deterministic_laboratory_only",
+  "surface": {
+    "tool": "fortress.wait",
+    "selector": "exact_original_plan_digest",
+    "adds_tools": false,
+    "restores_dispatch_authority": false,
+    "restores_cancellation_authority": false,
+    "requires_current_read_authority": ["observe", "query"]
+  },
+  "reserve_endpoint": {
+    "record_tag": "E",
+    "key": ["fortress_id", "original_plan_digest"],
+    "value": ["state_hash", "game_tick", "observation_epoch", "observation_sequence"],
+    "one_immutable_first_sample": true,
+    "first_capture_requires_exact_published_head": true,
+    "semantic_horizon": "unchanged_original_absolute_game_tick",
+    "truth": "rederived_from_exact_snapshot_original_source_and_sealed_output_ledger",
+    "serializes_truth_boolean": false,
+    "later_or_same_tick_stock_can_replace_false_or_unknown": false,
+    "missing_history_can_be_inferred": false,
+    "continuous_maintenance_proven": false,
+    "survives_durable_restart": true,
+    "survives_restore_as_active_evidence": false,
+    "cache_installed_only_after_publication": true,
+    "publication_failure": "stop_selected_request_without_reusable_cache_or_later_progress_slices",
+    "uncertain_write": "reopen_and_replay_before_any_retry"
+  },
+  "terminal_receipts": {
+    "record_tag": "T",
+    "key": ["fortress_id", "original_plan_digest"],
+    "value": "strictly_ordered_step_id_final_state_and_complete_atomic_anchor",
+    "source_identity": "unchanged_separate_retained_original_record",
+    "capture": "W_or_R_retirement_with_nonempty_complete_anchored_recorded_map",
+    "semantic_admission": "exact_original_expected_step_census_source_seal_anchors_and_active_recovery_lineage",
+    "accepted_storage_states": ["verified", "failed", "cancelled", "compensated", "not_dispatched", "abandoned"],
+    "dispatched_or_missing_anchors_qualify": false,
+    "never_dispatched_subset_must_match_N": true,
+    "appears_in_unfinished_commits": false,
+    "historical_goal_truth_can_replace_receipts": false,
+    "older_unanchored_or_missing_history": "unavailable_no_inference",
+    "legacy_D_F_V_semantics_changed": false,
+    "survives_retirement_compaction_and_repeated_restart": true
+  },
+  "bounds": {
+    "max_originals_per_fortress": 64,
+    "max_endpoint_records_per_original": 1,
+    "max_terminal_archives_per_original": 1,
+    "max_recorded_steps_per_commit": 256,
+    "max_ordinary_record_bytes": 65536,
+    "selected_wait_source_budget": "negotiated_complete_current_and_archived_sources_with_existing_16_MiB_ceiling"
+  },
+  "retention": {
+    "object_roots": "all_exact_endpoint_and_terminal_receipt_snapshot_hashes",
+    "eviction": "existing_eligible_original_history_eviction_releases_only_matching_roots",
+    "reopen": "strict_content_address_anchor_and_original_binding_validation",
+    "restore": "historical_bytes_retained_active_original_evidence_abandoned",
+    "older_reader_of_E_or_T": "fails_closed_on_unknown_record_tag"
+  },
+  "implementation": [
+    "crates/dfmcp-lab/src/durable.rs",
+    "crates/dfmcp-mcp/src/objective_reserve.rs",
+    "crates/dfmcp-mcp/src/objectives.rs",
+    "crates/dfmcp-mcp/src/recovered_plan_wait.rs",
+    "crates/dfmcp-mcp/src/selected_plan_wait.rs"
+  ],
+  "focused_tests": [
+    "crates/dfmcp-lab/src/durable_reserve_observation_tests.rs",
+    "crates/dfmcp-lab/src/durable_retired_commit_tests.rs",
+    "crates/dfmcp-mcp/src/objective_reserve_tests.rs"
+  ],
+  "evidence_scope": "source_and_named_development_checks_only_not_live_or_full_workspace_qualification"
+}

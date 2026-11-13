@@ -91,6 +91,17 @@ fn corrupt(message: impl Into<String>) -> DfmcpError {
     DfmcpError::new(ErrorCode::CorruptLedger, message).retryable(false)
 }
 
+/// Ordinary durable continuation may reset the observation epoch but never
+/// reverse game time. Restore is handled separately as goal abandonment.
+fn anchor_precedes(before: StateAnchor, after: StateAnchor) -> bool {
+    before.fortress_id == after.fortress_id
+        && before.tick <= after.tick
+        && before.cursor.epoch <= after.cursor.epoch
+        && (before.cursor.epoch < after.cursor.epoch
+            || before.cursor.sequence < after.cursor.sequence
+            || before == after)
+}
+
 fn io(context: &str, error: &std::io::Error) -> DfmcpError {
     DfmcpError::new(ErrorCode::AdapterUnavailable, format!("{context}: {error}"))
 }
@@ -262,7 +273,8 @@ impl DurableObjective {
     }
 }
 
-/// A committed plan whose steps are not all final.
+/// Exact recorded action custody for an unfinished or archived retired plan.
+/// A retired copy is history only and never reopens dispatch or monitoring.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DurableCommit {
     pub fortress_id: FortressId,
@@ -319,6 +331,21 @@ enum Record {
         fortress_id: FortressId,
         plan_digest: Digest32,
         steps: BTreeMap<u32, StateAnchor>,
+    },
+    /// Complete anchored final receipt rows preserved at retirement. Source
+    /// identity comes from the retained original, never from current goal truth.
+    ObjectiveRetiredCommit {
+        fortress_id: FortressId,
+        plan_digest: Digest32,
+        steps: BTreeMap<u32, (String, StateAnchor)>,
+    },
+    /// The first exact reserve endpoint observed for one retained original.
+    /// Predicate truth is reconstructed from this snapshot and the original
+    /// source; a stored Boolean can never substitute for those bytes.
+    ObjectiveReserveObservation {
+        fortress_id: FortressId,
+        plan_digest: Digest32,
+        anchor: StateAnchor,
     },
     Step {
         fortress_id: FortressId,
@@ -729,6 +756,41 @@ impl Record {
                 }
                 payload
             }
+            Self::ObjectiveReserveObservation {
+                fortress_id,
+                plan_digest,
+                anchor,
+            } => format!(
+                "E {} {} {} {} {} {}",
+                fortress_id.get(),
+                plan_digest.to_hex(),
+                anchor.state_hash.to_hex(),
+                anchor.tick.0,
+                anchor.cursor.epoch,
+                anchor.cursor.sequence,
+            ),
+            Self::ObjectiveRetiredCommit {
+                fortress_id,
+                plan_digest,
+                steps,
+            } => {
+                let mut payload = format!(
+                    "T {} {} {}",
+                    fortress_id.get(),
+                    plan_digest.to_hex(),
+                    steps.len(),
+                );
+                for (step, (state, anchor)) in steps {
+                    payload.push_str(&format!(
+                        " {step} {state} {} {} {} {}",
+                        anchor.state_hash.to_hex(),
+                        anchor.tick.0,
+                        anchor.cursor.epoch,
+                        anchor.cursor.sequence,
+                    ));
+                }
+                payload
+            }
             Self::Step {
                 fortress_id,
                 plan_digest,
@@ -779,6 +841,9 @@ impl Record {
         }
         if payload.starts_with("N ") {
             return Self::parse_objective_custody(payload);
+        }
+        if payload.starts_with("T ") {
+            return Self::parse_retired_commit(payload);
         }
         let fields: Vec<&str> = payload.split(' ').collect();
         match fields.as_slice() {
@@ -883,6 +948,22 @@ impl Record {
                     plan_digest: parse_digest(digest)?,
                     step,
                     state: (*state).to_owned(),
+                })
+            }
+            ["E", fortress, digest, hash, tick, epoch, sequence] => {
+                let fortress_id = FortressId::new(parse_u64(fortress)?);
+                Ok(Self::ObjectiveReserveObservation {
+                    fortress_id,
+                    plan_digest: parse_digest(digest)?,
+                    anchor: StateAnchor {
+                        fortress_id,
+                        cursor: ObservationCursor {
+                            epoch: parse_u64(epoch)?,
+                            sequence: parse_u64(sequence)?,
+                        },
+                        tick: GameTick(parse_u64(tick)?),
+                        state_hash: parse_digest(hash)?,
+                    },
                 })
             }
             [
@@ -1028,6 +1109,68 @@ impl Record {
             return Err(corrupt("journal objective custody has trailing fields"));
         }
         Ok(Self::ObjectiveCustody {
+            fortress_id,
+            plan_digest,
+            steps,
+        })
+    }
+
+    fn parse_retired_commit(payload: &str) -> Result<Self> {
+        let mut fields = payload.split(' ');
+        let mut next = || {
+            fields
+                .next()
+                .ok_or_else(|| corrupt("journal retired receipt map is truncated"))
+        };
+        if next()? != "T" {
+            return Err(corrupt("journal retired receipt kind is invalid"));
+        }
+        let fortress_id = FortressId::new(parse_u64(next()?)?);
+        let plan_digest = parse_digest(next()?)?;
+        let count = parse_u64(next()?)?;
+        if count == 0 || count > MAX_STEPS_PER_COMMIT as u64 {
+            return Err(corrupt(
+                "journal retired receipt map exceeds its step bound",
+            ));
+        }
+        let mut steps = BTreeMap::new();
+        for _ in 0..count {
+            let step = u32::try_from(parse_u64(next()?)?)
+                .map_err(|_| corrupt("journal retired receipt step is malformed"))?;
+            if steps
+                .last_key_value()
+                .is_some_and(|(prior, _)| *prior >= step)
+            {
+                return Err(corrupt(
+                    "journal retired receipt steps are not strictly ordered",
+                ));
+            }
+            let state = next()?;
+            if !STEP_STATES.contains(&state) || state == "dispatched" {
+                return Err(corrupt("journal retired receipt state is not final"));
+            }
+            let state = state.to_owned();
+            let state_hash = parse_digest(next()?)?;
+            let tick = GameTick(parse_u64(next()?)?);
+            let epoch = parse_u64(next()?)?;
+            let sequence = parse_u64(next()?)?;
+            steps.insert(
+                step,
+                (
+                    state,
+                    StateAnchor {
+                        fortress_id,
+                        state_hash,
+                        tick,
+                        cursor: ObservationCursor { epoch, sequence },
+                    },
+                ),
+            );
+        }
+        if fields.next().is_some() {
+            return Err(corrupt("journal retired receipt map has trailing fields"));
+        }
+        Ok(Self::ObjectiveRetiredCommit {
             fortress_id,
             plan_digest,
             steps,
@@ -1329,6 +1472,64 @@ impl DurableLabStore {
                 }
             }
         }
+        for (fortress, book) in &store.index.reserve_observations {
+            for (digest, anchor) in book {
+                let objective = store.objective(*fortress, *digest).ok_or_else(|| {
+                    corrupt("reserve observation lost its retained original objective")
+                })?;
+                let sealed = verified_anchors
+                    .get(&objective.sealed_state_hash)
+                    .ok_or_else(|| {
+                        corrupt("reserve observation lost its original sealed snapshot")
+                    })?;
+                if verified_anchors.get(&anchor.state_hash) != Some(anchor)
+                    || !anchor_precedes(*sealed, *anchor)
+                {
+                    return Err(corrupt(
+                        "reserve observation does not follow its exact original sealed snapshot",
+                    ));
+                }
+                // The endpoint is immutable history. A later restore may move
+                // the current world behind it; the semantic owner independently
+                // validates recovery continuity and abandonment before use.
+            }
+        }
+        for commit in store
+            .index
+            .retired_commits
+            .values()
+            .flat_map(BTreeMap::values)
+        {
+            let objective = store
+                .objective(commit.fortress_id, commit.plan_digest)
+                .ok_or_else(|| corrupt("retired receipts lost their retained original"))?;
+            let sealed = verified_anchors
+                .get(&objective.sealed_state_hash)
+                .ok_or_else(|| corrupt("retired receipts lost their original sealed snapshot"))?;
+            let nondispatch: BTreeMap<_, _> = commit
+                .steps
+                .iter()
+                .filter(|(_, state)| state.as_str() == "not_dispatched")
+                .filter_map(|(step, _)| {
+                    commit.step_anchors.get(step).map(|anchor| (*step, *anchor))
+                })
+                .collect();
+            if nondispatch != objective.retired_never_dispatched
+                || commit.step_anchors.iter().any(|(step, anchor)| {
+                    verified_anchors.get(&anchor.state_hash) != Some(anchor)
+                        || (!anchor_precedes(*sealed, *anchor)
+                            // Restore may move game time behind the seal.
+                            // Only the explicit abandonment at that exact
+                            // stored restore frontier is historical evidence.
+                            && !(commit.steps.get(step).is_some_and(|state| state == "abandoned")
+                                && objective.restore_abandoned_anchor == Some(*anchor)))
+                })
+            {
+                return Err(corrupt(
+                    "retired receipt history lacks exact original anchored evidence",
+                ));
+            }
+        }
         store.remove_crash_leftovers();
         Ok(store)
     }
@@ -1414,6 +1615,21 @@ impl DurableLabStore {
                                 .map(|anchor| anchor.state_hash),
                         )
                     }),
+            )
+            .chain(
+                self.index
+                    .reserve_observations
+                    .values()
+                    .flat_map(BTreeMap::values)
+                    .map(|anchor| anchor.state_hash),
+            )
+            .chain(
+                self.index
+                    .retired_commits
+                    .values()
+                    .flat_map(BTreeMap::values)
+                    .flat_map(|commit| commit.step_anchors.values())
+                    .map(|anchor| anchor.state_hash),
             )
             .collect()
     }
@@ -1962,6 +2178,21 @@ impl DurableLabStore {
             .and_then(|book| book.get(&plan_digest))
     }
 
+    /// Exact immutable final receipts archived when an original commit retired.
+    /// Missing legacy rows stay unavailable. The semantic owner must verify the
+    /// complete expected step census, source, archived proofs and active lineage.
+    #[must_use]
+    pub fn retired_commit(
+        &self,
+        fortress_id: FortressId,
+        plan_digest: Digest32,
+    ) -> Option<&DurableCommit> {
+        self.index
+            .retired_commits
+            .get(&fortress_id)
+            .and_then(|book| book.get(&plan_digest))
+    }
+
     /// Every unfinished durable commit of a fortress, in digest order.
     pub fn commits(&self, fortress_id: FortressId) -> impl Iterator<Item = &DurableCommit> {
         self.index
@@ -1991,6 +2222,82 @@ impl DurableLabStore {
             .get(&fortress_id)
             .into_iter()
             .flat_map(BTreeMap::values)
+    }
+
+    /// The immutable first selected reserve observation for one exact original.
+    /// Its source-defined horizon and predicate must be independently checked by
+    /// the caller before presenting endpoint evidence. This is never current
+    /// truth, a successful action receipt, or permission to resume dispatch.
+    #[must_use]
+    pub fn objective_reserve_observation(
+        &self,
+        fortress_id: FortressId,
+        plan_digest: Digest32,
+    ) -> Option<StateAnchor> {
+        self.index
+            .reserve_observations
+            .get(&fortress_id)
+            .and_then(|book| book.get(&plan_digest))
+            .copied()
+    }
+
+    /// Retain the first exact reserve observation only after its complete world
+    /// frontier is durable. The owning semantic layer verifies the unchanged
+    /// original request, exact horizon, source and current read authority.
+    /// Repeating the same observation is a no-op; a later or different snapshot
+    /// cannot overwrite an earlier False/Unknown result. No truth is serialized.
+    pub fn persist_objective_reserve_observation(
+        &mut self,
+        plan_digest: Digest32,
+        snapshot: &WorldSnapshot,
+    ) -> Result<()> {
+        self.ensure_writable()?;
+        if !snapshot.hash_is_valid() {
+            return Err(invalid(
+                "reserve observation snapshot has an invalid state hash",
+            ));
+        }
+        let fortress = snapshot.fortress_id;
+        let objective = self.objective(fortress, plan_digest).ok_or_else(|| {
+            invalid("reserve observation names an unknown retained original objective")
+        })?;
+        if objective.restore_abandoned_anchor.is_some() {
+            return Err(invalid(
+                "abandoned original cannot acquire reserve observations",
+            ));
+        }
+        if let Some(previous) = self.objective_reserve_observation(fortress, plan_digest) {
+            return if previous == snapshot.anchor() {
+                Ok(())
+            } else {
+                Err(DfmcpError::new(
+                    ErrorCode::Conflict,
+                    "the original reserve observation is immutable",
+                ))
+            };
+        }
+        if self
+            .head(fortress)
+            .is_none_or(|head| head.anchor != snapshot.anchor())
+        {
+            return Err(invalid(
+                "reserve observation requires the exact already-published durable frontier",
+            ));
+        }
+        let sealed = self.load_snapshot(objective.sealed_state_hash)?;
+        if !anchor_precedes(sealed.anchor(), snapshot.anchor()) {
+            return Err(invalid(
+                "reserve observation precedes its original sealed source",
+            ));
+        }
+        self.append(
+            Record::ObjectiveReserveObservation {
+                fortress_id: fortress,
+                plan_digest,
+                anchor: snapshot.anchor(),
+            },
+            Some(snapshot),
+        )
     }
 
     /// The latest durable state of a fortress, if it has one.
@@ -2097,6 +2404,39 @@ impl DurableLabStore {
                         std::iter::once(Record::Objective(source)).chain(custody)
                     }),
             )
+            .chain(
+                self.index
+                    .reserve_observations
+                    .iter()
+                    .flat_map(|(fortress, book)| {
+                        book.iter()
+                            .map(|(digest, anchor)| Record::ObjectiveReserveObservation {
+                                fortress_id: *fortress,
+                                plan_digest: *digest,
+                                anchor: *anchor,
+                            })
+                    }),
+            )
+            .chain(
+                self.index
+                    .retired_commits
+                    .values()
+                    .flat_map(BTreeMap::values)
+                    .map(|commit| Record::ObjectiveRetiredCommit {
+                        fortress_id: commit.fortress_id,
+                        plan_digest: commit.plan_digest,
+                        steps: commit
+                            .steps
+                            .iter()
+                            .filter_map(|(step, state)| {
+                                commit
+                                    .step_anchors
+                                    .get(step)
+                                    .map(|anchor| (*step, (state.clone(), *anchor)))
+                            })
+                            .collect(),
+                    }),
+            )
             .collect();
         for record in live {
             let payload = record.payload();
@@ -2165,6 +2505,12 @@ struct Index {
     checkpoints: BTreeMap<FortressId, BTreeMap<CheckpointId, DurableCheckpoint>>,
     commits: BTreeMap<FortressId, BTreeMap<Digest32, DurableCommit>>,
     objectives: BTreeMap<FortressId, BTreeMap<Digest32, DurableObjective>>,
+    /// At most one observation per retained original; shares its admission and
+    /// eviction bounds without changing legacy original-source record bytes.
+    reserve_observations: BTreeMap<FortressId, BTreeMap<Digest32, StateAnchor>>,
+    /// At most one complete anchored final receipt book per retained original.
+    /// This archive is never returned by `commits` and cannot resume dispatch.
+    retired_commits: BTreeMap<FortressId, BTreeMap<Digest32, DurableCommit>>,
 }
 
 impl Index {
@@ -2391,8 +2737,18 @@ impl Index {
                 self.validate_objective_admission(&objective, &evicted_history)?;
                 self.apply(Record::Commit(objective.opening_commit()))?;
                 if let Some(book) = self.objectives.get_mut(&objective.fortress_id) {
-                    for digest in evicted_history {
-                        book.remove(&digest);
+                    for digest in &evicted_history {
+                        book.remove(digest);
+                    }
+                }
+                if let Some(book) = self.reserve_observations.get_mut(&objective.fortress_id) {
+                    for digest in &evicted_history {
+                        book.remove(digest);
+                    }
+                }
+                if let Some(book) = self.retired_commits.get_mut(&objective.fortress_id) {
+                    for digest in &evicted_history {
+                        book.remove(digest);
                     }
                 }
                 self.apply(Record::Objective(objective))?;
@@ -2470,6 +2826,74 @@ impl Index {
                 }
                 objective.retired_never_dispatched = steps;
             }
+            Record::ObjectiveReserveObservation {
+                fortress_id,
+                plan_digest,
+                anchor,
+            } => {
+                if anchor.fortress_id != fortress_id
+                    || !self
+                        .objectives
+                        .get(&fortress_id)
+                        .is_some_and(|book| book.contains_key(&plan_digest))
+                {
+                    return Err(corrupt(
+                        "reserve observation names a different or missing original objective",
+                    ));
+                }
+                let book = self.reserve_observations.entry(fortress_id).or_default();
+                if book.contains_key(&plan_digest) {
+                    return Err(corrupt("original reserve observation was recorded twice"));
+                }
+                book.insert(plan_digest, anchor);
+            }
+            Record::ObjectiveRetiredCommit {
+                fortress_id,
+                plan_digest,
+                steps,
+            } => {
+                if steps.is_empty()
+                    || steps.len() > MAX_STEPS_PER_COMMIT
+                    || steps.values().any(|(state, anchor)| {
+                        !STEP_STATES.contains(&state.as_str())
+                            || state == "dispatched"
+                            || anchor.fortress_id != fortress_id
+                    })
+                    || self
+                        .commits
+                        .get(&fortress_id)
+                        .is_some_and(|book| book.contains_key(&plan_digest))
+                {
+                    return Err(corrupt(
+                        "retired receipt history requires bounded anchored final work",
+                    ));
+                }
+                let objective = self
+                    .objectives
+                    .get(&fortress_id)
+                    .and_then(|book| book.get(&plan_digest))
+                    .ok_or_else(|| corrupt("retired receipt history names an unknown original"))?;
+                let nondispatch: BTreeMap<_, _> = steps
+                    .iter()
+                    .filter(|(_, (state, _))| state == "not_dispatched")
+                    .map(|(step, (_, anchor))| (*step, *anchor))
+                    .collect();
+                if nondispatch != objective.retired_never_dispatched {
+                    return Err(corrupt("retired receipt and nondispatch custody disagree"));
+                }
+                let mut commit = objective.opening_commit();
+                for (step, (state, anchor)) in steps {
+                    commit.steps.insert(step, state);
+                    commit.step_anchors.insert(step, anchor);
+                }
+                let book = self.retired_commits.entry(fortress_id).or_default();
+                if book.contains_key(&plan_digest) {
+                    return Err(corrupt(
+                        "original retired receipt history was recorded twice",
+                    ));
+                }
+                book.insert(plan_digest, commit);
+            }
             Record::Step {
                 fortress_id,
                 plan_digest,
@@ -2515,6 +2939,7 @@ impl Index {
                 plan_digest,
                 retain_nondispatch,
             } => {
+                let mut retired_receipts = None;
                 if retain_nondispatch {
                     let commit = self
                         .commits
@@ -2544,6 +2969,29 @@ impl Index {
                             commit.step_anchors.get(step).map(|anchor| (*step, *anchor))
                         })
                         .collect();
+                    // Preserve the entire recorded census only when every
+                    // row has an atomic anchor. A partial/legacy map cannot
+                    // turn missing proof into a recovered successful action.
+                    if !commit.steps.is_empty()
+                        && commit.steps.len() == commit.step_anchors.len()
+                        && commit
+                            .steps
+                            .keys()
+                            .all(|step| commit.step_anchors.contains_key(step))
+                    {
+                        retired_receipts = Some(
+                            commit
+                                .steps
+                                .iter()
+                                .filter_map(|(step, state)| {
+                                    commit
+                                        .step_anchors
+                                        .get(step)
+                                        .map(|anchor| (*step, (state.clone(), *anchor)))
+                                })
+                                .collect(),
+                        );
+                    }
                 }
                 let book = self
                     .commits
@@ -2554,6 +3002,13 @@ impl Index {
                 }
                 if book.is_empty() {
                     self.commits.remove(&fortress_id);
+                }
+                if let Some(steps) = retired_receipts {
+                    self.apply(Record::ObjectiveRetiredCommit {
+                        fortress_id,
+                        plan_digest,
+                        steps,
+                    })?;
                 }
             }
         }
@@ -2572,6 +3027,14 @@ mod custody_tests;
 #[cfg(test)]
 #[path = "durable_resource_acquisition_tests.rs"]
 mod resource_acquisition_tests;
+
+#[cfg(test)]
+#[path = "durable_reserve_observation_tests.rs"]
+mod reserve_observation_tests;
+
+#[cfg(test)]
+#[path = "durable_retired_commit_tests.rs"]
+mod retired_commit_tests;
 
 #[cfg(test)]
 mod tests {

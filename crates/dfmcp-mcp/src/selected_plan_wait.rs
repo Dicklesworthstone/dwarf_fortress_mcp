@@ -124,8 +124,8 @@ fn exact_original(session: &LabSession, digest: Digest32) -> Result<&Objective> 
 
 /// One request's selector and observation state, held under the session owner.
 /// Historical reserve evidence is never inferred from a later current stock.
-/// Exact observations survive subsequent bounded calls only with the same
-/// original owner and retained snapshot; recovery and restore do not import it.
+/// Exact observations survive durable recovery only with verified archived
+/// original custody. Restore abandonment never imports an active endpoint.
 pub(super) struct SelectedPlanWait {
     selected: super::plan_cancellation::Selection,
     recovered: Option<RecoveredSelection>,
@@ -142,6 +142,7 @@ pub(super) struct SelectedPlanWait {
     can_continue: bool,
     reserve_observation: Option<ReserveObservation>,
     reserve_reused: bool,
+    reserve_durable: bool,
     remaining_reserve_work: Option<bool>,
     reserve_error: Option<Value>,
     goal_truth: PredicateTruth,
@@ -258,16 +259,24 @@ impl SelectedPlanWait {
         let reserve_observation = original
             .selected_wait_reserve_observation
             .map(|(anchor, truth)| ReserveObservation { anchor, truth });
+        let reserve_durable = original.selected_wait_reserve_durable;
         if reserve_observation.is_some_and(|sample| {
             reserve_until != Some(sample.anchor.tick.0)
                 || sample.anchor.fortress_id != context.anchor.fortress_id
-                || sample.anchor.cursor.epoch != context.anchor.cursor.epoch
+                || sample.anchor.cursor.epoch > context.anchor.cursor.epoch
+                || (sample.anchor.cursor.epoch != context.anchor.cursor.epoch
+                    && (recovered.is_none() || !reserve_durable))
+                || (sample.anchor.cursor.epoch == context.anchor.cursor.epoch
+                    && sample.anchor.cursor.sequence > context.anchor.cursor.sequence)
+                || (sample.anchor.cursor == context.anchor.cursor
+                    && sample.anchor != context.anchor)
                 || sample.anchor.tick > context.anchor.tick
         }) {
             return Err(refused(
                 "retained exact reserve observation disagrees with original custody",
             ));
         }
+        super::objectives::ensure_reserve_snapshot(session, selected.actual)?;
         let mut selected = Self {
             selected,
             recovered,
@@ -284,6 +293,7 @@ impl SelectedPlanWait {
             can_continue,
             reserve_observation,
             reserve_reused: reserve_observation.is_some(),
+            reserve_durable,
             remaining_reserve_work: None,
             reserve_error: None,
             goal_truth: PredicateTruth::Unknown,
@@ -515,20 +525,14 @@ impl SelectedPlanWait {
         }
         self.check(session)?;
         if let Some(sample) = self.reserve_observation {
-            let original = session
-                .objectives
-                .iter_mut()
-                .find(|objective| objective.plan_digest == self.selected.actual)
-                .ok_or_else(|| refused("selected original goal lost custody during wait"))?;
-            if original.selected_wait_reserve_observation.is_none() {
-                original.selected_wait_reserve_observation = Some((sample.anchor, sample.truth));
-                // Progression publishes durability before inspection. This is
-                // a read-derived, process-local cache with an exact retained
-                // world root, not a new durable proof or execution authority.
-                session.history.record(session.adapter.snapshot());
-            }
+            self.reserve_durable = super::objectives::retain_reserve_observation(
+                session,
+                self.selected.actual,
+                sample.anchor,
+                sample.truth,
+            )?;
         }
-        Ok(())
+        self.check(session)
     }
 
     pub(super) fn stopped(&self) -> bool {
@@ -566,8 +570,11 @@ impl SelectedPlanWait {
                 } else { "unknown" },
                 "available":observed.is_some(),
                 "reused_from_prior_wait":self.reserve_reused,
-                "retention":"owning_session_exact_snapshot",
-                "durable":false,
+                "retention":if self.reserve_durable {
+                    "durable_original_exact_snapshot"
+                } else { "owning_session_exact_snapshot" },
+                "durable":self.reserve_durable,
+                "survives_restart":self.reserve_durable,
                 "survives_restore":false,
                 "remaining_work_required":self.remaining_reserve_work,
                 "remaining_work_epistemic":"predicted",
@@ -665,7 +672,9 @@ fn fatal_evaluation(error: &DfmcpError) -> bool {
     )
 }
 
-fn observed_truth(result: Result<PredicateTruth>) -> Result<(PredicateTruth, Option<Value>)> {
+pub(super) fn observed_truth(
+    result: Result<PredicateTruth>,
+) -> Result<(PredicateTruth, Option<Value>)> {
     match result {
         Ok(truth) => Ok((truth, None)),
         Err(error) if fatal_evaluation(&error) => Err(error),

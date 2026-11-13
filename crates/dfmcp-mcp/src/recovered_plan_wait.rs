@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use dfmcp_core::{DfmcpError, Digest32, ErrorCode, Result, StateAnchor, StepId};
 use dfmcp_intent::{Action, EffectWorkState, ObligationStatus, PlanStep, PreparedPlan, effects};
 use dfmcp_lab::durable::{DurableLabStore, DurableObjective};
-use dfmcp_world::{Predicate, PredicateEvidence, WorldSnapshot};
+use dfmcp_world::{Predicate, PredicateEvidence, PredicateTruth, WorldSnapshot};
 use serde_json::{Value, json};
 
 use super::super::{
@@ -103,6 +103,7 @@ struct Receipt {
 struct VerifiedCustody {
     plan_digest: Digest32,
     recovery_anchor: StateAnchor,
+    archived_after_retirement: bool,
     receipts: Vec<Receipt>,
     digest: Digest32,
     canonical_bytes: usize,
@@ -151,13 +152,23 @@ impl RecoveredPlanCustody {
                 "recovered wait has no exact bounded original plan seal",
             ));
         }
-        let commit = store
-            .commit(retained.fortress_id, retained.plan_digest)
-            .ok_or_else(|| {
-                unavailable(
-                    "the original action commit was already retired; retained goal truth cannot reconstruct its missing action receipts",
-                )
-            })?;
+        let (commit, archived_after_retirement) = match (
+            store.commit(retained.fortress_id, retained.plan_digest),
+            store.retired_commit(retained.fortress_id, retained.plan_digest),
+        ) {
+            (Some(commit), None) => (commit, false),
+            (None, Some(commit)) => (commit, true),
+            (Some(_), Some(_)) => {
+                return Err(corrupt(
+                    "the original action map is both active and retired",
+                ));
+            }
+            (None, None) => {
+                return Err(unavailable(
+                    "the original action history is unavailable; retained goal truth cannot reconstruct its missing action receipts",
+                ));
+            }
+        };
         if commit.fortress_id != retained.fortress_id
             || commit.plan_digest != retained.plan_digest
             || commit.intent_id != retained.intent_id
@@ -179,6 +190,11 @@ impl RecoveredPlanCustody {
                     .get(&step.id.get())
                     .ok_or_else(|| unavailable("an original step receipt is missing"))?,
             )?;
+            if archived_after_retirement && state == State::Dispatched {
+                return Err(corrupt(
+                    "retired original action custody contains unfinished dispatch",
+                ));
+            }
             let anchor = commit
                 .step_anchors
                 .get(&step.id.get())
@@ -237,6 +253,7 @@ impl RecoveredPlanCustody {
         }
         let mut bytes = b"dfmcp-recovered-plan-wait-custody/1\0".to_vec();
         bytes.extend_from_slice(plan.digest.as_bytes());
+        bytes.push(u8::from(archived_after_retirement));
         bytes.extend_from_slice(&retained.owner_session_id.get().to_be_bytes());
         append_anchor(&mut bytes, plan.anchor);
         append_anchor(&mut bytes, recovery.previous_anchor());
@@ -250,6 +267,7 @@ impl RecoveredPlanCustody {
         Ok(VerifiedCustody {
             plan_digest: plan.digest,
             recovery_anchor: recovery.active_anchor(),
+            archived_after_retirement,
             receipts,
             digest: Digest32::of_bytes(&bytes),
             canonical_bytes: bytes.len(),
@@ -302,6 +320,9 @@ impl RecoveredPlanCustody {
             "verified_archived_sources":custody.archived_sources,
             "verified_archived_bytes":custody.archived_bytes,
             "historical_proof":"exact_archived_atomic_step_receipts",
+            "action_record_origin":if custody.archived_after_retirement {
+                "archived_retired_commit"
+            } else { "retained_commit_at_recovery" },
             "current_proof":"original_carried_observation_monitors",
             "retired_action_history_inferred":false,
             "restores_dispatch_authority":false,
@@ -482,10 +503,10 @@ fn verify_terminal(step: &PlanStep, snapshot: &WorldSnapshot) -> Result<()> {
         .obligation
         .as_ref()
         .and_then(|spec| spec.failure.as_ref())
-        && evidence.establishes(failure)?
+        && evidence.evaluate(failure)? != PredicateTruth::False
     {
         return Err(corrupt(
-            "the archived verified action simultaneously establishes its original failure predicate",
+            "the archived verified action does not establish its original failure predicate as false",
         ));
     }
     if step

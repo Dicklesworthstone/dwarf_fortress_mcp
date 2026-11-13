@@ -9,6 +9,10 @@ use super::*;
 use dfmcp_lab::durable::{DurableLabStore, DurableObjective, MAX_OBJECTIVES_PER_FORTRESS};
 use serde_json::Value;
 
+#[path = "objective_reserve.rs"]
+mod reserve;
+pub(super) use reserve::{ensure_reserve_snapshot, retain_reserve_observation};
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ProductionReserveStatus {
     WorkRequired,
@@ -67,9 +71,10 @@ pub(super) struct Objective {
     first_satisfied_anchor: Option<StateAnchor>,
     historical_proof_verified: bool,
     /// Bounded foreground waits may split after the original reserve tick but
-    /// before action stability settles. Preserve the first exact observation
-    /// with this live original owner; never reconstruct it after recovery.
+    /// before action stability settles. Keep the first exact observation;
+    /// recovery derives its truth only from the archived original endpoint.
     pub(super) selected_wait_reserve_observation: Option<(StateAnchor, PredicateTruth)>,
+    pub(super) selected_wait_reserve_durable: bool,
     restore_abandoned_anchor: Option<StateAnchor>,
     verification_error: Option<String>,
 }
@@ -339,13 +344,20 @@ impl Objective {
                 "the original production goal has no verified active stock-ledger custody",
             ));
         }
+        self.resource_output_truth_at(session.adapter.snapshot())
+    }
+
+    fn resource_output_truth_at(
+        &self,
+        snapshot: &dfmcp_world::WorldSnapshot,
+    ) -> Result<PredicateTruth> {
         let original_ledger = self.bound_resource_output_ledger()?;
         match &self.source {
             PlanSource::Production { raw, .. } => crate::lab_world::ProductionRequest::parse(raw)?
-                .semantic_goal_truth_in_ledger(session.adapter.snapshot(), original_ledger),
+                .semantic_goal_truth_in_ledger(snapshot, original_ledger),
             PlanSource::ProductionContinuation { raw, .. } => {
                 goal_continuation::ProductionContinuation::parse(raw)?
-                    .semantic_goal_truth_in_ledger(session.adapter.snapshot(), original_ledger)
+                    .semantic_goal_truth_in_ledger(snapshot, original_ledger)
             }
             _ => Err(DfmcpError::new(
                 ErrorCode::InvalidIntent,
@@ -391,6 +403,7 @@ impl Objective {
             first_satisfied_anchor: None,
             historical_proof_verified: false,
             selected_wait_reserve_observation: None,
+            selected_wait_reserve_durable: false,
             restore_abandoned_anchor: None,
             verification_error: None,
         }
@@ -1205,6 +1218,7 @@ pub(super) fn stage_objective_abandonment(session: &mut LabSession) {
         objective.original_handles_live = false;
         objective.active_observation_anchor = None;
         objective.selected_wait_reserve_observation = None;
+        objective.selected_wait_reserve_durable = false;
     }
     session.objective_restore.extend(
         session
@@ -1266,6 +1280,7 @@ pub(super) fn recover_objective(
         first_satisfied_anchor: retained.first_satisfied_anchor,
         historical_proof_verified: false,
         selected_wait_reserve_observation: None,
+        selected_wait_reserve_durable: false,
         restore_abandoned_anchor: retained.restore_abandoned_anchor,
         verification_error: None,
     };
@@ -1380,6 +1395,7 @@ pub(super) fn recover_objective(
         }
         objective.plan = Some(plan);
         objective.retired_never_dispatched = retired;
+        reserve::recover_reserve_observation(&mut objective, store, recovery)?;
         Ok(())
     })();
     if let Err(error) = checked {

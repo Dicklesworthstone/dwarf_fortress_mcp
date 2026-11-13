@@ -45,6 +45,7 @@ fn context(snapshot: &WorldSnapshot) -> OperationContext {
             (Capability::Observe, RiskTier::ReadOnly),
             (Capability::Plan, RiskTier::ReadOnly),
             (Capability::ControlClock, RiskTier::Reversible),
+            (Capability::Checkpoint, RiskTier::Guarded),
             (Capability::Designate, RiskTier::Guarded),
         ]
         .into_iter()
@@ -118,7 +119,7 @@ fn fixture(label: &str, publication: Publication) -> Result<Fixture> {
             Some(if pause {
                 CommitState::Verified
             } else {
-                CommitState::Dispatched
+                CommitState::AppliedAwaitingVerification
             }),
         );
         if matches!(publication, Publication::MissingStep) && !pause {
@@ -167,8 +168,50 @@ fn capture(fixture: &Fixture) -> RecoveredPlanCustody {
     )
 }
 
+fn complete(fixture: &mut Fixture, anchored: bool) -> Result<()> {
+    let mut adapter = MemoryAdapter::recovered(fixture.head.clone())?;
+    adapter.advance_ticks(300)?;
+    let dig = fixture
+        .plan
+        .steps
+        .iter()
+        .find(|step| matches!(step.action, Action::DesignateDig { .. }))
+        .ok_or_else(|| corrupt("fixture lacks dig"))?;
+    verify_terminal(dig, adapter.snapshot())?;
+    let updates = if anchored {
+        vec![DurableStepUpdate {
+            plan_digest: fixture.plan.digest,
+            step: dig.id.get(),
+            state: "verified".to_owned(),
+        }]
+    } else {
+        // A legacy unanchored transition may record a correct final state;
+        // it still cannot establish the exact historical action proof.
+        fixture.store.persist_step(
+            fixture.head.fortress_id,
+            fixture.plan.digest,
+            dig.id.get(),
+            "verified",
+        )?;
+        Vec::new()
+    };
+    fixture
+        .store
+        .persist_progress("starter_fortress", adapter.snapshot(), &updates, &[])?;
+    fixture.head = adapter.snapshot().clone();
+    fixture.recovered = MemoryAdapter::recovered(fixture.head.clone())?
+        .snapshot()
+        .clone();
+    fixture.lineage = RecoveredGoalLineage::verify(
+        &fixture.head,
+        fixture.head.anchor(),
+        fixture.recovered.anchor(),
+    )?;
+    Ok(())
+}
+
 #[test]
-fn mixed_recovery_preserves_prior_verified_steps_before_commit_retirement() -> Result<()> {
+fn mixed_recovery_retains_original_terminal_map_across_retirement() -> Result<()> {
     let mut fixture = fixture("mixed", Publication::Complete)?;
     let custody = capture(&fixture);
     let checked = custody.checked()?;
@@ -197,17 +240,39 @@ fn mixed_recovery_preserves_prior_verified_steps_before_commit_retirement() -> R
         fixture.recovered.anchor(),
     )?;
 
-    // Capture is immutable observation custody. The durable action record may
-    // retire in this process without losing the map, but a later restart must
-    // not invent that map from the retained original goal.
+    // A complete current transition must precede retirement. The immutable
+    // first capture remains valid for its own process; a later recovery reads
+    // the actual final map archived at retirement, never inferred goal truth.
+    let active = fixture.lineage.active_anchor();
+    complete(&mut fixture, true)?;
     fixture
         .store
         .retire_commit(fixture.head.fortress_id, fixture.plan.digest)?;
-    custody.validate(
-        &fixture.plan,
-        fixture.lineage.active_anchor(),
-        fixture.recovered.anchor(),
-    )?;
+    custody.validate(&fixture.plan, active, fixture.head.anchor())?;
+    fixture.store.compact()?;
+    let recovered = capture(&fixture);
+    assert!(recovered.checked()?.archived_after_retirement);
+    assert!(
+        recovered
+            .checked()?
+            .receipts
+            .iter()
+            .all(|receipt| receipt.state == State::Verified)
+    );
+    Ok(())
+}
+
+#[test]
+fn achieved_goal_cannot_replace_a_legacy_unanchored_retired_action() -> Result<()> {
+    let mut fixture = fixture("legacy-retired", Publication::Complete)?;
+    complete(&mut fixture, false)?;
+    assert_eq!(
+        crate::lab_world::plan_goal_truth(&fixture.head, &fixture.plan)?,
+        dfmcp_world::PredicateTruth::True,
+    );
+    fixture
+        .store
+        .retire_commit(fixture.head.fortress_id, fixture.plan.digest)?;
     let missing = capture(&fixture).checked().err().ok_or_else(|| {
         corrupt("retired action history unexpectedly reconstructed a receipt map")
     })?;
@@ -360,6 +425,41 @@ fn archived_verified_proof_rejects_simultaneous_original_failure() -> Result<()>
     let error = verify_terminal(&step, &fixture.head)
         .err()
         .ok_or_else(|| corrupt("contradictory terminal proof was accepted"))?;
+    assert_eq!(error.code, ErrorCode::CorruptLedger);
+    assert!(error.message.contains("failure"));
+    Ok(())
+}
+
+#[test]
+fn archived_verified_proof_cannot_turn_unknown_failure_into_false() -> Result<()> {
+    let fixture = fixture("unknown-failure", Publication::Complete)?;
+    let mut step = fixture
+        .plan
+        .steps
+        .iter()
+        .find(|step| matches!(step.action, Action::DesignateDig { .. }))
+        .cloned()
+        .ok_or_else(|| corrupt("fixture lacks dig"))?;
+    let unknown = Predicate::FieldCompare {
+        entity_id: effects::created_entity_id(&step.idempotency_key, 0),
+        field: "unobserved_original_failure".to_owned(),
+        op: dfmcp_world::CompareOp::Eq,
+        value: dfmcp_world::Value::Bool(true),
+    };
+    assert_eq!(
+        PredicateEvidence::laboratory(&fixture.head)?.evaluate(&unknown)?,
+        PredicateTruth::Unknown,
+    );
+    step.postconditions = vec![Predicate::True];
+    let spec = step
+        .obligation
+        .as_mut()
+        .ok_or_else(|| corrupt("fixture dig lacks temporal obligation"))?;
+    spec.terminal = Predicate::True;
+    spec.failure = Some(unknown);
+    let error = verify_terminal(&step, &fixture.head)
+        .err()
+        .ok_or_else(|| corrupt("unknown failure was treated as established false"))?;
     assert_eq!(error.code, ErrorCode::CorruptLedger);
     assert!(error.message.contains("failure"));
     Ok(())

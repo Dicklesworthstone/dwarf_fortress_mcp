@@ -58,11 +58,17 @@
   "progression": "shared ordinary foreground owner; other retained plans continue during the same world time",
   "publication": "persist each complete slice before further effects; failed publication stops advancement",
   "reserve_semantics": "clip at immutable original absolute tick; later stock cannot repair missing or failed endpoint evidence; sealed action deadlines unchanged",
-  "reserve_evidence_retention": "exact owned observation and bounded snapshot across calls; process-local, non-durable, cleared on restore",
+  "reserve_evidence_retention": "exact original observation and bounded snapshot across calls; durable E custody survives verified recovery, process-local custody remains session-bound, restore abandons active evidence",
   "output_semantics": "retain selected_plan_wait and elapsed-work counters together in every fitting output tier",
   "replay": "record optional selected original digest and reproduce the observed early frontier",
   "automatic_continuation": false,
   "automatic_cancellation": false,
   "native_protocol_change": false,
-  "production_admission_change": false
+  "production_admission_change": false,
+  "recovered_action_receipt_sources": [
+    "retained_commit_at_recovery",
+    "archived_retired_commit"
+  ],
+  "retired_action_history_inferred": false,
+  "durable_evidence_contract": "architecture/laboratory_durable_original_evidence_v1.json"
 }

@@ -147,6 +147,48 @@ fn recovered_mixed_plan_finishes_without_recreating_dispatch_authority() -> Test
     assert_eq!(repeated["advanced_game_ticks"], 0);
     assert_eq!(anchor(&second)?, finished);
     assert_eq!(payload(&fortress_observe(Some(first)))?["ok"], false);
+
+    // Completed action evidence must survive another process, including
+    // compaction. Exact retired receipts remain read-only; no action handles
+    // or old session ownership return with the historical original goal.
+    let object_digest = selected["plan_object_digest"].clone();
+    let owner = selected["original_owner_session_id"].clone();
+    let mut prior = finished;
+    for _ in 0..2 {
+        directory.restart();
+        {
+            let mut store = dfmcp_lab::durable::DurableLabStore::open(&directory.0)?;
+            let plan = dfmcp_core::Digest32::from_hex(&digest).ok_or("invalid plan digest")?;
+            assert!(store.commit(prior.fortress_id, plan).is_none());
+            let retired = store
+                .retired_commit(prior.fortress_id, plan)
+                .ok_or("retired original receipt map missing")?;
+            assert_eq!(retired.steps.len(), 2);
+            assert!(retired.steps.values().all(|state| state == "verified"));
+            store.compact()?;
+        }
+        let next = field(&open("7855701", false)?, "session_id")?;
+        let before = anchor(&next)?;
+        assert!(before.cursor.epoch > prior.cursor.epoch);
+        let archived = selected_wait(&next, &digest, 0)?;
+        assert_eq!(archived["ok"], true, "{archived}");
+        let observed = &archived["selected_plan_wait"];
+        assert_eq!(observed["stop_reason"], "complete", "{archived}");
+        assert_eq!(observed["plan_object_digest"], object_digest);
+        assert_eq!(observed["original_owner_session_id"], owner);
+        assert_eq!(observed["actions_verified"], true);
+        assert_eq!(observed["action_count"], 2);
+        assert_eq!(observed["physical_quiescent"], true);
+        assert_eq!(observed["owns_original_dispatch"], false);
+        assert_eq!(observed["dispatch_handles_restored"], false);
+        assert_eq!(
+            observed["recovery_evidence"]["action_record_origin"],
+            "archived_retired_commit",
+        );
+        assert_eq!(archived["advanced_game_ticks"], 0);
+        assert_eq!(anchor(&next)?, before);
+        prior = before;
+    }
     Ok(())
 }
 

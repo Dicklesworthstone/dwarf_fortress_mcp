@@ -1,5 +1,29 @@
 # Changelog
 
+## Unreleased — Preserve completed originals and exact reserve evidence
+
+- Retain complete anchored final action maps when original laboratory commits
+  retire. Recovered selected waits verify those same receipts after compaction
+  and repeated restarts, preserving original source, owner, step census and
+  proof anchors without restoring dispatch or cancellation handles.
+- Persist the first selected observation at an original future reserve's exact
+  absolute tick. Recompute its truth from the archived snapshot and sealed
+  stock-ledger identity on recovery; later or same-tick stock cannot replace
+  false/unknown evidence or invent a missed endpoint.
+- Add bounded additive `E` endpoint and `T` terminal-history journal records,
+  compaction roots and original-scoped eviction. Preserve legacy source bytes;
+  histories without complete anchored receipts remain unavailable. Restore
+  retains historical bytes while abandoning the old pursuit.
+- Require archived verified actions' failure predicates to be known false,
+  matching the live obligation engine. Stop a selected request on failed endpoint
+  publication before installing a cache or advancing another slice.
+- Pass all 123 exact-source laboratory component tests, including 15 new
+  persistence regressions, and five exact-source recovered-verifier behavioral
+  tests with real MemoryAdapter progression and storage. Add public reserve,
+  repeated-restart and consumer regression sources. Full MCP/Objective/facade
+  integration remains uncompiled and unexecuted because unchanged Asupersync
+  compilation was SIGKILLed; the component runs do not establish full qualification.
+
 ## Unreleased — Resume the exact original laboratory plan after restart
 
 - Extend `fortress.wait(plan_digest=...)` to an exactly identified durable

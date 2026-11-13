@@ -84,12 +84,22 @@ produces `reserve_unmet` or `reserve_unknown`. A past frontier with no exact
 observation produces `reserve_unobserved`; stock observed later cannot repair
 the missing endpoint. Reserve inspection never extends sealed action deadlines.
 
-An exact observation is retained with the original owner and its bounded
-snapshot history, so later bounded waits can reuse the same endpoint. The
-response identifies reuse explicitly and charges the historical snapshot
-alongside the current source. This read-derived cache is process-local:
-`durable` and `survives_restore` are false. Restart or restore does not recreate
-past reserve evidence from current stock.
+An exact observation is retained with the original and its bounded snapshot
+history, so later bounded waits can reuse the same endpoint. In a durable
+fortress, its complete snapshot is persisted after the world frontier and before
+the in-memory sample is installed. Recovery derives its truth again from the
+unchanged original request, sealed stock-ledger identity and exact archived
+bytes. The stored record contains no Boolean conclusion to trust on its own.
+
+The response identifies reuse explicitly and charges the historical snapshot
+alongside the current source. Confirmed durable evidence reports
+`retention: "durable_original_exact_snapshot"`, `durable: true` and
+`survives_restart: true`. A process-local fortress retains the existing
+`owning_session_exact_snapshot` behavior. `survives_restore` remains false.
+Later or same-tick observations cannot replace a first false or unknown sample,
+and a missed endpoint is never reconstructed from later current stock. See
+[durable original evidence](LAB_DURABLE_ORIGINAL_EVIDENCE.md) for publication,
+retention and journal compatibility.
 
 ## Authority, bounds and recovery
 
@@ -122,12 +132,19 @@ separately reviewed continuation. A raw action list requires a new explicit
 review. Selected waiting never executes a recovered deferred step.
 
 After a carried project completes, a zero-tick selected wait can inspect the
-same recovered outcome without committing more work. Restore abandons the old
-pursuit and makes it ineligible. Missing, duplicated, contradictory or
-unanchored step evidence refuses before time advances. Old fully retired
-commits whose durable history no longer contains complete action receipts
-remain ineligible: verified historical goal achievement alone does not prove
-all original actions.
+same recovered outcome without committing more work. Complete anchored final
+receipts are retained when the active commit retires and survive compaction and
+repeated restarts. `recovery_evidence.action_record_origin` identifies either
+`retained_commit_at_recovery` or `archived_retired_commit`; both require the same
+exact original step census and archived proof. Retired archives grant no new
+dispatch or cancellation handles.
+
+Restore abandons the old pursuit and makes it ineligible. Missing, duplicated,
+contradictory or unanchored step evidence refuses before time advances. Legacy
+history that has actually lost its complete anchored receipt map remains
+ineligible: verified historical goal achievement alone does not prove all
+original actions. An older journal that still contains those exact rows can
+preserve them when replayed.
 
 ### Live selection and shared bounds
 
