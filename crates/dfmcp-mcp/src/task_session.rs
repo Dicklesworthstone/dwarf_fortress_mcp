@@ -59,6 +59,7 @@ pub(crate) fn validate(session_id: &str, digest: &str) -> Result<()> {
         durability_gate(session)?;
         let ctx = context_for(session, session.next_request_id);
         authorize_entry(&ctx, Capability::Observe, RiskTier::ReadOnly)?;
+        authorize_entry(&ctx, Capability::Query, RiskTier::ReadOnly)?;
         if session.budget.max_output_tokens < 1_500 || session.budget.max_bytes < 6_000 {
             return Err(DfmcpError::new(
                 ErrorCode::BudgetExceeded,
@@ -196,6 +197,43 @@ fn original_goal(session: &LabSession, requested_digest: &str) -> (PredicateTrut
     (truth, payload)
 }
 
+fn selected_goal(
+    session: &LabSession,
+    digest: &str,
+) -> Result<super::selected_plan_wait::TaskGoalObservation> {
+    let observed = super::selected_plan_wait::parse_digest(digest).and_then(|digest| {
+        super::selected_plan_wait::SelectedPlanWait::observe_retained(session, digest)
+    });
+    let error = match observed {
+        Ok(observed) => return Ok(observed),
+        Err(error)
+            if matches!(
+                error.code,
+                ErrorCode::BudgetExceeded
+                    | ErrorCode::CapabilityDenied
+                    | ErrorCode::CancellationRequested
+                    | ErrorCode::InternalInvariantViolation
+            ) =>
+        {
+            return Err(error);
+        }
+        Err(error) => error,
+    };
+    Ok(super::selected_plan_wait::TaskGoalObservation {
+        truth: PredicateTruth::Unknown,
+        pending: false,
+        projection: json!({
+            "schema":"dfmcp.selected-plan-wait/1",
+            "requested_plan_digest":digest,
+            "complete":false, "inspection_complete":false,
+            "stop_reason":"goal_unknown", "goal_truth":"unknown",
+            "stage_goal_truth":"unknown", "observation_only":true,
+            "observed_anchor":anchor_json(&session.adapter.snapshot().anchor()),
+            "goal_error":{"code":error.code.as_str(), "message":error.message},
+        }),
+    })
+}
+
 #[derive(Default)]
 struct TaskProgress {
     total: usize,
@@ -234,8 +272,9 @@ impl TaskProgress {
         }
     }
 
-    fn proof_status(&self, original_goal: PredicateTruth) -> McpTaskStatus {
+    fn proof_status(&self, original_goal: PredicateTruth, pending: bool) -> McpTaskStatus {
         match self.action_proof_status() {
+            McpTaskStatus::Completed if pending => McpTaskStatus::Working,
             McpTaskStatus::Completed if original_goal != PredicateTruth::True => {
                 if self.remaining_actions == 0 {
                     // The finite original work is finished. An unmet or
@@ -250,11 +289,11 @@ impl TaskProgress {
         }
     }
 
-    fn monitor_status(&self, original_goal: PredicateTruth) -> McpTaskStatus {
+    fn monitor_status(&self, original_goal: PredicateTruth, pending: bool) -> McpTaskStatus {
         if self.remaining_actions > 0 {
             McpTaskStatus::Working
         } else {
-            self.proof_status(original_goal)
+            self.proof_status(original_goal, pending)
         }
     }
 
@@ -324,14 +363,16 @@ fn view_locked(session: &LabSession, digest: &str) -> Result<PlanTaskView> {
     // The transport monitor owns cleanup as well as observation. A final goal
     // proof cannot close its original task while physical work can still run.
     // Keep the proof outcome explicit; no terminal action receipt is rewritten.
-    let (goal_truth, goal) = original_goal(session, digest);
+    let (_, goal) = original_goal(session, digest);
+    let selected = selected_goal(session, digest)?;
     let action_proof_status = progress.action_proof_status();
-    let proof_status = progress.proof_status(goal_truth);
-    let status = progress.monitor_status(goal_truth);
+    let proof_status = progress.proof_status(selected.truth, selected.pending);
+    let status = progress.monitor_status(selected.truth, selected.pending);
     let goal_unconfirmed_after_work = progress.remaining_actions == 0
         && action_proof_status == McpTaskStatus::Completed
-        && goal_truth != PredicateTruth::True;
-    let needs_replan = goal_unconfirmed_after_work && goal_truth == PredicateTruth::False;
+        && selected.truth != PredicateTruth::True
+        && !selected.pending;
+    let needs_replan = goal_unconfirmed_after_work && selected.truth == PredicateTruth::False;
     let cleanup_required =
         progress.remaining_work > 0 && action_proof_status != McpTaskStatus::Working;
     let anchor = anchor_json(&session.adapter.snapshot().anchor());
@@ -373,7 +414,9 @@ fn view_locked(session: &LabSession, digest: &str) -> Result<PlanTaskView> {
             "proof_status": proof_status.as_str(),
             "action_proof_status": action_proof_status.as_str(),
             "original_goal": goal,
-            "original_goal_satisfied": goal_truth == PredicateTruth::True,
+            "selected_plan_wait": selected.projection,
+            "original_goal_satisfied": selected.truth == PredicateTruth::True && !selected.pending,
+            "original_goal_pending": selected.pending,
             "goal_unconfirmed_after_work": goal_unconfirmed_after_work,
             "needs_replan": needs_replan,
             "replacement_work_dispatched": false,
@@ -383,9 +426,10 @@ fn view_locked(session: &LabSession, digest: &str) -> Result<PlanTaskView> {
             "drain_progress": progress.json(),
             "observed_anchor": anchor, "game_tick": session.adapter.snapshot().tick.0,
             "paused": session.adapter.snapshot().paused,
-            "indeterminate": progress.indeterminate > 0 || goal_truth == PredicateTruth::Unknown,
+            "indeterminate": progress.indeterminate > 0
+                || (selected.truth == PredicateTruth::Unknown && !selected.pending),
             "recovery_class": if progress.indeterminate > 0 || progress.unknown_work > 0
-                || goal_truth == PredicateTruth::Unknown {
+                || (selected.truth == PredicateTruth::Unknown && !selected.pending) {
                 "reconciliation_required"
             } else if cleanup_required || needs_replan {
                 "operator_action_required"
@@ -394,7 +438,8 @@ fn view_locked(session: &LabSession, digest: &str) -> Result<PlanTaskView> {
             "agent_turn": packet,
             "scope": "laboratory_process_only",
             "next_step": if goal_unconfirmed_after_work {
-                if needs_replan && let Some(next) = goal.get("continuation_request").filter(|next| next.is_object()) {
+                if needs_replan && let Some(next) = selected.projection.get("continuation_request")
+                    .or_else(|| goal.get("continuation_request")).filter(|next| next.is_object()) {
                     next.clone()
                 } else { json!({
                     "tool": "fortress.observe", "arguments": {"session_id": session.session_id.to_string()},
@@ -411,8 +456,11 @@ fn view_locked(session: &LabSession, digest: &str) -> Result<PlanTaskView> {
                     "note": "the goal proof is failed or physical work is unresolved; inspect current evidence and use tasks/cancel with this task's original handle for authorized cleanup",
                 })
             } else if status == McpTaskStatus::Working { json!({
-                "tool": "fortress.wait", "arguments": {"session_id": session.session_id.to_string(), "max_game_ticks": 100},
-                "note": "only an explicit foreground wait advances laboratory game time",
+                "tool": "fortress.wait", "arguments": {
+                    "session_id": session.session_id.to_string(), "plan_digest":digest,
+                    "max_game_ticks":if selected.projection["reserve_capture_required"] == true { 0 } else { 100 },
+                },
+                "note": "explicit selected waits preserve the original reserve frontier; a zero-tick selected wait records its exact endpoint without advancing time",
             }) } else { Value::Null },
         }),
     })
@@ -422,6 +470,7 @@ pub(crate) fn view(session_id: &str, digest: &str) -> Result<PlanTaskView> {
     with_task_read(session_id, |session| {
         let ctx = context_for(session, session.next_request_id);
         authorize_entry(&ctx, Capability::Observe, RiskTier::ReadOnly)?;
+        authorize_entry(&ctx, Capability::Query, RiskTier::ReadOnly)?;
         view_locked(session, digest)
     })
 }
@@ -434,6 +483,7 @@ pub(crate) fn cancellation_admission(session_id: &str, digest: &str) -> Result<b
         durability_gate(session)?;
         let ctx = context_for(session, session.next_request_id);
         authorize_entry(&ctx, Capability::Observe, RiskTier::ReadOnly)?;
+        authorize_entry(&ctx, Capability::Query, RiskTier::ReadOnly)?;
         if !session.commit_receipts.contains_key(digest) {
             // The retained task has not dispatched its originating commit.
             return Ok(false);
@@ -455,7 +505,12 @@ pub(crate) fn cancellation_admission(session_id: &str, digest: &str) -> Result<b
                 authorize_original_action(session, id, &ctx)?;
             }
         }
-        if all_verified && all_drained && original_goal(session, digest).0 == PredicateTruth::True {
+        let selected = selected_goal(session, digest)?;
+        if all_verified
+            && all_drained
+            && !selected.pending
+            && selected.truth == PredicateTruth::True
+        {
             return Err(DfmcpError::new(
                 ErrorCode::Conflict,
                 "cannot cancel a verified plan task whose original goal holds and physical work is already quiescent",
@@ -472,6 +527,7 @@ pub(crate) fn drain(session_id: &str, digest: &str, finalize: bool) -> Result<Va
         durability_gate(session)?;
         let ctx = context_for(session, session.next_request_id);
         authorize_entry(&ctx, Capability::Observe, RiskTier::ReadOnly)?;
+        authorize_entry(&ctx, Capability::Query, RiskTier::ReadOnly)?;
         let ids = original_actions(session, digest)?;
         let mut steps = Vec::with_capacity(ids.len());
         for id in ids.iter().rev().copied() {
@@ -549,11 +605,13 @@ pub(crate) fn drain(session_id: &str, digest: &str, finalize: bool) -> Result<Va
                 "original task actions are not all terminal with proven physical quiescence",
             ));
         }
-        let (goal_truth, goal) = original_goal(session, digest);
-        let proof_status = progress.proof_status(goal_truth);
+        let (_, goal) = original_goal(session, digest);
+        let selected = selected_goal(session, digest)?;
+        let proof_status = progress.proof_status(selected.truth, selected.pending);
         let certificate = if finalize && progress.remaining_actions == 0 {
             let canonical = json!({"plan_digest": digest, "steps": steps, "anchor": anchor,
                 "proof_status": proof_status.as_str(), "original_goal": goal,
+                "selected_plan_wait":selected.projection,
                 "action_proof_status": progress.action_proof_status().as_str(),
                 "drain_progress": progress.json()});
             Some(
@@ -570,7 +628,9 @@ pub(crate) fn drain(session_id: &str, digest: &str, finalize: bool) -> Result<Va
             "proof_status": proof_status.as_str(),
             "action_proof_status": progress.action_proof_status().as_str(),
             "original_goal": goal,
-            "original_goal_satisfied": goal_truth == PredicateTruth::True,
+            "selected_plan_wait":selected.projection,
+            "original_goal_satisfied": selected.truth == PredicateTruth::True && !selected.pending,
+            "original_goal_pending":selected.pending,
             "remaining_work": progress.remaining_work,
             "physical_quiescent": progress.remaining_work == 0,
             "active_work": {"actions": steps.iter().filter(|row| row["quiescent"] != true).collect::<Vec<_>>()},
@@ -594,6 +654,7 @@ mod tests {
             Some("78241".to_owned()),
             Some(vec![
                 ("observe".to_owned(), "read_only".to_owned()),
+                ("query".to_owned(), "read_only".to_owned()),
                 ("plan".to_owned(), "read_only".to_owned()),
                 ("configure_production".to_owned(), "reversible".to_owned()),
             ]),
@@ -688,8 +749,10 @@ mod tests {
             let digest = plan.digest.to_hex();
             session.commit_receipts.insert(
                 digest.clone(),
-                json!({"plan_digest": digest, "actions": [{"action_id": id.to_string()}]})
-                    .to_string(),
+                json!({"ok":true, "session_id":session.session_id.to_string(),
+                    "plan_id":plan.id.to_string(), "plan_digest": digest,
+                    "actions": [{"action_id": id.to_string(), "step":0}]})
+                .to_string(),
             );
             session.objectives.push(Objective::committed(
                 &plan,
@@ -913,6 +976,7 @@ mod tests {
                 Some(selector.to_owned()),
                 Some(vec![
                     ("observe".to_owned(), "read_only".to_owned()),
+                    ("query".to_owned(), "read_only".to_owned()),
                     ("plan".to_owned(), "read_only".to_owned()),
                     ("control_clock".to_owned(), "reversible".to_owned()),
                     ("configure_production".to_owned(), "reversible".to_owned()),
@@ -1181,3 +1245,7 @@ mod tests {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "task_reserve_tests.rs"]
+mod reserve_tests;

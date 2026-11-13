@@ -89,12 +89,8 @@ fn open_fixture() -> TestResult<(String, WorldSnapshot)> {
             FactPresence::Known(WorldValue::Text(HIDDEN_MARKERS[7].to_owned())),
         ];
         for (index, presence) in presences.into_iter().enumerate() {
-            let mut fact = Fact::with_presence(
-                presence,
-                snapshot.tick,
-                FactSource::Replay,
-                Digest32::ZERO,
-            );
+            let mut fact =
+                Fact::with_presence(presence, snapshot.tick, FactSource::Replay, Digest32::ZERO);
             fact.value = WorldValue::Text(HIDDEN_MARKERS[index].to_owned());
             fields.insert(format!("unavailable_{index}"), fact);
         }
@@ -251,7 +247,10 @@ fn public_lexical_search_accepts_long_announcements_without_losing_their_suffix(
     assert_eq!(result["returned"], 1);
     assert_eq!(result["hits"][0]["event_id"], "96102");
     assert_eq!(result["hits"][0]["entity_id"], Value::Null);
-    assert_eq!(result["hits"][0]["title"], format!("{}...", "岩".repeat(84)));
+    assert_eq!(
+        result["hits"][0]["title"],
+        format!("{}...", "岩".repeat(84))
+    );
     assert_eq!(result["anchor"], expected_anchor);
     assert_eq!(result["agent_turn"]["anchor"], expected_anchor);
     assert_eq!(

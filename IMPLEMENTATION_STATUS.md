@@ -1,5 +1,40 @@
 # Implementation Status
 
+## Unreleased — Complete Tasks against original project and reserve evidence
+
+Laboratory MCP Tasks now use a read-only projection of the same exact original
+project and reserve evidence as selected foreground waits. Verified, physically
+quiet production cannot complete a future reserve before its unchanged absolute
+horizon. The monitor stays pending through the endpoint tick until an explicit
+selected wait records the first observation; its recommended wait carries the
+original plan digest and requests zero ticks when only capture remains. Passive
+Task inspection never captures an endpoint, publishes durable custody, hydrates
+history, polls actions or advances time.
+
+Missing past endpoints and immutable false/unknown endpoints cannot be repaired
+by later ample stock. Completed resource harvesting likewise cannot complete an
+unfinished original room: the Task reports the original project outcome and an
+eligible separately reviewed continuation. Current stage predicates remain
+separate from original_goal_satisfied, action proof and physical cleanup.
+Current Observe and Query authority and source budgets gate proof and Task
+cancellation; a pending future reserve remains cancellable without manufacturing
+success. Fitted terminal summaries retain the decisive selected outcome and
+exact endpoint evidence, with complete details in existing evidence pages.
+
+Six new Task regressions cover before/at/past-horizon behavior, read-only
+inspection, immutable false/unknown endpoints, physical-only cancellation,
+revoked Query and incomplete room projects after harvesting. A seventh checks
+that bounded terminal evidence preserves reserve failures and missing samples.
+Source review and latest-nightly rustfmt completed. The normal locked/offline MCP test build was killed by SIGKILL while compiling
+unchanged Asupersync 0.5.0 under shared memory pressure, before local MCP
+compilation. These new tests therefore remain unexecuted. The restored
+environment did execute all eight world
+search integration tests successfully, including the three long-announcement
+regressions from the preceding work; their formatting is normalized here.
+No full-workspace qualification or native/live admission is claimed. Owners:
+`df-fastmcp-conformance-5pj.3`, `df-tasks-projection-tests-yy4`, and the shared
+selected-wait contract `df-lab-selected-plan-wait-s4q`.
+
 ## Unreleased — Retain unproved original reserve goals at capacity
 
 Original-goal admission no longer treats projected reserve funding or an elapsed

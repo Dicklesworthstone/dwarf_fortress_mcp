@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased — Complete Tasks against original project and reserve evidence
+
+- Keep future-reserve Tasks pending until an explicit selected wait records the
+  first exact original endpoint. Passive Task reads and cancellation checks do
+  not capture, repair or replace that evidence.
+- Separate current stock and harvested-stage truth from complete original goal
+  satisfaction. Report missed/false/unknown endpoints and incomplete projects
+  honestly, with selected waits and eligible reviewed continuations.
+- Apply current Query authority and source budgets to Task proof/cancellation,
+  preserve physical cleanup semantics, and keep decisive reserve evidence in
+  fitted terminal results.
+- Add six Task regressions and a bounded-evidence regression; source reviewed
+  and rustfmt checked. MCP execution remains blocked by SIGKILL in unchanged
+  Asupersync 0.5.0 before local compilation.
+  All eight world search integration tests now pass on latest nightly, including
+  the preceding long-announcement regressions.
+
 ## Unreleased — Retain unproved original reserve goals at capacity
 
 - Keep future-reserve originals when their exact endpoint is missing, false,

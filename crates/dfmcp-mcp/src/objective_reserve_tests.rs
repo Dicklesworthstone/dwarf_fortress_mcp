@@ -259,7 +259,10 @@ fn capacity_refuses_pause(session: &str) -> TestResult {
     let guard = handle.lock().map_err(|_| "session poisoned")?;
     assert_eq!(guard.objectives.len(), MAX_OBJECTIVES_PER_FORTRESS);
     assert_eq!(
-        guard.pending.as_ref().map(|pending| pending.digest.as_str()),
+        guard
+            .pending
+            .as_ref()
+            .map(|pending| pending.digest.as_str()),
         Some(digest)
     );
     Ok(())
@@ -342,7 +345,10 @@ fn exact_true_reserve_history_is_eligible_locally_and_after_verified_recovery() 
             digest.to_hex(),
         ))?;
         assert_eq!(observed["ok"], true, "{observed}");
-        assert_eq!(observed["selected_plan_wait"]["complete"], true, "{observed}");
+        assert_eq!(
+            observed["selected_plan_wait"]["complete"], true,
+            "{observed}"
+        );
         assert_eq!(observed["game_tick"], 1234);
         assert_eq!(
             observed["selected_plan_wait"]["reserve_frontier"]["durable"],

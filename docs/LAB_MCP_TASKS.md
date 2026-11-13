@@ -39,7 +39,7 @@ the Tasks extension in its capabilities:
 ```
 
 Open a laboratory session and prepare a plan through the usual eleven-tool
-workflow. The session must have `observe` and every action capability the plan
+workflow. The session must have `observe`, `query` and every action capability the plan
 requires. For an excavation followed by a bed, that includes `plan`,
 `designate`, `construct`, and the checkpoint authority required by its risk
 policy; explicit clock advancement also requires `control_clock`. See the
@@ -108,6 +108,9 @@ silently stops game work. The task detail exposes both:
 | `proof_status` | The original goal outcome: `working`, `completed`, `failed` or `cancelled`. A failure is reported for failed/indeterminate actions or finished quiet work whose original goal is false or unknown. |
 | `action_proof_status` | The separate aggregate action-receipt outcome; verified work does not by itself establish the original goal. |
 | `original_goal` | Current source-qualified truth, original predicate, actual committed digest and observation anchor, together with separately labeled immutable first achievement and restore abandonment. |
+| `original_goal_satisfied` | The complete original goal is established, including any required first exact reserve endpoint. True current stock alone does not establish a future reserve. |
+| `original_goal_pending` | A future reserve still needs its explicit endpoint observation; finished actions can leave the Task working with no physical cleanup required. |
+| `selected_plan_wait` | Read-only inspection of the exact original project, stage truth, physical work, reserve evidence and any separately reviewed continuation. |
 | `needs_replan` | The original work has finished below its original goal. Review a new plan explicitly; the monitor dispatches no replacement. |
 | `status` | The monitor's lifecycle. It remains `working` while an original action is nonterminal or its physical work is active or unknown. |
 | Each action's `work_state` | `never_dispatched`, `active`, `quiescent` or `unknown`, with the entity identity and current observed anchor. |
@@ -121,6 +124,29 @@ reports `failed`, `needs_replan: true` and the current goal evidence. Missing or
 ineligible goal evidence stays `unknown` and requires reconciliation. An
 idempotent witness-rebase alias resolves to the actual original committed goal;
 a later unrelated plan cannot replace it.
+
+Future reserves keep their original absolute game tick. Even if all production
+actions have verified and current stock is sufficient, the Task remains
+`working` until an explicit selected `fortress_wait` retains the first exact
+endpoint. Task reads, supervisor wakeups and cancellation checks only consume
+already-retained evidence: they do not record an endpoint, load an archived
+snapshot into the version book, poll actions or advance time. The recommended
+wait names the Task's exact original `plan_digest`, so progression stops at its
+reserve frontier.
+
+At the exact horizon without a retained endpoint, the Task stays pending and
+recommends `fortress_wait(plan_digest=..., max_game_ticks=0)` to capture that
+observation explicitly. After the horizon, a missing endpoint produces
+`reserve_unobserved`; a first false or unknown endpoint produces `reserve_unmet`
+or `reserve_unknown`. Later sufficient stock cannot repair these outcomes.
+The nested `original_goal.predicate_truth` continues to report current stock
+truth independently. Full and bounded Task results retain the selected reserve
+outcome and its exact anchor. No Task operation renews the original deadline.
+
+For a resource-backed room or production pursuit, verified harvesting is only
+the current stage. When the original complete project remains unmet and the
+physical work is quiet, the Task fails with `needs_replan: true` and the
+eligible explicit continuation request. It never dispatches the next stage.
 
 For a failed goal, `status: "working"` therefore means retained monitoring or
 cleanup, not that its failed proof is still pending. Terminal but active actions
@@ -179,8 +205,9 @@ Stopping future excavation or construction does not undo completed game
 progress. Missing work after a known dispatch, replacement identities and
 ineligible lifecycle facts remain unresolved and cannot certify a drain.
 
-Each drain phase rechecks current observation and action authority. A fully
-verified and physically quiescent plan whose original goal currently holds
+Each drain phase rechecks current Observe, Query and action authority. A fully
+verified and physically quiescent plan whose complete original goal holds,
+including any required retained exact reserve endpoint,
 cannot be cancelled. A verified plan
 whose early proof leaves physical work active can be cleaned up without
 rewriting that proof. Explicit `tasks/cancel` finalizes the transport task as
@@ -188,6 +215,11 @@ rewriting that proof. Explicit `tasks/cancel` finalizes the transport task as
 `proof_status: "failed"` and the original failure evidence. Without explicit
 transport cancellation, a monitor becomes `failed` once failed work is quiet,
 or `completed` once verified work is quiet and the original goal holds.
+An unfinished future-reserve monitor can be cancelled after its physical work
+is already quiet. Its drain certificate proves only physical quiescence;
+`proof_status: "working"` and `original_goal_pending: true` remain explicit,
+and cancellation creates no endpoint evidence. Missing current read authority
+or exhausted source budgets cannot bypass the completed-goal cancellation guard.
 
 The bounded laboratory drain completes before
 cancellation intent is forwarded to the upstream store. Both ordered phases
@@ -228,6 +260,7 @@ stages for adapters that cannot drain in one bounded call.
 
 ```bash
 cargo test --locked --offline -p dfmcp-mcp --test tasks_tests
+cargo test --locked --offline -p dfmcp-mcp --lib server::task_session
 cargo test --locked --offline -p dwarf-fortress-mcp --test modern_tasks_golden
 ```
 

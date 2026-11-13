@@ -95,17 +95,18 @@ fn snapshot_search_excludes_unavailable_values_from_matches_snippets_and_scores(
         FactPresence::Stale(baseline.anchor()),
         FactPresence::Known(Value::Text("claimedmarker".to_owned())),
     ] {
-        let mut fact = Fact::with_presence(
-            presence,
-            GameTick(100),
-            FactSource::Replay,
-            Digest32::ZERO,
-        );
+        let mut fact =
+            Fact::with_presence(presence, GameTick(100), FactSource::Replay, Digest32::ZERO);
         fact.value = Value::Text("retainedmarker".to_owned());
         let snapshot = snapshot_with_fields(BTreeMap::from([("message".to_owned(), fact)]));
         engine.index_snapshot(&snapshot)?;
 
-        for text in ["retainedmarker", "claimedmarker", "withheldmetadata", "message"] {
+        for text in [
+            "retainedmarker",
+            "claimedmarker",
+            "withheldmetadata",
+            "message",
+        ] {
             assert!(
                 engine.search(text, 5)?.is_empty(),
                 "unavailable field data became searchable: {text}"
@@ -147,10 +148,7 @@ fn snapshot_search_keeps_legacy_and_explicit_known_values_and_retained_events()
         kind: WorldEventKind::Announcement,
         subject: None,
         summary: "Retained report".to_owned(),
-        fields: BTreeMap::from([(
-            "message".to_owned(),
-            Value::Text("eventmarker".to_owned()),
-        )]),
+        fields: BTreeMap::from([("message".to_owned(), Value::Text("eventmarker".to_owned()))]),
     };
     snapshot.graph.events.insert(event.id, event);
     snapshot.refresh_hash();
@@ -211,8 +209,8 @@ fn snapshot_search_finds_builtin_and_custom_kinds_with_stable_identity_ties()
 }
 
 #[test]
-fn rebuilding_search_withdraws_newly_unavailable_values()
--> Result<(), Box<dyn std::error::Error>> {
+fn rebuilding_search_withdraws_newly_unavailable_values() -> Result<(), Box<dyn std::error::Error>>
+{
     let mut snapshot = snapshot_with_fields(BTreeMap::from([(
         "message".to_owned(),
         Fact::known(
@@ -358,7 +356,10 @@ fn direct_document_title_and_body_limits_remain_atomic() -> Result<(), Box<dyn s
     oversized.refresh_hash();
     let refused = engine.index_snapshot(&oversized);
     assert_eq!(
-        refused.err().ok_or("oversized snapshot body was admitted")?.code,
+        refused
+            .err()
+            .ok_or("oversized snapshot body was admitted")?
+            .code,
         dfmcp_core::ErrorCode::BudgetExceeded
     );
     assert_eq!(engine.search("beforemarker", 5)?, before);

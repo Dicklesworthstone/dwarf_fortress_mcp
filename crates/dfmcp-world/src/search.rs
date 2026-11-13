@@ -184,8 +184,7 @@ impl FrankenSearchEngine {
                 .fields
                 .iter()
                 .filter_map(|(name, fact)| {
-                    fact.known_value()
-                        .map(|value| format!("{name}: {value:?}"))
+                    fact.known_value().map(|value| format!("{name}: {value:?}"))
                 })
                 .collect();
             let body = format!(

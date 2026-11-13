@@ -96,6 +96,38 @@ fn compact_original_goal(work: &TaskWork, task_id: &str, payload: &Value) -> Val
     })
 }
 
+/// The current stock predicate can be true while an original future reserve
+/// is still pending or has failed at its exact endpoint. Keep that distinction
+/// in fitted results; the complete source and action census stay in evidence.
+fn compact_selected_outcome(payload: &Value) -> Value {
+    let selected = &payload["selected_plan_wait"];
+    if !selected.is_object() {
+        return Value::Null;
+    }
+    let reserve = &selected["reserve_frontier"];
+    json!({
+        "requested_plan_digest": selected["requested_plan_digest"],
+        "plan_digest": selected["plan_digest"],
+        "complete": selected["complete"].as_bool().unwrap_or(false),
+        "inspection_complete": selected["inspection_complete"].as_bool().unwrap_or(false),
+        "stop_reason": selected["stop_reason"],
+        "goal_truth": selected.get("goal_truth").cloned().unwrap_or_else(|| json!("unknown")),
+        "stage_goal_truth": selected.get("stage_goal_truth").cloned().unwrap_or_else(|| json!("unknown")),
+        "goal_observed_anchor": selected["goal_observed_anchor"],
+        "reserve_frontier": if reserve.is_object() { json!({
+            "reserve_until_tick": reserve["reserve_until_tick"],
+            "observed_anchor": reserve["observed_anchor"],
+            "truth": reserve["truth"],
+            "available": reserve["available"].as_bool().unwrap_or(false),
+            "durable": reserve["durable"].as_bool().unwrap_or(false),
+            "remaining_work_required": reserve["remaining_work_required"],
+            "continuous_maintenance_proven": false,
+        }) } else { Value::Null },
+        "continuation_request": selected["continuation_request"],
+        "automatic_continuation": false,
+    })
+}
+
 #[derive(Default)]
 struct ProgressSignal {
     waker: Mutex<Option<Waker>>,
@@ -231,10 +263,12 @@ impl LabTaskService {
             "proof_status": payload.get("proof_status").cloned().unwrap_or_else(|| json!("unknown")),
             "action_proof_status": payload.get("action_proof_status").cloned().unwrap_or_else(|| json!("unknown")),
             "original_goal_satisfied": payload["original_goal_satisfied"].as_bool().unwrap_or(false),
+            "original_goal_pending": payload["original_goal_pending"].as_bool().unwrap_or(false),
             "goal_unconfirmed_after_work": payload["goal_unconfirmed_after_work"],
             "needs_replan": payload["needs_replan"].as_bool().unwrap_or(false),
             "replacement_work_dispatched": false,
             "original_goal": original_goal,
+            "selected_plan_wait": compact_selected_outcome(payload),
             "remaining_work": payload["remaining_work"],
             "physical_quiescent": payload["physical_quiescent"].as_bool().unwrap_or(false),
             "cleanup_required": payload.get("cleanup_required").cloned().unwrap_or(Value::Bool(true)),
@@ -673,6 +707,45 @@ pub(crate) async fn serve_with_tasks(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fitted_outcome_retains_failed_or_missing_reserve_without_replacing_it_with_current_stock() {
+        let endpoint = json!({"fortress_id":"7", "epoch":1, "sequence":10,
+            "game_tick":100, "state_hash":"a".repeat(64)});
+        for (truth, available, reason) in [
+            (json!("false"), true, "reserve_unmet"),
+            (json!("unknown"), true, "reserve_unknown"),
+            (Value::Null, false, "reserve_unobserved"),
+        ] {
+            let payload = json!({"selected_plan_wait": {
+                "requested_plan_digest":"b".repeat(64), "plan_digest":"c".repeat(64),
+                "complete":false, "inspection_complete":true, "stop_reason":reason,
+                "goal_truth":"true", "stage_goal_truth":"true",
+                "goal_observed_anchor":endpoint,
+                "reserve_frontier":{"reserve_until_tick":100, "observed_anchor":endpoint,
+                    "truth":truth,"available":available,"durable":available,
+                    "remaining_work_required":false,"error":{"message":"details ".repeat(4096)}},
+                "source_work":{"large_diagnostic":"source ".repeat(4096)},
+            }});
+            let compact = compact_selected_outcome(&payload);
+            assert_eq!(compact["complete"], false);
+            assert_eq!(compact["stop_reason"], reason);
+            assert_eq!(compact["goal_truth"], "true");
+            assert_eq!(compact["reserve_frontier"]["truth"], truth);
+            assert_eq!(compact["reserve_frontier"]["available"], available);
+            assert_eq!(compact["reserve_frontier"]["observed_anchor"], endpoint);
+            assert_eq!(
+                compact["reserve_frontier"]["continuous_maintenance_proven"],
+                false
+            );
+            assert!(compact.to_string().len() < 1_400, "{compact}");
+        }
+        assert!(compact_selected_outcome(&json!({"original_goal_satisfied":true})).is_null());
+        let unknown = compact_selected_outcome(&json!({"selected_plan_wait":{}}));
+        assert_eq!(unknown["complete"], false);
+        assert_eq!(unknown["inspection_complete"], false);
+        assert_eq!(unknown["goal_truth"], "unknown");
+    }
 
     #[test]
     fn bounded_original_goal_keeps_truth_and_identity_for_large_predicates() {

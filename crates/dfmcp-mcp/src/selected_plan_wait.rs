@@ -153,12 +153,64 @@ pub(super) struct SelectedPlanWait {
     stop: Option<&'static str>,
 }
 
+/// An original goal's current evidence for a passive Task monitor. Pending
+/// future evidence is distinct from unavailable or negative terminal proof.
+pub(super) struct TaskGoalObservation {
+    pub(super) truth: PredicateTruth,
+    pub(super) pending: bool,
+    pub(super) projection: Value,
+}
+
 impl SelectedPlanWait {
     pub(super) fn new(
         session: &mut LabSession,
         digest: Digest32,
         started: Instant,
     ) -> Result<Self> {
+        let mut selected = Self::from_custody(session, digest, started)?;
+        super::objectives::ensure_reserve_snapshot(session, selected.selected.actual)?;
+        selected.inspect(session)?;
+        Ok(selected)
+    }
+
+    /// Consume only already-retained endpoint evidence. Task reads, wakeups and
+    /// cancellation checks cannot capture a reserve endpoint, publish history,
+    /// poll an action, dispatch a successor or advance the world clock.
+    pub(super) fn observe_retained(
+        session: &LabSession,
+        digest: Digest32,
+    ) -> Result<TaskGoalObservation> {
+        let mut selected = Self::from_custody(session, digest, Instant::now())?;
+        selected.inspect_current(session, false)?;
+        let now = session.adapter.snapshot().tick.0;
+        let pending = selected.reserve_until.is_some_and(|until| now <= until)
+            && selected.reserve_observation.is_none()
+            && selected.stop.is_none();
+        let truth = if pending || selected.reserve_error.is_some() {
+            PredicateTruth::Unknown
+        } else if let Some(until) = selected.reserve_until {
+            match selected.reserve_observation.map(|sample| sample.truth) {
+                Some(PredicateTruth::False) => PredicateTruth::False,
+                Some(PredicateTruth::Unknown) => PredicateTruth::Unknown,
+                None if now >= until => PredicateTruth::Unknown,
+                None if selected.stop == Some("needs_continuation") => PredicateTruth::False,
+                _ => selected.goal_truth,
+            }
+        } else {
+            selected.goal_truth
+        };
+        let mut projection = selected.projection(session, true);
+        projection["observation_only"] = json!(true);
+        projection["reserve_capture_required"] =
+            json!(selected.reserve_until == Some(now) && selected.reserve_observation.is_none());
+        Ok(TaskGoalObservation {
+            truth,
+            pending,
+            projection,
+        })
+    }
+
+    fn from_custody(session: &LabSession, digest: Digest32, started: Instant) -> Result<Self> {
         let context = read_context(session);
         context.budget.validate()?;
         authorize_entry(&context, Capability::Observe, RiskTier::ReadOnly)?;
@@ -276,8 +328,7 @@ impl SelectedPlanWait {
                 "retained exact reserve observation disagrees with original custody",
             ));
         }
-        super::objectives::ensure_reserve_snapshot(session, selected.actual)?;
-        let mut selected = Self {
+        Ok(Self {
             selected,
             recovered,
             original_owner_session_id,
@@ -302,9 +353,7 @@ impl SelectedPlanWait {
             goal_anchor: None,
             actions: Actions::default(),
             stop: None,
-        };
-        selected.inspect(session)?;
-        Ok(selected)
+        })
     }
 
     fn original<'a>(&self, session: &'a LabSession) -> Result<&'a Objective> {
@@ -474,7 +523,7 @@ impl SelectedPlanWait {
 
     /// Sample the selected outcome only after the owner published the current
     /// complete progression slice. No polling, dispatch or clock change occurs.
-    pub(super) fn inspect(&mut self, session: &mut LabSession) -> Result<()> {
+    fn inspect_current(&mut self, session: &LabSession, capture_endpoint: bool) -> Result<()> {
         self.admit_source(session)?;
         self.actions = self.inspect_actions(session)?;
         let original = self.original(session)?;
@@ -499,7 +548,7 @@ impl SelectedPlanWait {
                 self.reserve_error = Some(error_json(error));
             }
         }
-        if self.reserve_until == Some(session.adapter.snapshot().tick.0) {
+        if capture_endpoint && self.reserve_until == Some(session.adapter.snapshot().tick.0) {
             // The first exact observed endpoint is immutable across bounded
             // calls by this owner. Later stock cannot replace False/Unknown
             // with a more convenient sample.
@@ -523,7 +572,21 @@ impl SelectedPlanWait {
         if self.stop == Some("goal_unmet") && self.can_continue {
             self.stop = Some("needs_continuation");
         }
-        self.check(session)?;
+        // An explicit zero-tick selected wait owns endpoint capture. A passive
+        // monitor at that exact tick must leave time to perform that observation;
+        // it cannot turn an unrecorded endpoint into either proof or failure.
+        if !capture_endpoint
+            && self.reserve_until == Some(session.adapter.snapshot().tick.0)
+            && self.reserve_observation.is_none()
+            && self.actions.interrupted().is_none()
+        {
+            self.stop = None;
+        }
+        self.check(session)
+    }
+
+    pub(super) fn inspect(&mut self, session: &mut LabSession) -> Result<()> {
+        self.inspect_current(session, true)?;
         if let Some(sample) = self.reserve_observation {
             self.reserve_durable = super::objectives::retain_reserve_observation(
                 session,
