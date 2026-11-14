@@ -122,6 +122,7 @@ enum Action {
     PlanRun(RunRequest, Option<u32>),
     PlanInventoryRun(InventoryRunRequest, Option<u32>),
     Prepare(Digest32),
+    ReviewPrepared(Digest32),
     Commit(Digest32, bool),
     CommitRun(Digest32, bool, Option<u32>),
     CommitInventoryRun(Digest32, bool, Option<u32>),
@@ -146,6 +147,7 @@ impl Action {
         matches!(
             self,
             Self::Prepare(_)
+                | Self::ReviewPrepared(_)
                 | Self::PlanRun(..)
                 | Self::PlanInventoryRun(..)
                 | Self::Commit(..)
@@ -180,6 +182,7 @@ impl Action {
                 runtime.plan_inventory_run(request, c)
             }
             Self::Prepare(id) => runtime.prepare_next(id, c),
+            Self::ReviewPrepared(id) => runtime.review_prepared(id, c),
             Self::Commit(seal, confirmed) => runtime.commit(seal, confirmed, c),
             Self::CommitRun(seal, confirmed, step) => {
                 runtime.select_order(step, c)?;
@@ -530,13 +533,18 @@ fn plan_action(raw: &str) -> Result<Action> {
     } else if value.get("kind").and_then(Value::as_str) == Some("existing_labor_portfolio") {
         crate::live_production_runtime::ExistingLaborPortfolioRequest::parse(raw)
             .map(Action::PlanExistingLaborPortfolio)
-    } else if value.get("kind").and_then(Value::as_str) == Some("step") {
+    } else if matches!(
+        value.get("kind").and_then(Value::as_str),
+        Some("step" | "review_prepared")
+    ) {
         let request: StepRequest = serde_json::from_str(raw)
             .map_err(|_| error(ErrorCode::InvalidRequest, "invalid closed step request"))?;
-        if request.kind != "step" {
-            return Err(error(ErrorCode::InvalidRequest, "invalid step kind"));
+        let original = digest(&request.original_plan_digest)?;
+        match request.kind.as_str() {
+            "step" => Ok(Action::Prepare(original)),
+            "review_prepared" => Ok(Action::ReviewPrepared(original)),
+            _ => Err(error(ErrorCode::InvalidRequest, "invalid step kind")),
         }
-        Ok(Action::Prepare(digest(&request.original_plan_digest)?))
     } else {
         Ok(Action::Plan(Request::parse(raw)?))
     }
@@ -721,7 +729,7 @@ pub fn fortress_query(
     })
 }
 #[tool(
-    description = "Compile kind=stock_targets with expected_observation, units, labor, targets and original timing to size one to four distinct furniture minima from one qualified census. Each target supplies recipe, minimum_stack_units and optional max_order_amount (1..100, default100). Only deficits create orders; every requested minimum remains in the original goal. It uses already enabled eligible workers by default; optional assign_labor=true adds one separately reviewed labor-enable step before the dependent orders, for at most five original steps. All-met targets create no original or effect; any oversized deficit refuses the whole proposal. Each insertion revalidates the original census and exact receipt-backed prior-order queue. Compile kind=stock_target with expected_observation, units, labor, recipe, minimum_stack_units and original timing to derive one finite deficit from a fresh complete inventory census using already-enabled eligible workers by default. Optional assign_labor=true instead plans an explicitly confirmed labor enable before the dependent order; each step requires separate review. Optional max_order_amount is 1..100 (default100); an already-satisfied target creates no original or effect, and an oversized deficit refuses. Insertion requires the exact original census and an empty native order queue at each protected boundary. Otherwise compile one original labor and finite-order plan, kind=existing_labor for one finite order using observed already-enabled eligible workers without a labor assignment, kind=existing_labor_portfolio for one to four orders using the same qualified current workers, or kind=portfolio to assign labor before one to four distinct furniture orders; every order may select observed_inventory_minimum or observed_inventory_increase with item_type and increase_stack_units (1..1000000). Increase seals a server-qualified complete original inventory baseline before preparation; clients cannot supply or renew that baseline; kind=step with original_plan_digest prepares the next eligible original step. After all original effects settle, kind=run prepares an independently authorized clock for the original retained-order or inventory goal. After Wait observes True original labor and explicitly selected inventory, kind=inventory_run prepares an independent stability clock even after order retirement. Both name original_paired_seal, game_ticks and wall_millis; portfolio clock requests also require the exact original order_step_id. Configured original workshop and Manager 1.23 prerequisites retain their exact acknowledged identities; planning and each native order boundary freshly verify workshop completion and the original manager assignment with its production responsibility cache. Planning never unpauses."
+    description = "Compile kind=stock_targets with expected_observation, units, labor, targets and original timing to size one to four distinct furniture minima from one qualified census. Each target supplies recipe, minimum_stack_units and optional max_order_amount (1..100, default100). Only deficits create orders; every requested minimum remains in the original goal. It uses already enabled eligible workers by default; optional assign_labor=true adds one separately reviewed labor-enable step before the dependent orders, for at most five original steps. All-met targets create no original or effect; any oversized deficit refuses the whole proposal. Each insertion revalidates the original census and exact receipt-backed prior-order queue. Compile kind=stock_target with expected_observation, units, labor, recipe, minimum_stack_units and original timing to derive one finite deficit from a fresh complete inventory census using already-enabled eligible workers by default. Optional assign_labor=true instead plans an explicitly confirmed labor enable before the dependent order; each step requires separate review. Optional max_order_amount is 1..100 (default100); an already-satisfied target creates no original or effect, and an oversized deficit refuses. Insertion requires the exact original census and an empty native order queue at each protected boundary. Otherwise compile one original labor and finite-order plan, kind=existing_labor for one finite order using observed already-enabled eligible workers without a labor assignment, kind=existing_labor_portfolio for one to four orders using the same qualified current workers, or kind=portfolio to assign labor before one to four distinct furniture orders; every order may select observed_inventory_minimum or observed_inventory_increase with item_type and increase_stack_units (1..1000000). Increase seals a server-qualified complete original inventory baseline before preparation; clients cannot supply or renew that baseline; kind=step with original_plan_digest prepares the next eligible original step. Explicit kind=review_prepared with that same original_plan_digest obtains a fresh review of the one retained undispatched step after restart or lost publication; it rechecks current sources and authority without repeating native preparation, renewing its lifetime or restoring an old confirmation. Any possible dispatch refuses this path. After all original effects settle, kind=run prepares an independently authorized clock for the original retained-order or inventory goal. After Wait observes True original labor and explicitly selected inventory, kind=inventory_run prepares an independent stability clock even after order retirement. Both name original_paired_seal, game_ticks and wall_millis; portfolio clock requests also require the exact original order_step_id. Configured original workshop and Manager 1.23 prerequisites retain their exact acknowledged identities; planning and each native order boundary freshly verify workshop completion and the original manager assignment with its production responsibility cache. Planning never unpauses."
 )]
 pub fn fortress_plan(session_id: String, request: String) -> String {
     with_session(session_id, "fortress.plan", None, || plan_action(&request))
@@ -803,7 +811,7 @@ pub fn run_stdio() {
     let server = ServerBuilder::new("dfmcp-live-combined-production-dev", env!("CARGO_PKG_VERSION"))
         .tool(FortressOpenSession).tool(FortressObserve).tool(FortressQuery).tool(FortressPlan).tool(FortressCommit)
         .tool(FortressWait).tool(FortressCancel).tool(FortressCheckpoint).tool(FortressRestore).tool(FortressExplain).tool(FortressDoctor)
-        .instructions("Unadmitted development only. Observe, use kind=stock_targets to size one to four distinct furniture stock targets from one fresh qualified census with existing eligible workers by default, or explicit assign_labor=true to review one labor enable before the dependent orders. Every requested minimum, including initially met stock, remains in the complete original goal; each nonzero deficit needs its own reviewed order. A wholly satisfied request creates no original or effect. Use kind=stock_target to size one finite stock deficit from a fresh independently qualified census using already-enabled workers by default, with optional assign_labor=true to review a labor enable before the dependent order; a met target creates neither effect, or compile one original labor and finite-order plan, kind=existing_labor for one order using current qualified labor without assigning it, kind=existing_labor_portfolio for up to four orders using the same workers, or kind=portfolio to assign labor before up to four furniture orders, prepare and confirm each dependency-satisfied step, and reconcile uncertainty under its original key. All-applied does not prove the original goal or physical goods. Wait joins current labor with the original retained-order completion or explicitly selected inventory goal under the original stability requirement. Separately configured clock control can prepare kind=run and confirm scope=run for either objective while the exact original order remains eligible; after a True original labor/inventory sample, kind/scope=inventory_run can finish explicitly selected inventory stability after native order retirement. Portfolio clock Plan/Commit/Cancel calls require the original order_step_id; Query can select that leaf. Portfolio Wait samples one original leaf per call and proves the parent only after a coherent complete cohort. Both clock owners preserve every original deadline and exclude competing pending clocks across all leaves; no automatic advancement or repeated unpause is permitted. Unresolved runs must reconcile before paused sampling. A disappeared order leaves default completion unknown. Inventory presence does not prove order-attributed production. Parent proof is process-local and withdrawn on failure or reopening. Independently acknowledged Carpenter workshop and Manager 1.23 prerequisites can be configured separately or together. Their exact originals are bound to the production plan; planning and each order preparation and dispatch boundary freshly check workshop completion and manager identity, assignment, role getters and production responsibility cache. Preserve each complete source checkpoint even when planning fails before an original exists. Historical prerequisite checks do not prove current readiness or the production goal.")
+        .instructions("Unadmitted development only. Observe, use kind=stock_targets to size one to four distinct furniture stock targets from one fresh qualified census with existing eligible workers by default, or explicit assign_labor=true to review one labor enable before the dependent orders. Every requested minimum, including initially met stock, remains in the complete original goal; each nonzero deficit needs its own reviewed order. A wholly satisfied request creates no original or effect. Use kind=stock_target to size one finite stock deficit from a fresh independently qualified census using already-enabled workers by default, with optional assign_labor=true to review a labor enable before the dependent order; a met target creates neither effect, or compile one original labor and finite-order plan, kind=existing_labor for one order using current qualified labor without assigning it, kind=existing_labor_portfolio for up to four orders using the same workers, or kind=portfolio to assign labor before up to four furniture orders, prepare and confirm each dependency-satisfied step, and reconcile uncertainty under its original key. A retained Prepared step with no dispatch attempt can obtain a new process-local review through kind=review_prepared and its original_plan_digest; native preparation is not repeated or renewed, and a separate new confirmation is required. All-applied does not prove the original goal or physical goods. Wait joins current labor with the original retained-order completion or explicitly selected inventory goal under the original stability requirement. Separately configured clock control can prepare kind=run and confirm scope=run for either objective while the exact original order remains eligible; after a True original labor/inventory sample, kind/scope=inventory_run can finish explicitly selected inventory stability after native order retirement. Portfolio clock Plan/Commit/Cancel calls require the original order_step_id; Query can select that leaf. Portfolio Wait samples one original leaf per call and proves the parent only after a coherent complete cohort. Both clock owners preserve every original deadline and exclude competing pending clocks across all leaves; no automatic advancement or repeated unpause is permitted. Unresolved runs must reconcile before paused sampling. A disappeared order leaves default completion unknown. Inventory presence does not prove order-attributed production. Parent proof is process-local and withdrawn on failure or reopening. Independently acknowledged Carpenter workshop and Manager 1.23 prerequisites can be configured separately or together. Their exact originals are bound to the production plan; planning and each order preparation and dispatch boundary freshly check workshop completion and manager identity, assignment, role getters and production responsibility cache. Preserve each complete source checkpoint even when planning fails before an original exists. Historical prerequisite checks do not prove current readiness or the production goal.")
         .build();
     crate::run_modern_stdio(server);
 }
@@ -1058,10 +1066,21 @@ mod tests {
             plan_action(&json!({"kind":"step","original_plan_digest":seal}).to_string())?,
             Action::Prepare(_)
         ));
-        for extra in ["key", "path", "source", "step_id"] {
-            let mut value = json!({"kind":"step","original_plan_digest":seal});
-            value[extra] = json!("forged");
-            assert!(plan_action(&value.to_string()).is_err());
+        assert!(matches!(
+            plan_action(&json!({"kind":"review_prepared","original_plan_digest":seal}).to_string())?,
+            Action::ReviewPrepared(_)
+        ));
+        for kind in ["step", "review_prepared"] {
+            for extra in ["key", "path", "source", "step_id", "paired_seal", "ttl"] {
+                let mut value = json!({"kind":kind,"original_plan_digest":seal});
+                value[extra] = json!("forged");
+                assert!(plan_action(&value.to_string()).is_err());
+            }
+            assert!(plan_action(&json!({"kind":kind}).to_string()).is_err());
+            assert!(plan_action(&json!({"kind":kind,"original_plan_digest":"0".repeat(64)}).to_string()).is_err());
+            assert!(plan_action(&format!(
+                "{{\"kind\":\"{kind}\",\"original_plan_digest\":\"{seal}\",\"original_plan_digest\":\"{seal}\"}}"
+            )).is_err());
         }
         assert!(
             plan_action(&format!(
@@ -1381,6 +1400,9 @@ mod tests {
         let prepare = Action::Prepare(id);
         assert!(prepare.may_need_reconciliation());
         assert!(!prepare.may_dispatch());
+        let review = Action::ReviewPrepared(id);
+        assert!(review.may_need_reconciliation());
+        assert!(!review.may_dispatch());
         assert!(Action::Commit(id, true).may_need_reconciliation());
         assert!(Action::Commit(id, true).may_dispatch());
         assert!(Action::Wait.may_need_reconciliation());

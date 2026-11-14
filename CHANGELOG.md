@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased — Fresh review of original production preparations
+
+- Add explicit `review_prepared` to the existing combined Plan workflow so a
+  restarted Control owner can review an undispatched original labor/order step.
+- Revalidate original/predecessor custody, source capture, current authority,
+  fixed native owner mode and original expiry before issuing a new paired seal.
+- Keep the original native preparation, token, semantic key and deadline;
+  send no second native Prepare RPC and forbid review after possible dispatch.
+- Publish a new frontier head to invalidate old confirmations and withdraw
+  local permission on failed review or publication.
+- Add durable/concrete-family and MCP regression sources plus eight modern
+  stdio scenarios. Preserve all eleven public tools and existing admission limits.
+- Recover reviewed changes through GitHub after execution-environment loss.
+  Rust compilation/tests, stdio execution and final formatting remain unverified;
+  no full-workspace or live-game qualification is claimed.
+
 ## Unreleased — Fresh review of retained native production preparations
 
 - Add durable and concrete-family review of the exact undispatched original

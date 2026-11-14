@@ -1742,6 +1742,19 @@ impl Runtime {
             frontier.prepare_next(execution, c).map(|_| ())
         })
     }
+    pub(crate) fn review_prepared(
+        &mut self,
+        expected: Digest32,
+        c: &OperationContext,
+    ) -> Result<View> {
+        self.check(c, true)?;
+        if self.original.as_ref().map(|p| p.digest) != Some(expected) {
+            return Err(denied("fresh review must name the exact original plan"));
+        }
+        self.delegate(c, false, true, |frontier, execution, c| {
+            frontier.review_prepared(execution, c).map(|_| ())
+        })
+    }
     pub(crate) fn commit(
         &mut self,
         seal: Digest32,

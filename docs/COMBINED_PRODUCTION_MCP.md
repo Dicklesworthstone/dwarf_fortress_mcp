@@ -1844,12 +1844,16 @@ return their separately witnessed `workshop_prerequisite.checkpoint` even when
 
 Offline opens retain historical custody without contacting DFHack. Reconcile
 mode can consult the original keys under Query authority. Neither reconstructs
-a process-local review or native dispatch permit. A resumed Control owner must
-prepare an eligible Pending step; it cannot reuse an old paired seal. A retained
-Prepared step without its process-local review can be reconciled or cancelled,
-but this host cannot renew its commit permit. Lost custody,
-changed source or an inconsistent native/frontier record refuses rather than
-inventing success or replacing a journal.
+a process-local review or native dispatch permit. A resumed Control owner can
+prepare an eligible Pending step or explicitly review an undispatched Prepared
+original with `kind="review_prepared"` and its exact `original_plan_digest`.
+That request freshly rechecks current authority, complete original/predecessor
+custody and the original native capture before publishing a new paired seal.
+It sends no new native Prepare RPC and changes no original key, native token,
+expiry or deadline. An old seal remains unusable, and any possible prior dispatch
+requires reconciliation instead. Lost custody, changed source or an inconsistent
+native/frontier record refuses rather than inventing success or replacing a
+journal. See [prepared recovery](COMBINED_PREPARED_RECOVERY.md).
 An uncertain Offline response recommends `fortress_cancel` with
 `scope="session"`: retain its recovery object, close that local owner, then reopen
 in Reconcile mode with the operator's native configuration. Offline Wait only

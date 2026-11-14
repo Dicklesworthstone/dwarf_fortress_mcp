@@ -849,6 +849,50 @@ fn encode(
     });
     let current_tick = anchor
         .is_some_and(|a| view["anchor"] == anchor_value(a) && known_tick == Some(a.tick.get()));
+    let prepared_review = if control_available
+        && !uncertain
+        && current_tick
+        && review.is_null()
+        && !stock_target_failed
+        && view["frontier"]["needs_reconciliation"] == false
+        && view["original_plan"]["anchor"] == view["anchor"]
+        && digest(&view["original_plan"]["plan_digest"]).is_some()
+        && known_tick
+            .zip(view["original_plan"]["expires_at_tick"].as_u64())
+            .is_some_and(|(tick, expiry)| tick < expiry)
+    {
+        let mut active = entries.iter().filter(|entry| {
+            !matches!(entry["phase"].as_str(), Some("pending" | "applied" | "failed" | "cancelled"))
+        });
+        let selected = active.next().filter(|_| active.next().is_none());
+        selected.filter(|entry| {
+            entry["phase"] == "prepared"
+                && entry["dispatch_attempted"] == false
+                && digest(&entry["preparation_digest"]).is_some()
+                && view["original_plan"]["steps"].as_array().is_some_and(|steps| {
+                    steps.iter().any(|step| {
+                        step["step_id"] == entry["step_id"]
+                            && step["key"] == entry["idempotency_key"]
+                            && (step["obligation"].is_null()
+                                || known_tick
+                                    .zip(step["obligation"]["deadline_tick"].as_u64())
+                                    .is_some_and(|(tick, expiry)| tick < expiry))
+                            && if entry["family"] == "workforce/1.17" {
+                                step["action"]["kind"] == "set_labor"
+                                    && view["labor_control_enabled"] == true
+                            } else {
+                                entry["family"] == "work-orders/1.10"
+                                    && step["action"]["kind"] == "create_work_order"
+                                    && view["production_control_enabled"] == true
+                                    && !prerequisite_fenced
+                                    && !input_failed
+                            }
+                    })
+                })
+        }).map(|entry| entry["step_id"].clone())
+    } else {
+        None
+    };
     // A complete cohort has its own public anchor. Its exact selected leaf
     // remains usable clock evidence without relabeling the selected anchor.
     let cohort_covers_selected = portfolio
@@ -1149,6 +1193,13 @@ fn encode(
             "Confirm the exact current paired review.",
             true,
             json!({"paired_seal":review["paired_seal"],"confirmed":true}),
+        ))
+    } else if prepared_review.is_some() {
+        Some((
+            "fortress_plan",
+            "Review the exact retained undispatched step under fresh source and authority checks; native preparation is not repeated and a new confirmation is required.",
+            false,
+            json!({"request":json!({"kind":"review_prepared", "original_plan_digest":view["original_plan"]["plan_digest"]}).to_string()}),
         ))
     } else if view["frontier"]["next_ready"].is_u64()
         && view["original_plan"]["plan_digest"].is_string()
@@ -1567,6 +1618,11 @@ fn encode(
     let mut actions = entries;
     let mut cancellation_drains = Vec::new();
     let mut affordances = Vec::new();
+    if let Some(step) = prepared_review {
+        affordances.push(json!({"action":"fortress_plan","scope":"step",
+            "request_kind":"review_prepared","step_id":step,"enabled":true,
+            "grants_authority":false,"repeats_native_preparation":false}));
+    }
     for (owner, summary) in CLOCK_OWNERS.into_iter().zip(&clock_views) {
         let clock = owner.view(view);
         let active = &clock["active_run"];
@@ -1875,6 +1931,69 @@ mod stock_target_tests;
 mod tests {
     use super::*;
     use dfmcp_core::{Digest32, FortressId, GameTick, ObservationCursor};
+
+    #[test]
+    fn retained_prepared_guidance_requires_exact_undispatched_current_control() {
+        let (anchor, _) = joined_order_goal_view("false", false);
+        for (family, action, control) in [
+            ("workforce/1.17", "set_labor", "labor_control_enabled"),
+            ("work-orders/1.10", "create_work_order", "production_control_enabled"),
+        ] {
+            let mut view = json!({"anchor":anchor_value(anchor),
+                "observation_tick_floor":anchor.tick.get(),
+                "original_plan":{"anchor":anchor_value(anchor),"plan_digest":"a".repeat(64),
+                    "expires_at_tick":anchor.tick.get()+100,
+                    "steps":[{"step_id":0,"key":"original-key","action":{"kind":action},
+                        "obligation":null}]},
+                "frontier":{"next_ready":null,"all_applied":false,"needs_reconciliation":false,
+                    "entries":[{"step_id":0,"family":family,"phase":"prepared",
+                        "idempotency_key":"original-key","preparation_digest":"b".repeat(64),
+                        "dispatch_attempted":false}]},
+                "review":null,"labor_control_enabled":true,"production_control_enabled":true});
+            let result = joined_packet(anchor, &view, "control", true, false);
+            let recommendation = &result["agent_turn"]["recommendations"][0];
+            assert_eq!(recommendation["tool"], "fortress_plan");
+            let request: Value = serde_json::from_str(
+                recommendation["arguments"]["request"].as_str().expect("fresh-review request")
+            ).expect("closed fresh-review JSON");
+            assert_eq!(request, json!({"kind":"review_prepared","original_plan_digest":"a".repeat(64)}));
+            assert_eq!(result["agent_turn"]["active_work"]["confirmations"], json!([]));
+            assert!(result["review"].is_null(), "guidance does not issue a confirmation");
+            let recommends_review = |view: &Value, mode, verified, uncertain| {
+                joined_packet(anchor, view, mode, verified, uncertain)
+                    ["agent_turn"]["affordances"]
+                    .as_array().is_some_and(|items| items.iter().any(|item| {
+                        item["request_kind"] == "review_prepared" && item["enabled"] == true
+                    }))
+            };
+            assert!(recommends_review(&view, "control", true, false));
+            for (mode, verified, uncertain) in [
+                ("offline", true, false), ("reconcile", true, false),
+                ("control", false, false), ("control", true, true),
+            ] {
+                assert!(!recommends_review(&view, mode, verified, uncertain));
+            }
+            for (field, value) in [
+                ("dispatch_attempted", json!(true)),
+                ("dispatch_attempted", Value::Null),
+                ("phase", json!("indeterminate")),
+                ("idempotency_key", json!("substituted-key")),
+                ("preparation_digest", json!("0".repeat(64))),
+            ] {
+                let mut refused = view.clone();
+                refused["frontier"]["entries"][0][field] = value;
+                assert!(!recommends_review(&refused, "control", true, false));
+            }
+            let mut expired = view.clone();
+            expired["original_plan"]["expires_at_tick"] = json!(anchor.tick.get());
+            assert!(!recommends_review(&expired, "control", true, false));
+            let mut consumed_future = view.clone();
+            consumed_future["observation_tick_floor"] = json!(anchor.tick.get()+1);
+            assert!(!recommends_review(&consumed_future, "control", true, false));
+            view[control] = json!(false);
+            assert!(!recommends_review(&view, "control", true, false));
+        }
+    }
 
     fn input_supply_view(anchor: StateAnchor, failed: bool) -> Value {
         json!({"schema":"dfmcp.furniture-input-supply/1","policy":"furniture-wood/1",

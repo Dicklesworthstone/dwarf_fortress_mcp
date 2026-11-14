@@ -253,6 +253,22 @@ fn machine_host_contract_preserves_bounded_development_scope() -> Result<()> {
     ))
     .map_err(|_| invalid("invalid production contract JSON"))?;
     let host = &contract["development_mcp_host"];
+    let review = &host["explicit_prepared_review"];
+    assert_eq!(review["request_kind"], "review_prepared");
+    assert_eq!(review["selector"], "original_plan_digest");
+    for field in [
+        "requires_control_mode", "requires_undispatched_prepared_frontier",
+        "fresh_original_native_capture_required", "original_and_predecessor_custody_rechecked",
+        "opening_and_current_authority_intersected", "fresh_frontier_head_and_paired_seal",
+    ] {
+        assert_eq!(review[field], true, "explicit prepared review {field}");
+    }
+    for field in [
+        "native_prepare_rpc_sent", "native_token_or_expiry_renewed",
+        "original_plan_key_or_deadline_changed", "possible_dispatch_retry_permitted",
+    ] {
+        assert_eq!(review[field], false, "explicit prepared review {field}");
+    }
     assert_eq!(
         host["cli_profile"],
         json!(["serve-gameplay-dev", "labor-order"])

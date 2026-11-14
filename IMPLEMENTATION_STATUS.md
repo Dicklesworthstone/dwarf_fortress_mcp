@@ -1,5 +1,37 @@
 # Implementation Status
 
+## Unreleased — Resume an original Prepared production step after restart
+
+The combined development host now accepts an explicit
+`kind="review_prepared"` Plan request for the exact original plan digest.
+A Control owner can regain a fresh review for one undispatched Prepared labor
+assignment or finite order after restart. Reopening alone still restores no
+confirmation, native commit permission or current goal proof.
+
+The durable coordinator checks original expiry, opening/current scoped grants,
+complete original and predecessor custody, and fresh qualified source evidence.
+The concrete executor reuses the exact native preparation and checks fixed
+child Control mode. It sends no replacement native Prepare RPC and changes no
+original plan, StepId, key, native token, expiry or deadline. A new durable head
+invalidates earlier paired seals. Any possible dispatch remains a reconciliation
+case even if a later query reports Prepared; failures withdraw local permission.
+
+Rust regression sources cover concrete workforce/order restart, changed source,
+grant and custody refusal, sticky dispatch history, stale confirmations and
+failed publication. Eight additional modern stdio scenarios exercise the public
+workflow with authenticated native TCP fixtures. The public tool set and native
+protocols are unchanged.
+
+Independent source review completed. Earlier repository/contract checks through
+dependency policy and bead coverage passed before the execution environment
+became unavailable. Rust builds did not complete, the new Rust/stdio tests remain
+unexecuted, and final reconstructed-source formatting is unverified. Full
+`verify.sh`, `qualify_local.sh`, native/game qualification and production
+admission are not claimed.
+
+See [prepared production recovery](docs/COMBINED_PREPARED_RECOVERY.md).
+Owner: `df-dfhack-bridge-plane-c-pic.4.1`; the broader bead remains in progress.
+
 ## Unreleased — Recover exact native production preparations for fresh review
 
 The durable live dispatcher and concrete production executor now support an
