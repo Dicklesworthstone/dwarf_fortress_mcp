@@ -616,3 +616,209 @@ fn session_preflights_compensation_authority_for_older_live_original_before_newe
     assert_session_quiet(&drain_session(&session, "stop_future_steps")?);
     Ok(())
 }
+
+#[test]
+fn session_preflights_live_spatial_reservations_before_newer_stops_or_emergency_pause()
+-> TestResult {
+    let _serial = server::serialized_durable_tests();
+    let _directory = StateDir::new("session-live-reservation");
+    let session = open_variant("7864044", false, false)?;
+    commit(&session, json!([dig()]))?;
+    commit(&session, json!([named_order("newer work behind a conflicting live reservation")]))?;
+    let previous = inspect(&session, |session| {
+        let area = session.open_actions.iter().find_map(|id| {
+            session.adapter.action_step(*id).and_then(|step| step.action.scope().map_area)
+        }).ok_or("live excavation scope missing")?;
+        let previous = session.leases.manager.clone();
+        // A current foreign reservation may exist after an older local lease
+        // was released. Complete original receipts remain the caller's custody.
+        session.leases.manager.release_session_leases(session.session_id);
+        session.leases.manager.acquire_spatial_lease(
+            SessionId::new(999), area, true, session.adapter.snapshot().tick, 100,
+        )?;
+        Ok(previous)
+    })?;
+    let before = world(&session)?;
+    let leases_before = inspect(&session, |session| Ok(format!("{:?}", session.leases.manager)))?;
+    for mode in ["stop_future_steps", "emergency_pause_and_drain"] {
+        let refused = drain_session(&session, mode)?;
+        assert_eq!(refused["ok"], false, "{refused}");
+        assert_eq!(refused["error"]["code"], "conflict", "{refused}");
+        assert!(refused["finalize_certificate"].is_null());
+        assert!(refused["emergency_pause"].is_null());
+        assert_eq!(world(&session)?, before);
+        assert_eq!(
+            inspect(&session, |session| Ok(format!("{:?}", session.leases.manager)))?,
+            leases_before,
+        );
+    }
+    inspect(&session, |session| {
+        session.leases.manager = previous;
+        Ok(())
+    })?;
+    let stopped = drain_session(&session, "stop_future_steps")?;
+    assert_session_quiet(&stopped);
+    assert_eq!(stopped["drain_progress"]["drained"], 2);
+    Ok(())
+}
+
+#[test]
+fn session_refuses_foreign_owner_of_selected_live_action_with_original_receipt_retained()
+-> TestResult {
+    let _serial = server::serialized_durable_tests();
+    let _directory = StateDir::new("session-live-owner-conflict");
+    let owner = open_variant("7864045", true, false)?;
+    let other = open_variant("7864045", true, false)?;
+    commit(&owner, json!([dig()]))?;
+    let action = inspect(&owner, |session| session.last_action.ok_or_else(|| "owned action missing".into()))?;
+    commit(&owner, json!([named_order("newer owned work must stay active")]))?;
+    let other_id = server::parse_session_id_arg(&other)?;
+    let handle = server::lookup_session_str(&owner)?;
+    let previous = server::with_session(
+        &handle,
+        || -> TestResult<_> { Err("shared fixture unavailable".into()) },
+        |session| {
+            let previous = session.leases.by_action.get(&action).cloned()
+                .ok_or("selected ownership missing")?;
+            session.leases.by_action.insert(action, (other_id, previous.1.clone()));
+            Ok(previous)
+        },
+    )?;
+    let before = view(&owner, |session| Ok(session.adapter.snapshot().clone()))?;
+    for mode in ["stop_future_steps", "emergency_pause_and_drain"] {
+        let refused = drain_session(&owner, mode)?;
+        assert_eq!(refused["ok"], false, "{refused}");
+        assert_eq!(refused["error"]["code"], "conflict", "{refused}");
+        assert!(refused["emergency_pause"].is_null());
+        assert!(refused["finalize_certificate"].is_null());
+        assert_eq!(view(&owner, |session| Ok(session.adapter.snapshot().clone()))?, before);
+    }
+    server::with_session(
+        &handle,
+        || -> TestResult { Err("shared fixture unavailable".into()) },
+        |session| {
+            session.leases.by_action.insert(action, previous);
+            Ok(())
+        },
+    )?;
+    assert_session_quiet(&drain_session(&owner, "stop_future_steps")?);
+    Ok(())
+}
+
+#[test]
+fn session_preflights_distinct_compensation_entity_before_stopping_newer_original()
+-> TestResult {
+    let _serial = server::serialized_durable_tests();
+    let _directory = StateDir::new("session-inverse-ownership");
+    let session = open_variant("7864046", false, false)?;
+    let unit = dfmcp_core::EntityId::new(1003);
+    let digest = inspect(&session, |session| {
+        let mut grant = session.grants.iter().find(|grant| grant.capability == Capability::Designate)
+            .cloned().ok_or("fixture grant missing")?;
+        grant.capability = Capability::ConfigureLabor;
+        grant.max_risk = RiskTier::Reversible;
+        session.grants.push(grant);
+        let raw = json!([dig()]).to_string();
+        let summary = "excavation with an independently scoped labor inverse".to_owned();
+        let mut intent = server::semantic_intent(
+            dfmcp_core::IntentId::new(7864046),
+            session.adapter.snapshot(), summary.clone(), &raw,
+        )?;
+        intent.requested_actions[0].compensation = Some(Action::SetLabor {
+            units: vec![unit], labor: "BREW".to_owned(), enabled: false,
+        });
+        let prepared = dfmcp_intent::StaticPlanner::default().prepare_laboratory(
+            session.adapter.snapshot(), &intent, &server::read_context(session),
+        )?;
+        let digest = prepared.digest.to_hex();
+        session.pending = Some(server::PendingPlan {
+            plan: prepared, digest: digest.clone(),
+            source: server::PlanSource::Actions { summary, raw },
+        });
+        Ok(digest)
+    })?;
+    let committed = payload(&facade::fortress_commit(Some(session.clone()), digest))?;
+    assert_eq!(committed["ok"], true, "{committed}");
+    commit(&session, json!([named_order("newer original before independent inverse")]))?;
+    inspect(&session, |session| {
+        session.leases.manager.acquire_entity_lease(
+            SessionId::new(999), unit, true, session.adapter.snapshot().tick, 100,
+        )?;
+        Ok(())
+    })?;
+    let before = world(&session)?;
+    let refused = drain_session(&session, "compensate_reversible")?;
+    assert_eq!(refused["ok"], false, "{refused}");
+    assert_eq!(refused["error"]["code"], "conflict", "{refused}");
+    assert!(refused["finalize_certificate"].is_null());
+    assert_eq!(world(&session)?, before);
+    // An ordinary stop never applies that inverse and does not need its entity.
+    assert_session_quiet(&drain_session(&session, "stop_future_steps")?);
+    Ok(())
+}
+
+#[test]
+fn session_preserves_overlapping_foreign_physical_work_without_live_derived_leases()
+-> TestResult {
+    let _serial = server::serialized_durable_tests();
+    let _directory = StateDir::new("session-foreign-missing-leases");
+    let owner = open_variant("7864047", true, false)?;
+    let other = open_variant("7864047", true, false)?;
+    commit(&other, json!([dig()]))?;
+    let foreign_id = inspect(&other, |session| {
+        session.last_action.ok_or_else(|| "foreign action missing".into())
+    })?;
+    let foreign_owner = server::parse_session_id_arg(&other)?;
+    let handle = server::lookup_session_str(&owner)?;
+    server::with_session(
+        &handle,
+        || -> TestResult { Err("shared fixture unavailable".into()) },
+        |session| {
+            // Keep the real immutable original and active physical work, but
+            // simulate loss of its derived lease index and reservations.
+            session.leases.by_action.remove(&foreign_id);
+            session.leases.manager.release_session_leases(foreign_owner);
+            Ok(())
+        },
+    )?;
+    // The legacy designation engine supports overlapping observations. Missing
+    // derived admission custody permits this setup; cancellation must still use
+    // the positively known foreign original before stopping either project.
+    commit(&owner, json!([dig()]))?;
+    commit(&owner, json!([named_order("newer work behind overlapping foreign excavation")]))?;
+    let before = view(&owner, |session| Ok(session.adapter.snapshot().clone()))?;
+    let foreign_receipt = view(&owner, |session| {
+        session.adapter.action_receipt(foreign_id).cloned()
+            .ok_or_else(|| "foreign original receipt missing".into())
+    })?;
+    for retain_expired_owner in [false, true] {
+        if retain_expired_owner {
+            server::with_session(
+                &handle,
+                || -> TestResult { Err("shared fixture unavailable".into()) },
+                |session| {
+                    // This is also the state after reservation expiry/pruning:
+                    // original ownership remains but no active lease protects it.
+                    session.leases.by_action.insert(foreign_id, (foreign_owner, Vec::new()));
+                    Ok(())
+                },
+            )?;
+        }
+        let leases_before = view(&owner, |session| Ok(format!("{:?}", session.leases.manager)))?;
+        for mode in ["stop_future_steps", "emergency_pause_and_drain"] {
+            let refused = drain_session(&owner, mode)?;
+            assert_eq!(refused["ok"], false, "{refused}");
+            assert_eq!(refused["error"]["code"], "conflict", "{refused}");
+            assert!(refused["emergency_pause"].is_null());
+            assert!(refused["finalize_certificate"].is_null());
+            view(&owner, |session| {
+                assert_eq!(session.adapter.snapshot(), &before);
+                assert_eq!(session.adapter.action_receipt(foreign_id), Some(&foreign_receipt));
+                assert!(!server::action_fully_drained(&session.adapter, foreign_id));
+                assert_eq!(format!("{:?}", session.leases.manager), leases_before);
+                Ok(())
+            })?;
+        }
+    }
+    Ok(())
+}

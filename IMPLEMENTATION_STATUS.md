@@ -1,5 +1,35 @@
 # Implementation Status
 
+## Unreleased — Check live cancellation ownership before effects
+
+Complete laboratory session cancellation now preflights live original scopes
+against current foreign reservations and unresolved foreign physical work,
+including expired or missing derived lease entries when immutable original
+custody still proves another owner. Contradictory ownership of a selected action
+refuses before an emergency pause or any newer original stops.
+
+A compensation that would actually execute must also pass the check for its
+own entity or spatial scope. The coordinator pre-admits existing and temporary
+lease records/bytes, uses a private manager for reservations and leaves real
+lease state untouched on refusal. Same-session work and known nonoverlapping
+foreign work retain the existing behavior.
+
+Four new public-facade regression sources cover conflicting spatial reservations,
+contradictory ownership with intact original receipts, distinct compensation
+scope and unresolved foreign work without a current lease. The earlier
+recovered-emergency regression now correctly expects missing Designate authority
+to refuse complete selection before pause, with unchanged work across reopen.
+The concurrent complete-session coordinator and its existing regressions are
+preserved.
+
+Independent actual-source/API review and GitHub content readback completed.
+The execution host remains unavailable; these new tests, final formatting and
+full Rust/stdio verification have not been executed. No native-game or
+asynchronous-region qualification is claimed.
+
+Owner: `df-cancellation-progress-certificates-vvw`; broader cancellation
+acceptance remains in progress.
+
 ## Unreleased — Resume an original Prepared production step after restart
 
 The combined development host now accepts an explicit

@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased — Refuse conflicting live cancellation before any effect
+
+- Preflight complete-session live cleanup against current reservations and
+  foreign unresolved work, including expiry and missing derived lease custody.
+- Refuse contradictory selected ownership and separately check the actual
+  compensation scope before pause or stopping another original.
+- Budget existing and temporary lease state before private admission; preserve
+  the real lease manager and world on refusal.
+- Add four public-facade regression sources and correct the stale emergency
+  test to require complete cleanup authority before a session-wide pause.
+- Preserve the concurrent full-session implementation. Independent source/API
+  review and remote readback completed; execution and final formatting remain
+  unavailable after host loss.
+
 ## Unreleased — Fresh review of original production preparations
 
 - Add explicit `review_prepared` to the existing combined Plan workflow so a

@@ -65,6 +65,79 @@ fn live_effects(session: &LabSession, original: &LiveOriginal, mode: CancelMode)
     Ok(effects)
 }
 
+/// Conservative count without first cloning variable-length action scopes.
+/// Assignment scopes may deduplicate IDs, so their upper bound is sufficient.
+fn live_scope_lease_count(action: &Action) -> u64 {
+    match action {
+        Action::Pause { .. } | Action::CreateWorkOrder { .. }
+        | Action::SetStandingOrder { .. } | Action::Extension { .. } => 0,
+        Action::DesignateDig { .. } | Action::Build { .. }
+        | Action::HarvestResource { .. } | Action::ConfigureStockpile { .. } => 1,
+        Action::PlaceFurniture { .. } => 2,
+        Action::SetLabor { units, .. } => units.len() as u64,
+        Action::AssignSquad { units, .. } | Action::SetBurrowMembership { units, .. } =>
+            (units.len() as u64).saturating_add(1),
+    }
+}
+
+/// Check a selected live effect against current reservations and the retained
+/// physical work of other owners. The private manager never publishes a lease
+/// or consumes a real identifier when complete session admission is refused.
+fn admit_live_scope(
+    session: &LabSession,
+    leases: &mut dfmcp_core::lease::LeaseManager,
+    action: &Action,
+    started: Instant,
+) -> Result<()> {
+    check_time(session, started)?;
+    let scope = action.scope();
+    let now = session.adapter.snapshot().tick;
+    if let Some(area) = scope.map_area {
+        leases.acquire_spatial_lease(session.session_id, area, true, now, 1)?;
+    }
+    for entity in &scope.entity_ids {
+        leases.acquire_entity_lease(session.session_id, *entity, true, now, 1)?;
+    }
+    // TTL expiry does not release another member's unresolved physical work.
+    for (id, (owner, _)) in &session.leases.by_action {
+        check_time(session, started)?;
+        if *owner == session.session_id || server::action_fully_drained(&session.adapter, *id) {
+            continue;
+        }
+        let held = session.adapter.action_step(*id)
+            .ok_or_else(|| refused("foreign physical ownership lost its original action"))?
+            .action.scope();
+        if scope.entity_ids.iter().any(|entity| held.entity_ids.contains(entity))
+            || scope.map_area.zip(held.map_area)
+                .is_some_and(|(area, held)| dfmcp_core::lease::cuboids_intersect(&area, &held))
+        {
+            return Err(refused("another member retains unresolved physical work overlapping selected live cleanup"));
+        }
+    }
+    // Derived lease entries can be absent while immutable original custody
+    // still identifies another current member. The same positive ownership
+    // used to exclude that work from the final certificate also fences stops.
+    for id in session.adapter.retained_action_ids() {
+        check_time(session, started)?;
+        if session.leases.by_action.contains_key(&id)
+            || server::action_fully_drained(&session.adapter, id)
+            || !known_foreign(session, id)
+        {
+            continue;
+        }
+        let held = session.adapter.action_step(id)
+            .ok_or_else(|| refused("retained foreign work lost its original action"))?
+            .action.scope();
+        if scope.entity_ids.iter().any(|entity| held.entity_ids.contains(entity))
+            || scope.map_area.zip(held.map_area)
+                .is_some_and(|(area, held)| dfmcp_core::lease::cuboids_intersect(&area, &held))
+        {
+            return Err(refused("foreign original physical work overlaps selected live cleanup despite missing derived leases"));
+        }
+    }
+    Ok(())
+}
+
 fn prepare(session: &LabSession, mode: CancelMode, started: Instant) -> Result<SessionSelection> {
     session.budget.validate()?;
     let context = remaining_context(session, started)?;
@@ -83,6 +156,9 @@ fn prepare(session: &LabSession, mode: CancelMode, started: Instant) -> Result<S
         .saturating_add(session.open_actions.len() as u64)
         .saturating_add(session.last_plan_actions.len() as u64)
         .saturating_add(session.leases.by_action.len() as u64);
+    let lease_records = session.leases.manager.active_lease_count() as u64;
+    records = records.saturating_add(lease_records);
+    bytes = bytes.saturating_add(lease_records.saturating_mul(192));
     bytes = bytes.saturating_add(records.saturating_mul(64));
     charge(session, started, bytes, records)?;
     for _ in session.adapter.retained_action_ids() {
@@ -147,9 +223,55 @@ fn prepare(session: &LabSession, mode: CancelMode, started: Instant) -> Result<S
     let mut effects = usize::from(mode == CancelMode::EmergencyPauseAndDrain && !session.adapter.snapshot().paused);
     let mut live_actions = 0usize;
     let mut identities = Vec::new();
+    // Reserve every lease record the private admission copy can add before
+    // cloning it or acquiring the first temporary forward/inverse reservation.
+    let mut temporary_leases = 0u64;
+    for original in live.iter().filter(|original| original.pending) {
+        for id in &original.selected.actions {
+            check_time(session, started)?;
+            if server::action_fully_drained(&session.adapter, *id) {
+                continue;
+            }
+            let step = session.adapter.action_step(*id)
+                .ok_or_else(|| refused("selected live cleanup lost its original action"))?;
+            temporary_leases = temporary_leases.saturating_add(live_scope_lease_count(&step.action));
+            if effect_mode == CancelMode::CompensateReversible
+                && session.adapter.action_receipt(*id).is_some_and(|receipt| !receipt.state.is_terminal())
+                && session.adapter.action_work_state(*id)? != EffectWorkState::NeverDispatched
+                && let Some(inverse) = &step.compensation
+            {
+                temporary_leases = temporary_leases.saturating_add(live_scope_lease_count(inverse));
+            }
+        }
+    }
+    records = records.saturating_add(temporary_leases);
+    bytes = bytes.saturating_add(temporary_leases.saturating_mul(192));
+    charge(session, started, bytes, records)?;
+    let mut cleanup_leases = session.leases.manager.clone();
     for original in live.iter().filter(|original| original.pending) {
         server::plan_cancellation::authorize(session, &original.selected, effect_mode)?;
         effects = effects.saturating_add(live_effects(session, original, effect_mode)?);
+        for id in &original.selected.actions {
+            check_time(session, started)?;
+            if server::action_fully_drained(&session.adapter, *id) {
+                continue;
+            }
+            if session.leases.by_action.get(id)
+                .is_some_and(|(owner, _)| *owner != session.session_id)
+            {
+                return Err(refused("selected live action has contradictory foreign ownership"));
+            }
+            let step = session.adapter.action_step(*id)
+                .ok_or_else(|| refused("selected live cleanup lost its original action"))?;
+            admit_live_scope(session, &mut cleanup_leases, &step.action, started)?;
+            if effect_mode == CancelMode::CompensateReversible
+                && session.adapter.action_receipt(*id).is_some_and(|receipt| !receipt.state.is_terminal())
+                && session.adapter.action_work_state(*id)? != EffectWorkState::NeverDispatched
+                && let Some(inverse) = &step.compensation
+            {
+                admit_live_scope(session, &mut cleanup_leases, inverse, started)?;
+            }
+        }
         live_actions = live_actions.saturating_add(original.selected.actions.len());
         identities.push(json!({"plan_digest":original.selected.actual.to_hex(),
             "selection_origin":"current_process",

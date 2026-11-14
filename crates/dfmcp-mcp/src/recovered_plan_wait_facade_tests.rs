@@ -298,7 +298,7 @@ fn cancel_session(session: &str, mode: &str) -> TestResult<Value> {
 }
 
 #[test]
-fn recovered_emergency_pause_is_durable_without_claiming_carried_work_drained() -> TestResult {
+fn recovered_session_drain_refuses_missing_cleanup_authority_before_emergency_pause() -> TestResult {
     let _serial = crate::server::serialized_durable_tests();
     let directory = StateDir::new("emergency-pause");
     let first = field(&open("7855704", true)?, "session_id")?;
@@ -310,33 +310,21 @@ fn recovered_emergency_pause_is_durable_without_claiming_carried_work_drained() 
     )?;
     directory.restart();
     // Recovery restores physical work, but no action handle or Designate grant.
+    // Complete session cancellation admits every original before even pausing.
     let second = field(&open("7855704", false)?, "session_id")?;
     let before = current_world(&second)?;
     assert!(!before.paused);
-    let ordinary = cancel_session(&second, "stop_future_steps")?;
-    assert_eq!(ordinary["ok"], true, "{ordinary}");
-    assert_eq!(ordinary["drain_progress"]["quiescent"], false);
-    assert!(ordinary["finalize_certificate"].is_null());
-    assert_eq!(current_world(&second)?, before);
-
-    let paused = cancel_session(&second, "emergency_pause_and_drain")?;
-    assert_eq!(paused["ok"], true, "{paused}");
-    assert_eq!(paused["paused"], true);
-    assert_eq!(paused["emergency_pause"]["changed"], true);
-    assert_eq!(paused["emergency_pause"]["durable"], true);
-    assert_eq!(paused["emergency_pause"]["publication_confirmed"], true);
-    assert_eq!(paused["emergency_pause"]["action_handles_created"], false);
-    assert_eq!(paused["emergency_pause"]["physical_work_drained"], false);
-    assert_eq!(paused["drain_progress"]["actions_total"], 0);
-    assert_eq!(paused["drain_progress"]["remaining_carried"], 1);
-    assert_eq!(paused["drain_progress"]["quiescent"], false);
-    assert!(paused["finalize_certificate"].is_null());
-    let after = current_world(&second)?;
-    assert!(after.paused);
-    assert_eq!(after.tick, before.tick);
-    assert_eq!(after.graph.entities, before.graph.entities);
-    assert_eq!(after.graph.chunks, before.graph.chunks);
-    let observed = selected_wait(&second, &digest, 100)?;
+    for mode in ["stop_future_steps", "emergency_pause_and_drain"] {
+        let refused = cancel_session(&second, mode)?;
+        assert_eq!(refused["ok"], false, "{refused}");
+        assert_eq!(refused["error"]["code"], "capability_denied");
+        assert_eq!(refused["paused"], false);
+        assert_eq!(refused["drain_progress"]["quiescent"], false);
+        assert!(refused["emergency_pause"].is_null());
+        assert!(refused["finalize_certificate"].is_null());
+        assert_eq!(current_world(&second)?, before);
+    }
+    let observed = selected_wait(&second, &digest, 0)?;
     assert_eq!(observed["ok"], true, "{observed}");
     assert_eq!(observed["advanced_game_ticks"], 0);
     assert_eq!(observed["selected_plan_wait"]["physical_quiescent"], false);
@@ -344,29 +332,16 @@ fn recovered_emergency_pause_is_durable_without_claiming_carried_work_drained() 
         observed["selected_plan_wait"]["dispatch_handles_restored"],
         false
     );
-    assert_eq!(current_world(&second)?, after);
-
-    // Pause is part of the durable world frontier, including after compaction.
-    let mut prior = after.anchor();
-    for _ in 0..2 {
-        directory.restart();
-        dfmcp_lab::durable::DurableLabStore::open(&directory.0)?.compact()?;
-        let next = field(&open("7855704", false)?, "session_id")?;
-        let world = current_world(&next)?;
-        assert!(world.paused);
-        assert_eq!(world.tick, before.tick);
-        assert!(world.cursor.epoch > prior.cursor.epoch);
-        assert_eq!(world.graph.entities, before.graph.entities);
-        let remaining = selected_wait(&next, &digest, 0)?;
-        assert_eq!(remaining["ok"], true, "{remaining}");
-        assert_eq!(remaining["selected_plan_wait"]["physical_quiescent"], false);
-        assert_eq!(
-            remaining["selected_plan_wait"]["dispatch_handles_restored"],
-            false
-        );
-        assert_eq!(remaining["advanced_game_ticks"], 0);
-        prior = world.anchor();
-    }
+    assert_eq!(current_world(&second)?, before);
+    directory.restart();
+    dfmcp_lab::durable::DurableLabStore::open(&directory.0)?.compact()?;
+    let next = field(&open("7855704", false)?, "session_id")?;
+    let recovered = current_world(&next)?;
+    assert!(!recovered.paused);
+    assert_eq!(recovered.tick, before.tick);
+    let remaining = selected_wait(&next, &digest, 0)?;
+    assert_eq!(remaining["ok"], true, "{remaining}");
+    assert_eq!(remaining["selected_plan_wait"]["physical_quiescent"], false);
     Ok(())
 }
 
