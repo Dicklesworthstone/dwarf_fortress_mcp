@@ -525,6 +525,20 @@ mod actual {
                 &self.c,
             )
         }
+        fn review_prepared(
+            &mut self,
+            index: usize,
+            prepared: FamilyPreparation,
+        ) -> Result<FamilyPreparation> {
+            let route = self.route(index)?;
+            self.executor.review_prepared(
+                &self.plan,
+                &self.plan.steps[index],
+                &route,
+                prepared,
+                &self.c,
+            )
+        }
         fn applied(&mut self, index: usize) -> Result<()> {
             let prepared = self.prepare(index)?;
             self.commit(index, prepared)?;
@@ -620,6 +634,146 @@ mod actual {
                 hooks,
             })
         }
+    }
+
+    #[test]
+    fn recovered_families_require_fresh_review_and_keep_the_exact_native_preparation()
+    -> Result<()> {
+        for index in [0, 1] {
+            let mut f = ProductionFixture::new(1)?;
+            if index == 1 {
+                f.applied(0)?;
+            }
+            let prepared = f.prepare(index)?;
+            let original = f.executor.latest_step_evidence().cloned()
+                .ok_or_else(|| invalid("missing original native preparation"))?;
+            let original_expiry = f.plan.expires_at_tick;
+            let mut f = f.reopen(false)?;
+            assert!(f.commit(index, prepared).is_err());
+            assert_eq!(f.review_prepared(index, prepared)?, prepared);
+            let refreshed = f.executor.latest_step_evidence()
+                .ok_or_else(|| invalid("missing fresh original review"))?;
+            assert_eq!(refreshed.original_plan(), &f.plan);
+            assert_eq!(f.plan.expires_at_tick, original_expiry);
+            match (&original, refreshed) {
+                (StepEvidence::Labor(before), StepEvidence::Labor(after)) => {
+                    assert_eq!(before.review().native_plan(), after.review().native_plan());
+                    assert_eq!(f.workforce.data.borrow().calls[1], 1);
+                    assert_eq!(f.workforce.data.borrow().calls[2], 0);
+                }
+                (StepEvidence::WorkOrder(before), StepEvidence::WorkOrder(after)) => {
+                    assert_eq!(before.review().native_plan(), after.review().native_plan());
+                    assert_eq!(f.orders.borrow().prepares, 1);
+                    assert_eq!(f.orders.borrow().commits, 0);
+                }
+                _ => return Err(invalid("re-review changed native family")),
+            }
+            f.commit(index, prepared)?;
+            assert_eq!(f.workforce.data.borrow().calls[1], 1);
+            assert_eq!(f.workforce.data.borrow().calls[2], 1);
+            assert_eq!(f.orders.borrow().prepares, index);
+            assert_eq!(f.orders.borrow().commits, index);
+            assert!(!f.executor.original_goal_proven());
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn prepared_re_review_rejects_changed_capture_and_retains_the_consumed_tick()
+    -> Result<()> {
+        for index in [0, 1] {
+            let mut f = ProductionFixture::new(1)?;
+            if index == 1 {
+                f.applied(0)?;
+            }
+            let prepared = f.prepare(index)?;
+            let mut f = f.reopen(false)?;
+            if index == 0 {
+                f.workforce.data.borrow_mut().fixture.tick = 140;
+            } else {
+                let mut bytes = f.orders.borrow().queue.canonical_bytes().to_vec();
+                bytes[24..32].copy_from_slice(&140u64.to_be_bytes());
+                f.orders.borrow_mut().queue = WorkOrderObservation::decode(&bytes)?;
+            }
+            assert!(f.review_prepared(index, prepared).is_err());
+            assert!(f.executor.high_tick() >= 140);
+            assert!(f.executor.latest_step_evidence().is_none());
+            assert!(f.commit(index, prepared).is_err());
+            assert_eq!(f.workforce.data.borrow().calls[1], 1);
+            assert_eq!(f.workforce.data.borrow().calls[2], index);
+            assert_eq!(f.orders.borrow().prepares, index);
+            assert_eq!(f.orders.borrow().commits, 0);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn prepared_re_review_requires_current_grants_and_independent_source_authority()
+    -> Result<()> {
+        for index in [0, 1] {
+            for denied_source in [false, true] {
+                let mut f = ProductionFixture::new(1)?;
+                if index == 1 {
+                    f.applied(0)?;
+                }
+                let prepared = f.prepare(index)?;
+                let mut f = f.reopen(false)?;
+                if denied_source {
+                    f.executor.evidence.as_mut()
+                        .ok_or_else(|| invalid("missing current evidence owner"))?
+                        .inner.deny = true;
+                } else {
+                    let capability = f.plan.steps[index].required_capability;
+                    f.c.grants.retain(|grant| grant.capability != capability);
+                }
+                let reads = (f.workforce.data.borrow().calls[0], f.orders.borrow().reads);
+                assert!(f.review_prepared(index, prepared).is_err());
+                assert!(f.commit(index, prepared).is_err());
+                if !denied_source {
+                    assert_eq!(
+                        (f.workforce.data.borrow().calls[0], f.orders.borrow().reads), reads,
+                        "revoked current authority must refuse before native contact"
+                    );
+                }
+                assert_eq!(f.workforce.data.borrow().calls[1], 1);
+                assert_eq!(f.workforce.data.borrow().calls[2], index);
+                assert_eq!(f.orders.borrow().prepares, index);
+                assert_eq!(f.orders.borrow().commits, 0);
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn prepared_re_review_cannot_revive_native_possible_dispatch() -> Result<()> {
+        for index in [0, 1] {
+            let mut f = ProductionFixture::new(1)?;
+            if index == 1 {
+                f.applied(0)?;
+            }
+            let prepared = f.prepare(index)?;
+            if index == 0 {
+                f.workforce.data.borrow_mut().lose_commit = true;
+            } else {
+                f.orders.borrow_mut().lose_reply = true;
+            }
+            assert!(f.commit(index, prepared).is_err());
+            let mut f = f.reopen(false)?;
+            let before = (
+                f.workforce.data.borrow().calls,
+                f.orders.borrow().prepares,
+                f.orders.borrow().commits,
+                f.orders.borrow().reads,
+            );
+            assert!(f.review_prepared(index, prepared).is_err());
+            assert!(f.commit(index, prepared).is_err());
+            assert_eq!(
+                (f.workforce.data.borrow().calls, f.orders.borrow().prepares,
+                 f.orders.borrow().commits, f.orders.borrow().reads), before,
+                "possible dispatch cannot reach another native source or mutation"
+            );
+        }
+        Ok(())
     }
 
     #[test]

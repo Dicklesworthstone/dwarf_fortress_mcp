@@ -226,11 +226,13 @@ struct Fake {
     disk: Memory,
     pin: Recovery,
     prepare: usize,
+    review: usize,
     commit: usize,
     recover: usize,
     cancel: usize,
     outcomes: BTreeMap<StepId, RecoveredFamily>,
     fail_prepare: bool,
+    fail_review: bool,
     lose_commit: bool,
     fail_result_sync: bool,
     recover_override: Option<RecoveredFamily>,
@@ -362,6 +364,28 @@ impl LiveFamilyExecutor for Fake {
     }
 }
 impl DurableFamilyExecutor for Fake {
+    fn review_prepared(
+        &mut self,
+        _: &PreparedPlan,
+        step: &PlanStep,
+        _: &RoutedStep,
+        preparation: FamilyPreparation,
+        c: &OperationContext,
+    ) -> Result<FamilyPreparation> {
+        self.review += 1;
+        self.durable(step.id, Phase::Prepared, c)?;
+        if self.fail_review {
+            return Err(error(ErrorCode::StaleAnchor, "current family source changed"));
+        }
+        if self.outcomes.get(&step.id) != Some(&RecoveredFamily::Prepared(preparation)) {
+            return Err(corrupt());
+        }
+        self.local_permit = true;
+        if self.fail_result_sync {
+            self.disk.disk.borrow_mut().fail_sync = true;
+        }
+        Ok(preparation)
+    }
     fn recover_step(
         &mut self,
         _: &PreparedPlan,
@@ -387,6 +411,87 @@ impl DurableFamilyExecutor for Fake {
         self.abandon += 1;
         self.local_permit = false;
     }
+}
+
+#[test]
+fn recovered_preparation_requires_explicit_fresh_review_and_a_new_confirmation() -> Result<()> {
+    let (mut owner, disk, c, mut family) = created(1)?;
+    let first = owner.prepare_next(&mut family, &c)?;
+    let pin = owner.recovery();
+    drop(owner);
+    family.abandon_preparation();
+    let mut current = c.clone();
+    current.session_id = SessionId::new(c.session_id.get() + 1);
+    let mut reopened = Coordinator::open(disk, &current, BuildMode::Control, None, pin, false)?;
+    assert!(reopened.inspect(&current)?.review.is_none());
+    assert!(reopened.commit(first.seal, true, &mut family, &current).is_err());
+    assert_eq!(family.commit, 0);
+    let review = reopened.review_prepared(&mut family, &current)?;
+    assert_ne!(review.seal, first.seal);
+    assert_ne!(review.head, first.head);
+    assert_eq!(review.preparation, first.preparation);
+    let newer = reopened.review_prepared(&mut family, &current)?;
+    assert_ne!(newer.seal, review.seal);
+    assert!(reopened.commit(review.seal, true, &mut family, &current).is_err());
+    assert!(!family.local_permit);
+    let confirmed = reopened.review_prepared(&mut family, &current)?;
+    assert!(reopened.commit(confirmed.seal, true, &mut family, &current)?.all_applied());
+    assert_eq!((family.prepare, family.review, family.commit), (1, 3, 1));
+    Ok(())
+}
+
+#[test]
+fn possible_dispatch_stays_fenced_when_recovery_returns_prepared() -> Result<()> {
+    let (mut owner, _, c, mut family) = created(1)?;
+    let prepared = owner.prepare_next(&mut family, &c)?;
+    family.lose_commit = true;
+    assert!(owner.commit(prepared.seal, true, &mut family, &c).is_err());
+    family.recover_override = Some(RecoveredFamily::Prepared(prepared.preparation));
+    let recovered = owner.reconcile(prepared.step, &mut family, &c)?;
+    assert_eq!(recovered.entries[0].phase, Phase::Prepared);
+    assert!(recovered.entries[0].dispatch_attempted);
+    assert!(owner.review_prepared(&mut family, &c).is_err());
+    assert_eq!((family.prepare, family.review, family.commit), (1, 0, 1));
+    assert!(!family.local_permit);
+    Ok(())
+}
+
+#[test]
+fn prepared_review_requires_control_current_grants_and_unexpired_original() -> Result<()> {
+    let (mut owner, disk, c, mut family) = created(1)?;
+    owner.prepare_next(&mut family, &c)?;
+    let pin = owner.recovery();
+    for mode in [BuildMode::Offline, BuildMode::Recover] {
+        let mut reopened = Coordinator::open(disk.clone(), &c, mode, None, pin, false)?;
+        assert!(reopened.review_prepared(&mut family, &c).is_err());
+    }
+    let mut revoked = c.clone();
+    revoked.grants.retain(|grant| grant.capability != Capability::ControlClock);
+    assert!(owner.review_prepared(&mut family, &revoked).is_err());
+    let mut expired = c.clone();
+    expired.anchor.tick = owner.original_plan().expires_at_tick;
+    assert!(owner.review_prepared(&mut family, &expired).is_err());
+    assert_eq!((family.prepare, family.review, family.commit), (1, 0, 0));
+    Ok(())
+}
+
+#[test]
+fn failed_fresh_review_or_frontier_publication_withdraws_every_local_permit() -> Result<()> {
+    let (mut owner, _, c, mut family) = created(1)?;
+    owner.prepare_next(&mut family, &c)?;
+    let head = owner.recovery().head;
+    family.fail_review = true;
+    assert!(owner.review_prepared(&mut family, &c).is_err());
+    assert_eq!(owner.recovery().head, head);
+    assert!(!family.local_permit);
+    assert!(owner.inspect(&c)?.review.is_none());
+    family.fail_review = false;
+    family.fail_result_sync = true;
+    assert!(owner.review_prepared(&mut family, &c).is_err());
+    assert!(owner.is_fenced());
+    assert!(!family.local_permit);
+    assert_eq!((family.prepare, family.review, family.commit), (1, 2, 0));
+    Ok(())
 }
 
 #[test]

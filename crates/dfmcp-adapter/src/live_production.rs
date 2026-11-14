@@ -875,21 +875,22 @@ where
         retained.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
         Ok(())
     }
-    fn fresh_prepare(
+    fn prepare_or_review(
         &mut self,
         step: &PlanStep,
         route: &RoutedStep,
         call: &mut Call,
+        retained: Option<FamilyPreparation>,
     ) -> Result<FamilyPreparation> {
         if self.prepared.is_some() {
             return Err(blocked());
         }
         self.retained_control(step, &call.current()?, true)?;
         let inventory = self.inventory(call)?;
-        if inventory.blocked_other_than(None) {
+        if inventory.blocked_other_than(retained.map(|_| step.idempotency_key.as_str())) {
             return Err(blocked());
         }
-        if inventory
+        let existing_key = inventory
             .workforce
             .records
             .iter()
@@ -897,8 +898,23 @@ where
             || inventory
                 .orders
                 .iter()
-                .any(|r| r.plan().key() == step.idempotency_key)
-        {
+                .any(|r| r.plan().key() == step.idempotency_key);
+        if let Some(expected) = retained {
+            let undispatched = match route.family {
+                LiveFamily::WorkforceV1_17 => inventory.workforce.records.iter().any(|record| {
+                    record.plan().key() == step.idempotency_key
+                        && record.state() == AssignmentState::Prepared
+                }),
+                LiveFamily::WorkOrdersV1_10 => inventory.orders.iter().any(|record| {
+                    record.plan().key() == step.idempotency_key
+                        && record.state() == CreationState::Prepared
+                }),
+                _ => false,
+            };
+            if expected.family != route.family || !undispatched {
+                return Err(blocked());
+            }
+        } else if existing_key {
             return Err(error(
                 ErrorCode::Conflict,
                 "original native key already exists; reconstruct its historical outcome instead of preparing it again",
@@ -920,6 +936,15 @@ where
         let selection = self.selection(step.id)?;
         let observe = call.take(native_bytes)?;
         let prepare = call.take(native_bytes)?;
+        let attach = if retained.is_some() {
+            Some(call.take(if route.family == LiveFamily::WorkforceV1_17 {
+                labor_read_bytes(inventory.labor_cost(), 2)?
+            } else {
+                ORDER_VIEW_BYTES
+            })?)
+        } else {
+            None
+        };
         let checks = (0..2)
             .map(|_| call.take(dependencies.check_bytes))
             .collect::<Result<Vec<_>>>()?;
@@ -956,12 +981,30 @@ where
                 let source = self.evidence.as_mut().ok_or_else(|| error(ErrorCode::CapabilityDenied, "new native production requires independently owned original canonical evidence"))?;
                 let factory = &mut self.factory;
                 let observe = call.edge(&observe, self.workforce.high_tick())?;
-                let review =
+                let review = if let Some(expected) = retained {
+                    let review = self.workforce.reattach_selected(
+                        selection,
+                        &call.edge(attach.as_ref().ok_or_else(custody)?, self.high_tick)?,
+                    )?;
+                    if review.seal() != expected.digest {
+                        return Err(custody());
+                    }
+                    self.workforce.refresh_prepared(
+                        review.seal(),
+                        source,
+                        &observe,
+                        |b, c| factory.connect(b, c),
+                    )?
+                } else {
                     self.workforce
                         .observe_selected(selection, source, &observe, |b, c| {
                             factory.connect(b, c)
-                        })?;
+                        })?
+                };
                 let current = call.edge(&prepare, self.workforce.high_tick())?;
+                // An exact retained key returns locally from the native owner.
+                // Its ordinary planning gate still checks the fixed Control
+                // mode and current grants; no Prepare RPC or TTL renewal occurs.
                 StepEvidence::Labor(self.workforce.prepare(
                     review.seal(),
                     source,
@@ -989,13 +1032,24 @@ where
                     &observe,
                     self.orders.high_tick().max(guarded.workforce.high_tick()),
                 )?;
-                let review = self
-                    .orders
-                    .observe_selected(selection, &mut guarded, &observe)?;
+                let review = if let Some(expected) = retained {
+                    let review = self.orders.reattach_selected(
+                        selection,
+                        &call.edge(attach.as_ref().ok_or_else(custody)?, *guarded.high_tick)?,
+                    )?;
+                    if review.seal() != expected.digest {
+                        return Err(custody());
+                    }
+                    self.orders.refresh_prepared(review.seal(), &mut guarded, &observe)?
+                } else {
+                    self.orders.observe_selected(selection, &mut guarded, &observe)?
+                };
                 let current = call.edge(
                     &prepare,
                     self.orders.high_tick().max(guarded.workforce.high_tick()),
                 )?;
+                // The native owner's exact-key branch returns its existing
+                // preparation only after checking its fixed Control mode.
                 StepEvidence::WorkOrder(self.orders.prepare(
                     review.seal(),
                     &mut guarded,
@@ -1013,6 +1067,9 @@ where
                 "native preparation did not produce a complete original prepared review",
             ));
         };
+        if retained.is_some_and(|expected| expected != preparation) {
+            return Err(custody());
+        }
         self.prepared = Some((step.id, preparation));
         Ok(preparation)
     }
@@ -1305,7 +1362,7 @@ where
             }
         };
         self.latest = None;
-        let outcome = self.fresh_prepare(step, route, &mut call);
+        let outcome = self.prepare_or_review(step, route, &mut call, None);
         self.retain_floor(&mut call);
         if outcome.is_err() {
             self.prepared = None;
@@ -1415,6 +1472,24 @@ where
     E: WorkforceEvidenceOwner + WorkOrderEvidenceOwner,
     F: WorkforceFactory,
 {
+    fn review_prepared(
+        &mut self,
+        plan: &PreparedPlan,
+        step: &PlanStep,
+        route: &RoutedStep,
+        preparation: FamilyPreparation,
+        c: &OperationContext,
+    ) -> Result<FamilyPreparation> {
+        self.abandon_preparation();
+        self.check_call(plan, step, route)?;
+        let mut call = self.call(c)?;
+        let outcome = self.prepare_or_review(step, route, &mut call, Some(preparation));
+        self.retain_floor(&mut call);
+        if outcome.is_err() {
+            self.abandon_preparation();
+        }
+        outcome
+    }
     fn recover_step(
         &mut self,
         plan: &PreparedPlan,

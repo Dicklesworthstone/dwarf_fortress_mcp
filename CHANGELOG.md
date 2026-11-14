@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased — Fresh review of retained native production preparations
+
+- Add durable and concrete-family review of the exact undispatched original
+  labor/order preparation after restart.
+- Recheck source, original/predecessor custody, fixed Control mode and both
+  opening/current authority; preserve original key, token, expiry and deadline.
+- Publish a fresh confirmation seal without another native Prepare RPC, and
+  refuse possible-dispatch retries even when a later query says Prepared.
+- Add eight durable/concrete-family regression functions. Independent source
+  review and remote source readback completed; Rust execution and final
+  formatting remain unverified after execution-environment loss.
+- The public MCP workflow and modern stdio coverage follow separately.
+
 ## Unreleased — Drain recovered and current laboratory originals together
 
 - Extend session cancellation to the complete admitted recovered/live original

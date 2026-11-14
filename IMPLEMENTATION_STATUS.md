@@ -1,5 +1,30 @@
 # Implementation Status
 
+## Unreleased — Recover exact native production preparations for fresh review
+
+The durable live dispatcher and concrete production executor now support an
+explicit fresh review of one retained undispatched Prepared labor assignment or
+finite order. They recheck Control mode, complete original/predecessor custody,
+fresh independent source evidence, opening/current scoped authority and the
+original expiry before issuing another process-local confirmation.
+
+The original native preparation, StepId, semantic key, token and deadline stay
+unchanged. No second native Prepare RPC is sent. A newly published journal head
+invalidates older paired seals, and any possible dispatch remains ineligible
+even if reconciliation later reports Prepared. Failure withdraws local permits.
+The workforce semantic owner now provides the missing exact-preparation refresh
+boundary; native protocol and production-admission scope remain unchanged.
+
+Eight new Rust regression functions cover the durable coordinator and actual
+workforce/order executor fixtures, including both restart paths, source drift,
+revoked grants, stale seals, sticky dispatch and failed publication. Independent
+source/API review and exact GitHub source readback completed. Compilation and
+test execution did not complete before the execution environment became
+unavailable; final reconstructed formatting is unverified. The public MCP
+request/presentation and stdio campaign follow in a separate increment.
+
+Owner: `df-dfhack-bridge-plane-c-pic.4.1`; broader qualification remains open.
+
 ## Unreleased — Drain complete recovered laboratory sessions
 
 `fortress.cancel` with `scope: "session"` now admits the complete union of

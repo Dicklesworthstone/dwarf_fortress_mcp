@@ -39,6 +39,20 @@
     "restores_process_local_review": false,
     "restores_native_commit_permit": false
   },
+  "explicit_prepared_review": {
+    "entry": "Coordinator::review_prepared",
+    "required_phase": "Prepared",
+    "requires_control_mode": true,
+    "requires_current_original_authority": true,
+    "dispatch_attempted_refused": true,
+    "family_refresh_required": true,
+    "family_default": "refuse",
+    "durable_event": "RecoveredPrepared",
+    "fresh_frontier_head_invalidates_prior_seals": true,
+    "reuses_original_step_and_key": true,
+    "renews_original_expiry": false,
+    "automatic_on_recovery": false
+  },
   "execution": {
     "active_nonterminal_steps": 1,
     "preparation_intent_synced_before_family_prepare": true,

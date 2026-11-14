@@ -19,7 +19,7 @@ use crate::control_effect_journal::EffectJournalStorage;
 use crate::live_routing::{LiveRoutingEvidence, resolve_workforce_step};
 use crate::semantic_selection::SelectedSemanticStep;
 use crate::workforce_control::journal::{
-    AssignmentRecord, MAX_FRAME, WorkforceBinding, WorkforceView,
+    AssignmentRecord, AssignmentState, MAX_FRAME, WorkforceBinding, WorkforceMode, WorkforceView,
 };
 use crate::workforce_control::rpc::{CONNECT_BYTES, RPC_BYTES, WorkforceManifest, WorkforceSource};
 use crate::workforce_control::{
@@ -689,6 +689,99 @@ impl<S: EffectJournalStorage, B: EffectJournalStorage> SemanticWorkforceSession<
             association: stored,
         };
         self.attached = Some(review.clone());
+        Ok(review)
+    }
+
+    /// Re-observe an exact undispatched preparation under current authority.
+    /// This obtains fresh review evidence without repeating native Prepare,
+    /// renewing its lifetime, or dispatching the original assignment.
+    pub fn refresh_prepared<N, F, E>(
+        &mut self,
+        seal: Digest32,
+        evidence: &mut E,
+        context: &OperationContext,
+        factory: F,
+    ) -> Result<SemanticWorkforceReview>
+    where
+        N: WorkforceSource,
+        F: FnOnce(&WorkforceBinding, &OperationContext) -> Result<N>,
+        E: WorkforceEvidenceOwner,
+    {
+        self.native.clear_selection();
+        self.control_store()?;
+        if self.native.mode() != WorkforceMode::Control {
+            return Err(error(
+                ErrorCode::CapabilityDenied,
+                "fresh workforce review requires the original native owner in Control mode",
+            ));
+        }
+        let review = self.attached(seal)?;
+        let mut call = Call::new(context)?;
+        let view = self.view(&mut call)?;
+        self.exact_association(&review)?;
+        authorize_original(&review.original, review.step, &call.context()?)?;
+        let record = view
+            .records
+            .iter()
+            .find(|record| record.plan() == &review.native)
+            .ok_or_else(custody)?;
+        if record.state() != AssignmentState::Prepared {
+            return Err(conflict(
+                "only an undispatched original workforce preparation can be reviewed again",
+            ));
+        }
+        let native_context = call.native(&view)?;
+        let store = &mut self.associations;
+        let guard_call = &mut call;
+        let guard_review = &review;
+        let scoped = move |binding: &WorkforceBinding, c: &OperationContext| -> Result<_> {
+            store.verify(&guard_call.context()?)?;
+            let current = guard_call.edge(c)?;
+            authorize_original(&guard_review.original, guard_review.step, &current)?;
+            let native = factory(binding, &current)?;
+            Ok(Scoped {
+                native,
+                original: &guard_review.original,
+                step: guard_review.step,
+                // This shell can only read. The exact association is checked
+                // before acquisition and again after independent source policy.
+                association: None,
+                associations: store,
+                call: guard_call,
+            })
+        };
+        let capture = self.native.observe(
+            &review.native.before().ids(),
+            &native_context,
+            scoped,
+        )?;
+        // Let the native owner retain a consumed tick before rejecting drift.
+        // A failed re-review must not allow an older authority clock on retry.
+        if &capture != review.native.before() {
+            self.native.clear_selection();
+            return Err(error(
+                ErrorCode::StaleAnchor,
+                "current workforce differs from the original prepared capture",
+            ));
+        }
+        call.refresh(evidence, &capture, &native_context)?;
+        let candidate = resolve_workforce_step(
+            &review.original,
+            review.step,
+            &evidence.routing_evidence()?,
+            &capture,
+        )?;
+        if candidate.native_plan() != &review.native
+            || candidate.source_digest() != review.association.source
+        {
+            self.native.clear_selection();
+            return Err(conflict(
+                "fresh workforce review changed its original semantic/native binding",
+            ));
+        }
+        self.view(&mut call)?;
+        self.exact_association(&review)?;
+        authorize_original(&review.original, review.step, &call.context()?)?;
         Ok(review)
     }
 

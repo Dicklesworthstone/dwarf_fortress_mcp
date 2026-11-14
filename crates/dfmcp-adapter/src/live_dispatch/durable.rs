@@ -207,6 +207,19 @@ pub enum RecoveredFamily {
 /// Before every new effect, a concrete executor must recheck actual predecessor
 /// family custody and the original selected-step postconditions/obligations.
 pub trait DurableFamilyExecutor: LiveFamilyExecutor {
+    /// Explicitly refresh an exact undispatched preparation under current
+    /// source and Control authority. Recovery alone cannot call this boundary;
+    /// implementations must not repeat native Prepare or renew its lifetime.
+    fn review_prepared(
+        &mut self,
+        _: &PreparedPlan,
+        _: &PlanStep,
+        _: &RoutedStep,
+        _: FamilyPreparation,
+        _: &OperationContext,
+    ) -> Result<FamilyPreparation> {
+        Err(denied())
+    }
     fn recover_step(
         &mut self,
         plan: &PreparedPlan,
@@ -871,6 +884,14 @@ impl<S: EffectJournalStorage> Coordinator<S> {
             self.fenced = true;
             return Err(cause);
         }
+        self.publish_review(step, prepared, &mut work)
+    }
+    fn publish_review(
+        &mut self,
+        step: StepId,
+        prepared: FamilyPreparation,
+        work: &mut Work,
+    ) -> Result<Review> {
         let mut seal = Vec::new();
         seal.extend_from_slice(self.id.as_bytes());
         seal.extend_from_slice(self.head.as_bytes());
@@ -886,7 +907,7 @@ impl<S: EffectJournalStorage> Coordinator<S> {
             head: self.head,
         };
         self.review = Some(review.clone());
-        self.finish(&mut work, true)?;
+        self.finish(work, true)?;
         if let Err(cause) = work
             .current()
             .and_then(|c| self.authorize_step(step, &c, false))
@@ -895,6 +916,58 @@ impl<S: EffectJournalStorage> Coordinator<S> {
             return Err(cause);
         }
         Ok(review)
+    }
+    /// Re-review the one retained preparation without replaying native Prepare.
+    /// A durable dispatch attempt remains disqualifying even if native recovery
+    /// subsequently reports Prepared. Every successful review advances the head
+    /// so only its new process-local confirmation can be used.
+    pub fn review_prepared<E: DurableFamilyExecutor>(
+        &mut self,
+        executor: &mut E,
+        c: &OperationContext,
+    ) -> Result<Review> {
+        self.review = None;
+        executor.abandon_preparation();
+        let result = (|| {
+            self.retain_executor_floor(executor, c);
+            let current = self.access(c)?;
+            let mut work = Work::new(current)?;
+            let index = active(&self.entries).ok_or_else(conflict)?;
+            let entry = &self.entries[index];
+            if entry.phase != Phase::Prepared || entry.dispatch_attempted {
+                return Err(conflict());
+            }
+            let step = entry.step;
+            let expected = entry.preparation.ok_or_else(corrupt)?;
+            self.authorize_step(step, &work.current()?, false)?;
+            // Keep room for the fresh review and its later dispatch/result.
+            self.retain_capacity(3)?;
+            let family_context = self.delegated(work.family(self.operation_reserve(), true)?)?;
+            self.verify(&mut work)?;
+            let family_context = self.access(&work.narrow_family(&family_context)?)?;
+            self.authorize_step(step, &family_context, false)?;
+            let compiled = &self.compiled.steps[index];
+            let outcome = executor.review_prepared(
+                &self.compiled.plan,
+                &compiled.semantic,
+                &compiled.route,
+                expected,
+                &family_context,
+            );
+            self.high_tick = self.high_tick.max(executor.observed_tick_floor());
+            work.floor(self.high_tick);
+            let prepared = outcome?;
+            require(prepared == expected)?;
+            self.authorize_step(step, &work.current()?, false)?;
+            // Append even when the preparation is unchanged. Reusing a prior
+            // head would let an old confirmation match a new local permission.
+            self.append(Event::RecoveredPrepared(step, prepared.digest), &mut work)?;
+            self.publish_review(step, prepared, &mut work)
+        })();
+        if result.is_err() {
+            executor.abandon_preparation();
+        }
+        self.completed(result)
     }
     pub fn commit<E: DurableFamilyExecutor>(
         &mut self,
