@@ -89,7 +89,7 @@
   "compatibility": {
     "existing_scalar_and_watch_behaviors_preserved": true,
     "existing_rust_wrappers_and_handler_aliases_preserved": true,
-    "passive_tasks": "continue to accept one exact plan_digest with zero time; selected sets use foreground wait",
+    "passive_tasks": "accept one exact plan_digest or one explicit plan_digests set with all/any policy and zero time; foreground waits supply progression and endpoint capture",
     "logical_tool_count": 11,
     "native_protocol_change": false,
     "production_admission_change": false

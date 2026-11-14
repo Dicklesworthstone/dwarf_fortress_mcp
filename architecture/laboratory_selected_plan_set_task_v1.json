@@ -1,0 +1,97 @@
+{
+  "schema": "dfmcp.laboratory-selected-plan-set-task-contract/1",
+  "owning_bead": "df-fastmcp-conformance-5pj.3.1",
+  "logical_tool": "fortress.wait",
+  "wire_tool": "fortress_wait",
+  "transport": "modern MCP 2026-07-28 with negotiated Tasks extension",
+  "request": {
+    "required": ["session_id", "plan_digests", "as_task=true"],
+    "minimum_members": 1,
+    "maximum_members": 8,
+    "max_game_ticks": "omitted, null or zero",
+    "plan_policy": "all by default; all or any only",
+    "other_selectors": "plan_digest, watch_id, watch_ids and watch_policy must be omitted or null",
+    "unknown_fields": "refused before Task creation",
+    "duplicate_aliases": "refuse different requested selectors resolving to the same actual original"
+  },
+  "descriptor": {
+    "schema": "dfmcp.lab-original-set-observer-task-work/1",
+    "closed_fields": ["schema", "session_id", "plan_digests", "plan_policy"],
+    "caller_array_order_retained": true,
+    "existing_scalar_descriptor_bytes_unchanged": true
+  },
+  "result_schema": "dfmcp.lab-original-set-observer-task/1",
+  "bounded_result_schema": "dfmcp.lab-original-set-task-summary/1",
+  "monitor_kind": "observe_original_set",
+  "cancellation_scope": "monitor_only",
+  "admission": [
+    "current session Observe and Query",
+    "complete actual original identities and live or durable recovered custody",
+    "whole-set shared source, selected-proof, action and wall bounds",
+    "complete selected outcome and response envelope allowance",
+    "repeat admission at the store creation boundary"
+  ],
+  "retained_membership": {
+    "admission_binding": "canonical paired requested and actual digests, original plan and object identity, owner and admitted anchor",
+    "later_observations": "every successful view must match the complete admitted original identity before publication",
+    "identity_failure": "inspection_unavailable with all admitted historical identities, unknown current proof and null physical state",
+    "historical_binding_is_current_evidence": false,
+    "substitution_of_another_original": false
+  },
+  "observation": {
+    "owner": "one existing supervised application Task handoff",
+    "frontier": "all selected members under one session read lock",
+    "all": "every selected original complete at the same current frontier",
+    "any": "one selected original complete at the current frontier",
+    "attention_precedes_group_success": true,
+    "earlier_member_success_is_latched": false,
+    "all_attention_causes_retained": true,
+    "any_success_cancels_peers": false,
+    "any_success_implies_all_physical_work_quiet": false,
+    "terminal_task_evidence": "immutable observation at its recorded completion or failure anchor"
+  },
+  "passive_boundary": {
+    "clock_advancement": false,
+    "action_polling": false,
+    "successor_dispatch": false,
+    "archive_hydration": false,
+    "reserve_endpoint_capture": false,
+    "durable_publication": false,
+    "semantic_request_counter_changes": false,
+    "original_receipt_changes": false,
+    "endpoint_publication_mode": "retained_evidence_only"
+  },
+  "reserve_evidence": {
+    "exact_horizon_without_endpoint": "pending; recommend the same explicit foreground set with zero ticks",
+    "past_horizon_without_endpoint": "reserve_unobserved",
+    "first_false_or_unknown_endpoint": "immutable reserve_unmet or reserve_unknown",
+    "unloaded_archive": "unavailable evidence; only explicit foreground wait may load it",
+    "later_stock_repairs_history": false
+  },
+  "cancellation": {
+    "authority": "current Observe",
+    "query_or_effect_grants_required": false,
+    "retained_stage": "monitor_finalized",
+    "effect_cancellation_requested": false,
+    "physical_work_changed": false,
+    "physical_quiescence_certified": false,
+    "original_receipts_changed": false
+  },
+  "evidence": {
+    "complete_document_retained": true,
+    "bounded_summary": "every selected requested and actual identity, policy, decisive original goal, action, physical and reserve outcome",
+    "oversized_details": "digest-bound existing Task evidence pages",
+    "unavailable_counts": "unknown or null, never invented zero",
+    "task_identity_lifetime": "server process only"
+  },
+  "compatibility": {
+    "logical_tool_count": 11,
+    "maximum_active_monitors": 1,
+    "maximum_retained_tasks": 256,
+    "existing_commit_task_effect_ownership": "unchanged",
+    "existing_scalar_observer_behavior": "unchanged",
+    "upstream_pin_change": false,
+    "native_protocol_change": false,
+    "production_admission_change": false
+  }
+}

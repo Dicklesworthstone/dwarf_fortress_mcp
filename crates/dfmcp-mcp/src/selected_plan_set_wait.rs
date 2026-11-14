@@ -169,6 +169,74 @@ impl SelectedPlanSetWait {
         self.stop.is_some()
     }
 
+    /// Inspect one explicit set using only the currently retained version book.
+    /// A Task owns no foreground progression or endpoint publication. Even the
+    /// first exact horizon is pending until a caller explicitly captures it.
+    pub(super) fn observe_retained(
+        session: &LabSession,
+        digests: &[String],
+        policy: &str,
+        started: Instant,
+    ) -> Result<Value> {
+        if digests.is_empty() || digests.len() > MAX_PLANS {
+            return Err(invalid(
+                "plan_digests must contain one to eight explicit originals",
+            ));
+        }
+        let mut selected = Self::new(
+            session,
+            digests.to_vec(),
+            Some(policy.to_owned()),
+            0,
+            started,
+        )?;
+        let source = SelectedPlanWait::admit_retained_set_source(&selected.members, session)?;
+        selected.record_source(&source)?;
+        let mut plans = Vec::with_capacity(selected.members.len());
+        for member in &mut selected.members {
+            let observed = member.observe_set_member(session, &source)?;
+            let mut plan = observed.projection;
+            plan["original_goal_pending"] = json!(observed.pending);
+            plan["complete_original_goal_truth"] = json!(match observed.truth {
+                PredicateTruth::True => "true",
+                PredicateTruth::False => "false",
+                PredicateTruth::Unknown => "unknown",
+            });
+            plan["source_work"]["accounting_shared_with_selected_set"] = json!(true);
+            plan["other_session_work_progresses"] = json!(false);
+            plans.push(plan);
+        }
+        selected.evaluated_anchor = Some(session.adapter.snapshot().anchor());
+        selected.classify(&plans);
+        let capture_required = plans
+            .iter()
+            .any(|plan| plan["reserve_capture_required"] == true);
+        let mut outcome = selected.outcome(session, plans, true);
+        outcome["caller_plan_digests"] = json!(digests);
+        outcome["observation_only"] = json!(true);
+        outcome["other_committed_work_progresses"] = json!(false);
+        outcome["reserve_capture_required"] = json!(capture_required);
+        outcome["archive_hydration_performed"] = json!(false);
+        outcome["endpoint_publication"] = json!({
+            "mode":"retained_evidence_only", "operation":"passive_observation",
+            "endpoints_captured":false,"publication_performed":false,
+            "atomic_set_publication":false,
+        });
+        outcome["source_work"]["repetition_bounds"] =
+            json!("one_current_frontier_under_one_observation_deadline");
+        let maximum = session
+            .budget
+            .max_bytes
+            .min(u64::from(session.budget.max_output_tokens) * 4);
+        if outcome.to_string().len() as u64 > maximum {
+            return Err(exhausted(
+                "complete passive original set exceeds its response budget",
+            ));
+        }
+        selected.check(session)?;
+        Ok(outcome)
+    }
+
     pub(super) fn ceiling(&self, now: u64, other: Option<u64>) -> Option<u64> {
         self.members
             .iter()
@@ -293,31 +361,13 @@ impl SelectedPlanSetWait {
 
     fn sample_frontier(&mut self, session: &mut LabSession, mut base: Value) -> Result<()> {
         self.check(session)?;
-        let inspections = self
-            .inspections
-            .checked_add(1)
-            .filter(|count| *count <= MAX_INSPECTIONS)
-            .ok_or_else(|| exhausted("selected plan set reached its shared inspection limit"))?;
+        if self.inspections >= MAX_INSPECTIONS {
+            return Err(exhausted(
+                "selected plan set reached its shared inspection limit",
+            ));
+        }
         let source = SelectedPlanWait::admit_set_source(&self.members, session)?;
-        self.inspections = inspections;
-        self.inspected_records = self
-            .inspected_records
-            .checked_add(source.records)
-            .ok_or_else(|| exhausted("selected plan set source record accounting overflowed"))?;
-        self.inspected_bytes = self
-            .inspected_bytes
-            .checked_add(source.bytes)
-            .ok_or_else(|| exhausted("selected plan set source byte accounting overflowed"))?;
-        self.charged_predicate_nodes = self
-            .charged_predicate_nodes
-            .checked_add(source.predicate_node_bound)
-            .ok_or_else(|| exhausted("selected plan set predicate accounting overflowed"))?;
-        self.maximum_predicate_node_bound = self
-            .maximum_predicate_node_bound
-            .max(source.predicate_node_bound);
-        self.maximum_source_records = self.maximum_source_records.max(source.records);
-        self.maximum_source_bytes = self.maximum_source_bytes.max(source.bytes);
-        self.maximum_source_snapshots = self.maximum_source_snapshots.max(source.snapshots);
+        self.record_source(&source)?;
         self.endpoint_publication_complete = false;
         self.failed_endpoint_plan = None;
         // Reinspect every member, including a previously complete consumable
@@ -327,42 +377,13 @@ impl SelectedPlanSetWait {
         }
         self.evaluated_anchor = Some(session.adapter.snapshot().anchor());
         let plans = self.plans(session, true);
-        self.attention = plans
-            .iter()
-            .filter_map(|plan| {
-                let reason = plan["stop_reason"].as_str()?;
-                if matches!(reason, "complete" | "paused" | "tick_limit") {
-                    return None;
-                }
-                Some(json!({"plan_digest":plan["plan_digest"],
-                "requested_plan_digest":plan["requested_plan_digest"],"stop_reason":reason}))
-            })
-            .collect();
-        let completed = plans
-            .iter()
-            .filter(|plan| plan["complete"] == true)
-            .filter_map(|plan| plan["plan_digest"].as_str().map(str::to_owned))
-            .collect::<Vec<_>>();
-        let group_complete = match self.policy {
-            PlanPolicy::All => !plans.is_empty() && completed.len() == plans.len(),
-            PlanPolicy::Any => !completed.is_empty(),
-        };
+        self.classify(&plans);
         let remaining = base["wait_progress"]["remaining_game_ticks"]
             .as_u64()
             .ok_or_else(|| {
                 invalid("selected plan set lacks the shared remaining tick allowance")
             })?;
-        if let Some(first) = self.attention.first() {
-            self.stop = first["stop_reason"].as_str().map(str::to_owned);
-            self.triggered = self
-                .attention
-                .iter()
-                .filter_map(|cause| cause["plan_digest"].as_str().map(str::to_owned))
-                .collect();
-        } else if group_complete {
-            self.stop = Some(self.policy.complete_reason().to_owned());
-            self.triggered = completed;
-        } else {
+        if self.stop.is_none() {
             self.stop = if session.adapter.snapshot().paused {
                 Some("paused".to_owned())
             } else if remaining == 0 {
@@ -370,7 +391,6 @@ impl SelectedPlanSetWait {
             } else {
                 None
             };
-            self.triggered.clear();
         }
         let current = self.remaining_context(session)?;
         let mut view = temporal_handler::projection(session, &current)?;
@@ -414,6 +434,71 @@ impl SelectedPlanSetWait {
         self.endpoint_publication_complete = true;
         self.published = Some(rendered);
         Ok(())
+    }
+
+    fn record_source(&mut self, source: &selected_plan_wait::PlanSetSource) -> Result<()> {
+        let inspections = self
+            .inspections
+            .checked_add(1)
+            .filter(|count| *count <= MAX_INSPECTIONS)
+            .ok_or_else(|| exhausted("selected plan set reached its shared inspection limit"))?;
+        self.inspections = inspections;
+        self.inspected_records = self
+            .inspected_records
+            .checked_add(source.records)
+            .ok_or_else(|| exhausted("selected plan set source record accounting overflowed"))?;
+        self.inspected_bytes = self
+            .inspected_bytes
+            .checked_add(source.bytes)
+            .ok_or_else(|| exhausted("selected plan set source byte accounting overflowed"))?;
+        self.charged_predicate_nodes = self
+            .charged_predicate_nodes
+            .checked_add(source.predicate_node_bound)
+            .ok_or_else(|| exhausted("selected plan set predicate accounting overflowed"))?;
+        self.maximum_predicate_node_bound = self
+            .maximum_predicate_node_bound
+            .max(source.predicate_node_bound);
+        self.maximum_source_records = self.maximum_source_records.max(source.records);
+        self.maximum_source_bytes = self.maximum_source_bytes.max(source.bytes);
+        self.maximum_source_snapshots = self.maximum_source_snapshots.max(source.snapshots);
+        Ok(())
+    }
+
+    fn classify(&mut self, plans: &[Value]) {
+        self.attention = plans
+            .iter()
+            .filter_map(|plan| {
+                let reason = plan["stop_reason"].as_str()?;
+                if matches!(reason, "complete" | "paused" | "tick_limit") {
+                    return None;
+                }
+                Some(json!({"plan_digest":plan["plan_digest"],
+                "requested_plan_digest":plan["requested_plan_digest"],"stop_reason":reason}))
+            })
+            .collect();
+        let completed = plans
+            .iter()
+            .filter(|plan| plan["complete"] == true)
+            .filter_map(|plan| plan["plan_digest"].as_str().map(str::to_owned))
+            .collect::<Vec<_>>();
+        let group_complete = match self.policy {
+            PlanPolicy::All => !plans.is_empty() && completed.len() == plans.len(),
+            PlanPolicy::Any => !completed.is_empty(),
+        };
+        if let Some(first) = self.attention.first() {
+            self.stop = first["stop_reason"].as_str().map(str::to_owned);
+            self.triggered = self
+                .attention
+                .iter()
+                .filter_map(|cause| cause["plan_digest"].as_str().map(str::to_owned))
+                .collect();
+        } else if group_complete {
+            self.stop = Some(self.policy.complete_reason().to_owned());
+            self.triggered = completed;
+        } else {
+            self.stop = None;
+            self.triggered.clear();
+        }
     }
 
     pub(super) fn take_published(&mut self) -> Option<String> {

@@ -90,6 +90,10 @@
         null
       ],
       "description": "Group policy for plan_digests only. Omitted/null means all. All requires every selected original to be complete at the same current frontier; any requires at least one. Current consumable goals are reevaluated, and any exceptional member outcome takes precedence over group success."
+    },
+    "as_task": {
+      "type": "boolean",
+      "description": "Modern negotiated Tasks projection for one exact original plan or one explicit original-plan set. Requires an explicit session and omitted/null/zero max_game_ticks. False or omitted preserves foreground wait. Task observation never advances time, polls actions, loads archives or captures reserve endpoints; cancellation stops only the monitor."
     }
   },
   "examples": [
@@ -120,6 +124,16 @@
         "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
       ],
       "plan_policy": "all"
+    },
+    {
+      "session_id": "00000000000000000000000000000001",
+      "max_game_ticks": 0,
+      "plan_digests": [
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      ],
+      "plan_policy": "all",
+      "as_task": true
     }
   ],
   "allOf": [
@@ -261,6 +275,56 @@
             "type": "array"
           }
         }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "as_task"
+        ],
+        "properties": {
+          "as_task": {
+            "const": true
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "session_id"
+        ],
+        "properties": {
+          "session_id": {
+            "type": "string"
+          },
+          "max_game_ticks": {
+            "enum": [
+              0,
+              null
+            ]
+          }
+        },
+        "anyOf": [
+          {
+            "required": [
+              "plan_digest"
+            ],
+            "properties": {
+              "plan_digest": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "required": [
+              "plan_digests"
+            ],
+            "properties": {
+              "plan_digests": {
+                "type": "array"
+              }
+            }
+          }
+        ]
       }
     }
   ]

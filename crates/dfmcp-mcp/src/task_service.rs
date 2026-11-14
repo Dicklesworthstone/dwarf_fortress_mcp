@@ -13,7 +13,6 @@ use fastmcp_rust::{
     FinalTaskSupervisorFuture, FinalTaskSupervisorHandoff, FinalTaskWorkDescriptor,
     FinalToolOutcome, McpContext, McpError, McpResult, Tool, ToolHandler,
 };
-use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::task_store::LabTaskStore;
@@ -21,6 +20,13 @@ use crate::tasks::McpTaskStatus;
 
 const WORK_SCHEMA: &str = "dfmcp.lab-plan-task-work/1";
 const OBSERVATION_WORK_SCHEMA: &str = "dfmcp.lab-original-observer-task-work/1";
+const SET_OBSERVATION_WORK_SCHEMA: &str = "dfmcp.lab-original-set-observer-task-work/1";
+
+#[path = "task_work.rs"]
+mod task_work;
+pub(crate) use task_work::TaskWork;
+#[path = "task_group_evidence.rs"]
+mod task_group_evidence;
 
 fn unresolved_drain_progress() -> Value {
     json!({
@@ -28,62 +34,6 @@ fn unresolved_drain_progress() -> Value {
         "remaining_work": null, "unknown_work": null, "remaining_actions": null,
         "drained": null, "physical_quiescent": false, "quiescent": false,
     })
-}
-
-#[derive(Clone, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct TaskWork {
-    schema: String,
-    pub(crate) session_id: String,
-    pub(crate) plan_digest: String,
-}
-
-impl TaskWork {
-    pub(crate) fn parse(value: &Value) -> McpResult<Self> {
-        let mut work: Self = serde_json::from_value(value.clone())
-            .map_err(|_| McpError::invalid_params("invalid laboratory task work descriptor"))?;
-        if !matches!(work.schema.as_str(), WORK_SCHEMA | OBSERVATION_WORK_SCHEMA)
-            || work.session_id.len() != 32
-            || work.plan_digest.len() != 64
-            || !work
-                .session_id
-                .bytes()
-                .chain(work.plan_digest.bytes())
-                .all(|byte| byte.is_ascii_hexdigit())
-            || (work.is_observer()
-                && work
-                    .plan_digest
-                    .bytes()
-                    .any(|byte| byte.is_ascii_uppercase()))
-        {
-            return Err(McpError::invalid_params(
-                "laboratory task work must bind one exact session and sealed plan digest",
-            ));
-        }
-        work.session_id.make_ascii_lowercase();
-        work.plan_digest.make_ascii_lowercase();
-        Ok(work)
-    }
-
-    pub(crate) fn is_observer(&self) -> bool {
-        self.schema == OBSERVATION_WORK_SCHEMA
-    }
-
-    pub(crate) fn monitor_kind(&self) -> &'static str {
-        if self.is_observer() {
-            "observe_original"
-        } else {
-            "commit_original"
-        }
-    }
-
-    pub(crate) fn cancellation_scope(&self) -> &'static str {
-        if self.is_observer() {
-            "monitor_only"
-        } else {
-            "original_plan"
-        }
-    }
 }
 
 /// The predicate itself is retained in the complete evidence pages. Its
@@ -118,7 +68,7 @@ fn compact_original_goal(work: &TaskWork, task_id: &str, payload: &Value) -> Val
         "continuation_request": original_goal["continuation_request"],
         "condition_digest": condition_digest,
         "completion_inferred_from_action_states": false,
-        "details": format!("df://session/{}/task-{task_id}~evidence-0", work.session_id),
+        "details": format!("df://session/{}/task-{task_id}~evidence-0", work.session_id()),
     })
 }
 
@@ -226,7 +176,7 @@ impl LabTaskService {
         payload: &Value,
         failure: Option<&str>,
     ) -> McpResult<Value> {
-        let budget = crate::server::task_session::read_budget(&work.session_id)
+        let budget = crate::server::task_session::read_budget(work.session_id())
             .map_err(|error| McpError::invalid_params(error.to_string()))?;
         self.store.retain_final_evidence(id, payload, failure)?;
         let max_bytes = budget.max_bytes.min(
@@ -250,6 +200,22 @@ impl LabTaskService {
         };
         if fits(payload)? {
             return Ok(payload.clone());
+        }
+        if work.is_set_observer() {
+            let compact = task_group_evidence::compact_set_terminal(
+                work,
+                id.as_str(),
+                payload,
+                failure,
+                budget.max_output_tokens,
+                max_bytes,
+            );
+            if !fits(&compact)? {
+                return Err(McpError::invalid_params(
+                    "complete selected-set task summary exceeds negotiated output budget; full evidence remains retained and the monitor has not published a terminal outcome",
+                ));
+            }
+            return Ok(compact);
         }
         let full = payload.to_string();
         let mut counts = std::collections::BTreeMap::<String, usize>::new();
@@ -276,11 +242,11 @@ impl LabTaskService {
                 "needs_replan": payload["needs_replan"].as_bool().unwrap_or(false),
                 "remaining_work": payload["remaining_work"],
                 "physical_quiescent": payload["physical_quiescent"].as_bool().unwrap_or(false),
-                "blind_retry_allowed": false, "details": format!("df://session/{}/task-{}", work.session_id, id.as_str())}]);
+                "blind_retry_allowed": false, "details": format!("df://session/{}/task-{}", work.session_id(), id.as_str())}]);
         }
         if payload["physical_quiescent"].as_bool() != Some(true) {
             active["indeterminate_effects"] = json!([{
-                "plan_digest": work.plan_digest, "state": "unknown", "quiescent": false,
+                "plan_digest": work.plan_digest(), "state": "unknown", "quiescent": false,
                 "reason": "the retained terminal evidence does not prove physical quiescence",
             }]);
         }
@@ -290,13 +256,13 @@ impl LabTaskService {
             "fortress.commit"
         };
         let turn = crate::AgentTurnBuilder::new(operation, crate::AgentPhase::Verify)
-            .session_id(work.session_id.clone())
+            .session_id(work.session_id().to_owned())
             .anchor(anchor.clone())
             .active_work(active)
             .build();
         let original_goal = compact_original_goal(work, id.as_str(), payload);
         let compact = json!({"ok": failure.is_none(), "schema": "dfmcp.lab-task-summary/1",
-        "session_id": work.session_id, "plan_digest": work.plan_digest,
+        "session_id": work.session_id(), "plan_digest": work.plan_digest(),
         "monitor_kind":work.monitor_kind(),"cancellation_scope":work.cancellation_scope(),
         "owns_original_dispatch":if work.is_observer() { json!(false) } else { payload["owns_original_dispatch"].clone() },
         "effects_dispatched_by_task":if work.is_observer() { json!(false) } else { payload["effects_dispatched_by_task"].clone() },
@@ -321,8 +287,8 @@ impl LabTaskService {
         "blind_retry_allowed": false, "agent_turn": turn, "scope": "laboratory_process_only",
         "evidence": {"coverage": "summary_with_complete_evidence_retained",
             "digest": dfmcp_core::Digest32::of_bytes(full.as_bytes()).to_hex(), "bytes": full.len(),
-            "details": format!("df://session/{}/task-{}", work.session_id, id.as_str()),
-            "next": format!("df://session/{}/task-{}~evidence-0", work.session_id, id.as_str())},
+            "details": format!("df://session/{}/task-{}", work.session_id(), id.as_str()),
+            "next": format!("df://session/{}/task-{}~evidence-0", work.session_id(), id.as_str())},
         "output_budget": {"max_output_tokens": budget.max_output_tokens, "max_bytes": max_bytes,
             "clipped": true, "omitted": if work.is_observer() {
                 "complete original observation and custody diagnostics are retained in digest-checked evidence pages"
@@ -501,8 +467,8 @@ impl ApplicationTaskSupervisor for LabTaskService {
                     self.store
                         .record_progress(work.task_id(), json!({"stage": "dispatch_started"}))?;
                     let commit = crate::agent_facade::fortress_commit(
-                        Some(definition.session_id.clone()),
-                        definition.plan_digest.clone(),
+                        Some(definition.session_id().to_owned()),
+                        definition.original_digest()?.to_owned(),
                     );
                     let commit: Value = serde_json::from_str(&commit).map_err(|_| {
                         McpError::internal_error("laboratory commit response is invalid")
@@ -517,8 +483,8 @@ impl ApplicationTaskSupervisor for LabTaskService {
                 // original receipt is authoritative even if the facade needed to
                 // replace a large success response with a budget refusal.
                 if !crate::server::task_session::has_original_receipt(
-                    &definition.session_id,
-                    &definition.plan_digest,
+                    definition.session_id(),
+                    definition.original_digest()?,
                 )
                 .map_err(|error| McpError::invalid_params(error.to_string()))?
                 {
@@ -527,8 +493,8 @@ impl ApplicationTaskSupervisor for LabTaskService {
                     } else {
                         "the original plan was not dispatched; inspect refusal or required shared-world consent"
                     };
-                    let payload = json!({"ok": false, "session_id": definition.session_id,
-                    "plan_digest": definition.plan_digest, "status": "failed",
+                    let payload = json!({"ok": false, "session_id": definition.session_id(),
+                    "plan_digest": definition.plan_digest(), "status": "failed",
                     "proof_status": if recovering { "unknown" } else { "failed" },
                     "original_plan_dispatched": if recovering { Value::Null } else { json!(false) },
                     "remaining_work": if recovering { Value::Null } else { json!(0) },
@@ -544,7 +510,7 @@ impl ApplicationTaskSupervisor for LabTaskService {
                     }) },
                     "indeterminate": recovering, "blind_retry_allowed": false,
                     "recovery_class": if recovering { "reconciliation_required" } else { "operator_action_required" },
-                    "next_step": {"tool": "fortress.observe", "arguments": {"session_id": definition.session_id},
+                    "next_step": {"tool": "fortress.observe", "arguments": {"session_id": definition.session_id()},
                         "note": "inspect current state and the retained refusal or shared-world consent before choosing a new plan"},
                     "commit_response": commit});
                     let bounded = self.bounded_terminal_evidence(
@@ -579,15 +545,30 @@ impl ApplicationTaskSupervisor for LabTaskService {
                         return Ok(Some(()));
                     }
                     let observed = if definition.is_observer() {
-                        crate::server::task_session::observation_view(&definition.session_id, &definition.plan_digest)
+                        definition.observation_view()
                     } else {
-                        crate::server::task_session::view(&definition.session_id, &definition.plan_digest)
+                        crate::server::task_session::view(definition.session_id(), definition.original_digest()?)
                     };
+                    let observed = observed.and_then(|view| {
+                        if definition.is_set_observer() {
+                            let binding = self.store.observation_binding(work.task_id())
+                                .map_err(|error| dfmcp_core::DfmcpError::new(
+                                    dfmcp_core::ErrorCode::InternalInvariantViolation,error.to_string()))?;
+                            if !binding.as_ref().is_some_and(|binding|
+                                definition.matches_admitted_set(binding,&view.payload))
+                            {
+                                return Err(dfmcp_core::DfmcpError::new(
+                                    dfmcp_core::ErrorCode::CorruptLedger,
+                                    "selected original identity differs from the admitted Task binding"));
+                            }
+                        }
+                        Ok(view)
+                    });
                     let mut view = match observed {
                         Ok(view) => view,
                         Err(error) => {
-                            let payload = json!({"ok": false, "session_id": definition.session_id,
-                                "plan_digest": definition.plan_digest, "error": error.to_string(),
+                            let mut payload = json!({"ok": false, "session_id": definition.session_id(),
+                                "plan_digest": definition.plan_digest(), "error": error.to_string(),
                                 "monitor_kind":definition.monitor_kind(),"cancellation_scope":definition.cancellation_scope(),
                                 "owns_original_dispatch":if definition.is_observer() { json!(false) } else { Value::Null },
                                 "effects_dispatched_by_task":if definition.is_observer() { json!(false) } else { Value::Null },
@@ -598,6 +579,21 @@ impl ApplicationTaskSupervisor for LabTaskService {
                                 "physical_work": {"state": "unknown", "quiescent": false,
                                     "reason": "the original plan's retained action evidence cannot be observed"},
                                 "blind_retry_allowed": false, "recovery_class": "reconciliation_required"});
+                            definition.attach_selection(&mut payload);
+                            if definition.is_set_observer() {
+                                payload["schema"] = json!("dfmcp.lab-original-set-observer-task/1");
+                                let binding = self.store.observation_binding(work.task_id())?
+                                    .ok_or_else(|| McpError::internal_error("admitted original-set identity is unavailable"))?;
+                                payload["actual_plan_digests"] = binding["plan_digests"].clone();
+                                payload["selected_plan_set_wait"] = task_group_evidence::unresolved_set_outcome(&binding);
+                                payload["inspection_complete"] = json!(false);
+                                payload["action_proof_status"] = json!("unknown");
+                                payload["group_complete"] = json!(false);
+                                payload["physical_quiescent"] = Value::Null;
+                                payload["drain_progress"]["physical_quiescent"] = Value::Null;
+                                payload["physical_work"]["quiescent"] = Value::Null;
+                                payload["physical_work"]["reason"] = json!("the complete selected original set cannot be observed at this frontier");
+                            }
                             self.store.record_progress(work.task_id(), json!({"stage": "unresolved", "evidence": payload}))?;
                             let failure = "original plan can no longer be observed; do not retry the effect";
                             let bounded = self.bounded_terminal_evidence(work.task_id(), &definition, &payload, Some(failure))?;
@@ -613,11 +609,18 @@ impl ApplicationTaskSupervisor for LabTaskService {
                         McpTaskStatus::Working | McpTaskStatus::InputRequired => Ok(None),
                         McpTaskStatus::Completed => {
                             let bounded = self.bounded_terminal_evidence(work.task_id(), &definition, &view.payload, None)?;
-                            work.complete_task(task_result(&bounded)?, Some("the original goal holds and every original plan action has verified evidence and quiescent physical work".to_owned()))?;
+                            let message = if definition.is_set_observer() {
+                                "the selected original set satisfies its current-frontier policy; inspect every member and physical_work for unfinished peers"
+                            } else {
+                                "the original goal holds and every original plan action has verified evidence and quiescent physical work"
+                            };
+                            work.complete_task(task_result(&bounded)?, Some(message.to_owned()))?;
                             Ok(Some(()))
                         }
                         McpTaskStatus::Failed => {
-                            let failure = if view.payload["needs_replan"] == true {
+                            let failure = if definition.is_set_observer() {
+                                "at least one selected original requires attention; inspect the complete member outcomes before any continuation or cleanup"
+                            } else if view.payload["needs_replan"] == true {
                                 "the original work finished but its original goal is unmet; a new plan requires an explicit decision"
                             } else if view.payload["goal_unconfirmed_after_work"] == true {
                                 "the original work finished but its original goal evidence is unavailable; reconciliation is required"
@@ -727,7 +730,7 @@ impl ToolHandler for TaskAwareCommit {
         let work = TaskWork::parse(
             &json!({"schema": WORK_SCHEMA, "session_id": session_id, "plan_digest": plan_digest}),
         )?;
-        crate::server::task_session::validate(&work.session_id, &work.plan_digest)
+        crate::server::task_session::validate(work.session_id(), work.original_digest()?)
             .map_err(|error| McpError::invalid_params(error.to_string()))?;
         Ok(FinalToolOutcome::CreateTask { work_descriptor: FinalTaskWorkDescriptor::new(serde_json::to_value(work).map_err(|_| McpError::internal_error("could not encode original plan work"))?)?,
             status_message: Some("laboratory sealed plan queued; commit authority will be revalidated before dispatch".to_owned()) })
@@ -751,7 +754,7 @@ fn observation_request(arguments: &Value) -> McpResult<TaskWork> {
                 | "plan_digests"
                 | "plan_policy"
         )
-    }) || ["watch_id", "watch_ids", "watch_policy", "plan_digests", "plan_policy"]
+    }) || ["watch_id", "watch_ids", "watch_policy"]
         .iter()
         .any(|field| fields.get(*field).is_some_and(|value| !value.is_null()))
         || fields
@@ -759,7 +762,7 @@ fn observation_request(arguments: &Value) -> McpResult<TaskWork> {
             .is_some_and(|value| !value.is_null() && value.as_u64() != Some(0))
     {
         return Err(McpError::invalid_params(
-            "an observation Task requires one exact plan_digest, no plan-set or watch selectors and omitted or zero max_game_ticks; use an explicit foreground wait for selected sets or to advance time",
+            "an observation Task requires exact original plan selection, no watch selectors and omitted or zero max_game_ticks; use an explicit foreground wait to advance time",
         ));
     }
     if fields.get("as_task") != Some(&Value::Bool(true)) {
@@ -771,6 +774,24 @@ fn observation_request(arguments: &Value) -> McpResult<TaskWork> {
         .get("session_id")
         .and_then(Value::as_str)
         .ok_or_else(|| McpError::invalid_params("as_task requires an explicit session_id"))?;
+    let scalar = fields.get("plan_digest").filter(|value| !value.is_null());
+    let group = fields.get("plan_digests").filter(|value| !value.is_null());
+    let policy = fields.get("plan_policy").filter(|value| !value.is_null());
+    if let Some(digests) = group {
+        if scalar.is_some() {
+            return Err(McpError::invalid_params(
+                "observation Tasks select either plan_digest or plan_digests, never both",
+            ));
+        }
+        return TaskWork::parse(&json!({"schema":SET_OBSERVATION_WORK_SCHEMA,
+            "session_id":session_id,"plan_digests":digests,
+            "plan_policy":policy.cloned().unwrap_or_else(|| json!("all"))}));
+    }
+    if policy.is_some() {
+        return Err(McpError::invalid_params(
+            "plan_policy requires an explicit plan_digests set",
+        ));
+    }
     let plan_digest = fields
         .get("plan_digest")
         .and_then(Value::as_str)
@@ -781,8 +802,8 @@ fn observation_request(arguments: &Value) -> McpResult<TaskWork> {
         "session_id":session_id,"plan_digest":plan_digest}))
 }
 
-/// The same wait tool can return a process-local passive Task for one already
-/// committed original. Ordinary foreground waits keep their original handler.
+/// The same wait tool can return one process-local passive Task for an exact
+/// original or a bounded set. Ordinary waits keep their foreground handler.
 pub(crate) struct TaskAwareWait;
 
 impl ToolHandler for TaskAwareWait {
@@ -794,7 +815,7 @@ impl ToolHandler for TaskAwareWait {
             .and_then(Value::as_object_mut)
         {
             properties.insert("as_task".to_owned(), json!({"type":"boolean",
-                "description":"Observe one exact committed or durable recovered original as a modern MCP Task. Requires explicit session_id and plan_digest, omitted or zero max_game_ticks, no plan-set or watch selector, and current Observe/Query. One active monitor per process. This Task never commits, advances time, captures reserve endpoints or cancels original work; tasks/cancel stops only its observation."}));
+                "description":"Observe exact committed or durable recovered originals as one modern MCP Task. Requires explicit session_id, either plan_digest or 1..8 plan_digests with optional plan_policy all/any, omitted or zero max_game_ticks, no watch selector, and current Observe/Query. One active monitor per process. This Task never commits, advances time, captures reserve endpoints or cancels original work; tasks/cancel stops only its observation."}));
         }
         definition
     }
@@ -840,8 +861,7 @@ impl ToolHandler for TaskAwareWait {
         }
         ctx.checkpoint()?;
         let work = observation_request(&arguments)?;
-        crate::server::task_session::validate_observation(&work.session_id, &work.plan_digest)
-            .map_err(|error| McpError::invalid_params(error.to_string()))?;
+        work.validate_observation()?;
         Ok(FinalToolOutcome::CreateTask {
             work_descriptor:FinalTaskWorkDescriptor::new(serde_json::to_value(work)
                 .map_err(|_| McpError::internal_error("could not encode original observation work"))?)?,
@@ -950,12 +970,9 @@ mod tests {
     }
 
     #[test]
-    fn bounded_original_goal_keeps_truth_and_identity_for_large_predicates() {
-        let work = TaskWork {
-            schema: WORK_SCHEMA.to_owned(),
-            session_id: "1".repeat(32),
-            plan_digest: "2".repeat(64),
-        };
+    fn bounded_original_goal_keeps_truth_and_identity_for_large_predicates() -> McpResult<()> {
+        let work = TaskWork::parse(&json!({"schema":WORK_SCHEMA,
+            "session_id":"1".repeat(32),"plan_digest":"2".repeat(64)}))?;
         let task_id = "3".repeat(32);
         let anchor = json!({
             "fortress_id": "4".repeat(32), "epoch": 7, "sequence": 9,
@@ -967,7 +984,7 @@ mod tests {
         })).collect::<Vec<_>>()});
         for truth in ["true", "false", "unknown"] {
             let payload = json!({"action_proof_status": "completed", "original_goal": {
-                "plan_digest": "6".repeat(64), "requested_plan_digest": work.plan_digest,
+                "plan_digest": "6".repeat(64), "requested_plan_digest": work.plan_digest(),
                 "predicate_truth": truth,
                 "epistemic_state": if truth == "unknown" { "unknown" } else { "certified_derived" },
                 "evidence_scope": "laboratory_reference_world", "observed_anchor": anchor,
@@ -976,7 +993,7 @@ mod tests {
             let compact = compact_original_goal(&work, &task_id, &payload);
             assert_eq!(compact["predicate_truth"], truth);
             assert_eq!(compact["plan_digest"], "6".repeat(64));
-            assert_eq!(compact["requested_plan_digest"], work.plan_digest);
+            assert_eq!(compact["requested_plan_digest"], work.original_digest()?);
             assert_eq!(compact["observed_anchor"], anchor);
             assert_eq!(compact["evidence_scope"], "laboratory_reference_world");
             assert_eq!(compact["completion_inferred_from_action_states"], false);
@@ -990,15 +1007,13 @@ mod tests {
                 compact_original_goal(&work, &task_id, &changed)["condition_digest"]
             );
         }
+        Ok(())
     }
 
     #[test]
-    fn missing_original_goal_does_not_inherit_completed_action_proofs() {
-        let work = TaskWork {
-            schema: WORK_SCHEMA.to_owned(),
-            session_id: "1".repeat(32),
-            plan_digest: "2".repeat(64),
-        };
+    fn missing_original_goal_does_not_inherit_completed_action_proofs() -> McpResult<()> {
+        let work = TaskWork::parse(&json!({"schema":WORK_SCHEMA,
+            "session_id":"1".repeat(32),"plan_digest":"2".repeat(64)}))?;
         let compact = compact_original_goal(
             &work,
             "3",
@@ -1009,15 +1024,14 @@ mod tests {
         assert!(compact["condition_digest"].is_null());
         assert!(compact["observed_anchor"].is_null());
         assert_eq!(compact["completion_inferred_from_action_states"], false);
+        Ok(())
     }
 
     #[test]
-    fn bounded_original_goal_keeps_historical_achievement_separate_from_current_truth() {
-        let work = TaskWork {
-            schema: WORK_SCHEMA.to_owned(),
-            session_id: "1".repeat(32),
-            plan_digest: "2".repeat(64),
-        };
+    fn bounded_original_goal_keeps_historical_achievement_separate_from_current_truth()
+    -> McpResult<()> {
+        let work = TaskWork::parse(&json!({"schema":WORK_SCHEMA,
+            "session_id":"1".repeat(32),"plan_digest":"2".repeat(64)}))?;
         let anchor = |sequence: u64| {
             json!({
                 "fortress_id": "3".repeat(32), "epoch": 1, "sequence": sequence,
@@ -1028,7 +1042,7 @@ mod tests {
         let now = anchor(1200);
         for abandoned in [false, true] {
             let payload = json!({"original_goal": {
-                "plan_digest": work.plan_digest, "requested_plan_digest": work.plan_digest,
+                "plan_digest": work.plan_digest(), "requested_plan_digest": work.plan_digest(),
                 "predicate_truth": if abandoned { "unknown" } else { "false" },
                 "epistemic_state": if abandoned { "unknown" } else { "certified_derived" },
                 "evidence_scope": "laboratory_reference_world", "observed_anchor": now,
@@ -1053,5 +1067,6 @@ mod tests {
             assert!(compact["recorded_first_satisfied_anchor"].is_null());
             assert!(compact.to_string().len() < 1_800, "{compact}");
         }
+        Ok(())
     }
 }

@@ -605,6 +605,253 @@ pub(crate) fn observation_view(session_id: &str, digest: &str) -> Result<PlanTas
     })
 }
 
+/// One passive Task may observe a complete explicit set; it acquires neither
+/// original effect ownership nor a separate monitor for each selected member.
+pub(crate) fn validate_observation_set(
+    session_id: &str,
+    digests: &[String],
+    policy: &str,
+) -> Result<()> {
+    observation_set_view(session_id, digests, policy).map(|_| ())
+}
+
+fn observation_set_next_wait(
+    context: &OperationContext,
+    session_id: &str,
+    digests: &[String],
+    policy: &str,
+    paused: bool,
+    capture_required: bool,
+) -> Value {
+    let clock_now =
+        authorize_entry(context, Capability::ControlClock, RiskTier::Reversible).is_ok();
+    if paused
+        && !capture_required
+        && clock_now
+        && authorize_entry(context, Capability::Plan, RiskTier::ReadOnly).is_ok()
+    {
+        return json!({"tool":"fortress.plan","arguments":{
+            "session_id":session_id,"paused_target":false,
+            "summary":"review resuming the selected original projects",
+        },"note":"resuming requires a separately reviewed and committed plan; the observation Task changes no clock state"});
+    }
+    let candidate = context.budget.max_game_ticks.min(100);
+    let authorized_ticks = (!paused && !capture_required && clock_now && candidate > 0)
+        .then(|| context.anchor.tick.0.checked_add(candidate))
+        .flatten()
+        .filter(|end_tick| {
+            let mut end = context.clone();
+            end.anchor.tick = GameTick(*end_tick);
+            authorize_entry(&end, Capability::Observe, RiskTier::ReadOnly).is_ok()
+                && authorize_entry(&end, Capability::Query, RiskTier::ReadOnly).is_ok()
+                && authorize_entry(&end, Capability::ControlClock, RiskTier::Reversible).is_ok()
+        })
+        .map_or(0, |_| candidate);
+    json!({"tool":"fortress.wait","arguments":{
+        "session_id":session_id,"plan_digests":digests,"plan_policy":policy,
+        "max_game_ticks":authorized_ticks,
+    },"note":if capture_required {
+        "only an explicit zero-tick foreground wait may retain the selected exact endpoint"
+    } else if authorized_ticks > 0 {
+        "only this separately requested foreground wait may progress the shared world"
+    } else {
+        "current authority permits reinspection without advancing time; progress requires a separately authorized foreground wait"
+    }})
+}
+
+pub(crate) fn observation_set_view(
+    session_id: &str,
+    digests: &[String],
+    policy: &str,
+) -> Result<PlanTaskView> {
+    let started = std::time::Instant::now();
+    with_task_read(session_id, |session| {
+        let ctx = read_context(session);
+        authorize_entry(&ctx, Capability::Observe, RiskTier::ReadOnly)?;
+        authorize_entry(&ctx, Capability::Query, RiskTier::ReadOnly)?;
+        if session.budget.max_output_tokens < 1_500 || session.budget.max_bytes < 6_000 {
+            return Err(DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                "original set observation Tasks require at least 1500 output tokens and 6000 bytes",
+            ));
+        }
+        let selected = super::selected_plan_set_wait::SelectedPlanSetWait::observe_retained(
+            session, digests, policy, started,
+        )?;
+        let plans = selected["plans"].as_array().ok_or_else(session_error)?;
+        let sum = |field: &str| -> Result<u64> {
+            plans.iter().try_fold(0_u64, |count, plan| {
+                count
+                    .checked_add(plan[field].as_u64().ok_or_else(session_error)?)
+                    .ok_or_else(|| {
+                        DfmcpError::new(
+                            ErrorCode::BudgetExceeded,
+                            "original set Task census accounting overflowed",
+                        )
+                    })
+            })
+        };
+        let total = sum("action_count")?;
+        let verified = sum("verified_actions")?;
+        let terminal = sum("terminal_actions")?;
+        let active = sum("active_work_actions")?;
+        let unknown = sum("unknown_work_actions")?;
+        let remaining = active.checked_add(unknown).ok_or_else(session_error)?;
+        let nonterminal = total.checked_sub(terminal).ok_or_else(session_error)?;
+        let quiet = (unknown == 0).then_some(active == 0);
+        let status = if selected["group_complete"] == true {
+            McpTaskStatus::Completed
+        } else if selected["stop_reason"].is_string() {
+            McpTaskStatus::Failed
+        } else {
+            McpTaskStatus::Working
+        };
+        let action_status = if plans.iter().any(|plan| {
+            matches!(
+                plan["stop_reason"].as_str(),
+                Some("failed" | "indeterminate")
+            )
+        }) {
+            McpTaskStatus::Failed
+        } else if verified == total {
+            McpTaskStatus::Completed
+        } else if terminal == total {
+            McpTaskStatus::Failed
+        } else {
+            McpTaskStatus::Working
+        };
+        let needs_replan = status == McpTaskStatus::Failed
+            && plans.iter().any(|plan| {
+                plan["physical_quiescent"] == true
+                    && matches!(
+                        plan["stop_reason"].as_str(),
+                        Some("needs_continuation" | "goal_unmet" | "reserve_unmet")
+                    )
+            });
+        let unresolved = unknown > 0
+            || plans.iter().any(|plan| {
+                plan["complete_original_goal_truth"] == "unknown"
+                    && plan["original_goal_pending"] != true
+            });
+        let affected = selected["interrupted_plan_digests"]
+            .as_array()
+            .and_then(|causes| causes.first())
+            .and_then(|digest| plans.iter().find(|plan| plan["plan_digest"] == *digest));
+        let next_step = if status == McpTaskStatus::Working {
+            observation_set_next_wait(
+                &ctx,
+                session_id,
+                digests,
+                policy,
+                session.adapter.snapshot().paused,
+                selected["reserve_capture_required"] == true,
+            )
+        } else if let Some(next) = affected
+            .and_then(|plan| plan.get("continuation_request"))
+            .filter(|next| next.is_object())
+        {
+            next.clone()
+        } else if let Some(plan) = affected {
+            json!({"tool":"fortress.explain","arguments":{
+                "session_id":session_id,"entity_id":format!("goal:{}",
+                    plan["plan_digest"].as_str().ok_or_else(session_error)?),
+            },"note":"inspect this exact original before separately authorizing any cleanup or continuation"})
+        } else {
+            Value::Null
+        };
+        let anchor = anchor_json(&session.adapter.snapshot().anchor());
+        let summaries = plans.iter().map(|plan| json!({
+            "requested_plan_digest":plan["requested_plan_digest"],"plan_digest":plan["plan_digest"],
+            "goal_truth":plan["goal_truth"],"stage_goal_truth":plan["stage_goal_truth"],
+            "complete":plan["complete"],"stop_reason":plan["stop_reason"],
+            "physical_quiescent":plan["physical_quiescent"],
+            "reserve_capture_required":plan["reserve_capture_required"],
+        })).collect::<Vec<_>>();
+        let mut work = crate::empty_active_work();
+        work["obligations"] = json!(plans.iter().filter(|plan| plan["complete"] != true)
+            .map(|plan| json!({
+                "kind":"observed_original_project","plan_digest":plan["plan_digest"],
+                "action_count":plan["action_count"],"active_work_actions":plan["active_work_actions"],
+                "unknown_work_actions":plan["unknown_work_actions"],
+                "physical_quiescent":plan["physical_quiescent"],
+                "observer_owns_work":false,
+            })).collect::<Vec<_>>());
+        let maximum = session
+            .budget
+            .max_bytes
+            .min(u64::from(session.budget.max_output_tokens) * 4);
+        let packet = crate::AgentTurnBuilder::new("fortress.wait", crate::AgentPhase::Verify)
+            .session_id(session.session_id.to_string())
+            .anchor(anchor.clone())
+            .briefing(json!({"objective_status":summaries,"plan_policy":policy,
+                "group_complete":selected["group_complete"],
+                "unfinished_plan_digests":selected["unfinished_plan_digests"],
+                "observation_only":true}))
+            .active_work(work)
+            .budget(json!({"requested":null,"admitted":{"maximum_response_bytes":maximum},
+                "consumed":{"source_work":selected["source_work"],"proof_work":selected["proof_work"],
+                    "game_ticks":0,"actions_polled":0,"effects_dispatched":0,"endpoints_captured":0},
+                "remaining":null,"soft_stop_reason":selected["stop_reason"],"hard_stop_reason":null}))
+            .build();
+        let payload = json!({
+            "ok":status != McpTaskStatus::Failed,"schema":"dfmcp.lab-original-set-observer-task/1",
+            "session_id":session_id,"plan_digests":digests,"plan_policy":policy,
+            "actual_plan_digests":selected["plan_digests"],
+            "status":status.as_str(),"proof_status":status.as_str(),
+            "monitor_kind":"observe_original_set","cancellation_scope":"monitor_only",
+            "owns_original_dispatch":false,"dispatch_handles_restored":false,
+            "effects_dispatched_by_task":false,"effect_cancellation_allowed":false,
+            "replacement_work_dispatched":false,"automatic_continuation":false,
+            "selected_plan_set_wait":selected,
+            "group_complete":selected["group_complete"],"all_originals_complete":selected["all_complete"],
+            "original_goal_satisfied":selected["group_complete"],
+            "original_goal_pending":status == McpTaskStatus::Working,
+            "goal_unconfirmed_after_work":status == McpTaskStatus::Failed
+                && quiet == Some(true) && action_status == McpTaskStatus::Completed && unresolved,
+            "action_proof_status":action_status.as_str(),"action_count":total,
+            "needs_replan":needs_replan,"indeterminate":unresolved,
+            "remaining_work":if unknown == 0 { json!(active) } else { Value::Null },
+            "physical_quiescent":quiet,
+            "physical_work":{"state":if unknown > 0 { "unknown" }
+                else if active > 0 { "active" } else { "quiescent" },
+                "quiescent":quiet,"actions_total":total,"active_work_actions":active,
+                "unknown_work_actions":unknown,"remaining_nonterminal":nonterminal,
+                "scope":"all_selected_originals","observer_owns_work":false,"drain_performed":false},
+            "cleanup_required":status == McpTaskStatus::Failed && quiet != Some(true),
+            "drain_progress":{"inspection_only":true,"actions_total":total,
+                "remaining_nonterminal":nonterminal,"remaining_work":remaining,"unknown_work":unknown,
+                "physical_quiescent":quiet,"quiescent":quiet == Some(true) && terminal == total,
+                "cancellation_drains_work":false},
+            "observed_anchor":anchor,"game_tick":session.adapter.snapshot().tick.0,
+            "paused":session.adapter.snapshot().paused,
+            "recovery_class":if unresolved { "reconciliation_required" }
+                else if status == McpTaskStatus::Failed { "operator_action_required" }
+                else { "never_unchanged" },
+            "blind_retry_allowed":false,"next_step":next_step,
+            "agent_turn":packet,"scope":"laboratory_process_only",
+        });
+        // A Task's enclosing status/result and JSON-RPC framing are additional
+        // output. Creation admits this complete view with bounded headroom;
+        // the service still checks its exact final envelope before transition.
+        if (payload.to_string().len() as u64)
+            .checked_add(2_048)
+            .is_none_or(|bytes| bytes > maximum)
+        {
+            return Err(DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                "complete original set Task evidence and transport envelope exceed the response budget",
+            ));
+        }
+        if started.elapsed() >= std::time::Duration::from_millis(session.budget.max_wall_millis) {
+            return Err(DfmcpError::new(
+                ErrorCode::BudgetExceeded,
+                "complete original set Task inspection exceeded its shared wall deadline",
+            ));
+        }
+        Ok(PlanTaskView { status, payload })
+    })
+}
+
 /// The Tasks store checks the engine before recording cancellation. A stale
 /// task projection cannot cancel an already verified and physically quiet
 /// plan. Loss of action authority cannot be hidden by transport cancellation.
@@ -1404,3 +1651,7 @@ mod reserve_tests;
 #[cfg(test)]
 #[path = "task_observer_tests.rs"]
 mod observer_tests;
+
+#[cfg(test)]
+#[path = "task_set_observer_tests.rs"]
+mod set_observer_tests;

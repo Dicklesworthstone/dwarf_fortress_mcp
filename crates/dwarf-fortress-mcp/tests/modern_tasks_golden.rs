@@ -939,3 +939,241 @@ fn small_output_budget_retains_complete_digest_checked_action_evidence() -> Test
     );
     Ok(())
 }
+
+fn start_set_observer(
+    client: &mut StdioClient,
+    session: &str,
+    digests: &[String],
+    policy: &str,
+) -> TestResult<String> {
+    let task = client.method(
+        "tools/call",
+        json!({
+            "name":"fortress_wait","arguments":{
+                "session_id":session,"plan_digests":digests,
+                "plan_policy":policy,"max_game_ticks":0,"as_task":true,
+            },
+        }),
+    )?;
+    assert_eq!(task["resultType"], "task", "{task}");
+    assert_eq!(task["status"], "working", "{task}");
+    Ok(task["taskId"]
+        .as_str()
+        .ok_or("group Task ID missing")?
+        .to_owned())
+}
+
+fn await_set_observation(
+    client: &mut StdioClient,
+    session: &str,
+    task_id: &str,
+) -> TestResult<Value> {
+    for _ in 0..256 {
+        let detail = client.task_record(session, task_id)?;
+        assert_eq!(detail["task"]["status"], "working", "{detail}");
+        if detail["progress"]["obligation"]["selected_plan_set_wait"].is_object() {
+            return Ok(detail);
+        }
+    }
+    Err("group Task did not inspect its complete selected original set".into())
+}
+
+#[test]
+fn selected_set_tasks_observe_cancel_and_complete_all_or_any_without_owning_effects() -> TestResult
+{
+    let mut client = StdioClient::spawn(true)?;
+    client.discover()?;
+    let tools = client.method("tools/list", json!({}))?;
+    let definitions = tools["tools"]
+        .as_array()
+        .ok_or("tool definitions missing")?;
+    assert_eq!(definitions.len(), 11);
+    let wait = definitions
+        .iter()
+        .find(|tool| tool["name"] == "fortress_wait")
+        .ok_or("wait definition missing")?;
+    for field in ["as_task", "plan_digests", "plan_policy"] {
+        assert!(
+            wait["inputSchema"]["properties"].get(field).is_some(),
+            "{field}"
+        );
+    }
+
+    let session = client.open("909", false)?;
+    let original = client.plan(&session, true)?;
+    let first = plan_digest(&original)?.to_owned();
+    let building = original["steps"][1]["creates_entity_id"]
+        .as_str()
+        .ok_or("dependent building missing")?
+        .to_owned();
+    let committed = client.tool(
+        "fortress_commit",
+        json!({"session_id":session,"plan_digest":first}),
+    )?;
+    assert_eq!(committed["actions"][1]["state"], "Prepared");
+    let later=client.tool("fortress_plan",json!({
+        "session_id":session,"summary":"independent resumed-clock original","paused_target":false,
+    }))?;
+    let second = plan_digest(&later)?.to_owned();
+    client.tool(
+        "fortress_commit",
+        json!({"session_id":session,"plan_digest":second}),
+    )?;
+    let digests = vec![second.clone(), first.clone()];
+    let before = client.terrain(&session)?;
+    for arguments in [
+        json!({"session_id":session,"plan_digests":digests,"plan_digest":first,"as_task":true}),
+        json!({"session_id":session,"plan_digests":digests,"plan_policy":"all_complete","as_task":true}),
+        json!({"session_id":session,"plan_digests":digests,"max_game_ticks":1,"as_task":true}),
+        json!({"session_id":session,"plan_digests":[first,"0".repeat(64)],"as_task":true}),
+    ] {
+        assert_refused(&client.rpc(
+            "tools/call",
+            json!({"name":"fortress_wait","arguments":arguments}),
+        )?);
+    }
+    assert_eq!(client.resource(&session, "tasks")?["total"], 0);
+    assert_eq!(client.terrain(&session)?["anchor"], before["anchor"]);
+
+    let id = start_set_observer(&mut client, &session, &digests, "all")?;
+    let observed = await_set_observation(&mut client, &session, &id)?;
+    assert_eq!(observed["monitor_kind"], "observe_original_set");
+    assert_eq!(observed["plan_digests"], json!(digests));
+    assert!(observed.get("plan_digest").is_none());
+    let obligation = &observed["progress"]["obligation"];
+    assert_eq!(
+        obligation["schema"],
+        "dfmcp.lab-original-set-observer-task/1"
+    );
+    assert_eq!(
+        obligation["selected_plan_set_wait"]["plans"]
+            .as_array()
+            .map(Vec::len),
+        Some(2)
+    );
+    assert_eq!(obligation["physical_quiescent"], false);
+    assert_eq!(obligation["effects_dispatched_by_task"], false);
+    assert_eq!(
+        obligation["selected_plan_set_wait"]["endpoint_publication"]["publication_performed"],
+        false
+    );
+    for _ in 0..3 {
+        assert_eq!(client.task(&id)?["status"], "working");
+    }
+    assert_eq!(client.terrain(&session)?["anchor"], before["anchor"]);
+    assert!(
+        find_entity(&client.entities(&session, "building")?, &building).is_none(),
+        "Task inspection must not dispatch the prepared child"
+    );
+    assert_refused(&client.rpc(
+        "tools/call",
+        json!({"name":"fortress_wait","arguments":{
+            "session_id":session,"plan_digests":digests,"plan_policy":"any","as_task":true,
+        }}),
+    )?);
+    assert_eq!(client.resource(&session, "tasks")?["total"], 1);
+    client.method("tasks/cancel", json!({"taskId":id}))?;
+    client.await_terminal(&id, "cancelled")?;
+    let cancelled = client.task_record(&session, &id)?;
+    assert_eq!(cancelled["progress"]["stage"], "monitor_finalized");
+    assert_eq!(cancelled["progress"]["plan_digests"], json!(digests));
+    assert_eq!(
+        cancelled["progress"]["effect_cancellation_requested"],
+        false
+    );
+    assert_eq!(
+        cancelled["progress"]["physical_quiescence_certified"],
+        false
+    );
+    assert_eq!(client.terrain(&session)?["anchor"], before["anchor"]);
+
+    let any = start_set_observer(&mut client, &session, &digests, "any")?;
+    let any_terminal = client.await_terminal(&any, "completed")?;
+    let any_payload = tool_payload(&any_terminal["result"])?;
+    assert_eq!(
+        any_payload["selected_plan_set_wait"]["stop_reason"],
+        "any_complete"
+    );
+    assert_eq!(
+        any_payload["selected_plan_set_wait"]["unfinished_plan_digests"],
+        json!([first])
+    );
+    assert_eq!(any_payload["action_proof_status"], "working");
+    assert_eq!(any_payload["physical_quiescent"], false);
+    assert_eq!(any_payload["cleanup_required"], false);
+    assert_eq!(client.terrain(&session)?["anchor"], before["anchor"]);
+
+    let all = start_set_observer(&mut client, &session, &digests, "all")?;
+    await_set_observation(&mut client, &session, &all)?;
+    for _ in 0..16 {
+        client.advance(&session, 50)?;
+        if client.task(&all)?["status"] == "completed" {
+            break;
+        }
+    }
+    let all_terminal = client.await_terminal(&all, "completed")?;
+    let full = tool_payload(&all_terminal["result"])?;
+    assert_eq!(
+        full["selected_plan_set_wait"]["stop_reason"],
+        "all_complete"
+    );
+    assert_eq!(
+        full["selected_plan_set_wait"]["unfinished_plan_digests"],
+        json!([])
+    );
+    assert_eq!(full["physical_quiescent"], true);
+    assert_eq!(full["action_proof_status"], "completed");
+    assert_eq!(full["plan_digests"], json!(digests));
+    assert_eq!(
+        client.task(&any)?,
+        any_terminal,
+        "completed any proof remains at its original frontier"
+    );
+
+    // The same retained evidence paging used by scalar Tasks must retain every
+    // selected original and its decisive outcome, including on a full result.
+    let mut next = Some(format!("df://session/{session}/task-{all}~evidence-0"));
+    let mut assembled = String::new();
+    let mut digest = None;
+    for _ in 0..128 {
+        let Some(uri) = next.take() else {
+            break;
+        };
+        let resource = client.method("resources/read", json!({"uri":uri}))?;
+        let page: Value = serde_json::from_str(
+            resource["contents"][0]["text"]
+                .as_str()
+                .ok_or("evidence page text missing")?,
+        )?;
+        assert_eq!(page["source"], "final_evidence");
+        assert_eq!(page["offset"], assembled.len());
+        if let Some(expected) = &digest {
+            assert_eq!(&page["digest"], expected);
+        } else {
+            digest = Some(page["digest"].clone());
+        }
+        assembled.push_str(page["part"].as_str().ok_or("evidence part missing")?);
+        next = page["next"].as_str().map(str::to_owned);
+    }
+    assert!(
+        next.is_none(),
+        "selected-set evidence traversal must finish"
+    );
+    assert_eq!(
+        digest,
+        Some(json!(Digest32::of_bytes(assembled.as_bytes()).to_hex()))
+    );
+    let evidence: Value = serde_json::from_str(&assembled)?;
+    assert_eq!(evidence["plan_digests"], json!(digests));
+    assert_eq!(
+        evidence["selected_plan_set_wait"]["plans"]
+            .as_array()
+            .map(Vec::len),
+        Some(2)
+    );
+    assert_eq!(
+        evidence["selected_plan_set_wait"],
+        full["selected_plan_set_wait"]
+    );
+    Ok(())
+}

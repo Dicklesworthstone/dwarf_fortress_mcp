@@ -1,5 +1,62 @@
 # Implementation Status
 
+## Unreleased — Retain one passive Task for an entire original project set
+
+The modern laboratory wait registration now accepts `as_task: true` with one
+to eight `plan_digests` and `plan_policy: "all"|"any"`, defaulting to `all`.
+An explicit session and zero, null or omitted ticks are required. This creates
+one process-local monitor under the existing one-active-monitor limit; all
+256 retained record slots remain shared with scalar observers and commit Tasks.
+Existing scalar descriptor serialization and the eleven-tool surface are
+preserved.
+
+The complete selection is admitted under current Observe/Query, verified live
+or recovered original custody, and shared source, proof, action, deadline and
+output bounds. Admission repeats at Task creation. Each admitted requested and
+actual identity, original object and owner is retained independently of outcome
+truth and checked before every later successful observation. A missing source,
+changed alias or lost custody retains that historical binding with unknown
+current truth and physical state; it cannot silently change membership or reuse
+an earlier success.
+
+Each inspection reads all originals under one session lock and the same current
+frontier. `all` requires simultaneous current completion; `any` requires one
+current completion. Exceptional member outcomes take precedence, and active or
+unknown work in unfinished peers remains explicit in aggregate `physical_work`
+and per-member outcomes. Once terminal, the Task's observation evidence stays
+immutable at its recorded anchor.
+
+The inspector is passive: it cannot advance time, poll actions, dispatch
+successors, hydrate archived snapshots, capture reserve endpoints, publish
+durable state or change semantic request counters. An exact uncaptured reserve
+horizon remains pending and recommends the same explicit foreground set with
+zero ticks. Missed horizons and first false/unknown endpoints retain their
+original evidence meaning. Progress recommendations respect current and endpoint
+authority and the negotiated time allowance. Cancellation requires current
+Observe and finalizes only this monitor; original receipts, physical work and
+effect ownership remain unchanged.
+
+Full terminal evidence and compact summaries keep all selected identities,
+policy, decisive goal/stage truth, action and physical census, reserve evidence
+and endpoint ownership. Existing digest-checked Task pages retain the complete
+document. The final result envelope must fit before terminal publication.
+
+Sixteen new regression sources cover eight passive inspection cases, four
+request/descriptor/evidence/identity cases, three actual store cancellation and
+admission cases, and one modern stdio lifecycle spanning cancellation, `any`
+completion with an active peer, later `all` completion and full evidence-page
+reconstruction. All 66 request-schema cases passed (27 accepted, 39 rejected).
+Independent reciprocal source review, scoped Rust formatting and whitespace
+checks passed. Rust compilation and these new tests remain unqualified: the
+executable and separate metadata-only attempts both ended with SIGKILL inside
+unchanged Asupersync before MCP compilation. Required repository gate attempts
+on the preceding committed source are recorded in the next section; they do
+not qualify this increment. No native-game or production-admission claim follows.
+
+See [group observation Tasks](docs/LAB_MCP_TASKS.md#retain-one-task-for-several-original-projects)
+and the [machine-readable contract](architecture/laboratory_selected_plan_set_task_v1.json).
+Owner: `df-fastmcp-conformance-5pj.3.1`; executable qualification remains in progress.
+
 ## Unreleased — Coordinate complete original plan sets at exact reserve horizons
 
 The laboratory's existing `fortress_wait` now accepts an explicit set of one to
@@ -44,10 +101,19 @@ coverage exercise the integration boundaries. Independent source review fixed
 prospective endpoint/objective consistency and complete-group guidance before
 publication. All 47 request-schema cases passed and scoped Rust parsing,
 formatting and whitespace checks passed. The executable MCP build was killed
-with SIGKILL in unchanged Asupersync before project compilation; the new Rust
-tests have not executed. Exact metadata and mandatory gate attempts are pending.
-No full-workspace, transport, native-game or production-admission qualification
-is claimed.
+with SIGKILL in unchanged Asupersync before project compilation. A separate
+metadata-only attempt also ended with SIGKILL in that unchanged dependency after
+483.954 seconds, before MCP typechecking. The exact Rust/manifests fingerprint
+stayed unchanged. The new Rust tests have not executed.
+
+The required `scripts/verify.sh` and `scripts/qualify_local.sh` were attempted on
+the clean committed source `2c1e8727cb8dd0316245f8704bb9b229d7cfd352`.
+Verification completed static contracts, bead coverage, Python checks and
+SDK-double native regressions, then stopped at full-workspace formatting
+(98 files with existing formatting differences, before Clippy and Rust tests).
+The separate qualification attempt has not established a successful receipt.
+Its SDK-double checks are not real DFHack/game evidence. No full-workspace,
+transport, native-game or production-admission qualification is claimed.
 
 See [selected original-plan sets](docs/LAB_SELECTED_PLAN_SET_WAIT.md).
 Owner: `df-lab-selected-plan-wait-s4q.1`; qualification remains in progress.

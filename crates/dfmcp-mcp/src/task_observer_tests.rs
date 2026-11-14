@@ -8,6 +8,9 @@ use fastmcp_rust::{
 type TestResult<T = ()> = std::result::Result<T, Box<dyn std::error::Error>>;
 const OBSERVER_SCHEMA: &str = "dfmcp.lab-original-observer-task-work/1";
 
+#[path = "task_group_store_tests.rs"]
+mod group_store;
+
 fn parsed(raw: &str) -> TestResult<Value> {
     Ok(serde_json::from_str(raw)?)
 }

@@ -203,32 +203,36 @@ impl SelectedPlanWait {
     ) -> Result<TaskGoalObservation> {
         let mut selected = Self::from_custody(session, digest, Instant::now())?;
         selected.inspect_current(session, false)?;
+        Ok(selected.retained_observation(session))
+    }
+
+    fn retained_observation(&self, session: &LabSession) -> TaskGoalObservation {
         let now = session.adapter.snapshot().tick.0;
-        let pending = selected.reserve_until.is_some_and(|until| now <= until)
-            && selected.reserve_observation.is_none()
-            && selected.stop.is_none();
-        let truth = if pending || selected.reserve_error.is_some() {
+        let pending = self.reserve_until.is_some_and(|until| now <= until)
+            && self.reserve_observation.is_none()
+            && self.stop.is_none();
+        let truth = if pending || self.reserve_error.is_some() {
             PredicateTruth::Unknown
-        } else if let Some(until) = selected.reserve_until {
-            match selected.reserve_observation.map(|sample| sample.truth) {
+        } else if let Some(until) = self.reserve_until {
+            match self.reserve_observation.map(|sample| sample.truth) {
                 Some(PredicateTruth::False) => PredicateTruth::False,
                 Some(PredicateTruth::Unknown) => PredicateTruth::Unknown,
                 None if now >= until => PredicateTruth::Unknown,
-                None if selected.stop == Some("needs_continuation") => PredicateTruth::False,
-                _ => selected.goal_truth,
+                None if self.stop == Some("needs_continuation") => PredicateTruth::False,
+                _ => self.goal_truth,
             }
         } else {
-            selected.goal_truth
+            self.goal_truth
         };
-        let mut projection = selected.projection(session, true);
+        let mut projection = self.projection(session, true);
         projection["observation_only"] = json!(true);
         projection["reserve_capture_required"] =
-            json!(selected.reserve_until == Some(now) && selected.reserve_observation.is_none());
-        Ok(TaskGoalObservation {
+            json!(self.reserve_until == Some(now) && self.reserve_observation.is_none());
+        TaskGoalObservation {
             truth,
             pending,
             projection,
-        })
+        }
     }
 
     fn from_custody(session: &LabSession, digest: Digest32, started: Instant) -> Result<Self> {
@@ -493,14 +497,24 @@ impl SelectedPlanWait {
         members: &[Self],
         session: &mut LabSession,
     ) -> Result<PlanSetSource> {
-        let first = members
-            .first()
-            .ok_or_else(|| refused("selected plan set is empty"))?;
-        let predicate_node_bound = Self::set_predicate_node_bound(members, session)?;
         for member in members {
             member.check(session)?;
             super::objectives::ensure_reserve_snapshot(session, member.selected.actual)?;
         }
+        Self::admit_retained_set_source(members, session)
+    }
+
+    /// Passive set monitors can consume only snapshots already in the version
+    /// book. The immutable session reference excludes archive hydration and
+    /// every endpoint, action, clock or durable-state publication path.
+    pub(super) fn admit_retained_set_source(
+        members: &[Self],
+        session: &LabSession,
+    ) -> Result<PlanSetSource> {
+        let first = members
+            .first()
+            .ok_or_else(|| refused("selected plan set is empty"))?;
+        let predicate_node_bound = Self::set_predicate_node_bound(members, session)?;
         let mut context = read_context(session);
         let spent = first.started.elapsed().as_nanos().div_ceil(1_000_000);
         if spent >= u128::from(context.budget.max_wall_millis) {
@@ -609,13 +623,32 @@ impl SelectedPlanWait {
         session: &LabSession,
         source: &PlanSetSource,
     ) -> Result<()> {
+        self.inspect_set_member(session, source, true)
+    }
+
+    pub(super) fn observe_set_member(
+        &mut self,
+        session: &LabSession,
+        source: &PlanSetSource,
+    ) -> Result<TaskGoalObservation> {
+        self.inspect_set_member(session, source, false)?;
+        Ok(self.retained_observation(session))
+    }
+
+    fn inspect_set_member(
+        &mut self,
+        session: &LabSession,
+        source: &PlanSetSource,
+        capture_endpoint: bool,
+    ) -> Result<()> {
         charge_set(&mut self.source_inspections, 1)?;
         charge_set(&mut self.inspected_records, source.records)?;
         charge_set(&mut self.inspected_bytes, source.bytes)?;
         self.maximum_source_records = self.maximum_source_records.max(source.records);
         self.maximum_source_bytes = self.maximum_source_bytes.max(source.bytes);
-        self.inspect_admitted_current(session, true)?;
-        if self.reserve_observation.is_some()
+        self.inspect_admitted_current(session, capture_endpoint)?;
+        if capture_endpoint
+            && self.reserve_observation.is_some()
             && self
                 .original(session)?
                 .selected_wait_reserve_observation

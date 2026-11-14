@@ -43,6 +43,23 @@ def main() -> None:
         ({"plan_digests": selectors["plan_digests"], "max_game_ticks": -1}, False),
         ({"plan_digests": selectors["plan_digests"], "unknown": True}, False),
     ])
+    owner = "1" * 32
+    for selector in ("plan_digest", "plan_digests"):
+        for ticks in (None, 0):
+            cases.append(({"session_id": owner, selector: selectors[selector],
+                           "as_task": True, "max_game_ticks": ticks}, True))
+        for extra in ({"max_game_ticks": 1}, {"session_id": None},
+                      {"as_task": "true"}, {"as_task": None}):
+            cases.append(({"session_id": owner, selector: selectors[selector],
+                           "as_task": True, **extra}, False))
+        cases.append(({selector: selectors[selector], "as_task": True}, False))
+    cases.extend([
+        ({"as_task": False, "max_game_ticks": 10}, True),
+        ({"session_id": owner, "as_task": True}, False),
+        ({"session_id": owner, "watch_ids": selectors["watch_ids"], "as_task": True}, False),
+        ({"session_id": owner, "plan_digests": selectors["plan_digests"],
+          "plan_policy": "any", "as_task": True}, True),
+    ])
     cases.extend((example, True) for example in schema["examples"])
     for request, accepted in cases:
         if validator.is_valid(request) != accepted:

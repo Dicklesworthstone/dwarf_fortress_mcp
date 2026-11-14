@@ -63,8 +63,10 @@ never unpauses, prepares a continuation or cancels another project.
 
 A zero-tick request inspects the current frontier and may capture explicitly
 selected exact reserve endpoints after complete admission. It advances no time
-and dispatches no successor. Passive observation Tasks continue to select one
-original with `plan_digest`; group progression uses this foreground wait.
+and dispatches no successor. Add `as_task: true` with zero or omitted ticks to
+retain one passive Task for the same set and policy. Its reads and cancellation
+leave original work unchanged; explicit foreground waits supply time and endpoint
+capture. See [group observation Tasks](LAB_MCP_TASKS.md#retain-one-task-for-several-original-projects).
 
 ## Complete publication and durable endpoints
 

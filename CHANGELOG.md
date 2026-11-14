@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased — Monitor complete original project sets with one passive Task
+
+- Extend negotiated `fortress_wait(as_task=true)` with `plan_digests` and
+  `plan_policy: all|any`, retaining one monitor for up to eight original projects.
+- Observe the entire set at one current frontier without progressing the clock,
+  polling actions, hydrating archives, capturing endpoints or dispatching work.
+  Explicit foreground set waits provide progression and exact endpoint capture.
+- Bind every requested/actual original and its immutable object and owner at
+  creation; recheck that binding before each published observation. Lost custody
+  preserves admitted identities with unknown current proof.
+- Keep unfinished peers and their aggregate physical work visible after `any`
+  completion. Cancellation finalizes only the monitor under current Observe
+  authority and leaves every original receipt and physical action unchanged.
+- Preserve all decisive member outcomes in bounded results and retain the full
+  immutable evidence in digest-checked pages. Existing scalar descriptor bytes,
+  eleven tools, one active monitor and 256 retained records are unchanged.
+- Add sixteen regression tests across passive inspection, strict request and
+  descriptor parsing, identity retention, real store cancellation/capacity and
+  modern stdio lifecycle/evidence pages. All 66 request-schema cases pass;
+  independent source review, scoped Rust formatting and whitespace checks pass.
+  These new Rust tests remain unexecuted: both MCP compilation attempts stopped
+  in unchanged Asupersync. No runtime or full qualification is claimed.
+
 ## Unreleased — Coordinate complete original laboratory projects
 
 - Add explicit `plan_digests` and `plan_policy: all|any` to the existing wait
@@ -17,9 +40,12 @@
 - Add thirteen public-facade regressions, two replay tests, passive Task boundary
   checks and actual modern stdio coverage. All 47 request-schema cases pass;
   source review and scoped Rust parsing/formatting passed. The executable build
-  was SIGKILLed in unchanged Asupersync before MCP compilation. Further exact
-  metadata and mandatory gate attempts are pending; no Rust execution or full
-  qualification claim is made.
+  was SIGKILLed in unchanged Asupersync before MCP compilation. A separate
+  metadata-only check was also killed in that dependency before MCP typechecking,
+  with unchanged source fingerprints. Both required gate scripts were attempted
+  on the clean committed source; verification stopped at existing workspace
+  formatting differences before Clippy/Rust tests. No Rust execution or full
+  qualification is claimed.
 
 ## Unreleased — Refuse conflicting live cancellation before any effect
 

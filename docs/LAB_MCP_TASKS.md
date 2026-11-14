@@ -9,6 +9,8 @@ Use `fortress_wait(plan_digest=..., as_task=true)` to attach a new passive Task
 to an existing original, including a verified durable recovered original.
 That second kind of Task observes the original without acquiring its effect
 or cancellation ownership.
+Use `fortress_wait(plan_digests=[...], plan_policy="all"|"any", as_task=true)`
+to retain one passive monitor for a complete original-plan set.
 
 This is process-local laboratory execution. It does not admit a live DFHack
 tuple, add a production protocol, or qualify native game behavior. Task handles
@@ -117,6 +119,7 @@ detail and terminal evidence:
 |---|---|---|---|
 | `fortress_commit(as_task=true)` | `commit_original` | `original_plan` | Retains the original commit and authorized drain behavior. |
 | `fortress_wait(plan_digest=..., as_task=true)` | `observe_original` | `monitor_only` | Observes the exact original; commits, clock changes, replacement actions and physical drains are never dispatched by this Task. |
+| `fortress_wait(plan_digests=[...], plan_policy=..., as_task=true)` | `observe_original_set` | `monitor_only` | Observes the complete selected set at one current frontier; each original keeps its existing effect ownership. |
 
 An observation Task consumes only already-retained evidence. Its creation,
 supervisor wakeups, reads and cancellation do not advance time, poll actions,
@@ -145,6 +148,82 @@ The original action receipts and physical work remain unchanged. Its
 projection can separately identify the current session as the original owner.
 Recovered projections always retain the historical owner and state that
 dispatch handles were not restored.
+
+## Retain one Task for several original projects
+
+The same negotiated wait tool can retain one monitor for one to eight distinct
+originals. Supply an explicit session, `plan_digests`, `as_task: true` and an
+optional `plan_policy` of `all` (default) or `any`. Omit `max_game_ticks` or set
+it to zero. Scalar plan and watch selectors are mutually exclusive with the set.
+
+```json
+{
+  "name": "fortress_wait",
+  "arguments": {
+    "session_id": "<current session ID>",
+    "plan_digests": ["<first original digest>", "<second original digest>"],
+    "plan_policy": "all",
+    "max_game_ticks": 0,
+    "as_task": true
+  }
+}
+```
+
+The descriptor `dfmcp.lab-original-set-observer-task-work/1` preserves the
+caller's array order and policy. Current outcomes retain paired requested and
+actual original identities in canonical actual-digest order. Admission checks
+the whole set both before requesting a Task and at the store creation boundary:
+current Observe/Query, live or verified recovered custody, distinct actual
+originals, and complete shared source, proof, action, time and output bounds.
+
+Creation pins the admitted requested/actual identities, original object digests
+and owners independently of changing outcomes. Every later successful view must
+match that binding. If custody or alias resolution becomes unavailable or
+contradictory, the failure keeps every admitted identity, labels its anchor as
+historical and reports unknown current proof and physical state. It does not
+substitute a new original or carry forward old success as current evidence.
+
+Each supervisor observation evaluates every member at the same current frontier.
+`all` requires all originals to be complete together; `any` requires at least
+one. Earlier member success is reevaluated while the monitor is active. An
+exceptional outcome in any selected member takes precedence and retains every
+attention cause. Completion with `any` can coexist with unfinished physical
+work in other selected originals; their identities, current outcomes and work
+states remain visible. Neither completion nor cancellation stops those peers.
+Once terminal, the Task retains its immutable evidence at that observation
+anchor; later world changes do not rewrite historical Task results.
+
+This monitor is passive throughout creation, polling, reads and cancellation.
+It does not advance time, poll actions, dispatch successors, hydrate archived
+snapshots, capture reserve endpoints, write durable history or allocate semantic
+request counters. At an exact uncaptured reserve horizon it remains pending and
+recommends an explicit foreground wait on the same set with zero ticks. After
+a missed horizon, missing evidence stays missing; a first false/unknown endpoint
+cannot be replaced by later stock. A required archived snapshot absent from the
+current version book remains unavailable until an explicit foreground operation
+loads it.
+
+To make progress, call `fortress_wait` with the same `plan_digests` and policy,
+`as_task` omitted or false, and a bounded positive time allowance when currently
+authorized. The foreground set clips to each selected reserve horizon. Inspect
+the retained Task with `tasks/get` or its existing session resource afterwards.
+
+The terminal result uses `dfmcp.lab-original-set-observer-task/1`; a fitted result
+uses `dfmcp.lab-original-set-task-summary/1`. Both retain
+`selected_plan_set_wait`, all selected identities and aggregate work facts.
+Bounded summaries preserve every member's decisive original/stage goal, action,
+physical and reserve outcome; complete evidence remains available through the
+existing digest-checked evidence pages. `monitor_kind: "observe_original_set"`
+and `cancellation_scope: "monitor_only"` identify ownership explicitly. Task
+cancellation needs current Observe and finalizes only the monitor, issuing no
+physical-quiescence certificate and changing no original receipt.
+
+This is one Task under the existing one-active-monitor and 256-retained-record
+limits. It does not add workers or change the upstream supervisor lifetime.
+Existing scalar observer and commit Task descriptors retain their original
+serialized forms. See the
+[group observer contract](../architecture/laboratory_selected_plan_set_task_v1.json)
+and [foreground original-plan sets](LAB_SELECTED_PLAN_SET_WAIT.md).
 
 ## Observe progress and prove completion
 
@@ -357,7 +436,7 @@ not process-local Task identities, Task notifications or native game behavior.
 ## Capacity and retention
 
 The first implementation admits **one active task monitor per server process**
-and retains at most **256 task records**, shared by both commit and observation
+and retains at most **256 task records**, shared by commit, scalar observation and set observation
 Tasks. The upstream runner owns one active
 supervisor handoff at a time, and this bound is enforced before dispatch so a
 second accepted task cannot starve behind an unfinished monitor. Ordinary
