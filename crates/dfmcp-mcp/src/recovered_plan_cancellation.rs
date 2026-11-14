@@ -74,6 +74,9 @@ struct Selection {
     archive_digest: Digest32,
     custody: Value,
     started: Instant,
+    inspected_bytes: u64,
+    inspected_records: u64,
+    physical_effects: usize,
 }
 
 fn needs_drain(row: &RecoveredStepCustody) -> bool {
@@ -304,6 +307,10 @@ fn select_at(
         archive_digest: archive.object_digest,
         custody: custody.evidence_json()?,
         started,
+        inspected_bytes: bytes.saturating_add(archive_bytes.len() as u64)
+            .saturating_add(custody.bytes()? as u64),
+        inspected_records: records,
+        physical_effects: effects,
     })
 }
 
@@ -354,6 +361,7 @@ fn publish_stop(session: &mut LabSession, receipt: RecoveredWorkDrainReceipt) ->
             format!("recovered physical work was stopped but durable publication failed: {fault}"),
         ));
     }
+    super::remember_version(session);
     Ok(())
 }
 
@@ -397,6 +405,8 @@ fn cancel_selected(
                             "emergency pause is current but durable publication failed: {fault}"
                         ),
                     ));
+                } else {
+                    super::remember_version(session);
                 }
             }
             Err(error) => failure = Some(error),
@@ -519,6 +529,10 @@ fn cancel_selected(
 #[path = "recovered_scope_cancellation.rs"]
 mod scopes;
 pub(super) use scopes::oldest_open_plan;
+
+#[path = "recovered_session_cancellation.rs"]
+mod session_scope;
+pub(super) use session_scope::cancel_session;
 
 /// The explanation pin includes current grants, custody and the full selection.
 /// Inspecting this offer never polls a monitor or publishes durable progress.

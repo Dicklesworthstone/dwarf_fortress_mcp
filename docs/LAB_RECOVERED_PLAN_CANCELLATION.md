@@ -2,8 +2,9 @@
 
 A durable laboratory restart retains original plans, anchored action receipts,
 and physical work, while discarding the old process's action handles and grants.
-The exact original can now be stopped through the ordinary cancellation tool
-under freshly negotiated authority.
+Original work can be stopped through the ordinary cancellation tool under
+freshly negotiated authority. Select one exact original, discover the oldest
+unfinished original, or drain the complete current session selection.
 
 ```json
 {
@@ -57,6 +58,59 @@ This is deterministic laboratory functionality under
 `df-cancellation-progress-certificates-vvw`. Native DFHack cancellation and
 production admission are separate boundaries.
 
+## Drain recovered and newly committed work together
+
+Use session scope to stop every eligible recovered original and every original
+currently owned by the requesting live session:
+
+```json
+{
+  "tool": "fortress.cancel",
+  "arguments": {
+    "session_id": "<current recovered session>",
+    "scope": "session",
+    "mode": "stop_future_steps"
+  }
+}
+```
+
+The coordinator reconstructs live custody from complete original commit
+receipts, including canonical aliases, instead of trusting only the volatile
+open-action list. It verifies the full recovered selection and current scoped
+authority for every selected original before stopping anything. Source, census,
+action, output and wall-time bounds apply to the complete call, including the
+final proof and possible cancellation-history growth. If the accumulated source
+cannot fit, use `oldest_open_plan` or one exact original to drain a smaller
+selection. A missing grant or invalid older original cannot leave newer work
+stopped by a partial preflight.
+
+The drain stops newer originals before older originals and reverses original
+step order within each one. Every physical stop is published before the next
+effect. Terminal historical proof and already-completed game progress remain
+intact. No deferred step is dispatched, no old handle is restored, and the
+pending review and latest-plan orientation remain unchanged. The session stays
+open after the drain.
+
+Other live members retain their own work. Unknown or untracked work is never
+adopted and prevents a complete session certificate. Recovered compensation
+remains unavailable: a mixed selection with recovered work refuses
+`compensate_reversible` before effects.
+
+`emergency_pause_and_drain` admits one shared clock pause plus the whole
+selected drain. An empty selection can still pause the world, including
+untracked work, while reporting that the drain is incomplete. Invalid selected
+custody or insufficient authority/budget refuses before that pause.
+
+Session responses declare `selection_scope: "session_originals"` and retain
+`selected_plans_digest`, which identifies the complete admitted original set.
+Aggregate progress distinguishes original plans, live actions, recovered steps,
+completed stops, and remaining work. Final certification requires a fresh
+complete selected census, quiet exact physical identities, no unresolved
+untracked work, and confirmed durable publication. A failed publication retains
+actual partial progress and the full selection digest, stops subsequent effects,
+and leaves the certificate null. These fields survive the minimum admitted
+1,500-token response even when detailed per-original history is omitted.
+
 ## What the stop changes
 
 The operation stops the original's remaining mining, resource harvesting,
@@ -70,10 +124,11 @@ its original state and proof anchor; if its physical work is still running,
 that work is stopped with separate evidence. Positive archived nondispatch
 remains nondispatch, and deferred steps are never started by cancellation.
 
-The selected scope contains only the exact original plan. Other originals,
-continuation descendants, and the pending review remain independent. Selection
-does not reconstruct dispatch handles, adopt untracked work, or retry a prior
-effect.
+An exact or oldest-original selection contains only that original plan.
+Other originals and continuation descendants remain independent. Session scope
+explicitly includes every eligible original in its complete selection, while
+the pending review remains independent. Selection does not reconstruct dispatch
+handles, adopt untracked work, or retry a prior effect.
 
 `emergency_pause_and_drain` additionally pauses the shared clock under current
 ControlClock authority, publishes that frontier, and then stops the selected
@@ -95,7 +150,8 @@ The complete selection is admitted before any stop or emergency pause:
 - Spatial and entity ownership are checked against current leases. Expired
   lease time does not excuse another owner's unresolved physical work.
 - Unknown physical identity, conflicting untracked work, incomplete or ambiguous
-  custody, and foreign live ownership refuse the selection.
+  custody, and foreign ownership of selected effects refuse the selection.
+  Known work owned by another live session remains outside session scope.
 - Withdrawn and restore-abandoned originals are not eligible. Recovery accepts
   the exact sealed digest and does not infer former live request aliases.
 - The complete world, original source, archived custody, and step/ownership

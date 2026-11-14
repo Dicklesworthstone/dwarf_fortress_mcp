@@ -20,8 +20,9 @@ open work, the pending review, or a Task monitor.
 The placeholder digest must be replaced with exactly 64 lowercase hexadecimal
 digits. `last_action` and `plan` retain their live-handle meanings.
 `oldest_open_plan` selects one oldest unfinished original across verified
-durable recovery and current live work, while `session` selects the session's
-retained live action set. Live originals support all three existing cancellation modes.
+durable recovery and current live work. `session` selects all eligible recovered
+originals and all complete originals owned by the requesting live session.
+Live-only selections support all three existing cancellation modes.
 An explicit `emergency_pause_and_drain` also pauses the shared fortress clock
 under current clock authority; ordinary `stop_future_steps` needs no clock
 advance or clock grant.
@@ -61,13 +62,38 @@ later effects and reports the uncertainty; it does not continue the drain or
 invent durable success. A later refusal to stop work likewise retains the pause
 and its receipt.
 
-Recovered carried work remains a separate obligation. Pausing it does not
-restore old dispatch or cancellation handles, stop its physical effects, or
-certify quiescence. A session-wide result with unresolved carried or untracked
-work has `drain_progress.quiescent: false` and a null
-`finalize_certificate`. Use an exact recovered `plan:<digest>` request to stop
-eligible original work under fresh scoped authority. Generic session scope
-does not adopt untracked work or recover individual stop ownership.
+Session scope admits the complete mixed recovered/live selection before its
+single pause, then stops eligible physical work under fresh scoped authority.
+It does not restore old dispatch handles or adopt untracked work. A result with
+unresolved carried or untracked work has `drain_progress.quiescent: false` and a
+null `finalize_certificate`. Empty session scope can still pause the world
+without certifying unknown work; malformed selected custody refuses before
+that effect. Use an exact recovered `plan:<digest>` request when only one
+original should stop.
+
+## Complete session selection
+
+Session drainage verifies original commit custody even when volatile open-action
+lists have lost their entries. Retained request aliases are deduplicated by
+their exact original. Recovered originals pass the same complete archive,
+lineage, fresh physical-identity and current-authority checks as exact recovered
+cancellation. Every selected original is admitted before the first stop.
+
+One source/census allowance, action allowance and deadline cover the whole
+request. Stops proceed from newer originals to older originals, with reverse
+step order inside each original. Each physical stop publishes its changed world
+and disposition before another begins. A failed append leaves the actual
+stopped frontier visible, fences further effects and withholds final proof;
+retry cannot treat an unpublished frontier as complete.
+
+The response retains `selection_scope: "session_originals"`,
+`selected_plans_digest`, aggregate original/live/recovered counts, measured
+progress and publication status. A final certificate binds that complete
+selection and its fresh final census. Known work owned by other live members is
+preserved; unknown or untracked work prevents complete session certification.
+The session, pending review and latest-plan orientation remain available.
+See [recovered session drainage](LAB_RECOVERED_PLAN_CANCELLATION.md)
+for the request and durability limits.
 
 ## Complete original selection
 
@@ -82,7 +108,10 @@ selection checks:
   the adapter's original commit, retained step and current action receipt.
 - Current Observe authority and every selected nonquiescent action's original
   scoped capability/risk, plus the aggregate stop/compensation/pause budget.
-  Emergency pause also checks current clock authority before any selected stop.
+  Any selected compensation must independently pass its current capability,
+  risk and scope checks before the drain starts. Unsupported compensation
+  effects refuse at admission. Emergency pause likewise checks current clock
+  authority before any selected stop.
 
 Each adapter effect still rechecks current authority at its own boundary.
 This preflight prevents a known missing capability on an earlier prerequisite

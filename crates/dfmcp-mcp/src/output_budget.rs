@@ -533,6 +533,8 @@ fn cancellation_outcome(payload: &Value) -> Option<Map<String, Value>> {
         "plan_id",
         "selection_scope",
         "selection_origin",
+        "selected_plans_digest",
+        "foreign_live_work_included",
         "original_owner_session_id",
         "dispatch_handles_restored",
         "plan_object_digest",

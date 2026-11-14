@@ -1,5 +1,42 @@
 # Implementation Status
 
+## Unreleased — Drain complete recovered laboratory sessions
+
+`fortress.cancel` with `scope: "session"` now admits the complete union of
+eligible recovered originals and originals owned by the current live session.
+Original commit custody, including retained aliases, reconstructs live selection
+even when volatile open-action lists are missing. Fresh original source,
+physical identity, current grants and aggregate source/action/output/time
+bounds are checked before the first effect. Known work owned by another live
+member remains outside the selection.
+
+One emergency pause can precede the mixed drain, including an empty selection
+with unresolved untracked work. Stops run from newer originals to older ones
+and reverse step order inside each original, without dispatching deferred work,
+advancing game time, rewriting terminal proof or discarding partial progress.
+Each physical stop publishes its new world and disposition before another
+effect. Cancellation owns publication so a trailing implicit write cannot
+invalidate an already-built response.
+
+The complete selection digest, original/live/recovered totals, measured partial
+progress, original error, pause and publication status survive bounded output.
+A fresh final census and confirmed publication are required for a session
+certificate. Unknown or untracked work withholds it; a failed append fences
+further stops and preserves the actual stopped frontier. The pending review,
+latest-plan orientation and open session remain available.
+
+Twelve new public-facade regression sources cover mixed recovery/reopen,
+complete preflight and compensation authority, aggregate emergency pause,
+reverse stop order, durable failure and retry, publication cutoffs, other live
+members and contradictory ownership, unknown/untracked work, minimum-output
+partial receipts and missing volatile handle lists. Independent source review
+corrected publication, ownership, compensation-admission and final-source
+reservation defects; it is recorded separately from execution. The execution host became unavailable
+after repeated dependency compiler termination and disconnects. The new MCP
+tests and final workspace qualification have not run; no passing Rust,
+native DFHack or production-admission result is claimed.
+Owner: `df-cancellation-progress-certificates-vvw`.
+
 ## Unreleased — Discover the oldest unfinished original after laboratory recovery
 
 `fortress.cancel` with `scope: "oldest_open_plan"` now discovers verified

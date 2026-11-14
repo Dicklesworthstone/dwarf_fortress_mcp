@@ -6022,7 +6022,19 @@ fn with_wait_session<T>(
     poisoned: impl FnOnce() -> T,
     body: impl FnOnce(&mut LabSession) -> T,
 ) -> T {
-    if !watch_selected {
+    with_explicit_publication(session, watch_selected, poisoned, body)
+}
+
+/// Effect coordinators that publish every frontier must not acquire an implicit
+/// append after constructing their final receipt. The ordinary admission, owner,
+/// closed-session and shared-world fences remain exactly the same.
+fn with_explicit_publication<T>(
+    session: &Arc<Mutex<LabSession>>,
+    owns_publication: bool,
+    poisoned: impl FnOnce() -> T,
+    body: impl FnOnce(&mut LabSession) -> T,
+) -> T {
+    if !owns_publication {
         return with_session(session, poisoned, body);
     }
     let _admission = match LAB_ADMISSION.read() {
@@ -6592,8 +6604,11 @@ pub(crate) fn cancel_in_scope(
         Ok(value) => value,
         Err(error) => return dfmcp_error_payload("fortress.cancel", &error),
     };
-    with_session(
+    let owns_publication = selected_goal.is_none()
+        && (selected_plan.is_some() || drain_scope.is_some());
+    with_explicit_publication(
         &session,
+        owns_publication,
         || mutex_poisoned_payload("fortress.cancel"),
         |guard| {
             if let Err(error) = durability_gate(guard) {
@@ -6645,6 +6660,9 @@ pub(crate) fn cancel_in_scope(
                 return plan_cancellation::cancel(guard, cancel_mode, digest);
             }
             if let Some(scope) = drain_scope {
+                if scope == "session" {
+                    return recovered_plan_cancellation::cancel_session(guard, cancel_mode);
+                }
                 if scope == "oldest_open_plan" {
                     return recovered_plan_cancellation::oldest_open_plan(guard, cancel_mode);
                 }
@@ -6907,6 +6925,7 @@ fn drain_actions_at(
             return drain_refusal_payload(guard, scope, &actions, &error, Some(&receipt));
         }
         receipt["publication_confirmed"] = json!(true);
+        remember_version(guard);
         Some(receipt)
     } else {
         None
@@ -6920,6 +6939,7 @@ fn drain_actions_at(
     // Never poll eligibility during cancellation: prepared successors must not
     // dispatch. Stop dependents before withdrawing their prerequisites.
     for action_id in actions.iter().rev().copied() {
+        let effect_anchor = guard.adapter.snapshot().anchor();
         let before = match guard.adapter.action_receipt(action_id).cloned() {
             Some(receipt) => receipt,
             None => {
@@ -6981,6 +7001,20 @@ fn drain_actions_at(
             "physical_drain": cleanup,
             "drained": drained,
         }));
+        // Publish a changed physical/disposition frontier before the next stop,
+        // including a request phase whose later finalization refused. A failed
+        // append retains the actual in-memory state and fences later effects.
+        let changed = guard.adapter.snapshot().anchor() != effect_anchor
+            || guard.adapter.action_receipt(action_id).is_none_or(|receipt| receipt.state != before.state);
+        if changed {
+            persist_durable_head(guard);
+            if let Some(fault) = &guard.durability_fault {
+                failure = Some(DfmcpError::new(ErrorCode::AdapterUnavailable,
+                    format!("original cancellation changed state but durable publication failed: {fault}")));
+                break;
+            }
+            remember_version(guard);
+        }
         if let Err(error) = outcome {
             failure = Some(error);
             break;
@@ -7020,8 +7054,8 @@ fn drain_actions_at(
             "original cancellation exhausted its shared wall-time allowance"));
     }
     let session_quiet = scope != "session" || (untracked_quiet && remaining_carried == 0);
-    let quiescent =
-        failure.is_none() && remaining_nonterminal == 0 && remaining_work == 0 && session_quiet;
+    let quiescent = failure.is_none() && guard.durability_fault.is_none()
+        && remaining_nonterminal == 0 && remaining_work == 0 && session_quiet;
     let anchor = anchor_json(&guard.adapter.snapshot().anchor());
     let finalize_certificate = quiescent.then(|| {
         let canonical = json!({
@@ -7062,6 +7096,8 @@ fn drain_actions_at(
             "steps": steps,
             "finalize_certificate": finalize_certificate,
             "observed_anchor": anchor,
+            "publication_confirmed": guard.durability_fault.is_none(),
+            "durability_pending": guard.durability_fault.is_some(),
             "note": "terminal goal receipts remain history; remaining physical work is stopped under fresh authority with separate evidence",
         }).to_string(),
         Some(error) => {
@@ -7077,6 +7113,8 @@ fn drain_actions_at(
             payload["steps"] = json!(steps);
             payload["finalize_certificate"] = serde_json::Value::Null;
             payload["observed_anchor"] = anchor;
+            payload["publication_confirmed"] = json!(guard.durability_fault.is_none());
+            payload["durability_pending"] = json!(guard.durability_fault.is_some());
             payload.to_string()
         }
     }

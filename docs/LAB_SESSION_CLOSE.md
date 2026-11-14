@@ -29,8 +29,13 @@ that closing was recorded in the discarded replay log. An earlier exported
 replay remains a separate private laboratory input.
 
 If work remains, explicitly drain the intended original plan or session first,
-then inspect the result. Terminal Failed or Verified goal receipts do not by
-themselves establish physical quiescence. Stop or finish an active modern Task
+then inspect the result. Session scope can drain verified recovered originals
+and newly committed owned originals together under current authority; a durable
+restart does not require remembered action handles. Its complete selection and
+publication checks must succeed before closing can establish quiet custody.
+See [recovered session drainage](LAB_RECOVERED_PLAN_CANCELLATION.md).
+Terminal Failed or Verified goal receipts do not by themselves establish
+physical quiescence. Stop or finish an active modern Task
 monitor separately; even a monitor that observes only an original goal owns its
 session until its supervisor has returned. Task cancellation scope remains
 independent of session close.

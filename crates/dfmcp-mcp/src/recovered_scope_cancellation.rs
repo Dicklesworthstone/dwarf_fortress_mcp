@@ -9,19 +9,19 @@ use std::collections::BTreeSet;
 use super::super as server;
 use super::*;
 
-struct Discovery {
-    digest: Option<Digest32>,
-    inspected_bytes: u64,
-    inspected_records: u64,
+pub(super) struct Discovery {
+    pub(super) digests: Vec<Digest32>,
+    pub(super) inspected_bytes: u64,
+    pub(super) inspected_records: u64,
 }
 
 /// Recovery originals precede every current-process dispatch: their seals are
 /// in an earlier accepted observation epoch. Within that history, use original
 /// cursor order and the sealed digest as the canonical tie-break, never the
 /// journal map's incidental digest order or the cached carried-work status.
-fn oldest_recovered(session: &LabSession, started: Instant) -> Result<Discovery> {
+pub(super) fn discover_recovered(session: &LabSession, started: Instant, all: bool) -> Result<Discovery> {
     if session.carried.is_empty() {
-        return Ok(Discovery { digest: None, inspected_bytes: 0, inspected_records: 0 });
+        return Ok(Discovery { digests: Vec::new(), inspected_bytes: 0, inspected_records: 0 });
     }
     session.budget.validate()?;
     let context = remaining_context(session, started)?;
@@ -92,6 +92,7 @@ fn oldest_recovered(session: &LabSession, started: Instant) -> Result<Discovery>
         ordered.push((anchor.cursor.epoch, anchor.cursor.sequence, digest));
     }
     ordered.sort_unstable();
+    let mut pending_originals = Vec::new();
     for (_, _, digest) in ordered {
         let entry = original(session, digest)?.resource_goal(session);
         let plan = entry.plan.ok_or_else(|| refused("the original work source became unavailable"))?;
@@ -131,16 +132,19 @@ fn oldest_recovered(session: &LabSession, started: Instant) -> Result<Discovery>
             // Selection never falls through an older unavailable original to
             // whichever newer original happens to be cancellable. Full exact
             // custody, current scope and effect authority are checked next.
-            return Ok(Discovery {
-                digest: Some(digest),
-                inspected_bytes: source_bytes.saturating_add(bytes),
-                inspected_records: source_records.saturating_add(records),
-            });
+            pending_originals.push(digest);
+            if !all {
+                return Ok(Discovery {
+                    digests: pending_originals,
+                    inspected_bytes: source_bytes.saturating_add(bytes),
+                    inspected_records: source_records.saturating_add(records),
+                });
+            }
         }
     }
     check(bytes, records)?;
     Ok(Discovery {
-        digest: None,
+        digests: pending_originals,
         inspected_bytes: source_bytes.saturating_add(bytes),
         inspected_records: source_records.saturating_add(records),
     })
@@ -148,9 +152,9 @@ fn oldest_recovered(session: &LabSession, started: Instant) -> Result<Discovery>
 
 pub(crate) fn oldest_open_plan(session: &mut LabSession, mode: CancelMode) -> String {
     let started = Instant::now();
-    match oldest_recovered(session, started) {
+    match discover_recovered(session, started, false) {
         Ok(oldest) => {
-            let Some(digest) = oldest.digest else {
+            let Some(digest) = oldest.digests.first().copied() else {
                 return server::drain_oldest_live_at(session, mode, started,
                     oldest.inspected_bytes, oldest.inspected_records);
             };

@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased — Drain recovered and current laboratory originals together
+
+- Extend session cancellation to the complete admitted recovered/live original
+  selection, including owned work missing from transient open-action lists.
+- Preflight current custody, scoped authority and one aggregate source, action,
+  output and deadline allowance before the first pause or stop. Preserve other
+  live members and refuse recovered compensation.
+- Stop in reverse original/step order and publish every changed frontier before
+  continuing. Report actual partial progress and fence further effects when
+  durable publication fails; keep publication inside the cancellation boundary.
+- Bind final proof to the complete selected-original set and fresh final census.
+  Preserve that identity, progress, errors and publication status in compact
+  receipts; unknown or untracked work cannot acquire a session certificate.
+- Add twelve public-facade regression sources for mixed durable recovery,
+  emergency action limits, publication failures and cutoffs, complete
+  compensation authority, contradictory ownership and bounded output.
+  Runtime verification remains unavailable after execution-host loss. No live
+  admission or asynchronous region-cancellation completion follows.
+
 ## Unreleased — Discover and stop the oldest recovered laboratory original
 
 - Extend `scope: "oldest_open_plan"` across verified durable recovery and live

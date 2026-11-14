@@ -48,6 +48,16 @@ pub(super) struct Selection {
 /// Admit the complete original action set before the first effect. In particular,
 /// never certify a truncated client-visible receipt as a complete plan drain.
 pub(super) fn select(session: &LabSession, requested: Digest32) -> Result<Selection> {
+    select_custody(session, requested, session.budget.max_actions as usize)
+}
+
+/// A complete source census does not spend an effect allowance on already quiet
+/// history. The aggregate coordinator separately admits every selected action.
+pub(super) fn select_for_census(session: &LabSession, requested: Digest32) -> Result<Selection> {
+    select_custody(session, requested, MAX_ACTIONS)
+}
+
+fn select_custody(session: &LabSession, requested: Digest32, action_limit: usize) -> Result<Selection> {
     session.budget.validate()?;
     let raw = session.commit_receipts.get(&requested.to_hex()).ok_or_else(|| {
         refused("no original commit owned by this session matches the selected digest; pending plans, restored sources and other sessions do not grant cancellation authority")
@@ -80,7 +90,7 @@ pub(super) fn select(session: &LabSession, requested: Digest32) -> Result<Select
         ));
     }
     if rows.len() > MAX_ACTIONS
-        || rows.len() > session.budget.max_actions as usize
+        || rows.len() > action_limit
         || rows.len() as u64 > u64::from(session.budget.max_entities)
     {
         return Err(DfmcpError::new(
@@ -172,6 +182,30 @@ pub(super) fn authorize(session: &LabSession, selected: &Selection, mode: Cancel
             &scope.entity_ids,
             scope.map_area,
         )?;
+        // The adapter checks the inverse independently even for an undispatched
+        // prepared step. Admit every current grant before a newer original can
+        // be stopped; a terminal original only needs physical cleanup.
+        if mode == CancelMode::CompensateReversible
+            && session.adapter.action_receipt(*id).is_some_and(|receipt| !receipt.state.is_terminal())
+            && let Some(compensation) = &step.compensation
+        {
+            if matches!(compensation, dfmcp_intent::Action::Extension { .. })
+                || !dfmcp_adapter::GameAdapter::identity(&session.adapter)
+                    .capabilities.contains(&compensation.capability())
+            {
+                return Err(DfmcpError::new(ErrorCode::AdapterRejected,
+                    "laboratory adapter cannot execute the compensation action"));
+            }
+            let inverse_scope = compensation.scope();
+            context.authorize(compensation.capability(), compensation.risk(),
+                &inverse_scope.entity_ids, inverse_scope.map_area)?;
+            if compensation.naturally_temporal()
+                && session.adapter.action_work_state(*id)? != dfmcp_intent::EffectWorkState::NeverDispatched
+            {
+                return Err(DfmcpError::new(ErrorCode::CancellationIncomplete,
+                    "temporal compensation requires a separate bounded plan and proof"));
+            }
+        }
     }
     if mode == CancelMode::EmergencyPauseAndDrain {
         super::authorize_entry(&context, Capability::ControlClock, RiskTier::Reversible)?;
