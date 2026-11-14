@@ -202,7 +202,7 @@ fn dispatch(adapter: &mut MemoryAdapter, action: Action, id: u128) -> Result<(Ac
     Ok((committed.actions[0].action_id, entity))
 }
 
-fn manufactured(job: &str) -> Result<(MemoryAdapter, EntityId)> {
+pub(super) fn manufactured(job: &str) -> Result<(MemoryAdapter, EntityId)> {
     let mut adapter = world()?;
     let (action, order) = dispatch(
         &mut adapter,

@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased — Stop exact recovered laboratory effects under fresh authority
+
+- Add adapter inspection and physical drainage for archived mining, harvesting,
+  construction, furniture-placement and finite-order work after durable restart.
+- Bind cleanup to the exact original step, original custody and intact recovery
+  lineage. Require current scoped authority and a complete bounded source before
+  changing the world; restore and external injection invalidate that lineage.
+- Preserve historical action receipts and partial game progress. Publish fresh
+  before/after stop evidence without recreating dispatch or compensation handles.
+- Add six real-adapter regression cases spanning all supported temporal families,
+  fresh grants, quiet repeats, wrong identities/lineage and exhausted bounds.
+  Scoped formatting and whitespace checks pass; execution is in progress.
+- This is the adapter foundation for exact recovered-plan cancellation. The
+  public coordinator and its durable publication checks follow separately;
+  native cancellation and live admission remain outside this increment.
+
 ## Unreleased — Guard laboratory setters with exact relations and quantities
 
 - Accept bounded typed relation/quantity preconditions and all/any/not for raw

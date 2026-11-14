@@ -1,5 +1,32 @@
 # Implementation Status
 
+## Unreleased — Exact recovered laboratory effect cleanup foundation
+
+The laboratory adapter now accepts a bounded `RecoveredWorkRef` for one exact
+archived temporal step after durable recovery. It independently checks the
+original sealed plan, current anchor and scoped grants, exact physical identity,
+and the retained source-to-recovery lineage before stopping mining, harvesting,
+construction, furniture placement or finite production. Restore and external
+world injection invalidate that lineage. The reference is evidence identity;
+the calling coordinator must still prove complete durable custody and ownership.
+
+The complete original archive and current world are admitted before recursive
+hashing or cloning. Byte, record, value-node, nesting and shared wall-time limits
+fail before mutation. A shadow-world stop preserves partial game progress and
+historical receipts, publishes fresh before/after evidence atomically, and
+creates no dispatch or compensation handle. Quiet repeats produce no new effect.
+
+Six focused real-adapter regression cases cover all five temporal families
+(including both wood and plant harvesting), current grants after original
+expiry, exact scopes, quiet repeats, tampered identity, restore/injection/second
+recovery, source bounds and cursor exhaustion. Scoped nightly Rustfmt and
+whitespace checks pass. Rust execution is in progress; no full-workspace or
+live/native qualification is claimed. The public recovered-plan coordinator is
+a separate implementation increment.
+
+Owner: `df-cancellation-progress-certificates-vvw`; the broader cancellation
+bead remains in progress.
+
 ## Unreleased — Caller guards survive independent laboratory setter changes
 
 Raw SetLabor and SetBurrowMembership steps now accept optional bounded

@@ -65,7 +65,7 @@ fn stock_field(resource: HarvestResource) -> &'static str {
     }
 }
 
-fn world(resource: HarvestResource) -> MemoryAdapter {
+pub(super) fn world(resource: HarvestResource) -> MemoryAdapter {
     let fortress = FortressId::new(718);
     let settings = effects::fortress_settings_entity_id(fortress);
     let mut graph = WorldGraph::default();

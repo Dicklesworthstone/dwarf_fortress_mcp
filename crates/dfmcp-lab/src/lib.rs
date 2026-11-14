@@ -21,8 +21,10 @@ use dfmcp_intent::{
 pub mod durable;
 pub mod event_history;
 pub mod faults;
+mod recovered_effect_drain;
 
 pub use faults::{Boundary, CampaignReport, Fault, FaultPoint, FaultSchedule};
+pub use recovered_effect_drain::{RecoveredWorkDrainReceipt, RecoveredWorkRef};
 
 #[cfg(test)]
 #[path = "civilian_release_tests.rs"]
@@ -33,6 +35,8 @@ mod effect_drain_tests;
 mod furniture_lifecycle_tests;
 #[cfg(test)]
 mod harvest_lifecycle_tests;
+#[cfg(test)]
+mod recovered_effect_drain_tests;
 
 use dfmcp_world::{Predicate, PredicateEvidence, WorldGraph, WorldSnapshot, execute_bounded_query};
 
@@ -89,6 +93,8 @@ pub enum LabEvent {
     CancelFinalized(ActionId, CommitState),
     /// Independently authorized cleanup of work whose goal proof is terminal.
     EffectDrained(ActionId, StateAnchor),
+    /// Current cleanup of an exact archived step, without recreating a handle.
+    RecoveredEffectDrained(Digest32, StepId, StateAnchor),
     Checkpointed(CheckpointId),
     Restored(CheckpointId),
     SnapshotInjected(StateAnchor),
@@ -134,6 +140,9 @@ pub struct MemoryAdapter {
     transcript: VecDeque<LabEvent>,
     transcript_truncated: bool,
     nonce: u128,
+    /// Exact source and first observation for this recovery. Restore or external
+    /// injection invalidates this lineage along with live execution handles.
+    recovery_origin: Option<(StateAnchor, StateAnchor)>,
 }
 
 impl MemoryAdapter {
@@ -177,6 +186,7 @@ impl MemoryAdapter {
             transcript: VecDeque::new(),
             transcript_truncated: false,
             nonce: 1,
+            recovery_origin: None,
         }
     }
 
@@ -210,6 +220,7 @@ impl MemoryAdapter {
         )?;
         snapshot.refresh_hash();
         let mut adapter = Self::new(snapshot);
+        adapter.recovery_origin = Some((recovered_from, adapter.snapshot.anchor()));
         adapter.record_event(LabEvent::Recovered(adapter.snapshot.anchor()));
         Ok(adapter)
     }
@@ -465,6 +476,7 @@ impl MemoryAdapter {
     }
 
     fn invalidate_active_work(&mut self) {
+        self.recovery_origin = None;
         self.prepared.clear();
         self.plans.clear();
         self.actions.clear();
