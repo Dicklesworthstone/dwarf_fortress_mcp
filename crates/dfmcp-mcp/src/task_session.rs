@@ -4,6 +4,9 @@ use super::*;
 use crate::tasks::McpTaskStatus;
 use serde_json::Value;
 
+#[path = "task_replay.rs"]
+pub(crate) mod replay;
+
 pub(crate) struct PlanTaskView {
     pub(crate) status: McpTaskStatus,
     pub(crate) payload: Value,
@@ -650,120 +653,141 @@ pub(crate) fn cancellation_admission(session_id: &str, digest: &str) -> Result<b
 /// Two separately observable phases. Both operate on the original plan, even
 /// when the session has since committed another plan.
 pub(crate) fn drain(session_id: &str, digest: &str, finalize: bool) -> Result<Value> {
-    with_task_session(session_id, |session| {
-        durability_gate(session)?;
-        let ctx = context_for(session, session.next_request_id);
-        authorize_entry(&ctx, Capability::Observe, RiskTier::ReadOnly)?;
-        authorize_entry(&ctx, Capability::Query, RiskTier::ReadOnly)?;
-        let ids = original_actions(session, digest)?;
-        let mut steps = Vec::with_capacity(ids.len());
-        for id in ids.iter().rev().copied() {
-            let before = session.adapter.action_receipt(id).cloned().ok_or_else(|| {
-                DfmcpError::new(
-                    ErrorCode::Conflict,
-                    "original task action is missing during drain",
-                )
-            })?;
-            let before_work = action_work_json(session, id);
-            let mut effect_drain = Value::Null;
-            if !before.state.is_terminal() {
-                let (_, ctx) = next_context(session)?;
-                if finalize {
-                    session.adapter.finalize_cancel(id, &ctx)?;
-                } else {
-                    session
-                        .adapter
-                        .request_cancel(id, CancelMode::StopFutureSteps, &ctx)?;
-                }
-                session.replay.mark_not_replayable(
-                    "modern MCP Tasks cancellation drained original-plan actions outside the tool-call replay log",
-                );
-            } else if before_work["quiescent"] != true {
-                // A failed deadline or early Verified proof does not stop the
-                // original effect. Request observes and authorizes only; the
-                // separately recorded finalization performs a stop-only drain.
-                let ctx = context_for(session, session.next_request_id);
-                authorize_original_action(session, id, &ctx)?;
-                if finalize {
-                    let (_, ctx) = next_context(session)?;
-                    let receipt = session.adapter.drain_action_work(id, &ctx)?;
-                    effect_drain = effect_drain_json(&receipt);
-                    session.replay.mark_not_replayable(
-                        "modern MCP Tasks cancellation drained original-plan actions outside the tool-call replay log",
-                    );
-                }
-            }
-            release_action_leases(session, id);
-            steps.push(json!({
-                "action_id": id.to_string(), "before": format!("{:?}", before.state),
-                "before_work": before_work, "effect_drain": effect_drain,
-                "proof_receipt_preserved": before.state.is_terminal(),
-            }));
-        }
-        steps.reverse();
-        // Inspect all original identities again at the final anchor, after
-        // every stop. Earlier per-action observations cannot certify the
-        // final state of the whole plan.
-        let mut progress = TaskProgress::default();
-        for (id, row) in ids.iter().copied().zip(steps.iter_mut()) {
-            let after = session
-                .adapter
-                .action_receipt(id)
-                .ok_or_else(session_error)?;
-            let after_work = action_work_json(session, id);
-            progress.observe(after.state, &after_work);
-            row["after"] = json!(format!("{:?}", after.state));
-            row["receipt_digest"] = json!(after.adapter_receipt_digest.to_hex());
-            row["receipt_anchor"] = anchor_json(&after.observed_anchor);
-            row["evidence"] =
-                json!(after.evidence.iter().map(|evidence| json!({
-                "evidence_id": evidence.id.to_string(), "digest": evidence.digest.to_hex(),
-                "kind": format!("{:?}", evidence.kind), "summary": evidence.summary,
-                "anchor": anchor_json(&evidence.anchor),
-            })).collect::<Vec<_>>());
-            row["quiescent"] = json!(after.state.is_terminal() && after_work["quiescent"] == true);
-            row["after_work"] = after_work;
-        }
-        retain_open_actions(session);
-        let anchor = anchor_json(&session.adapter.snapshot().anchor());
-        if finalize && progress.remaining_actions > 0 {
-            return Err(DfmcpError::new(
-                ErrorCode::CancellationIncomplete,
-                "original task actions are not all terminal with proven physical quiescence",
-            ));
-        }
-        let (_, goal) = original_goal(session, digest);
-        let selected = selected_goal(session, digest)?;
-        let proof_status = progress.proof_status(selected.truth, selected.pending);
-        let certificate = if finalize && progress.remaining_actions == 0 {
-            let canonical = json!({"plan_digest": digest, "steps": steps, "anchor": anchor,
-                "proof_status": proof_status.as_str(), "original_goal": goal,
-                "selected_plan_wait":selected.projection,
-                "action_proof_status": progress.action_proof_status().as_str(),
-                "drain_progress": progress.json()});
-            Some(
-                json!({"digest": Digest32::of_bytes(canonical.to_string().as_bytes()).to_hex(),
-                "statement": "every original action receipt is terminal and its registered physical work is quiescent at this anchor; terminal proof receipts are preserved",
-                "proof_status": proof_status.as_str(), "anchor": anchor}),
+    with_task_session(session_id, |session| drain_recorded(session, digest, finalize))
+}
+
+/// Both normal cancellation and checked replay call this under engine ownership.
+fn drain_recorded(session: &mut LabSession, digest: &str, finalize: bool) -> Result<Value> {
+    let before = replay::frontier(session, digest);
+    let result = drain_owned(session, digest, finalize);
+    let (evidence_digest, verified) = replay::session_evidence_digest(&result, session);
+    if !verified {
+        session.replay.mark_not_replayable(
+            "Task replay cannot verify the retained withdrawal proof for owner normalization",
+        );
+    }
+    let event = crate::replay::RecordedTaskDrain {
+        plan_digest: digest.to_owned(),
+        finalize,
+        before,
+        after: replay::frontier(session, digest),
+        ok: result.is_ok(),
+        error_code: result.as_ref().err().map(|error| error.code.as_str().to_owned()),
+        evidence_digest,
+    };
+    session.replay.record_task_drain(event);
+    result
+}
+
+/// The Task store and disposable replayer share this exact effect path.
+/// Recording surrounds it so errors retain any already-applied partial phase.
+fn drain_owned(session: &mut LabSession, digest: &str, finalize: bool) -> Result<Value> {
+    durability_gate(session)?;
+    let ctx = context_for(session, session.next_request_id);
+    authorize_entry(&ctx, Capability::Observe, RiskTier::ReadOnly)?;
+    authorize_entry(&ctx, Capability::Query, RiskTier::ReadOnly)?;
+    let ids = original_actions(session, digest)?;
+    let mut steps = Vec::with_capacity(ids.len());
+    for id in ids.iter().rev().copied() {
+        let before = session.adapter.action_receipt(id).cloned().ok_or_else(|| {
+            DfmcpError::new(
+                ErrorCode::Conflict,
+                "original task action is missing during drain",
             )
-        } else {
-            None
-        };
-        Ok(
-            json!({"stage": if finalize { "finalized" } else { "cancel_requested" },
-            "plan_digest": digest, "steps": steps, "drain_progress": progress.json(),
-            "proof_status": proof_status.as_str(),
-            "action_proof_status": progress.action_proof_status().as_str(),
-            "original_goal": goal,
+        })?;
+        let before_work = action_work_json(session, id);
+        let mut effect_drain = Value::Null;
+        if !before.state.is_terminal() {
+            let (_, ctx) = next_context(session)?;
+            if finalize {
+                session.adapter.finalize_cancel(id, &ctx)?;
+            } else {
+                session
+                    .adapter
+                    .request_cancel(id, CancelMode::StopFutureSteps, &ctx)?;
+            }
+        } else if before_work["quiescent"] != true {
+            // A failed deadline or early Verified proof does not stop the
+            // original effect. Request observes and authorizes only; the
+            // separately recorded finalization performs a stop-only drain.
+            let ctx = context_for(session, session.next_request_id);
+            authorize_original_action(session, id, &ctx)?;
+            if finalize {
+                let (_, ctx) = next_context(session)?;
+                let receipt = session.adapter.drain_action_work(id, &ctx)?;
+                effect_drain = effect_drain_json(&receipt);
+            }
+        }
+        release_action_leases(session, id);
+        steps.push(json!({
+            "action_id": id.to_string(), "before": format!("{:?}", before.state),
+            "before_work": before_work, "effect_drain": effect_drain,
+            "proof_receipt_preserved": before.state.is_terminal(),
+        }));
+    }
+    steps.reverse();
+    // Inspect all original identities again at the final anchor, after
+    // every stop. Earlier per-action observations cannot certify the
+    // final state of the whole plan.
+    let mut progress = TaskProgress::default();
+    for (id, row) in ids.iter().copied().zip(steps.iter_mut()) {
+        let after = session
+            .adapter
+            .action_receipt(id)
+            .ok_or_else(session_error)?;
+        let after_work = action_work_json(session, id);
+        progress.observe(after.state, &after_work);
+        row["after"] = json!(format!("{:?}", after.state));
+        row["receipt_digest"] = json!(after.adapter_receipt_digest.to_hex());
+        row["receipt_anchor"] = anchor_json(&after.observed_anchor);
+        row["evidence"] =
+            json!(after.evidence.iter().map(|evidence| json!({
+            "evidence_id": evidence.id.to_string(), "digest": evidence.digest.to_hex(),
+            "kind": format!("{:?}", evidence.kind), "summary": evidence.summary,
+            "anchor": anchor_json(&evidence.anchor),
+        })).collect::<Vec<_>>());
+        row["quiescent"] = json!(after.state.is_terminal() && after_work["quiescent"] == true);
+        row["after_work"] = after_work;
+    }
+    retain_open_actions(session);
+    let anchor = anchor_json(&session.adapter.snapshot().anchor());
+    if finalize && progress.remaining_actions > 0 {
+        return Err(DfmcpError::new(
+            ErrorCode::CancellationIncomplete,
+            "original task actions are not all terminal with proven physical quiescence",
+        ));
+    }
+    let (_, goal) = original_goal(session, digest);
+    let selected = selected_goal(session, digest)?;
+    let proof_status = progress.proof_status(selected.truth, selected.pending);
+    let certificate = if finalize && progress.remaining_actions == 0 {
+        let canonical = json!({"plan_digest": digest, "steps": steps, "anchor": anchor,
+            "proof_status": proof_status.as_str(), "original_goal": goal,
             "selected_plan_wait":selected.projection,
-            "original_goal_satisfied": selected.truth == PredicateTruth::True && !selected.pending,
-            "original_goal_pending":selected.pending,
-            "remaining_work": progress.remaining_work,
-            "physical_quiescent": progress.remaining_work == 0,
-            "active_work": {"actions": steps.iter().filter(|row| row["quiescent"] != true).collect::<Vec<_>>()},
-            "finalize_certificate": certificate, "observed_anchor": anchor}),
+            "action_proof_status": progress.action_proof_status().as_str(),
+            "drain_progress": progress.json()});
+        Some(
+            json!({"digest": Digest32::of_bytes(canonical.to_string().as_bytes()).to_hex(),
+            "statement": "every original action receipt is terminal and its registered physical work is quiescent at this anchor; terminal proof receipts are preserved",
+            "proof_status": proof_status.as_str(), "anchor": anchor}),
         )
-    })
+    } else {
+        None
+    };
+    Ok(
+        json!({"stage": if finalize { "finalized" } else { "cancel_requested" },
+        "plan_digest": digest, "steps": steps, "drain_progress": progress.json(),
+        "proof_status": proof_status.as_str(),
+        "action_proof_status": progress.action_proof_status().as_str(),
+        "original_goal": goal,
+        "selected_plan_wait":selected.projection,
+        "original_goal_satisfied": selected.truth == PredicateTruth::True && !selected.pending,
+        "original_goal_pending":selected.pending,
+        "remaining_work": progress.remaining_work,
+        "physical_quiescent": progress.remaining_work == 0,
+        "active_work": {"actions": steps.iter().filter(|row| row["quiescent"] != true).collect::<Vec<_>>()},
+        "finalize_certificate": certificate, "observed_anchor": anchor}),
+    )
 }
 
 #[cfg(test)]

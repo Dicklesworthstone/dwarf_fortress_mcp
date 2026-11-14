@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased — Deterministic replay for Task cancellation
+
+- Record original-plan Task cancellation request/finalize phases, including
+  failed partial drains, with exact input/output custody and proof witnesses.
+- Select replay bundle v2 only when engine Task events are present; preserve
+  the v1 tool-only encoding, digest and golden. Observer cancellation remains
+  absent from the engine transcript because it changes no game state.
+- Validate the complete bounded transcript before creating a private session,
+  refuse external shared/durable ownership, and compare event inputs before
+  effects through the existing authorized drain. Localize the first mismatch.
+- Verify and normalize withdrawn-original proof without rewriting published
+  evidence; compare event preconditions and run effects under one owner lock.
+- Add eleven Rust regression tests plus the v2 schema and schema mutations.
+  Execution remains unverified after the execution environment disconnected
+  during dependency compilation. No full-workspace or native admission claim.
+
 ## Unreleased — Pause recovered laboratory work before emergency drains
 
 - Execute explicitly authorized emergency pause for session/plan drains even

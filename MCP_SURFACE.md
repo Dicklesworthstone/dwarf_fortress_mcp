@@ -672,6 +672,14 @@ history remain inspectable. Withdrawal creates no game effect or success claim;
 it refuses active/unknown work and restore-abandoned pursuits. Explain exposes
 a current withdrawal affordance. See [goal withdrawal](docs/LAB_GOAL_WITHDRAWAL.md).
 
+Modern laboratory Task cancellation records its original-plan request and
+finalization phases in replay bundle v2, including partial failures. Replay
+checks exact pre-effect authority, custody and budgets, then runs the same
+authorized drain in a fresh private session and compares the resulting proof.
+Tool-only logs retain v1 unchanged; passive observer cancellation changes no
+engine transcript. Shared/durable sessions remain nonreplayable. See
+[lab Tasks and replay](docs/LAB_MCP_TASKS.md).
+
 ### `fortress.checkpoint`
 
 Creates and verifies a content-addressed recovery point and reports its publication and evidence

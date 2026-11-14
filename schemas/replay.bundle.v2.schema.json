@@ -1,0 +1,349 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dfmcp.local/schemas/replay.bundle.v2.schema.json",
+  "title": "dfmcp.replay.bundle/2",
+  "description": "A bounded private laboratory engine transcript. Tool entries preserve their outcomes and anchors and add the request frontier; task_cancel_phase entries reproduce the existing original-plan request/finalize drain with before/after authority, budget, action/work/lease and request-counter witnesses plus normalized result evidence. Task identities and lifecycle are not replayed. calls_digest = SHA-256(\"dfmcp-replay-bundle-calls/2\\0\" || compact canonical JSON of calls). Complete runtime prevalidation forbids shared/durable opens, malformed later entries and unknown event generations before creating a fresh session. Neither input evidence nor this transcript grants authority.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "server_version",
+    "replayable",
+    "not_replayable_reason",
+    "truncated",
+    "calls_digest",
+    "calls",
+    "note"
+  ],
+  "properties": {
+    "schema": {
+      "const": "dfmcp.replay.bundle/2"
+    },
+    "server_version": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "replayable": {
+      "type": "boolean"
+    },
+    "not_replayable_reason": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 256
+    },
+    "truncated": {
+      "type": "boolean"
+    },
+    "calls_digest": {
+      "$ref": "#/$defs/hex32"
+    },
+    "note": {
+      "type": "string"
+    },
+    "calls": {
+      "type": "array",
+      "maxItems": 4096,
+      "items": {
+        "oneOf": [
+          {
+            "$ref": "#/$defs/call"
+          },
+          {
+            "$ref": "#/$defs/task_drain"
+          }
+        ]
+      },
+      "minItems": 1
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "replayable": {
+            "const": true
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "not_replayable_reason": {
+            "type": "null"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "replayable": {
+            "const": false
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "not_replayable_reason": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "hex32": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "decimal_id": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]{0,19})$"
+    },
+    "anchor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "fortress_id",
+        "epoch",
+        "sequence",
+        "game_tick",
+        "state_hash"
+      ],
+      "properties": {
+        "fortress_id": {
+          "$ref": "#/$defs/decimal_id"
+        },
+        "epoch": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "game_tick": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "state_hash": {
+          "$ref": "#/$defs/hex32"
+        }
+      }
+    },
+    "call": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "seq",
+        "tool",
+        "arguments",
+        "ok",
+        "error_code",
+        "anchor_after",
+        "next_request_after"
+      ],
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "tool": {
+          "enum": [
+            "fortress.open_session",
+            "fortress.observe",
+            "fortress.query",
+            "fortress.plan",
+            "fortress.commit",
+            "fortress.wait",
+            "fortress.cancel",
+            "fortress.checkpoint",
+            "fortress.restore",
+            "fortress.explain",
+            "fortress.doctor"
+          ]
+        },
+        "arguments": {
+          "type": "object",
+          "not": {
+            "required": [
+              "session_id"
+            ]
+          }
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "error_code": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 64
+        },
+        "anchor_after": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/anchor"
+            }
+          ]
+        },
+        "next_request_after": {
+          "$ref": "#/$defs/counter"
+        }
+      }
+    },
+    "counter": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 39,
+      "pattern": "^(0|[1-9][0-9]{0,38})$",
+      "description": "Canonical decimal u128 request counter; reader additionally enforces the exact u128 maximum."
+    },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "max_wall_millis",
+        "max_game_ticks",
+        "max_entities",
+        "max_bytes",
+        "max_output_tokens",
+        "max_actions"
+      ],
+      "properties": {
+        "max_wall_millis": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_game_ticks": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_entities": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_bytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_output_tokens": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_actions": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "frontier": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "anchor",
+        "next_request_id",
+        "authority_digest",
+        "original_actions_digest",
+        "budget"
+      ],
+      "properties": {
+        "anchor": {
+          "$ref": "#/$defs/anchor"
+        },
+        "next_request_id": {
+          "$ref": "#/$defs/counter"
+        },
+        "authority_digest": {
+          "$ref": "#/$defs/hex32",
+          "description": "SHA-256 of dfmcp-task-replay-authority/1 NUL followed by the ordered current grants, risks, scopes, expiries and remaining uses in compact canonical JSON."
+        },
+        "original_actions_digest": {
+          "$ref": "#/$defs/hex32",
+          "description": "SHA-256 of dfmcp-task-replay-original-actions/1 NUL and complete retained original selector, receipt/evidence/physical-work/lease census (at most 64 actions), or exact unavailable-custody diagnostic."
+        },
+        "budget": {
+          "$ref": "#/$defs/budget"
+        }
+      }
+    },
+    "task_drain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "seq",
+        "event",
+        "arguments",
+        "before",
+        "after",
+        "ok",
+        "error_code",
+        "evidence_digest"
+      ],
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "event": {
+          "const": "task_cancel_phase"
+        },
+        "arguments": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "plan_digest",
+            "phase"
+          ],
+          "properties": {
+            "plan_digest": {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/hex32"
+                },
+                {
+                  "not": {
+                    "const": "0000000000000000000000000000000000000000000000000000000000000000"
+                  }
+                }
+              ]
+            },
+            "phase": {
+              "enum": [
+                "request",
+                "finalize"
+              ]
+            }
+          }
+        },
+        "before": {
+          "$ref": "#/$defs/frontier"
+        },
+        "after": {
+          "$ref": "#/$defs/frontier"
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "error_code": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 64
+        },
+        "evidence_digest": {
+          "$ref": "#/$defs/hex32",
+          "description": "SHA-256 of dfmcp-task-replay-evidence/1 NUL and the full typed drain outcome. Five documented direct current-owner paths are normalized. A nested withdrawal proof additionally requires exact verified retained source, terminal census and quiet-frontier custody before its owner/requester inputs are normalized and resealed. A valid local finalization certificate is then rederived from the same normalized material; invalid identities stay distinguishable. Error records retain failure code and message; after witnesses retain partial effects."
+        }
+      }
+    }
+  }
+}

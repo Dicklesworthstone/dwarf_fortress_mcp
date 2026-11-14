@@ -50,7 +50,90 @@ def main():
         assert not validator.is_valid(bundle), f"mutation {index} was accepted"
     accepted = mutated(lambda b: b.update(replayable=False, not_replayable_reason="shared fortress"))
     assert validator.is_valid(accepted)
-    print(f"replay bundle schema: golden valid, {len(rejected)} mutations rejected")
+    v2_rejected = check_task_bundle_schema(golden)
+    print(f"replay bundle schemas: v1 golden valid, {len(rejected)} legacy and {v2_rejected} Task-event mutations rejected")
+
+
+def check_task_bundle_schema(golden):
+    """Synthetic shape fixtures are not execution or live-game evidence."""
+    schema = json.loads((ROOT / "schemas/replay.bundle.v2.schema.json").read_text())
+    Draft202012Validator.check_schema(schema)
+    validator = Draft202012Validator(schema)
+    bundle = copy.deepcopy(golden)
+    bundle["schema"] = "dfmcp.replay.bundle/2"
+    for index, call in enumerate(bundle["calls"]):
+        call["next_request_after"] = str(index + 1)
+    anchor = copy.deepcopy(bundle["calls"][-1]["anchor_after"])
+    frontier = {
+        "anchor": anchor,
+        "next_request_id": "9",
+        "authority_digest": "12" * 32,
+        "original_actions_digest": "34" * 32,
+        "budget": {
+            "max_wall_millis": 2000, "max_game_ticks": 10000,
+            "max_entities": 2000, "max_bytes": 4 * 1024 * 1024,
+            "max_output_tokens": 1500, "max_actions": 64,
+        },
+    }
+    for phase in ["request", "finalize"]:
+        event = {
+            "seq": len(bundle["calls"]),
+            "event": "task_cancel_phase",
+            "arguments": {"plan_digest": "56" * 32, "phase": phase},
+            "before": copy.deepcopy(frontier),
+            "after": copy.deepcopy(frontier),
+            "ok": True, "error_code": None, "evidence_digest": "78" * 32,
+        }
+        bundle["calls"].append(event)
+
+    def v2_digest(calls):
+        compact = json.dumps(calls, separators=(",", ":"), ensure_ascii=False, sort_keys=True)
+        return hashlib.sha256(b"dfmcp-replay-bundle-calls/2\0" + compact.encode()).hexdigest()
+
+    bundle["calls_digest"] = v2_digest(bundle["calls"])
+    assert validator.is_valid(bundle), list(validator.iter_errors(bundle))
+    assert bundle["calls_digest"] != calls_digest(bundle["calls"]), "version domains must differ"
+
+    def changed(edit):
+        value = copy.deepcopy(bundle)
+        edit(value)
+        return value
+
+    mutations = [
+        changed(lambda b: b.update(schema="dfmcp.replay.bundle/3")),
+        changed(lambda b: b["calls"][0].pop("next_request_after")),
+        changed(lambda b: b["calls"][-1].update(event="native_command")),
+        changed(lambda b: b["calls"][-1].update(tool="fortress.cancel")),
+        changed(lambda b: b["calls"][-1]["arguments"].update(phase="dispatch")),
+        changed(lambda b: b["calls"][-1]["arguments"].update(plan_digest="AB" * 32)),
+        changed(lambda b: b["calls"][-1]["arguments"].update(plan_digest="0" * 64)),
+        changed(lambda b: b["calls"][-1]["arguments"].update(session_id="other")),
+        changed(lambda b: b["calls"][-1]["before"].pop("authority_digest")),
+        changed(lambda b: b["calls"][-1]["before"].update(next_request_id="01")),
+        changed(lambda b: b["calls"][-1]["after"].update(original_actions_digest="z" * 64)),
+        changed(lambda b: b["calls"][-1]["before"]["budget"].update(max_bytes=0)),
+        changed(lambda b: b["calls"][-1].pop("evidence_digest")),
+        changed(lambda b: b.update(calls=[])),
+        changed(lambda b: b.update(calls=[copy.deepcopy(b["calls"][0])] * 4097)),
+    ]
+    for index, value in enumerate(mutations):
+        assert not validator.is_valid(value), f"Task event mutation {index} accepted"
+    failed = changed(lambda b: b["calls"][-1].update(ok=False, error_code="capability_denied"))
+    assert validator.is_valid(failed), "failed partial phases remain valid evidence"
+    old_validator = Draft202012Validator(
+        json.loads((ROOT / "schemas/replay.bundle.schema.json").read_text())
+    )
+    assert not old_validator.is_valid(bundle), "old schema must reject /2"
+    assert not validator.is_valid(golden), "new schema must not reinterpret /1"
+    for edit in [
+        lambda b: b["calls"][-1]["before"]["budget"].update(max_bytes=1),
+        lambda b: b["calls"][-1].update(evidence_digest="90" * 32),
+        lambda b: b["calls"][-1]["arguments"].update(phase="request"),
+    ]:
+        value = changed(edit)
+        assert v2_digest(value["calls"]) != bundle["calls_digest"]
+    return len(mutations)
+
 
 
 if __name__ == "__main__":

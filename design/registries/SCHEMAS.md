@@ -22,7 +22,7 @@
 | `dfmcp-profiled-snapshot-v1` | `1` | reject unknown version/profile; preserve opaque optional extensions | source/profile/provenance plus projected canonical state; envelope SHA-256 | `crates/dfmcp-world/src/completeness.rs` |
 | `dfmcp-profiled-capsule-v1` | `1` | exact profiled base; unchanged profile/provenance/extensions; same epoch | bound source and projected anchors, envelope identities, publication tick, and v1 delta | `crates/dfmcp-world/src/completeness.rs` |
 | `dfmcp.ledger.frame` | planned `1` | migration registry | length-delimited canonical frame | phase-two design |
-| `dfmcp.replay.bundle` | planned `1` | reader supports prior majors | sealed manifest + content-addressed blobs | phase-five design |
+| `dfmcp.replay.bundle` | laboratory `1`, `2` | unchanged `/1` bytes; `/2` adds Task drain events and tool request counters; reader validates either closed generation | compact canonical JSON with separate SHA-256 call domains per version; bounded private-session replay | `schemas/replay.bundle.schema.json`, `schemas/replay.bundle.v2.schema.json` |
 
 ## Canonical observation envelopes
 
@@ -43,6 +43,19 @@ projections carry a distinct projected hash and original source anchor; independ
 source verification is required to authenticate a source claim. A nonzero manifest digest does not
 admit a live source. Optional extension bytes remain covered by identity even when their meaning
 is unknown to a reader.
+
+## Laboratory replay generations
+
+Version 1 remains the tool-only laboratory transcript, with its existing golden
+bytes and `dfmcp-replay-bundle-calls/1` digest domain. Version 2 uses the separate
+`dfmcp-replay-bundle-calls/2` domain and records transport-owned original-plan
+Task cancellation request/finalize events, including partial failures. The
+reader validates the complete closed transcript, its domain-specific digest,
+and the 4,096-entry/32 MiB bounds before allocating one fresh private session.
+Shared or durable opens, unknown event versions and incomplete logs cannot
+establish replay equality. Neither generation is a native admission claim or
+the future production ledger/archive format. The exact witness and session
+normalization contract is in `docs/LAB_MCP_TASKS.md`.
 
 ## Evolution rules
 

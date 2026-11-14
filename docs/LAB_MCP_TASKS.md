@@ -307,12 +307,52 @@ original work and an explicit reconciliation diagnostic instead of claiming
 quiescence. The supervisor and stdio server share a caller-owned Asupersync lifetime; no game
 worker is detached.
 
-Transport-owned cancellation changes the engine outside the ordinary tool-call
-replay stream. Until that event is representable in the replay format, a
-session that has executed such a drain marks its exported call log
-`replayable: false` with a specific explanation, and the replayer refuses to
-execute it. It must not claim that a call log omitting cancellation effects can
-reproduce the session.
+Transport-owned cancellation is recorded as two ordered
+`task_cancel_phase` engine events in a `dfmcp.replay.bundle/2` transcript.
+Each event identifies the exact original plan and the `request` or
+`finalize` phase. Recording holds the same engine ownership as the drain and
+retains failed phases, including any partial effects. Both before and after
+witnesses bind the canonical anchor, next request counter, current scoped
+authority, all six source budgets, and the original action receipts, evidence,
+physical work and held leases. The normalized result digest covers the drain
+result or the exact error code and message.
+
+Replay validates the complete bounded transcript before opening a fresh
+private laboratory session. It compares the before witness before attempting
+any cancellation, then calls the same drain helper with the recorded selector
+and phase under that same engine ownership. A mismatched input publishes no
+snapshot history, goal progress or replay event. That helper rechecks current authority and budgets; the transcript
+never supplies replacement grants or action identities. Replay checks the
+outcome, after witness and evidence digest and stops at the first difference.
+A request-counter or anchor gap between a phase and its recorded predecessor,
+a truncated log, or shared/durable external state still makes the export
+nonreplayable.
+
+Five direct typed result locations may replace the current owner session ID with
+`owning_session`: `original_goal.owner_session_id`,
+`original_goal.continuation_request.arguments.session_id`,
+`selected_plan_wait.original_owner_session_id`,
+`selected_plan_wait.continuation_request.arguments.session_id`, and
+`selected_plan_wait.next_step.arguments.session_id`. User text and predicate
+data are never normalized. When the exact original was explicitly withdrawn,
+its nested withdrawal projection must also match verified retained custody:
+the original source, complete terminal census, positive nondispatch evidence
+and archived quiet frontier. Only its current original owner and requesting
+session inputs are replaced by a fixed comparison identity, and its proof is
+resealed through the existing typed withdrawal codec. The published withdrawal
+is unchanged. A missing, foreign or invalid withdrawal proof cannot be
+normalized and makes the export explicitly nonreplayable.
+
+A drain certificate is verified against its original material before its digest
+is rederived over the same normalized material; invalid certificate identities
+remain distinguishable. Withdrawal proof verification and comparison are
+internal replay evidence, not renewed pursuit or authority.
+
+Tool-only sessions retain exactly the existing `dfmcp.replay.bundle/1`
+encoding and digest domain. Version 2 has a separate digest domain and adds
+request counters to tool entries. Passive observation Task cancellation has no
+engine effects and adds no drain events. Replay reproduces engine transitions,
+not process-local Task identities, Task notifications or native game behavior.
 
 ## Capacity and retention
 
@@ -330,10 +370,10 @@ returned. The ordinary conservative session defaults satisfy these bounds.
 Tasks have process-lifetime retention (`ttlMs: null`), bounded by the record
 limit. A time-to-live must not silently erase an unfinished game obligation.
 Once the retained-record limit is reached, new task creation is refused before
-effects; retained evidence remains readable. Larger concurrent supervision,
-restart-persistent task identities and a replay event for transport-owned
-drains remain future work, as do independently observable asynchronous drain
-stages for adapters that cannot drain in one bounded call.
+effects; retained evidence remains readable. Larger concurrent supervision
+and restart-persistent task identities remain future work, as do independently
+observable asynchronous drain stages for adapters that cannot drain in one
+bounded call.
 
 ## Regression entry points
 
@@ -341,6 +381,8 @@ stages for adapters that cannot drain in one bounded call.
 cargo test --locked --offline -p dfmcp-mcp --test tasks_tests
 cargo test --locked --offline -p dfmcp-mcp --lib server::task_session
 cargo test --locked --offline -p dfmcp-mcp --lib task_service::observer_request_tests
+cargo test --locked --offline -p dfmcp-mcp --lib replay::task_tests
+python scripts/test_replay_bundle_schema.py
 cargo test --locked --offline -p dwarf-fortress-mcp --test modern_tasks_golden
 ```
 
@@ -357,6 +399,13 @@ selectors, shared Task capacity, and each upstream store cancellation entry.
 They compare snapshots, request counters and original action receipts before
 and after passive observation and cancellation; physical work must remain
 active when only its monitor is stopped.
+
+The Task replay regressions cover exact export/replay/re-export equality,
+each upstream cancellation entry, preservation of a different active plan and
+pending review, verified withdrawal history, failed and partially applied phases, passive observers,
+before-effect tampering refusal, output evidence divergence, closed input
+validation and truncated or incomplete recording. The schema script checks
+both generations and field-mutation shapes; it is not an execution test.
 
 ## Foreground stop of a selected original plan
 

@@ -27,6 +27,15 @@ pub(super) fn withdrawal_offer(session: &LabSession, digest: Digest32) -> Value 
     withdrawal::offer(session, digest)
 }
 
+/// Replay comparison only: exact retained evidence and its verified
+/// owner-normalized projection. This neither changes nor publishes custody.
+pub(super) fn replay_withdrawal(
+    session: &LabSession,
+    digest: &str,
+) -> Result<Option<(Value, Value)>> {
+    withdrawal::replay_projection(session, digest)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ProductionReserveStatus {
     WorkRequired,

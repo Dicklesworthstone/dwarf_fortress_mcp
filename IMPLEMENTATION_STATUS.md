@@ -1,5 +1,43 @@
 # Implementation Status
 
+## Unreleased — Replay original-plan Task cancellation without losing the transcript
+
+Laboratory replay now records the application-owned request and finalization
+phases used by modern MCP Task cancellation. A transcript containing these
+phases exports `dfmcp.replay.bundle/2`; tool-only transcripts retain the existing
+`dfmcp.replay.bundle/1` encoding and digest. Each event binds the exact original
+plan, before/after canonical anchor and request counter, current scoped
+authority and budgets, original receipt/work/lease custody, outcome and retained
+cancellation evidence. Failed phases are recorded too, including partial
+progress. Passive observer cancellation still changes no engine transcript.
+
+Replay validates the whole bounded transcript before opening one fresh private
+laboratory session. It rejects shared/durable ownership, malformed or unknown
+events and incomplete logs. An event's input witness must match under the same owner lock as the
+existing authorized drain; the first result, frontier or evidence mismatch
+is reported explicitly. Expected witnesses never install authority, create a
+Task handle or reach a native adapter. Only typed references to the owning
+process-local session are normalized; original identities and proof remain
+exact. Finalization certificate integrity is checked before normalization.
+Withdrawn-original proof is normalized only after verifying its complete sealed
+source, terminal census and archived physical frontier; published withdrawal
+and original terminal receipts remain unchanged. A mismatched input publishes
+no history or replay event. An unrecorded predecessor prevents a claim of reproducible event ordering.
+
+Eleven focused Rust regression tests cover both drain phases, all three real
+Task-store cancellation entries, unchanged passive observers and legacy
+exports, refused/partially applied phases, witness/evidence tampering,
+pre-allocation input rejection and incomplete logs. The v1 golden remains
+unchanged. Source review and schema consistency checks are recorded separately
+from execution: the execution environment disconnected during dependency
+compilation and remains unavailable. These new Rust and Python tests have not
+run, and full MCP/workspace/native qualification is unestablished. The exact
+locked dependencies and current nightly were fetched before the interruption;
+no dependency or upstream runtime pin was changed.
+Owners: `df-fastmcp-conformance-5pj.3`,
+`df-replay-equality-campaign-test021-c7c`.
+See `docs/LAB_MCP_TASKS.md`.
+
 ## Unreleased — Emergency pause survives loss of live action handles
 
 Session and plan-scoped emergency drains now pause through a freshly authorized

@@ -48,6 +48,84 @@ pub(super) fn projection(withdrawal: &DurableObjectiveWithdrawal) -> Value {
     })
 }
 
+
+/// Verify retained live private withdrawal custody before normalizing only its
+/// two process-owner inputs for replay evidence. The published certificate and
+/// all original source, action, frontier and nondispatch identities stay intact.
+pub(super) fn replay_projection(
+    session: &LabSession,
+    digest: &str,
+) -> Result<Option<(Value, Value)>> {
+    let mut selected = session.objectives.iter()
+        .filter(|objective| objective.plan_digest.to_hex() == digest);
+    let Some(objective) = selected.next() else {
+        return Err(refused("Task replay withdrawal lost its exact original"));
+    };
+    let Some(withdrawal) = objective.withdrawal.as_ref() else {
+        return Ok(None);
+    };
+    if selected.next().is_some()
+        || objective.verification_error.is_some()
+        || !objective.originating_process
+        || objective.owner_session_id != session.session_id
+        || withdrawal.requester_session_id != session.session_id
+        || session.shared.is_some()
+        || session.durable_scenario.is_some()
+    {
+        return Err(refused("Task replay withdrawal needs its verified private original owner"));
+    }
+    let plan = objective.plan.as_ref()
+        .ok_or_else(|| refused("Task replay withdrawal lost its original seal"))?;
+    if !plan.digest_is_valid() || !plan.id_is_valid()
+        || plan.digest != objective.plan_digest
+        || plan.steps.is_empty() || plan.steps.len() > MAX_STEPS
+        || plan.steps.len() > session.budget.max_actions as usize
+    {
+        return Err(refused("Task replay withdrawal has invalid bounded original custody"));
+    }
+    let mut source = source_record(objective, plan);
+    let mut terminal = DurableCommit {
+        fortress_id: source.fortress_id,
+        plan_digest: source.plan_digest,
+        sealed_state_hash: source.sealed_state_hash,
+        intent_id: source.intent_id,
+        source: source.source.clone(),
+        steps: BTreeMap::new(),
+        step_anchors: BTreeMap::new(),
+    };
+    for step in &plan.steps {
+        let receipt = session.adapter.step_receipt(plan.id, step.id)
+            .ok_or_else(|| refused("Task replay withdrawal lost original terminal evidence"))?;
+        terminal.steps.insert(step.id.get(), terminal_state(receipt.state)?.to_owned());
+        terminal.step_anchors.insert(step.id.get(), receipt.observed_anchor);
+    }
+    complete_census(plan, &terminal)?;
+    withdrawal.validate_source(&source, &terminal)?;
+    if !withdrawal.proof_matches(&source, &terminal) {
+        return Err(refused("Task replay withdrawal proof no longer binds its original evidence"));
+    }
+    let snapshot = session.history.get(&withdrawal.anchor.state_hash)
+        .ok_or_else(|| refused("Task replay withdrawal lost its exact archived frontier"))?;
+    query_budget::admit_sources(&[snapshot], &read_context(session))?;
+    if snapshot.anchor() != withdrawal.anchor || !snapshot.hash_is_valid() {
+        return Err(refused("Task replay withdrawal archived frontier is unverifiable"));
+    }
+    quiet_at(plan, &withdrawal.never_dispatched_steps, snapshot)?;
+
+    // This sentinel exists only inside comparison material. It is never a
+    // current-session identity or authority and is never installed in history.
+    let comparison_owner = SessionId::new(u128::MAX);
+    source.owner_session_id = comparison_owner;
+    let normalized = DurableObjectiveWithdrawal::new(
+        &source, &terminal, withdrawal.anchor, comparison_owner,
+        withdrawal.never_dispatched_steps.clone(),
+    )?;
+    let original = projection(withdrawal);
+    let mut normalized = projection(&normalized);
+    normalized["requester_session_id"] = json!("owning_session");
+    Ok(Some((original, normalized)))
+}
+
 fn source_record(objective: &Objective, plan: &PreparedPlan) -> DurableObjective {
     DurableObjective {
         fortress_id: plan.anchor.fortress_id,

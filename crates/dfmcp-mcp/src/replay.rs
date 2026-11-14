@@ -1,23 +1,26 @@
 //! Deterministic replay bundles for laboratory sessions.
 //!
-//! Every tool call of a laboratory session is recorded with its exact
-//! arguments, its outcome and the canonical anchor it left behind. The log is
-//! exported as a `dfmcp.replay.bundle/1` (`df://session/{id}/replay`), and
-//! [`replay_bundle`] re-executes a bundle in a fresh session and reports the
-//! earliest call whose outcome or resulting anchor differs. Because the
-//! laboratory is deterministic, a divergence localizes a change in semantics
-//! (or a nondeterminism bug) to one call and one field.
+//! Every tool call is recorded with its exact arguments, outcome and canonical
+//! anchor. Tool-only logs retain the unchanged dfmcp.replay.bundle/1 encoding.
+//! Application-owned Task drain phases select /2, adding exact input/output
+//! witnesses and normalized cancellation evidence. Neither format reconstructs
+//! Tasks or reaches a native adapter.
 //!
-//! Sessions that share a fortress or resume durable state depend on inputs
-//! outside their own call log, so their bundles are marked not replayable
-//! rather than replayed into a false divergence.
+//! Shared or durable sessions depend on inputs outside their own call log and
+//! remain nonreplayable. The replayer validates the entire transcript before
+//! opening one fresh private laboratory session.
 
 use dfmcp_core::{Digest32, StateAnchor};
 use serde_json::{Value, json};
 
-/// Schema identifier of a replay bundle.
+#[path = "replay_validation.rs"]
+mod validation;
+
+/// Schema identifier of a tool-only replay bundle.
 pub const BUNDLE_SCHEMA: &str = "dfmcp.replay.bundle/1";
-/// Most calls one session records; later calls mark the log truncated.
+/// Schema identifier of a bundle containing original-plan Task drains.
+pub const TASK_BUNDLE_SCHEMA: &str = "dfmcp.replay.bundle/2";
+/// Most entries one session records; later entries mark the log truncated.
 pub const MAX_RECORDED_CALLS: usize = 4_096;
 /// Largest bundle the replayer accepts.
 pub const MAX_BUNDLE_BYTES: usize = 32 * 1024 * 1024;
@@ -30,12 +33,32 @@ pub(crate) struct RecordedCall {
     ok: bool,
     error_code: Option<String>,
     anchor_after: Option<StateAnchor>,
+    /// Serialized only in /2, preserving every existing /1 byte.
+    next_request_after: u128,
 }
 
-/// A session's bounded call log.
+/// An application-owned engine transition, not a public fortress tool.
+#[derive(Clone, Debug)]
+pub(crate) struct RecordedTaskDrain {
+    pub(crate) plan_digest: String,
+    pub(crate) finalize: bool,
+    pub(crate) before: Value,
+    pub(crate) after: Value,
+    pub(crate) ok: bool,
+    pub(crate) error_code: Option<String>,
+    pub(crate) evidence_digest: String,
+}
+
+#[derive(Clone, Debug)]
+enum RecordedEntry {
+    Tool(RecordedCall),
+    TaskDrain(RecordedTaskDrain),
+}
+
+/// A session's bounded engine transcript.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct ReplayLog {
-    calls: Vec<RecordedCall>,
+    calls: Vec<RecordedEntry>,
     truncated: bool,
     /// Why the log cannot be replayed from its own contents, if it cannot.
     not_replayable: Option<&'static str>,
@@ -44,6 +67,44 @@ pub(crate) struct ReplayLog {
 impl ReplayLog {
     pub(crate) fn mark_not_replayable(&mut self, reason: &'static str) {
         self.not_replayable.get_or_insert(reason);
+    }
+
+    fn has_capacity(&mut self) -> bool {
+        if self.calls.len() < MAX_RECORDED_CALLS {
+            return true;
+        }
+        self.truncated = true;
+        self.mark_not_replayable("the call log exceeded its bound and was truncated");
+        false
+    }
+
+    /// Called under engine ownership, including after a partially applied
+    /// failing phase. A late facade recorder cannot turn an unrecorded
+    /// predecessor into a claimed reproducible ordering.
+    pub(crate) fn record_task_drain(&mut self, event: RecordedTaskDrain) {
+        let predecessor = self.calls.last().map(|entry| match entry {
+            RecordedEntry::Tool(call) => (
+                call.anchor_after.as_ref().map(anchor_json).unwrap_or(Value::Null),
+                json!(call.next_request_after.to_string()),
+            ),
+            RecordedEntry::TaskDrain(event) => (
+                event.after["anchor"].clone(),
+                event.after["next_request_id"].clone(),
+            ),
+        });
+        if predecessor
+            != Some((
+                event.before["anchor"].clone(),
+                event.before["next_request_id"].clone(),
+            ))
+        {
+            self.mark_not_replayable(
+                "Task cancellation encountered an engine transition not yet recorded in call order",
+            );
+        }
+        if self.has_capacity() {
+            self.calls.push(RecordedEntry::TaskDrain(event));
+        }
     }
 }
 
@@ -65,8 +126,7 @@ fn outcome(payload: &str) -> (bool, Option<String>, Option<String>) {
     (ok, code, session)
 }
 
-/// Record one completed tool call against the session it addressed (or, for
-/// `fortress.open_session`, the session it created).
+/// Record one completed facade call against its addressed or created session.
 pub(crate) fn record(
     tool: &'static str,
     session_id: Option<&str>,
@@ -83,9 +143,8 @@ pub(crate) fn record(
         object.remove("session_id");
     }
     if ok && tool == "fortress.open_session" && arguments["existing_session"] == true {
-        // Metadata-only transitions can share a canonical anchor. Bind their
-        // accepted before/after allowances so an out-of-order concurrent log
-        // cannot replay successfully into a different final session budget.
+        // Metadata transitions can share an anchor: bind their accepted
+        // allowances so reordered negotiations cannot claim replay equality.
         let receipt: Value = serde_json::from_str(payload).unwrap_or(Value::Null);
         arguments["previous_max_output_tokens"] =
             receipt["previous_budget"]["max_output_tokens"].clone();
@@ -95,6 +154,7 @@ pub(crate) fn record(
         return;
     };
     let anchor_after = Some(guard.adapter.snapshot().anchor());
+    let next_request_after = crate::server::read_context(&guard).request_id.get();
     let log = &mut guard.replay;
     if ok
         && tool == "fortress.query"
@@ -120,34 +180,52 @@ pub(crate) fn record(
             "watch-selected waits name process-local handles owned by the original session",
         );
     }
-    if log.calls.len() >= MAX_RECORDED_CALLS {
-        log.truncated = true;
-        log.mark_not_replayable("the call log exceeded its bound and was truncated");
+    if !log.has_capacity() {
         return;
     }
-    log.calls.push(RecordedCall {
+    log.calls.push(RecordedEntry::Tool(RecordedCall {
         tool,
         arguments,
         ok,
         error_code,
         anchor_after,
-    });
+        next_request_after,
+    }));
 }
 
-fn calls_json(log: &ReplayLog) -> Value {
+fn calls_json(log: &ReplayLog, task_events: bool) -> Value {
     Value::Array(
         log.calls
             .iter()
             .enumerate()
-            .map(|(seq, call)| {
-                json!({
+            .map(|(seq, entry)| match entry {
+                RecordedEntry::Tool(call) => {
+                    let mut value = json!({
+                        "seq": seq,
+                        "tool": call.tool,
+                        "arguments": call.arguments,
+                        "ok": call.ok,
+                        "error_code": call.error_code,
+                        "anchor_after": call.anchor_after.as_ref().map(anchor_json),
+                    });
+                    if task_events {
+                        value["next_request_after"] = json!(call.next_request_after.to_string());
+                    }
+                    value
+                }
+                RecordedEntry::TaskDrain(event) => json!({
                     "seq": seq,
-                    "tool": call.tool,
-                    "arguments": call.arguments,
-                    "ok": call.ok,
-                    "error_code": call.error_code,
-                    "anchor_after": call.anchor_after.as_ref().map(anchor_json),
-                })
+                    "event": "task_cancel_phase",
+                    "arguments": {
+                        "plan_digest": event.plan_digest,
+                        "phase": if event.finalize { "finalize" } else { "request" },
+                    },
+                    "before": event.before,
+                    "after": event.after,
+                    "ok": event.ok,
+                    "error_code": event.error_code,
+                    "evidence_digest": event.evidence_digest,
+                }),
             })
             .collect(),
     )
@@ -159,18 +237,25 @@ fn calls_digest(calls: &Value) -> String {
     Digest32::of_bytes(&bytes).to_hex()
 }
 
-/// Export a session's log as a replay bundle.
+fn task_calls_digest(calls: &Value) -> String {
+    let mut bytes = b"dfmcp-replay-bundle-calls/2\0".to_vec();
+    bytes.extend_from_slice(calls.to_string().as_bytes());
+    Digest32::of_bytes(&bytes).to_hex()
+}
+
+/// Export a session's log without changing legacy tool-only bundle bytes.
 pub(crate) fn bundle_json(log: &ReplayLog) -> Value {
-    let calls = calls_json(log);
+    let task_events = log.calls.iter().any(|entry| matches!(entry, RecordedEntry::TaskDrain(_)));
+    let calls = calls_json(log, task_events);
     json!({
-        "schema": BUNDLE_SCHEMA,
+        "schema": if task_events { TASK_BUNDLE_SCHEMA } else { BUNDLE_SCHEMA },
         "server_version": env!("CARGO_PKG_VERSION"),
         "replayable": log.not_replayable.is_none(),
         "not_replayable_reason": log.not_replayable,
         "truncated": log.truncated,
-        "calls_digest": calls_digest(&calls),
+        "calls_digest": if task_events { task_calls_digest(&calls) } else { calls_digest(&calls) },
         "calls": calls,
-        "note": "replay with `dwarf-fortress-mcp replay <bundle.json>`; every call is re-executed in a fresh laboratory session and compared by outcome and resulting canonical anchor",
+        "note": "replay with `dwarf-fortress-mcp replay <bundle.json>`; every call is re-executed in a fresh laboratory session and compared by outcome and resulting canonical anchor"
     })
 }
 
@@ -291,34 +376,44 @@ fn divergence(seq: usize, tool: &str, field: &str, expected: &Value, observed: &
     })
 }
 
-/// Re-execute a replay bundle in a fresh laboratory session and report the
-/// earliest divergence by outcome, error code or resulting anchor.
+/// Re-execute a complete transcript in one fresh private laboratory session.
+/// The first mismatch stops replay; event input mismatches stop before effects.
 #[must_use]
 pub fn replay_bundle(bundle: &Value) -> Value {
     let refuse = |reason: String| json!({"ok": false, "replayed": 0, "error": reason});
-    if bundle["schema"] != BUNDLE_SCHEMA {
-        return refuse(format!("not a {BUNDLE_SCHEMA} bundle"));
-    }
+    let task_events = match validation::validate(bundle) {
+        Ok(task_events) => task_events,
+        Err(reason) => return refuse(reason),
+    };
     if bundle["replayable"] != true {
         return refuse(format!(
             "bundle is not replayable: {}",
-            bundle["not_replayable_reason"]
-                .as_str()
-                .unwrap_or("unspecified")
+            bundle["not_replayable_reason"].as_str().unwrap_or("unspecified")
         ));
     }
     let Some(calls) = bundle["calls"].as_array() else {
         return refuse("bundle has no calls array".to_owned());
     };
-    if calls_digest(&bundle["calls"]) != bundle["calls_digest"].as_str().unwrap_or_default() {
+    let observed_digest = if task_events {
+        task_calls_digest(&bundle["calls"])
+    } else {
+        calls_digest(&bundle["calls"])
+    };
+    if observed_digest != bundle["calls_digest"].as_str().unwrap_or_default() {
         return refuse("bundle calls do not match calls_digest".to_owned());
     }
     let mut session: Option<String> = None;
     for (seq, call) in calls.iter().enumerate() {
-        let tool = call["tool"].as_str().unwrap_or_default();
-        if seq == 0 && tool != "fortress.open_session" {
-            return refuse("a bundle must start with fortress.open_session".to_owned());
+        if call["event"] == "task_cancel_phase" {
+            let Some(session_id) = session.as_deref() else {
+                return refuse("Task drain event needs an earlier opened session".to_owned());
+            };
+            if let Some(report) = replay_task_drain(seq, call, session_id) {
+                return report;
+            }
+            continue;
         }
+        let tool = call["tool"].as_str().unwrap_or_default();
         let payload = match invoke(tool, session.clone(), &call["arguments"]) {
             Ok(payload) => payload,
             Err(reason) => return refuse(format!("call {seq}: {reason}")),
@@ -327,19 +422,13 @@ pub fn replay_bundle(bundle: &Value) -> Value {
         if seq == 0 {
             session = created;
         }
-        if json!(ok) != call["ok"] {
-            return json!({
-                "ok": false,
-                "replayed": seq + 1,
-                "first_divergence": divergence(seq, tool, "ok", &call["ok"], &json!(ok)),
-            });
-        }
-        if json!(error_code) != call["error_code"] {
-            return json!({
-                "ok": false,
-                "replayed": seq + 1,
-                "first_divergence": divergence(seq, tool, "error_code", &call["error_code"], &json!(error_code)),
-            });
+        for (field, observed) in [("ok", json!(ok)), ("error_code", json!(error_code))] {
+            if observed != call[field] {
+                return json!({
+                    "ok": false, "replayed": seq + 1,
+                    "first_divergence": divergence(seq, tool, field, &call[field], &observed),
+                });
+            }
         }
         if ok && tool == "fortress.open_session" && call["arguments"]["existing_session"] == true {
             let receipt: Value = serde_json::from_str(&payload).unwrap_or(Value::Null);
@@ -351,8 +440,7 @@ pub fn replay_bundle(bundle: &Value) -> Value {
                 let observed = &receipt[budget]["max_output_tokens"];
                 if !expected.is_u64() || observed != expected {
                     return json!({
-                        "ok": false,
-                        "replayed": seq + 1,
+                        "ok": false, "replayed": seq + 1,
                         "first_divergence": divergence(seq, tool, field, expected, observed),
                     });
                 }
@@ -362,16 +450,22 @@ pub fn replay_bundle(bundle: &Value) -> Value {
             .as_deref()
             .and_then(|id| crate::server::lookup_session_str(id).ok())
             .and_then(|s| {
-                s.lock()
-                    .ok()
-                    .map(|g| anchor_json(&g.adapter.snapshot().anchor()))
+                s.lock().ok().map(|g| {
+                    (anchor_json(&g.adapter.snapshot().anchor()),
+                        json!(crate::server::read_context(&g).request_id.get().to_string()))
+                })
             });
-        let observed = observed.unwrap_or(Value::Null);
-        if observed != call["anchor_after"] {
+        let (anchor_after, next_request_after) = observed.unwrap_or((Value::Null, Value::Null));
+        if anchor_after != call["anchor_after"] {
             return json!({
-                "ok": false,
-                "replayed": seq + 1,
-                "first_divergence": divergence(seq, tool, "anchor_after", &call["anchor_after"], &observed),
+                "ok": false, "replayed": seq + 1,
+                "first_divergence": divergence(seq, tool, "anchor_after", &call["anchor_after"], &anchor_after),
+            });
+        }
+        if task_events && next_request_after != call["next_request_after"] {
+            return json!({
+                "ok": false, "replayed": seq + 1,
+                "first_divergence": divergence(seq, tool, "next_request_after", &call["next_request_after"], &next_request_after),
             });
         }
     }
@@ -383,6 +477,55 @@ pub fn replay_bundle(bundle: &Value) -> Value {
         "note": "every call reproduced its recorded outcome and canonical anchor",
     })
 }
+
+/// Events replay the existing authority-bearing drain with no Task object.
+/// Expected witnesses describe inputs; they never install grants or state.
+fn replay_task_drain(seq: usize, call: &Value, session_id: &str) -> Option<Value> {
+    use crate::server::task_session;
+    let Some(requested) = call["arguments"]["plan_digest"].as_str() else {
+        return Some(json!({"ok":false,"replayed":seq,"error":"missing original plan selector"}));
+    };
+    let observed = match task_session::replay::checked_drain(
+        session_id, requested, call["arguments"]["phase"] == "finalize", &call["before"],
+    ) {
+        Ok(task_session::replay::CheckedPhase::InputDivergence(before)) => {
+            return Some(json!({
+                "ok":false, "replayed":seq,
+                "first_divergence":divergence(seq, "task_cancel_phase", "before", &call["before"], &before),
+                "event_effects_attempted":false,
+            }));
+        }
+        Ok(task_session::replay::CheckedPhase::Executed { result, after, evidence_digest }) => json!({
+            "ok":result.is_ok(),
+            "error_code":result.as_ref().err().map(|error| error.code.as_str()),
+            "after":after,
+            "evidence_digest":evidence_digest,
+        }),
+        Err(error) => {
+            return Some(json!({
+                "ok":false, "replayed":seq,
+                "first_divergence":divergence(
+                    seq, "task_cancel_phase", "before", &call["before"],
+                    &json!({"error_code":error.code.as_str()}),
+                ),
+                "event_effects_attempted":false,
+            }));
+        }
+    };
+    for field in ["ok", "error_code", "after", "evidence_digest"] {
+        if observed[field] != call[field] {
+            return Some(json!({
+                "ok":false,"replayed":seq + 1,
+                "first_divergence":divergence(seq, "task_cancel_phase", field, &call[field], &observed[field]),
+            }));
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+#[path = "replay_task_tests.rs"]
+mod task_tests;
 
 #[cfg(test)]
 mod tests {
