@@ -346,6 +346,17 @@ pub(crate) fn notify_progress() {
     }
 }
 
+/// Foreground close does not cancel a supervisor or discard queued Tasks.
+pub(crate) fn with_session_idle<T>(
+    session_id: &str,
+    publish: impl FnOnce(usize) -> dfmcp_core::Result<T>,
+) -> dfmcp_core::Result<T> {
+    match SERVICE.get() {
+        Some(service) => service.store.with_session_idle(session_id, publish),
+        None => publish(0),
+    }
+}
+
 pub(crate) fn session_tasks(session_id: &str, offset: usize) -> Value {
     match SERVICE
         .get()
@@ -437,6 +448,7 @@ impl ApplicationTaskSupervisor for LabTaskService {
                 ));
             };
             let definition = TaskWork::parse(work.work_descriptor().as_value())?;
+            let _monitor_scope = self.store.monitor_scope(work.task_id())?;
             cx.checkpoint()
                 .map_err(|error| McpError::internal_error(error.to_string()))?;
             if work.is_cancellation_requested()? {

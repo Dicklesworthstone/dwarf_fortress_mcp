@@ -672,6 +672,18 @@ history remain inspectable. Withdrawal creates no game effect or success claim;
 it refuses active/unknown work and restore-abandoned pursuits. Explain exposes
 a current withdrawal affordance. See [goal withdrawal](docs/LAB_GOAL_WITHDRAWAL.md).
 
+Explicit laboratory `mode: "close_session"` with `scope: "session"` and
+`session_id` releases a quiet session under current Observe authority. It
+requires a complete terminal/physical census, no active Task supervisor and a
+fitted final receipt before releasing session/orientation capacity, private
+query/replay/history state, grants and membership. It refuses deferred or
+unknown work and unresolved durable admissions. Other shared members retain
+their world; a last member proves the full adapter index quiet. Durable close
+publishes the current head and preserves the durable store for a fresh reopen.
+Export needed evidence before closing. The latest 32 close receipts support
+process-local idempotent retries; they grant no new authority or goal success.
+See [quiet session close](docs/LAB_SESSION_CLOSE.md).
+
 Modern laboratory Task cancellation records its original-plan request and
 finalization phases in replay bundle v2, including partial failures. Replay
 checks exact pre-effect authority, custody and budgets, then runs the same

@@ -29,11 +29,33 @@ struct TaskRecord {
     final_evidence: Option<Value>,
     terminal_failure: Option<String>,
     dispatch_started: bool,
+    /// The application supervisor future still owns this monitor, even if its
+    /// terminal wire transition has just been published.
+    supervisor_active: bool,
 }
 
 pub(crate) struct LabTaskStore {
     inner: InMemoryFinalTaskStore,
     records: Mutex<BTreeMap<FinalTaskId, TaskRecord>>,
+}
+
+pub(crate) struct MonitorScope {
+    store: Arc<LabTaskStore>,
+    id: FinalTaskId,
+}
+
+impl Drop for MonitorScope {
+    fn drop(&mut self) {
+        // This only releases process-local supervisor bookkeeping. Poisoning
+        // still makes later ordinary store access fail closed.
+        let mut records = match self.store.records.lock() {
+            Ok(records) => records,
+            Err(poison) => poison.into_inner(),
+        };
+        if let Some(record) = records.get_mut(&self.id) {
+            record.supervisor_active = false;
+        }
+    }
 }
 
 impl LabTaskStore {
@@ -67,6 +89,11 @@ impl LabTaskStore {
         // Admission and the upstream create share this lock. A concurrent
         // task call cannot slip past the single-monitor bound.
         let mut records = self.records()?;
+        // Validation can finish before a concurrent explicit session close.
+        // Close holds this custody lock through registration removal, so this
+        // late check cannot create work for an already released owner.
+        crate::server::with_registered_session(&work.session_id, || ())
+            .map_err(|error| McpError::invalid_params(error.to_string()))?;
         if records.len() >= MAX_RETAINED_TASKS {
             return Err(McpError::invalid_params(
                 "laboratory retained task capacity reached; no plan was dispatched",
@@ -106,9 +133,54 @@ impl LabTaskStore {
                 final_evidence: None,
                 terminal_failure: None,
                 dispatch_started: false,
+                supervisor_active: false,
             },
         );
         Ok(())
+    }
+
+    pub(crate) fn monitor_scope(self: &Arc<Self>, id: &FinalTaskId) -> McpResult<MonitorScope> {
+        let mut records = self.records()?;
+        let record = records.get_mut(id)
+            .ok_or_else(|| McpError::internal_error("laboratory task binding missing"))?;
+        crate::server::with_registered_session(&record.work.session_id, || ())
+            .map_err(|error| McpError::invalid_params(error.to_string()))?;
+        if record.supervisor_active {
+            return Err(McpError::internal_error("laboratory monitor already has an owned supervisor"));
+        }
+        record.supervisor_active = true;
+        Ok(MonitorScope { store: self.clone(), id: id.clone() })
+    }
+
+    /// Hold the same custody lock used by creation until the session has
+    /// published its final close receipt and removed its registration.
+    pub(crate) fn with_session_idle<T>(
+        &self,
+        session_id: &str,
+        publish: impl FnOnce(usize) -> dfmcp_core::Result<T>,
+    ) -> dfmcp_core::Result<T> {
+        let unavailable = |message: String| dfmcp_core::DfmcpError::new(
+            dfmcp_core::ErrorCode::InternalInvariantViolation, message,
+        );
+        let records = self.records().map_err(|error| unavailable(error.to_string()))?;
+        let mut terminal = 0;
+        for (id, record) in records.iter()
+            .filter(|(_, record)| record.work.session_id.eq_ignore_ascii_case(session_id))
+        {
+            let task = self.inner.get_task(id)
+                .map_err(|error| unavailable(error.to_string()))?
+                .ok_or_else(|| unavailable("retained laboratory task is unavailable; close refused".to_owned()))?;
+            if record.supervisor_active
+                || matches!(task, FinalTask::Working(_) | FinalTask::InputRequired { .. })
+            {
+                return Err(dfmcp_core::DfmcpError::new(
+                    dfmcp_core::ErrorCode::Conflict,
+                    "a Task monitor still owns this session; finish or cancel the monitor before close",
+                ));
+            }
+            terminal += 1;
+        }
+        publish(terminal)
     }
 
     pub(crate) fn record_progress(&self, id: &FinalTaskId, progress: Value) -> McpResult<()> {

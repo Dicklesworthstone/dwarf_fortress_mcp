@@ -266,6 +266,12 @@ impl MemoryAdapter {
         self.actions.get(&action_id).map(|action| &action.receipt)
     }
 
+    /// Complete retained action identities for bounded owner-lifetime checks.
+    /// Reading this index never polls, dispatches, or changes historical proof.
+    pub fn retained_action_ids(&self) -> impl Iterator<Item = ActionId> + '_ {
+        self.actions.keys().copied()
+    }
+
     /// The immutable original commit that owns this action, without polling
     /// or reconstructing a plan from its current proof state.
     #[must_use]

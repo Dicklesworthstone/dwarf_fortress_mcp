@@ -27,8 +27,25 @@ pub(super) fn admit_sources(
     sources: &[&WorldSnapshot],
     current: &OperationContext,
 ) -> Result<Value> {
+    admit_source_scope(sources, current, Capability::Query)
+}
+
+/// Lifetime checks inspect the canonical world under Observe without borrowing
+/// Query authority. Shape, record, byte and deadline bounds remain identical.
+pub(super) fn admit_observation_sources(
+    sources: &[&WorldSnapshot],
+    current: &OperationContext,
+) -> Result<Value> {
+    admit_source_scope(sources, current, Capability::Observe)
+}
+
+fn admit_source_scope(
+    sources: &[&WorldSnapshot],
+    current: &OperationContext,
+    capability: Capability,
+) -> Result<Value> {
     let started = Instant::now();
-    current.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
+    current.authorize(capability, RiskTier::ReadOnly, &[], None)?;
     let mut records = 0_u64;
     for source in sources {
         if source.fortress_id != current.anchor.fortress_id {

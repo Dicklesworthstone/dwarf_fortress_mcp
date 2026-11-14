@@ -137,6 +137,17 @@ fn orientation_sessions() -> MutexGuard<'static, BTreeMap<String, SessionOrienta
     }
 }
 
+/// Close owns the server registration lock before removing this cache entry.
+/// Delayed successful opens use the same order and cannot resurrect it.
+pub(crate) fn release_session_orientation(session_id: &str) {
+    orientation_sessions().remove(session_id);
+}
+
+#[cfg(test)]
+pub(crate) fn has_session_orientation(session_id: &str) -> bool {
+    orientation_sessions().contains_key(session_id)
+}
+
 fn string_array(value: Option<&Value>) -> Vec<String> {
     match value.and_then(Value::as_array) {
         Some(values) => values
@@ -1700,6 +1711,29 @@ fn presentation_state(
         return (fallback, None, sequence);
     };
 
+    if operation == "fortress.open_session" && is_ok(payload) {
+        return match crate::server::with_registered_session(id, || {
+            presentation_state_registered(operation, payload, id)
+        }) {
+            Ok(state) => state,
+            Err(error) => {
+                *payload = json!({"ok":false,"error":{
+                    "operation":operation,"code":error.code.as_str(),
+                    "message":error.message,"retryable":false,"details":[]}});
+                let mut fallback = SessionOrientation::from_payload(payload);
+                let sequence = fallback.advance_turn();
+                (fallback, None, sequence)
+            }
+        };
+    }
+    presentation_state_registered(operation, payload, id)
+}
+
+fn presentation_state_registered(
+    operation: &str,
+    payload: &mut Value,
+    id: &String,
+) -> (SessionOrientation, Option<Value>, u64) {
     let mut registry = orientation_sessions();
     if operation == "fortress.open_session" && is_ok(payload) {
         if registry.len() >= MAX_PRESENTATION_SESSIONS && !registry.contains_key(id) {
@@ -2601,13 +2635,18 @@ pub use FortressWaitForTargets as FortressWaitForPlan;
 pub use FortressWaitForTargets as FortressWaitForSelection;
 
 #[tool(
-    description = "Request, drain, compensate when authorized, and finalize cancellation while preserving recovery state. mode: compensate_reversible (default) | stop_future_steps | emergency_pause_and_drain. scope: last_action (default), plan (last committed plan), plan:<64-lowercase-original-plan-digest> (one exact commit owned by this session, leaving other plans and descendants alone), oldest_open_plan (earliest retained original plan, for bounded cleanup), or session (all retained open work across this session's plans). With scope=session or a selected plan, explicit emergency_pause_and_drain pauses under current Observe and ControlClock authority before draining, even when selected work is already quiet or a durable restart left no session action handles. Emergency drains require at least 1,500 output tokens and 6,000 bytes before effects. They create no replacement handles; exact pause evidence remains separate from unresolved carried work and physical drain success. Drain dependents first and return a finalize_certificate only when goal states are terminal and physical work is proven quiescent. Failed and Verified receipts remain history; their remaining work can be stopped with separate evidence. Separately, mode withdraw_goal with exact scope goal:<original-plan-digest> archives one verified, physically quiet original under current Observe, Query and reversible Plan authority, freeing an active goal slot while retaining its source and proof. Withdrawal does not stop work, prove success, withdraw descendants, or permit continuation of that original."
+    description = "Request, drain, compensate when authorized, and finalize cancellation while preserving recovery state. mode: compensate_reversible (default) | stop_future_steps | emergency_pause_and_drain. scope: last_action (default), plan (last committed plan), plan:<64-lowercase-original-plan-digest> (one exact commit owned by this session, leaving other plans and descendants alone), oldest_open_plan (earliest retained original plan, for bounded cleanup), or session (all retained open work across this session's plans). With scope=session or a selected plan, explicit emergency_pause_and_drain pauses under current Observe and ControlClock authority before draining, even when selected work is already quiet or a durable restart left no session action handles. Emergency drains require at least 1,500 output tokens and 6,000 bytes before effects. They create no replacement handles; exact pause evidence remains separate from unresolved carried work and physical drain success. Drain dependents first and return a finalize_certificate only when goal states are terminal and physical work is proven quiescent. Failed and Verified receipts remain history; their remaining work can be stopped with separate evidence. Separately, mode withdraw_goal with exact scope goal:<original-plan-digest> archives one verified, physically quiet original under current Observe, Query and reversible Plan authority, freeing an active goal slot while retaining its source and proof. Withdrawal does not stop work, prove success, withdraw descendants, or permit continuation of that original. Explicit mode close_session with scope session closes only after owned work is terminal and physically quiet and no Task monitor remains active; it discards pending reviews and volatile query/history handles, releases session membership and authority, and preserves durable state. Ordinary scope session retains its drain meaning."
 )]
 pub fn fortress_cancel(
     session_id: Option<String>,
     mode: Option<String>,
     scope: Option<String>,
 ) -> String {
+    if mode.as_deref() == Some("close_session") {
+        // Teardown fits and publishes its final packet before revoking its owner.
+        // Ordinary projection and replay recording require an open session.
+        return crate::server::cancel_in_scope(session_id, mode, scope);
+    }
     let recorded = json!({"mode": mode, "scope": scope});
     let response = project_response(
         crate::server::cancel_in_scope(session_id.clone(), mode, scope),
@@ -3144,3 +3183,31 @@ mod session_output_budget_facade_tests;
 #[cfg(test)]
 #[path = "lab_history_catalog_presentation_tests.rs"]
 mod history_catalog_presentation_tests;
+
+#[cfg(test)]
+mod closed_presentation_tests {
+    use super::*;
+
+    #[test]
+    fn delayed_open_projection_cannot_recreate_a_closed_orientation_slot()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let _serial = crate::test_serial();
+        let raw = crate::server::fortress_open_session(
+            Some(true), Some("73907".into()), None, None, None, None, None, None, None,
+        );
+        let opened: Value = serde_json::from_str(&raw)?;
+        assert_eq!(opened["ok"], true, "{opened}");
+        let id = opened["session_id"].as_str().ok_or("session ID")?.to_owned();
+        let closed: Value = serde_json::from_str(&fortress_cancel(
+            Some(id.clone()), Some("close_session".into()), Some("session".into()),
+        ))?;
+        assert_eq!(closed["ok"], true, "{closed}");
+        let late: Value = serde_json::from_str(&project_response(
+            raw, "fortress.open_session", AgentPhase::Orient, ObservationProfile::Briefing, Some(&id),
+        ))?;
+        assert_eq!(late["ok"], false, "{late}");
+        assert_eq!(late["error"]["code"], "session_not_found");
+        assert!(!has_session_orientation(&id));
+        Ok(())
+    }
+}

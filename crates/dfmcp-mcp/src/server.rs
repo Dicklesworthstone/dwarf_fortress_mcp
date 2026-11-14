@@ -62,6 +62,9 @@ pub(crate) mod goal_explanation;
 #[path = "lab_plan_cancellation.rs"]
 mod plan_cancellation;
 
+#[path = "lab_session_close.rs"]
+pub(crate) mod session_close;
+
 #[path = "production_source.rs"]
 pub(crate) mod production_source;
 
@@ -262,6 +265,8 @@ struct NegotiatedCapability {
 /// within the same session share state without crossing `static` boundaries.
 pub(crate) struct LabSession {
     pub(crate) session_id: SessionId,
+    /// Revoked before registry removal; already-resolved Arc handles cannot act.
+    closed: bool,
     /// Reclaim private foreground query roots with their owning session.
     _query_resources: temporal_query::SessionGuard,
     #[allow(dead_code)]
@@ -881,6 +886,9 @@ fn with_session_view<T>(
         Ok(guard) => guard,
         Err(_) => return poisoned(),
     };
+    if guard.closed {
+        return poisoned();
+    }
     let prior_shared_members = guard.shared_members;
     if let Some(world) = world.as_mut() {
         std::mem::swap(&mut guard.adapter, &mut world.adapter);
@@ -1281,6 +1289,12 @@ fn durability_gate(session: &mut LabSession) -> Result<()> {
 /// Whether a private durable session has been superseded by a newer one.
 fn ensure_durable_owner(session: &Arc<Mutex<LabSession>>) -> Result<()> {
     let (session_id, fortress_id, durable, shared) = match session.lock() {
+        Ok(guard) if guard.closed => {
+            return Err(DfmcpError::new(
+                ErrorCode::SessionNotFound,
+                "laboratory session is closed; open a new session",
+            ));
+        }
         Ok(guard) => (
             guard.session_id,
             guard.fortress_id,
@@ -2491,6 +2505,27 @@ pub(crate) fn parse_session_id_arg(value: &str) -> Result<SessionId> {
     Ok(SessionId::new(parsed))
 }
 
+/// Keep registration live through a process-local publication. The callback
+/// must not acquire LAB_ADMISSION or a session/world lock. Task creation holds
+/// its custody lock before entering here; presentation insertion follows the
+/// same registry-before-orientation order as explicit close.
+pub(crate) fn with_registered_session<T>(
+    raw: &str,
+    publish: impl FnOnce() -> T,
+) -> Result<T> {
+    let id = parse_session_id_arg(raw)?;
+    let registry = SESSIONS.lock().map_err(|_| {
+        DfmcpError::new(ErrorCode::InternalInvariantViolation, "session registry poisoned")
+    })?;
+    if !registry.contains_key(&id) {
+        return Err(DfmcpError::new(
+            ErrorCode::SessionNotFound,
+            "laboratory session is closed or unavailable",
+        ));
+    }
+    Ok(publish())
+}
+
 pub(crate) fn lookup_session(session_id: SessionId) -> Result<Arc<Mutex<LabSession>>> {
     let guard = sessions();
     guard.get(&session_id).cloned().ok_or_else(|| {
@@ -3066,6 +3101,7 @@ pub(crate) fn open_session_in_scenario(
     );
     let session = Arc::new(Mutex::new(LabSession {
         session_id,
+        closed: false,
         _query_resources: temporal_query::SessionGuard::new(session_id),
         fortress_id,
         grants,
@@ -6468,6 +6504,9 @@ pub(crate) fn cancel_in_scope(
     mode: Option<String>,
     scope: Option<String>,
 ) -> String {
+    if mode.as_deref() == Some("close_session") {
+        return session_close::cancel(session_id, scope);
+    }
     let selected_goal = match scope
         .as_deref()
         .and_then(|value| value.strip_prefix("goal:"))

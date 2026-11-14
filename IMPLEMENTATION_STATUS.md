@@ -1,5 +1,53 @@
 # Implementation Status
 
+## Unreleased — Explicit close of quiet laboratory sessions
+
+The existing laboratory cancellation tool now accepts explicit
+`session_id`, `scope: "session"`, and `mode: "close_session"`. After current
+Observe authorization and a complete bounded custody/physical-work inspection,
+it releases the session and orientation slots, pending reviews, private
+baselines/watches/history, grants, and quiet owned leases. Ordinary session
+cancellation continues to drain work while leaving the session open.
+
+Close refuses nonterminal or active/unknown original work, deferred successors,
+unresolved recovered or untracked work, and queued or still-running Task
+supervisors. A terminal wire status cannot conceal an application supervisor
+still finishing. Task creation rechecks registration under the same custody
+fence as close. A closed flag and revoked grants reject stale Arc holders, and
+registration-ordered presentation publication prevents a delayed open reply
+from recreating an orientation slot.
+
+The complete canonical world is structurally admitted before hashing or scanning.
+World and custody/census bytes and records share the negotiated source bound,
+and the final wall-time check includes publication and rendering.
+The complete final Agent Turn must fit before resource removal. Its certificate
+binds the current anchor and a complete original-proof/current-physical census;
+it grants no goal-success claim. Refusals retain session and query custody.
+Shared members keep the world and other members' work; the last member also
+proves the complete adapter action index quiet before releasing the world slot.
+Durable close publishes and verifies the current head before relinquishing
+ownership, and refuses unfinished owned or unattributed durable admissions,
+including admission preceding an adapter commit failure. Reopen uses new
+authority and ordinary recovery; no old dispatch handle is revived.
+
+The latest 32 successful close receipts are retained process-locally for exact
+idempotent repeats. Export replay/evidence before close: private replay/history
+is deliberately released. Large accumulated custody can exceed an existing
+source allowance, and superseded durable owners remain fenced; neither case
+uses a truncated census or stale proof to claim close success.
+
+Nine focused Rust regression tests cover resource/slot release, stale handles,
+authority and output/source refusal, terminal proof versus physical work, deferred
+successors, shared ownership, Task creation/supervisor races, delayed
+presentation, durable publication failure, unresolved durable admission and
+reopening. Independent source review and integration checks completed; Rust
+compilation, formatting and tests remain unexecuted because the execution
+environment is unavailable. This is laboratory source implementation, not full
+workspace, Asupersync-region or native admission qualification.
+Owners: `df-cancellation-progress-certificates-vvw`,
+`df-fastmcp-conformance-5pj.3`.
+See `docs/LAB_SESSION_CLOSE.md`.
+
 ## Unreleased — Replay original-plan Task cancellation without losing the transcript
 
 Laboratory replay now records the application-owned request and finalization

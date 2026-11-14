@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased — Release quiet laboratory sessions safely
+
+- Add explicit `fortress.cancel(session_id, scope="session", mode="close_session")`
+  to reclaim session/orientation capacity, private query/replay/history state,
+  shared membership, quiet leases and authority after complete quiescence checks.
+- Refuse active, unknown, deferred, recovered or untracked work and active Task
+  supervisors. Fence delayed Task creation, stale session handles and delayed
+  orientation publication.
+- Fit the complete final receipt before resource deletion. Bind original proof
+  and current physical work into a close census certificate; retain the latest
+  32 process-local receipts for idempotent repeats.
+- Preserve other shared members and durable world history. Publish the durable
+  head and refuse unfinished durable admissions before releasing ownership.
+- Charge the complete canonical world and original custody/census together;
+  reject oversized quiet sources before resource release under Observe authority.
+- Add nine focused regression tests and user-facing close documentation.
+  Independent source review completed; compilation, formatting and test
+  execution remain unverified while the execution environment is unavailable.
+
 ## Unreleased — Deterministic replay for Task cancellation
 
 - Record original-plan Task cancellation request/finalize phases, including
