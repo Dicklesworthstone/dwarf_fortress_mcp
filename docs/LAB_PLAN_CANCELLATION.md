@@ -24,6 +24,40 @@ An explicit `emergency_pause_and_drain` also pauses the shared fortress clock
 under current clock authority; ordinary `stop_future_steps` needs no clock
 advance or clock grant.
 
+## Emergency pause after recovery
+
+With `scope: "session"`, an explicit `emergency_pause_and_drain` request pauses
+the shared laboratory clock even when a durable restart left no live action
+handles. Plan-scoped drains likewise pause before draining, including an
+already-quiet selected original. An `oldest_open_plan` request still needs a
+retained original, and `last_action` still needs its original live handle.
+
+Current Observe and ControlClock authority and the aggregate action budget are
+checked before the pause. Emergency drains also require at least 1,500 output
+tokens and 6,000 bytes so the exact outcome can be returned; an insufficient
+allowance refuses before the effect. Ordinary stop and compensation modes do
+not acquire this clock effect.
+
+The pause creates no replacement commit or action handle and advances no game
+time. Its `emergency_pause` receipt retains the exact before/after anchors,
+evidence digest, whether the pause changed state, and durable publication
+status. A successful emergency pause clears prior shared unpause consent even
+when later cleanup refuses. Repeating it against an already paused world is
+idempotent, while still requiring current clock authority.
+
+For a durable fortress, the paused frontier is published before subsequent
+physical stops. A failed publication retains the actual paused world, fences
+later effects and reports the uncertainty; it does not continue the drain or
+invent durable success. A later refusal to stop work likewise retains the pause
+and its receipt.
+
+Recovered carried work remains a separate obligation. Pausing it does not
+restore old dispatch or cancellation handles, stop its physical effects, or
+certify quiescence. A session-wide result with unresolved carried or untracked
+work has `drain_progress.quiescent: false` and a null
+`finalize_certificate`. It remains available for inspection and separately
+authorized recovery.
+
 ## Complete original selection
 
 The current session must retain its original commit response and the adapter

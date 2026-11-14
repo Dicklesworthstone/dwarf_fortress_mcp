@@ -1,5 +1,41 @@
 # Implementation Status
 
+## Unreleased — Emergency pause survives loss of live action handles
+
+Session and plan-scoped emergency drains now pause through a freshly authorized
+MemoryAdapter boundary before attempting physical stops. Durable recovery can
+leave active carried work with no live action handles; that empty selection no
+longer leaves the fortress running. Already-quiet selected originals can also
+request the explicit pause. Ordinary cancellation modes keep their clock
+behavior, and last-action/oldest-plan selection still requires its existing
+handle or original.
+
+The pause requires current Observe and ControlClock authority, the shared
+aggregate action budget and an output floor of 1,500 tokens plus 6,000 bytes.
+It advances no game time and creates no replacement action or commit. Its exact
+receipt preserves both anchors, evidence, change and publication status.
+Successful pause clears prior shared unpause consent; refusals before pause
+preserve it. Durable pause is published before further stops. Publication
+failure retains actual in-memory pause, stops further effects and reports the
+existing durable fault without claiming durable success.
+
+Carried and untracked physical work remain explicit. Pausing recovered work
+does not cancel it or recreate its old effect handles; unfinished session-wide
+work receives no finalization certificate. Failure responses retain the exact
+requesting session so bounded inspection advice cannot select another session.
+The cancellation outcome fitting introduced earlier preserves these receipts.
+
+Ten new regression sources cover the real adapter, public facade and durable
+store: empty/quiet selections, original proof and pending-review preservation,
+scope/expiry/authority/budget/anchor refusals, atomic cursor failure, shared clock
+consent, repeated pause, restart/compaction and failed durable append. The final
+source received independent review against current types, context authorization,
+publication and failure-injection semantics. Rust tests, compilation and
+formatting remain unexecuted because the execution environment is unavailable.
+This is laboratory source behavior, not native/live admission or completion of
+general recovered physical cancellation. Owner:
+`df-cancellation-progress-certificates-vvw`.
+
 ## Unreleased — Bind relation rebase witnesses to endpoint identity
 
 The ordinary read witness now compares both complete endpoint entity records

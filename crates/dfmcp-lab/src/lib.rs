@@ -288,6 +288,27 @@ impl MemoryAdapter {
         self.actions.get(&action_id).map(|action| &action.step)
     }
 
+    /// Pause under fresh authority independently of retained action handles.
+    /// Emergency session drains need this boundary after recovery, when work
+    /// can remain in the world although no foreground action handle survives.
+    ///
+    /// This is the same transactional pause effect used by ordinary emergency
+    /// cancellation. It creates no action or commit, never advances game time,
+    /// and proves only pause state, not physical quiescence. The caller reserves
+    /// one action when the pause changes and publishes this frontier before
+    /// attempting any further drain.
+    pub fn pause_for_emergency_drain(&mut self, context: &OperationContext) -> Result<Evidence> {
+        self.check_anchor(context.anchor)?;
+        context.authorize(Capability::Observe, RiskTier::ReadOnly, &[], None)?;
+        context.authorize(Capability::ControlClock, RiskTier::Reversible, &[], None)?;
+        apply_action(&mut self.snapshot, &Action::Pause { paused: true }, "")?;
+        Ok(evidence(
+            self.snapshot.anchor(),
+            EvidenceKind::Postcondition,
+            "fortress is paused under current emergency clock authority; work quiescence is not certified",
+        ))
+    }
+
     /// Inspect physical work without polling or dispatching a prepared action.
     /// A terminal goal proof does not, by itself, prove physical quiescence.
     pub fn action_work_state(&self, action_id: ActionId) -> Result<EffectWorkState> {

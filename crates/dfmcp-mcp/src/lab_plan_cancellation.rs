@@ -157,12 +157,10 @@ fn authorize(session: &LabSession, selected: &Selection, mode: CancelMode) -> Re
     let context = super::read_context(session);
     super::authorize_entry(&context, Capability::Observe, RiskTier::ReadOnly)?;
     super::authorize_drain_budget(session, &selected.actions, mode)?;
-    let mut needs_drain = false;
     for id in &selected.actions {
         if super::action_fully_drained(&session.adapter, *id) {
             continue;
         }
-        needs_drain = true;
         let step = session
             .adapter
             .action_step(*id)
@@ -175,10 +173,7 @@ fn authorize(session: &LabSession, selected: &Selection, mode: CancelMode) -> Re
             scope.map_area,
         )?;
     }
-    if needs_drain
-        && mode == CancelMode::EmergencyPauseAndDrain
-        && !session.adapter.snapshot().paused
-    {
+    if mode == CancelMode::EmergencyPauseAndDrain {
         super::authorize_entry(&context, Capability::ControlClock, RiskTier::Reversible)?;
     }
     Ok(())

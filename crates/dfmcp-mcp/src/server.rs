@@ -4758,6 +4758,7 @@ fn cancel_action_error_payload(
     let work = action_work_json(session, action_id);
     let remaining_nonterminal = usize::from(!receipt.is_some_and(|row| row.state.is_terminal()));
     let remaining_work = usize::from(work["quiescent"] != true);
+    payload["session_id"] = json!(session.session_id.to_string());
     payload["scope"] = json!("last_action");
     payload["action_id"] = json!(action_id.to_string());
     payload["final_state"] = json!(receipt.map(|row| format!("{:?}", row.state)));
@@ -4890,6 +4891,12 @@ fn session_provisions_json(session: &LabSession) -> Option<serde_json::Value> {
     }
 }
 
+// Reserve space for the exact pause anchors, effect evidence and unresolved
+// drain outcome before emergency control changes the shared world. These
+// match the conservative default output allowance and the bounded receipt tier.
+const EMERGENCY_DRAIN_MIN_OUTPUT_TOKENS: u32 = 1_500;
+const EMERGENCY_DRAIN_MIN_BYTES: u64 = 6_000;
+
 /// Bound the aggregate physical effects before starting a multi-action drain.
 /// Fresh contexts for individual steps must not reset the call's action budget.
 fn authorize_drain_budget(
@@ -4897,6 +4904,15 @@ fn authorize_drain_budget(
     actions: &[ActionId],
     mode: CancelMode,
 ) -> Result<()> {
+    if mode == CancelMode::EmergencyPauseAndDrain
+        && (session.budget.max_output_tokens < EMERGENCY_DRAIN_MIN_OUTPUT_TOKENS
+            || session.budget.max_bytes < EMERGENCY_DRAIN_MIN_BYTES)
+    {
+        return Err(DfmcpError::new(
+            ErrorCode::BudgetExceeded,
+            "emergency pause requires at least 1500 output tokens and 6000 bytes to retain its exact effect receipt and unresolved drain outcome; no pause or drain was performed",
+        ));
+    }
     if actions.len() > session.budget.max_actions as usize {
         return Err(DfmcpError::new(
             ErrorCode::BudgetExceeded,
@@ -4904,7 +4920,6 @@ fn authorize_drain_budget(
         ));
     }
     let mut effects = 0u64;
-    let mut needs_drain = false;
     for id in actions {
         let receipt = session.adapter.action_receipt(*id).ok_or_else(|| {
             DfmcpError::new(
@@ -4914,7 +4929,6 @@ fn authorize_drain_budget(
         })?;
         let work = session.adapter.action_work_state(*id)?;
         let terminal = receipt.state.is_terminal();
-        needs_drain |= !terminal || !work.is_quiescent();
         effects += u64::from(matches!(work, EffectWorkState::Active { .. }));
         if !terminal
             && mode == CancelMode::CompensateReversible
@@ -4928,9 +4942,7 @@ fn authorize_drain_budget(
         }
     }
     effects += u64::from(
-        needs_drain
-            && mode == CancelMode::EmergencyPauseAndDrain
-            && !session.adapter.snapshot().paused,
+        mode == CancelMode::EmergencyPauseAndDrain && !session.adapter.snapshot().paused,
     );
     if effects > u64::from(session.budget.max_actions) {
         return Err(DfmcpError::new(
@@ -6699,6 +6711,54 @@ pub(crate) fn cancel_in_scope(
     )
 }
 
+/// Keep the current pause and unresolved-work facts on a pre-drain refusal.
+/// A successful emergency pause is an independent safety effect and cannot be
+/// erased by a later publication or original-action failure.
+fn drain_refusal_payload(
+    guard: &LabSession,
+    scope: &str,
+    actions: &[ActionId],
+    error: &DfmcpError,
+    emergency_pause: Option<&serde_json::Value>,
+) -> String {
+    let mut payload: serde_json::Value =
+        serde_json::from_str(&dfmcp_error_payload("fortress.cancel", error))
+            .unwrap_or_else(|_| json!({"ok": false}));
+    let unknown = actions
+        .iter()
+        .filter(|id| {
+            !guard
+                .adapter
+                .action_work_state(**id)
+                .is_ok_and(|state| state.is_quiescent())
+        })
+        .count();
+    let pending = actions
+        .iter()
+        .filter(|id| {
+            !guard
+                .adapter
+                .action_receipt(**id)
+                .is_some_and(|receipt| receipt.state.is_terminal())
+        })
+        .count();
+    payload["session_id"] = json!(guard.session_id.to_string());
+    payload["scope"] = json!(scope);
+    payload["drain_progress"] = json!({
+        "actions_total": actions.len(), "drained": 0,
+        "remaining_nonterminal": pending, "remaining_work": unknown,
+        "remaining_carried": guard.carried.iter().filter(|step| !step.is_final()).count(),
+        "quiescent": false,
+        "stage": if emergency_pause.is_some() { "pause_publication_refused" } else { "admission_refused" },
+    });
+    payload["paused"] = json!(guard.adapter.snapshot().paused);
+    payload["emergency_pause"] = json!(emergency_pause);
+    payload["untracked_work"] = untracked_work_json(guard);
+    payload["finalize_certificate"] = serde_json::Value::Null;
+    payload["observed_anchor"] = anchor_json(&guard.adapter.snapshot().anchor());
+    payload.to_string()
+}
+
 fn drain_actions(
     guard: &mut LabSession,
     cancel_mode: CancelMode,
@@ -6706,38 +6766,48 @@ fn drain_actions(
     actions: Vec<ActionId>,
 ) -> String {
     if let Err(error) = authorize_drain_budget(guard, &actions, cancel_mode) {
-        let mut payload: serde_json::Value =
-            serde_json::from_str(&dfmcp_error_payload("fortress.cancel", &error))
-                .unwrap_or_else(|_| json!({"ok": false}));
-        let unknown = actions
-            .iter()
-            .filter(|id| {
-                !guard
-                    .adapter
-                    .action_work_state(**id)
-                    .is_ok_and(|state| state.is_quiescent())
-            })
-            .count();
-        let pending = actions
-            .iter()
-            .filter(|id| {
-                !guard
-                    .adapter
-                    .action_receipt(**id)
-                    .is_some_and(|receipt| receipt.state.is_terminal())
-            })
-            .count();
-        payload["scope"] = json!(scope);
-        payload["drain_progress"] = json!({
-            "actions_total": actions.len(), "drained": 0,
-            "remaining_nonterminal": pending, "remaining_work": unknown,
-            "quiescent": false, "stage": "admission_refused",
-        });
-        payload["untracked_work"] = untracked_work_json(guard);
-        payload["finalize_certificate"] = serde_json::Value::Null;
-        payload["observed_anchor"] = anchor_json(&guard.adapter.snapshot().anchor());
-        return payload.to_string();
+        return drain_refusal_payload(guard, scope, &actions, &error, None);
     }
+    // Emergency pause is not conditional on a live action handle. Recovery
+    // can leave carried or untracked physical work with an empty selection;
+    // a completed original can likewise have no action left to cancel.
+    let emergency_pause = if cancel_mode == CancelMode::EmergencyPauseAndDrain {
+        let before = guard.adapter.snapshot().anchor();
+        let was_paused = guard.adapter.snapshot().paused;
+        let paused = next_context(guard)
+            .and_then(|(_, context)| guard.adapter.pause_for_emergency_drain(&context));
+        let evidence = match paused {
+            Ok(evidence) => evidence,
+            Err(error) => return drain_refusal_payload(guard, scope, &actions, &error, None),
+        };
+        reset_emergency_unpause_consent(guard, cancel_mode);
+        let mut receipt = json!({
+            "requested": true, "changed": !was_paused, "paused": true,
+            "before_anchor": anchor_json(&before),
+            "observed_anchor": anchor_json(&evidence.anchor),
+            "game_ticks_advanced": 0, "action_handles_created": false,
+            "physical_work_drained": false,
+            "authority": "current_observe_and_control_clock",
+            "evidence_digest": evidence.digest.to_hex(),
+            "durable": guard.durable_scenario.is_some(),
+            "publication_confirmed": false,
+        });
+        // Persist the independent safety frontier before another stop. Failure
+        // leaves the in-memory fortress paused and the existing durable fault
+        // fence in place; it must not dispatch more effects or claim a drain.
+        persist_durable_head(guard);
+        if let Some(fault) = &guard.durability_fault {
+            let error = DfmcpError::new(
+                ErrorCode::AdapterUnavailable,
+                format!("emergency pause is current but its durable publication failed: {fault}"),
+            );
+            return drain_refusal_payload(guard, scope, &actions, &error, Some(&receipt));
+        }
+        receipt["publication_confirmed"] = json!(true);
+        Some(receipt)
+    } else {
+        None
+    };
     let mut steps = Vec::with_capacity(actions.len());
     let mut already_terminal = 0usize;
     let mut compensated = 0usize;
@@ -6878,6 +6948,7 @@ fn drain_actions(
             "scope": scope,
             "drain_progress": progress,
             "paused": guard.adapter.snapshot().paused,
+            "emergency_pause": emergency_pause,
             "untracked_work": untracked,
             "steps": steps,
             "finalize_certificate": finalize_certificate,
@@ -6888,7 +6959,9 @@ fn drain_actions(
             let mut payload: serde_json::Value =
                 serde_json::from_str(&dfmcp_error_payload("fortress.cancel", &error))
                     .unwrap_or_else(|_| json!({"ok": false}));
+            payload["session_id"] = json!(guard.session_id.to_string());
             payload["scope"] = json!(scope);
+            payload["emergency_pause"] = json!(emergency_pause);
             payload["paused"] = json!(guard.adapter.snapshot().paused);
             payload["untracked_work"] = untracked;
             payload["drain_progress"] = progress;

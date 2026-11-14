@@ -924,3 +924,151 @@ fn forecast_reports_advancement_refusal_instead_of_an_available_prediction() -> 
 
 #[path = "plan_cancellation_mcp_tests.rs"]
 mod selected_plan_cancellation;
+
+#[test]
+fn emergency_session_pause_works_without_actions_and_requires_current_clock_grant() -> TestResult {
+    let _serial = crate::test_serial();
+    let denied = open_session("73640", false, Some("starter_fortress"), false)?;
+    let before_denied = snapshot(&denied)?;
+    let refusal = cancel(&denied, "emergency_pause_and_drain", "session")?;
+    assert_eq!(refusal["ok"], false, "{refusal}");
+    assert_eq!(refusal["error"]["code"], "capability_denied");
+    assert_eq!(snapshot(&denied)?, before_denied);
+    let session = open("73641")?;
+    let before = snapshot(&session)?;
+    let ordinary = cancel(&session, "stop_future_steps", "session")?;
+    assert_eq!(ordinary["ok"], true, "{ordinary}");
+    assert_eq!(snapshot(&session)?, before);
+    in_session(&session, |guard| {
+        assert!(guard.open_actions.is_empty() && guard.last_action.is_none());
+        guard.budget.max_actions = 1;
+        Ok(())
+    })?;
+    let paused = cancel(&session, "emergency_pause_and_drain", "session")?;
+    assert_eq!(paused["ok"], true, "{paused}");
+    assert_eq!(paused["paused"], true);
+    assert_eq!(paused["emergency_pause"]["changed"], true);
+    assert_eq!(paused["emergency_pause"]["physical_work_drained"], false);
+    assert_eq!(paused["emergency_pause"]["action_handles_created"], false);
+    assert_eq!(paused["emergency_pause"]["game_ticks_advanced"], 0);
+    assert_eq!(paused["emergency_pause"]["publication_confirmed"], true);
+    let after = snapshot(&session)?;
+    assert_eq!(after.tick, before.tick);
+    assert!(after.paused);
+    assert_eq!(paused["observed_anchor"], anchor_json(&after.anchor()));
+    in_session(&session, |guard| {
+        assert!(guard.open_actions.is_empty() && guard.last_action.is_none());
+        assert!(guard.commit_receipts.is_empty());
+        Ok(())
+    })?;
+    let repeated = cancel(&session, "emergency_pause_and_drain", "session")?;
+    assert_eq!(repeated["emergency_pause"]["changed"], false);
+    assert_eq!(snapshot(&session)?, after);
+    Ok(())
+}
+
+#[test]
+fn emergency_pause_of_completed_original_preserves_receipt_and_pending_review() -> TestResult {
+    let _serial = crate::test_serial();
+    let session = open("73642")?;
+    let committed =
+        plan_and_commit(&session, r#"[{"action":{"kind":"pause","paused":false}}]"#)?;
+    let (action, _) = last_effect(&session)?;
+    let original = receipt(&session, action)?;
+    assert_eq!(original.state, CommitState::Verified);
+    let pending = plan(&session, &order("unrelated pending", "MAKE_TEST", 1, json!([])))?;
+    let scope = format!(
+        "plan:{}",
+        committed["plan_digest"].as_str().ok_or("digest missing")?
+    );
+    let before = snapshot(&session)?;
+    let paused = cancel(&session, "emergency_pause_and_drain", &scope)?;
+    assert_eq!(paused["ok"], true, "{paused}");
+    assert_eq!(paused["emergency_pause"]["changed"], true);
+    assert_eq!(paused["drain_progress"]["drained"], 0);
+    assert!(snapshot(&session)?.paused);
+    assert_eq!(snapshot(&session)?.tick, before.tick);
+    assert_eq!(receipt(&session, action)?, original);
+    in_session(&session, |guard| {
+        assert_eq!(
+            guard.pending.as_ref().map(|review| review.digest.as_str()),
+            pending["plan_digest"].as_str()
+        );
+        Ok(())
+    })?;
+    Ok(())
+}
+
+#[test]
+fn emergency_pause_without_work_clears_prior_shared_unpause_consent() -> TestResult {
+    let _serial = crate::test_serial();
+    let first = open_session_paused("73643", true, Some("starter_fortress"), true, true)?;
+    let second = open_session("73643", true, None, true)?;
+    let vote = request_unpause(&first)?;
+    assert_eq!(vote["clock_consent"]["votes"], 1, "{vote}");
+    let before = snapshot(&first)?;
+    let paused = cancel(&second, "emergency_pause_and_drain", "session")?;
+    assert_eq!(paused["ok"], true, "{paused}");
+    assert_eq!(paused["emergency_pause"]["changed"], false);
+    assert_eq!(snapshot(&first)?, before);
+    in_session(&first, |guard| {
+        assert!(guard.leases.unpause_consent.is_empty());
+        Ok(())
+    })?;
+    let new_vote = request_unpause(&second)?;
+    assert_eq!(new_vote["ok"], false, "{new_vote}");
+    assert_eq!(new_vote["clock_consent"]["votes"], 1);
+    assert!(snapshot(&first)?.paused);
+    Ok(())
+}
+
+#[test]
+fn emergency_pause_refuses_an_unrepresentable_receipt_before_changing_the_world() -> TestResult {
+    let _serial = crate::test_serial();
+    for (selector, tokens, bytes) in [("73644", 1, 6_000), ("73645", 1_500, 5_999)] {
+        let session = open(selector)?;
+        let before = snapshot(&session)?;
+        in_session(&session, |guard| {
+            guard.budget.max_output_tokens = tokens;
+            guard.budget.max_bytes = bytes;
+            Ok(())
+        })?;
+        let refused = cancel(&session, "emergency_pause_and_drain", "session")?;
+        assert_eq!(refused["ok"], false, "{refused}");
+        assert_eq!(refused["error"]["code"], "budget_exceeded", "{refused}");
+        assert_eq!(snapshot(&session)?, before);
+        in_session(&session, |guard| {
+            assert!(guard.open_actions.is_empty());
+            assert!(guard.commit_receipts.is_empty());
+            Ok(())
+        })?;
+    }
+    Ok(())
+}
+
+#[test]
+fn emergency_receipt_budget_refusal_preserves_existing_shared_clock_consent() -> TestResult {
+    let _serial = crate::test_serial();
+    let first = open_session_paused("73646", true, Some("starter_fortress"), true, true)?;
+    let second = open_session("73646", true, None, true)?;
+    let vote = request_unpause(&first)?;
+    assert_eq!(vote["clock_consent"]["votes"], 1, "{vote}");
+    let before = snapshot(&first)?;
+    for (tokens, bytes) in [(1, 6_000), (1_500, 5_999)] {
+        in_session(&second, |guard| {
+            guard.budget.max_output_tokens = tokens;
+            guard.budget.max_bytes = bytes;
+            Ok(())
+        })?;
+        let refused = cancel(&second, "emergency_pause_and_drain", "session")?;
+        assert_eq!(refused["ok"], false, "{refused}");
+        assert_eq!(refused["error"]["code"], "budget_exceeded", "{refused}");
+        assert_eq!(snapshot(&first)?, before);
+        in_session(&first, |guard| {
+            assert_eq!(guard.leases.unpause_consent.len(), 1);
+            assert!(guard.leases.unpause_consent.contains(&guard.session_id));
+            Ok(())
+        })?;
+    }
+    Ok(())
+}

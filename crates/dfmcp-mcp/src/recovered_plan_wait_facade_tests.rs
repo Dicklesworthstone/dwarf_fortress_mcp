@@ -282,3 +282,127 @@ fn recovered_selection_requires_current_grants_and_refuses_restored_history() ->
     assert_eq!(anchor(&second)?, restored_anchor);
     Ok(())
 }
+
+fn current_world(session: &str) -> TestResult<dfmcp_world::WorldSnapshot> {
+    let handle = crate::server::lookup_session_str(session)?;
+    let guard = handle.lock().map_err(|_| "test session lock poisoned")?;
+    Ok(guard.adapter.snapshot().clone())
+}
+
+fn cancel_session(session: &str, mode: &str) -> TestResult<Value> {
+    payload(&fortress_cancel(
+        Some(session.to_owned()),
+        Some(mode.to_owned()),
+        Some("session".to_owned()),
+    ))
+}
+
+#[test]
+fn recovered_emergency_pause_is_durable_without_claiming_carried_work_drained() -> TestResult {
+    let _serial = crate::server::serialized_durable_tests();
+    let directory = StateDir::new("emergency-pause");
+    let first = field(&open("7855704", true)?, "session_id")?;
+    let digest = commit(
+        &first,
+        json!([
+            {"action":{"kind":"designate_dig","min":[0,3,10],"max":[7,5,10],"mode":"mine"}}
+        ]),
+    )?;
+    directory.restart();
+    // Recovery restores physical work, but no action handle or Designate grant.
+    let second = field(&open("7855704", false)?, "session_id")?;
+    let before = current_world(&second)?;
+    assert!(!before.paused);
+    let ordinary = cancel_session(&second, "stop_future_steps")?;
+    assert_eq!(ordinary["ok"], true, "{ordinary}");
+    assert_eq!(ordinary["drain_progress"]["quiescent"], false);
+    assert!(ordinary["finalize_certificate"].is_null());
+    assert_eq!(current_world(&second)?, before);
+
+    let paused = cancel_session(&second, "emergency_pause_and_drain")?;
+    assert_eq!(paused["ok"], true, "{paused}");
+    assert_eq!(paused["paused"], true);
+    assert_eq!(paused["emergency_pause"]["changed"], true);
+    assert_eq!(paused["emergency_pause"]["durable"], true);
+    assert_eq!(paused["emergency_pause"]["publication_confirmed"], true);
+    assert_eq!(paused["emergency_pause"]["action_handles_created"], false);
+    assert_eq!(paused["emergency_pause"]["physical_work_drained"], false);
+    assert_eq!(paused["drain_progress"]["actions_total"], 0);
+    assert_eq!(paused["drain_progress"]["remaining_carried"], 1);
+    assert_eq!(paused["drain_progress"]["quiescent"], false);
+    assert!(paused["finalize_certificate"].is_null());
+    let after = current_world(&second)?;
+    assert!(after.paused);
+    assert_eq!(after.tick, before.tick);
+    assert_eq!(after.graph.entities, before.graph.entities);
+    assert_eq!(after.graph.chunks, before.graph.chunks);
+    let observed = selected_wait(&second, &digest, 100)?;
+    assert_eq!(observed["ok"], true, "{observed}");
+    assert_eq!(observed["advanced_game_ticks"], 0);
+    assert_eq!(observed["selected_plan_wait"]["physical_quiescent"], false);
+    assert_eq!(observed["selected_plan_wait"]["dispatch_handles_restored"], false);
+    assert_eq!(current_world(&second)?, after);
+
+    // Pause is part of the durable world frontier, including after compaction.
+    let mut prior = after.anchor();
+    for _ in 0..2 {
+        directory.restart();
+        dfmcp_lab::durable::DurableLabStore::open(&directory.0)?.compact()?;
+        let next = field(&open("7855704", false)?, "session_id")?;
+        let world = current_world(&next)?;
+        assert!(world.paused);
+        assert_eq!(world.tick, before.tick);
+        assert!(world.cursor.epoch > prior.cursor.epoch);
+        assert_eq!(world.graph.entities, before.graph.entities);
+        let remaining = selected_wait(&next, &digest, 0)?;
+        assert_eq!(remaining["ok"], true, "{remaining}");
+        assert_eq!(remaining["selected_plan_wait"]["physical_quiescent"], false);
+        assert_eq!(remaining["selected_plan_wait"]["dispatch_handles_restored"], false);
+        assert_eq!(remaining["advanced_game_ticks"], 0);
+        prior = world.anchor();
+    }
+    Ok(())
+}
+
+#[test]
+fn emergency_pause_publication_failure_stops_before_any_physical_drain() -> TestResult {
+    let _serial = crate::server::serialized_durable_tests();
+    let directory = StateDir::new("emergency-publication-failure");
+    let first = field(&open("7855705", true)?, "session_id")?;
+    let digest = commit(
+        &first,
+        json!([
+            {"action":{"kind":"designate_dig","min":[0,3,10],"max":[7,5,10],"mode":"mine"}}
+        ]),
+    )?;
+    let before = current_world(&first)?;
+    assert!(!before.paused);
+    crate::server::inject_durable_crash_after(0);
+    let refused = cancel_session(&first, "emergency_pause_and_drain")?;
+    assert_eq!(refused["ok"], false, "{refused}");
+    assert_eq!(refused["error"]["code"], "adapter_unavailable");
+    assert_eq!(refused["paused"], true);
+    assert_eq!(refused["emergency_pause"]["changed"], true);
+    assert_eq!(refused["emergency_pause"]["publication_confirmed"], false);
+    assert_eq!(refused["drain_progress"]["drained"], 0);
+    assert_eq!(refused["drain_progress"]["quiescent"], false);
+    assert!(refused["finalize_certificate"].is_null());
+    let memory = current_world(&first)?;
+    assert!(memory.paused);
+    assert_eq!(memory.tick, before.tick);
+    assert_eq!(memory.graph.entities, before.graph.entities);
+    assert_eq!(memory.graph.chunks, before.graph.chunks);
+
+    // The refusal did not claim this in-memory pause survived a failed append.
+    directory.restart();
+    let next = field(&open("7855705", false)?, "session_id")?;
+    let recovered = current_world(&next)?;
+    assert!(!recovered.paused);
+    assert_eq!(recovered.tick, before.tick);
+    assert_eq!(recovered.graph.entities, before.graph.entities);
+    let remaining = selected_wait(&next, &digest, 0)?;
+    assert_eq!(remaining["ok"], true, "{remaining}");
+    assert_eq!(remaining["selected_plan_wait"]["physical_quiescent"], false);
+    assert_eq!(remaining["selected_plan_wait"]["dispatch_handles_restored"], false);
+    Ok(())
+}

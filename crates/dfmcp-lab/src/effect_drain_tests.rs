@@ -567,3 +567,105 @@ fn undispatched_is_distinct_from_missing_after_dispatch_and_immediate_effects_ar
     );
     Ok(())
 }
+
+fn emergency_clock_context(adapter: &MemoryAdapter) -> OperationContext {
+    let mut ctx = context(adapter);
+    ctx.grants
+        .retain(|grant| grant.capability == Capability::Observe);
+    ctx.grants.push(CapabilityGrant {
+        capability: Capability::ControlClock,
+        max_risk: RiskTier::Reversible,
+        scope: CapabilityScope {
+            fortress_id: Some(adapter.snapshot.fortress_id),
+            ..CapabilityScope::default()
+        },
+        expires_at_tick: None,
+        remaining_uses: None,
+    });
+    ctx
+}
+
+#[test]
+fn emergency_pause_without_original_handles_preserves_running_work_and_is_idempotent()
+-> Result<()> {
+    let (original, action, entity) = started(order(), false, None)?;
+    let mut recovered = MemoryAdapter::recovered(original.snapshot.clone())?;
+    let before = recovered.snapshot.clone();
+    assert!(recovered.action_receipt(action).is_none());
+    let proof = recovered.pause_for_emergency_drain(&emergency_clock_context(&recovered))?;
+    assert!(recovered.snapshot.paused);
+    assert_eq!(recovered.snapshot.tick, before.tick);
+    assert_eq!(
+        recovered.snapshot.graph.entities.get(&entity),
+        before.graph.entities.get(&entity)
+    );
+    assert_eq!(proof.anchor, recovered.snapshot.anchor());
+    assert_eq!(proof.kind, EvidenceKind::Postcondition);
+    assert!(recovered.actions.is_empty() && recovered.commits.is_empty());
+    let paused = recovered.snapshot.clone();
+    let repeated = recovered.pause_for_emergency_drain(&emergency_clock_context(&recovered))?;
+    assert_eq!(repeated, proof);
+    assert_eq!(recovered.snapshot, paused);
+    Ok(())
+}
+
+#[test]
+fn emergency_pause_rechecks_current_authority_scope_expiry_budget_and_anchor() -> Result<()> {
+    for denial in 0..8 {
+        let (mut adapter, _, _) = started(order(), false, None)?;
+        let mut ctx = emergency_clock_context(&adapter);
+        match denial {
+            0 => ctx
+                .grants
+                .retain(|grant| grant.capability != Capability::Observe),
+            1 => ctx
+                .grants
+                .retain(|grant| grant.capability != Capability::ControlClock),
+            2 | 3 | 4 => {
+                let grant = ctx
+                    .grants
+                    .iter_mut()
+                    .find(|grant| grant.capability == Capability::ControlClock)
+                    .ok_or_else(|| {
+                        DfmcpError::new(
+                            ErrorCode::InternalInvariantViolation,
+                            "clock fixture missing",
+                        )
+                    })?;
+                if denial == 2 {
+                    grant.scope.fortress_id = Some(FortressId::new(999));
+                } else if denial == 3 {
+                    grant.scope.entity_ids.insert(EntityId::new(999));
+                } else {
+                    grant.expires_at_tick = Some(GameTick(99));
+                }
+            }
+            5 => ctx.budget.max_actions = 0,
+            6 => ctx.cancellation_requested = true,
+            _ => ctx.anchor.state_hash = Digest32::ZERO,
+        }
+        let before = adapter.snapshot.clone();
+        let transcript = adapter.transcript.clone();
+        assert!(adapter.pause_for_emergency_drain(&ctx).is_err());
+        assert_eq!(adapter.snapshot, before);
+        assert_eq!(adapter.transcript, transcript);
+    }
+    Ok(())
+}
+
+#[test]
+fn emergency_pause_publication_failure_is_atomic_without_draining_work() -> Result<()> {
+    let (mut adapter, action, _) = started(order(), false, None)?;
+    adapter.snapshot.cursor.sequence = u64::MAX;
+    adapter.snapshot.refresh_hash();
+    let before = adapter.snapshot.clone();
+    let original = adapter.action_receipt(action).cloned();
+    assert_eq!(
+        refusal(adapter.pause_for_emergency_drain(&emergency_clock_context(&adapter)))?.code,
+        ErrorCode::CursorGap
+    );
+    assert_eq!(adapter.snapshot, before);
+    assert_eq!(adapter.action_receipt(action), original.as_ref());
+    assert!(!adapter.action_work_state(action)?.is_quiescent());
+    Ok(())
+}

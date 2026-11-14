@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased — Pause recovered laboratory work before emergency drains
+
+- Execute explicitly authorized emergency pause for session/plan drains even
+  with no surviving live action handles or an already-quiet original.
+- Preserve exact pause evidence, shared consent reset, aggregate effect budget
+  and durable publication before stops; retain actual pause on later failure.
+- Require a minimum response allowance before effects and keep session identity
+  on partial errors. Never treat paused carried work as physically drained.
+- Add ten adapter/facade/durable regression sources and complete independent
+  source review. Rust execution and formatting remain unavailable.
+
 ## Unreleased — Protect relation witnesses against endpoint replacement
 
 - Bind both full endpoint records when comparing an unchanged relation, so
