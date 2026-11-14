@@ -145,11 +145,14 @@ every boolean branch, overflow and current authority. Adversarial public
 fixtures inject independent canonical observations; their plan and commit
 requests still pass caller JSON through the ordinary facade.
 
-Scoped Rustfmt completed after the execution environment returned. The full
-MCP test-library build was SIGKILLed in unchanged Asupersync under memory
-pressure without a Rust source diagnostic; a lower-memory actual-source
-typecheck is pending. The guarded-setter regressions remain unexecuted.
-Fourteen laboratory effect-drain tests, including the three new emergency-pause
-cases, passed; those checks do not qualify this MCP feature. Source review and
-partial component checks do not establish a passing MCP build, real stdio
-execution or native admission.
+Scoped Rustfmt passes for this session's changed source. All 25 tests in the
+complete production witness module and its original field-refinement includes
+passed with real pinned dependencies, including all six new relation/aggregate
+component cases and both endpoint safety regressions. No implementation copy,
+substitute type or omitted child test was used.
+
+The 11 new guarded-setter parser/public-facade tests remain unexecuted. Complete
+MCP test and typecheck attempts, including a bounded codegen-partition retry,
+were SIGKILLed in unchanged Asupersync under observed memory pressure before
+MCP diagnostics or execution. The component results do not establish a
+successful full MCP build, real stdio execution or native admission.

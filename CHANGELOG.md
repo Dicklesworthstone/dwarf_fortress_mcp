@@ -12,10 +12,14 @@
 - Preserve the same-tick model-free setter scope, original-source replay and
   complete execution-contract comparison; general structural merge stays open.
 - Add 17 parser, component and public-facade regressions and complete independent
-  reviews. Apply scoped Rustfmt to this session's changes; pass all 14 laboratory
-  drain tests after execution recovered. Full MCP test compilation was killed
-  in unchanged Asupersync under memory pressure; a lower-memory actual-source
-  typecheck is pending and the 17 new guarded-setter tests remain unexecuted.
+  reviews. Pass 62 focused Rust tests across laboratory drainage, the complete
+  output-budget module and the complete coarse/field-witness modules using real
+  source and dependencies. All six new guarded component cases execute.
+- Complete scoped Rustfmt and the verification script's pre-format gates. Full
+  workspace verification remains blocked by existing formatting differences;
+  complete MCP build/check attempts, including a bounded codegen-partition
+  retry, were SIGKILLed in unchanged Asupersync under memory pressure. The public
+  facade/parser additions remain unexecuted and no native qualification is claimed.
 
 ## Unreleased — Release quiet laboratory sessions safely
 

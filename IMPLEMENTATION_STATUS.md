@@ -30,15 +30,25 @@ public Plan/Commit behavior. Both independent implementation reviews found no
 concrete blocker; the concurrent Task replay and explicit session-close changes
 were preserved and reviewed at their integration boundaries.
 
-After execution recovered, scoped Rustfmt completed and all 14 laboratory
-effect-drain tests passed, including the three new emergency-pause regressions.
-The full MCP test-library build was terminated by SIGKILL in the unchanged
-pinned Asupersync 0.5.0 dependency after memory pressure; it emitted no Rust
-source diagnostic and did not reach MCP test execution. A lower-memory
-cargo check --tests is pending. The 17 guarded-setter regressions remain
-unexecuted. Repository verification passed bead coverage and is running its
-Python contract gates. These partial checks do not establish full-workspace
-or native qualification; subsequent results must supersede this pending status.
+After execution recovered, 62 focused Rust tests passed against the real
+production source and pinned dependencies: 14 laboratory effect-drain tests,
+23 inline output-budget tests and 25 witness/field-refinement tests. The latter
+two complete modules were compiled directly with their real dependency
+artifacts and original path includes; no copied implementation or substitute
+types were used. This executes all six new guarded-setter component regressions,
+both endpoint regressions, all three bounded-receipt regressions and all three
+new adapter emergency-pause regressions. The exercised files are unchanged.
+
+The complete MCP test build, cargo check --tests and a bounded 256-codegen-unit
+retry all ended with SIGKILL inside unchanged Asupersync 0.5.0 under observed
+memory pressure, before MCP diagnostics or execution. No successful complete
+MCP typecheck is claimed. The 18 new public-facade/parser regressions remain
+source-present but unexecuted. Full verification passed its contract, bead,
+Python/native-component, excavation/blueprint and syntax gates, then stopped at
+existing workspace formatting differences. Scoped formatting of this session's
+changed files passes. The separate clean-source qualifier was stopped after
+that known prerequisite failure; no full qualification receipt is claimed.
+General native/live admission remains unestablished.
 
 Owner: `dfmcp-reality-wiring-proof-4bf.10`. General structural fallback and
 runtime merge-certificate admission remain unfinished; the bead stays open.

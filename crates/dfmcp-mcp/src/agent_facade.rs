@@ -3193,17 +3193,34 @@ mod closed_presentation_tests {
     -> Result<(), Box<dyn std::error::Error>> {
         let _serial = crate::test_serial();
         let raw = crate::server::fortress_open_session(
-            Some(true), Some("73907".into()), None, None, None, None, None, None, None,
+            Some(true),
+            Some("73907".into()),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
         );
         let opened: Value = serde_json::from_str(&raw)?;
         assert_eq!(opened["ok"], true, "{opened}");
-        let id = opened["session_id"].as_str().ok_or("session ID")?.to_owned();
+        let id = opened["session_id"]
+            .as_str()
+            .ok_or("session ID")?
+            .to_owned();
         let closed: Value = serde_json::from_str(&fortress_cancel(
-            Some(id.clone()), Some("close_session".into()), Some("session".into()),
+            Some(id.clone()),
+            Some("close_session".into()),
+            Some("session".into()),
         ))?;
         assert_eq!(closed["ok"], true, "{closed}");
         let late: Value = serde_json::from_str(&project_response(
-            raw, "fortress.open_session", AgentPhase::Orient, ObservationProfile::Briefing, Some(&id),
+            raw,
+            "fortress.open_session",
+            AgentPhase::Orient,
+            ObservationProfile::Briefing,
+            Some(&id),
         ))?;
         assert_eq!(late["ok"], false, "{late}");
         assert_eq!(late["error"]["code"], "session_not_found");

@@ -154,4 +154,12 @@ part of the existing physical-work test module so it uses the same real
 laboratory adapter fixtures. Execution evidence is tracked in
 `IMPLEMENTATION_STATUS.md`; source coverage alone is not a passing test run.
 
+Current focused execution passed all 14 laboratory effect-drain tests and all
+23 tests in the complete output-budget module, using the actual source and real
+pinned dependencies. These include the new adapter emergency-pause and bounded
+cancellation-receipt regressions. The seven new emergency-pause facade/durable
+tests remain unexecuted: complete MCP compilation and typecheck attempts were
+SIGKILLed in unchanged Asupersync under memory pressure. These component results
+do not establish full MCP, real stdio or native qualification.
+
 Owner: `df-cancellation-progress-certificates-vvw`.

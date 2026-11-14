@@ -2509,13 +2509,13 @@ pub(crate) fn parse_session_id_arg(value: &str) -> Result<SessionId> {
 /// must not acquire LAB_ADMISSION or a session/world lock. Task creation holds
 /// its custody lock before entering here; presentation insertion follows the
 /// same registry-before-orientation order as explicit close.
-pub(crate) fn with_registered_session<T>(
-    raw: &str,
-    publish: impl FnOnce() -> T,
-) -> Result<T> {
+pub(crate) fn with_registered_session<T>(raw: &str, publish: impl FnOnce() -> T) -> Result<T> {
     let id = parse_session_id_arg(raw)?;
     let registry = SESSIONS.lock().map_err(|_| {
-        DfmcpError::new(ErrorCode::InternalInvariantViolation, "session registry poisoned")
+        DfmcpError::new(
+            ErrorCode::InternalInvariantViolation,
+            "session registry poisoned",
+        )
     })?;
     if !registry.contains_key(&id) {
         return Err(DfmcpError::new(
