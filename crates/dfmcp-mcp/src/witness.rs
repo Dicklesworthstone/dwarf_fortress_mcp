@@ -201,6 +201,19 @@ impl ReadWitness {
             if base.graph.edges.get(id) != now.graph.edges.get(id) {
                 return Some(json!({"read": "edge", "edge_id": id.get().to_string()}));
             }
+            // An unchanged relation can still refer to a removed or replaced
+            // entity. Bind both referents from the sealed record so an ABA
+            // replacement cannot hide behind byte-identical edge content.
+            if let Some(edge) = base.graph.edges.get(id) {
+                for endpoint in [edge.from, edge.to] {
+                    if base.graph.entities.get(&endpoint) != now.graph.entities.get(&endpoint) {
+                        return Some(json!({
+                            "read":"edge_endpoint", "edge_id":id.get().to_string(),
+                            "entity_id":endpoint.get().to_string(),
+                        }));
+                    }
+                }
+            }
         }
         for area in &self.regions {
             for coord in dfmcp_world::terrain::region_tiles(*area) {
@@ -220,7 +233,10 @@ impl ReadWitness {
             "regions": self.regions.iter().map(|r| json!({"min": [r.min.x, r.min.y, r.min.z], "max": [r.max.x, r.max.y, r.max.z]})).collect::<Vec<_>>(),
             "pause": self.pause,
         });
-        // Existing witness certificates keep their exact bytes.
+        // Certificates without relation reads keep their exact bytes.
+        if !self.edges.is_empty() {
+            value["edge_endpoint_records"] = json!(true);
+        }
         if self.building_domain {
             value["building_domain"] =
                 json!({"kind":"building", "coverage":"complete", "max_entities":65_536});
@@ -639,5 +655,112 @@ mod tests {
             witness.to_json()["entity_domains"]["kinds"],
             json!(["item"])
         );
+    }
+
+    #[test]
+    fn relation_witness_binds_both_endpoint_records_and_generations() -> Result<()> {
+        use dfmcp_world::{EdgeKind, EdgeRecord};
+        let (mut base, _) = replay_fixture(10, 0, false)?;
+        let from = EntityId::new(10);
+        let to = EntityId::new(20);
+        for id in [from, to] {
+            base.graph.entities.insert(
+                id,
+                EntityRecord {
+                    id,
+                    generation: 1,
+                    revision: 1,
+                    kind: EntityKind::Unit,
+                    label: "sealed relation endpoint".into(),
+                    fields: Default::default(),
+                },
+            );
+        }
+        let edge_id = EdgeId::new(30);
+        base.graph.edges.insert(
+            edge_id,
+            EdgeRecord {
+                id: edge_id,
+                revision: 1,
+                kind: EdgeKind::AssignedTo,
+                from,
+                to,
+                fields: Default::default(),
+            },
+        );
+        base.refresh_hash();
+        let mut witness = ReadWitness::default();
+        witness.predicate(&Predicate::EdgeExists {
+            edge_id,
+            kind: Some(EdgeKind::AssignedTo),
+        });
+        assert!(witness.first_change(&base, &base).is_none());
+        assert_eq!(witness.to_json()["edge_endpoint_records"], true);
+        for endpoint in [from, to] {
+            for change in ["generation", "kind", "revision", "removed"] {
+                let mut current = base.clone();
+                if change == "removed" {
+                    current.graph.entities.remove(&endpoint);
+                } else {
+                    let record = current.graph.entities.get_mut(&endpoint).ok_or_else(|| {
+                        dfmcp_core::DfmcpError::new(
+                            dfmcp_core::ErrorCode::InternalInvariantViolation,
+                            "endpoint fixture missing",
+                        )
+                    })?;
+                    match change {
+                        "generation" => record.generation += 1,
+                        "kind" => record.kind = EntityKind::Burrow,
+                        _ => record.revision += 1,
+                    }
+                }
+                current.refresh_hash();
+                assert_eq!(base.graph.edges, current.graph.edges);
+                assert_eq!(
+                    witness.first_change(&base, &current),
+                    Some(json!({
+                        "read":"edge_endpoint", "edge_id":edge_id.get().to_string(),
+                        "entity_id":endpoint.get().to_string(),
+                    })),
+                    "{endpoint}/{change}"
+                );
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn negative_relation_witness_preserves_exact_identity_absence() -> Result<()> {
+        use dfmcp_world::{EdgeKind, EdgeRecord};
+        let (base, _) = replay_fixture(10, 0, false)?;
+        let edge_id = EdgeId::new(30);
+        let mut witness = ReadWitness::default();
+        witness.predicate(&Predicate::Not(Box::new(Predicate::EdgeExists {
+            edge_id,
+            kind: None,
+        })));
+        assert!(witness.first_change(&base, &base).is_none());
+        let mut current = base.clone();
+        current.graph.edges.insert(
+            edge_id,
+            EdgeRecord {
+                id: edge_id,
+                revision: 1,
+                kind: EdgeKind::AssignedTo,
+                from: EntityId::new(10),
+                to: EntityId::new(20),
+                fields: Default::default(),
+            },
+        );
+        current.refresh_hash();
+        assert_eq!(
+            witness.first_change(&base, &current),
+            Some(json!({"read":"edge", "edge_id":edge_id.get().to_string()}))
+        );
+        assert_eq!(
+            witness.first_change(&current, &base),
+            Some(json!({"read":"edge", "edge_id":edge_id.get().to_string()}))
+        );
+        Ok(())
     }
 }

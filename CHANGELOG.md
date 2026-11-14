@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased — Protect relation witnesses against endpoint replacement
+
+- Bind both full endpoint records when comparing an unchanged relation, so
+  removed or reused entities cannot bypass sealed-plan conflict detection.
+- Declare endpoint coverage in relation certificates while preserving
+  relation-free certificate bytes.
+- Add two focused endpoint/negative-read regressions and complete independent
+  source review. Rust compilation, formatting and tests remain unexecuted
+  while the execution environment is unavailable.
+
 ## Unreleased — Retain cancellation outcomes in bounded responses
 
 - Preserve exact action/plan identity, pause state, measured drain progress,

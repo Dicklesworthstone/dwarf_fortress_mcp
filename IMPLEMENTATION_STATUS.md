@@ -1,5 +1,25 @@
 # Implementation Status
 
+## Unreleased — Bind relation rebase witnesses to endpoint identity
+
+The ordinary read witness now compares both complete endpoint entity records
+after confirming that a read relation is unchanged. An endpoint's removal,
+replacement generation, kind or revision can no longer pass unnoticed behind
+a byte-identical edge. Such drift reports an `edge_endpoint` conflict and
+requires the existing conservative replay/refinement path; it supplies no
+new mutation authority.
+
+Relation certificates explicitly declare the endpoint-record coverage.
+Certificates without relation reads retain their prior exact representation.
+Two focused regressions cover both endpoints across removal, generation, kind
+and revision changes, plus relation insertion/removal and negative exact-edge
+reads. Independent source review confirmed the actual entity/edge types and
+that the current field-refinement path cannot override relation conflicts.
+Rust compilation, formatting and these tests remain unexecuted because the
+execution environment is unavailable. The broader structural merge and
+public guarded-setter work remains open under
+`dfmcp-reality-wiring-proof-4bf.10`.
+
 ## Unreleased — Preserve exact cancellation outcomes under output pressure
 
 Cancellation response fitting now retains the exact selected scope, original

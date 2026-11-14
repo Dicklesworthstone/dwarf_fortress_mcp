@@ -53,8 +53,11 @@ an accepted field proof.
 Range, spatial, relation, aggregate and owned-history predicates remain on the
 conservative replay path. Blueprint and objective compilers are also excluded
 because they can read domains that their resulting action list does not name.
-The existing unchanged whole-record witness path retains its certificate
-format and behavior.
+Ordinary whole-record relation witnesses also compare both complete endpoint
+entity records after checking the edge itself. A byte-identical relation cannot
+hide endpoint removal, generation reuse, kind drift or another endpoint-record
+change. Relation certificates declare `edge_endpoint_records: true`; witnesses
+without relation reads retain their exact prior certificate representation.
 
 ## Bounds and authority
 
