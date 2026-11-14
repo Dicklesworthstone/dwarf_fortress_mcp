@@ -428,13 +428,17 @@ fn unsupported_domains_actions_and_temporal_reads_remain_conservative() -> TestR
     let mut changed = original.clone();
     changed.steps[0]
         .preconditions
-        .push(Predicate::EntityQuantity {
+        .push(Predicate::EntityQuantityIncrease {
             kind: EntityKind::Unit,
             filter_field: "alive".into(),
             filter_value: Value::Bool(true),
             quantity_field: None,
-            op: CompareOp::Ge,
-            value: 1,
+            baseline: 1,
+            increase: 1,
+            baseline_anchor: base.anchor(),
+            baseline_source_digest: Digest32::of_bytes(b"retained baseline"),
+            source_generation: 1,
+            baseline_source_counters: [0, 0, 1],
         });
     changes.push(changed);
     let mut changed = original.clone();
@@ -476,6 +480,433 @@ fn incomplete_work_budget_is_a_refusal() -> TestResult {
         },
     ] {
         assert!(FieldWitness::prove(&old, &base, &now, budget).is_err());
+    }
+    Ok(())
+}
+
+fn quantity_guard(
+    kind: EntityKind,
+    field: &str,
+    value: Value,
+    quantity: Option<&str>,
+) -> Predicate {
+    Predicate::EntityQuantity {
+        kind,
+        filter_field: field.into(),
+        filter_value: value,
+        quantity_field: quantity.map(str::to_owned),
+        op: CompareOp::Ge,
+        value: 1,
+    }
+}
+
+#[test]
+fn quantity_refinement_binds_all_members_and_only_relevant_fields() -> TestResult {
+    let mut base = world();
+    for (id, selected, amount) in [(10, true, 2), (11, false, 3)] {
+        let id = EntityId::new(id);
+        base.graph.entities.insert(
+            id,
+            EntityRecord {
+                id,
+                generation: 1,
+                revision: 1,
+                kind: EntityKind::Item,
+                label: "inventory".into(),
+                fields: BTreeMap::from([
+                    ("selected".into(), fact(Value::Bool(selected))),
+                    ("amount".into(), fact(Value::U64(amount))),
+                ]),
+            },
+        );
+    }
+    base.refresh_hash();
+    let mut request = requested(labor("MINE"));
+    request.preconditions.push(quantity_guard(
+        EntityKind::Item,
+        "selected",
+        Value::Bool(true),
+        Some("amount"),
+    ));
+    let old = prepare(&base, request.clone())?;
+    let mut now = concurrent(&base)?;
+    let nonmatch = now
+        .graph
+        .entities
+        .get_mut(&EntityId::new(11))
+        .ok_or("nonmatch")?;
+    nonmatch.revision += 1;
+    nonmatch
+        .fields
+        .insert("amount".into(), fact(Value::U64(999)));
+    nonmatch.label = "an unrelated label".into();
+    now.refresh_hash();
+    let proof = FieldWitness::prove(&old, &base, &now, WorkBudget::default())?;
+    let replayed = prepare(&now, request)?;
+    assert!(super::super::same_actions(&old, &replayed));
+    let certificate = proof.certificate(&old, &replayed, &json!({"read":"entity_domains"}));
+    let domain = &certificate["certificate"]["witness"]["aggregate_domains"][0];
+    assert_eq!(domain["coverage"], "complete_laboratory_kind_domain");
+    assert_eq!(domain["members"], json!(["10", "11"]));
+    assert_eq!(domain["matched_members"], json!(["10"]));
+    assert_eq!(domain["total"], 2);
+    assert!(domain["predicate_digest"].is_string());
+    let fields = certificate["certificate"]["witness"]["fields"]
+        .as_array()
+        .ok_or("fields")?;
+    assert!(
+        fields
+            .iter()
+            .any(|read| read["entity_id"] == "11" && read["field"] == "selected")
+    );
+    assert!(
+        !fields
+            .iter()
+            .any(|read| read["entity_id"] == "11" && read["field"] == "amount")
+    );
+    Ok(())
+}
+
+#[test]
+fn quantity_refinement_refuses_phantoms_selector_swaps_and_reused_generations() -> TestResult {
+    let mut base = world();
+    let other = EntityId::new(3);
+    let mut record = base.graph.entities[&UNIT].clone();
+    record.id = other;
+    record
+        .fields
+        .insert("alive".into(), fact(Value::Bool(false)));
+    base.graph.entities.insert(other, record);
+    base.refresh_hash();
+    let mut request = requested(labor("MINE"));
+    request.preconditions.push(quantity_guard(
+        EntityKind::Unit,
+        "alive",
+        Value::Bool(true),
+        None,
+    ));
+    let old = prepare(&base, request)?;
+    for change in [
+        "phantom",
+        "alias_phantom",
+        "removed_nonmatch",
+        "swap",
+        "generation",
+        "unknown",
+    ] {
+        let mut now = concurrent(&base)?;
+        match change {
+            "phantom" | "alias_phantom" => {
+                let mut record = now.graph.entities[&other].clone();
+                record.id = EntityId::new(4);
+                if change == "alias_phantom" {
+                    record.kind = EntityKind::Other("unit".into());
+                }
+                now.graph.entities.insert(record.id, record);
+            }
+            "removed_nonmatch" => {
+                now.graph.entities.remove(&other);
+            }
+            "swap" => {
+                now.graph
+                    .entities
+                    .get_mut(&UNIT)
+                    .ok_or("unit")?
+                    .fields
+                    .insert("alive".into(), fact(Value::Bool(false)));
+                now.graph
+                    .entities
+                    .get_mut(&other)
+                    .ok_or("other")?
+                    .fields
+                    .insert("alive".into(), fact(Value::Bool(true)));
+            }
+            "generation" => {
+                now.graph
+                    .entities
+                    .get_mut(&other)
+                    .ok_or("other")?
+                    .generation += 1;
+            }
+            _ => {
+                now.graph
+                    .entities
+                    .get_mut(&other)
+                    .ok_or("other")?
+                    .fields
+                    .get_mut("alive")
+                    .ok_or("alive")?
+                    .presence = Some(FactPresence::Unknown("selector not established".into()));
+            }
+        }
+        now.refresh_hash();
+        assert!(
+            FieldWitness::prove(&old, &base, &now, WorkBudget::default()).is_err(),
+            "{change}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn quantity_refinement_does_not_accept_equal_totals_or_unknown_contributions() -> TestResult {
+    let mut base = world();
+    for (id, amount) in [(10, 2), (11, 3)] {
+        let id = EntityId::new(id);
+        base.graph.entities.insert(
+            id,
+            EntityRecord {
+                id,
+                generation: 1,
+                revision: 1,
+                kind: EntityKind::Item,
+                label: "contributor".into(),
+                fields: BTreeMap::from([
+                    ("selected".into(), fact(Value::Bool(true))),
+                    ("amount".into(), fact(Value::U64(amount))),
+                ]),
+            },
+        );
+    }
+    base.refresh_hash();
+    let mut request = requested(labor("MINE"));
+    request.preconditions.push(quantity_guard(
+        EntityKind::Item,
+        "selected",
+        Value::Bool(true),
+        Some("amount"),
+    ));
+    let old = prepare(&base, request)?;
+    for change in [
+        "equal_total",
+        "unknown",
+        "wrong_type",
+        "provenance",
+        "removed_quantity",
+    ] {
+        let mut now = concurrent(&base)?;
+        let record = now
+            .graph
+            .entities
+            .get_mut(&EntityId::new(10))
+            .ok_or("contributor")?;
+        match change {
+            "equal_total" => {
+                record.fields.insert("amount".into(), fact(Value::U64(1)));
+                now.graph
+                    .entities
+                    .get_mut(&EntityId::new(11))
+                    .ok_or("other")?
+                    .fields
+                    .insert("amount".into(), fact(Value::U64(4)));
+            }
+            "unknown" => {
+                record.fields.get_mut("amount").ok_or("amount")?.presence =
+                    Some(FactPresence::Omitted("not observed".into()));
+            }
+            "wrong_type" => {
+                record.fields.insert("amount".into(), fact(Value::I64(2)));
+            }
+            "provenance" => {
+                record.fields.get_mut("amount").ok_or("amount")?.source = FactSource::Replay;
+            }
+            _ => {
+                record.fields.remove("amount");
+            }
+        }
+        now.refresh_hash();
+        assert!(
+            FieldWitness::prove(&old, &base, &now, WorkBudget::default()).is_err(),
+            "{change}"
+        );
+    }
+    Ok(())
+}
+
+fn relation_world() -> WorldSnapshot {
+    let mut base = world();
+    let id = EdgeId::new(30);
+    base.graph.edges.insert(
+        id,
+        EdgeRecord {
+            id,
+            revision: 1,
+            kind: dfmcp_world::EdgeKind::AssignedTo,
+            from: UNIT,
+            to: BURROW,
+            fields: BTreeMap::from([("eligible".into(), fact(Value::Bool(true)))]),
+        },
+    );
+    base.refresh_hash();
+    base
+}
+
+#[test]
+fn exact_relation_refinement_preserves_endpoints_fields_and_negative_reads() -> TestResult {
+    let base = relation_world();
+    let edge_id = EdgeId::new(30);
+    let mut request = requested(labor("MINE"));
+    request.preconditions.push(Predicate::All(vec![
+        Predicate::EdgeExists {
+            edge_id,
+            kind: Some(dfmcp_world::EdgeKind::AssignedTo),
+        },
+        Predicate::Not(Box::new(Predicate::EdgeExists {
+            edge_id: EdgeId::new(31),
+            kind: None,
+        })),
+    ]));
+    let old = prepare(&base, request.clone())?;
+    let now = concurrent(&base)?;
+    let proof = FieldWitness::prove(&old, &base, &now, WorkBudget::default())?;
+    let replayed = prepare(&now, request)?;
+    assert!(super::super::same_actions(&old, &replayed));
+    let certificate = proof.certificate(&old, &replayed, &json!({"read":"entity"}));
+    let edges = &certificate["certificate"]["witness"]["edges"];
+    assert_eq!(edges[0]["presence"], "present");
+    assert_eq!(edges[0]["edge_id"], edge_id.to_string());
+    assert_eq!(edges[1]["presence"], "missing");
+    assert_eq!(edges[1]["coverage"], "complete_laboratory_edge_identity");
+    for change in [
+        "removed",
+        "kind",
+        "field",
+        "edge_revision",
+        "endpoint_reuse",
+        "dangling",
+        "phantom",
+    ] {
+        let mut changed = concurrent(&base)?;
+        match change {
+            "removed" => {
+                changed.graph.edges.remove(&edge_id);
+            }
+            "kind" => {
+                changed.graph.edges.get_mut(&edge_id).ok_or("edge")?.kind =
+                    dfmcp_world::EdgeKind::MemberOf;
+            }
+            "field" => {
+                changed
+                    .graph
+                    .edges
+                    .get_mut(&edge_id)
+                    .ok_or("edge")?
+                    .fields
+                    .insert("eligible".into(), fact(Value::Bool(false)));
+            }
+            "edge_revision" => {
+                changed
+                    .graph
+                    .edges
+                    .get_mut(&edge_id)
+                    .ok_or("edge")?
+                    .revision += 1;
+            }
+            "endpoint_reuse" => {
+                changed
+                    .graph
+                    .entities
+                    .get_mut(&BURROW)
+                    .ok_or("burrow")?
+                    .generation += 1;
+            }
+            "dangling" => {
+                changed.graph.entities.remove(&BURROW);
+            }
+            _ => {
+                let mut phantom = changed.graph.edges[&edge_id].clone();
+                phantom.id = EdgeId::new(31);
+                changed.graph.edges.insert(phantom.id, phantom);
+            }
+        }
+        changed.refresh_hash();
+        assert!(
+            FieldWitness::prove(&old, &base, &changed, WorkBudget::default()).is_err(),
+            "{change}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn aggregate_refinement_refuses_incomplete_or_oversized_censuses() -> TestResult {
+    let mut base = world();
+    let mut request = requested(labor("MINE"));
+    request.preconditions.push(quantity_guard(
+        EntityKind::Unit,
+        "alive",
+        Value::Bool(true),
+        None,
+    ));
+    let old = prepare(&base, request.clone())?;
+    let now = concurrent(&base)?;
+    assert!(
+        FieldWitness::prove(
+            &old,
+            &base,
+            &now,
+            WorkBudget {
+                max_entities: 1,
+                ..WorkBudget::default()
+            }
+        )
+        .is_err()
+    );
+    for id in 3..=259 {
+        let mut record = base.graph.entities[&UNIT].clone();
+        record.id = EntityId::new(id);
+        base.graph.entities.insert(record.id, record);
+    }
+    base.refresh_hash();
+    let old = prepare(&base, request)?;
+    let now = concurrent(&base)?;
+    assert!(FieldWitness::prove(&old, &base, &now, WorkBudget::default()).is_err());
+    Ok(())
+}
+
+#[test]
+fn quantity_refinement_keeps_unknown_and_overflow_branches_under_any() -> TestResult {
+    for unavailable in ["unknown_selector", "overflow"] {
+        let mut base = relation_world();
+        for (id, amount) in [(10, u64::MAX), (11, 1)] {
+            let id = EntityId::new(id);
+            let mut selector = fact(Value::Bool(true));
+            if unavailable == "unknown_selector" && id == EntityId::new(11) {
+                selector.presence = Some(FactPresence::Unknown("unobserved selector".into()));
+            }
+            base.graph.entities.insert(
+                id,
+                EntityRecord {
+                    id,
+                    generation: 1,
+                    revision: 1,
+                    kind: EntityKind::Item,
+                    label: "uncertain inventory".into(),
+                    fields: BTreeMap::from([
+                        ("selected".into(), selector),
+                        ("amount".into(), fact(Value::U64(amount))),
+                    ]),
+                },
+            );
+        }
+        base.refresh_hash();
+        let mut request = requested(labor("MINE"));
+        request.preconditions.push(Predicate::Any(vec![
+            Predicate::EdgeExists {
+                edge_id: EdgeId::new(30),
+                kind: None,
+            },
+            quantity_guard(
+                EntityKind::Item,
+                "selected",
+                Value::Bool(true),
+                Some("amount"),
+            ),
+        ]));
+        let old = prepare(&base, request)?;
+        let now = concurrent(&base)?;
+        let result = FieldWitness::prove(&old, &base, &now, WorkBudget::default());
+        assert!(result.is_err(), "{unavailable}");
     }
     Ok(())
 }

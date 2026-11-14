@@ -206,6 +206,98 @@ The `starter_fortress` scenario is 48x48 rock at z=9..11 with, at z=10, a carved
 10x3 hall at (0..9, 0..2), seven dwarves (entity IDs 1001–1007), a stockpile
 (2001), a burrow (3001) and a squad (4001).
 
+## Caller guards for labor and burrow setters
+
+A raw `set_labor` or `set_burrow_membership` step may include a
+`preconditions` array. The guards must already be established true when the
+plan is prepared and must still hold when its step dispatches. They constrain
+whether the existing setter runs; its ordinary postconditions, compensation
+and capability requirements remain the execution contract.
+
+For example, this labor assignment requires an exact count of seven living
+units and the absence of one particular relation identity:
+
+```json
+[
+  {
+    "action": {
+      "kind": "set_labor",
+      "units": ["1001"],
+      "labor": "MINE",
+      "enabled": true
+    },
+    "preconditions": [
+      {
+        "kind": "entity_quantity",
+        "entity_kind": "unit",
+        "filter_field": "alive",
+        "filter_value": {"type": "bool", "value": true},
+        "comparison": "eq",
+        "value": 7
+      },
+      {
+        "kind": "not",
+        "arg": {
+          "kind": "edge_exists",
+          "edge_id": "0000000000000000000000000000001e"
+        }
+      }
+    ]
+  }
+]
+```
+
+The example edge identity is an exact key, not a claim that any particular
+relation family is absent. Positive relation guards may additionally require
+`"edge_kind":"assigned_to"`; obtain real relation identities and kinds from
+the selected laboratory observation.
+
+The closed forms are:
+
+| Guard `kind` | Required fields | Meaning |
+|---|---|---|
+| `edge_exists` | `edge_id`; optional `edge_kind` | Exact edge exists, with the requested kind when supplied. |
+| `entity_quantity` | `entity_kind`, `filter_field`, `filter_value`, `comparison`, `value`; optional `quantity_field` | Count every kind member whose exact typed selector matches; with a quantity field, sum each matching member's established unsigned value instead. |
+| `all` | `args` | Every child must hold. |
+| `any` | `args` | At least one child must hold. |
+| `not` | `arg` | Three-valued negation; unknown remains unknown. |
+
+Each step's precondition list is a conjunction. Comparisons are `eq`, `ne`,
+`lt`, `le`, `gt` and `ge`; the threshold is an unsigned 64-bit integer.
+Selector literals preserve their type: `{"type":"null"}`,
+`{"type":"bool","value":true}`, `{"type":"i64","value":3}`,
+`{"type":"u64","value":3}`, `{"type":"text","value":"BED"}`, or
+`{"type":"fixed","value":{"units":3,"scale":100}}`. Signed and unsigned
+values are distinct selectors. Omitting `quantity_field` counts matching
+entities; supplying it requires an eligible `u64` fact on every match.
+Unknown selectors, unavailable contributing quantities and unsigned overflow
+cannot establish an aggregate, even when a known subtotal meets the threshold.
+An empty complete kind domain has quantity zero.
+
+Edge IDs are nonzero, 32-digit lowercase hexadecimal strings. Registered entity
+and edge kind names use their canonical spelling; bounded custom names retain
+the existing typed custom-kind semantics. Field and kind names contain
+1–128 non-control bytes, and text literals contain at most 4,096 bytes. Each
+step accepts at most 64 preconditions, each compound accepts 1–64 arguments,
+and the complete request admits at most 256 guard nodes at depth 16, within the
+existing 16-KiB action-request and 16-step bounds. Unknown fields, duplicate
+fields, malformed values and guards on other action families are refused.
+
+The planned and replayed step projections expose their sealed `preconditions`.
+The original caller JSON survives the normal source replay and durable source
+record. Requests that omit guards, or supply an empty list, produce the same
+requested actions as before. A caller cannot use this input to supply arbitrary
+postconditions, obligations, compensation actions or new effect families.
+
+Shared, same-tick model-free setter plans can retain these guards through
+independent changes. Exact relation records and endpoint generations remain
+bound; quantity witnesses retain the complete kind census and each relevant
+selector and quantity fact. An equal sum with changed contributors, a new
+nonmatching member or a replaced endpoint requires a newly reviewed replay.
+Unknown branches under `any` are not omitted from the rebase witness.
+See [the field-rebase contract](LAB_FIELD_REBASE.md) for bounds, certificates
+and the current validation boundary.
+
 ## In-process dispatcher
 
 `dfmcp_adapter::dispatcher::MutationDispatcher` executes the same reference

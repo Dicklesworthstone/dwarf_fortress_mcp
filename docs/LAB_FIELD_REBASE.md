@@ -50,9 +50,52 @@ Opt-in model worlds continue through explicit source replay and review. The
 absence census is part of the certificate; an incomplete scan cannot produce
 an accepted field proof.
 
-Range, spatial, relation, aggregate and owned-history predicates remain on the
-conservative replay path. Blueprint and objective compilers are also excluded
-because they can read domains that their resulting action list does not name.
+Exact `EdgeExists` and absolute `EntityQuantity` predicates are also eligible
+within this closed setter boundary. Caller-supplied guards reach these existing
+typed predicates through the optional `preconditions` array in raw action
+requests; see [the request grammar](LAB_SEMANTIC_ACTIONS.md#caller-guards-for-labor-and-burrow-setters).
+The planner seals and rechecks them using its existing laboratory evidence
+policy.
+
+### Exact relation reads
+
+A present edge must retain its complete identity, revision, kind, endpoints and
+qualified field facts. The certificate includes a deterministic full-record
+commitment and binds both endpoint entity identities, generations and kinds.
+Unrelated endpoint fields may change only after the ordinary coarse endpoint
+conflict reaches this finer check. Edge insertion, removal, changed edge
+content, dangling endpoints or endpoint generation reuse require fresh review.
+A negative edge read preserves the absence of that exact identity in both
+complete laboratory graphs. It does not establish absence of an entire
+relation family or arbitrary adjacency range.
+
+### Absolute quantity reads
+
+The proof scans the entire canonical entity-kind domain in each version,
+including reserved-name aliases and entities whose selector currently does
+not match. It requires exactly the same member identities and generations.
+Every member's selector fact is retained; each matching member's unsigned
+quantity fact is retained when the predicate sums a field. Without a quantity
+field, each match contributes one. Unrelated fields, including the quantity
+of a nonmatching member, may change.
+
+A matching subtotal is insufficient when any selector or contributing quantity
+is unavailable. Unsigned overflow also refuses refinement. Insertions, removals,
+selector changes and substituted contributors remain conflicts even if the
+total is unchanged or the new member does not match. The same rule protects an
+initially empty domain. Every `any` and `not` branch remains witnessed; a
+currently true sibling cannot erase an unknown aggregate read.
+
+Optional `edges` and `aggregate_domains` certificate sections record exact
+edge commitments, complete membership, matched contributors, exact total and
+the canonical aggregate predicate digest. The ordinary field section retains
+the full selector and quantity fact digests. Certificates that use neither new
+read family retain their existing representation.
+
+Range, spatial, temporal quantity-increase and owned-history predicates remain
+on the conservative replay path. Blueprint and objective compilers are also
+excluded because they can read domains that their resulting action list does
+not name.
 Ordinary whole-record relation witnesses also compare both complete endpoint
 entity records after checking the edge itself. A byte-identical relation cannot
 hide endpoint removal, generation reuse, kind drift or another endpoint-record
@@ -62,8 +105,10 @@ without relation reads retain their exact prior certificate representation.
 ## Bounds and authority
 
 The proof admits at most 64 steps, 256 entity identities, 256 distinct fields,
-predicate depth 32, 4,096 entity-plus-edge records per version, 262,144 counted
-operations and 1 MiB of charged scalar data. The negotiated action, entity and
+256 exact edge reads, 64 aggregate predicates, predicate depth 32, 4,096
+entity-plus-edge records per version, 262,144 counted operations and 1 MiB of
+charged scalar data. Aggregate members and relation endpoints share the same
+256-identity limit; selectors and quantities share the same 256-field limit. The negotiated action, entity and
 byte budgets can tighten those limits. Wall time is capped by the smaller of
 the negotiated budget and 100 ms. Exhaustion returns a refinement refusal and
 the ordinary reviewed replay; it does not dispatch effects.
@@ -91,3 +136,20 @@ plan/commit/query/retry path, revoked current effect authority and incomplete
 census refusal. The existing public conflict test now changes the exact same
 labor field, preserving explicit replan coverage after independent fields
 became eligible for automatic replay.
+
+The guarded-setter additions include parser and public-facade regression
+sources for positive and negative relation guards, shared-session aggregate
+guards, initial false/unknown/negated-unknown refusals, unchanged-total
+substitutions, nonmatching and alias phantoms, empty domains, endpoint reuse,
+every boolean branch, overflow and current authority. Adversarial public
+fixtures inject independent canonical observations; their plan and commit
+requests still pass caller JSON through the ordinary facade.
+
+Scoped Rustfmt completed after the execution environment returned. The full
+MCP test-library build was SIGKILLed in unchanged Asupersync under memory
+pressure without a Rust source diagnostic; a lower-memory actual-source
+typecheck is pending. The guarded-setter regressions remain unexecuted.
+Fourteen laboratory effect-drain tests, including the three new emergency-pause
+cases, passed; those checks do not qualify this MCP feature. Source review and
+partial component checks do not establish a passing MCP build, real stdio
+execution or native admission.

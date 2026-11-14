@@ -560,7 +560,10 @@ mod tests {
             source_generation: 1,
             baseline_source_counters: [0, 0, 1],
         });
-        assert_eq!(witness.to_json()["entity_domains"]["kinds"], json!(["item"]));
+        assert_eq!(
+            witness.to_json()["entity_domains"]["kinds"],
+            json!(["item"])
+        );
         // A present-world comparison cannot validate the original historical
         // baseline, even when both supplied snapshots are byte-identical.
         assert!(witness.first_change(&base, &base).is_some());

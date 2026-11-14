@@ -1142,7 +1142,10 @@ mod tests {
                 let original = response.to_string();
                 let fitted = fit(&original, budget);
                 let output: Value = serde_json::from_str(&fitted)?;
-                assert_eq!(output["output_budget"]["tier"], "cancellation_receipt", "{output}");
+                assert_eq!(
+                    output["output_budget"]["tier"], "cancellation_receipt",
+                    "{output}"
+                );
                 if let Some(fields) = raw.as_object() {
                     for (key, value) in fields {
                         assert_eq!(&output[key], value, "lost cancellation outcome field {key}");
@@ -1162,9 +1165,16 @@ mod tests {
                 );
                 assert_eq!(
                     output["agent_turn"]["coverage"]["omitted_domains"],
-                    json!(["session_orientation", "per_step_drain_evidence", "untracked_work_detail"]),
+                    json!([
+                        "session_orientation",
+                        "per_step_drain_evidence",
+                        "untracked_work_detail"
+                    ]),
                 );
-                assert_eq!(output["agent_turn"]["recommendations"][0]["risk"], "read_only");
+                assert_eq!(
+                    output["agent_turn"]["recommendations"][0]["risk"],
+                    "read_only"
+                );
                 assert!(estimate_tokens(&fitted) <= budget);
                 assert_eq!(fit(&original, budget), fitted);
                 let minimal = minimal(&response);
@@ -1201,10 +1211,13 @@ mod tests {
             ("scope", json!("last_action")),
             ("action_id", json!("a".repeat(32))),
             ("final_state", json!("AppliedAwaitingVerification")),
-            ("work_state", json!({
-                "state":"unknown", "quiescent":false,
-                "observed_anchor":raw["observed_anchor"],
-            })),
+            (
+                "work_state",
+                json!({
+                    "state":"unknown", "quiescent":false,
+                    "observed_anchor":raw["observed_anchor"],
+                }),
+            ),
         ] {
             raw[key] = value.clone();
             response[key] = value;
@@ -1212,10 +1225,16 @@ mod tests {
         let budget = (raw.to_string().len() as u64 + 2_048).div_ceil(4);
         let fitted = fit(&response.to_string(), budget);
         let output: Value = serde_json::from_str(&fitted)?;
-        assert_eq!(output["output_budget"]["tier"], "cancellation_receipt", "{output}");
+        assert_eq!(
+            output["output_budget"]["tier"], "cancellation_receipt",
+            "{output}"
+        );
         if let Some(fields) = raw.as_object() {
             for (key, value) in fields {
-                assert_eq!(&output[key], value, "lost single-action outcome field {key}");
+                assert_eq!(
+                    &output[key], value,
+                    "lost single-action outcome field {key}"
+                );
             }
         }
         assert_eq!(output["ok"], false);
@@ -1230,8 +1249,7 @@ mod tests {
     #[test]
     fn cancellation_receipt_requires_an_observed_outcome_and_preserves_fitting_turns()
     -> Result<(), serde_json::Error> {
-        let (raw, response) =
-            cancellation_with_oversized_orientation("continuous", true, false);
+        let (raw, response) = cancellation_with_oversized_orientation("continuous", true, false);
         let source = response.to_string();
         let full: Value = serde_json::from_str(&fit(&source, estimate_tokens(&source) + 1_000))?;
         assert_eq!(full["output_budget"]["tier"], "full");
@@ -1256,7 +1274,6 @@ mod tests {
         assert!(cancellation_outcome(&other_operation).is_none());
         Ok(())
     }
-
 }
 
 #[cfg(test)]

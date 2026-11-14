@@ -10,7 +10,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use dfmcp_core::{
-    DfmcpError, Digest32, EntityId, ErrorCode, FortressId, GameTick, MapCoord, MapCuboid,
+    DfmcpError, Digest32, EdgeId, EntityId, ErrorCode, FortressId, GameTick, MapCoord, MapCuboid,
     ObservationCursor, Result,
 };
 use dfmcp_intent::effects;
@@ -20,7 +20,7 @@ use dfmcp_intent::{
 };
 use dfmcp_world::terrain::{region_tiles, uniform_chunk, validate_region};
 use dfmcp_world::{
-    ChunkCoord, CompareOp, EntityKind, EntityRecord, Fact, FactSource, Predicate, Value,
+    ChunkCoord, CompareOp, EdgeKind, EntityKind, EntityRecord, Fact, FactSource, Predicate, Value,
     WorldGraph, WorldSnapshot, laboratory_fact_value, tile_codes,
 };
 use serde::{Deserialize, Deserializer, Serialize};
@@ -481,6 +481,202 @@ struct StepSpec {
     action: ActionSpec,
     #[serde(default)]
     depends_on: Vec<u32>,
+    #[serde(default)]
+    preconditions: Vec<ActionGuardSpec>,
+}
+
+const MAX_ACTION_GUARD_NODES: usize = 256;
+const MAX_ACTION_GUARD_DEPTH: usize = 16;
+
+/// Closed caller guards for the two setter families. These lower into the
+/// existing evidence-qualified predicates; they grant no effects or authority.
+#[derive(Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+enum ActionGuardSpec {
+    EdgeExists {
+        edge_id: String,
+        edge_kind: Option<String>,
+    },
+    EntityQuantity {
+        entity_kind: String,
+        filter_field: String,
+        filter_value: ActionGuardValue,
+        quantity_field: Option<String>,
+        comparison: ActionGuardComparison,
+        value: u64,
+    },
+    All {
+        args: Vec<ActionGuardSpec>,
+    },
+    Any {
+        args: Vec<ActionGuardSpec>,
+    },
+    Not {
+        arg: Box<ActionGuardSpec>,
+    },
+}
+
+#[derive(Deserialize)]
+#[serde(
+    tag = "type",
+    content = "value",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+enum ActionGuardValue {
+    Null,
+    Bool(bool),
+    I64(i64),
+    U64(u64),
+    Text(String),
+    Fixed { units: i64, scale: u32 },
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum ActionGuardComparison {
+    Eq,
+    Ne,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+}
+
+fn guard_entity_kind(value: String) -> Result<EntityKind> {
+    Ok(match name(value, "guard entity kind")?.as_str() {
+        "fortress" => EntityKind::Fortress,
+        "unit" => EntityKind::Unit,
+        "item" => EntityKind::Item,
+        "building" => EntityKind::Building,
+        "job" => EntityKind::Job,
+        "work_order" => EntityKind::WorkOrder,
+        "stockpile" => EntityKind::Stockpile,
+        "zone" => EntityKind::Zone,
+        "burrow" => EntityKind::Burrow,
+        "squad" => EntityKind::Squad,
+        "military_order" => EntityKind::MilitaryOrder,
+        "tile_feature" => EntityKind::TileFeature,
+        "plant" => EntityKind::Plant,
+        "creature" => EntityKind::Creature,
+        "historical_figure" => EntityKind::HistoricalFigure,
+        "civilization" => EntityKind::Civilization,
+        "announcement" => EntityKind::Announcement,
+        "syndrome" => EntityKind::Syndrome,
+        other => EntityKind::Other(other.to_owned()),
+    })
+}
+
+fn guard_edge_kind(value: String) -> Result<EdgeKind> {
+    Ok(match name(value, "guard edge kind")?.as_str() {
+        "located_at" => EdgeKind::LocatedAt,
+        "contained_in" => EdgeKind::ContainedIn,
+        "assigned_to" => EdgeKind::AssignedTo,
+        "member_of" => EdgeKind::MemberOf,
+        "performs" => EdgeKind::Performs,
+        "requires" => EdgeKind::Requires,
+        "produces" => EdgeKind::Produces,
+        "uses" => EdgeKind::Uses,
+        "supports" => EdgeKind::Supports,
+        "threatens" => EdgeKind::Threatens,
+        "ordered_by" => EdgeKind::OrderedBy,
+        "parent_of" => EdgeKind::ParentOf,
+        other => EdgeKind::Custom(other.to_owned()),
+    })
+}
+
+fn action_guard(spec: ActionGuardSpec, depth: usize, nodes: &mut usize) -> Result<Predicate> {
+    *nodes = nodes.saturating_add(1);
+    if depth > MAX_ACTION_GUARD_DEPTH || *nodes > MAX_ACTION_GUARD_NODES {
+        return Err(invalid(
+            "action preconditions exceed their depth or total node bound",
+        ));
+    }
+    Ok(match spec {
+        ActionGuardSpec::EdgeExists { edge_id, edge_kind } => {
+            if edge_id.len() != 32
+                || !edge_id
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+            {
+                return Err(invalid(
+                    "guard edge IDs are 32 lowercase hexadecimal digits",
+                ));
+            }
+            let edge_id = u128::from_str_radix(&edge_id, 16)
+                .map(EdgeId::new)
+                .map_err(|_| invalid("invalid guard edge identity"))?;
+            if edge_id == EdgeId::NIL {
+                return Err(invalid("guard edge identity must be nonzero"));
+            }
+            Predicate::EdgeExists {
+                edge_id,
+                kind: edge_kind.map(guard_edge_kind).transpose()?,
+            }
+        }
+        ActionGuardSpec::EntityQuantity {
+            entity_kind,
+            filter_field,
+            filter_value,
+            quantity_field,
+            comparison,
+            value,
+        } => {
+            let filter_value = match filter_value {
+                ActionGuardValue::Null => Value::Null,
+                ActionGuardValue::Bool(value) => Value::Bool(value),
+                ActionGuardValue::I64(value) => Value::I64(value),
+                ActionGuardValue::U64(value) => Value::U64(value),
+                ActionGuardValue::Fixed { units, scale } => Value::Fixed { units, scale },
+                ActionGuardValue::Text(value) => {
+                    if value.len() > 4_096 {
+                        return Err(invalid("guard text literal exceeds 4096 bytes"));
+                    }
+                    Value::Text(value)
+                }
+            };
+            Predicate::EntityQuantity {
+                kind: guard_entity_kind(entity_kind)?,
+                filter_field: name(filter_field, "guard selector field")?,
+                filter_value,
+                quantity_field: quantity_field
+                    .map(|field| name(field, "guard quantity field"))
+                    .transpose()?,
+                op: match comparison {
+                    ActionGuardComparison::Eq => CompareOp::Eq,
+                    ActionGuardComparison::Ne => CompareOp::Ne,
+                    ActionGuardComparison::Lt => CompareOp::Lt,
+                    ActionGuardComparison::Le => CompareOp::Le,
+                    ActionGuardComparison::Gt => CompareOp::Gt,
+                    ActionGuardComparison::Ge => CompareOp::Ge,
+                },
+                value,
+            }
+        }
+        ActionGuardSpec::All { args } | ActionGuardSpec::Any { args } if args.is_empty() => {
+            return Err(invalid(
+                "compound action guards require at least one argument",
+            ));
+        }
+        ActionGuardSpec::All { args } => Predicate::All(action_guard_children(args, depth, nodes)?),
+        ActionGuardSpec::Any { args } => Predicate::Any(action_guard_children(args, depth, nodes)?),
+        ActionGuardSpec::Not { arg } => {
+            Predicate::Not(Box::new(action_guard(*arg, depth + 1, nodes)?))
+        }
+    })
+}
+
+fn action_guard_children(
+    args: Vec<ActionGuardSpec>,
+    depth: usize,
+    nodes: &mut usize,
+) -> Result<Vec<Predicate>> {
+    if args.len() > MAX_LIST_ITEMS {
+        return Err(invalid("compound action guards exceed 64 arguments"));
+    }
+    args.into_iter()
+        .map(|arg| action_guard(arg, depth + 1, nodes))
+        .collect()
 }
 
 #[derive(Deserialize)]
@@ -826,8 +1022,8 @@ fn action(spec: ActionSpec) -> Result<Action> {
     })
 }
 
-/// Parse a JSON array of `{ "action": {...}, "depends_on": [step indices] }`.
-/// Postconditions, obligations and compensations come from the reference
+/// Parse a closed action array with optional dependencies and bounded setter
+/// preconditions. Postconditions, obligations and compensations come from the reference
 /// action model when the planner seals the plan.
 pub(crate) fn parse_steps(raw: &str) -> Result<Vec<RequestedAction>> {
     if raw.len() > MAX_ACTIONS_JSON_BYTES {
@@ -846,12 +1042,31 @@ pub(crate) fn parse_steps(raw: &str) -> Result<Vec<RequestedAction>> {
             "a laboratory plan has 1..={MAX_LAB_STEPS} steps"
         )));
     }
+    let mut guard_nodes = 0;
     steps
         .into_iter()
         .map(|step| {
+            let action = action(step.action)?;
+            if step.preconditions.len() > MAX_LIST_ITEMS {
+                return Err(invalid("a step accepts at most 64 action preconditions"));
+            }
+            if !step.preconditions.is_empty()
+                && !matches!(
+                    &action,
+                    Action::SetLabor { .. } | Action::SetBurrowMembership { .. }
+                )
+            {
+                return Err(invalid(
+                    "caller preconditions currently support labor and burrow setters",
+                ));
+            }
             Ok(RequestedAction {
-                action: action(step.action)?,
-                preconditions: Vec::new(),
+                action,
+                preconditions: step
+                    .preconditions
+                    .into_iter()
+                    .map(|guard| action_guard(guard, 0, &mut guard_nodes))
+                    .collect::<Result<Vec<_>>>()?,
                 postconditions: Vec::new(),
                 compensation: None,
                 obligation: None,
@@ -1024,8 +1239,8 @@ pub(crate) fn predicate_json(predicate: &Predicate) -> Json {
             "meaning":"net observed quantity growth; causal production unknown",
         }}),
         Predicate::EdgeExists { edge_id, kind } => json!({"edge_exists": {
-            "edge_id": edge_id.get().to_string(),
-            "kind": kind.as_ref().map(|kind| format!("{kind:?}")),
+            "edge_id": edge_id.to_string(),
+            "kind": kind.as_ref().map(EdgeKind::as_str),
         }}),
         Predicate::Paused(paused) => json!({"paused": paused}),
         Predicate::RegionTerrain { area, tile_code } => json!({"region_terrain": {
@@ -2921,6 +3136,10 @@ pub(crate) fn plan_steps_json(plan: &PreparedPlan) -> Json {
                     })),
                     "compensable": step.compensation.is_some(),
                 });
+                if !step.preconditions.is_empty() {
+                    row["preconditions"] =
+                        Json::Array(step.preconditions.iter().map(predicate_json).collect());
+                }
                 if let Action::CreateWorkOrder { conditions, .. } = &step.action {
                     row["conditions"] = Json::Array(conditions.iter().map(work_order_condition_json).collect());
                 }
@@ -3826,6 +4045,136 @@ mod tests {
             assert!(parse_steps(bad).is_err(), "{bad}");
         }
         Ok(())
+    }
+
+    #[test]
+    fn setter_guard_requests_lower_exact_typed_predicates_and_preserve_omission() -> Result<()> {
+        let action = json!({"kind":"set_labor","units":["1001"],"labor":"MINE","enabled":true});
+        let legacy = parse_steps(&json!([{"action":action}]).to_string())?;
+        let explicit_empty =
+            parse_steps(&json!([{"action":action,"preconditions":[]}]).to_string())?;
+        assert_eq!(legacy, explicit_empty);
+        let parsed = parse_steps(&json!([{
+            "action":action,
+            "preconditions":[{"kind":"all","args":[
+                {"kind":"edge_exists","edge_id":EdgeId::new(30).to_string(),"edge_kind":"assigned_to"},
+                {"kind":"not","arg":{"kind":"edge_exists","edge_id":EdgeId::new(31).to_string()}},
+                {"kind":"entity_quantity","entity_kind":"unit","filter_field":"alive",
+                 "filter_value":{"type":"bool","value":true},"comparison":"ge","value":7},
+            ]}],
+        }]).to_string())?;
+        assert_eq!(
+            parsed[0].preconditions,
+            vec![Predicate::All(vec![
+                Predicate::EdgeExists {
+                    edge_id: EdgeId::new(30),
+                    kind: Some(EdgeKind::AssignedTo)
+                },
+                Predicate::Not(Box::new(Predicate::EdgeExists {
+                    edge_id: EdgeId::new(31),
+                    kind: None
+                })),
+                Predicate::EntityQuantity {
+                    kind: EntityKind::Unit,
+                    filter_field: "alive".into(),
+                    filter_value: Value::Bool(true),
+                    quantity_field: None,
+                    op: CompareOp::Ge,
+                    value: 7,
+                },
+            ])]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn setter_guard_literals_preserve_numeric_types_and_exact_sum_semantics() -> Result<()> {
+        for (literal, expected) in [
+            (json!({"type":"null"}), Value::Null),
+            (json!({"type":"bool","value":true}), Value::Bool(true)),
+            (json!({"type":"i64","value":3}), Value::I64(3)),
+            (json!({"type":"u64","value":3}), Value::U64(3)),
+            (
+                json!({"type":"text","value":""}),
+                Value::Text(String::new()),
+            ),
+            (
+                json!({"type":"fixed","value":{"units":3,"scale":100}}),
+                Value::Fixed {
+                    units: 3,
+                    scale: 100,
+                },
+            ),
+        ] {
+            let parsed = parse_steps(&json!([{
+                "action":{"kind":"set_burrow_membership","units":["1001"],"burrow":"3001","assigned":true},
+                "preconditions":[{
+                    "kind":"entity_quantity","entity_kind":"stock_ledger",
+                    "filter_field":"selector","filter_value":literal,
+                    "quantity_field":"amount","comparison":"eq","value":0,
+                }],
+            }]).to_string())?;
+            assert_eq!(
+                parsed[0].preconditions,
+                vec![Predicate::EntityQuantity {
+                    kind: EntityKind::Other("stock_ledger".into()),
+                    filter_field: "selector".into(),
+                    filter_value: expected,
+                    quantity_field: Some("amount".into()),
+                    op: CompareOp::Eq,
+                    value: 0,
+                }]
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn setter_guard_requests_reject_unknown_duplicate_unbounded_and_effect_expanding_input() {
+        let action = json!({"kind":"set_labor","units":["1001"],"labor":"MINE","enabled":true});
+        let edge = json!({"kind":"edge_exists","edge_id":EdgeId::new(30).to_string()});
+        for guard in [
+            json!({"kind":"edge_exists","edge_id":"30"}),
+            json!({"kind":"edge_exists","edge_id":"00000000000000000000000000000000"}),
+            json!({"kind":"edge_exists","edge_id":"000000000000000000000000000000AF"}),
+            json!({"kind":"edge_exists","edge_id":EdgeId::new(30).to_string(),"generation":1}),
+            json!({"kind":"all","args":[]}),
+            json!({"kind":"any","args":[]}),
+            json!({"kind":"all","args":vec![edge.clone();65]}),
+            json!({"kind":"entity_quantity","entity_kind":"unit","filter_field":"alive",
+                "filter_value":{"type":"u64","value":-1},"comparison":"eq","value":1}),
+            json!({"kind":"entity_quantity","entity_kind":"unit","filter_field":"alive",
+                "filter_value":{"type":"bool","value":true,"extra":1},"comparison":"eq","value":1}),
+            json!({"kind":"entity_quantity","entity_kind":"unit","filter_field":"alive",
+                "filter_value":{"type":"null","value":true},"comparison":"eq","value":1}),
+            json!({"kind":"extension","command":"anything"}),
+        ] {
+            let raw = json!([{"action":action,"preconditions":[guard]}]).to_string();
+            assert!(parse_steps(&raw).is_err(), "{raw}");
+        }
+        let mut deep = edge.clone();
+        for _ in 0..=MAX_ACTION_GUARD_DEPTH {
+            deep = json!({"kind":"not","arg":deep});
+        }
+        assert!(
+            parse_steps(&json!([{"action":action,"preconditions":[deep]}]).to_string()).is_err()
+        );
+        assert!(
+            parse_steps(
+                &json!([{
+                    "action":{"kind":"pause","paused":false},"preconditions":[edge],
+                }])
+                .to_string()
+            )
+            .is_err()
+        );
+        for raw in [
+            r#"[{"action":{"kind":"set_labor","units":["1001"],"labor":"MINE","enabled":true},"preconditions":[],"preconditions":[]}]"#,
+            r#"[{"action":{"kind":"set_labor","units":["1001"],"labor":"MINE","enabled":true},"preconditions":[{"kind":"edge_exists","edge_id":"0000000000000000000000000000001e","edge_id":"0000000000000000000000000000001f"}]}]"#,
+            r#"[{"action":{"kind":"set_labor","units":["1001"],"labor":"MINE","enabled":true},"preconditions":[{"kind":"entity_quantity","entity_kind":"unit","filter_field":"alive","filter_value":{"type":"bool","value":true,"value":false},"comparison":"eq","value":7}]}]"#,
+        ] {
+            assert!(parse_steps(raw).is_err(), "{raw}");
+        }
     }
 
     #[test]

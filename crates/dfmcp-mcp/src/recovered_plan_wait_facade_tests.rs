@@ -340,7 +340,10 @@ fn recovered_emergency_pause_is_durable_without_claiming_carried_work_drained() 
     assert_eq!(observed["ok"], true, "{observed}");
     assert_eq!(observed["advanced_game_ticks"], 0);
     assert_eq!(observed["selected_plan_wait"]["physical_quiescent"], false);
-    assert_eq!(observed["selected_plan_wait"]["dispatch_handles_restored"], false);
+    assert_eq!(
+        observed["selected_plan_wait"]["dispatch_handles_restored"],
+        false
+    );
     assert_eq!(current_world(&second)?, after);
 
     // Pause is part of the durable world frontier, including after compaction.
@@ -357,7 +360,10 @@ fn recovered_emergency_pause_is_durable_without_claiming_carried_work_drained() 
         let remaining = selected_wait(&next, &digest, 0)?;
         assert_eq!(remaining["ok"], true, "{remaining}");
         assert_eq!(remaining["selected_plan_wait"]["physical_quiescent"], false);
-        assert_eq!(remaining["selected_plan_wait"]["dispatch_handles_restored"], false);
+        assert_eq!(
+            remaining["selected_plan_wait"]["dispatch_handles_restored"],
+            false
+        );
         assert_eq!(remaining["advanced_game_ticks"], 0);
         prior = world.anchor();
     }
@@ -403,6 +409,9 @@ fn emergency_pause_publication_failure_stops_before_any_physical_drain() -> Test
     let remaining = selected_wait(&next, &digest, 0)?;
     assert_eq!(remaining["ok"], true, "{remaining}");
     assert_eq!(remaining["selected_plan_wait"]["physical_quiescent"], false);
-    assert_eq!(remaining["selected_plan_wait"]["dispatch_handles_restored"], false);
+    assert_eq!(
+        remaining["selected_plan_wait"]["dispatch_handles_restored"],
+        false
+    );
     Ok(())
 }

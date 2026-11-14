@@ -237,17 +237,31 @@ It does not extend the original deadline or revive an expired preparation under
 the old approval. Same-tick independent work can still use automatic replay when
 the full contract remains identical.
 
-If that coarse witness conflicts on an entity, a bounded registered refinement
-can now compare exact fields for immediate `SetLabor` and
-`SetBurrowMembership` actions in model-free laboratory worlds. It includes
-explicit predicate reads, action and compensation prior writes, entity
-identity/generation/kind and the complete absence domain of optional model
-declarations and stamps. Unknown or unsupported reads and exhausted budgets
-require explicit review. The original Actions source is replayed at the actual
-current anchor; an identical reviewed contract and normal current authority
-and lease gates remain mandatory. See [laboratory field rebase](LAB_FIELD_REBASE.md)
-for the closed scope and certificate. Structural world merge fallback and its
-runtime certificate admission remain separate unfinished work.
+If that coarse witness conflicts, a bounded registered refinement can compare
+exact fields, exact relations and absolute quantity domains for immediate
+`SetLabor` and `SetBurrowMembership` actions in model-free laboratory worlds.
+Raw action requests can supply closed relation and aggregate preconditions;
+the existing planner seals and rechecks those predicates. The proof includes
+action and compensation prior writes, entity identity/generation/kind and the
+complete absence domain of optional model declarations and stamps.
+
+Relation reads preserve the complete edge and both endpoint identities and
+generations. Even the coarse relation witness compares endpoint records, so an
+unchanged edge cannot hide referent replacement. Aggregate reads preserve the
+complete canonical kind membership, including aliases and nonmatching
+members, every selector fact and every contributing unsigned quantity.
+Equal totals do not excuse changed contributors, selector swaps or phantoms;
+empty domains and negative edge reads retain explicit completeness scope.
+All boolean branches remain witnessed.
+
+Unknown or unsupported reads and exhausted budgets require explicit review.
+The original Actions source is replayed at the actual current anchor; an
+identical reviewed contract and normal current authority and lease gates
+remain mandatory. See [laboratory field rebase](LAB_FIELD_REBASE.md) for the
+closed scope, certificate and current validation limits. Temporal
+quantity-increase baselines, arbitrary spatial/adjacency ranges, structural
+world merge fallback and its runtime certificate admission remain separate
+unfinished work.
 
 ## 14. External effect journal
 

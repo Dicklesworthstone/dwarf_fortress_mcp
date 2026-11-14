@@ -586,8 +586,8 @@ fn emergency_clock_context(adapter: &MemoryAdapter) -> OperationContext {
 }
 
 #[test]
-fn emergency_pause_without_original_handles_preserves_running_work_and_is_idempotent()
--> Result<()> {
+fn emergency_pause_without_original_handles_preserves_running_work_and_is_idempotent() -> Result<()>
+{
     let (original, action, entity) = started(order(), false, None)?;
     let mut recovered = MemoryAdapter::recovered(original.snapshot.clone())?;
     let before = recovered.snapshot.clone();

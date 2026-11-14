@@ -1,5 +1,48 @@
 # Implementation Status
 
+## Unreleased — Caller guards survive independent laboratory setter changes
+
+Raw SetLabor and SetBurrowMembership steps now accept optional bounded
+preconditions: exact positive or negative relation reads, absolute entity counts
+or unsigned quantity sums, and all/any/not composition. Typed selectors retain
+their scalar type. The ordinary planner seals these guards, presents them per
+step, replays the original source and rechecks qualified evidence and current
+authority before effects. False or unknown guards refuse preparation or dispatch.
+Other action families do not accept caller guards; omitted or empty guards
+preserve the previous requested action.
+
+The bounded field-refinement path now compares complete exact edge records and
+both endpoint identities/generations. Negative reads bind the absence of the
+exact edge. Quantity proofs retain the complete canonical kind membership,
+including nonmatching members and aliases, every selector fact and each
+contributing unsigned quantity. Equal totals cannot hide changed contributors,
+selector swaps or phantoms. Empty domains and every boolean branch remain
+witnessed. Unknown/stale facts, overflow and exhausted bounds require review.
+
+Same-tick, model-free immediate setters remain the only eligible action family.
+Full model-absence census, original-source replay, complete execution-contract
+equality and fresh grants/leases still apply. Deterministic optional edge and
+aggregate certificate sections preserve the prior field-only representation.
+No structural world merge, new effect authority or native admission is supplied.
+
+Seventeen new regression sources cover component proofs, caller grammar and
+public Plan/Commit behavior. Both independent implementation reviews found no
+concrete blocker; the concurrent Task replay and explicit session-close changes
+were preserved and reviewed at their integration boundaries.
+
+After execution recovered, scoped Rustfmt completed and all 14 laboratory
+effect-drain tests passed, including the three new emergency-pause regressions.
+The full MCP test-library build was terminated by SIGKILL in the unchanged
+pinned Asupersync 0.5.0 dependency after memory pressure; it emitted no Rust
+source diagnostic and did not reach MCP test execution. A lower-memory
+cargo check --tests is pending. The 17 guarded-setter regressions remain
+unexecuted. Repository verification passed bead coverage and is running its
+Python contract gates. These partial checks do not establish full-workspace
+or native qualification; subsequent results must supersede this pending status.
+
+Owner: `dfmcp-reality-wiring-proof-4bf.10`. General structural fallback and
+runtime merge-certificate admission remain unfinished; the bead stays open.
+
 ## Unreleased — Explicit close of quiet laboratory sessions
 
 The existing laboratory cancellation tool now accepts explicit

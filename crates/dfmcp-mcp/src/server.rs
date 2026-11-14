@@ -4977,9 +4977,8 @@ fn authorize_drain_budget(
             effects += 1;
         }
     }
-    effects += u64::from(
-        mode == CancelMode::EmergencyPauseAndDrain && !session.adapter.snapshot().paused,
-    );
+    effects +=
+        u64::from(mode == CancelMode::EmergencyPauseAndDrain && !session.adapter.snapshot().paused);
     if effects > u64::from(session.budget.max_actions) {
         return Err(DfmcpError::new(
             ErrorCode::BudgetExceeded,

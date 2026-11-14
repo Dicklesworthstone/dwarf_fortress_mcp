@@ -6,13 +6,14 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Instant;
 
-use dfmcp_core::{Digest32, EntityId, WorkBudget};
+use dfmcp_core::{Digest32, EdgeId, EntityId, WorkBudget};
 use dfmcp_intent::{Action, PreparedPlan, effects};
-use dfmcp_world::{EntityKind, Fact, FactPresence, Predicate, Value, WorldSnapshot};
+use dfmcp_world::{EdgeRecord, EntityKind, Fact, FactPresence, Predicate, Value, WorldSnapshot};
 use serde_json::{Value as Json, json};
 
 const MAX_FIELDS: usize = 256;
 const MAX_IDENTITIES: usize = 256;
+const MAX_QUANTITIES: usize = 64;
 const MAX_PREDICATE_DEPTH: usize = 32;
 const MAX_OPERATIONS: usize = 262_144;
 const MAX_BYTES: usize = 1_048_576;
@@ -130,6 +131,66 @@ impl Meter {
         }
         Ok(())
     }
+
+    /// Bound and qualify every field before comparing or hashing an edge.
+    /// The commitment includes the complete record, not only its visible kind.
+    fn edge(&mut self, edge: &EdgeRecord, tick: dfmcp_core::GameTick) -> Check<Digest32> {
+        self.charge(1, 128)?;
+        if edge.id == EdgeId::NIL
+            || edge.revision == 0
+            || edge.revision == u64::MAX
+            || edge.fields.len() > MAX_FIELDS
+        {
+            return Err("field refinement relation record exceeds its identity or field bound");
+        }
+        self.text(edge.kind.as_str())?;
+        let mut fields = Vec::new();
+        for (field, fact) in &edge.fields {
+            self.text(field)?;
+            self.fact(fact, tick)?;
+            self.charge(1, 128)?;
+            fields.push(json!({
+                "field":field,
+                "fact_digest":Digest32::of_bytes(&fact.canonical_bytes()).to_hex(),
+            }));
+        }
+        let record = json!({
+            "schema":"dfmcp.field-witness-edge/1", "edge_id":edge.id.to_string(),
+            "revision":edge.revision, "kind":edge.kind.as_str(),
+            "from":edge.from.to_string(), "to":edge.to.to_string(), "fields":fields,
+        });
+        Ok(Digest32::of_bytes(record.to_string().as_bytes()))
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct QuantityRead {
+    kind: String,
+    filter_field: String,
+    filter_value: Value,
+    quantity_field: Option<String>,
+    predicate_digest: Digest32,
+}
+
+/// Scan the complete canonical kind domain, including aliases and nonmatches.
+/// Membership is bounded before allocation and compared before any total.
+fn quantity_members(
+    snapshot: &WorldSnapshot,
+    kind: &str,
+    meter: &mut Meter,
+) -> Check<Vec<EntityId>> {
+    let mut members = Vec::new();
+    for (id, record) in &snapshot.graph.entities {
+        meter.charge(1, 0)?;
+        if record.kind.as_str() == kind {
+            if members.len() >= MAX_IDENTITIES {
+                return Err("field refinement aggregate domain exceeds its identity bound");
+            }
+            meter.charge(1, 64)?;
+            members.push(*id);
+        }
+    }
+    Ok(members)
 }
 
 #[derive(Default)]
@@ -138,6 +199,8 @@ struct Reads {
     kinds: BTreeMap<EntityId, EntityKind>,
     fields: BTreeSet<(EntityId, String)>,
     writes: BTreeSet<(EntityId, String)>,
+    edges: BTreeSet<EdgeId>,
+    quantities: BTreeSet<QuantityRead>,
     pause: bool,
 }
 
@@ -204,6 +267,122 @@ impl Reads {
         Ok(())
     }
 
+    /// Preserve an exact edge read, including negative existence and endpoint
+    /// generations. A relation does not survive replacement of either referent.
+    fn bind_edges(
+        &mut self,
+        base: &WorldSnapshot,
+        now: &WorldSnapshot,
+        meter: &mut Meter,
+    ) -> Check<Vec<Json>> {
+        let mut witnesses = Vec::new();
+        for id in std::mem::take(&mut self.edges) {
+            meter.charge(1, 192)?;
+            match (base.graph.edges.get(&id), now.graph.edges.get(&id)) {
+                (None, None) => witnesses.push(json!({
+                    "edge_id":id.to_string(), "presence":"missing",
+                    "coverage":"complete_laboratory_edge_identity",
+                })),
+                (Some(before), Some(after)) => {
+                    let before_digest = meter.edge(before, base.tick)?;
+                    let after_digest = meter.edge(after, now.tick)?;
+                    if before.id != id
+                        || after.id != id
+                        || before != after
+                        || before_digest != after_digest
+                    {
+                        return Err("an exact relation record changed");
+                    }
+                    for endpoint in [before.from, before.to] {
+                        if !base.graph.entities.contains_key(&endpoint)
+                            || !now.graph.entities.contains_key(&endpoint)
+                        {
+                            return Err("a witnessed relation endpoint is unavailable");
+                        }
+                        self.identity(endpoint, meter)?;
+                    }
+                    witnesses.push(json!({
+                        "edge_id":id.to_string(), "presence":"present",
+                        "kind":before.kind.as_str(), "revision":before.revision,
+                        "from":before.from.to_string(), "to":before.to.to_string(),
+                        "record_digest":before_digest.to_hex(),
+                    }));
+                }
+                _ => return Err("a witnessed relation was inserted or removed"),
+            }
+        }
+        Ok(witnesses)
+    }
+
+    /// Bind complete domain membership, all selectors and each contributing
+    /// unsigned quantity. Equal totals never hide substituted contributors.
+    fn bind_quantities(
+        &mut self,
+        base: &WorldSnapshot,
+        now: &WorldSnapshot,
+        meter: &mut Meter,
+    ) -> Check<Vec<Json>> {
+        let mut witnesses = Vec::new();
+        for read in std::mem::take(&mut self.quantities) {
+            let before = quantity_members(base, &read.kind, meter)?;
+            let after = quantity_members(now, &read.kind, meter)?;
+            if before != after {
+                return Err("an aggregate domain member was inserted or removed");
+            }
+            let mut total = 0u64;
+            let mut matched = Vec::new();
+            for id in &before {
+                self.field(*id, &read.filter_field, false, meter)?;
+                let record = base
+                    .graph
+                    .entities
+                    .get(id)
+                    .ok_or("aggregate member missing")?;
+                let selector = record
+                    .fields
+                    .get(&read.filter_field)
+                    .ok_or("an aggregate selector is unavailable")?;
+                meter.fact(selector, base.tick)?;
+                let selector = selector
+                    .known_value()
+                    .ok_or("an aggregate selector is unavailable")?;
+                // Every nonmatching selector remains in the exact field set.
+                if selector != &read.filter_value {
+                    continue;
+                }
+                let quantity = match &read.quantity_field {
+                    None => 1,
+                    Some(field) => {
+                        self.field(*id, field, false, meter)?;
+                        let fact = record
+                            .fields
+                            .get(field)
+                            .ok_or("an aggregate quantity is unavailable")?;
+                        meter.fact(fact, base.tick)?;
+                        match fact.known_value() {
+                            Some(Value::U64(value)) => *value,
+                            _ => return Err("an aggregate quantity is not a known unsigned count"),
+                        }
+                    }
+                };
+                total = total
+                    .checked_add(quantity)
+                    .ok_or("an aggregate quantity overflows its unsigned bound")?;
+                meter.charge(1, 32)?;
+                matched.push(id.to_string());
+            }
+            meter.charge(1, 256)?;
+            witnesses.push(json!({
+                "kind":read.kind, "coverage":"complete_laboratory_kind_domain",
+                "predicate_digest":read.predicate_digest.to_hex(),
+                "filter_field":read.filter_field, "quantity_field":read.quantity_field,
+                "members":before.iter().map(ToString::to_string).collect::<Vec<_>>(),
+                "matched_members":matched, "total":total,
+            }));
+        }
+        Ok(witnesses)
+    }
+
     fn predicate(&mut self, predicate: &Predicate, depth: usize, meter: &mut Meter) -> Check<()> {
         meter.charge(1, 8)?;
         if depth > MAX_PREDICATE_DEPTH {
@@ -225,6 +404,56 @@ impl Reads {
                 meter.scalar(value)?;
                 self.field(*entity_id, field, false, meter)
             }
+            Predicate::EdgeExists { edge_id, kind } => {
+                meter.charge(1, 16)?;
+                if *edge_id == EdgeId::NIL {
+                    return Err("field refinement cannot bind the reserved edge identity");
+                }
+                if let Some(kind) = kind {
+                    meter.text(kind.as_str())?;
+                }
+                self.edges.insert(*edge_id);
+                if self.edges.len() > MAX_FIELDS {
+                    return Err("field refinement relation set exceeds its bound");
+                }
+                Ok(())
+            }
+            Predicate::EntityQuantity {
+                kind,
+                filter_field,
+                filter_value,
+                quantity_field,
+                ..
+            } => {
+                meter.text(kind.as_str())?;
+                meter.text(filter_field)?;
+                meter.scalar(filter_value)?;
+                if kind.as_str().is_empty()
+                    || kind.as_str().len() > 128
+                    || filter_field.is_empty()
+                    || filter_field.len() > 256
+                {
+                    return Err("field refinement aggregate selector exceeds its bound");
+                }
+                if let Some(field) = quantity_field {
+                    meter.text(field)?;
+                    if field.is_empty() || field.len() > 256 {
+                        return Err("field refinement aggregate quantity field exceeds its bound");
+                    }
+                }
+                meter.charge(1, 128)?;
+                self.quantities.insert(QuantityRead {
+                    kind: kind.as_str().to_owned(),
+                    filter_field: filter_field.clone(),
+                    filter_value: filter_value.clone(),
+                    quantity_field: quantity_field.clone(),
+                    predicate_digest: Digest32::of_bytes(&predicate.canonical_bytes()),
+                });
+                if self.quantities.len() > MAX_QUANTITIES {
+                    return Err("field refinement aggregate read set exceeds its bound");
+                }
+                Ok(())
+            }
             Predicate::Paused(_) => {
                 self.pause = true;
                 Ok(())
@@ -240,9 +469,9 @@ impl Reads {
                 Ok(())
             }
             Predicate::Not(child) => self.predicate(child, depth + 1, meter),
-            _ => Err(
-                "range, relation, aggregate and owned-history reads require conservative replay",
-            ),
+            _ => {
+                Err("range, temporal aggregate and owned-history reads require conservative replay")
+            }
         }
     }
 }
@@ -332,6 +561,11 @@ impl FieldWitness {
         }
         model_free(base, budget, &mut meter)?;
         model_free(now, budget, &mut meter)?;
+        let edges = reads.bind_edges(base, now, &mut meter)?;
+        let quantities = reads.bind_quantities(base, now, &mut meter)?;
+        if reads.identities.len() > budget.max_entities as usize {
+            return Err("field refinement relation or aggregate scope exceeds the entity budget");
+        }
         if reads.pause && base.paused != now.paused {
             return Err("the explicit pause read changed");
         }
@@ -407,17 +641,25 @@ impl FieldWitness {
                 "written":reads.writes.contains(&(*id, field.clone()))}));
         }
         meter.charge(1, 0)?;
-        Ok(Self {
-            description: json!({
-                "domain":"laboratory_model_free_setters/1", "identities":identities,
-                "fields":fields, "pause":reads.pause,
-                "model_absence":{"coverage":"complete_entities_and_edges", "fields":MODEL_FIELDS,
-                    "entity_kinds":[effects::HARVEST_TASK_KIND]},
-                "bounds":{"identities":MAX_IDENTITIES, "fields":MAX_FIELDS,
-                    "records_per_version":MAX_RECORDS.min(budget.max_entities as usize),
-                    "operations":MAX_OPERATIONS, "bytes":meter.max_bytes},
-            }),
-        })
+        let mut description = json!({
+            "domain":"laboratory_model_free_setters/1", "identities":identities,
+            "fields":fields, "pause":reads.pause,
+            "model_absence":{"coverage":"complete_entities_and_edges", "fields":MODEL_FIELDS,
+                "entity_kinds":[effects::HARVEST_TASK_KIND]},
+            "bounds":{"identities":MAX_IDENTITIES, "fields":MAX_FIELDS,
+                "records_per_version":MAX_RECORDS.min(budget.max_entities as usize),
+                "operations":MAX_OPERATIONS, "bytes":meter.max_bytes},
+        });
+        // Existing field-only certificates retain their exact representation.
+        if !edges.is_empty() {
+            description["edges"] = json!(edges);
+            description["bounds"]["edges"] = json!(MAX_FIELDS);
+        }
+        if !quantities.is_empty() {
+            description["aggregate_domains"] = json!(quantities);
+            description["bounds"]["aggregate_reads"] = json!(MAX_QUANTITIES);
+        }
+        Ok(Self { description })
     }
 
     pub(crate) fn certificate(

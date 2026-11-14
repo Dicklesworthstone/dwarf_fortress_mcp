@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased — Guard laboratory setters with exact relations and quantities
+
+- Accept bounded typed relation/quantity preconditions and all/any/not for raw
+  labor and burrow setters; seal and expose them in the ordinary Plan/Commit
+  flow and recheck current evidence and authority before effects.
+- Refine safe independent changes using complete relation records, endpoint
+  generations, complete canonical kind membership and exact contributing
+  selector/quantity facts. Reject phantoms, equal-total substitutions, unknown
+  branches, overflow and exhausted bounds.
+- Preserve the same-tick model-free setter scope, original-source replay and
+  complete execution-contract comparison; general structural merge stays open.
+- Add 17 parser, component and public-facade regressions and complete independent
+  reviews. Apply scoped Rustfmt to this session's changes; pass all 14 laboratory
+  drain tests after execution recovered. Full MCP test compilation was killed
+  in unchanged Asupersync under memory pressure; a lower-memory actual-source
+  typecheck is pending and the 17 new guarded-setter tests remain unexecuted.
+
 ## Unreleased — Release quiet laboratory sessions safely
 
 - Add explicit `fortress.cancel(session_id, scope="session", mode="close_session")`

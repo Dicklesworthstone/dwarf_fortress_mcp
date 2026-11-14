@@ -971,12 +971,14 @@ fn emergency_session_pause_works_without_actions_and_requires_current_clock_gran
 fn emergency_pause_of_completed_original_preserves_receipt_and_pending_review() -> TestResult {
     let _serial = crate::test_serial();
     let session = open("73642")?;
-    let committed =
-        plan_and_commit(&session, r#"[{"action":{"kind":"pause","paused":false}}]"#)?;
+    let committed = plan_and_commit(&session, r#"[{"action":{"kind":"pause","paused":false}}]"#)?;
     let (action, _) = last_effect(&session)?;
     let original = receipt(&session, action)?;
     assert_eq!(original.state, CommitState::Verified);
-    let pending = plan(&session, &order("unrelated pending", "MAKE_TEST", 1, json!([])))?;
+    let pending = plan(
+        &session,
+        &order("unrelated pending", "MAKE_TEST", 1, json!([])),
+    )?;
     let scope = format!(
         "plan:{}",
         committed["plan_digest"].as_str().ok_or("digest missing")?
