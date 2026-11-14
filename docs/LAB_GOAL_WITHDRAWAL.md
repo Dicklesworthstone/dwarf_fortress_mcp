@@ -44,10 +44,13 @@ fresh authority. A historical owner ID does not recreate dispatch authority.
 
 Every original action must already be terminal and its exact physical work
 proven quiet. An active, missing, replaced or uncertain creator refuses
-withdrawal. If live original handles remain available, use the existing
+withdrawal. For a live original or a verified durable recovered original, use
 `scope: "plan:<digest>"`, `mode: "stop_future_steps"` cancellation first, then
 inspect its drain evidence. Withdrawal itself never advances time, stops game
-work, compensates an effect, or changes an action receipt.
+work, compensates an effect, or changes an action receipt. A recovered stop
+publishes fresh cancellation and physical-quiet evidence under current scoped
+authority while preserving historical terminal proof. See
+[recovered original cancellation](LAB_RECOVERED_PLAN_CANCELLATION.md).
 
 Canceled deferred steps need positive evidence that they never dispatched.
 The withdrawal certificate retains that original disposition separately from
@@ -58,8 +61,8 @@ commit blocks withdrawal.
 
 Restore-abandoned pursuits are refused by this first increment. They no longer
 have an active lineage, and a missing entity after a rewind cannot establish
-that earlier physical work is safely retired. Withdrawal does not provide a
-new stop operation for active recovered work.
+that earlier physical work is safely retired. Explicit recovered cancellation
+must finish and publish its durable frontier before withdrawal is eligible.
 
 ## Outcome and discovery
 

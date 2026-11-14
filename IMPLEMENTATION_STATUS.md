@@ -1,5 +1,45 @@
 # Implementation Status
 
+## Unreleased — Public cancellation of exact recovered laboratory originals
+
+The existing `fortress.cancel` exact `plan:<digest>` scope now selects a verified
+durable original when no live original handle survives. Fresh current grants,
+the exact archived step/action census, complete source bounds, intact recovery
+lineage and current entity/spatial ownership are checked before effects. The
+selection rejects foreign, withdrawn, restore-abandoned, ambiguous, untracked
+or unknown work. An expired lease does not release another owner's unresolved
+physical work. Recovery does not infer former live aliases or restore dispatch.
+
+`stop_future_steps` stops the selected temporal effects in reverse order.
+`emergency_pause_and_drain` additionally publishes an independently authorized
+pause before the stops. Recovered compensation is refused. Each successful
+stop publishes its world and fresh cancellation disposition together before the
+next stop. Previously Verified/Failed proof and anchors remain immutable;
+deferred steps remain nondispatched. Unrelated originals and pending review
+remain separate. A failed durable append retains the actual stopped state,
+fences subsequent effects, and withholds the finalization certificate.
+
+The final certificate requires a complete final disposition/current-work census
+and confirmed durable publication. Exact source/recovery identity, measured
+progress, publication status and nullable final proof survive output fitting;
+omitted historical detail is explicit. Typed Explain offers the freshly checked
+stop request. A stopped original remains inspectable by selected wait, can be
+withdrawn under the existing quiet-goal rules, and permits ordinary session
+close and later durable reopen when their independent conditions hold.
+
+Seven public-facade regression cases cover that full lifecycle, terminal proof
+preservation, complete authority/budget/lease/custody refusal, unrelated work,
+append-failure fencing, emergency pause, tampered cleanup evidence and a real
+three-step cancellation at the minimum 1,500-token response allowance.
+Independent source review and scoped nightly formatting passed. Rust execution
+is in progress; no complete MCP, full-workspace, native/game or admission result
+is claimed by this source checkpoint.
+
+See [the recovered cancellation guide](docs/LAB_RECOVERED_PLAN_CANCELLATION.md).
+Owner: `df-cancellation-progress-certificates-vvw`; session-wide recovered
+selection, general asynchronous region cancellation and native cancellation
+remain outside this increment.
+
 ## Unreleased — Exact recovered laboratory effect cleanup foundation
 
 The laboratory adapter now accepts a bounded `RecoveredWorkRef` for one exact

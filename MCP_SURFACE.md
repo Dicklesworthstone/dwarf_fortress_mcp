@@ -642,7 +642,7 @@ both original and clock identities without cancelling game effects.
 
 The laboratory supports `scope: "last_action"` (default), `"plan"` (the latest
 committed plan), `"plan:<64-lowercase-original-plan-digest>"` (one exact original
-commit owned by the current session), `"oldest_open_plan"` (the oldest retained
+commit owned by the current session or verified through durable recovery), `"oldest_open_plan"` (the oldest retained
 plan with unfinished work), and `"session"` (retained open work across the
 session's plans). Exact original selection checks complete commit/action custody,
 all current scoped effect authority and aggregate budgets before its first
@@ -651,6 +651,11 @@ untouched; witness-rebase aliases disclose both requested and actual digests.
 Typed original-plan/goal Explain includes a currently authorized selected-stop
 request when available, bound into its complete observation pin.
 See `docs/LAB_PLAN_CANCELLATION.md`.
+Recovered exact originals require complete anchored action custody and fresh
+current Observe, Query and scoped effect grants. They support stop and emergency
+pause without recreating action handles or compensation. Each stopped frontier
+is durably published before another stop; historical terminal proof stays
+immutable. See [recovered original cancellation](docs/LAB_RECOVERED_PLAN_CANCELLATION.md).
 Use `oldest_open_plan` to drain individually bounded original plans when the
 whole session exceeds one call's budget; the response identifies that plan's
 original digest and certifies only its actions.

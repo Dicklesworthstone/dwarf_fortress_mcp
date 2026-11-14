@@ -111,6 +111,20 @@ struct VerifiedCustody {
     archived_bytes: usize,
 }
 
+/// A checked original disposition and its independently inspected current
+/// work. Only the complete verified custody book can produce this census.
+#[derive(Clone, Debug)]
+pub(crate) struct RecoveredStepCustody {
+    pub(crate) step: StepId,
+    pub(crate) recorded_state: &'static str,
+    pub(crate) state: &'static str,
+    pub(crate) recorded_anchor: StateAnchor,
+    pub(crate) proof_anchor: Option<StateAnchor>,
+    pub(crate) recovery_anchor: StateAnchor,
+    pub(crate) custody_digest: Digest32,
+    pub(crate) work: EffectWorkState,
+}
+
 /// Only recovery of the exact original source can construct this custody.
 /// Retain failures separately from the ordinary goal: retired legacy action
 /// history may be unavailable while the original goal is still observable.
@@ -329,6 +343,54 @@ impl RecoveredPlanCustody {
         }))
     }
 
+    /// Reuse the full observation verifier before exposing any stop identity.
+    /// A missing monitor or failed custody check never becomes nondispatch.
+    pub(crate) fn drain_census(
+        &self,
+        session: &LabSession,
+        plan: &PreparedPlan,
+    ) -> Result<Vec<RecoveredStepCustody>> {
+        let actions = self.inspect(session, plan)?;
+        if actions.indeterminate || actions.unknown != 0 {
+            return Err(unavailable(
+                "recovered cancellation requires complete interpretable original action and current physical evidence",
+            ));
+        }
+        let custody = self.checked()?;
+        custody
+            .receipts
+            .iter()
+            .zip(&plan.steps)
+            .map(|(receipt, step)| {
+                let carried = session
+                    .carried
+                    .iter()
+                    .find(|row| row.plan_digest == plan.digest && row.step == Some(step.id));
+                let state = carried.map_or(Ok(receipt.state), |row| State::parse(&row.state))?;
+                let work = if receipt.state == State::NeverDispatched {
+                    EffectWorkState::NeverDispatched
+                } else {
+                    dfmcp_intent::inspect_effect_work(
+                        session.adapter.snapshot(),
+                        &step.action,
+                        &step.idempotency_key,
+                        true,
+                    )?
+                };
+                Ok(RecoveredStepCustody {
+                    step: step.id,
+                    recorded_state: receipt.state.name(),
+                    state: state.name(),
+                    recorded_anchor: receipt.anchor,
+                    proof_anchor: carried.map_or(Some(receipt.anchor), |row| row.proof_anchor),
+                    recovery_anchor: custody.recovery_anchor,
+                    custody_digest: custody.digest,
+                    work,
+                })
+            })
+            .collect()
+    }
+
     pub(super) fn inspect(&self, session: &LabSession, plan: &PreparedPlan) -> Result<Actions> {
         let custody = self.checked()?;
         let snapshot = session.adapter.snapshot();
@@ -358,14 +420,7 @@ impl RecoveredPlanCustody {
                 return Err(corrupt("selected original action ordering changed"));
             }
             if let Some(row) = carried.get(&step.id) {
-                inspect_carried(
-                    row,
-                    receipt,
-                    step,
-                    custody.recovery_anchor,
-                    snapshot.anchor(),
-                    &mut actions,
-                )?;
+                inspect_carried(row, receipt, step, custody, snapshot.anchor(), &mut actions)?;
             } else if receipt.state == State::Dispatched {
                 return Err(unavailable(
                     "a dispatched original step lost its recovered observation monitor",
@@ -405,10 +460,11 @@ fn inspect_carried(
     row: &CarriedStep,
     receipt: &Receipt,
     step: &PlanStep,
-    recovery: StateAnchor,
+    custody: &VerifiedCustody,
     current: StateAnchor,
     actions: &mut Actions,
 ) -> Result<()> {
+    let recovery = custody.recovery_anchor;
     if row.work_step.as_ref() != Some(step)
         || row.kind != crate::lab_world::action_kind(&step.action)
         || row.proof != proof(step)
@@ -441,12 +497,57 @@ fn inspect_carried(
             ));
         }
     } else {
-        if !matches!(state, State::Dispatched | State::Verified | State::Failed) {
+        if !matches!(
+            state,
+            State::Dispatched | State::Verified | State::Failed | State::Cancelled
+        ) {
             return Err(corrupt(
                 "recovery changed an original dispatch into a different disposition",
             ));
         }
-        if let Some(monitor) = &row.monitor {
+        if state == State::Cancelled {
+            let drain = row.recovered_drain.as_ref().ok_or_else(|| {
+                corrupt("fresh recovered cancellation lacks its exact physical drain evidence")
+            })?;
+            let entity = effects::created_entity_id(&step.idempotency_key, 0);
+            let before_matches = if drain.stopped_work {
+                drain.before == EffectWorkState::Active { entity_id: entity }
+                    && drain.before_anchor.tick == drain.observed_anchor.tick
+                    && drain.before_anchor.cursor.checked_next()
+                        == Some(drain.observed_anchor.cursor)
+            } else {
+                drain.before
+                    == EffectWorkState::Quiescent {
+                        entity_id: Some(entity),
+                    }
+                    && drain.before_anchor == drain.observed_anchor
+            };
+            if drain.plan_digest != custody.plan_digest
+                || drain.step_id != step.id
+                || drain.custody_digest != custody.digest
+                || drain.recorded_anchor != receipt.anchor
+                || drain.recovery_anchor != recovery
+                || drain.observed_anchor.cursor.epoch != recovery.cursor.epoch
+                || !precedes(recovery, drain.before_anchor)
+                || !precedes(drain.before_anchor, drain.observed_anchor)
+                || !precedes(drain.observed_anchor, current)
+                || !before_matches
+                || drain.after
+                    != (EffectWorkState::Quiescent {
+                        entity_id: Some(entity),
+                    })
+                || row.proof_anchor != Some(drain.observed_anchor)
+                || drain.evidence.is_empty()
+                || drain
+                    .evidence
+                    .iter()
+                    .any(|evidence| evidence.anchor != drain.observed_anchor)
+            {
+                return Err(corrupt(
+                    "fresh recovered cancellation does not bind its original custody and current quiet frontier",
+                ));
+            }
+        } else if let Some(monitor) = &row.monitor {
             if monitor.recovery_anchor() != recovery {
                 return Err(corrupt(
                     "carried proof monitor belongs to a different recovery",

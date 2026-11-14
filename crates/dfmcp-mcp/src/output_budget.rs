@@ -532,6 +532,10 @@ fn cancellation_outcome(payload: &Value) -> Option<Map<String, Value>> {
         "plan_digest",
         "plan_id",
         "selection_scope",
+        "selection_origin",
+        "original_owner_session_id",
+        "dispatch_handles_restored",
+        "plan_object_digest",
         "descendant_plans_included",
         "drain_progress",
         "paused",
@@ -539,6 +543,7 @@ fn cancellation_outcome(payload: &Value) -> Option<Map<String, Value>> {
         "finalize_certificate",
         "observed_anchor",
         "durability_pending",
+        "publication_confirmed",
     ] {
         if let Some(value) = payload.get(key) {
             out.insert(key.to_owned(), value.clone());

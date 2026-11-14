@@ -19,10 +19,17 @@ open work, the pending review, or a Task monitor.
 
 The placeholder digest must be replaced with exactly 64 lowercase hexadecimal
 digits. Existing `last_action`, `plan`, `oldest_open_plan`, and `session`
-scopes keep their meanings. All three existing cancellation modes are supported.
+scopes keep their meanings. Live originals support all three existing cancellation modes.
 An explicit `emergency_pause_and_drain` also pauses the shared fortress clock
 under current clock authority; ordinary `stop_future_steps` needs no clock
 advance or clock grant.
+
+The same exact selector also accepts a verified original recovered from a
+durable fortress. Fresh current authority can stop its physical work without
+restoring old action handles. Recovered originals support `stop_future_steps`
+and `emergency_pause_and_drain`; compensation remains unavailable without its
+original live handles. See [recovered original cancellation](LAB_RECOVERED_PLAN_CANCELLATION.md)
+for complete custody, publication and budget requirements.
 
 ## Emergency pause after recovery
 
@@ -55,12 +62,13 @@ Recovered carried work remains a separate obligation. Pausing it does not
 restore old dispatch or cancellation handles, stop its physical effects, or
 certify quiescence. A session-wide result with unresolved carried or untracked
 work has `drain_progress.quiescent: false` and a null
-`finalize_certificate`. It remains available for inspection and separately
-authorized recovery.
+`finalize_certificate`. Use an exact recovered `plan:<digest>` request to stop
+eligible original work under fresh scoped authority. Generic session scope
+does not adopt untracked work or recover individual stop ownership.
 
 ## Complete original selection
 
-The current session must retain its original commit response and the adapter
+For a live original, the current session must retain its original commit response and the adapter
 must retain the matching complete original commit. Before the first effect,
 selection checks:
 
@@ -82,10 +90,13 @@ the actual newly sealed digest. Either retained alias selects the same complete
 original commit. The response distinguishes `requested_plan_digest` and
 `plan_digest`; the certificate binds the exact requested scope.
 
-Pending plans, another session's shared-world actions, durable source history,
-or an adapter receipt without the session's original commit custody cannot
-authorize cancellation. An unknown or unavailable selection refuses. Restore
-and restart do not reconstruct old foreground effect handles from source history.
+Pending plans, another live session's actions, or an adapter receipt without
+the session's original commit custody cannot authorize live cancellation.
+Absent live custody, an exact verified durable original requires its complete
+anchored action census, accepted recovery lineage and current scoped grants.
+Source history alone remains insufficient; malformed live custody cannot be
+bypassed by falling back to recovery. Unknown or unavailable selection refuses.
+Restore and restart never reconstruct old foreground effect handles.
 
 ## Drain and proof semantics
 
@@ -101,7 +112,7 @@ physical work is proven quiet, a `finalize_certificate`. The certificate's
 canonical material includes the exact `plan:<digest>` scope and selected
 actions. Repeating an already completed selected drain is idempotent.
 
-The response explicitly declares `selection_scope: "exact_original_commit"`
+A live response explicitly declares `selection_scope: "exact_original_commit"`
 and `descendant_plans_included: false`. A later reviewed continuation is a
 separate commit and requires its own selected cancellation if it must stop.
 Other plans, the pending review, and the latest-action/latest-plan orientation

@@ -61,6 +61,8 @@ pub(crate) mod goal_explanation;
 
 #[path = "lab_plan_cancellation.rs"]
 mod plan_cancellation;
+#[path = "recovered_plan_cancellation.rs"]
+mod recovered_plan_cancellation;
 
 #[path = "lab_session_close.rs"]
 pub(crate) mod session_close;
@@ -477,6 +479,9 @@ pub(crate) struct CarriedStep {
     work_step: Option<dfmcp_intent::PlanStep>,
     work_state: EffectWorkState,
     work_anchor: Option<StateAnchor>,
+    /// Fresh stop evidence in this recovery lineage, never a restored action
+    /// handle or a replacement for an earlier terminal proof.
+    recovered_drain: Option<dfmcp_lab::RecoveredWorkDrainReceipt>,
     /// Durable state, or indeterminate when recovery cannot certify it.
     state: String,
 }
@@ -501,9 +506,10 @@ impl CarriedStep {
             "observation_error": self.observation_error,
             "failure_reason": self.failure_reason,
             "work_state": work,
+            "physical_drain": self.recovered_drain.as_ref().map(recovered_plan_cancellation::receipt_json),
             "recovery_class": if self.state == "indeterminate" { "reconciliation_required" } else { "never_unchanged" },
             "blind_retry_allowed": false,
-            "stability": self.monitor.as_ref().and_then(|monitor| match monitor.status() {
+            "stability": self.monitor.as_ref().filter(|_| self.state == "dispatched").and_then(|monitor| match monitor.status() {
                 Some(ObligationStatus::Active { consecutive_stable_observations, .. }) => Some(json!({
                     "consecutive_observations": consecutive_stable_observations,
                     "recovery_anchor": anchor_json(&monitor.recovery_anchor()),
@@ -1426,6 +1432,7 @@ fn recover_commit(
                     reason: "sealed effect identity could not be reproduced".to_owned(),
                 },
                 work_anchor: None,
+                recovered_drain: None,
                 state: "indeterminate".to_owned(),
             });
             return Ok(json!({
@@ -1607,6 +1614,7 @@ fn recover_commit(
                 work_step: Some(step.clone()),
                 work_state: work_state.clone(),
                 work_anchor: Some(recovered.anchor()),
+                recovered_drain: None,
                 state: if unresolved { "indeterminate".to_owned() } else { state.clone() },
             });
         }

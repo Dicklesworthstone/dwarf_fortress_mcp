@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased — Cancel a recovered original through the laboratory MCP workflow
+
+- Extend exact `plan:<digest>` cancellation to verified durable originals after
+  restart, under fresh Observe, Query and original scoped effect authority.
+- Preflight complete bounded archive/custody, shared budgets and foreign entity
+  or spatial ownership before any stop. Expiry cannot release unresolved work.
+- Stop in reverse order and publish each physical stop with its fresh final
+  disposition before proceeding. Preserve historical Verified/Failed proof,
+  unrelated originals and pending review; create no dispatch handles.
+- Retain actual stopped state and fence effects on durable publication failure.
+  Issue a final certificate only for complete, final, durably quiet selection.
+- Expose read-only stop offers, retain truthful recovery outcomes through bounded
+  responses, and support stop → selected wait → goal withdrawal → session close
+  and durable reopen. Recovered compensation remains unavailable.
+- Add seven public-facade regression cases, including authority/source/lease
+  refusal, failed publication and the minimum output allowance. Independent
+  review and scoped formatting passed; coordinated Rust execution is in progress.
+
 ## Unreleased — Stop exact recovered laboratory effects under fresh authority
 
 - Add adapter inspection and physical drainage for archived mining, harvesting,

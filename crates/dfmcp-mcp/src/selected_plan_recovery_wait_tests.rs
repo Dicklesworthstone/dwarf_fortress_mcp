@@ -378,7 +378,7 @@ fn carried_monitor_must_bind_the_exact_original_step_and_recovery() -> Result<()
             row,
             receipt,
             step,
-            fixture.lineage.active_anchor(),
+            custody.checked()?,
             fixture.recovered.anchor(),
             &mut Actions::default(),
         )

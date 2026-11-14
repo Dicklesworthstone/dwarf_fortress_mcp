@@ -596,6 +596,7 @@ fn public_candidate_packets_keep_unfinished_recovered_work_visible_without_resam
                 reason: "retained physical work has not been reobserved".to_owned(),
             },
             work_anchor: None,
+            recovered_drain: None,
             state: "verified".to_owned(),
         };
         let retained = carried.to_json();

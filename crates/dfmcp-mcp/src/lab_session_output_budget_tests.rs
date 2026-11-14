@@ -175,6 +175,7 @@ fn renegotiation_preserves_live_work_pending_seals_query_handles_and_unknown_rec
                 reason: "physical work has not been reobserved".into(),
             },
             work_anchor: None,
+            recovered_drain: None,
             state: "verified".into(),
         };
         let retained = carried.to_json();

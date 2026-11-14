@@ -139,6 +139,15 @@ repeated restarts. `recovery_evidence.action_record_origin` identifies either
 exact original step census and archived proof. Retired archives grant no new
 dispatch or cancellation handles.
 
+An explicit [recovered original stop](LAB_RECOVERED_PLAN_CANCELLATION.md) can
+produce fresh cancellation evidence under current effect authority. A zero-tick
+selected wait validates that evidence against the original archived disposition
+and current recovery lineage, then reports `stop_reason: "cancelled"` when an
+unfinished original was cancelled. Historical Verified or Failed proof remains
+unchanged even when its continuing physical work was stopped. Durable final
+dispositions survive retirement, compaction and another restart. Waiting itself
+does not request these stops, and an explicitly withdrawn goal remains ineligible.
+
 Restore abandons the old pursuit and makes it ineligible. Missing, duplicated,
 contradictory or unanchored step evidence refuses before time advances. Legacy
 history that has actually lost its complete anchored receipt map remains

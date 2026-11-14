@@ -1,8 +1,8 @@
-//! Exact, session-owned original-plan cancellation.
+//! Exact original-plan cancellation with separate live and recovered custody.
 //!
 //! The selector names the original commit, not whichever plan happens to be
-//! latest. Durable source history and another session's shared-world receipts
-//! are inspection evidence, never replacement effect authority.
+//! latest. Complete durable custody can select fresh recovered cleanup; it and
+//! another session's shared-world receipts never replace current effect authority.
 
 use dfmcp_adapter::CancelMode;
 use dfmcp_core::{ActionId, Capability, DfmcpError, Digest32, ErrorCode, Result, RiskTier};
@@ -180,6 +180,11 @@ fn authorize(session: &LabSession, selected: &Selection, mode: CancelMode) -> Re
 }
 
 pub(crate) fn cancel(session: &mut LabSession, mode: CancelMode, digest: Digest32) -> String {
+    // Present live custody remains authoritative, including malformed receipts.
+    // Only its absence permits selection of an exact verified durable original.
+    if !session.commit_receipts.contains_key(&digest.to_hex()) {
+        return super::recovered_plan_cancellation::cancel(session, mode, digest);
+    }
     let selected = match select(session, digest).and_then(|selected| {
         authorize(session, &selected, mode)?;
         Ok(selected)
@@ -210,6 +215,9 @@ pub(crate) fn cancel(session: &mut LabSession, mode: CancelMode, digest: Digest3
 /// explanation pin: changing custody or grants at the same world anchor must
 /// invalidate an old page. No operation context is consumed and no work polls.
 pub(crate) fn offer(session: &LabSession, digest: Digest32) -> Value {
+    if !session.commit_receipts.contains_key(&digest.to_hex()) {
+        return super::recovered_plan_cancellation::offer(session, digest);
+    }
     let selected = match select(session, digest).and_then(|selected| {
         authorize(session, &selected, CancelMode::StopFutureSteps)?;
         Ok(selected)

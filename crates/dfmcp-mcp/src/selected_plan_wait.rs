@@ -21,7 +21,7 @@ const MAX_STEPS: usize = 64;
 
 #[path = "recovered_plan_wait.rs"]
 mod recovered;
-pub(super) use recovered::RecoveredPlanCustody;
+pub(super) use recovered::{RecoveredPlanCustody, RecoveredStepCustody};
 
 fn refused(message: &str) -> DfmcpError {
     DfmcpError::new(ErrorCode::Conflict, message)
