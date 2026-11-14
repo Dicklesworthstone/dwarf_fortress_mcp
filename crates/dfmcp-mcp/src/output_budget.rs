@@ -17,7 +17,8 @@
 //!    top recommendation and the budget record survive.
 //! A published goal withdrawal has one final receipt tier: its exact outcome
 //! and certificate remain complete while oversized orientation is explicitly
-//! omitted with a read-only inspection step.
+//! omitted with a read-only inspection step. Cancellation likewise retains its
+//! exact pause/drain outcome, including partial failures and absent certificates.
 //!
 //! Every response carries `output_budget` with the estimate and the tier.
 
@@ -504,6 +505,48 @@ fn record_omission(payload: &mut Value, path: &str) {
     }
 }
 
+/// Cancellation may already have paused or stopped physical work. Preserve the
+/// exact selected outcome independently of optional per-step detail and session
+/// orientation. In particular, a successful request is not proof of quiescence.
+fn cancellation_outcome(payload: &Value) -> Option<Map<String, Value>> {
+    if payload["agent_turn"]["operation"] != "fortress.cancel"
+        || !payload["drain_progress"].is_object()
+        || !payload["observed_anchor"].is_object()
+        || !payload["paused"].is_boolean()
+        || !payload["ok"].is_boolean()
+    {
+        return None;
+    }
+    let mut out = Map::new();
+    for key in [
+        "ok",
+        "error",
+        "session_id",
+        "scope",
+        "action_id",
+        "requested_state",
+        "final_state",
+        "work_state",
+        "physical_drain",
+        "requested_plan_digest",
+        "plan_digest",
+        "plan_id",
+        "selection_scope",
+        "descendant_plans_included",
+        "drain_progress",
+        "paused",
+        "emergency_pause",
+        "finalize_certificate",
+        "observed_anchor",
+        "durability_pending",
+    ] {
+        if let Some(value) = payload.get(key) {
+            out.insert(key.to_owned(), value.clone());
+        }
+    }
+    Some(out)
+}
+
 fn minimal(payload: &Value) -> Value {
     let mut out = Map::new();
     for key in [
@@ -541,6 +584,9 @@ fn minimal(payload: &Value) -> Value {
                 out.insert(key.to_owned(), value.clone());
             }
         }
+    }
+    if let Some(outcome) = cancellation_outcome(payload) {
+        out.extend(outcome);
     }
     // Withdrawal has already changed pursuit custody. Its exact historical
     // disposition cannot disappear into a generic successful cancellation.
@@ -635,6 +681,52 @@ fn withdrawal_receipt(payload: &Value, budget: u64, original: u64) -> Option<Str
         "max_output_tokens":budget, "full_estimate_tokens":original,
         "estimator":"ceil(bytes / 4)", "tier":"withdrawal_receipt",
         "note":"complete withdrawal receipt; session orientation omitted for output budget",
+    });
+    fits(&small, &record, budget)
+}
+
+/// Large singleton recommendations can prevent even the ordinary minimal
+/// orientation from fitting after cancellation. Report the exact pause and
+/// drain result, including failures, without claiming that omitted work is
+/// absent or that a paused world has been drained. Historical step detail is
+/// explicitly omitted; the read-only follow-up inspects current work only.
+fn cancellation_receipt(payload: &Value, budget: u64, original: u64) -> Option<String> {
+    let outcome = cancellation_outcome(payload)?;
+    let status = match payload["agent_turn"]["continuity"]["status"].as_str() {
+        Some(
+            status @ ("bootstrap" | "continuous" | "heartbeat" | "partial" | "gap" | "reset"
+            | "stale" | "indeterminate"),
+        ) => status,
+        _ => "indeterminate",
+    };
+    let next = json!({
+        "tool":"fortress.observe",
+        "arguments":{"session_id":payload["session_id"],"profile":"briefing"},
+    });
+    let mut small = Value::Object(outcome);
+    small["truncated"] = json!(true);
+    small["agent_turn"] = json!({
+        "schema":"dfmcp.agent_turn/1", "operation":"fortress.cancel", "phase":"reconcile",
+        "anchor":payload["observed_anchor"],
+        "continuity":{"status":status,"detail_omitted_for_output_budget":true},
+        "profile":"tactical",
+        "active_work":{"status":"omitted_for_output_budget","absence_proven":false},
+        "recommendations":[{
+            "tool":next["tool"], "arguments":next["arguments"],
+            "reason":"inspect current work after the reported cancellation outcome",
+            "risk":"read_only", "reversibility":"not_applicable", "requires_confirmation":false,
+        }],
+        "coverage":{
+            "status":"partial", "complete_domains":["cancellation_outcome"],
+            "absence_proof_scope":[],
+            "omitted_domains":["session_orientation","per_step_drain_evidence","untracked_work_detail"],
+            "continuation":next,
+        },
+    });
+    let record = json!({
+        "max_output_tokens":budget, "full_estimate_tokens":original,
+        "estimator":"ceil(bytes / 4)", "tier":"cancellation_receipt",
+        "note":"exact pause/drain outcome; current-work inspection does not reconstruct omitted historical step detail",
     });
     fits(&small, &record, budget)
 }
@@ -743,6 +835,9 @@ pub(crate) fn fit(response: &str, max_output_tokens: u64) -> String {
         Some(text) => text,
         None => {
             if let Some(receipt) = withdrawal_receipt(&payload, max_output_tokens, original) {
+                return receipt;
+            }
+            if let Some(receipt) = cancellation_receipt(&payload, max_output_tokens, original) {
                 return receipt;
             }
             // The budget is below even the minimal envelope: say so in the
@@ -987,6 +1082,181 @@ mod tests {
         }
         Ok(())
     }
+
+    fn cancellation_with_oversized_orientation(
+        status: &str,
+        succeeded: bool,
+        quiescent: bool,
+    ) -> (Value, Value) {
+        let (_, orientation) = withdrawal_with_oversized_orientation(status);
+        let anchor = orientation["agent_turn"]["anchor"].clone();
+        let mut raw = json!({
+            "ok":succeeded, "session_id":"f".repeat(32),
+            "scope":format!("plan:{}", "e".repeat(64)),
+            "requested_plan_digest":"e".repeat(64), "plan_digest":"d".repeat(64),
+            "plan_id":"c".repeat(32), "selection_scope":"exact_original_commit",
+            "descendant_plans_included":false,
+            "paused":true, "observed_anchor":anchor,
+            "drain_progress":{
+                "actions_total":1, "drained":u64::from(quiescent),
+                "remaining_nonterminal":u64::from(!quiescent),
+                "remaining_work":u64::from(!quiescent),
+                "remaining_carried":u64::from(!quiescent),
+                "untracked_work_quiescent":quiescent, "quiescent":quiescent,
+            },
+            "finalize_certificate":if quiescent {json!({
+                "digest":"b".repeat(64), "anchor":anchor,
+                "statement":"every original action is terminal and its physical work is proven quiescent",
+            })} else {Value::Null},
+            "emergency_pause":{
+                "requested":true, "changed":true, "paused":true,
+                "before_anchor":anchor, "observed_anchor":anchor,
+                "game_ticks_advanced":0, "action_handles_created":false,
+                "physical_work_drained":false,
+                "authority":"current_observe_and_control_clock",
+                "evidence_digest":"a".repeat(64),
+                "durable":true, "publication_confirmed":succeeded,
+            },
+        });
+        if !succeeded {
+            raw["error"] = json!({
+                "code":"corrupt_ledger", "message":"pause publication requires recovery",
+            });
+            raw["durability_pending"] = json!(true);
+        }
+        let mut response = raw.clone();
+        response["agent_turn"] = orientation["agent_turn"].clone();
+        response["steps"] = json!([{"historical_detail":"step evidence ".repeat(2_000)}]);
+        (raw, response)
+    }
+
+    #[test]
+    fn bounded_cancellation_preserves_exact_pause_drain_and_failure_outcomes()
+    -> Result<(), serde_json::Error> {
+        for status in ["continuous", "gap", "reset", "indeterminate"] {
+            for (succeeded, quiescent) in [(true, true), (true, false), (false, false)] {
+                let (raw, response) =
+                    cancellation_with_oversized_orientation(status, succeeded, quiescent);
+                let raw_bytes = raw.to_string().len() as u64;
+                let budget = (raw_bytes + 2_048).div_ceil(4);
+                let original = response.to_string();
+                let fitted = fit(&original, budget);
+                let output: Value = serde_json::from_str(&fitted)?;
+                assert_eq!(output["output_budget"]["tier"], "cancellation_receipt", "{output}");
+                if let Some(fields) = raw.as_object() {
+                    for (key, value) in fields {
+                        assert_eq!(&output[key], value, "lost cancellation outcome field {key}");
+                    }
+                }
+                assert_eq!(output["ok"], succeeded);
+                assert_eq!(output["drain_progress"]["quiescent"], quiescent);
+                assert_eq!(output["finalize_certificate"].is_null(), !quiescent);
+                assert_eq!(output["emergency_pause"]["physical_work_drained"], false);
+                assert_eq!(output["agent_turn"]["continuity"]["status"], status);
+                assert_eq!(output["agent_turn"]["anchor"], raw["observed_anchor"]);
+                assert_eq!(output["agent_turn"]["active_work"]["absence_proven"], false);
+                assert_eq!(output["agent_turn"]["coverage"]["status"], "partial");
+                assert_eq!(
+                    output["agent_turn"]["coverage"]["complete_domains"],
+                    json!(["cancellation_outcome"]),
+                );
+                assert_eq!(
+                    output["agent_turn"]["coverage"]["omitted_domains"],
+                    json!(["session_orientation", "per_step_drain_evidence", "untracked_work_detail"]),
+                );
+                assert_eq!(output["agent_turn"]["recommendations"][0]["risk"], "read_only");
+                assert!(estimate_tokens(&fitted) <= budget);
+                assert_eq!(fit(&original, budget), fitted);
+                let minimal = minimal(&response);
+                assert_eq!(minimal["drain_progress"], raw["drain_progress"]);
+                assert_eq!(minimal["emergency_pause"], raw["emergency_pause"]);
+                assert_eq!(minimal["finalize_certificate"], raw["finalize_certificate"]);
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn bounded_single_action_failure_keeps_exact_action_and_physical_state()
+    -> Result<(), serde_json::Error> {
+        let (mut raw, mut response) =
+            cancellation_with_oversized_orientation("indeterminate", false, false);
+        for key in [
+            "plan_digest",
+            "requested_plan_digest",
+            "plan_id",
+            "selection_scope",
+            "descendant_plans_included",
+            "finalize_certificate",
+            "emergency_pause",
+        ] {
+            if let Some(fields) = raw.as_object_mut() {
+                fields.remove(key);
+            }
+            if let Some(fields) = response.as_object_mut() {
+                fields.remove(key);
+            }
+        }
+        for (key, value) in [
+            ("scope", json!("last_action")),
+            ("action_id", json!("a".repeat(32))),
+            ("final_state", json!("AppliedAwaitingVerification")),
+            ("work_state", json!({
+                "state":"unknown", "quiescent":false,
+                "observed_anchor":raw["observed_anchor"],
+            })),
+        ] {
+            raw[key] = value.clone();
+            response[key] = value;
+        }
+        let budget = (raw.to_string().len() as u64 + 2_048).div_ceil(4);
+        let fitted = fit(&response.to_string(), budget);
+        let output: Value = serde_json::from_str(&fitted)?;
+        assert_eq!(output["output_budget"]["tier"], "cancellation_receipt", "{output}");
+        if let Some(fields) = raw.as_object() {
+            for (key, value) in fields {
+                assert_eq!(&output[key], value, "lost single-action outcome field {key}");
+            }
+        }
+        assert_eq!(output["ok"], false);
+        assert_eq!(output["scope"], "last_action");
+        assert_eq!(output["action_id"], "a".repeat(32));
+        assert_eq!(output["work_state"]["quiescent"], false);
+        assert!(output.get("finalize_certificate").is_none());
+        assert!(estimate_tokens(&fitted) <= budget);
+        Ok(())
+    }
+
+    #[test]
+    fn cancellation_receipt_requires_an_observed_outcome_and_preserves_fitting_turns()
+    -> Result<(), serde_json::Error> {
+        let (raw, response) =
+            cancellation_with_oversized_orientation("continuous", true, false);
+        let source = response.to_string();
+        let full: Value = serde_json::from_str(&fit(&source, estimate_tokens(&source) + 1_000))?;
+        assert_eq!(full["output_budget"]["tier"], "full");
+        assert_eq!(full["agent_turn"], response["agent_turn"]);
+        assert_eq!(full["drain_progress"], raw["drain_progress"]);
+        let budget = (raw.to_string().len() as u64 + 2_048).div_ceil(4);
+        for (key, value) in [
+            ("drain_progress", Value::Null),
+            ("observed_anchor", Value::Null),
+            ("paused", json!("unknown")),
+            ("ok", Value::Null),
+        ] {
+            let mut unavailable = response.clone();
+            unavailable[key] = value;
+            assert!(cancellation_outcome(&unavailable).is_none());
+            let fitted: Value = serde_json::from_str(&fit(&unavailable.to_string(), budget))?;
+            assert_eq!(fitted["ok"], false, "{key}: {fitted}");
+            assert_eq!(fitted["output_budget"]["tier"], "refused");
+        }
+        let mut other_operation = response;
+        other_operation["agent_turn"]["operation"] = json!("fortress.wait");
+        assert!(cancellation_outcome(&other_operation).is_none());
+        Ok(())
+    }
+
 }
 
 #[cfg(test)]

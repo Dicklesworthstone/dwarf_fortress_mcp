@@ -1,5 +1,33 @@
 # Implementation Status
 
+## Unreleased — Preserve exact cancellation outcomes under output pressure
+
+Cancellation response fitting now retains the exact selected scope, original
+action or plan identity, pause state, measured drain progress and finalization
+certificate, including a null certificate. Partial failures retain their
+original error and physical-work state. A successful request with unfinished
+carried or untracked work cannot lose its explicit nonquiescent outcome when
+the ordinary minimal response is selected.
+
+If oversized singleton orientation still prevents fitting, a bounded
+`cancellation_receipt` tier preserves the same outcome and continuity hazards,
+explicitly omits session orientation and per-step historical detail, and offers
+read-only inspection of current work. That inspection does not claim to
+reconstruct omitted historical step evidence. Fitting full responses remain
+unchanged, and an unavailable outcome cannot enter the receipt tier.
+
+Three exact-module regression tests cover complete and partial drains,
+publication failures, single-action identity, absent certificates, current
+physical uncertainty, deterministic fitting, byte limits and unchanged full
+responses. Independent source review and conservative envelope sizing completed;
+the final tier adds less than the tested 2,048-byte allowance. Rust compilation,
+Rustfmt and these tests could not run after the execution environment
+disconnected. Before that loss, the unchanged baseline verification passed all
+gates through dependency policy and stopped at the missing `br` prerequisite.
+Those baseline results do not qualify this change. No new full-workspace or
+native/live qualification is claimed. Owner:
+`df-cancellation-progress-certificates-vvw`.
+
 ## Unreleased — Observe existing and recovered originals with passive MCP Tasks
 
 The laboratory modern stdio facade now accepts `fortress_wait` with explicit

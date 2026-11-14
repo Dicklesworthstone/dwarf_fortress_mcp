@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased — Retain cancellation outcomes in bounded responses
+
+- Preserve exact action/plan identity, pause state, measured drain progress,
+  errors and nullable finalization certificates through minimal output.
+- Add a bounded cancellation receipt when oversized session orientation cannot
+  fit; explicitly omit historical detail and recommend read-only current-work
+  inspection without inventing quiescence or success.
+- Add three focused output regressions and complete independent source/envelope
+  review. Rust execution and formatting remain unverified because the execution
+  environment disconnected before compilation.
+
 ## Unreleased — Passive Tasks for existing and recovered originals
 
 - Add opt-in `fortress_wait(plan_digest=..., as_task=true)` under current

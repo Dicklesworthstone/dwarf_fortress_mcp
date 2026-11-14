@@ -74,6 +74,15 @@ Other plans, the pending review, and the latest-action/latest-plan orientation
 are preserved. A selected-plan certificate proves only that selected scope;
 it does not certify all work in the session or fortress.
 
+When output is constrained, response fitting preserves the exact selected scope,
+action or plan identity, pause state, drain counters, original error and
+finalization certificate (including a null certificate). The
+`cancellation_receipt` tier explicitly omits oversized session orientation and
+per-step historical detail, preserves continuity hazards, and offers a read-only
+observation of current work. That follow-up does not reconstruct omitted
+historical step evidence. A request accepted with `ok: true` still does not imply
+that its drain is complete.
+
 ## Discover the stop from Explain
 
 A typed `fortress.explain` request for `plan:<digest>` or `goal:<digest>`
