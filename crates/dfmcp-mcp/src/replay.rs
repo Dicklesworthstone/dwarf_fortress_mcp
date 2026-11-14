@@ -274,6 +274,39 @@ fn opt_watch_ids(args: &Value) -> Result<Option<Vec<String>>, String> {
         .collect::<Result<Vec<_>, _>>().map(Some)
 }
 
+// Keep semantically invalid, well-typed selections intact: refused calls are
+// part of a transcript too. Only the tool may decide membership and policy.
+fn opt_plan_digests(args: &Value) -> Result<Option<Vec<String>>, String> {
+    let Some(value) = args.get("plan_digests").filter(|value| !value.is_null()) else {
+        return Ok(None);
+    };
+    let digests = value
+        .as_array()
+        .ok_or_else(|| "recorded plan_digests must be an array of strings".to_owned())?;
+    digests
+        .iter()
+        .map(|digest| {
+            digest
+                .as_str()
+                .map(str::to_owned)
+                .ok_or_else(|| "recorded plan_digests contains a non-string digest".to_owned())
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map(Some)
+}
+
+fn opt_plan_policy(args: &Value) -> Result<Option<String>, String> {
+    args.get("plan_policy")
+        .filter(|value| !value.is_null())
+        .map(|value| {
+            value
+                .as_str()
+                .map(str::to_owned)
+                .ok_or_else(|| "recorded plan_policy must be a string".to_owned())
+        })
+        .transpose()
+}
+
 fn opt_bool(args: &Value, key: &str) -> Option<bool> {
     args[key].as_bool()
 }
@@ -338,13 +371,15 @@ fn invoke(tool: &str, session: Option<String>, args: &Value) -> Result<String, S
             Some(session_or(tool)?),
             opt_string(args, "plan_digest").unwrap_or_default(),
         ),
-        "fortress.wait" => f::fortress_wait_for_targets(
+        "fortress.wait" => f::fortress_wait_for_outcomes(
             Some(session_or(tool)?),
             opt_u64(args, "max_game_ticks"),
             opt_string(args, "plan_digest"),
             opt_string(args, "watch_id"),
             opt_watch_ids(args)?,
             opt_string(args, "watch_policy"),
+            opt_plan_digests(args)?,
+            opt_plan_policy(args)?,
         ),
         "fortress.cancel" => f::fortress_cancel(
             Some(session_or(tool)?),
@@ -638,6 +673,90 @@ mod tests {
         let report = replay_bundle(&golden);
         assert_eq!(report["ok"], true, "golden replay diverged: {report}");
         assert_eq!(report["first_divergence"], Value::Null);
+        Ok(())
+    }
+
+    #[test]
+    fn malformed_plan_set_replay_arguments_are_refused_before_any_calls() -> TestResult {
+        let golden: Value = serde_json::from_str(include_str!(
+            "../../../schemas/examples/replay_bundle_v1.json"
+        ))?;
+        let index = golden["calls"]
+            .as_array()
+            .ok_or("calls")?
+            .iter()
+            .position(|call| call["tool"] == "fortress.wait")
+            .ok_or("wait call")?;
+        for (key, malformed) in [
+            ("plan_digests", json!("a".repeat(64))),
+            ("plan_digests", json!(["a".repeat(64), 7])),
+            ("plan_digests", json!({"digest":"a".repeat(64)})),
+            ("plan_policy", json!(["all"])),
+            ("plan_policy", json!(false)),
+        ] {
+            let mut forged = golden.clone();
+            forged["calls"][index]["arguments"][key] = malformed;
+            forged["calls_digest"] = json!(calls_digest(&forged["calls"]));
+            let report = replay_bundle(&forged);
+            assert_eq!(report["ok"], false, "{report}");
+            assert_eq!(report["replayed"], 0, "{report}");
+            assert!(
+                report["error"]
+                    .as_str()
+                    .is_some_and(|error| error.contains(key)),
+                "{report}"
+            );
+            assert!(report.get("replay_session_id").is_none());
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn recorded_plan_set_refusals_keep_exact_input() -> TestResult {
+        let opened = parsed(&f::fortress_open_session(
+            Some(false),
+            Some("660124".to_owned()),
+            None,
+            None,
+            Some(10_000),
+            None,
+            None,
+            Some(8_192),
+            None,
+            Some("starter_fortress".to_owned()),
+            None,
+            None,
+        ))?;
+        assert_eq!(opened["ok"], true, "{opened}");
+        let session = opened["session_id"].as_str().ok_or("session")?.to_owned();
+        let cases = [
+            (Vec::new(), None),
+            (vec!["not-a-digest".to_owned()], None),
+            (vec!["a".repeat(64); 9], Some("all".to_owned())),
+            (vec!["a".repeat(64)], Some("unknown-policy".to_owned())),
+        ];
+        for (digests, policy) in &cases {
+            let refused = parsed(&f::fortress_wait_for_plans(
+                Some(session.clone()),
+                Some(100),
+                digests.clone(),
+                policy.clone(),
+            ))?;
+            assert_eq!(refused["ok"], false, "{refused}");
+        }
+        let bundle = crate::server::replay_bundle_for(&session)?;
+        assert_eq!(bundle["replayable"], true, "{bundle}");
+        for (index, (digests, policy)) in cases.iter().enumerate() {
+            let arguments = &bundle["calls"][index + 1]["arguments"];
+            assert_eq!(arguments["plan_digests"], json!(digests));
+            assert_eq!(arguments["plan_policy"], json!(policy));
+        }
+        let report = replay_bundle(&bundle);
+        assert_eq!(report["ok"], true, "{report}");
+        let replayed = report["replay_session_id"]
+            .as_str()
+            .ok_or("replay session")?;
+        assert_eq!(crate::server::replay_bundle_for(replayed)?, bundle);
         Ok(())
     }
 

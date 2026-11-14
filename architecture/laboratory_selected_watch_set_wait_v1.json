@@ -11,7 +11,8 @@
     "maximum_members": 8,
     "mutually_exclusive_with": [
       "plan_digest",
-      "watch_id"
+      "watch_id",
+      "plan_digests"
     ],
     "omitted_behavior": "existing duration-based, selected-original-plan or scalar-watch wait",
     "order": "canonical lexicographic handle order",

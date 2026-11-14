@@ -214,6 +214,23 @@ fn test_modern_handshake_full_lifecycle_and_plan_commit() -> Result<(), Box<dyn 
             "fortress_doctor",
         ]
     );
+    let wait_tool = tools
+        .iter()
+        .find(|tool| tool["name"] == "fortress_wait")
+        .ok_or("fortress_wait discovery missing")?;
+    let wait_schema = &wait_tool["inputSchema"];
+    for argument in ["plan_digests", "plan_policy"] {
+        assert!(
+            wait_schema["properties"][argument].is_object(),
+            "{wait_tool}"
+        );
+        assert!(
+            !wait_schema["required"]
+                .as_array()
+                .is_some_and(|required| required.iter().any(|name| name == argument)),
+            "selected-set arguments must remain optional: {wait_tool}",
+        );
+    }
 
     // 3. Open session (paused = true). lab adapter seed. Returns a session_id
     //    that all subsequent calls must echo back via the `session_id`
@@ -225,7 +242,7 @@ fn test_modern_handshake_full_lifecycle_and_plan_commit() -> Result<(), Box<dyn 
         "params": {
             "_meta": modern_meta(),
             "name": "fortress_open_session",
-            "arguments": { "paused": true }
+            "arguments": { "paused": true, "max_output_tokens": 16_384 }
         }
     });
     let open_session_resp = client.send(&open_session_req)?;
@@ -405,6 +422,75 @@ fn test_modern_handshake_full_lifecycle_and_plan_commit() -> Result<(), Box<dyn 
     let doctor_data: Value = serde_json::from_str(doctor_text)?;
     assert_eq!(doctor_data["ok"], true);
     assert_eq!(doctor_data["status"], "healthy");
+
+    // 10. The registered modern tool accepts the additive explicit plan-set
+    // selector. The committed original is already complete, so selection
+    // reports its exact identity without advancing or dispatching anything.
+    let selected_resp = client.send(&json!({
+        "jsonrpc":"2.0", "id":10, "method":"tools/call",
+        "params":{"_meta":modern_meta(), "name":"fortress_wait",
+            "arguments":{"session_id":session_id, "max_game_ticks":0,
+                "plan_digests":[plan_digest], "plan_policy":"all"}},
+    }))?;
+    assert_modern_envelope(&selected_resp, 10);
+    let selected: Value = serde_json::from_str(
+        selected_resp["result"]["content"][0]["text"]
+            .as_str()
+            .ok_or("selected plan-set tool text missing")?,
+    )?;
+    assert_eq!(selected["ok"], true, "{selected}");
+    let group = &selected["selected_plan_set_wait"];
+    assert_eq!(group["schema"], "dfmcp.selected-plan-set-wait/1");
+    assert_eq!(group["plan_policy"], "all");
+    assert_eq!(group["stop_reason"], "all_complete");
+    assert_eq!(group["group_complete"], true);
+    assert_eq!(group["plan_digests"], json!([plan_digest]));
+    assert_eq!(group["requested_plan_digests"], json!([plan_digest]));
+    assert_eq!(group["plans"].as_array().map(Vec::len), Some(1));
+    assert_eq!(group["plans"][0]["complete"], true);
+    assert_eq!(selected["advanced_game_ticks"], 0);
+    assert_eq!(
+        selected["agent_turn"]["anchor"],
+        selected["observed_anchor"]
+    );
+    assert_eq!(
+        selected["observed_anchor"],
+        commit_data["agent_turn"]["anchor"]
+    );
+
+    // 11. A well-typed conflicting selection reaches the actual handler and
+    // refuses semantically, preserving the one registered wait tool.
+    let conflict_resp = client.send(&json!({
+        "jsonrpc":"2.0", "id":11, "method":"tools/call",
+        "params":{"_meta":modern_meta(), "name":"fortress_wait",
+            "arguments":{"session_id":session_id, "max_game_ticks":100,
+                "plan_digest":plan_digest, "plan_digests":[plan_digest],
+                "plan_policy":"any"}},
+    }))?;
+    assert_modern_envelope(&conflict_resp, 11);
+    let conflict: Value = serde_json::from_str(
+        conflict_resp["result"]["content"][0]["text"]
+            .as_str()
+            .ok_or("conflicting wait tool text missing")?,
+    )?;
+    assert_eq!(conflict["ok"], false, "{conflict}");
+    assert_eq!(conflict["error"]["code"], "invalid_request");
+    let observed_resp = client.send(&json!({
+        "jsonrpc":"2.0", "id":12, "method":"tools/call",
+        "params":{"_meta":modern_meta(), "name":"fortress_observe",
+            "arguments":{"session_id":session_id}},
+    }))?;
+    assert_modern_envelope(&observed_resp, 12);
+    let observed: Value = serde_json::from_str(
+        observed_resp["result"]["content"][0]["text"]
+            .as_str()
+            .ok_or("post-refusal observation missing")?,
+    )?;
+    assert_eq!(observed["ok"], true);
+    assert_eq!(
+        observed["agent_turn"]["anchor"],
+        selected["observed_anchor"]
+    );
     Ok(())
 }
 

@@ -35,7 +35,7 @@ caller's order.
 
 `watch_policy` accepts only `all_satisfied` or `any_satisfied`. Omitted or null
 means `all_satisfied`; a non-null policy requires `watch_ids`. The selectors
-`plan_digest`, `watch_id` and `watch_ids` are mutually exclusive. Existing
+`plan_digest`, `plan_digests`, `watch_id` and `watch_ids` are mutually exclusive. Existing
 duration, selected-plan and single-watch calls preserve their behavior and
 response shapes. The public surface still has eleven tools.
 

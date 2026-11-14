@@ -8,9 +8,10 @@
     "format": "watch: followed by 64 lowercase hexadecimal digits",
     "optional": true,
     "mutually_exclusive_with": "plan_digest",
-    "omitted_behavior": "existing duration-based, selected-original-plan or selected-watch-set wait",
+    "omitted_behavior": "existing duration-based, selected-original-plan, selected-plan-set or selected-watch-set wait",
     "additional_mutually_exclusive_selectors": [
-      "watch_ids"
+      "watch_ids",
+      "plan_digests"
     ]
   },
   "selection_scope": "one exact original process-local watch owned by the addressed laboratory session",

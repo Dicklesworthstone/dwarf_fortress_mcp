@@ -1096,7 +1096,91 @@ fn selected_wait_recommendations(
     payload: &Value,
     state: &SessionOrientation,
 ) -> Option<Vec<Value>> {
-    let selected = payload.get("selected_plan_wait")?.as_object()?;
+    if let Some(selected) = payload.get("selected_plan_set_wait") {
+        return selected_plan_set_recommendations(selected, state);
+    }
+    selected_plan_recommendations(payload.get("selected_plan_wait")?, state)
+}
+
+fn selected_plan_set_recommendations(
+    selected: &Value,
+    state: &SessionOrientation,
+) -> Option<Vec<Value>> {
+    if selected["group_complete"] == true {
+        return Some(Vec::new());
+    }
+    let reason = selected["stop_reason"].as_str()?;
+    if reason == "tick_limit"
+        && state.paused == Some(false)
+        && has_grant(state, "control_clock")
+        && state.budget["max_game_ticks"]
+            .as_u64()
+            .is_none_or(|ticks| ticks > 0)
+    {
+        let digests = selected["requested_plan_digests"].as_array()?;
+        return Some(vec![recommendation(
+            "continue-selected-plan-set-wait",
+            "fortress.wait",
+            "the selected originals remain unfinished at this call's shared time limit",
+            "high",
+            "high",
+            "read_only",
+            "not_applicable",
+            false,
+            json!({"plan_digests":digests, "plan_policy":selected["plan_policy"],
+                "max_game_ticks":wait_ticks(state)}),
+        )]);
+    }
+    if reason == "paused" && has_grant(state, "plan") && has_grant(state, "control_clock") {
+        return Some(vec![recommendation(
+            "review-resume-for-selected-plans",
+            "fortress.plan",
+            "the selected original work cannot progress while the shared fortress is paused",
+            "high",
+            "high",
+            "read_only",
+            "not_applicable",
+            false,
+            json!({"paused_target":false,
+                "summary":"resume to progress the selected original projects"}),
+        )]);
+    }
+    let interrupted = selected["interrupted_plan_digests"]
+        .as_array()?
+        .first()?
+        .as_str()?;
+    let original = selected["plans"]
+        .as_array()?
+        .iter()
+        .find(|plan| plan["plan_digest"].as_str() == Some(interrupted))?;
+    selected_plan_recommendations(original, state)
+}
+
+/// Pure guidance for a group result staged by the owner before endpoint writes.
+/// This deliberately avoids the presentation cache and its session lock.
+pub(crate) fn selected_plan_set_guidance(
+    selected: &Value,
+    paused: bool,
+    max_game_ticks: u64,
+    can_plan: bool,
+    can_control_clock: bool,
+) -> Vec<Value> {
+    let grants = [("plan", can_plan), ("control_clock", can_control_clock)]
+        .into_iter()
+        .filter_map(|(name, granted)| granted.then_some(name))
+        .collect::<Vec<_>>();
+    let state = SessionOrientation::from_payload(&json!({
+        "paused":paused, "budget":{"max_game_ticks":max_game_ticks},
+        "granted_capabilities":grants,
+    }));
+    selected_plan_set_recommendations(selected, &state).unwrap_or_default()
+}
+
+fn selected_plan_recommendations(
+    selected: &Value,
+    state: &SessionOrientation,
+) -> Option<Vec<Value>> {
+    let selected = selected.as_object()?;
     let digest = selected.get("requested_plan_digest")?.as_str()?;
     let reason = selected.get("stop_reason")?.as_str()?;
     if reason == "complete" {
@@ -2533,12 +2617,7 @@ pub fn fortress_wait_for_watches(
     )
 }
 
-/// The wire still exposes one fortress_wait tool. A selector changes when its
-/// bounded foreground work returns; every authority is checked independently.
-#[tool(
-    name = "fortress_wait",
-    description = "Progress retained laboratory work in bounded foreground intervals. max_game_ticks caps time advanced while unpaused; each interval observes prerequisites and dispatches authorized ready successors, then persists progress before continuing. Optional plan_digest selects one exact original commit owned by this session or a verified durable original with complete recovered step evidence, stopping when its original goal, action proofs and physical work complete or need attention. Recovered selection observes original carried work without restoring dispatch handles, adopting another live session's work or dispatching previously deferred steps. Optional watch_id instead selects one retained laboratory condition returned by temporal watch registration; intervals stop at its original cadence and deadline, sample the exact published world, and return early on satisfaction, failure, expiry, invalidation, cancellation or unknown evidence. Alternatively watch_ids selects one to eight unique owned handles with watch_policy=all_satisfied (default) or any_satisfied. The whole selected set is sampled atomically at each published frontier using each original cadence and deadline. Failed, expired, invalidated, cancelled and blocked_unknown members take precedence over group completion. Group success aggregates retained watch outcomes, including historical terminals; it never proves simultaneous current truth. plan_digest, watch_id and watch_ids are mutually exclusive, and watch_policy is valid only with watch_ids. Watch selection requires current whole-fortress Observe and Query; positive time also requires ControlClock, with the requested horizon authorized before advancement. A zero-tick watch wait samples only the current world. Selection never changes predicates, deadlines, required stability, unpauses, cancels, follows descendant plans or grants mutation authority. Other committed work continues during shared world time. selected_watch_wait preserves the original definition and exact sample evidence; cursor gaps reset positive stability. Without a selector, duration-based behavior is unchanged. Reports actual elapsed and remaining ticks; pause and progression errors stop further advancement."
-)]
+/// Preserve the six-argument scalar/watch-set Rust API.
 pub fn fortress_wait_for_targets(
     session_id: Option<String>,
     max_game_ticks: Option<u64>,
@@ -2546,6 +2625,54 @@ pub fn fortress_wait_for_targets(
     watch_id: Option<String>,
     watch_ids: Option<Vec<String>>,
     watch_policy: Option<String>,
+) -> String {
+    fortress_wait_for_outcomes(
+        session_id,
+        max_game_ticks,
+        plan_digest,
+        watch_id,
+        watch_ids,
+        watch_policy,
+        None,
+        None,
+    )
+}
+
+/// Foreground wait for an explicit set of complete original projects.
+pub fn fortress_wait_for_plans(
+    session_id: Option<String>,
+    max_game_ticks: Option<u64>,
+    plan_digests: Vec<String>,
+    plan_policy: Option<String>,
+) -> String {
+    fortress_wait_for_outcomes(
+        session_id,
+        max_game_ticks,
+        None,
+        None,
+        None,
+        None,
+        Some(plan_digests),
+        plan_policy,
+    )
+}
+
+/// The wire still exposes one fortress_wait tool. A selector changes when its
+/// bounded foreground work returns; every authority is checked independently.
+#[tool(
+    name = "fortress_wait",
+    description = "Progress retained laboratory work in bounded foreground intervals. max_game_ticks caps time advanced while unpaused; each interval observes prerequisites and dispatches authorized ready successors, then persists progress before continuing. Optional plan_digest selects one exact original commit owned by this session or a verified durable original with complete recovered step evidence, stopping when its original goal, action proofs and physical work complete or need attention. Recovered selection observes original carried work without restoring dispatch handles, adopting another live session's work or dispatching previously deferred steps. Alternatively plan_digests selects one to eight distinct complete originals with plan_policy=all (default) or any. It observes every selected original at the same frontier, clips to each original reserve horizon, and captures only explicitly selected exact endpoints after complete selection and output admission. Any exceptional selected outcome takes precedence over group completion; earlier completion is reevaluated as current goals change. Optional watch_id instead selects one retained laboratory condition returned by temporal watch registration; intervals stop at its original cadence and deadline, sample the exact published world, and return early on satisfaction, failure, expiry, invalidation, cancellation or unknown evidence. Alternatively watch_ids selects one to eight unique owned handles with watch_policy=all_satisfied (default) or any_satisfied. The whole selected set is sampled atomically at each published frontier using each original cadence and deadline. Failed, expired, invalidated, cancelled and blocked_unknown members take precedence over group completion. Group success aggregates retained watch outcomes, including historical terminals; it never proves simultaneous current truth. plan_digest, plan_digests, watch_id and watch_ids are mutually exclusive. plan_policy is valid only with plan_digests, and watch_policy only with watch_ids. Watch selection requires current whole-fortress Observe and Query; positive time also requires ControlClock, with the requested horizon authorized before advancement. A zero-tick watch wait samples only the current world. Selection never changes predicates, deadlines, required stability, unpauses, cancels, follows descendant plans or grants mutation authority. Other committed work continues during shared world time. selected_watch_wait preserves the original definition and exact sample evidence; cursor gaps reset positive stability. Without a selector, duration-based behavior is unchanged. Reports actual elapsed and remaining ticks; pause and progression errors stop further advancement."
+)]
+#[allow(clippy::too_many_arguments)]
+pub fn fortress_wait_for_outcomes(
+    session_id: Option<String>,
+    max_game_ticks: Option<u64>,
+    plan_digest: Option<String>,
+    watch_id: Option<String>,
+    watch_ids: Option<Vec<String>>,
+    watch_policy: Option<String>,
+    plan_digests: Option<Vec<String>>,
+    plan_policy: Option<String>,
 ) -> String {
     let mut recorded = json!({"max_game_ticks": max_game_ticks});
     if let Some(digest) = &plan_digest {
@@ -2560,6 +2687,12 @@ pub fn fortress_wait_for_targets(
     if let Some(policy) = &watch_policy {
         recorded["watch_policy"] = json!(policy);
     }
+    if let Some(digests) = &plan_digests {
+        recorded["plan_digests"] = json!(digests);
+    }
+    if let Some(policy) = &plan_policy {
+        recorded["plan_policy"] = json!(policy);
+    }
     let selector_error = if watch_policy.is_some() && watch_ids.is_none() {
         Some("watch_policy requires an explicit watch_ids selection")
     } else if watch_policy
@@ -2567,6 +2700,17 @@ pub fn fortress_wait_for_targets(
         .is_some_and(|policy| !matches!(policy, "all_satisfied" | "any_satisfied"))
     {
         Some("watch_policy must be all_satisfied or any_satisfied")
+    } else if plan_policy.is_some() && plan_digests.is_none() {
+        Some("plan_policy requires an explicit plan_digests selection")
+    } else if plan_policy
+        .as_deref()
+        .is_some_and(|policy| !matches!(policy, "all" | "any"))
+    {
+        Some("plan_policy must be all or any")
+    } else if plan_digests.is_some()
+        && (plan_digest.is_some() || watch_id.is_some() || watch_ids.is_some())
+    {
+        Some("plan_digest, plan_digests, watch_id and watch_ids are mutually exclusive wait selectors")
     } else if plan_digest.is_some() && watch_id.is_some() && watch_ids.is_none() {
         Some("plan_digest and watch_id are mutually exclusive wait selectors")
     } else if usize::from(plan_digest.is_some())
@@ -2584,6 +2728,8 @@ pub fn fortress_wait_for_targets(
             dfmcp_core::ErrorCode::InvalidRequest,
             message,
         ))
+    } else if let Some(digests) = plan_digests {
+        crate::server::wait_for_plans(session_id.clone(), max_game_ticks, digests, plan_policy)
     } else if let Some(watches) = watch_ids {
         crate::server::wait_for_watches(session_id.clone(), max_game_ticks, watches, watch_policy)
     } else {
@@ -2615,7 +2761,7 @@ pub fn fortress_wait_for_targets(
             session_id.as_deref(),
         ),
         crate::server::WaitPublication::Published(raw) => {
-            // The complete packet was admitted before the watch root changed.
+            // The complete packet was admitted before selected evidence changed.
             // Refresh orientation only; never refit or replace that publication.
             if let Ok(mut payload) = serde_json::from_str::<Value>(&raw) {
                 let resolved = payload["session_id"].as_str().map(str::to_owned);
@@ -2630,9 +2776,10 @@ pub fn fortress_wait_for_targets(
 }
 
 // Existing Rust integrations retain every prior registered handler alias.
-pub use FortressWaitForTargets as FortressWait;
-pub use FortressWaitForTargets as FortressWaitForPlan;
-pub use FortressWaitForTargets as FortressWaitForSelection;
+pub use FortressWaitForOutcomes as FortressWait;
+pub use FortressWaitForOutcomes as FortressWaitForPlan;
+pub use FortressWaitForOutcomes as FortressWaitForSelection;
+pub use FortressWaitForOutcomes as FortressWaitForTargets;
 
 #[tool(
     description = "Request, drain, compensate when authorized, and finalize cancellation while preserving recovery state. mode: compensate_reversible (default) | stop_future_steps | emergency_pause_and_drain. scope: last_action (default), plan (last committed plan), plan:<64-lowercase-original-plan-digest> (one exact current-session commit or verified durable recovered original, leaving other plans and descendants alone), oldest_open_plan (earliest retained original plan, for bounded cleanup), or session (all retained open work across this session's plans). With scope=session or a selected plan, explicit emergency_pause_and_drain pauses under current Observe and ControlClock authority before draining, even when selected work is already quiet or a durable restart left no session action handles. Recovered exact originals require current Observe, Query and scoped action grants. They support stop_future_steps and emergency_pause_and_drain without restoring handles or compensation; each recovered stop is durably published before another stop. Emergency drains and recovered exact drains require at least 1,500 output tokens and 6,000 bytes before effects. They create no replacement handles; exact pause evidence remains separate from unresolved carried work and physical drain success. Drain dependents first and return a finalize_certificate only when goal states are terminal and physical work is proven quiescent. Failed and Verified receipts remain history; their remaining work can be stopped with separate evidence. Separately, mode withdraw_goal with exact scope goal:<original-plan-digest> archives one verified, physically quiet original under current Observe, Query and reversible Plan authority, freeing an active goal slot while retaining its source and proof. Withdrawal does not stop work, prove success, withdraw descendants, or permit continuation of that original. Explicit mode close_session with scope session closes only after owned work is terminal and physically quiet and no Task monitor remains active; it discards pending reviews and volatile query/history handles, releases session membership and authority, and preserves durable state. Ordinary scope session retains its drain meaning."

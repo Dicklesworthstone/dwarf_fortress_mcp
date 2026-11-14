@@ -1,5 +1,57 @@
 # Implementation Status
 
+## Unreleased — Coordinate complete original plan sets at exact reserve horizons
+
+The laboratory's existing `fortress_wait` now accepts an explicit set of one to
+eight original plan digests with `plan_policy: "all"` or `"any"`. It resolves
+current-session commits and verified durable recovered originals together,
+rejects aliases for the same original, and preserves requested/actual identities
+in canonical original order. Existing scalar and watch calls, handler aliases,
+passive single-original Tasks and the eleven-tool surface are preserved.
+
+Every published frontier reevaluates the entire set. `all` requires current
+completion of every original at the same frontier; `any` requires one current
+completion. A previously satisfied consumable goal can become false again.
+Exceptional original outcomes take precedence, with all attention causes
+reported. The shared foreground clock clips to each selected exact reserve
+horizon, while ordinary authorized work continues. Selection does not replace
+pending/latest plans, follow descendants, restore dispatch handles, dispatch
+recovered deferred steps, unpause, continue or cancel automatically.
+
+Whole-set custody and authority admission precede progression. Each frontier
+admits the complete source union and a conservative shared selected-proof node
+bound before staging any endpoint. Current and distinct historical snapshots
+share one source allowance. The complete prospective Agent Turn, current work
+and objective summaries must fit before the first endpoint append. Original
+`E` records remain independently immutable: a later failure preserves accepted
+earlier endpoints, discards unpublished candidate metadata and reports incomplete
+publication with actual progress. A first false/unknown endpoint stays immutable.
+
+Successful Agent Turns retain selection-preserving tick-limit guidance and
+separately reviewed attention/continuation requests. Deterministic replay keeps
+the raw caller array and policy for eligible private volatile sessions. Typed
+malformations refuse the whole transcript before a session opens; well-typed
+semantic refusals reproduce the original rejected request. Shared/durable
+replay eligibility is unchanged.
+
+Thirteen public-facade regression sources cover distinct/same reserve horizons,
+mixed recovered/live custody and reopen, current `all`/`any` behavior, attention
+precedence, zero-tick effects, duplicate aliases, pending/latest preservation,
+authority/source/action/output bounds, immutable false/unknown endpoints,
+partial independent publication, exact replay and retry guidance. Two additional
+replay tests, passive Task selector checks and real modern stdio discovery/call
+coverage exercise the integration boundaries. Independent source review fixed
+prospective endpoint/objective consistency and complete-group guidance before
+publication. All 47 request-schema cases passed and scoped Rust parsing,
+formatting and whitespace checks passed. The executable MCP build was killed
+with SIGKILL in unchanged Asupersync before project compilation; the new Rust
+tests have not executed. Exact metadata and mandatory gate attempts are pending.
+No full-workspace, transport, native-game or production-admission qualification
+is claimed.
+
+See [selected original-plan sets](docs/LAB_SELECTED_PLAN_SET_WAIT.md).
+Owner: `df-lab-selected-plan-wait-s4q.1`; qualification remains in progress.
+
 ## Unreleased — Check live cancellation ownership before effects
 
 Complete laboratory session cancellation now preflights live original scopes

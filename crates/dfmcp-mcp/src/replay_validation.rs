@@ -121,6 +121,14 @@ pub(super) fn validate(bundle: &Value) -> Result<bool, String> {
         if !exact_fields(call, fields) || (task_events && !counter(&call["next_request_after"])) {
             return Err(invalid());
         }
+        if tool == "fortress.wait" {
+            // Validate every entry before opening even the disposable session.
+            // A malformed selector must never fall back to ordinary time wait.
+            opt_plan_digests(&call["arguments"])
+                .map_err(|reason| format!("call {seq}: {reason}"))?;
+            opt_plan_policy(&call["arguments"])
+                .map_err(|reason| format!("call {seq}: {reason}"))?;
+        }
         if tool == "fortress.open_session" {
             let args = &call["arguments"];
             if ["shared", "durable"].iter().any(|key| {

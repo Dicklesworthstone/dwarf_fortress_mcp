@@ -18,6 +18,10 @@ use super::{LabSession, Objective, anchor_json, authorize_entry, read_context};
 
 const MAX_SOURCE_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_STEPS: usize = 64;
+pub(super) const MAX_SET_PREDICATE_NODES: u64 = 4_096;
+// A closed production source has at most 64 quota leaves plus one All node.
+// Room sources have at most 64 excavations plus one connected-access leaf.
+pub(super) const SEMANTIC_GOAL_NODE_RESERVE: u64 = 65;
 
 #[path = "recovered_plan_wait.rs"]
 mod recovered;
@@ -29,6 +33,13 @@ fn refused(message: &str) -> DfmcpError {
 
 fn exhausted(message: &str) -> DfmcpError {
     DfmcpError::new(ErrorCode::BudgetExceeded, message)
+}
+
+fn charge_set(count: &mut u64, additional: u64) -> Result<()> {
+    *count = count
+        .checked_add(additional)
+        .ok_or_else(|| exhausted("selected plan set shared accounting overflowed"))?;
+    Ok(())
 }
 
 pub(super) fn parse_digest(raw: &str) -> Result<Digest32> {
@@ -161,6 +172,16 @@ pub(super) struct TaskGoalObservation {
     pub(super) projection: Value,
 }
 
+/// One complete source union shared by every member of a selected plan set.
+/// Historical endpoints count once by exact anchor; each original's custody
+/// still contributes independently to the admitted proof domain.
+pub(super) struct PlanSetSource {
+    pub(super) records: u64,
+    pub(super) bytes: u64,
+    pub(super) snapshots: usize,
+    pub(super) predicate_node_bound: u64,
+}
+
 impl SelectedPlanWait {
     pub(super) fn new(
         session: &mut LabSession,
@@ -211,6 +232,15 @@ impl SelectedPlanWait {
     }
 
     fn from_custody(session: &LabSession, digest: Digest32, started: Instant) -> Result<Self> {
+        Self::from_custody_in_domain(session, digest, started, None)
+    }
+
+    fn from_custody_in_domain(
+        session: &LabSession,
+        digest: Digest32,
+        started: Instant,
+        retained_domain_bytes: Option<usize>,
+    ) -> Result<Self> {
         let context = read_context(session);
         context.budget.validate()?;
         authorize_entry(&context, Capability::Observe, RiskTier::ReadOnly)?;
@@ -286,9 +316,13 @@ impl SelectedPlanWait {
         // The optional continuation oracle can inspect every retained sibling
         // seal. Charge the complete retained plan domain once under this same
         // request clock; immutable plans do not grow during foreground time.
-        let mut retained_plan_bytes = archive.len();
+        let mut retained_plan_bytes = retained_domain_bytes.unwrap_or(archive.len());
         let maximum_bytes = context.budget.max_bytes.min(MAX_SOURCE_BYTES) as usize;
-        for other in &session.objectives {
+        for other in session
+            .objectives
+            .iter()
+            .filter(|_| retained_domain_bytes.is_none())
+        {
             if other.plan_digest == selected.actual {
                 continue;
             }
@@ -355,6 +389,271 @@ impl SelectedPlanWait {
             actions: Actions::default(),
             stop: None,
         })
+    }
+
+    /// Resolve the whole explicit set without capturing an endpoint or changing
+    /// the world. All members share one admitted immutable retained-plan domain.
+    pub(super) fn set_members(
+        session: &LabSession,
+        digests: &[Digest32],
+        started: Instant,
+    ) -> Result<Vec<Self>> {
+        let mut members: Vec<Self> = Vec::with_capacity(digests.len());
+        let mut steps = 0usize;
+        for digest in digests {
+            let retained = members.first().map(|member| member.retained_plan_bytes);
+            let member = Self::from_custody_in_domain(session, *digest, started, retained)?;
+            if members
+                .iter()
+                .any(|prior| prior.selected.actual == member.selected.actual)
+            {
+                return Err(DfmcpError::new(
+                    ErrorCode::InvalidRequest,
+                    "plan_digests must name distinct originals, including after alias resolution",
+                ));
+            }
+            let original_steps = member
+                .original(session)?
+                .resource_plan()
+                .ok_or_else(|| refused("a selected set original lost its sealed plan"))?
+                .steps
+                .len();
+            steps = steps
+                .checked_add(original_steps)
+                .ok_or_else(|| exhausted("selected original step accounting overflowed"))?;
+            if steps > session.budget.max_actions as usize {
+                return Err(exhausted(
+                    "complete selected original steps exceed the shared action budget",
+                ));
+            }
+            members.push(member);
+        }
+        members.sort_by_key(|member| member.selected.actual);
+        Ok(members)
+    }
+
+    pub(super) fn actual_digest(&self) -> Digest32 {
+        self.selected.actual
+    }
+
+    pub(super) fn requested_digest(&self) -> Digest32 {
+        self.selected.requested
+    }
+
+    /// A shared upper bound on current goal/stage/reserve predicate-node
+    /// visits, admitted before evaluating any selected member. Charge both
+    /// scalar truth passes even when they share or short-circuit a predicate;
+    /// each semantic source reserves two full closed-model evaluations (goal
+    /// and reserve status). This is deliberately not measured execution work.
+    pub(super) fn set_predicate_node_bound(members: &[Self], session: &LabSession) -> Result<u64> {
+        let mut nodes = 0_u64;
+        for member in members {
+            member.check(session)?;
+            let original = member.original(session)?;
+            let plan = original
+                .resource_plan()
+                .ok_or_else(|| refused("selected proof lost its original plan"))?;
+            plan.terminal_condition.validate_shape()?;
+            let mut stage_nodes = plan.terminal_condition.complexity() as u64;
+            // plan_goal_truth additionally checks each harvested input's exact
+            // postconditions when the terminal condition succeeds.
+            for step in &plan.steps {
+                if matches!(step.action, dfmcp_intent::Action::HarvestResource { .. }) {
+                    charge_set(&mut stage_nodes, 1)?;
+                    for predicate in &step.postconditions {
+                        predicate.validate_shape()?;
+                        charge_set(&mut stage_nodes, predicate.complexity() as u64)?;
+                    }
+                }
+            }
+            charge_set(
+                &mut nodes,
+                stage_nodes
+                    .checked_mul(2)
+                    .ok_or_else(|| exhausted("selected proof node bound overflowed"))?,
+            )?;
+            if original.is_resource_aware_room()
+                || original.is_resource_aware_production()
+                || original.is_consumption_reserve()
+            {
+                charge_set(&mut nodes, SEMANTIC_GOAL_NODE_RESERVE * 2)?;
+            }
+            if nodes > MAX_SET_PREDICATE_NODES {
+                return Err(exhausted(
+                    "selected originals exceed their shared predicate-node bound",
+                ));
+            }
+        }
+        Ok(nodes)
+    }
+
+    /// Hydrate already-published historical endpoints, then admit the complete
+    /// union once. Loading prior proof is not a new endpoint observation.
+    pub(super) fn admit_set_source(
+        members: &[Self],
+        session: &mut LabSession,
+    ) -> Result<PlanSetSource> {
+        let first = members
+            .first()
+            .ok_or_else(|| refused("selected plan set is empty"))?;
+        let predicate_node_bound = Self::set_predicate_node_bound(members, session)?;
+        for member in members {
+            member.check(session)?;
+            super::objectives::ensure_reserve_snapshot(session, member.selected.actual)?;
+        }
+        let mut context = read_context(session);
+        let spent = first.started.elapsed().as_nanos().div_ceil(1_000_000);
+        if spent >= u128::from(context.budget.max_wall_millis) {
+            return Err(exhausted(
+                "selected plan set has no source-inspection wall budget",
+            ));
+        }
+        context.budget.max_wall_millis -= spent as u64;
+        let mut snapshots = vec![session.adapter.snapshot()];
+        for member in members {
+            if let Some(sample) = member.reserve_observation
+                && !snapshots
+                    .iter()
+                    .any(|snapshot| snapshot.anchor() == sample.anchor)
+            {
+                let snapshot = session
+                    .history
+                    .get(&sample.anchor.state_hash)
+                    .filter(|snapshot| snapshot.anchor() == sample.anchor)
+                    .ok_or_else(|| {
+                        refused("a selected original reserve snapshot is unavailable")
+                    })?;
+                snapshots.push(snapshot);
+            }
+        }
+        let source = super::query_budget::admit_sources(&snapshots, &context)?;
+        let mut records = source["records"]
+            .as_u64()
+            .ok_or_else(|| refused("selected source union has no record count"))?;
+        let mut bytes = source["canonical_bytes"]
+            .as_u64()
+            .ok_or_else(|| refused("selected source union has no byte count"))?;
+        charge_set(&mut records, session.objectives.len() as u64)?;
+        charge_set(&mut records, session.carried.len() as u64)?;
+        charge_set(&mut bytes, first.retained_plan_bytes as u64)?;
+        for objective in &session.objectives {
+            first.check(session)?;
+            let entry = objective.resource_goal(session);
+            charge_set(
+                &mut records,
+                entry.plan.map_or(0, |plan| plan.steps.len()) as u64,
+            )?;
+            charge_set(&mut bytes, entry.summary.len() as u64)?;
+            charge_set(&mut bytes, entry.request_json.map_or(0, str::len) as u64)?;
+            charge_set(
+                &mut bytes,
+                entry.verification_error.map_or(0, str::len) as u64,
+            )?;
+            if let Some((anchor, truth)) = objective.selected_wait_reserve_observation {
+                charge_set(&mut records, 1)?;
+                charge_set(
+                    &mut bytes,
+                    json!({"anchor":anchor_json(&anchor),"truth":truth_name(truth)})
+                        .to_string()
+                        .len() as u64,
+                )?;
+            }
+        }
+        for member in members {
+            member.check(session)?;
+            if member.recovered.is_some() {
+                let custody = member.recovery_custody(session)?;
+                let plan = member
+                    .original(session)?
+                    .resource_plan()
+                    .ok_or_else(|| refused("a selected recovered original disappeared"))?;
+                charge_set(&mut records, plan.steps.len() as u64)?;
+                charge_set(&mut bytes, custody.bytes()? as u64)?;
+            } else {
+                charge_set(
+                    &mut bytes,
+                    session
+                        .commit_receipts
+                        .get(&member.selected.requested.to_hex())
+                        .ok_or_else(|| refused("selected original commit custody disappeared"))?
+                        .len() as u64,
+                )?;
+            }
+        }
+        if members.iter().any(|member| member.recovered.is_some()) {
+            for row in &session.carried {
+                first.check(session)?;
+                charge_set(&mut bytes, row.to_json().to_string().len() as u64)?;
+            }
+        }
+        if records > u64::from(context.budget.max_entities)
+            || bytes > context.budget.max_bytes.min(MAX_SOURCE_BYTES)
+        {
+            return Err(exhausted(
+                "selected plan set exceeds its complete shared source budget",
+            ));
+        }
+        first.check(session)?;
+        Ok(PlanSetSource {
+            records,
+            bytes,
+            snapshots: snapshots.len(),
+            predicate_node_bound,
+        })
+    }
+
+    /// Inspect a candidate without installing its exact endpoint. The caller
+    /// admits every member and the complete output before retaining any sample.
+    pub(super) fn stage_set_member(
+        &mut self,
+        session: &LabSession,
+        source: &PlanSetSource,
+    ) -> Result<()> {
+        charge_set(&mut self.source_inspections, 1)?;
+        charge_set(&mut self.inspected_records, source.records)?;
+        charge_set(&mut self.inspected_bytes, source.bytes)?;
+        self.maximum_source_records = self.maximum_source_records.max(source.records);
+        self.maximum_source_bytes = self.maximum_source_bytes.max(source.bytes);
+        self.inspect_admitted_current(session, true)?;
+        if self.reserve_observation.is_some()
+            && self
+                .original(session)?
+                .selected_wait_reserve_observation
+                .is_none()
+        {
+            // Only a private prospective packet sees this value. Publication
+            // below must succeed before that packet can become a response.
+            self.reserve_durable = session.durable_scenario.is_some();
+        }
+        Ok(())
+    }
+
+    pub(super) fn retain_set_endpoint(&mut self, session: &mut LabSession) -> Result<()> {
+        self.check(session)?;
+        if let Some(sample) = self.reserve_observation {
+            self.reserve_durable = super::objectives::retain_reserve_observation(
+                session,
+                self.selected.actual,
+                sample.anchor,
+                sample.truth,
+            )?;
+        }
+        Ok(())
+    }
+
+    /// A later independent endpoint append can fail after an earlier member
+    /// succeeded. Error projection shows only genuinely retained endpoints.
+    pub(super) fn discard_unpublished_endpoint(&mut self, session: &LabSession) {
+        if let Ok(original) = self.original(session) {
+            let retained = original.selected_wait_reserve_observation;
+            let durable = original.selected_wait_reserve_durable;
+            self.reserve_observation =
+                retained.map(|(anchor, truth)| ReserveObservation { anchor, truth });
+            self.reserve_durable = durable;
+        } else {
+            self.reserve_observation = None;
+            self.reserve_durable = false;
+        }
     }
 
     fn original<'a>(&self, session: &'a LabSession) -> Result<&'a Objective> {
@@ -526,6 +825,15 @@ impl SelectedPlanWait {
     /// complete progression slice. No polling, dispatch or clock change occurs.
     fn inspect_current(&mut self, session: &LabSession, capture_endpoint: bool) -> Result<()> {
         self.admit_source(session)?;
+        self.inspect_admitted_current(session, capture_endpoint)
+    }
+
+    fn inspect_admitted_current(
+        &mut self,
+        session: &LabSession,
+        capture_endpoint: bool,
+    ) -> Result<()> {
+        self.check(session)?;
         self.actions = self.inspect_actions(session)?;
         let original = self.original(session)?;
         let (goal, goal_error) = observed_truth(original.selected_wait_truth(session))?;

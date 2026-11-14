@@ -748,8 +748,10 @@ fn observation_request(arguments: &Value) -> McpResult<TaskWork> {
                 | "watch_id"
                 | "watch_ids"
                 | "watch_policy"
+                | "plan_digests"
+                | "plan_policy"
         )
-    }) || ["watch_id", "watch_ids", "watch_policy"]
+    }) || ["watch_id", "watch_ids", "watch_policy", "plan_digests", "plan_policy"]
         .iter()
         .any(|field| fields.get(*field).is_some_and(|value| !value.is_null()))
         || fields
@@ -757,7 +759,7 @@ fn observation_request(arguments: &Value) -> McpResult<TaskWork> {
             .is_some_and(|value| !value.is_null() && value.as_u64() != Some(0))
     {
         return Err(McpError::invalid_params(
-            "an observation Task requires one exact plan_digest, no watch selectors and omitted or zero max_game_ticks; use an explicit foreground wait to advance time",
+            "an observation Task requires one exact plan_digest, no plan-set or watch selectors and omitted or zero max_game_ticks; use an explicit foreground wait for selected sets or to advance time",
         ));
     }
     if fields.get("as_task") != Some(&Value::Bool(true)) {
@@ -792,7 +794,7 @@ impl ToolHandler for TaskAwareWait {
             .and_then(Value::as_object_mut)
         {
             properties.insert("as_task".to_owned(), json!({"type":"boolean",
-                "description":"Observe one exact committed or durable recovered original as a modern MCP Task. Requires explicit session_id and plan_digest, omitted or zero max_game_ticks, no watch selector, and current Observe/Query. One active monitor per process. This Task never commits, advances time, captures reserve endpoints or cancels original work; tasks/cancel stops only its observation."}));
+                "description":"Observe one exact committed or durable recovered original as a modern MCP Task. Requires explicit session_id and plan_digest, omitted or zero max_game_ticks, no plan-set or watch selector, and current Observe/Query. One active monitor per process. This Task never commits, advances time, captures reserve endpoints or cancels original work; tasks/cancel stops only its observation."}));
         }
         definition
     }

@@ -95,7 +95,7 @@ needs attention. Pause and the requested tick cap also stop the call.
 
 This selects one exact retained definition: its success and failure conditions,
 entity generations, deadline, cadence and required stability never change.
-`plan_digest`, `watch_id` and `watch_ids` are mutually exclusive. Omitting all
+`plan_digest`, `plan_digests`, `watch_id` and `watch_ids` are mutually exclusive. Omitting all
 three preserves ordinary duration-based waiting; selecting a plan preserves
 [original-project waiting](LAB_SELECTED_PLAN_WAIT.md). No new tool is added.
 Direct Rust callers can use

@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased — Coordinate complete original laboratory projects
+
+- Add explicit `plan_digests` and `plan_policy: all|any` to the existing wait
+  tool, preserving scalar/watch calls, Rust wrappers and all eleven tools.
+- Inspect every selected original at one current frontier and stop at each
+  exact reserve horizon. Reevaluate consumed goals; exceptional outcomes take
+  precedence over group completion and retain every affected original.
+- Admit complete live/recovered custody, current authority, aggregate source
+  and proof work, and the full response before endpoint publication. Preserve
+  independently durable earlier endpoints if a later append fails.
+- Keep endpoint custody consistent across selected results and objective
+  summaries, retain pending reviews, and return selection-preserving next steps.
+- Replay exact caller selections in eligible private sessions; reject malformed
+  recorded selectors before execution and preserve semantic refusal cases.
+- Add thirteen public-facade regressions, two replay tests, passive Task boundary
+  checks and actual modern stdio coverage. All 47 request-schema cases pass;
+  source review and scoped Rust parsing/formatting passed. The executable build
+  was SIGKILLed in unchanged Asupersync before MCP compilation. Further exact
+  metadata and mandatory gate attempts are pending; no Rust execution or full
+  qualification claim is made.
+
 ## Unreleased — Refuse conflicting live cancellation before any effect
 
 - Preflight complete-session live cleanup against current reservations and

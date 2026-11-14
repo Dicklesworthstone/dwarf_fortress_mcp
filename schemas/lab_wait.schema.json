@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://dwarf-fortress-mcp.dev/schemas/lab_wait.schema.json",
   "title": "Laboratory fortress_wait arguments",
-  "description": "One existing tool supports ordinary duration-based waiting, one exact original plan, one condition watch, or an explicit set of retained laboratory watches. Current ownership, grants, complete source bounds and atomic complete response publication remain binding.",
+  "description": "One existing tool supports ordinary duration-based waiting, one exact original plan, an explicit set of complete originals, one condition watch, or an explicit set of retained laboratory watches. Current ownership, grants, complete source bounds and complete response admission remain binding.",
   "type": "object",
   "additionalProperties": false,
   "properties": {
@@ -29,7 +29,7 @@
         "null"
       ],
       "pattern": "^[0-9a-f]{64}$",
-      "description": "One exact session-owned original committed plan; mutually exclusive with non-null watch_id or watch_ids."
+      "description": "One exact session-owned or verified durable original committed plan; mutually exclusive with non-null plan_digests, watch_id or watch_ids."
     },
     "watch_id": {
       "type": [
@@ -37,7 +37,7 @@
         "null"
       ],
       "pattern": "^watch:[0-9a-f]{64}$",
-      "description": "One retained laboratory watch handle. Samples its immutable original condition at bounded published frontiers. Mutually exclusive with non-null plan_digest or watch_ids."
+      "description": "One retained laboratory watch handle. Samples its immutable original condition at bounded published frontiers. Mutually exclusive with non-null plan_digest, plan_digests or watch_ids."
     },
     "watch_ids": {
       "type": [
@@ -51,7 +51,7 @@
         "type": "string",
         "pattern": "^watch:[0-9a-f]{64}$"
       },
-      "description": "One explicit set of one to eight unique owned laboratory watch handles. Every published frontier samples the exact set atomically, respecting each unfinished member's cadence and deadline. Mutually exclusive with non-null plan_digest or watch_id."
+      "description": "One explicit set of one to eight unique owned laboratory watch handles. Every published frontier samples the exact set atomically, respecting each unfinished member's cadence and deadline. Mutually exclusive with non-null plan_digest, plan_digests or watch_id."
     },
     "watch_policy": {
       "type": [
@@ -64,20 +64,32 @@
         null
       ],
       "description": "Group policy for watch_ids only. Omitted/null means all_satisfied. Attention takes precedence over group success. Policies aggregate retained outcomes, including historical terminals, without claiming current simultaneous truth."
-    }
-  },
-  "not": {
-    "required": [
-      "plan_digest",
-      "watch_id"
-    ],
-    "properties": {
-      "plan_digest": {
-        "type": "string"
+    },
+    "plan_digests": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "minItems": 1,
+      "maxItems": 8,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{64}$"
       },
-      "watch_id": {
-        "type": "string"
-      }
+      "description": "One explicit set of one to eight distinct session-owned or verified durable original plans. Different aliases resolving to the same original are also refused. Each frontier inspects the complete set at one current snapshot and clips time to every selected original reserve horizon. Mutually exclusive with non-null plan_digest, watch_id or watch_ids."
+    },
+    "plan_policy": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "all",
+        "any",
+        null
+      ],
+      "description": "Group policy for plan_digests only. Omitted/null means all. All requires every selected original to be complete at the same current frontier; any requires at least one. Current consumable goals are reevaluated, and any exceptional member outcome takes precedence over group success."
     }
   },
   "examples": [
@@ -99,9 +111,50 @@
         "watch:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
       ],
       "watch_policy": "all_satisfied"
+    },
+    {
+      "session_id": "00000000000000000000000000000001",
+      "max_game_ticks": 2000,
+      "plan_digests": [
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      ],
+      "plan_policy": "all"
     }
   ],
   "allOf": [
+    {
+      "not": {
+        "required": [
+          "plan_digest",
+          "plan_digests"
+        ],
+        "properties": {
+          "plan_digest": {
+            "type": "string"
+          },
+          "plan_digests": {
+            "type": "array"
+          }
+        }
+      }
+    },
+    {
+      "not": {
+        "required": [
+          "plan_digest",
+          "watch_id"
+        ],
+        "properties": {
+          "plan_digest": {
+            "type": "string"
+          },
+          "watch_id": {
+            "type": "string"
+          }
+        }
+      }
+    },
     {
       "not": {
         "required": [
@@ -111,6 +164,38 @@
         "properties": {
           "plan_digest": {
             "type": "string"
+          },
+          "watch_ids": {
+            "type": "array"
+          }
+        }
+      }
+    },
+    {
+      "not": {
+        "required": [
+          "plan_digests",
+          "watch_id"
+        ],
+        "properties": {
+          "plan_digests": {
+            "type": "array"
+          },
+          "watch_id": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "not": {
+        "required": [
+          "plan_digests",
+          "watch_ids"
+        ],
+        "properties": {
+          "plan_digests": {
+            "type": "array"
           },
           "watch_ids": {
             "type": "array"
@@ -151,6 +236,28 @@
         ],
         "properties": {
           "watch_ids": {
+            "type": "array"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "plan_policy"
+        ],
+        "properties": {
+          "plan_policy": {
+            "type": "string"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "plan_digests"
+        ],
+        "properties": {
+          "plan_digests": {
             "type": "array"
           }
         }

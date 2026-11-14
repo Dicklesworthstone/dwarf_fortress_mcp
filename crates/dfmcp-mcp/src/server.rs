@@ -202,6 +202,13 @@ mod lab_progress;
 #[path = "selected_plan_wait.rs"]
 mod selected_plan_wait;
 
+#[path = "selected_plan_set_wait.rs"]
+mod selected_plan_set_wait;
+
+#[cfg(test)]
+#[path = "selected_plan_set_wait_facade_tests.rs"]
+mod selected_plan_set_wait_facade_tests;
+
 #[path = "selected_watch_wait.rs"]
 mod selected_watch_wait;
 
@@ -5908,6 +5915,7 @@ fn wait_progress_error(
 enum WaitWatchSelection {
     Single(selected_watch_wait::SelectedWatchWait),
     Set(selected_watch_set_wait::SelectedWatchSetWait),
+    Plans(selected_plan_set_wait::SelectedPlanSetWait),
 }
 
 impl WaitWatchSelection {
@@ -5915,6 +5923,7 @@ impl WaitWatchSelection {
         match self {
             Self::Single(watch) => watch.check(session),
             Self::Set(watches) => watches.check(session),
+            Self::Plans(plans) => plans.check(session),
         }
     }
 
@@ -5922,6 +5931,7 @@ impl WaitWatchSelection {
         match self {
             Self::Single(watch) => watch.stopped(),
             Self::Set(watches) => watches.stopped(),
+            Self::Plans(plans) => plans.stopped(),
         }
     }
 
@@ -5929,13 +5939,15 @@ impl WaitWatchSelection {
         match self {
             Self::Single(watch) => watch.ceiling(now, other),
             Self::Set(watches) => watches.ceiling(now, other),
+            Self::Plans(plans) => plans.ceiling(now, other),
         }
     }
 
-    fn sample(&mut self, session: &LabSession, base: serde_json::Value) -> Result<()> {
+    fn sample(&mut self, session: &mut LabSession, base: serde_json::Value) -> Result<()> {
         match self {
             Self::Single(watch) => watch.sample(session, base),
             Self::Set(watches) => watches.sample(session, base),
+            Self::Plans(plans) => plans.sample(session, base),
         }
     }
 
@@ -5943,6 +5955,7 @@ impl WaitWatchSelection {
         match self {
             Self::Single(watch) => watch.take_published(),
             Self::Set(watches) => watches.take_published(),
+            Self::Plans(plans) => plans.take_published(),
         }
     }
 }
@@ -5957,10 +5970,10 @@ fn wait_selection_error(
 ) -> String {
     let single = watch.and_then(|watch| match watch {
         WaitWatchSelection::Single(watch) => Some(watch),
-        WaitWatchSelection::Set(_) => None,
+        WaitWatchSelection::Set(_) | WaitWatchSelection::Plans(_) => None,
     });
     let raw = wait_progress_error(session, error, progress, receipts, selected, single);
-    let Some(WaitWatchSelection::Set(watches)) = watch else {
+    let Some(watch @ (WaitWatchSelection::Set(_) | WaitWatchSelection::Plans(_))) = watch else {
         return raw;
     };
     let current = read_context(session);
@@ -5971,7 +5984,15 @@ fn wait_selection_error(
     }
     match serde_json::from_str::<serde_json::Value>(&raw) {
         Ok(mut payload) => {
-            payload["selected_watch_set_wait"] = watches.projection(session, false);
+            match watch {
+                WaitWatchSelection::Set(watches) => {
+                    payload["selected_watch_set_wait"] = watches.projection(session, false);
+                }
+                WaitWatchSelection::Plans(plans) => {
+                    payload["selected_plan_set_wait"] = plans.projection(session, false);
+                }
+                WaitWatchSelection::Single(_) => {}
+            }
             payload.to_string()
         }
         Err(_) => raw,
@@ -6050,7 +6071,7 @@ fn with_explicit_publication<T>(
 /// Let authorized laboratory time pass in bounded slices, observing all owned
 /// work in dependency order and publishing each frontier before continuing.
 pub(crate) fn wait_with_ticks(session_id: Option<String>, max_game_ticks: Option<u64>) -> String {
-    wait_with_selection(session_id, max_game_ticks, None, None, None).into_response()
+    wait_with_selection(session_id, max_game_ticks, None, None, None, None).into_response()
 }
 
 /// Progress the same owned work, stopping at one exact original plan's goal,
@@ -6064,7 +6085,7 @@ pub(crate) fn wait_for_plan(
         Ok(digest) => digest,
         Err(error) => return dfmcp_error_payload("fortress.wait", &error),
     };
-    wait_with_selection(session_id, max_game_ticks, Some(digest), None, None).into_response()
+    wait_with_selection(session_id, max_game_ticks, Some(digest), None, None, None).into_response()
 }
 
 /// Select one exact session-owned laboratory condition, preserving its original
@@ -6074,7 +6095,7 @@ pub(crate) fn wait_for_watch(
     max_game_ticks: Option<u64>,
     watch_id: String,
 ) -> WaitPublication {
-    wait_with_selection(session_id, max_game_ticks, None, Some(watch_id), None)
+    wait_with_selection(session_id, max_game_ticks, None, Some(watch_id), None, None)
 }
 
 /// Progress one explicit watch set with one atomic detailed sample per frontier.
@@ -6090,7 +6111,20 @@ pub(crate) fn wait_for_watches(
         None,
         None,
         Some((watch_ids, watch_policy)),
+        None,
     )
+}
+
+/// Follow one explicit original-project set at the same bounded frontiers.
+/// Complete group publication owns its endpoint writes and returned packet.
+pub(crate) fn wait_for_plans(
+    session_id: Option<String>,
+    max_game_ticks: Option<u64>,
+    plan_digests: Vec<String>,
+    plan_policy: Option<String>,
+) -> WaitPublication {
+    wait_with_selection(session_id, max_game_ticks, None, None, None,
+        Some((plan_digests, plan_policy)))
 }
 
 fn wait_with_selection(
@@ -6099,17 +6133,19 @@ fn wait_with_selection(
     selected_digest: Option<Digest32>,
     watch_id: Option<String>,
     watch_set: Option<(Vec<String>, Option<String>)>,
+    plan_set: Option<(Vec<String>, Option<String>)>,
 ) -> WaitPublication {
     let started = std::time::Instant::now();
     if usize::from(selected_digest.is_some())
         + usize::from(watch_id.is_some())
         + usize::from(watch_set.is_some())
+        + usize::from(plan_set.is_some())
         > 1
     {
         return WaitPublication::Pending(coded_error_payload(
             "fortress.wait",
             ErrorCode::InvalidRequest,
-            "plan_digest, watch_id and watch_ids are mutually exclusive wait selectors",
+            "plan_digest, plan_digests, watch_id and watch_ids are mutually exclusive wait selectors",
         ));
     }
     let session = match resolve_session(session_id) {
@@ -6118,7 +6154,7 @@ fn wait_with_selection(
             return WaitPublication::Pending(dfmcp_error_payload("fortress.wait", &error));
         }
     };
-    let watch_selected = watch_id.is_some() || watch_set.is_some();
+    let watch_selected = watch_id.is_some() || watch_set.is_some() || plan_set.is_some();
     let mut published = false;
     let mut response_budget = None;
     let response = with_wait_session(
@@ -6193,7 +6229,12 @@ fn wait_with_selection(
                     )
                     .map(|watches| Some(WaitWatchSelection::Set(watches)))
                 }
-                (None, None) => Ok(None),
+                (None, None) => match plan_set {
+                    Some((digests, policy)) => selected_plan_set_wait::SelectedPlanSetWait::new(
+                        guard, digests, policy, requested_ticks, started,
+                    ).map(|plans| Some(WaitWatchSelection::Plans(plans))),
+                    None => Ok(None),
+                },
                 (Some(_), Some(_)) => Err(DfmcpError::new(
                     ErrorCode::InvalidRequest,
                     "watch_id and watch_ids are mutually exclusive",

@@ -47,6 +47,8 @@ fn observer_request_accepts_no_clock_and_refuses_other_wait_selectors_or_malform
         if let Some(ticks) = ticks {
             valid["max_game_ticks"] = ticks;
         }
+        valid["plan_digests"] = Value::Null;
+        valid["plan_policy"] = Value::Null;
         assert!(observation_request(&valid)?.is_observer());
     }
     for (field, invalid) in [
@@ -57,6 +59,9 @@ fn observer_request_accepts_no_clock_and_refuses_other_wait_selectors_or_malform
         ("watch_id", json!("original-watch")),
         ("watch_ids", json!([])),
         ("watch_policy", json!("all_satisfied")),
+        ("plan_digests", json!(["b".repeat(64)])),
+        ("plan_digests", json!([])),
+        ("plan_policy", json!("all")),
         ("as_task", json!(false)),
         ("as_task", Value::Null),
         ("as_task", json!("true")),
@@ -90,6 +95,18 @@ fn task_aware_wait_keeps_the_existing_wire_name_and_declares_explicit_monitor_on
         "boolean"
     );
     assert!(TaskAwareWait.declares_final_tasks());
+    for field in [
+        "plan_digest",
+        "plan_digests",
+        "plan_policy",
+        "watch_id",
+        "watch_ids",
+    ] {
+        assert!(
+            tool.input_schema["properties"].get(field).is_some(),
+            "{field}"
+        );
+    }
     let description = tool.input_schema["properties"]["as_task"]["description"]
         .as_str()
         .unwrap_or("");

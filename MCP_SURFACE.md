@@ -559,7 +559,7 @@ heartbeat.
 The modern laboratory registration also accepts `as_task: true` with an
 explicit session and exact committed or verified recovered original digest.
 This creates a passive observation Task under current Observe/Query authority;
-omit `max_game_ticks` or set it to zero and omit watch selectors. The Task
+omit `max_game_ticks` or set it to zero and omit plan-set and watch selectors. The Task
 observes retained original proof without dispatching work, advancing time or
 capturing reserve endpoints. Its `tasks/cancel` stops only the monitor and
 leaves original physical work unchanged. Discovery and terminal evidence state
@@ -603,10 +603,22 @@ shared time; selection does not follow descendants or dispatch a continuation.
 and exact reserve evidence. The optional selector is recorded in replay. See
 `docs/LAB_SELECTED_PLAN_WAIT.md`.
 
+An explicit `plan_digests` array selects one to eight distinct originals,
+including a mix of current-session commits and verified durable recovery.
+`plan_policy` is `all` (default) or `any`. Every member is reevaluated at one
+current frontier; earlier consumable-goal success is not latched. Any exceptional
+selected outcome takes precedence over group success. The shared clock clips
+to each selected exact reserve horizon, and complete source/output admission
+precedes any endpoint capture. Original endpoint records publish independently:
+a later append failure retains the successful prefix and stops with explicit
+partial progress. `selected_plan_set_wait` preserves every selected identity,
+current outcome and attention cause. Eligible private sessions replay the exact
+array and policy. See `docs/LAB_SELECTED_PLAN_SET_WAIT.md`.
+
 A laboratory condition can instead be selected with `watch_id`, or an explicit
 set of one to eight distinct owned handles with `watch_ids`. The optional
 `watch_policy` is valid only with `watch_ids`: `all_satisfied` (default) or
-`any_satisfied`. All three selectors are mutually exclusive; omitting them
+`any_satisfied`. All four selectors are mutually exclusive; omitting them
 preserves duration-based waiting. At each bounded published world, the selected
 set is sampled in one atomic transaction, with each unfinished watch's original
 cadence and deadline constraining advancement. Failure, expiry, invalidation,

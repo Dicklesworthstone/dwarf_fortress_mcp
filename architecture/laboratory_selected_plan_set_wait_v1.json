@@ -1,0 +1,97 @@
+{
+  "schema": "dfmcp.laboratory-selected-plan-set-wait-contract/1",
+  "owning_bead": "df-lab-selected-plan-wait-s4q.1",
+  "logical_tool": "fortress.wait",
+  "wire_tool": "fortress_wait",
+  "selector": {
+    "field": "plan_digests",
+    "optional": true,
+    "minimum_members": 1,
+    "maximum_members": 8,
+    "format": "explicit array of canonical lowercase 64-hex original plan digests",
+    "mutually_exclusive_with": ["plan_digest", "watch_id", "watch_ids"],
+    "duplicates": "refuse duplicate requested digests and distinct aliases resolving to the same original",
+    "order": "actual original plan digest, with requested identities paired to actual identities",
+    "membership_changes_during_call": false
+  },
+  "policy": {
+    "field": "plan_policy",
+    "allowed": ["all", "any"],
+    "omitted_or_null": "all",
+    "valid_only_with": "non-null plan_digests",
+    "completion_scope": "current_original_outcomes_at_one_frontier",
+    "earlier_completion_is_latched": false,
+    "all": "every selected original currently complete at the same frontier",
+    "any": "at least one selected original currently complete at the frontier",
+    "attention_precedes_group_success": true,
+    "attention_order": "canonical actual original digest; return every cause and use the first cause as stop_reason"
+  },
+  "custody": {
+    "accepted": ["exact current-session original commit", "verified durable recovered original"],
+    "retained": ["original source", "sealed plan", "complete step and action census", "original reserve horizon", "original action deadlines", "current physical work", "exact prior endpoint evidence"],
+    "foreign_live_owner_adoption": false,
+    "dispatch_handles_restored": false,
+    "recovered_deferred_dispatch": false,
+    "pending_and_latest_plan_preserved": true
+  },
+  "required_read_capabilities": ["observe", "query"],
+  "positive_tick_capability": "control_clock",
+  "authority_scope": "current whole-fortress grants; admit the complete requested positive horizon when unpaused and recheck at each frontier",
+  "zero_tick_behavior": "inspect every selected original and explicitly capture eligible exact reserve endpoints after complete selection and output admission; do not advance or dispatch",
+  "response_schema": "dfmcp.selected-plan-set-wait/1",
+  "response_field": "selected_plan_set_wait",
+  "records": "complete scalar selected-plan projections at one current frontier in canonical original order",
+  "identity_fields": ["requested_plan_digests", "plan_digests", "interrupted_plan_digests", "unfinished_plan_digests"],
+  "stop_reasons": ["all_complete", "any_complete", "indeterminate", "work_unknown", "failed", "cancelled", "cancellation_pending", "reserve_unobserved", "reserve_unmet", "reserve_unknown", "goal_unknown", "goal_unmet", "needs_continuation", "paused", "tick_limit"],
+  "progression": {
+    "owner": "existing shared foreground progression",
+    "clip_at": ["ordinary slice ceiling", "action and recovery cadence/deadline", "earliest selected future reserve horizon", "remaining requested ticks"],
+    "reevaluate_all_members_each_frontier": true,
+    "other_committed_work_continues": true,
+    "unselected_original_endpoints_captured": false,
+    "unpauses": false,
+    "automatic_continuation": false,
+    "automatic_cancellation": false
+  },
+  "publication": {
+    "admission_order": ["resolve and validate the entire selection", "admit the complete source union and evaluation work", "stage all original outcomes", "render complete selected evidence, objectives, retained work and Agent Turn", "admit the full response before any endpoint append"],
+    "endpoint_storage": "independent immutable original E records in canonical selection order",
+    "atomic_set_journal": false,
+    "later_append_failure": "halt, retain every earlier successfully published endpoint, discard unpublished candidate metadata and report incomplete publication with actual progress",
+    "first_false_or_unknown_endpoint_replaceable": false,
+    "after_final_append": "return the already admitted packet without fallible fitting or projection",
+    "error_currentness": "full selected identities and real elapsed progress remain visible under current read authority; incomplete inspection cannot claim group completion"
+  },
+  "budgets": {
+    "size_limit_scope": "each_complete_selected_source_union",
+    "source_union": "current world plus distinct exact historical endpoint snapshots plus complete retained original and selected custody sources",
+    "historical_snapshot_deduplication": "exact_anchor",
+    "aggregate_original_steps": "session max_actions",
+    "shared_evaluation_work": true,
+    "maximum_selected_predicate_nodes_per_frontier": 4096,
+    "selected_proof_accounting": "conservative upper bound, separately labeled from measured source work",
+    "semantic_goal_node_reserve": 65,
+    "shared_wall_deadline": true,
+    "maximum_foreground_slices": 4096,
+    "maximum_selected_inspections": 4097,
+    "maximum_selected_plans": 8,
+    "complete_source_byte_ceiling": 16777216,
+    "full_packet": "min(max_bytes, max_output_tokens * 4)",
+    "repeated_inspection_accounting": "report checked accumulated measured work; do not grant an independent source allowance to each member"
+  },
+  "replay": {
+    "arguments": "preserve exact caller plan_digests array and optional plan_policy",
+    "private_volatile_sessions": "existing deterministic replay eligibility",
+    "shared_or_durable_sessions": "remain nonreplayable",
+    "malformed_types": "refuse the whole transcript before opening a replay session",
+    "well_typed_semantic_refusals": "reexecute the exact rejected selection without changing it to an ordinary duration wait"
+  },
+  "compatibility": {
+    "existing_scalar_and_watch_behaviors_preserved": true,
+    "existing_rust_wrappers_and_handler_aliases_preserved": true,
+    "passive_tasks": "continue to accept one exact plan_digest with zero time; selected sets use foreground wait",
+    "logical_tool_count": 11,
+    "native_protocol_change": false,
+    "production_admission_change": false
+  }
+}
