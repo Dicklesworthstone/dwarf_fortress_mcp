@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased — Discover and stop the oldest recovered laboratory original
+
+- Extend `scope: "oldest_open_plan"` across verified durable recovery and live
+  work, using deterministic original observation order and fresh physical
+  inspection.
+- Admit complete original identity and shared discovery/cleanup budgets before
+  effects. Refuse unavailable older custody instead of skipping to newer work.
+- Retain the exact selected original and caller scope in the outcome and
+  finalization proof; preserve pending reviews, unrelated work and historical
+  terminal evidence.
+- Add six public-facade regression sources and workflow guidance. Independent
+  source review completed; final Rust execution and formatting remain unverified
+  after repeated execution-host resets. No live admission follows.
+
 ## Unreleased — Cancel a recovered original through the laboratory MCP workflow
 
 - Extend exact `plan:<digest>` cancellation to verified durable originals after

@@ -7,6 +7,9 @@ use dfmcp_world::{Predicate, WorldSnapshot};
 
 type TestResult<T = ()> = std::result::Result<T, Box<dyn std::error::Error>>;
 
+#[path = "recovered_scope_cancellation_tests.rs"]
+mod scopes;
+
 struct StateDir(std::path::PathBuf);
 impl StateDir {
     fn new(label: &str) -> Self {

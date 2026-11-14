@@ -18,8 +18,10 @@ open work, the pending review, or a Task monitor.
 ```
 
 The placeholder digest must be replaced with exactly 64 lowercase hexadecimal
-digits. Existing `last_action`, `plan`, `oldest_open_plan`, and `session`
-scopes keep their meanings. Live originals support all three existing cancellation modes.
+digits. `last_action` and `plan` retain their live-handle meanings.
+`oldest_open_plan` selects one oldest unfinished original across verified
+durable recovery and current live work, while `session` selects the session's
+retained live action set. Live originals support all three existing cancellation modes.
 An explicit `emergency_pause_and_drain` also pauses the shared fortress clock
 under current clock authority; ordinary `stop_future_steps` needs no clock
 advance or clock grant.
@@ -36,8 +38,9 @@ for complete custody, publication and budget requirements.
 With `scope: "session"`, an explicit `emergency_pause_and_drain` request pauses
 the shared laboratory clock even when a durable restart left no live action
 handles. Plan-scoped drains likewise pause before draining, including an
-already-quiet selected original. An `oldest_open_plan` request still needs a
-retained original, and `last_action` still needs its original live handle.
+already-quiet selected original. An `oldest_open_plan` request needs a retained
+live or verified recovered original, and `last_action` still needs its original
+live handle.
 
 Current Observe and ControlClock authority and the aggregate action budget are
 checked before the pause. Emergency drains also require at least 1,500 output

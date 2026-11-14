@@ -94,7 +94,18 @@ fn reference<'a>(plan: &'a PreparedPlan, row: &RecoveredStepCustody) -> Recovere
 /// any effect. Current reads, writes, conflicting custody, and the independent
 /// emergency pause all share this request's budgets.
 fn select(session: &LabSession, digest: Digest32, mode: CancelMode) -> Result<Selection> {
-    let started = Instant::now();
+    select_at(session, digest, mode, Instant::now(), 0, 0)
+}
+
+fn select_at(
+    session: &LabSession,
+    digest: Digest32,
+    mode: CancelMode,
+    started: Instant,
+    inspected_bytes: u64,
+    inspected_records: u64,
+) -> Result<Selection> {
+    check_time(session, started)?;
     session.budget.validate()?;
     let context = super::read_context(session);
     super::authorize_entry(&context, Capability::Observe, RiskTier::ReadOnly)?;
@@ -114,7 +125,10 @@ fn select(session: &LabSession, digest: Digest32, mode: CancelMode) -> Result<Se
             "recovered cancellation requires room for its complete bounded outcome",
         ));
     }
-    let source = super::query_budget::admit_sources(&[session.adapter.snapshot()], &context)?;
+    let source = super::query_budget::admit_sources(
+        &[session.adapter.snapshot()],
+        &remaining_context(session, started)?,
+    )?;
     let source_records = source["records"].as_u64().ok_or_else(|| {
         DfmcpError::new(
             ErrorCode::InternalInvariantViolation,
@@ -133,6 +147,7 @@ fn select(session: &LabSession, digest: Digest32, mode: CancelMode) -> Result<Se
         .plan
         .ok_or_else(|| refused("the exact original sealed plan is unavailable"))?;
     let records = source_records
+        .saturating_add(inspected_records)
         .saturating_add(session.objectives.len() as u64)
         .saturating_add(session.carried.len() as u64)
         .saturating_add(session.leases.by_action.len() as u64)
@@ -148,6 +163,7 @@ fn select(session: &LabSession, digest: Digest32, mode: CancelMode) -> Result<Se
         ));
     }
     let bytes = source_bytes
+        .saturating_add(inspected_bytes)
         .saturating_add(entry.summary.len() as u64)
         .saturating_add(entry.request_json.map_or(0, str::len) as u64);
     let maximum = session.budget.max_bytes.min(MAX_SOURCE_BYTES);
@@ -346,6 +362,16 @@ pub(crate) fn cancel(session: &mut LabSession, mode: CancelMode, digest: Digest3
         Ok(selected) => selected,
         Err(error) => return super::dfmcp_error_payload("fortress.cancel", &error),
     };
+    cancel_selected(session, mode, &format!("plan:{digest}"), selected)
+}
+
+fn cancel_selected(
+    session: &mut LabSession,
+    mode: CancelMode,
+    scope: &str,
+    selected: Selection,
+) -> String {
+    let digest = selected.plan.digest;
     let mut failure = None;
     let mut emergency = None;
     if mode == CancelMode::EmergencyPauseAndDrain {
@@ -445,16 +471,27 @@ pub(crate) fn cancel(session: &mut LabSession, mode: CancelMode, digest: Digest3
         && physical_quiet;
     let anchor = super::anchor_json(&session.adapter.snapshot().anchor());
     let certificate = quiescent.then(|| {
-        let canonical = json!({"schema":"dfmcp-recovered-plan-drain-certificate/1",
+        let mut canonical = json!({"schema":"dfmcp-recovered-plan-drain-certificate/1",
             "plan_digest":digest.to_hex(),"plan_object_digest":selected.archive_digest.to_hex(),
             "custody":selected.custody,"steps":final_rows,"anchor":anchor});
-        json!({"digest":Digest32::of_bytes(canonical.to_string().as_bytes()).to_hex(),
+        // Preserve exact-selector certificate bytes. Automatic selection binds
+        // the caller's requested scope as well as the chosen immutable original.
+        if scope == "oldest_open_plan" {
+            canonical["schema"] = json!("dfmcp-recovered-plan-drain-certificate/2");
+            canonical["scope"] = json!(scope);
+        }
+        let mut certificate = json!({"digest":Digest32::of_bytes(canonical.to_string().as_bytes()).to_hex(),
             "anchor":anchor,"plan_digest":digest.to_hex(),
             "custody_digest":selected.custody["digest"],"publication_confirmed":true,
-            "statement":"every original step has a final disposition and its exact physical work is currently proven quiescent"})
+            "statement":"every original step has a final disposition and its exact physical work is currently proven quiescent"});
+        if scope == "oldest_open_plan" {
+            certificate["scope"] = json!(scope);
+            certificate["schema"] = json!("dfmcp-recovered-plan-drain-certificate/2");
+        }
+        certificate
     });
     let mut result = json!({"ok":failure.is_none(),"session_id":session.session_id.to_string(),
-        "scope":format!("plan:{digest}"),"requested_plan_digest":digest.to_hex(),
+        "scope":scope,"requested_plan_digest":digest.to_hex(),
         "plan_digest":digest.to_hex(),"plan_id":selected.plan.id.to_string(),
         "plan_object_digest":selected.archive_digest.to_hex(),
         "selection_scope":"exact_recovered_original","selection_origin":"durable_recovery",
@@ -478,6 +515,10 @@ pub(crate) fn cancel(session: &mut LabSession, mode: CancelMode, digest: Digest3
     }
     result.to_string()
 }
+
+#[path = "recovered_scope_cancellation.rs"]
+mod scopes;
+pub(super) use scopes::oldest_open_plan;
 
 /// The explanation pin includes current grants, custody and the full selection.
 /// Inspecting this offer never polls a monitor or publishes durable progress.

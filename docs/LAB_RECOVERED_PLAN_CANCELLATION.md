@@ -21,6 +21,38 @@ Use the original committed digest retained before the restart. A typed
 the concrete cancellation request when its current custody, authority, and
 budgets permit it. An offer remains advisory; execution checks again.
 
+## Stop the oldest unfinished original without retaining its digest
+
+The same tool can discover and stop one oldest original:
+
+```json
+{
+  "tool": "fortress.cancel",
+  "arguments": {
+    "session_id": "<current recovered session>",
+    "scope": "oldest_open_plan",
+    "mode": "stop_future_steps"
+  }
+}
+```
+
+Recovered originals are ordered by their original observation epoch and
+sequence, with the sealed digest breaking ties. They precede work newly
+committed in the recovered process. Selection inspects fresh physical work as
+well as retained dispositions: a terminal proof does not hide work that is
+still running. Quiet originals are skipped, and a successful repeat can move
+on to the next original. An unavailable or ambiguous older original refuses
+selection rather than silently choosing a newer project.
+
+Discovery and the selected stop share the existing source, action and wall-time
+bounds. Current read authority precedes discovery; current scoped effect
+authority is still required to stop the selected original. `oldest_open_plan`
+does not grant compensation for recovered work, include continuation
+descendants, or change the pending review. Its response retains the requested
+scope and the exact selected original identity, and its finalization
+certificate covers only that original. Use the returned digest for later exact
+inspection or cancellation.
+
 This is deterministic laboratory functionality under
 `df-cancellation-progress-certificates-vvw`. Native DFHack cancellation and
 production admission are separate boundaries.

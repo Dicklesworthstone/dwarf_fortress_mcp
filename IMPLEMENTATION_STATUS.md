@@ -1,5 +1,30 @@
 # Implementation Status
 
+## Unreleased — Discover the oldest unfinished original after laboratory recovery
+
+`fortress.cancel` with `scope: "oldest_open_plan"` now discovers verified
+recovered originals before selecting newer live work. Original observation
+epoch, sequence and sealed digest define deterministic order. A complete
+bounded source census and fresh physical inspection prevent cached terminal
+proof from hiding active work; an unavailable older original refuses instead
+of selecting a convenient newer one.
+
+Discovery and cleanup share one wall-time and source allowance. The selected
+original still passes complete custody, current scoped authority, ownership,
+action and output admission before effects. Recovery does not restore grants,
+dispatch handles or compensation. The response and finalization certificate
+bind the requested oldest-plan scope to the exact selected original, while
+pending reviews, unrelated plans and historical proof remain separate.
+
+Six public-facade regression sources cover mixed recovered/live chronology,
+stale physical-work caches, corrupted or missing custody, authority and bounds,
+withdrawn history, emergency output and partial durable publication. Independent
+source review identified and corrected seal-ordering, stale-cache and quiet-skip
+custody defects. The execution host repeatedly disconnected and reset during
+dependency compilation; the final Rust tests and formatting have not run.
+No current-source Rust, full-workspace, native or admission result is claimed.
+Owner: `df-cancellation-progress-certificates-vvw`.
+
 ## Unreleased — Public cancellation of exact recovered laboratory originals
 
 The existing `fortress.cancel` exact `plan:<digest>` scope now selects a verified

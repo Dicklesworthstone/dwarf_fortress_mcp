@@ -153,7 +153,7 @@ pub(super) fn select(session: &LabSession, requested: Digest32) -> Result<Select
 
 /// Check every selected live obligation before any drain begins. The adapter
 /// still checks each effect against a fresh context at its own boundary.
-fn authorize(session: &LabSession, selected: &Selection, mode: CancelMode) -> Result<()> {
+pub(super) fn authorize(session: &LabSession, selected: &Selection, mode: CancelMode) -> Result<()> {
     let context = super::read_context(session);
     super::authorize_entry(&context, Capability::Observe, RiskTier::ReadOnly)?;
     super::authorize_drain_budget(session, &selected.actions, mode)?;

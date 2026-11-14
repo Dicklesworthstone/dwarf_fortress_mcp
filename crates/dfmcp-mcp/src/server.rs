@@ -6646,35 +6646,7 @@ pub(crate) fn cancel_in_scope(
             }
             if let Some(scope) = drain_scope {
                 if scope == "oldest_open_plan" {
-                    let Some(oldest) = guard
-                        .open_actions
-                        .iter()
-                        .copied()
-                        .find(|id| !action_fully_drained(&guard.adapter, *id))
-                    else {
-                        return coded_error_payload(
-                            "fortress.cancel",
-                            ErrorCode::Conflict,
-                            "no retained open plan remains in this session",
-                        );
-                    };
-                    let Some(original) = guard.adapter.action_plan_receipt(oldest) else {
-                        return cancel_action_error_payload(
-                            guard,
-                            oldest,
-                            &DfmcpError::new(
-                                ErrorCode::Conflict,
-                                "the oldest open action has no retained original commit; reconciliation is required",
-                            ),
-                        );
-                    };
-                    let digest = original.plan_digest.to_string();
-                    let actions = original.actions.iter().map(|row| row.action_id).collect();
-                    let mut payload: serde_json::Value =
-                        serde_json::from_str(&drain_actions(guard, cancel_mode, scope, actions))
-                            .unwrap_or_else(|_| json!({"ok": false}));
-                    payload["plan_digest"] = json!(digest);
-                    return payload.to_string();
+                    return recovered_plan_cancellation::oldest_open_plan(guard, cancel_mode);
                 }
                 let actions = if scope == "plan" {
                     guard.last_plan_actions.clone()
@@ -6811,6 +6783,91 @@ fn drain_actions(
     scope: &str,
     actions: Vec<ActionId>,
 ) -> String {
+    drain_actions_at(guard, cancel_mode, scope, actions, std::time::Instant::now())
+}
+
+fn drain_context_at(
+    session: &mut LabSession,
+    started: std::time::Instant,
+) -> Result<OperationContext> {
+    let spent = started.elapsed().as_nanos().div_ceil(1_000_000);
+    if spent >= u128::from(session.budget.max_wall_millis) {
+        return Err(DfmcpError::new(ErrorCode::BudgetExceeded,
+            "original cancellation exhausted its shared wall-time allowance"));
+    }
+    let (_, mut context) = next_context(session)?;
+    context.budget.max_wall_millis -= spent as u64;
+    Ok(context)
+}
+
+/// Continue the current-process branch of oldest selection without resetting
+/// the source allowance or deadline already spent inspecting recovered work.
+fn drain_oldest_live_at(
+    session: &mut LabSession,
+    mode: CancelMode,
+    started: std::time::Instant,
+    inspected_bytes: u64,
+    inspected_records: u64,
+) -> String {
+    let selected = (|| -> Result<plan_cancellation::Selection> {
+        let oldest = session.open_actions.iter().copied()
+            .find(|id| !action_fully_drained(&session.adapter, *id))
+            .ok_or_else(|| DfmcpError::new(ErrorCode::Conflict,
+                "no retained open plan remains in this session"))?;
+        let original = session.adapter.action_plan_receipt(oldest).ok_or_else(|| {
+            DfmcpError::new(ErrorCode::Conflict,
+                "the oldest open action has no retained original commit; reconciliation is required")
+        })?;
+        let digest = original.plan_digest;
+        let raw = session.commit_receipts.get(&digest.to_hex()).ok_or_else(|| {
+            DfmcpError::new(ErrorCode::Conflict, "the oldest live original lost its owning commit custody")
+        })?;
+        if inspected_bytes.saturating_add(raw.len() as u64) > session.budget.max_bytes
+            || inspected_records.saturating_add(original.actions.len() as u64)
+                > u64::from(session.budget.max_entities)
+            || started.elapsed() >= std::time::Duration::from_millis(session.budget.max_wall_millis)
+        {
+            return Err(DfmcpError::new(ErrorCode::BudgetExceeded,
+                "complete oldest-original selection exceeds its shared source or wall-time budget"));
+        }
+        let selected = plan_cancellation::select(session, digest)?;
+        plan_cancellation::authorize(session, &selected, mode)?;
+        Ok(selected)
+    })();
+    let selected = match selected {
+        Ok(selected) => selected,
+        Err(error) => return drain_refusal_payload(session, "oldest_open_plan", &[], &error, None),
+    };
+    let mut payload: serde_json::Value = serde_json::from_str(&drain_actions_at(
+        session, mode, "oldest_open_plan", selected.actions, started,
+    )).unwrap_or_else(|_| json!({"ok":false}));
+    payload["plan_digest"] = json!(selected.actual.to_hex());
+    payload["requested_plan_digest"] = json!(selected.requested.to_hex());
+    payload["plan_id"] = json!(selected.plan_id);
+    payload["selection_scope"] = json!("exact_original_commit");
+    payload["selection_origin"] = json!("current_process");
+    payload["descendant_plans_included"] = json!(false);
+    if payload["finalize_certificate"].is_object() {
+        let canonical = json!({"schema":"dfmcp-oldest-live-plan-drain-certificate/1",
+            "scope":"oldest_open_plan","plan_digest":selected.actual.to_hex(),
+            "original_action_certificate_digest":payload["finalize_certificate"]["digest"],
+            "anchor":payload["observed_anchor"]});
+        let mut certificate = canonical.clone();
+        certificate["digest"] =
+            json!(Digest32::of_bytes(canonical.to_string().as_bytes()).to_hex());
+        certificate["statement"] = payload["finalize_certificate"]["statement"].clone();
+        payload["finalize_certificate"] = certificate;
+    }
+    payload.to_string()
+}
+
+fn drain_actions_at(
+    guard: &mut LabSession,
+    cancel_mode: CancelMode,
+    scope: &str,
+    actions: Vec<ActionId>,
+    started: std::time::Instant,
+) -> String {
     if let Err(error) = authorize_drain_budget(guard, &actions, cancel_mode) {
         return drain_refusal_payload(guard, scope, &actions, &error, None);
     }
@@ -6820,8 +6877,8 @@ fn drain_actions(
     let emergency_pause = if cancel_mode == CancelMode::EmergencyPauseAndDrain {
         let before = guard.adapter.snapshot().anchor();
         let was_paused = guard.adapter.snapshot().paused;
-        let paused = next_context(guard)
-            .and_then(|(_, context)| guard.adapter.pause_for_emergency_drain(&context));
+        let paused = drain_context_at(guard, started)
+            .and_then(|context| guard.adapter.pause_for_emergency_drain(&context));
         let evidence = match paused {
             Ok(evidence) => evidence,
             Err(error) => return drain_refusal_payload(guard, scope, &actions, &error, None),
@@ -6881,8 +6938,8 @@ fn drain_actions(
             if action_fully_drained(&guard.adapter, action_id) {
                 Ok(())
             } else {
-                next_context(guard)
-                    .and_then(|(_, ctx)| {
+                drain_context_at(guard, started)
+                    .and_then(|ctx| {
                         guard
                             .adapter
                             .drain_action_work_in_mode(action_id, cancel_mode, &ctx)
@@ -6895,13 +6952,13 @@ fn drain_actions(
                     })
             }
         } else {
-            next_context(guard)
-                .and_then(|(_, ctx)| guard.adapter.request_cancel(action_id, cancel_mode, &ctx))
+            drain_context_at(guard, started)
+                .and_then(|ctx| guard.adapter.request_cancel(action_id, cancel_mode, &ctx))
                 .inspect(|_| {
                     reset_emergency_unpause_consent(guard, cancel_mode);
                 })
-                .and_then(|_| next_context(guard))
-                .and_then(|(_, ctx)| guard.adapter.finalize_cancel(action_id, &ctx))
+                .and_then(|_| drain_context_at(guard, started))
+                .and_then(|ctx| guard.adapter.finalize_cancel(action_id, &ctx))
                 .map(|receipt| {
                     drained = true;
                     if receipt.state == CommitState::Compensated {
@@ -6956,6 +7013,12 @@ fn drain_actions(
     let untracked = untracked_work_json(guard);
     let untracked_quiet = untracked["quiescent"] == true;
     let remaining_carried = guard.carried.iter().filter(|step| !step.is_final()).count();
+    if failure.is_none()
+        && started.elapsed() >= std::time::Duration::from_millis(guard.budget.max_wall_millis)
+    {
+        failure = Some(DfmcpError::new(ErrorCode::BudgetExceeded,
+            "original cancellation exhausted its shared wall-time allowance"));
+    }
     let session_quiet = scope != "session" || (untracked_quiet && remaining_carried == 0);
     let quiescent =
         failure.is_none() && remaining_nonterminal == 0 && remaining_work == 0 && session_quiet;
