@@ -74,7 +74,60 @@ Authorization filtering must precede the supplied projection. A selected
 closure is complete only within that projection; it proves neither complete
 fortress history nor absence of unobserved relations.
 
-## Verification
+## Existing-tool query
+
+The default laboratory runtime exposes this model through the existing
+`fortress_query` structured mode. Pass this object as the JSON string in `mode`:
+
+```json
+{
+  "mode": "structured",
+  "request": {
+    "schema": "dfmcp.query/1",
+    "query": {
+      "kind": "schedule",
+      "edge_kinds": ["requires"],
+      "duration_field": "duration",
+      "targets": [{"entity_id": "4", "generation": 1}]
+    }
+  }
+}
+```
+
+Use an actual published integer field and inspected entity handles; this example
+does not imply that every native or starter-world entity has a `duration` fact.
+Omit `targets`, or supply an empty array, to schedule every observed vertex.
+Explicit targets must be distinct and their generations must match the selected
+source. The closed request accepts no caller durations, capacities, actions or
+execution directives. Duplicate schedule and target fields in the original
+laboratory request bytes are rejected before execution.
+
+The response includes each exact duration fact and its provenance, entity
+generation/revision, scheduling offsets/slack, makespan, critical chain,
+dependency order, start-time groups and source/scope/decision witnesses.
+`model.epistemic_state` is `predicted`; `model.time_unit` is
+`selected_field_units`. The model creates no actions, clock advancement or
+retained monitor. Cycles can be inspected using `kind: "dependencies"`.
+
+The laboratory wrapper also accepts an exact retained `at` state hash. The
+source anchor identifies that historical model; the current anchor identifies
+the session. All repeated authorization uses current grants and the actual
+current tick, even when a restore makes the historical source tick larger.
+Source identity never renews expired grants or supplies current mutation truth.
+
+Complete source records, unrelated fields and canonical bytes are admitted
+before graph work. The final schedule is published whole or refused; it is not
+paged or silently truncated. Output reservations for Agent Turns or active work
+do not reduce the separately admitted source allowance. The caller can select
+fewer goals or explicitly negotiate more output when the complete closure does
+not fit. The eleven tools and legacy dependency request/response remain intact.
+
+The generic semantic executor and its schema-extension helper also expose the
+stateless operator. Live profiles retain their own discovery and history
+allowlists; this increment does not claim universal live-profile discovery,
+historical live support or native duration coverage.
+
+## Verification scope
 
 `crates/dfmcp-world/tests/graph_scheduling.rs` compares small weighted DAGs and
 arbitrary cyclic graphs with independent path/closure oracles and exercises
@@ -82,5 +135,14 @@ source qualification, zero-duration ties, multi-edges, exact numeric bounds,
 complete prerequisite selection, cancellation, frontier/work limits and deep
 iterative graphs. Execution evidence and its exact scope are recorded in
 `IMPLEMENTATION_STATUS.md`; these tests do not establish native-game admission.
+
+The focused MCP executor tests cover duration versus hop-count decisions,
+canonical target selection, generation fences, unavailable evidence, current
+authority, exact source anchors, complete source/output admission, separate
+output reservation, restored-clock history, closed grammar and schema
+composition. Public laboratory and publisher regression sources additionally
+cover facade reachability, historical generation/current grants, duplicate raw
+keys and preserved source budgets. Their executed scope is recorded separately
+from the std-only core suite and from full transport qualification.
 
 Owning bead: `df-franken-storage-mvcc-54h.4.1`.

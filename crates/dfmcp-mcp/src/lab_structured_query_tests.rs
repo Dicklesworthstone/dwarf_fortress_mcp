@@ -310,6 +310,84 @@ fn lab_structured_graph_queries_return_real_dependency_witnesses_and_paths() -> 
     Ok(())
 }
 
+fn open_schedule_fixture() -> TestResult<(String, WorldSnapshot)> {
+    let (session_id, _) = open_fixture()?;
+    let session = resolve_session(Some(session_id.clone()))?;
+    let mut guard = session.lock().map_err(|_| "session poisoned")?;
+    let mut source = guard.adapter.snapshot().clone();
+    for entity in source.graph.entities.values_mut() {
+        entity.fields.insert("duration".to_owned(), Fact::known(
+            WorldValue::U64(entity.id.get()), source.tick,
+            FactSource::Derived("dfmcp.lab-scenario/1".to_owned()), Digest32::ZERO,
+        ));
+    }
+    source.refresh_hash();
+    guard.adapter.inject_snapshot(source.clone())?;
+    Ok((session_id, source))
+}
+
+#[test]
+fn lab_schedule_query_reaches_public_facade_without_changing_world_or_legacy_analysis() -> TestResult {
+    let _serial = crate::test_serial();
+    let (session_id, source) = open_schedule_fixture()?;
+    let request = wrapper(json!({"kind":"schedule","edge_kinds":["requires"],
+        "duration_field":"duration","targets":[{"entity_id":"1","generation":1}]}), None);
+    let result = query(&session_id, request)?;
+    assert_eq!(result["ok"], true, "{result}");
+    assert_eq!(result["makespan"], 6);
+    assert_eq!(result["critical_chain"], json!(["3","2","1"]));
+    assert_eq!(result["returned"], 3);
+    assert_eq!(result["anchor"], anchor_json(&source.anchor()));
+    assert_eq!(result["agent_turn"]["anchor"], result["anchor"]);
+    assert_eq!(result["model"]["epistemic_state"], "predicted");
+    assert_eq!(result["observation_coverage"]["eligible_as_mutation_evidence"], false);
+    let legacy = query(&session_id, wrapper(json!({"kind":"dependencies","edge_kinds":["requires"]}), None))?;
+    assert_eq!(legacy["critical_chain"], json!(["1","2","3"]));
+    let session = resolve_session(Some(session_id))?;
+    assert_eq!(session.lock().map_err(|_| "session poisoned")?.adapter.snapshot().canonical_bytes(),
+        source.canonical_bytes());
+    Ok(())
+}
+
+#[test]
+fn lab_historical_schedule_keeps_source_generation_and_requires_current_authority() -> TestResult {
+    let _serial = crate::test_serial();
+    let (session_id, before) = open_schedule_fixture()?;
+    let after = advance(&session_id)?;
+    let selected = json!({"kind":"schedule","edge_kinds":["requires"],
+        "duration_field":"duration","targets":[{"entity_id":"1","generation":1}]});
+    expect_refusal(&query(&session_id, wrapper(selected.clone(), None))?, "conflict");
+    let historical = query(&session_id, wrapper(selected.clone(), Some(before.state_hash)))?;
+    assert_eq!(historical["ok"], true, "{historical}");
+    assert_eq!(historical["anchor"], anchor_json(&before.anchor()));
+    assert_eq!(historical["current_anchor"], anchor_json(&after.anchor()));
+    assert_eq!(historical["historical"], true);
+    let session = resolve_session(Some(session_id.clone()))?;
+    {
+        let mut guard = session.lock().map_err(|_| "session poisoned")?;
+        for grant in &mut guard.grants {
+            if grant.capability == Capability::Query {
+                grant.expires_at_tick = Some(before.tick);
+            }
+        }
+    }
+    expect_refusal(&query(&session_id, wrapper(selected, Some(before.state_hash)))?, "capability_denied");
+    Ok(())
+}
+
+#[test]
+fn lab_schedule_rejects_duplicate_original_selector_bytes() -> TestResult {
+    let _serial = crate::test_serial();
+    let (session_id, _) = open_schedule_fixture()?;
+    for raw in [
+        r#"{"mode":"structured","request":{"schema":"dfmcp.query/1","query":{"kind":"schedule","edge_kinds":["requires"],"duration_field":"duration","duration_field":"stock"}}}"#,
+        r#"{"mode":"structured","request":{"schema":"dfmcp.query/1","query":{"kind":"schedule","edge_kinds":["requires"],"duration_field":"duration","targets":[{"entity_id":"1","entity_id":"2","generation":1}]}}}"#,
+    ] {
+        expect_refusal(&parsed(&crate::agent_facade::fortress_query(Some(session_id.clone()),Some(raw.to_owned())))?, "invalid_request");
+    }
+    Ok(())
+}
+
 #[test]
 fn lab_structured_continuations_bind_source_session_projection_and_current_authority() -> TestResult
 {

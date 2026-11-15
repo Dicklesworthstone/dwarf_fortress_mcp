@@ -1,5 +1,39 @@
 # Implementation Status
 
+## Unreleased — Query duration-aware schedules through the existing tool
+
+The default laboratory `query` tool now accepts
+`dfmcp.dependency-schedule/1` within `mode: structured`. Callers select edge
+kinds, a qualified duration field and up to 64 generation-bound target entities.
+Current and exact retained laboratory sources expose complete prerequisite
+closure, earliest/latest offsets, slack, makespan, critical chain, start groups
+and source/budget witnesses. Results explicitly identify a conditional
+prediction with source-field units and unlimited independent capacity.
+
+Complete source admission retains the original byte allowance even when the
+response reservation is smaller. Current Query authority governs historical
+sources, including a restored current epoch whose tick is below the retained
+source tick; the selected source never renews expired grants or foreground
+deadlines. Closed parsing rejects duplicate raw selectors, unknown fields,
+noncanonical IDs and stale target generations. Whole results fit the remaining
+publisher reservation or refuse without truncation. Legacy query variants and
+the eleven-tool surface remain intact.
+
+All 27 focused Rust tests pass against the actual query executor, source helper
+and semantic query core: 11 schedule tests plus 16 existing regressions. The
+component links the complete original core/world crates; all 11 external
+dependencies match the repository lockfile's version, source and checksum.
+All 95 recorded source, manifest and schema hashes match before/after execution.
+The JSON Schema check passes 9 accepted, 33 rejected and 2 legacy cases; scoped
+formatting, whitespace and independent integration review pass. Additional
+public facade, retained-source and publisher regression sources are present but
+have not executed in the full MCP crate. This evidence does not establish full
+workspace qualification, native/live discovery, transport or game admission.
+
+See `docs/DEPENDENCY_SCHEDULING.md` and `docs/LAB_STRUCTURED_QUERY.md`.
+Owner: `df-franken-storage-mvcc-54h.4.1`; full integration qualification remains
+open.
+
 ## Unreleased — Schedule selected dependency goals by duration
 
 The world graph API now provides duration-aware dependency scheduling for an

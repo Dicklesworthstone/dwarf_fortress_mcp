@@ -32,6 +32,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use super::query_condition::Condition;
+use super::semantic_query::dependency_schedule_query;
 
 const MAX_REQUEST_BYTES: usize = 65_536;
 
@@ -61,6 +62,14 @@ pub(super) struct Request {
 struct ConditionRequest {
     mode: Mode,
     request: ConditionEnvelope,
+    at: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ScheduleRequest {
+    mode: Mode,
+    request: dependency_schedule_query::Envelope,
     at: Option<String>,
 }
 
@@ -152,6 +161,7 @@ pub(super) fn parse(raw: &str) -> Result<Option<Request>> {
                 | "inspect"
                 | "traverse"
                 | "dependencies"
+                | "schedule"
                 | "aggregate"
                 | "search"
                 | "events"
@@ -162,7 +172,7 @@ pub(super) fn parse(raw: &str) -> Result<Option<Request>> {
         )
     ) {
         return Err(invalid(
-            "structured laboratory queries support only entities, inspect, traverse, dependencies, aggregate, search, events, spatial_entities, related_entities, ranked_entities, and condition_evaluation",
+            "structured laboratory queries support only entities, inspect, traverse, dependencies, schedule, aggregate, search, events, spatial_entities, related_entities, ranked_entities, and condition_evaluation",
         ));
     }
     if request.request["query"]["kind"] == "condition_evaluation" {
@@ -172,6 +182,16 @@ pub(super) fn parse(raw: &str) -> Result<Option<Request>> {
         request.at = parsed.at;
         request.request = serde_json::to_value(parsed.request)
             .map_err(|_| invalid("laboratory condition preflight cannot be encoded"))?;
+    }
+    if request.request["query"]["kind"] == "schedule" {
+        // Decode the original bytes so duplicate selectors or target identity
+        // fields cannot disappear in the intermediate JSON Value.
+        let parsed: ScheduleRequest = serde_json::from_str(raw)
+            .map_err(|error| invalid(format!("invalid laboratory dependency schedule: {error}")))?;
+        let Mode::Structured = parsed.mode;
+        request.at = parsed.at;
+        request.request = serde_json::to_value(parsed.request)
+            .map_err(|_| invalid("laboratory dependency schedule cannot be encoded"))?;
     }
     Ok(Some(request))
 }
@@ -188,6 +208,11 @@ pub(super) fn execute(
     let mut source_context = current.clone();
     source_context.anchor = snapshot.anchor();
     let result = match request.request["query"]["kind"].as_str() {
+        Some("schedule") => {
+            dependency_schedule_query::execute_laboratory_source(
+                snapshot, current, &request.request, remaining_wall_millis(current, started)?,
+            )?
+        }
         Some("aggregate" | "search") => {
             operational_query::execute(snapshot, &source_context, &request.request)?
         }

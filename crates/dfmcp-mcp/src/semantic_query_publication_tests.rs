@@ -140,6 +140,33 @@ fn publish(
 }
 
 #[test]
+fn published_schedule_preserves_source_allowance_under_active_work_output_reservation() -> TestResult {
+    let (snapshot, mut context) = fixture();
+    context.budget.max_bytes = 1024 * 1024;
+    let input = json!({"schema":"dfmcp.query/1","query":{"kind":"schedule",
+        "edge_kinds":["requires"],"duration_field":"rank",
+        "targets":[{"entity_id":"1","generation":1}]}});
+    let publications = Cell::new(0);
+    let raw = execute_with_publisher_budget(&snapshot, &context, &input, 8192, |value| {
+        publications.set(publications.get() + 1);
+        Ok(value.to_string())
+    })?;
+    let result: Value = serde_json::from_str(&raw)?;
+    assert_eq!(result["makespan"], 1);
+    assert_eq!(result["returned"], 1);
+    assert!(raw.len() <= 8192);
+    assert_eq!(publications.get(), 1);
+    context.budget.max_bytes = snapshot.canonical_bytes().len() as u64 - 1;
+    let refused = execute_with_publisher_budget(&snapshot, &context, &input, 8192, |value| {
+        publications.set(publications.get() + 1);
+        Ok(value.to_string())
+    });
+    assert_eq!(refused.map_err(|error| error.code), Err(ErrorCode::BudgetExceeded));
+    assert_eq!(publications.get(), 1);
+    Ok(())
+}
+
+#[test]
 fn published_spatial_related_and_ranked_pages_keep_complete_source_budget() -> TestResult {
     let (snapshot, context) = fixture();
     for mut input in requests() {

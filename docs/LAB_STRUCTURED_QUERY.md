@@ -26,7 +26,7 @@ Pass a JSON string as the existing `mode` argument:
 The closed outer wrapper accepts only `mode`, `request` and optional `at`.
 `at` is the exact lowercase state hash of a current or retained world. The
 inner envelope accepts the existing schema, `query`, and optional complete
-`expected_anchor`. These ten query kinds are available:
+`expected_anchor`. These query kinds are available:
 
 | Kind | Purpose |
 | --- | --- |
@@ -36,6 +36,7 @@ inner envelope accepts the existing schema, `query`, and optional complete
 | `search` | Bounded lexical retrieval over selected kinds, typed predicates, fields and labels |
 | `traverse` | Bounded observed graph traversal and a witnessed path to an optional target |
 | `dependencies` | Prerequisite order, cycle components, cycle blockers and an unweighted critical chain |
+| `schedule` | Qualified-duration prerequisite closure, earliest/latest offsets, slack, makespan and a conditional weighted critical chain |
 | `events` | Inclusive retained-event windows, kind/subject selection, typed fields and chronological pages |
 | `spatial_entities` | Inclusive intersection or containment of explicitly named point/cuboid entity geometry |
 | `related_entities` | Entities with witnessed one-hop relations to targets selected by kinds, IDs and typed facts |
@@ -364,6 +365,24 @@ prerequisites before dependents and a deterministic longest unweighted chain.
 Cycles return their components and affected dependents rather than a fake
 schedule. This is graph structure, not a game-time forecast. Source anchor,
 scope identity and decision digests accompany the results.
+
+To account for explicit durations, use:
+
+```json
+{"kind":"schedule","edge_kinds":["requires"],"duration_field":"duration","targets":[{"entity_id":"100","generation":1}]}
+```
+
+The named source field must actually contain a qualified nonnegative integer on
+every selected goal and transitive prerequisite. Omitted or empty targets select
+all vertices; unrelated entities need no duration when targets are explicit.
+The result reports earliest/latest offsets, total slack, makespan, one weighted
+critical chain and start-time groups in that field's units. It assumes fixed
+durations and unlimited capacity for independent work, and remains a conditional
+prediction rather than a worker/resource forecast or completion proof. Missing
+duration evidence, cycles, overflow or insufficient complete-result budget refuse
+the whole schedule. Exact retained sources recheck grants at the actual current
+tick even across a clock-reset restore. See `DEPENDENCY_SCHEDULING.md` for the
+complete model, provenance, zero-duration ordering and budget contract.
 
 ## Retained event windows
 

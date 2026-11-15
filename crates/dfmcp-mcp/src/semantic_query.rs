@@ -3,6 +3,8 @@
 
 #[path = "semantic_query_core.rs"]
 mod core_query;
+#[path = "dependency_schedule_query.rs"]
+pub(super) mod dependency_schedule_query;
 #[path = "dominance_query.rs"]
 mod dominance_query;
 #[path = "event_query.rs"]
@@ -98,7 +100,9 @@ pub(super) fn laboratory_baseline_work(context: &OperationContext) -> Result<Val
 }
 
 pub(crate) fn extend_watch_count_schema(schema: Value) -> Result<Value> {
-    dominance_query::extend_schema(query_watch::extend_count_schema(schema)?)
+    dependency_schedule_query::extend_schema(dominance_query::extend_schema(
+        query_watch::extend_count_schema(schema)?,
+    )?)
 }
 
 /// Ownership of a durable watch registry belongs to the enclosing session.
@@ -241,6 +245,7 @@ pub fn execute(
         Some("item_quantity") => query_watch::quantity_query(snapshot, context, input),
         Some("condition_evaluation") => query_watch::condition_query(snapshot, context, input),
         Some("dominators") => dominance_query::execute(snapshot, context, input),
+        Some("schedule") => dependency_schedule_query::execute(snapshot, context, input),
         _ => core_query::execute(snapshot, context, input),
     }
 }
@@ -464,6 +469,13 @@ where
                 context,
                 input,
                 narrowed.budget.max_bytes,
+            )?;
+            publish_with_active_work(&output_context, value, publish)
+        }
+        Some("schedule") => {
+            let narrowed = result_context(&output_context)?;
+            let value = dependency_schedule_query::execute_with_output_budget(
+                snapshot, context, input, narrowed.budget.max_bytes,
             )?;
             publish_with_active_work(&output_context, value, publish)
         }

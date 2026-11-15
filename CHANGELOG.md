@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased — Expose dependency schedules in laboratory queries
+
+- Add the closed `dfmcp.dependency-schedule/1` structured query and schema
+  discovery through the existing tool, with generation-bound goal selection,
+  complete prerequisite closure, source durations, timing/slack/critical paths
+  and deterministic witnesses.
+- Keep complete-source and response byte limits separate. Authorize retained
+  sources using the actual current context after restores; preserve the original
+  foreground deadline, source identity and current grant expiry.
+- Publish explicit predicted/source-unit/unlimited-capacity semantics and refuse
+  incomplete results. Preserve legacy variants and all eleven tools.
+- Pass 27 actual-source focused Rust tests and 44 JSON Schema cases with stable
+  source hashes and exact locked component dependencies. Public facade and
+  publisher regressions are authored; full MCP/transport/native execution is
+  not established.
+
 ## Unreleased — Duration-aware dependency scheduling
 
 - Add selected-goal prerequisite closure, qualified integer durations,
