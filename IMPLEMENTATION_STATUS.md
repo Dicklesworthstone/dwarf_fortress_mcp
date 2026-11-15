@@ -1,5 +1,36 @@
 # Implementation Status
 
+## Unreleased — Schedule selected dependency goals by duration
+
+The world graph API now provides duration-aware dependency scheduling for an
+explicit set of goals and their complete transitive prerequisite closure.
+Qualified nonnegative integer durations produce earliest/latest start and
+finish offsets, total slack, makespan, one canonical prerequisite-first critical
+chain and start-time groups. Empty targets select the complete supplied graph.
+The existing unweighted dependency analysis remains byte-compatible.
+
+The model assumes fixed durations and independent capacity; units belong to
+the selected source field. It does not establish game-time completion,
+resource/worker feasibility, native compatibility or effect authority. Cycles
+within the selected closure, unusable duration evidence, integer overflow,
+source corruption, budget exhaustion and cancellation refuse complete results.
+Witnesses bind the original source, scope, projection, duration facts, targets,
+budgets and deterministic decisions.
+
+Both complete real core/world libraries compile with warning denial under the
+installed rustc 1.100.0-nightly (908501772, 2026-08-30). All 16 new scheduling
+integration tests pass, including 5,184 weighted DAG cases and 4,096 arbitrary
+directed graph/target cases checked against independent oracles, a 4,000-node
+chain, provenance, cancellation, exact bounds and legacy-output checks. Direct
+Rust compilation used the original std-only crates and no replacement source
+or stubs. Scoped formatting and whitespace checks passed. This is focused
+core/world execution, not full latest-nightly workspace qualification, MCP
+transport execution or native-game admission. The public query consumer follows
+in a separate increment.
+
+See `docs/DEPENDENCY_SCHEDULING.md`. Owner:
+`df-franken-storage-mvcc-54h.4.1`; broader graph-substrate admission remains open.
+
 ## Unreleased — Retain one passive Task for an entire original project set
 
 The modern laboratory wait registration now accepts `as_task: true` with one

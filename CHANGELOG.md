@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased — Duration-aware dependency scheduling
+
+- Add selected-goal prerequisite closure, qualified integer durations,
+  earliest/latest offsets, total slack, makespan and deterministic critical
+  paths without changing the legacy unweighted dependency analysis.
+- Preserve exact source/scope/budget witnesses, iterative bounded work,
+  zero-duration precedence, cycle refusal and cancellation. Results are
+  conditional schedules with independent capacity, never native completion.
+- Compile the complete core/world libraries with warnings denied and pass all
+  16 new integration tests, including 9,280 independent oracle cases. Full
+  workspace, MCP transport and native-game qualification are not established.
+
 ## Unreleased — Monitor complete original project sets with one passive Task
 
 - Extend negotiated `fortress_wait(as_task=true)` with `plan_digests` and

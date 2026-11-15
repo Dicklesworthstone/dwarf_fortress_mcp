@@ -18,6 +18,12 @@ pub use dominance::{
     analyze_dominators_with_check,
 };
 
+mod scheduling;
+pub use scheduling::{
+    DEPENDENCY_SCHEDULE_POLICY, DependencySchedule, DependencyScheduleQuery, ScheduleFront,
+    ScheduledDependency, schedule_dependencies, schedule_dependencies_with_check,
+};
+
 const MAX_VERTICES: usize = 100_000;
 const MAX_EDGES: usize = 1_000_000;
 const MAX_WORK: u64 = 10_000_000;

@@ -39,6 +39,14 @@ unweighted dependency chain. The chain is dependent-first and counts edges, not
 game ticks, labor duration, capacity, or resource contention. It is not a timed
 production schedule or proof of in-game completion.
 
+For explicit duration-aware analysis, `schedule_dependencies` accepts a qualified
+duration field and optional selected goal IDs. It includes every transitive
+prerequisite and returns earliest/latest offsets, total slack, a weighted
+critical chain and start-time groups. This is a conditional model with unlimited
+independent capacity, not observed game completion. See
+[`DEPENDENCY_SCHEDULING.md`](DEPENDENCY_SCHEDULING.md) for provenance, closure,
+cycle, tie-break, budget and witness semantics.
+
 ## Witnesses, bounds, and authority
 
 Results carry their exact source anchor, caller-supplied authorization-scope
