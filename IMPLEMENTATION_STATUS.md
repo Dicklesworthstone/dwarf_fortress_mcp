@@ -1,5 +1,33 @@
 # Implementation Status
 
+## Unreleased — Summarize several fortress dimensions in one query
+
+The existing structured aggregate query now accepts
+`group_by: {"kind":"fields","fields":[...]}` for one to four distinct field
+names. Ordered typed tuples support questions such as counts by workshop and
+suspension state, or workforce by profession and location, with the existing
+exact numeric metrics. Unavailable dimensions retain explicit masked states,
+future Known values remain source-time ineligible, and numeric types and fixed
+scales stay distinct.
+
+Source predicates, positive relationships and geometry compose before grouping.
+New multi-field requests admit the complete source and account for every
+dimension under existing work, wall, record and byte bounds. Tuple cardinality
+and full Agent Turn output limits refuse whole results. Existing ungrouped,
+single-field and entity-kind forms retain their shape.
+
+Eleven focused aggregate regression sources and one actual default-laboratory
+facade regression cover independent tuple totals, types, unavailable/future
+facts, selectors, authority, complete-source and output bounds, retained history
+and legacy behavior. The JSON contract parses and its local references and new
+closed bounds were checked; independent source/integration review completed.
+The final Rust changes, tests and formatting have not executed because the
+build host is unavailable. No workspace, transport or native qualification is
+established.
+
+See `docs/QUERY_EXECUTION.md` and `docs/LAB_STRUCTURED_QUERY.md`.
+Owner: `df-lab-structured-query-f7q.5`; executable qualification remains open.
+
 ## Unreleased — Keep future facts out of source-bound query results
 
 Typed field comparisons now treat observations later than the selected world

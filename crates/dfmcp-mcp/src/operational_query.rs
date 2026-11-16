@@ -36,6 +36,7 @@ const MAX_SCAN_ENTITIES: usize = 100000;
 const MAX_SCAN_BYTES: usize = 16 * 1024 * 1024;
 const MAX_WORK: usize = 4_000_000;
 const MAX_GROUPS: usize = 128;
+const MAX_GROUP_FIELDS: usize = 4;
 const MAX_METRICS: usize = 16;
 const MAX_ROWS: usize = 128;
 
@@ -82,6 +83,7 @@ enum Query {
 enum GroupBy {
     EntityKind,
     Field { field: String },
+    Fields { fields: Vec<String> },
 }
 
 #[derive(Deserialize)]
@@ -387,11 +389,12 @@ pub(super) fn execute_with_output_budget(
             "expected_anchor does not match the complete current anchor",
         ));
     }
-    // Compound selection may inspect every target and edge. Admit the complete
-    // source, including unselected values, before hashing or building its index.
-    // Plain aggregates and lexical searches retain their established allowance.
-    let work = if matches!(&request.query, Query::Aggregate { relation, spatial, .. }
-        if relation.is_some() || spatial.is_some())
+    // Compound selection and multi-field grouping admit the complete source,
+    // including unselected values, before hashing or building any group/index.
+    // Existing plain aggregates and lexical searches retain their allowance.
+    let work = if matches!(&request.query, Query::Aggregate { relation, spatial, group_by, .. }
+        if relation.is_some() || spatial.is_some()
+            || matches!(group_by, Some(GroupBy::Fields { .. })))
     {
         Some(source::preflight(snapshot, context, started)?)
     } else {
@@ -540,6 +543,15 @@ enum GroupKey {
     Kind(String),
     Presence(&'static str),
     Known(WorldValue),
+    Fields(Vec<(String, FieldGroupKey)>),
+}
+
+/// Tuple components preserve unavailable states and exact scalar types. Field
+/// names are retained in request order; no concatenated string can alias keys.
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
+enum FieldGroupKey {
+    Presence(&'static str),
+    Known(WorldValue),
 }
 
 struct Group {
@@ -562,6 +574,21 @@ fn group_key(
             }
             (state, None) => GroupKey::Presence(state),
         },
+        Some(GroupBy::Fields { fields }) => GroupKey::Fields(
+            fields
+                .iter()
+                .map(|field| {
+                    let key = match presence(entity.fields.get(field), source_tick) {
+                        (_, Some(value)) => {
+                            scalar(value)?;
+                            FieldGroupKey::Known(value.clone())
+                        }
+                        (state, None) => FieldGroupKey::Presence(state),
+                    };
+                    Ok((field.clone(), key))
+                })
+                .collect::<Result<Vec<_>>>()?,
+        ),
     })
 }
 
@@ -596,9 +623,23 @@ fn aggregate(
             "aggregate group or metric count exceeds its bound",
         ));
     }
-    if let Some(GroupBy::Field { field }) = group_by {
-        names(vec![field.clone()], 1)?;
-    }
+    let group_width = match group_by {
+        Some(GroupBy::Field { field }) => {
+            names(vec![field.clone()], 1)?;
+            1
+        }
+        Some(GroupBy::Fields { fields }) => {
+            if fields.is_empty()
+                || names(fields.clone(), MAX_GROUP_FIELDS)?.len() != fields.len()
+            {
+                return Err(invalid(
+                    "aggregate fields grouping requires one to four distinct field names",
+                ));
+            }
+            fields.len()
+        }
+        _ => 1,
+    };
     let mut metric_names = BTreeSet::new();
     for metric in metrics {
         names(vec![metric.name.clone(), metric.field.clone()], 2)?;
@@ -620,7 +661,8 @@ fn aggregate(
     let aggregate_work = snapshot.graph.entities.len().saturating_mul(
         metrics
             .len()
-            .saturating_add(2)
+            .saturating_add(group_width)
+            .saturating_add(1)
             .saturating_add(predicate_work),
     );
     if aggregate_work > MAX_WORK {
@@ -656,13 +698,20 @@ fn aggregate(
             .entities
             .len()
             .saturating_mul(
-                selected.len().saturating_add(group_levels).saturating_add(
-                    spatial
-                        .as_ref()
-                        .map_or(0, |spatial| spatial.work_units_per_entity()),
-                ),
+                selected
+                    .len()
+                    .saturating_add(group_levels.saturating_mul(group_width))
+                    .saturating_add(
+                        spatial
+                            .as_ref()
+                            .map_or(0, |spatial| spatial.work_units_per_entity()),
+                    ),
             )
-            .saturating_add(max_groups.saturating_mul(metrics.len().saturating_add(2)));
+            .saturating_add(
+                max_groups.saturating_mul(
+                    metrics.len().saturating_add(group_width).saturating_add(1),
+                ),
+            );
         work.charge(
             0,
             aggregate_work
@@ -787,6 +836,23 @@ fn aggregate(
                 GroupKey::Known(value) => {
                     json!({"kind":"field","presence":"known","value":scalar(&value)?})
                 }
+                GroupKey::Fields(fields) => {
+                    let fields = fields
+                        .into_iter()
+                        .map(|(field, key)| {
+                            Ok(match key {
+                                FieldGroupKey::Presence(state) => {
+                                    json!({"field":field,"presence":state,"value":null})
+                                }
+                                FieldGroupKey::Known(value) => {
+                                    json!({"field":field,"presence":"known",
+                                        "value":scalar(&value)?})
+                                }
+                            })
+                        })
+                        .collect::<Result<Vec<_>>>()?;
+                    json!({"kind":"fields","fields":fields})
+                }
             };
             let statistics: BTreeMap<_, _> = metrics
                 .iter()
@@ -799,7 +865,11 @@ fn aggregate(
     let mut result = json!({"kind":"aggregate","matched":matched,"groups":rows,
         "truncated":false,"continuation":null,"epistemic_state":"inferred",
         "scanned_entities":snapshot.graph.entities.len(),"metric_evaluations":matched.saturating_mul(metrics.len() as u64)});
-    if predicate.is_some() || relation.is_some() || spatial.is_some() {
+    if predicate.is_some()
+        || relation.is_some()
+        || spatial.is_some()
+        || matches!(group_by, Some(GroupBy::Fields { .. }))
+    {
         result["selection"] = json!({
             "selected_entities":selected_entities,
             "matched":matched,
@@ -2135,6 +2205,10 @@ mod tests {
 #[cfg(test)]
 #[path = "aggregate_selection_query_tests.rs"]
 mod aggregate_selection_tests;
+
+#[cfg(test)]
+#[path = "aggregate_group_fields_tests.rs"]
+mod aggregate_group_fields_tests;
 
 #[cfg(test)]
 #[path = "operational_query_future_tests.rs"]

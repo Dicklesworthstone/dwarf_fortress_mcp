@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased — Group fortress summaries by multiple fields
+
+- Add the closed `group_by.kind: fields` aggregate variant with one to four
+  distinct ordered dimensions and exact typed tuple keys.
+- Reuse source predicates, relationship/location selection and exact numeric
+  metrics. Preserve unknown/future components, excluded samples and whole-result
+  refusal at tuple cardinality or output limits.
+- Admit complete sources and charge dimension-aware lookup/output work; retain
+  existing single-field, entity-kind and ungrouped result shapes.
+- Update query schema discovery and examples. Add eleven aggregate regressions
+  and one actual default-laboratory history/authority regression.
+- Independently review the merged source and check JSON structure/local
+  references. Rust compilation, test execution and final formatting remain
+  unverified after execution-host loss.
+
 ## Unreleased — Respect snapshot time in query evidence
 
 - Treat future-dated field comparisons as Unknown in the shared evaluator,

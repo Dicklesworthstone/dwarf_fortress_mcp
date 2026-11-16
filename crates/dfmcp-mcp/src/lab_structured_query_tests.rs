@@ -1405,3 +1405,133 @@ fn lab_spatial_aggregate_answers_real_starter_workforce_counts_with_default_budg
     assert_eq!(counts["query_budget"]["max_output_tokens"], 4096);
     Ok(())
 }
+
+#[test]
+fn lab_multifield_aggregate_uses_default_budgets_and_exact_history_with_current_authority() -> TestResult
+{
+    let _serial = crate::test_serial();
+    let opened = parsed(&crate::agent_facade::fortress_open_session(
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        Some("starter_fortress".to_owned()),
+        None,
+        None,
+    ))?;
+    assert_eq!(opened["ok"], true, "{opened}");
+    let session_id = opened["session_id"]
+        .as_str()
+        .ok_or("session missing")?
+        .to_owned();
+    let session = resolve_session(Some(session_id.clone()))?;
+    let before = session
+        .lock()
+        .map_err(|_| "session poisoned")?
+        .adapter
+        .snapshot()
+        .clone();
+    let request = wrapper(
+        json!({
+            "kind":"aggregate", "kinds":["unit"],
+            "spatial":{"region":{"min":[0,1,10],"max":[2,1,10]},
+                "geometry":{"kind":"point","field":"position"},"relation":"within"},
+            "group_by":{"kind":"fields","fields":["profession","position"]}
+        }),
+        None,
+    );
+    let first = query(&session_id, request.clone())?;
+    assert_eq!(first["ok"], true, "{first}");
+    assert_eq!(first["matched"], 3);
+    assert_eq!(first["groups"].as_array().map(Vec::len), Some(3));
+    assert_eq!(first["selection"]["selected_entities"], 7);
+    assert_eq!(first["selection"]["outside_spatial_relation"], 4);
+    assert_eq!(first["selection"]["unknown_geometry"], 0);
+    assert_eq!(first["selection"]["complete_within_projection"], true);
+    assert_eq!(first["query_budget"]["max_output_tokens"], 4096);
+    assert_eq!(first["coverage"]["eligible_as_mutation_evidence"], false);
+    assert_eq!(first["coverage"]["absence_proven"], false);
+    assert_eq!(first["anchor"], anchor_json(&before.anchor()));
+    assert_eq!(first["agent_turn"]["anchor"], first["anchor"]);
+    assert_eq!(first["truncated"], false);
+    assert!(first["continuation"].is_null());
+    for group in first["groups"].as_array().ok_or("groups missing")? {
+        let fields = group["key"]["fields"].as_array().ok_or("fields missing")?;
+        assert_eq!(group["key"]["kind"], "fields");
+        assert_eq!(group["count"], 1);
+        assert_eq!(fields.len(), 2);
+        assert_eq!(fields[0]["field"], "profession");
+        assert_eq!(fields[0]["presence"], "known");
+        assert_eq!(fields[0]["value"]["type"], "text");
+        assert_eq!(fields[1]["field"], "position");
+        assert_eq!(fields[1]["presence"], "known");
+        assert_eq!(fields[1]["value"]["type"], "coord");
+    }
+    assert_eq!(query(&session_id, request.clone())?["groups"], first["groups"]);
+    assert_eq!(
+        session.lock().map_err(|_| "session poisoned")?.adapter.snapshot(),
+        &before
+    );
+
+    // Move the current fixture's citizens outside the selected area while
+    // retaining the original source. Historical grouping must not follow them.
+    let current = {
+        let mut guard = session.lock().map_err(|_| "session poisoned")?;
+        remember_version(&mut guard);
+        let mut current = guard.adapter.snapshot().clone();
+        current.tick = GameTick(current.tick.0 + 1);
+        current.cursor = current.cursor.checked_next().ok_or("cursor exhausted")?;
+        for entity in current.graph.entities.values_mut() {
+            if entity.kind == EntityKind::Unit {
+                entity.revision += 1;
+                entity.fields.insert(
+                    "position".to_owned(),
+                    Fact::known(
+                        WorldValue::Coord(dfmcp_core::MapCoord::new(100, 1, 10)),
+                        current.tick,
+                        FactSource::Derived("dfmcp.lab-scenario/1".to_owned()),
+                        Digest32::of_bytes(b"multifield-aggregate-history"),
+                    ),
+                );
+            }
+        }
+        current.refresh_hash();
+        guard.adapter.inject_snapshot(current.clone())?;
+        current
+    };
+    let changed = query(&session_id, request.clone())?;
+    assert_eq!(changed["ok"], true, "{changed}");
+    assert_eq!(changed["matched"], 0);
+    assert_eq!(changed["groups"], json!([]));
+    assert_eq!(changed["selection"]["outside_spatial_relation"], 7);
+    let mut retained = request;
+    retained["at"] = json!(before.state_hash.to_string());
+    retained["request"]["expected_anchor"] = anchor_json(&before.anchor());
+    let historical = query(&session_id, retained.clone())?;
+    assert_eq!(historical["ok"], true, "{historical}");
+    assert_eq!(historical["groups"], first["groups"]);
+    assert_eq!(historical["selection"], first["selection"]);
+    assert_eq!(historical["historical"], true);
+    assert_eq!(historical["anchor"], first["anchor"]);
+    assert_eq!(historical["current_anchor"], anchor_json(&current.anchor()));
+    assert_eq!(
+        historical["agent_turn"]["anchor"],
+        historical["current_anchor"]
+    );
+    assert_eq!(historical["agent_turn"]["continuity"]["status"], "stale");
+    {
+        let mut guard = session.lock().map_err(|_| "session poisoned")?;
+        guard.grants.retain(|grant| grant.capability != Capability::Query);
+    }
+    expect_refusal(&query(&session_id, retained)?, "capability_denied");
+    assert_eq!(
+        session.lock().map_err(|_| "session poisoned")?.adapter.snapshot(),
+        &current
+    );
+    Ok(())
+}

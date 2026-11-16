@@ -160,6 +160,77 @@ requests preserve their previous result fields and values.
 The filter is available to existing structured live-read consumers. It performs
 no bridge read, creates no watch and grants no effect authority.
 
+### Group by several fields in one summary
+
+The optional `group_by` variant `{"kind":"fields","fields":[...]}` accepts
+one to four distinct field names. It preserves the caller's field order.
+For a projection publishing job workshop references and suspension flags:
+
+```json
+{
+  "schema": "dfmcp.query/1",
+  "query": {
+    "kind": "aggregate",
+    "kinds": ["job"],
+    "group_by": {
+      "kind": "fields",
+      "fields": ["workshop", "suspended"]
+    },
+    "max_groups": 32
+  }
+}
+```
+
+Each group has an ordered, typed key:
+
+```json
+{
+  "kind": "fields",
+  "fields": [
+    {"field": "workshop", "presence": "known", "value": {"type": "entity", "value": "42"}},
+    {"field": "suspended", "presence": "known", "value": {"type": "bool", "value": false}}
+  ]
+}
+```
+
+This key appears under each existing group's `key`, beside its `count`
+and exact `metrics`. Field names must exist in the chosen projection to yield
+Known components; a missing field is explicitly `unobserved`. Each component
+uses the existing scalar rules: null, Boolean, signed/unsigned integer, fixed
+integer with its exact scale, text of at most 256 UTF-8 bytes, entity ID or
+coordinate. Nested values refuse the complete operation. Names retain the
+existing 128 UTF-8 byte limit.
+
+Keys are typed tuples, never concatenated text. Integer signedness, fixed scales,
+null and unavailable states remain distinct. Groups sort lexicographically by
+the components in requested order under the canonical typed-value ordering.
+Unavailable components retain their presence category and a null value; hidden
+payloads and explanatory strings do not participate in the key. A future Known
+component uses `presence: "future"` without its value. An unavailable grouping
+field still belongs to an explicit group: it does not make an otherwise known
+entity membership Unknown. Unavailable metric samples remain independent.
+
+Source `where`, optional positive relationships and optional geometry select
+the population before tuple formation. Each selected entity contributes once.
+Every metric retains the existing exact integer/fixed arithmetic, excluded
+sample counts and provenance. The group limit applies to distinct complete
+tuples, not to each field independently. For example, three workshops and two
+states can require six groups. Excess cardinality or final output bytes/tokens
+refuses all results; no truncated totals or continuation are published.
+
+Every multi-field request admits the complete source before hashing, even when
+no relationship or spatial selector is present. It uses the existing complete
+source record/byte/depth limits and shares one wall/work budget with selection,
+dimension-aware group lookup, metrics and serialization. `source_cost` and
+explicit selection coverage accompany these summaries. Query identity includes
+ordered field names, all selectors, the exact source and the session. Unknown
+membership remains separate from unknown group components and excluded metric
+samples; complete-world absence and mutation authority remain unestablished.
+
+Existing ungrouped, `entity_kind` and single `field` forms retain their result
+shape and grouping behavior. The shared source-tick eligibility rule above
+applies to all field-based forms.
+
 ### Combine aggregate membership with relationships and geometry
 
 Optional `relation` and `spatial` objects on an aggregate use the same closed

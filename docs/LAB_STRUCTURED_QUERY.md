@@ -32,7 +32,7 @@ inner envelope accepts the existing schema, `query`, and optional complete
 | --- | --- |
 | `entities` | Typed filters, explicit field projection, deterministic ordering and source-bound pages |
 | `inspect` | Exact entity ID and generation, with explicit selected fields |
-| `aggregate` | Counts, grouping and exact integer/fixed statistics, optionally selected by relationships and location |
+| `aggregate` | Counts, grouping by kind or one to four fields, and exact integer/fixed statistics, optionally selected by relationships and location |
 | `search` | Bounded lexical retrieval over selected kinds, typed predicates, fields and labels |
 | `traverse` | Bounded observed graph traversal and a witnessed path to an optional target |
 | `dependencies` | Prerequisite order, cycle components, cycle blockers and an unweighted critical chain |
@@ -102,6 +102,36 @@ eligible. Sums, minima and maxima use decimal integer strings; a mean is an
 exact rational.
 These are advisory statistics over the selected projection, not a complete
 stock or mutation-precondition certificate.
+
+### Aggregate by several fields
+
+Use `group_by.kind: "fields"` to summarize the joint distribution of one to
+four distinct fields, retaining their requested order. For example, the starter
+laboratory publishes profession and position facts on its citizens:
+
+```json
+{
+  "kind": "aggregate",
+  "kinds": ["unit"],
+  "group_by": {"kind": "fields", "fields": ["profession", "position"]},
+  "max_groups": 32
+}
+```
+
+Use this as `request.query`. Each group contains its count, optional exact
+metrics and a `key.fields` array of typed `field`, `presence`, `value`
+components. Unknown, missing, redacted and future components remain explicit
+without exposing backing values. Distinct signed/unsigned types and fixed scales
+are not merged; changing field order changes the ordered key and query identity.
+
+The same request can include `where`, `relation`, `spatial` and `metrics`.
+Selection precedes grouping; several matching edges never multiply an entity.
+`max_groups` bounds distinct combinations, so three values of one field and
+two of another may require six groups. The complete result must fit the
+negotiated response and Agent Turn allowance. New multi-field requests always
+admit the complete source and account for every dimension in bounded work.
+Exact retained history and current Query authority follow the same rules as
+other structured queries.
 
 ### Aggregate by recorded relationships and location
 
