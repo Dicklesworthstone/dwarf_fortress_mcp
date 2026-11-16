@@ -120,6 +120,182 @@ fn snapshot_search_excludes_unavailable_values_from_matches_snippets_and_scores(
 }
 
 #[test]
+fn snapshot_search_excludes_future_facts_without_changing_visible_scores_or_snippets()
+-> Result<(), Box<dyn std::error::Error>> {
+    let baseline = snapshot_with_fields(BTreeMap::from([
+        (
+            "prior".to_owned(),
+            Fact::known(
+                Value::Text("priorvisible".to_owned()),
+                GameTick(0),
+                FactSource::Replay,
+                Digest32::ZERO,
+            ),
+        ),
+        (
+            "current".to_owned(),
+            Fact::with_presence(
+                FactPresence::Known(Value::Text("currentvisible".to_owned())),
+                GameTick(100),
+                FactSource::Replay,
+                Digest32::ZERO,
+            ),
+        ),
+    ]));
+    let mut engine = FrankenSearchEngine::new();
+    engine.index_snapshot(&baseline)?;
+    let baseline_hits = engine.search("Urist priorvisible currentvisible", 5)?;
+    assert_eq!(baseline_hits.len(), 1);
+
+    for tick in [GameTick(101), GameTick(u64::MAX)] {
+        for explicit in [false, true] {
+            let value = Value::Text("Urist priorvisible futurepayloadmarker".to_owned());
+            let fact = if explicit {
+                Fact::with_presence(
+                    FactPresence::Known(value),
+                    tick,
+                    FactSource::Replay,
+                    Digest32::ZERO,
+                )
+            } else {
+                Fact::known(value, tick, FactSource::Replay, Digest32::ZERO)
+            };
+            let mut snapshot = baseline.clone();
+            snapshot
+                .graph
+                .entities
+                .get_mut(&EntityId::new(10))
+                .ok_or("fixture entity is missing")?
+                .fields
+                .insert("futurefieldmarker".to_owned(), fact);
+            snapshot.refresh_hash();
+            let unchanged_source = snapshot.clone();
+            engine.index_snapshot(&snapshot)?;
+
+            for query in ["futurefieldmarker", "futurepayloadmarker"] {
+                assert!(engine.search(query, 5)?.is_empty(), "{query}");
+            }
+            // Excluding only a hit is insufficient: future values must not
+            // change the corpus, document length, score or displayed snippet.
+            assert_eq!(
+                engine.search("Urist priorvisible currentvisible", 5)?,
+                baseline_hits
+            );
+            assert_eq!(snapshot, unchanged_source);
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn snapshot_search_excludes_future_events_from_matches_and_corpus_statistics()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mut baseline = snapshot_with_fields(BTreeMap::new());
+    for (id, tick, summary) in [
+        (91, GameTick(0), "Urist priorreportmarker"),
+        (92, GameTick(100), "Urist currentreportmarker"),
+    ] {
+        let event = WorldEvent {
+            id: EventId::new(id),
+            tick,
+            kind: WorldEventKind::Announcement,
+            subject: None,
+            summary: summary.to_owned(),
+            fields: BTreeMap::new(),
+        };
+        baseline.graph.events.insert(event.id, event);
+    }
+    baseline.refresh_hash();
+    let mut engine = FrankenSearchEngine::new();
+    engine.index_snapshot(&baseline)?;
+    let baseline_hits = engine.search("Urist", 5)?;
+    assert_eq!(baseline_hits.len(), 3);
+
+    for tick in [GameTick(101), GameTick(u64::MAX)] {
+        let mut snapshot = baseline.clone();
+        let event = WorldEvent {
+            id: EventId::new(90),
+            tick,
+            kind: WorldEventKind::Announcement,
+            subject: None,
+            summary: "Urist futurereportmarker".to_owned(),
+            fields: BTreeMap::from([(
+                "futureeventfield".to_owned(),
+                Value::Text("futureeventpayload".to_owned()),
+            )]),
+        };
+        snapshot.graph.events.insert(event.id, event);
+        snapshot.refresh_hash();
+        engine.index_snapshot(&snapshot)?;
+
+        for query in ["futurereportmarker", "futureeventfield", "futureeventpayload"] {
+            assert!(engine.search(query, 5)?.is_empty(), "{query}");
+        }
+        assert_eq!(engine.search("Urist", 5)?, baseline_hits);
+        for query in ["priorreportmarker", "currentreportmarker"] {
+            assert_eq!(engine.search(query, 5)?.len(), 1);
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn reindexing_uses_the_selected_source_tick_and_rejects_corrupt_future_data_atomically()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mut earlier = snapshot_with_fields(BTreeMap::from([(
+        "message".to_owned(),
+        Fact::known(
+            Value::Text("futurefactmarker".to_owned()),
+            GameTick(101),
+            FactSource::Replay,
+            Digest32::ZERO,
+        ),
+    )]));
+    let event = WorldEvent {
+        id: EventId::new(91),
+        tick: GameTick(101),
+        kind: WorldEventKind::Announcement,
+        subject: None,
+        summary: "futurereportmarker".to_owned(),
+        fields: BTreeMap::new(),
+    };
+    earlier.graph.events.insert(event.id, event);
+    earlier.refresh_hash();
+    let mut later = earlier.clone();
+    later.tick = GameTick(101);
+    later.cursor = later.cursor.checked_next().ok_or("cursor exhausted")?;
+    later.refresh_hash();
+    let mut engine = FrankenSearchEngine::new();
+
+    for source in [&earlier, &later, &earlier] {
+        engine.index_snapshot(source)?;
+        let expected = usize::from(source.tick == GameTick(101));
+        for query in ["futurefactmarker", "futurereportmarker"] {
+            assert_eq!(engine.search(query, 5)?.len(), expected, "{query}");
+        }
+    }
+
+    let before = engine.search("Urist", 5)?;
+    let mut corrupt = earlier.clone();
+    corrupt
+        .graph
+        .events
+        .get_mut(&EventId::new(91))
+        .ok_or("fixture event is missing")?
+        .summary = "tampered future report".to_owned();
+    // Source validation still covers excluded bytes and must not publish a
+    // partially rebuilt index when the future-only change breaks its hash.
+    let refused = engine.index_snapshot(&corrupt);
+    assert_eq!(
+        refused.err().ok_or("corrupt source was admitted")?.code,
+        dfmcp_core::ErrorCode::InternalInvariantViolation
+    );
+    assert_eq!(engine.search("Urist", 5)?, before);
+    assert!(engine.search("tampered", 5)?.is_empty());
+    Ok(())
+}
+
+#[test]
 fn snapshot_search_keeps_legacy_and_explicit_known_values_and_retained_events()
 -> Result<(), Box<dyn std::error::Error>> {
     let mut snapshot = snapshot_with_fields(BTreeMap::from([

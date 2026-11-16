@@ -597,7 +597,16 @@ fn evaluate_truth(
                 .map_or(PredicateTruth::Unknown, |truth| truth)
         }
         Predicate::EntityQuantity { .. } | Predicate::EntityQuantityIncrease { .. } => {
-            entity_quantity_truth(snapshot, predicate, Fact::known_value)
+            // A whole-domain census needs source-time-valid selectors and
+            // contributing quantities, just as a field comparison does. A
+            // future selector cannot establish that a record contributes zero.
+            entity_quantity_truth(snapshot, predicate, |fact| {
+                if fact.observed_at > snapshot.tick {
+                    None
+                } else {
+                    fact.known_value()
+                }
+            })
         }
         Predicate::All(predicates) => {
             let mut result = PredicateTruth::True;

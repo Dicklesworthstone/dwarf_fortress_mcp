@@ -1,5 +1,43 @@
 # Implementation Status
 
+## Unreleased — Bind legacy search and stock queries to selected source time
+
+Legacy laboratory search now excludes future-dated fact names/values and
+entire future event documents before lexical scoring. Hidden reports cannot
+change visible document frequencies, length normalization, snippets or ties.
+Reindexing an exact retained source uses that source's tick, even after the
+current world has advanced. Complete-source integrity and count/byte bounds
+still precede filtering, and replacement remains atomic.
+
+Ordinary EntityQuantity and EntityQuantityIncrease predicates now apply the
+same source-time boundary to every required selector and quantity. A future
+selector cannot establish a zero contribution or an empty matching domain;
+unknown totals remain Unknown under negation. Eligible nonmatching selectors
+still avoid reading irrelevant quantity fields. Evidence-authorized execution,
+baseline lineage and canonical predicate identities retain their existing rules.
+
+Seven new world regression functions and one actual public-facade regression
+cover temporal eligibility, exact scoring noninterference, complete censuses,
+negation, growth, historical reads and current authority. The original real core
+and world libraries compiled with warning denial on installed rustc
+1.100.0-nightly (908501772, 2026-08-30). Against that original implementation,
+the quantity suite returned 18 passed / 3 new failures and the search suite
+8 passed / 3 new failures. These are reproduced pre-fix failures, not a passing
+result for the correction. Raw returned output is retained in
+`docs/evidence/source-time-regression-red-2026-11-16.txt`; a complete source
+fingerprint inventory was not captured.
+
+The execution workspace became unavailable before corrected-source tests,
+MCP execution or formatting could finish. Latest-nightly installation was
+killed; verify.sh passed its first four contract groups and was interrupted
+during source-bundle verification. Full qualification did not run. The final
+files were reconstructed from exact base 9873cc16 and recorded edits, with
+unchanged baseline bytes checked and uploaded blobs read back exactly.
+No full-workspace, native, live-game or admission claim is added.
+
+Owner: `df-lab-structured-query-f7q.6`; related lexical integration bead
+`dfmcp-reality-wiring-proof-4bf.9` remains open.
+
 ## Unreleased — Compare exact retained operations observations
 
 Both operations profiles now accept `historical_changes` through the existing

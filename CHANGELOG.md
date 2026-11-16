@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased — Keep future data out of legacy search and stock totals
+
+- Apply selected-source time to legacy lexical fields and event documents,
+  including scoring and exact retained-source queries.
+- Preserve Unknown for whole-domain quantity and growth predicates when a
+  required selector or sample comes from a later tick; negation cannot turn
+  missing evidence into a stock or absence claim.
+- Add seven world regressions and one public laboratory regression. Six new
+  world tests reproduced the bugs against the original implementation; the
+  existing cases and new positive control passed. Corrected-source execution
+  and full qualification remain pending after the execution-host outage.
+- Keep source integrity/budgets, index publication, predicate identity,
+  native protocols, dependency pins and production admission unchanged.
+
 ## Unreleased — Compare retained operations endpoints
 
 - Add `historical_changes` for exact retained operations/1.3 and 1.4 records,

@@ -1,0 +1,109 @@
+EXIT 0 ELAPSED 303.0
+RUN dfmcp-world /home/agent/.rustup/toolchains/nightly-2026-08-31-x86_64-unknown-linux-gnu/bin/rustc --edition=2024 --test -Dwarnings -C debuginfo=0 -C codegen-units=16 /workspace/scratch/1c13379eeba2/dwarf_fortress_mcp/crates/dfmcp-world/tests/entity_quantity_tests.rs -L /workspace/scratch/1c13379eeba2/validation-cache/baseline-rustc -o /workspace/scratch/1c13379eeba2/validation-cache/baseline-rustc/entity_quantity_tests --extern dfmcp_core=/workspace/scratch/1c13379eeba2/validation-cache/baseline-rustc/libdfmcp_core.rlib --extern dfmcp_world=/workspace/scratch/1c13379eeba2/validation-cache/baseline-rustc/libdfmcp_world.rlib
+EXIT 0 ELAPSED 3.4
+
+running 21 tests
+test aggregate_encoding_appends_tag_twelve_and_boolean_normalization_remains_deterministic ... ok
+test aggregate_inputs_and_total_scan_work_are_validated_before_short_circuiting ... ok
+test aggregate_inputs_retain_the_existing_certified_and_laboratory_source_boundaries ... ok
+test canonical_kind_aliases_cannot_change_aggregate_truth_for_identical_world_bytes ... ok
+test complete_domain_is_required_even_for_positive_subtotals_and_empty_inventory ... ok
+test each_selector_and_matching_quantity_needs_independent_source_qualification ... ok
+test every_unavailable_or_contradictory_input_keeps_the_full_quantity_unknown ... ok
+test exact_record_count_and_stack_sum_have_distinct_meanings ... ok
+test increase_identity_and_query_continuations_seal_every_baseline_component ... ok
+test increase_never_accepts_a_different_fortress_epoch_or_earlier_frontier ... ok
+test increase_rejects_invalid_baselines_and_bounds_work_before_boolean_shortcuts ... ok
+test increase_still_needs_current_complete_qualified_inputs_after_reaching_target ... ok
+test increase_uses_sealed_stack_total_and_measures_net_growth_not_item_creation ... ok
+test nonmatching_quantities_are_irrelevant_but_their_selectors_are_required ... ok
+test qualified_baseline_measurement_distinguishes_zero_from_unknown ... ok
+test query_continuations_bind_every_aggregate_component ... ok
+test query_quantities_keep_future_selectors_and_samples_unknown_under_negation ... FAILED
+test query_quantities_keep_prior_and_same_tick_facts_and_ignore_unselected_samples ... ok
+test query_quantity_future_selectors_cannot_establish_an_empty_matching_domain ... FAILED
+test query_quantity_growth_uses_the_selected_source_tick ... FAILED
+test sums_never_coerce_invalid_numbers_or_wrap_overflow_and_zero_remains_known ... ok
+
+failures:
+
+---- query_quantities_keep_future_selectors_and_samples_unknown_under_negation stdout ----
+
+thread 'query_quantities_keep_future_selectors_and_samples_unknown_under_negation' (100) panicked at /workspace/scratch/1c13379eeba2/dwarf_fortress_mcp/crates/dfmcp-world/tests/entity_quantity_tests.rs:142:9:
+assertion `left == right` failed
+  left: False
+ right: Unknown
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- query_quantity_future_selectors_cannot_establish_an_empty_matching_domain stdout ----
+
+thread 'query_quantity_future_selectors_cannot_establish_an_empty_matching_domain' (102) panicked at /workspace/scratch/1c13379eeba2/dwarf_fortress_mcp/crates/dfmcp-world/tests/entity_quantity_tests.rs:142:9:
+assertion `left == right` failed
+  left: True
+ right: Unknown
+
+---- query_quantity_growth_uses_the_selected_source_tick stdout ----
+
+thread 'query_quantity_growth_uses_the_selected_source_tick' (103) panicked at /workspace/scratch/1c13379eeba2/dwarf_fortress_mcp/crates/dfmcp-world/tests/entity_quantity_tests.rs:142:9:
+assertion `left == right` failed
+  left: True
+ right: Unknown
+
+
+failures:
+    query_quantities_keep_future_selectors_and_samples_unknown_under_negation
+    query_quantity_future_selectors_cannot_establish_an_empty_matching_domain
+    query_quantity_growth_uses_the_selected_source_tick
+
+test result: FAILED. 18 passed; 3 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.53s
+
+
+
+TEST EXIT entity_quantity_tests 101
+RUN dfmcp-world /home/agent/.rustup/toolchains/nightly-2026-08-31-x86_64-unknown-linux-gnu/bin/rustc --edition=2024 --test -Dwarnings -C debuginfo=0 -C codegen-units=16 /workspace/scratch/1c13379eeba2/dwarf_fortress_mcp/crates/dfmcp-world/tests/search_tests.rs -L /workspace/scratch/1c13379eeba2/validation-cache/baseline-rustc -o /workspace/scratch/1c13379eeba2/validation-cache/baseline-rustc/search_tests --extern dfmcp_core=/workspace/scratch/1c13379eeba2/validation-cache/baseline-rustc/libdfmcp_core.rlib --extern dfmcp_world=/workspace/scratch/1c13379eeba2/validation-cache/baseline-rustc/libdfmcp_world.rlib
+EXIT 0 ELAPSED 2.6
+
+running 11 tests
+test announcement_display_titles_preserve_exact_bounds_and_utf8 ... ok
+test direct_document_title_and_body_limits_remain_atomic ... ok
+test long_announcement_titles_preserve_suffix_matches_and_identity_ties ... ok
+test rebuilding_search_withdraws_newly_unavailable_values ... ok
+test reindexing_uses_the_selected_source_tick_and_rejects_corrupt_future_data_atomically ... FAILED
+test snapshot_search_excludes_future_events_from_matches_and_corpus_statistics ... FAILED
+test snapshot_search_excludes_future_facts_without_changing_visible_scores_or_snippets ... FAILED
+test snapshot_search_excludes_unavailable_values_from_matches_snippets_and_scores ... ok
+test snapshot_search_finds_builtin_and_custom_kinds_with_stable_identity_ties ... ok
+test snapshot_search_keeps_legacy_and_explicit_known_values_and_retained_events ... ok
+test test_in_memory_lexical_snapshot_indexing ... ok
+
+failures:
+
+---- reindexing_uses_the_selected_source_tick_and_rejects_corrupt_future_data_atomically stdout ----
+
+thread 'reindexing_uses_the_selected_source_tick_and_rejects_corrupt_future_data_atomically' (143) panicked at /workspace/scratch/1c13379eeba2/dwarf_fortress_mcp/crates/dfmcp-world/tests/search_tests.rs:274:13:
+assertion `left == right` failed: futurefactmarker
+  left: 1
+ right: 0
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- snapshot_search_excludes_future_events_from_matches_and_corpus_statistics stdout ----
+
+thread 'snapshot_search_excludes_future_events_from_matches_and_corpus_statistics' (144) panicked at /workspace/scratch/1c13379eeba2/dwarf_fortress_mcp/crates/dfmcp-world/tests/search_tests.rs:232:13:
+futurereportmarker
+
+---- snapshot_search_excludes_future_facts_without_changing_visible_scores_or_snippets stdout ----
+
+thread 'snapshot_search_excludes_future_facts_without_changing_visible_scores_or_snippets' (145) panicked at /workspace/scratch/1c13379eeba2/dwarf_fortress_mcp/crates/dfmcp-world/tests/search_tests.rs:176:17:
+futurefieldmarker
+
+
+failures:
+    reindexing_uses_the_selected_source_tick_and_rejects_corrupt_future_data_atomically
+    snapshot_search_excludes_future_events_from_matches_and_corpus_statistics
+    snapshot_search_excludes_future_facts_without_changing_visible_scores_or_snippets
+
+test result: FAILED. 8 passed; 3 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+
+
+
+TEST EXIT search_tests 101

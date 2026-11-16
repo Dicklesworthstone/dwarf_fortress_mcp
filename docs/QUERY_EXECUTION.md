@@ -68,12 +68,15 @@ The laboratory's existing `fortress_query` mode
 integration; roadmap bead `dfmcp-reality-wiring-proof-4bf.9` remains open.
 
 Entity documents include their labels, canonical kind names, and only field
-values accepted by `Fact::known_value()`. Legacy known values and consistent
-explicit `Known` values remain searchable. Absent, unknown, unsupported, omitted,
+values accepted by `Fact::known_value()` whose observation tick is no later
+than the selected snapshot tick. Legacy known values and consistent explicit
+`Known` values remain searchable at or after their observation time. Absent, unknown, unsupported, omitted,
 redacted, stale and contradictory known-value records contribute neither field
 names nor compatibility values to matches, relevance scores or snippets. A
 label or kind can still match an entity whose fields are unavailable. Retained
-event summaries and values keep their existing lexical representation.
+events are indexed only when their event tick is no later than the selected
+snapshot tick. Excluding the entire future document also prevents it from
+influencing document frequency, length normalization or visible-hit scores.
 
 Each snapshot indexing operation builds a complete bounded replacement before
 publishing it. Reindexing after a fact becomes unavailable withdraws its old
@@ -106,6 +109,15 @@ Lexical matching also ignores future-dated fact-valued text fields and counts
 them in `unavailable_or_nontext_fields`. The observation tick does not turn
 inferred or assumed provenance into observed authority. These are source-bound
 query eligibility rules, not a complete-world or mutation certificate.
+
+Ordinary `EntityQuantity` and `EntityQuantityIncrease` queries apply this
+boundary to their complete selected census. A future selector leaves membership
+Unknown even if its backing value would not match; it cannot prove a zero
+contribution or an empty domain. A future required quantity leaves the total
+Unknown even when the eligible subtotal exceeds the requested threshold.
+Negation preserves that uncertainty. A known nonmatching selector does not
+require its unused quantity. Source-qualified mutation evidence retains its
+independent coverage and provenance checks.
 
 ## Filtered operational aggregates
 

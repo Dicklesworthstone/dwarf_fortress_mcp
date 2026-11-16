@@ -132,6 +132,104 @@ fn exact_record_count_and_stack_sum_have_distinct_meanings() -> Result<()> {
     Ok(())
 }
 
+fn query_unknown(snapshot: &WorldSnapshot, predicate: &Predicate) -> Result<()> {
+    for predicate in [
+        predicate.clone(),
+        Predicate::Not(Box::new(predicate.clone())),
+        Predicate::All(vec![Predicate::True, predicate.clone()]),
+        Predicate::Any(vec![Predicate::False, predicate.clone()]),
+    ] {
+        assert_eq!(
+            evaluate_truth_for(snapshot, EntityId::new(1), &predicate),
+            PredicateTruth::Unknown,
+        );
+        assert!(!evaluate(snapshot, &predicate));
+        let query = WorldQuery {
+            kinds: vec![EntityKind::Item],
+            predicate: Some(predicate),
+            order: QueryOrder::EntityIdAscending,
+            limit: 10,
+            continuation: None,
+        };
+        let page = execute_query(snapshot, &query, 10)?;
+        assert!(page.entities.is_empty());
+        assert!(page.continuation.is_none());
+    }
+    Ok(())
+}
+
+#[test]
+fn query_quantities_keep_future_selectors_and_samples_unknown_under_negation() -> Result<()> {
+    // A future nonmatching selector cannot prove the record contributes zero;
+    // a future matching selector cannot prove it belongs to the total either.
+    for item_type in ["BED", "DOOR"] {
+        for explicit_known in [false, true] {
+            let mut current = snapshot(&[(1, "BED", 5), (2, item_type, 1)]);
+            let mut selector = fact("type_key", Value::Text(item_type.into()));
+            selector.observed_at = GameTick(11);
+            selector.presence = explicit_known
+                .then(|| FactPresence::Known(selector.value.clone()));
+            change_fact(&mut current, 2, "type_key", selector)?;
+            for field in [None, Some("stack_size")] {
+                for (op, threshold) in [(CompareOp::Eq, 0), (CompareOp::Ge, 1)] {
+                    let predicate = quantity(field, op, threshold);
+                    query_unknown(&current, &predicate)?;
+                    unknown(&PredicateEvidence::scoped(&current, policy(&current))?, &predicate)?;
+                }
+            }
+        }
+    }
+    for explicit_known in [false, true] {
+        let mut current = snapshot(&[(1, "BED", 5), (2, "BED", 1)]);
+        let mut sample = fact("stack_size", Value::U64(1));
+        sample.observed_at = GameTick(11);
+        sample.presence = explicit_known.then(|| FactPresence::Known(sample.value.clone()));
+        change_fact(&mut current, 2, "stack_size", sample)?;
+        query_unknown(&current, &quantity(Some("stack_size"), CompareOp::Ge, 1))?;
+        // Counting known members does not read their unused stack-size field.
+        assert!(evaluate(&current, &quantity(None, CompareOp::Eq, 2)));
+    }
+    Ok(())
+}
+
+#[test]
+fn query_quantity_future_selectors_cannot_establish_an_empty_matching_domain() -> Result<()> {
+    let mut current = snapshot(&[(1, "DOOR", 99)]);
+    let mut selector = fact("type_key", Value::Text("DOOR".into()));
+    selector.observed_at = GameTick(11);
+    change_fact(&mut current, 1, "type_key", selector)?;
+    for field in [None, Some("stack_size")] {
+        query_unknown(&current, &quantity(field, CompareOp::Eq, 0))?;
+    }
+    Ok(())
+}
+
+#[test]
+fn query_quantities_keep_prior_and_same_tick_facts_and_ignore_unselected_samples() -> Result<()> {
+    for observed_at in [GameTick(0), GameTick(9), GameTick(10)] {
+        let mut current = snapshot(&[(1, "BED", 3), (2, "DOOR", 99), (3, "BED", 2)]);
+        for entity in current.graph.entities.values_mut() {
+            for fact in entity.fields.values_mut() {
+                fact.observed_at = observed_at;
+            }
+        }
+        // This quantity is unused because its eligible selector is known DOOR.
+        let mut unselected = fact("stack_size", Value::U64(99));
+        unselected.observed_at = GameTick(11);
+        change_fact(&mut current, 2, "stack_size", unselected)?;
+        for (field, total) in [(None, 2), (Some("stack_size"), 5)] {
+            let predicate = quantity(field, CompareOp::Eq, total);
+            assert_eq!(
+                evaluate_truth_for(&current, EntityId::new(1), &predicate),
+                PredicateTruth::True,
+            );
+            assert!(evaluate(&current, &predicate));
+            assert!(!evaluate(&current, &Predicate::Not(Box::new(predicate))));
+        }
+    }
+    Ok(())
+}
+
 #[test]
 fn complete_domain_is_required_even_for_positive_subtotals_and_empty_inventory() -> Result<()> {
     for snapshot in [snapshot(&[]), snapshot(&[(1, "BED", 5)])] {
@@ -564,6 +662,43 @@ fn increase_uses_sealed_stack_total_and_measures_net_growth_not_item_creation() 
         let current = later(&rows);
         assert_eq!(PredicateEvidence::scoped(&current, policy(&current))?.evaluate(&goal)?, expected);
         assert_eq!(evaluate(&current, &goal), expected == PredicateTruth::True);
+    }
+    Ok(())
+}
+
+#[test]
+fn query_quantity_growth_uses_the_selected_source_tick() -> Result<()> {
+    let original = snapshot(&[(1, "BED", 2)]);
+    let goal = increase(&original, 2, 1);
+    for field in ["type_key", "stack_size"] {
+        let mut historical = later(&[(1, "BED", 3)]);
+        let mut future = fact(
+            field,
+            if field == "type_key" {
+                Value::Text("BED".into())
+            } else {
+                Value::U64(3)
+            },
+        );
+        future.observed_at = GameTick(12);
+        change_fact(&mut historical, 1, field, future)?;
+        query_unknown(&historical, &goal)?;
+
+        // A later source can use the same fact, but cannot make the retained
+        // earlier source's census known or change the original growth baseline.
+        let mut current = historical.clone();
+        current.tick = GameTick(12);
+        current.cursor.sequence += 1;
+        current.refresh_hash();
+        assert_eq!(
+            evaluate_truth_for(&current, EntityId::new(1), &goal),
+            PredicateTruth::True,
+        );
+        query_unknown(&historical, &goal)?;
+        assert_eq!(
+            evaluate_truth_for(&original, EntityId::new(1), &goal),
+            PredicateTruth::False,
+        );
     }
     Ok(())
 }

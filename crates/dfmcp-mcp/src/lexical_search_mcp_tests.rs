@@ -5,7 +5,7 @@
 
 use std::collections::BTreeMap;
 
-use dfmcp_core::{Capability, Digest32, EntityId, EventId};
+use dfmcp_core::{Capability, Digest32, EntityId, EventId, GameTick};
 use dfmcp_world::{
     EntityKind, EntityRecord, Fact, FactPresence, FactSource, Value as WorldValue, WorldEvent,
     WorldEventKind, WorldSnapshot,
@@ -271,6 +271,139 @@ fn public_lexical_search_accepts_long_announcements_without_losing_their_suffix(
             .retain(|grant| grant.capability != Capability::Query);
     }
     let denied = search(&session_id, "tailannouncementmarker")?;
+    assert_eq!(denied["ok"], false, "{denied}");
+    assert_eq!(denied["error"]["code"], "capability_denied");
+    assert!(denied.get("hits").is_none());
+    Ok(())
+}
+
+#[test]
+fn public_lexical_search_uses_selected_source_time_and_preserves_current_authority() -> TestResult {
+    let _serial = crate::test_serial();
+    let (session_id, initial) = open_fixture()?;
+    let baseline_hits = search(&session_id, "needle")?["hits"].clone();
+    let future_tick = GameTick(initial.tick.0.checked_add(1).ok_or("tick exhausted")?);
+    let session = crate::server::resolve_session(Some(session_id.clone()))?;
+    let earlier = {
+        let mut guard = session.lock().map_err(|_| "session poisoned")?;
+        let mut snapshot = guard.adapter.snapshot().clone();
+        let entity = snapshot
+            .graph
+            .entities
+            .get_mut(&EntityId::new(SEARCH_ENTITY))
+            .ok_or("search entity missing")?;
+        entity.fields.insert(
+            "futurelegacyfield".to_owned(),
+            Fact::known(
+                WorldValue::Text("needle futurelegacymarker".to_owned()),
+                future_tick,
+                FactSource::Replay,
+                Digest32::ZERO,
+            ),
+        );
+        entity.fields.insert(
+            "futureexplicitfield".to_owned(),
+            Fact::with_presence(
+                FactPresence::Known(WorldValue::Text("futureexplicitmarker".to_owned())),
+                future_tick,
+                FactSource::Replay,
+                Digest32::ZERO,
+            ),
+        );
+        let event = WorldEvent {
+            id: EventId::new(96_103),
+            tick: future_tick,
+            kind: WorldEventKind::Announcement,
+            subject: Some(entity.id),
+            summary: "needle futureeventmarker".to_owned(),
+            fields: BTreeMap::from([(
+                "futureeventfield".to_owned(),
+                WorldValue::Text("futureeventpayload".to_owned()),
+            )]),
+        };
+        snapshot.graph.events.insert(event.id, event);
+        snapshot.cursor = snapshot.cursor.checked_next().ok_or("cursor exhausted")?;
+        snapshot.refresh_hash();
+        guard.adapter.inject_snapshot(snapshot.clone())?;
+        guard.history.record(&snapshot);
+        snapshot
+    };
+    let earlier_anchor = crate::observation_projection::anchor_json(&earlier.anchor());
+    let future_markers = [
+        "futurelegacyfield",
+        "futurelegacymarker",
+        "futureexplicitfield",
+        "futureexplicitmarker",
+        "futureeventmarker",
+        "futureeventfield",
+        "futureeventpayload",
+    ];
+    for marker in future_markers {
+        let result = search(&session_id, marker)?;
+        assert_eq!(result["ok"], true, "{result}");
+        assert_eq!(result["hits"], json!([]), "{result}");
+        assert_eq!(result["anchor"], earlier_anchor);
+        assert_eq!(result["agent_turn"]["anchor"], earlier_anchor);
+        assert_eq!(
+            result["agent_turn"]["coverage"]["absence_proof_scope"],
+            json!([])
+        );
+    }
+    assert_eq!(search(&session_id, "needle")?["hits"], baseline_hits);
+
+    let later = {
+        let mut guard = session.lock().map_err(|_| "session poisoned")?;
+        assert_eq!(guard.adapter.snapshot(), &earlier);
+        let mut snapshot = earlier.clone();
+        snapshot.tick = future_tick;
+        snapshot.cursor = snapshot.cursor.checked_next().ok_or("cursor exhausted")?;
+        snapshot.refresh_hash();
+        guard.adapter.inject_snapshot(snapshot.clone())?;
+        snapshot
+    };
+    for marker in future_markers {
+        let result = search(&session_id, marker)?;
+        assert_eq!(result["ok"], true, "{result}");
+        assert_eq!(result["returned"], 1, "{result}");
+    }
+
+    // A later current world must not make a retained earlier source eligible
+    // for facts or reports that were still in that source's future.
+    let historical_mode = |text| {
+        json!({"mode":"search","text":text,"limit":5,"at":earlier.state_hash.to_hex()})
+            .to_string()
+    };
+    for marker in future_markers {
+        let result = parsed(&fortress_query(
+            Some(session_id.clone()),
+            Some(historical_mode(marker)),
+        ))?;
+        assert_eq!(result["ok"], true, "{result}");
+        assert_eq!(result["hits"], json!([]), "{result}");
+        assert_eq!(result["historical"], true);
+        assert_eq!(result["anchor"], earlier_anchor);
+        assert_eq!(
+            result["current_anchor"],
+            crate::observation_projection::anchor_json(&later.anchor())
+        );
+    }
+    let historical_visible = parsed(&fortress_query(
+        Some(session_id.clone()),
+        Some(historical_mode("needle")),
+    ))?;
+    assert_eq!(historical_visible["ok"], true, "{historical_visible}");
+    assert_eq!(historical_visible["hits"], baseline_hits);
+    {
+        let mut guard = session.lock().map_err(|_| "session poisoned")?;
+        assert_eq!(guard.adapter.snapshot(), &later);
+        guard
+            .grants
+            .retain(|grant| grant.capability != Capability::Query);
+    }
+    let denied = parsed(&fortress_query(
+        Some(session_id),
+        Some(historical_mode("needle")),
+    ))?;
     assert_eq!(denied["ok"], false, "{denied}");
     assert_eq!(denied["error"]["code"], "capability_denied");
     assert!(denied.get("hits").is_none());

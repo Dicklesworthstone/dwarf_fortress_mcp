@@ -154,7 +154,7 @@ impl FrankenSearchEngine {
         Ok(())
     }
 
-    /// Index all entities and events from a world snapshot.
+    /// Index eligible entity facts and retained events through the source tick.
     pub fn index_snapshot(&mut self, snapshot: &WorldSnapshot) -> Result<()> {
         if !snapshot.hash_is_valid() {
             return Err(DfmcpError::new(
@@ -178,11 +178,12 @@ impl FrankenSearchEngine {
         let mut replacement = Self::new();
         for (id, entity) in &snapshot.graph.entities {
             // Compatibility values may survive redaction, omission or expiry.
-            // Apply the same presence boundary as canonical query projections
-            // before these bytes can affect either ranking or snippets.
+            // Apply the same presence and source-time boundaries as canonical
+            // query selection before these bytes can affect ranking or snippets.
             let facts_text: Vec<String> = entity
                 .fields
                 .iter()
+                .filter(|(_, fact)| fact.observed_at <= snapshot.tick)
                 .filter_map(|(name, fact)| {
                     fact.known_value().map(|value| format!("{name}: {value:?}"))
                 })
@@ -196,7 +197,14 @@ impl FrankenSearchEngine {
             replacement.index_document(Some(*id), None, format!("Entity {:?}", id), body)?;
         }
 
-        for event in snapshot.graph.events.values() {
+        // Future reports must not enter the corpus at all: even a nonmatching
+        // document changes IDF and length normalization for visible hits.
+        for event in snapshot
+            .graph
+            .events
+            .values()
+            .filter(|event| event.tick <= snapshot.tick)
+        {
             let fields_text: Vec<String> = event
                 .fields
                 .iter()
