@@ -4,7 +4,7 @@
 
 #[path = "query_history_endpoints.rs"]
 mod endpoints;
-pub(super) use endpoints::compare_endpoints;
+pub(super) use endpoints::{compare_endpoints, compare_endpoints_with_output_budget};
 #[path = "query_session_release.rs"]
 mod session_release;
 pub(super) use session_release::release as release_session;
@@ -165,22 +165,7 @@ fn check_input(root: &Value) -> Result<()> {
 }
 
 fn validate_selection(selection: &Value) -> Result<()> {
-    let object = selection
-        .as_object()
-        .ok_or_else(|| invalid("capture select must be an entities query object"))?;
-    if object.get("kind").and_then(Value::as_str) != Some("entities")
-        || object.keys().any(|key| {
-            !matches!(
-                key.as_str(),
-                "kind" | "kinds" | "where" | "fields" | "order"
-            )
-        })
-    {
-        return Err(invalid(
-            "capture select supports entities, kinds, where, fields, order only; pagination is owned by the capture",
-        ));
-    }
-    Ok(())
+    super::validate_entities_selection(selection)
 }
 
 fn row_key(row: &Value) -> Result<RowKey> {
@@ -209,7 +194,33 @@ fn materialize(
     context: &OperationContext,
     selection: &Value,
 ) -> Result<(Rows, usize)> {
-    let started = std::time::Instant::now();
+    materialize_impl(
+        snapshot,
+        context,
+        selection,
+        std::time::Instant::now(),
+        false,
+    )
+}
+
+/// The verified archive owner supplies a retained source, while every page
+/// remains authorized by the current context under the comparison deadline.
+fn materialize_retained(
+    snapshot: &WorldSnapshot,
+    current: &OperationContext,
+    selection: &Value,
+    started: std::time::Instant,
+) -> Result<(Rows, usize)> {
+    materialize_impl(snapshot, current, selection, started, true)
+}
+
+fn materialize_impl(
+    snapshot: &WorldSnapshot,
+    context: &OperationContext,
+    selection: &Value,
+    started: std::time::Instant,
+    retained_source: bool,
+) -> Result<(Rows, usize)> {
     let mut input = json!({"schema":"dfmcp.query/1", "query":selection});
     let mut page_limit = context.budget.max_entities.min(8);
     let mut rows = Rows::new();
@@ -231,7 +242,18 @@ fn materialize(
             ));
         }
         input["query"]["limit"] = json!(page_limit);
-        let result = match super::execute(snapshot, context, &input) {
+        let page = if retained_source {
+            super::execute_retained_with_output_budget(
+                snapshot,
+                context,
+                &input,
+                context.budget.max_bytes,
+                started,
+            )
+        } else {
+            super::execute(snapshot, context, &input)
+        };
+        let result = match page {
             Ok(result) => result,
             Err(error) if error.code == ErrorCode::BudgetExceeded && page_limit > 1 => {
                 page_limit /= 2;

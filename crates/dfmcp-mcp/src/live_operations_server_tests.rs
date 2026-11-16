@@ -169,12 +169,33 @@ fn connected_operations_queries_inspect_real_items_buildings_and_paths() -> Resu
         None,
     ))?;
     assert_eq!(schema["ok"], true);
+    let full_schema = history::query_schema()?;
     assert_eq!(
-        schema["query_schema"]["$defs"]["query"]["oneOf"]
-            .as_array()
-            .map(Vec::len),
-        Some(21)
+        schema["query_schema"],
+        query_schema_projection::without_descriptions(&full_schema)
     );
+    assert_eq!(
+        schema["schema_annotations"]["descriptions_omitted_for_budget"],
+        true
+    );
+    assert_eq!(
+        schema["schema_annotations"]["validation_keywords_complete"],
+        true
+    );
+    assert_eq!(schema["truncated"], false);
+    assert!(schema.to_string().len() <= 8192 * 4);
+    for kind in ["history", "historical_query", "historical_changes"] {
+        assert_eq!(
+            schema["query_schema"]["$defs"]["query"]["oneOf"]
+                .as_array()
+                .map(|variants| variants
+                    .iter()
+                    .filter(|variant| { variant["properties"]["kind"]["const"] == kind })
+                    .count()),
+            Some(1),
+            "schema must publish {kind} exactly once",
+        );
+    }
     Ok(())
 }
 
@@ -334,4 +355,9 @@ mod production_cases {
 #[cfg(unix)]
 mod history_cases {
     include!("operations_history_tests.rs");
+}
+
+#[cfg(unix)]
+mod history_changes_cases {
+    include!("operations_history_changes_tests.rs");
 }

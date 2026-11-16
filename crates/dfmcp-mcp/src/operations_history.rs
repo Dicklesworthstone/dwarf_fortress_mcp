@@ -6,6 +6,8 @@ use serde::Deserialize;
 use std::path::PathBuf;
 use std::time::Instant;
 
+#[path = "operations_history_changes.rs"]
+mod changes;
 #[path = "operations_history_journal.rs"]
 mod journal;
 pub(super) use journal::Journal;
@@ -294,7 +296,7 @@ pub(super) fn handles(input: &Value) -> bool {
             .get("query")
             .and_then(|q| q.get("kind"))
             .and_then(Value::as_str),
-        Some("history" | "historical_query")
+        Some("history" | "historical_query" | "historical_changes")
     )
 }
 pub(super) fn execute(
@@ -302,6 +304,9 @@ pub(super) fn execute(
     context: &OperationContext,
     input: &Value,
 ) -> Result<String> {
+    if input["query"]["kind"] == "historical_changes" {
+        return changes::execute(session, context, input);
+    }
     let started = Instant::now();
     context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
     let request = parse(input, context)?;
@@ -470,5 +475,15 @@ pub(super) fn query_schema() -> Result<Value> {
         )
     })?;
     variants.extend(additions.iter().cloned());
+    let comparison = serde_json::from_str(include_str!(
+        "../../../schemas/mcp_operations_history_changes_v1.json"
+    ))
+    .map_err(|_| {
+        error(
+            ErrorCode::InternalInvariantViolation,
+            "invalid operations comparison schema",
+        )
+    })?;
+    variants.push(comparison);
     Ok(schema)
 }

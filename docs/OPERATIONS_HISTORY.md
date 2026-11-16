@@ -6,8 +6,9 @@ publishing their live anchors and reconstructs the exact version chain after a
 restart. Historical queries reuse the existing typed query engine without
 replacing the current snapshot or evaluating a live watch against old facts.
 
-This is source-present functionality. Rust execution, real filesystem crash
-qualification and live-game validation have not been established. The journal is
+The runtime integration and its exact verification scope are recorded in
+`IMPLEMENTATION_STATUS.md`. Full MCP execution, filesystem crash qualification
+and live-game validation have not been established. The journal is
 not the prospective FrankenSQLite MVCC backend, an effect ledger, a game/save
 checkpoint, a durable watch service, signed provenance or an anti-rollback floor.
 No production admission, dependency pin or native bridge byte changed. The
@@ -102,8 +103,14 @@ rollback. Hash chaining is integrity evidence, not authentication.
 
 ## Query the retained history
 
-Both operations profiles expose the existing `history` and `historical_query`
-variants. Other live runtimes retain their own query and archive contracts.
+Both operations profiles expose `history`, `historical_query` and
+`historical_changes`. Other live runtimes retain their own query and archive
+contracts. Schema discovery first returns the complete annotated schema. If
+its descriptions exceed the response allowance, it retries with every validation
+keyword intact and marks `schema_annotations.descriptions_omitted_for_budget`.
+Literal values, named properties, references and current active work are
+preserved. An allowance too small for the complete validation grammar still
+refuses explicitly.
 
 Pass this envelope to the existing `fortress.query` tool, with the session ID
 supplied normally. `mode="history"` is a convenience equivalent:
@@ -160,6 +167,71 @@ An existing session can inspect valid archived observations after its native
 source fails. This does not make the source healthy. The development binary
 still requires live bootstrap when opening a new session; an offline replay CLI
 or offline-only server has not been added.
+
+## Compare retained observations
+
+Both operations profiles accept `historical_changes` through the same
+`fortress.query` tool. List history first, then copy the exact record numbers
+and lowercase digests for the two endpoints. For example:
+
+```json
+{
+  "schema": "dfmcp.query/1",
+  "query": {
+    "kind": "historical_changes",
+    "from": {"record": 1, "record_digest": "<first record digest from history>"},
+    "to": {"record": 2, "record_digest": "<second record digest from history>"},
+    "select": {
+      "kind": "entities",
+      "kinds": ["item"],
+      "fields": ["stack_size"]
+    },
+    "limit": 16
+  }
+}
+```
+
+The result contains complete before/after rows for `changed_in_result`,
+`entered_result` and `left_result`, plus counts and digests of both complete
+selected projections. These are changes in selection membership: leaving a
+selection does not prove an object was destroyed. A reused entity ID with a
+new generation produces a separate departure and arrival. Observation-only
+provenance refreshes are counted without inventing a value change.
+
+Selectors use the existing entities grammar: `kinds`, `where`, `fields` and
+`order`. The comparison owns pagination, so `select.limit` and
+`select.continuation` are rejected. Unknown fields, invalid nested predicates
+and malformed selectors are rejected before archive replay. A comparison page
+has at most 128 change records; each complete endpoint selection is limited to
+256 rows and 256 KiB. Narrow fields and filters when a complete selected set
+would exceed those bounds. A returned continuation is bound to the exact
+records, selection, current session and anchor, archive identity and archive
+head. Changing the page width is permitted; appending a new observation or
+reopening the session invalidates the old continuation.
+
+Record order must be forward within one observation epoch. Comparing a record
+to itself produces an empty comparison. Crossing a reset is refused; a pair
+within a retained epoch can still be queried after the current session has
+reset, under its current Query grant. The selected ticks never replace the
+current authorization tick or renew an expired grant.
+
+Both complete endpoint sources share one negotiated record/byte allowance and
+one original foreground deadline, including verified replay, selection,
+comparison and publication. The first endpoint is admitted before acquiring
+the second; an identical endpoint is replayed and charged once. Complete
+source structure has the existing 16 MiB / four-million-work-unit ceiling.
+Response reservations account for archive evidence, the Agent Turn and current
+active work independently of source admission. A small selected result does
+not authorize an oversized source. No partial comparison is returned when
+source, selection, deadline or response admission fails.
+
+The owner rechecks the fixed profile, published anchor, exact record digests
+and current archive custody. A corrupted archive refuses and fences the live
+source. Historical Agent Turns name the target endpoint and explicitly report
+partial temporal continuity: they prove neither intervening events nor current
+game freshness. Their current active-work section is preserved without
+sampling watches, creating baselines, reading the native bridge, changing the
+current anchor or authorizing mutations.
 
 ## Format and bounds
 

@@ -1,5 +1,52 @@
 # Implementation Status
 
+## Unreleased — Compare exact retained operations observations
+
+Both operations profiles now accept `historical_changes` through the existing
+query tool. Exact journal record/digest pairs produce selected before/after
+facts, membership changes, generation departures/arrivals and provenance-only
+refresh counts without creating a baseline, sampling a watch, reading the
+native bridge or replacing the current anchor. Comparisons are forward within
+one retained epoch and explicitly prove only selected endpoint differences.
+
+Current authority governs both sources even after a current clock reset.
+Closed selector validation precedes disk replay; fixed profile, published
+anchor, record identity and archive custody are checked before disclosure and
+again before publication. Complete endpoint sources share one input allowance
+and original deadline, while the final response has an independent reservation.
+The first source is admitted before the second is acquired; identical endpoints
+are charged once. Continuations bind exact endpoints, selection, session,
+current anchor and archive head. No partial comparison is published.
+
+Schema discovery preserves the complete validation grammar within the default
+response allowance by omitting descriptions only when the full annotated
+schema cannot fit. Literal values, property/definition names, references,
+current work and all validation constraints remain intact; the response marks
+the omitted annotations. Larger allowances retain the full schema.
+
+Final exact-source focused execution passes 82 query/schema tests and 40
+selected journal tests. The query component links the real current core/world
+libraries and original query modules; all 73 source/manifests remained unchanged
+through execution and all 11 external packages match the repository lockfile.
+The journal component was relinked against the current real libraries and its
+source fingerprints remained unchanged. The large 40,000-item journal case
+was killed by SIGKILL and remains unqualified. All 138 schema cases pass for
+both full and compact forms (276 validations); scoped latest-nightly formatting
+and whitespace checks pass.
+
+Nineteen public-handler regressions cover the two increments; those handlers
+have not executed in the full MCP crate. A latest-nightly locked/offline MCP
+check was killed in unchanged Asupersync 0.5.0 before MCP compilation. The
+required `verify.sh` passed its first 20 gate groups, then stopped at bead
+coverage because the `br` executable is absent. Full workspace, transport,
+native-game and production admission are not established. Existing journal
+formats, native protocols, dependency pins and the eleven-tool surface remain
+unchanged; the concurrent future-fact and ordered-grouping changes are retained.
+
+See `docs/OPERATIONS_HISTORY.md` and `docs/OPERATIONS_PAGING.md`.
+Owner: `df-operations-paged-history-p6h`; full integration qualification remains
+open.
+
 ## Unreleased — Summarize several fortress dimensions in one query
 
 The existing structured aggregate query now accepts

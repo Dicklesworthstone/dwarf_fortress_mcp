@@ -19,7 +19,7 @@ fn remaining(context: &OperationContext, started: Instant) -> Result<OperationCo
 
 /// `binding` identifies the verified archive, current session and exact record
 /// pair. It is an identity checksum, not authorization. Current authority is
-/// checked before any historical anchor is substituted and after computation.
+/// checked throughout without substituting either historical source anchor.
 /// Neither the baseline store nor the watch store is read or modified.
 pub(in super::super) fn compare_endpoints(
     before: &WorldSnapshot,
@@ -29,6 +29,31 @@ pub(in super::super) fn compare_endpoints(
     binding: Digest32,
     limit: Option<u32>,
     continuation: Option<&str>,
+) -> Result<Value> {
+    compare_endpoints_with_output_budget(
+        before,
+        after,
+        context,
+        selection,
+        binding,
+        limit,
+        continuation,
+        context.budget.max_bytes,
+    )
+}
+
+/// `output_bytes` reserves only the final response. Complete selected sources
+/// retain the negotiated input budget and the same current authority/deadline.
+#[allow(clippy::too_many_arguments)]
+pub(in super::super) fn compare_endpoints_with_output_budget(
+    before: &WorldSnapshot,
+    after: &WorldSnapshot,
+    context: &OperationContext,
+    selection: &Value,
+    binding: Digest32,
+    limit: Option<u32>,
+    continuation: Option<&str>,
+    output_bytes: u64,
 ) -> Result<Value> {
     let started = Instant::now();
     remaining(context, started)?;
@@ -49,7 +74,7 @@ pub(in super::super) fn compare_endpoints(
         ));
     }
     let hard_limit = context.budget.max_entities.min(128);
-    let limit = limit.unwrap_or(hard_limit.min(16));
+    let limit = limit.map_or(hard_limit.min(16), |value| value);
     if limit == 0 || limit > hard_limit {
         return Err(invalid(
             "historical change limit exceeds the negotiated row allowance",
@@ -65,12 +90,14 @@ pub(in super::super) fn compare_endpoints(
             return Err(invariant("historical endpoint hash is invalid"));
         }
     }
-    let mut old_context = remaining(context, started)?;
-    old_context.anchor = basis;
-    let (old_rows, _) = materialize(before, &old_context, selection)?;
-    let mut new_context = remaining(context, started)?;
-    new_context.anchor = target;
-    let (new_rows, _) = materialize(after, &new_context, selection)?;
+    remaining(context, started)?;
+    let (old_rows, _) = materialize_retained(before, context, selection, started)?;
+    remaining(context, started)?;
+    let new_rows = if basis == target {
+        old_rows.clone()
+    } else {
+        materialize_retained(after, context, selection, started)?.0
+    };
     let before_digest = rows_digest(&old_rows)?;
     let after_digest = rows_digest(&new_rows)?;
     let identity = Digest32::of_bytes(&encode(&json!({
@@ -114,6 +141,7 @@ pub(in super::super) fn compare_endpoints(
         context
             .budget
             .max_bytes
+            .min(output_bytes)
             .min(u64::from(context.budget.max_output_tokens) * 4),
     )
     .map_err(|_| exhausted("historical comparison byte allowance overflow"))?;

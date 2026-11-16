@@ -36,6 +36,16 @@ pub(crate) fn anchor_json(anchor: StateAnchor) -> Value {
     core_query::anchor_json(anchor)
 }
 
+/// Bound untrusted retained-read input before cloning or deserializing it.
+pub(super) fn validate_retained_input(input: &Value) -> Result<()> {
+    core_query::validate_input(input)
+}
+
+/// Reuse the entity-query grammar before an archive owner replays any source.
+pub(super) fn validate_entities_selection(selection: &Value) -> Result<()> {
+    core_query::validate_entities_selection(selection)
+}
+
 /// Laboratory ownership chooses the evidence policy, never a caller argument.
 /// Publication accepts the complete candidate before any watch state changes.
 pub(super) fn execute_laboratory_watch_with_publisher<F>(
@@ -224,6 +234,31 @@ pub(super) fn compare_endpoints(
         binding,
         limit,
         continuation,
+    )
+}
+
+/// Preserve the negotiated source allowance while reserving the caller's
+/// enclosing response separately from the selected endpoint comparison.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn compare_endpoints_with_output_budget(
+    before: &WorldSnapshot,
+    after: &WorldSnapshot,
+    context: &OperationContext,
+    selection: &Value,
+    binding: Digest32,
+    limit: Option<u32>,
+    continuation: Option<&str>,
+    output_bytes: u64,
+) -> Result<Value> {
+    query_history::compare_endpoints_with_output_budget(
+        before,
+        after,
+        context,
+        selection,
+        binding,
+        limit,
+        continuation,
+        output_bytes,
     )
 }
 

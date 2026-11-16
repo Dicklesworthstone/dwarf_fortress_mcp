@@ -288,6 +288,59 @@ fn current_authority_cannot_be_revived_by_selecting_older_authorized_ticks() -> 
 }
 
 #[test]
+fn current_authority_after_reset_is_not_replaced_by_higher_archived_ticks() -> Result<()> {
+    let before = world(100, 0, &[(1, 1, 1)]);
+    let after = world(101, 1, &[(1, 1, 2)]);
+    let mut current = world(1, 0, &[(1, 2, 3)]);
+    current.cursor.epoch = 1;
+    current.refresh_hash();
+    let mut authority = context(&current);
+    authority.grants[0].expires_at_tick = Some(GameTick(50));
+    let result = compare_endpoints(
+        &before,
+        &after,
+        &authority,
+        &selection(),
+        Digest32::ZERO,
+        None,
+        None,
+    )?;
+    assert_eq!(result["change_count"], 1);
+    assert_eq!(result["anchor"], anchor_json(after.anchor()));
+    assert_eq!(authority.anchor, current.anchor());
+    assert_eq!(authority.grants[0].expires_at_tick, Some(GameTick(50)));
+    Ok(())
+}
+
+#[test]
+fn response_reservation_does_not_reduce_complete_endpoint_source_admission() -> Result<()> {
+    let values: Vec<_> = (1..=100).map(|id| (id, 1, id as i64)).collect();
+    let before = world(1, 0, &values);
+    let mut changed = values;
+    changed[0].2 = 101;
+    let after = world(2, 1, &changed);
+    let authority = context(&after);
+    let output_bytes = 8192;
+    assert!(before.canonical_bytes().len() as u64 > output_bytes);
+    let result = compare_endpoints_with_output_budget(
+        &before,
+        &after,
+        &authority,
+        &selection(),
+        Digest32::ZERO,
+        None,
+        None,
+        output_bytes,
+    )?;
+    assert_eq!(result["matched_before"], 100);
+    assert_eq!(result["matched_after"], 100);
+    assert_eq!(result["change_count"], 1);
+    assert_eq!(result["returned"], 1);
+    assert!(encode(&result)?.len() as u64 <= output_bytes);
+    Ok(())
+}
+
+#[test]
 fn tiny_response_or_invalid_selector_never_returns_an_empty_progress_page() -> Result<()> {
     let before = world(1, 0, &[(1, 1, 1)]);
     let after = world(2, 1, &[(1, 1, 2)]);

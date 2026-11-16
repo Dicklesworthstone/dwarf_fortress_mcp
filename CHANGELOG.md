@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased — Compare retained operations endpoints
+
+- Add `historical_changes` for exact retained operations/1.3 and 1.4 records,
+  including field changes, selected membership changes, reused generations and
+  provenance refresh counts through the existing query tool.
+- Preserve current grants, current work and one foreground deadline across
+  verified replay and comparison. Admit complete sources together, reserve
+  output independently, validate selectors before replay and recheck custody
+  before publication. Bind cursors to the full endpoint/session/archive identity.
+- Keep schema discovery usable at the default response allowance by removing
+  descriptive annotations only when necessary, with complete validation rules,
+  exact literal data and an explicit response flag.
+- Add nine comparison-handler regressions, four shared-query cases and three
+  schema-preservation cases. Final focused components pass 82 query/schema and
+  40 journal tests; both schema forms pass all 138 cases each. Full MCP handler
+  execution, the resource-killed large fixture and native admission remain open.
+- Preserve concurrent future-fact selection and ordered grouped-aggregate work.
+
 ## Unreleased — Group fortress summaries by multiple fields
 
 - Add the closed `group_by.kind: fields` aggregate variant with one to four

@@ -5,6 +5,8 @@
 mod history;
 #[path = "live_operations_paged_server.rs"]
 pub mod paged;
+#[path = "query_schema_projection.rs"]
+mod query_schema_projection;
 // Shared module compiled into several servers; each copy uses a subset.
 #[allow(dead_code, clippy::duplicate_mod)]
 #[path = "operations_production.rs"]
@@ -656,7 +658,7 @@ fn finish_query(view: &QueryResponseProjection, value: Value) -> Result<String> 
     Ok(encoded)
 }
 #[tool(
-    description = "Query the coherent operations snapshot with typed filters, aggregates, graph relations, search, baselines and watches. Modes: schema, summary, jobs, buildings, items, production, history. Optional profile-bound durable history supports exact historical queries under current authority in both 1.3 and paged 1.4. Production diagnosis joins observed conditions; inventory_plan allocates declared stack-unit demands without reserving or proving usable supply. furniture_allocation selects distinct observed items for every bed/chair/table target or explains a complete shortage; fresh placement review is required."
+    description = "Query the coherent operations snapshot with typed filters, aggregates, graph relations, search, baselines and watches. Modes: schema, summary, jobs, buildings, items, production, history. Optional profile-bound durable history supports exact historical queries and historical_changes between retained records under current authority in both 1.3 and paged 1.4. Production diagnosis joins observed conditions; inventory_plan allocates declared stack-unit demands without reserving or proving usable supply. furniture_allocation selects distinct observed items for every bed/chair/table target or explains a complete shortage; fresh placement review is required."
 )]
 pub fn fortress_query(
     session_id: Option<String>,
@@ -750,12 +752,24 @@ pub fn fortress_query(
             narrowed.budget.max_bytes = view.result_byte_budget()? as u64;
             if schema {
                 let schema = history::query_schema()?;
-                return semantic_query::publish_with_active_work(
-                    &context,
-                    json!({"query_schema":schema,"mode":"schema",
-                "profile":format!("operations/{}",session.state.profile().protocol()),"source_stale":session.source.poisoned(),"truncated":false,"continuation":null}),
-                    |value| finish_query(&view, value),
-                );
+                let publish = |query_schema: Value, descriptions_omitted: bool| {
+                    let mut value = json!({"query_schema":query_schema,"mode":"schema",
+                        "profile":format!("operations/{}",session.state.profile().protocol()),
+                        "source_stale":session.source.poisoned(),"truncated":false,"continuation":null});
+                    if descriptions_omitted {
+                        value["schema_annotations"] = json!({"descriptions_omitted_for_budget":true,
+                            "validation_keywords_complete":true});
+                    }
+                    semantic_query::publish_with_active_work(&context, value, |value| {
+                        finish_query(&view, value)
+                    })
+                };
+                return match publish(schema.clone(), false) {
+                    Err(failure) if failure.code == ErrorCode::BudgetExceeded => {
+                        publish(query_schema_projection::without_descriptions(&schema), true)
+                    }
+                    result => result,
+                };
             }
             if production::handles(&input) {
                 let result_context = semantic_query::result_context(&narrowed)?;

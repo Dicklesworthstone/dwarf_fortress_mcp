@@ -159,7 +159,9 @@ profile append is synced. A failed append or capture preserves the last
 published anchor and fences the live source.
 
 Use `mode="history"` to list exact retained records and `historical_query` to
-inspect one by its record number and digest. Queries perform no native reads,
+inspect one by its record number and digest. Use `historical_changes` to compare
+complete selected item, building or job facts at two exact retained endpoints.
+Queries perform no native reads,
 keep current session authority and active work, and explicitly label past
 evidence as historical. Selecting an earlier epoch or larger historical tick
 cannot renew expired grants or expire a grant still valid at the current tick.

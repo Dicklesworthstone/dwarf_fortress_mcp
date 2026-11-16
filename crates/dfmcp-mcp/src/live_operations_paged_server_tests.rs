@@ -201,12 +201,26 @@ fn large_paged_projection_uses_existing_queries_baselines_and_watches() -> Resul
     ))?;
     assert_eq!(schema["ok"], true);
     assert_eq!(schema["profile"], "operations/1.4");
+    let full_schema = history::query_schema()?;
+    assert_eq!(schema["query_schema"], full_schema);
     assert_eq!(
-        schema["query_schema"]["$defs"]["query"]["oneOf"]
-            .as_array()
-            .map(Vec::len),
-        Some(21)
+        query_schema_projection::without_descriptions(&schema["query_schema"]),
+        query_schema_projection::without_descriptions(&full_schema)
     );
+    assert!(schema.get("schema_annotations").is_none());
+    assert_eq!(schema["truncated"], false);
+    for kind in ["history", "historical_query", "historical_changes"] {
+        assert_eq!(
+            schema["query_schema"]["$defs"]["query"]["oneOf"]
+                .as_array()
+                .map(|variants| variants
+                    .iter()
+                    .filter(|variant| { variant["properties"]["kind"]["const"] == kind })
+                    .count()),
+            Some(1),
+            "schema must publish {kind} exactly once",
+        );
+    }
     assert_eq!(session.query(json!({"kind":"history"}))?["ok"], false);
     assert_eq!(
         parse(&super::super::fortress_commit(Some(session.id.to_string())))?["error"]["code"],

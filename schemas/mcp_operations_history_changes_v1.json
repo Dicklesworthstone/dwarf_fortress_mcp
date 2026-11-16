@@ -1,0 +1,81 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "from",
+    "to",
+    "select"
+  ],
+  "description": "Read-only comparison of complete selected projections at two verified records in the session's fixed operations/1.3 or operations/1.4 journal. Records must be in forward order in the same observation epoch. Current session authority governs both sources. Each selection is bounded to 256 rows and 256 KiB. No baseline, monitoring work or game effect is created.",
+  "properties": {
+    "kind": {
+      "const": "historical_changes"
+    },
+    "from": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "record",
+        "record_digest"
+      ],
+      "properties": {
+        "record": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4096
+        },
+        "record_digest": {
+          "type": "string",
+          "minLength": 64,
+          "maxLength": 64,
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "to": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "record",
+        "record_digest"
+      ],
+      "properties": {
+        "record": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4096
+        },
+        "record_digest": {
+          "type": "string",
+          "minLength": 64,
+          "maxLength": 64,
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "select": {
+      "$ref": "#/$defs/capture_selection"
+    },
+    "limit": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1,
+      "maximum": 128
+    },
+    "continuation": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 128,
+      "pattern": "^qh1:[1-9][0-9]*:[0-9a-f]{64}$",
+      "not": {
+        "type": "string",
+        "pattern": "\\s"
+      }
+    }
+  }
+}

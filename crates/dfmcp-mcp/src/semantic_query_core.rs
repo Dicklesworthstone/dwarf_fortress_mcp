@@ -194,6 +194,47 @@ pub(super) fn validate_input(input: &Value) -> Result<()> {
     Ok(())
 }
 
+/// Validate a complete selected projection before acquiring either source.
+/// Pagination belongs to the capture/comparison owner, while selector decoding
+/// and normalization use the same closed grammar as ordinary entity queries.
+pub(super) fn validate_entities_selection(selection: &Value) -> Result<()> {
+    validate_input(selection)?;
+    let object = selection
+        .as_object()
+        .ok_or_else(|| invalid("select must be an entities query object"))?;
+    if object.get("kind").and_then(Value::as_str) != Some("entities")
+        || object.keys().any(|key| {
+            !matches!(
+                key.as_str(),
+                "kind" | "kinds" | "where" | "fields" | "order"
+            )
+        })
+    {
+        return Err(invalid(
+            "select supports entities, kinds, where, fields and order only; pagination belongs to its owner",
+        ));
+    }
+    let query: Query = serde_json::from_value(selection.clone())
+        .map_err(|error| invalid(format!("invalid entities selection: {error}")))?;
+    let Query::Entities {
+        kinds,
+        predicate,
+        fields,
+        ..
+    } = query
+    else {
+        return Err(invalid("select must be an entities query"));
+    };
+    bounded_names(fields, 32)?;
+    for kind in bounded_names(kinds, 32)? {
+        entity_kind(&kind)?;
+    }
+    if let Some(predicate) = predicate {
+        predicate.into_world()?.validate_shape()?;
+    }
+    Ok(())
+}
+
 pub(super) fn bounded_names(mut names: Vec<String>, maximum: usize) -> Result<Vec<String>> {
     if names.len() > maximum
         || names
@@ -941,6 +982,52 @@ mod tests {
     }
     fn envelope(query: Value) -> Value {
         json!({"schema":SCHEMA,"query":query})
+    }
+
+    #[test]
+    fn complete_selection_validation_reuses_typed_filter_grammar_without_a_source() -> Result<()> {
+        for selection in [
+            json!({"kind":"entities"}),
+            json!({"kind":"entities","kinds":["unit","unit","other:custom"],
+            "fields":["sane","sane"],"order":"revision_descending", "where":{
+                "op":"all","args":[
+                    {"op":"compare","field":"sane","comparison":"eq",
+                        "value":{"type":"bool","value":true}},
+                    {"op":"not","arg":{"op":"any","args":[
+                        {"op":"compare","field":"target","comparison":"ne",
+                            "value":{"type":"entity","value":"18446744073709551615"}}]}}
+                ]}}),
+        ] {
+            validate_entities_selection(&selection)?;
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn complete_selection_rejects_invalid_nested_selectors_and_owned_pagination() {
+        for selection in [
+            Value::Null,
+            json!({"kind":"inspect","entity_id":"1","generation":1}),
+            json!({"kind":"entities","limit":null}),
+            json!({"kind":"entities","continuation":null}),
+            json!({"kind":"entities","kinds":["unknown_kind"]}),
+            json!({"kind":"entities","kinds":"unit"}),
+            json!({"kind":"entities","fields":[""]}),
+            json!({"kind":"entities","fields":vec!["value";33]}),
+            json!({"kind":"entities","order":"native_order"}),
+            json!({"kind":"entities","where":{"op":"all","args":[
+                {"op":"compare","field":"target","comparison":"eq",
+                    "value":{"type":"entity","value":"01"}}]}}),
+            json!({"kind":"entities","where":{"op":"not","arg":{
+                "op":"compare","field":"value","comparison":"eq",
+                    "value":{"type":"i64","value":1},"unsupported":true}}}),
+            json!({"kind":"entities","where":{"op":"entity_quantity"}}),
+        ] {
+            assert!(
+                validate_entities_selection(&selection).is_err(),
+                "accepted malformed retained selection: {selection}"
+            );
+        }
     }
 
     #[test]
