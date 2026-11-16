@@ -1,5 +1,27 @@
 # Implementation Status
 
+## Unreleased — Keep future facts out of source-bound query results
+
+Typed field comparisons now treat observations later than the selected world
+tick as Unknown. Negation and Boolean composition preserve that uncertainty;
+a retained historical query uses its own source tick. Prior and same-tick
+Known facts remain eligible without a new age policy.
+
+Operational aggregates and lexical matching now apply the same time boundary
+to Known fact values. Future numeric samples are excluded explicitly, future
+group keys retain only their unavailable state, and future text cannot create
+a lexical hit. Existing unavailable/contradicted categories stay masked.
+
+Focused world and operational regression sources cover temporal boundaries,
+negation, exact numeric sample accounting, grouped-value masking and lexical
+selection. The changes received independent source review. These new Rust
+tests, formatting and full verification have not executed: the build host
+became unavailable after the pinned dependency fetch exhausted its cache
+filesystem. This is source implementation, not current-head qualification.
+
+See `docs/QUERY_EXECUTION.md`. Owner:
+`df-lab-structured-query-f7q.6`; executable verification remains open.
+
 ## Unreleased — Query duration-aware schedules through the existing tool
 
 The default laboratory `query` tool now accepts

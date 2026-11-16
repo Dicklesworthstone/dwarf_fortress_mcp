@@ -71,8 +71,10 @@ BREW enabled can be selected with:
 
 This is the `request.query` object, not another top-level tool argument.
 Unknown, omitted, redacted, stale or inconsistent facts never become matches
-through negation. Projected facts retain their presence, source, observation
-tick and epistemic class; unavailable compatibility values are not returned.
+through negation. Field comparisons also treat facts observed after the selected
+snapshot tick as Unknown, including for retained historical reads. Projected
+facts retain their presence, source, observation tick and epistemic class;
+unavailable compatibility values are not returned.
 
 An aggregate can group units by profession without dumping their records:
 
@@ -93,8 +95,11 @@ Optional numerical metrics name a field and an exact type:
 ```
 
 `i64`, `u64` and `fixed` are supported; `fixed` also requires its scale.
-Results separate excluded/unavailable inputs from actual samples. Sums,
-minima and maxima use decimal integer strings; a mean is an exact rational.
+Results separate excluded/unavailable inputs from actual samples. A future-dated
+numeric fact increments `excluded.future`; a future grouping fact produces a
+`future` key without exposing its value. Prior and same-tick Known facts remain
+eligible. Sums, minima and maxima use decimal integer strings; a mean is an
+exact rational.
 These are advisory statistics over the selected projection, not a complete
 stock or mutation-precondition certificate.
 

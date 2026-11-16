@@ -219,10 +219,18 @@ fn kinds(values: Vec<String>) -> Result<BTreeSet<String>> {
 }
 
 /// Never expose a stale/redacted backing value or conflicting Known payload.
-fn presence(fact: Option<&Fact>) -> (&'static str, Option<&WorldValue>) {
+fn presence(
+    fact: Option<&Fact>,
+    source_tick: dfmcp_core::GameTick,
+) -> (&'static str, Option<&WorldValue>) {
     let Some(fact) = fact else {
         return ("unobserved", None);
     };
+    // Retain unavailable/contradictory classifications and never expose their
+    // backing values. A consistent Known value still needs source-time validity.
+    if fact.observed_at > source_tick && fact.known_value().is_some() {
+        return ("future", None);
+    }
     match &fact.presence {
         None => ("known", Some(&fact.value)),
         Some(FactPresence::Known(value)) if value == &fact.value => ("known", Some(value)),
@@ -469,8 +477,13 @@ struct MetricState {
 }
 
 impl MetricState {
-    fn add(&mut self, spec: &Metric, fact: Option<&Fact>) -> Result<()> {
-        let (state, value) = presence(fact);
+    fn add(
+        &mut self,
+        spec: &Metric,
+        fact: Option<&Fact>,
+        source_tick: dfmcp_core::GameTick,
+    ) -> Result<()> {
+        let (state, value) = presence(fact, source_tick);
         let number = match (spec.numeric_type, value) {
             (NumericType::I64, Some(WorldValue::I64(value))) => Some(i128::from(*value)),
             (NumericType::U64, Some(WorldValue::U64(value))) => Some(i128::from(*value)),
@@ -534,11 +547,15 @@ struct Group {
     metrics: Vec<MetricState>,
 }
 
-fn group_key(entity: &EntityRecord, group_by: Option<&GroupBy>) -> Result<GroupKey> {
+fn group_key(
+    entity: &EntityRecord,
+    group_by: Option<&GroupBy>,
+    source_tick: dfmcp_core::GameTick,
+) -> Result<GroupKey> {
     Ok(match group_by {
         None => GroupKey::All,
         Some(GroupBy::EntityKind) => GroupKey::Kind(kind_name(&entity.kind)),
-        Some(GroupBy::Field { field }) => match presence(entity.fields.get(field)) {
+        Some(GroupBy::Field { field }) => match presence(entity.fields.get(field), source_tick) {
             (_, Some(value)) => {
                 scalar(value)?;
                 GroupKey::Known(value.clone())
@@ -741,7 +758,7 @@ fn aggregate(
                 }
             }
         }
-        let key = group_key(entity, group_by.as_ref())?;
+        let key = group_key(entity, group_by.as_ref(), snapshot.tick)?;
         if !groups.contains_key(&key) && groups.len() >= *max_groups {
             return Err(exhausted(
                 "aggregate group cardinality exceeded max_groups; no partial summary was published",
@@ -754,7 +771,7 @@ fn aggregate(
         group.count += 1;
         matched += 1;
         for (state, spec) in group.metrics.iter_mut().zip(metrics) {
-            state.add(spec, entity.fields.get(&spec.field))?;
+            state.add(spec, entity.fields.get(&spec.field), snapshot.tick)?;
         }
     }
     let rows = groups
@@ -1106,7 +1123,7 @@ fn search(
         }
         for field in &spec.text_fields {
             let fact = entity.fields.get(field);
-            match presence(fact) {
+            match presence(fact, snapshot.tick) {
                 (_, Some(WorldValue::Text(text))) => {
                     if match_text(text, &terms, &mut found, &mut scanned)? {
                         // Borrow the key from the canonical entity, never a temporary selector.
@@ -2118,3 +2135,7 @@ mod tests {
 #[cfg(test)]
 #[path = "aggregate_selection_query_tests.rs"]
 mod aggregate_selection_tests;
+
+#[cfg(test)]
+#[path = "operational_query_future_tests.rs"]
+mod future_tests;

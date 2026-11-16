@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased — Respect snapshot time in query evidence
+
+- Treat future-dated field comparisons as Unknown in the shared evaluator,
+  including negation and retained-source reads.
+- Exclude future Known numeric samples with `excluded.future`, mask future
+  grouping values, and ignore future fact-valued lexical text.
+- Preserve older/same-tick Known facts, explicit unavailable states, exact
+  integer statistics and existing query authority/output limits.
+- Add focused world and operational regressions. Independent source review
+  is complete; final Rust compilation, tests, formatting and full qualification
+  remain unexecuted after execution-host loss.
+
 ## Unreleased — Expose dependency schedules in laboratory queries
 
 - Add the closed `dfmcp.dependency-schedule/1` structured query and schema

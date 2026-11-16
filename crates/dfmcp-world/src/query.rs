@@ -559,6 +559,9 @@ fn evaluate_truth(
             .entities
             .get(&target_entity(*entity_id, candidate))
             .and_then(|entity| entity.fields.get(field))
+            // Historical queries use their selected source tick, not a newer
+            // current world that could make a future-dated value look known.
+            .filter(|fact| fact.observed_at <= snapshot.tick)
             .and_then(Fact::known_value)
             .map_or(PredicateTruth::Unknown, |known| compare(known, *op, value)),
         Predicate::EdgeExists { edge_id, kind } => {
@@ -1611,3 +1614,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "query_future_tests.rs"]
+mod future_tests;

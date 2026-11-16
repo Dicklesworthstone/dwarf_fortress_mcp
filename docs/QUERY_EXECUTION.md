@@ -86,6 +86,27 @@ source anchor in its normal Agent Turn. Search results are advisory retrieval
 over the supplied projection. Neither an empty result nor a known value alone
 proves complete-world absence, source authenticity or mutation eligibility.
 
+## Facts must belong to the selected source tick
+
+Typed field comparisons use only facts whose observation tick is at or before
+the selected snapshot tick. A future-dated fact yields Unknown, including under
+`not`; it cannot enter an aggregate, search or entity selection through a
+negated comparison. This rule uses the selected source tick on retained reads,
+not the current session tick. A consistently Known fact observed at that tick
+or earlier remains eligible; this rule does not impose an additional age limit.
+
+Aggregate grouping and numeric metrics apply the same time boundary before
+using a Known value. Future-dated grouping facts produce an unavailable
+`future` key with no backing value. Future numeric samples increment
+`excluded.future`; they do not increment sample counts or become zero.
+Metric totals, extrema and means therefore depend only on temporally eligible
+samples. Existing unavailable and contradictory values remain masked.
+
+Lexical matching also ignores future-dated fact-valued text fields and counts
+them in `unavailable_or_nontext_fields`. The observation tick does not turn
+inferred or assumed provenance into observed authority. These are source-bound
+query eligibility rules, not a complete-world or mutation certificate.
+
 ## Filtered operational aggregates
 
 The stateless `dfmcp.query/1` aggregate accepts the same typed `where` grammar as
