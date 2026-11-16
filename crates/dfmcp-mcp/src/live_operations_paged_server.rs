@@ -66,6 +66,8 @@ fn allowed_paged_environment(name: &str) -> bool {
             "DFMCP_ALLOW_UNADMITTED_OPERATIONS_V1_4"
                 | "DFMCP_OPERATIONS_PAGED_TOKEN"
                 | "DFMCP_OPERATIONS_PAGED_ENDPOINT"
+                | "DFMCP_OPERATIONS_PAGED_JOURNAL"
+                | "DFMCP_OPERATIONS_PAGED_JOURNAL_REPAIR"
         )
 }
 fn validate_paged_environment() -> Result<()> {
@@ -78,14 +80,14 @@ fn validate_paged_environment() -> Result<()> {
     {
         return Err(error(
             ErrorCode::CapabilityDenied,
-            "operations/1.4 requires its exact development opt-in and refuses other profiles, journals, or production admission environment",
+            "operations/1.4 requires its exact development opt-in and refuses other profiles or production admission environment",
         ));
     }
     Ok(())
 }
 
 #[tool(
-    description = "Open a read-only operations/1.4 session. Capture one coherent native world and transfer immutable pages. Supports up to 65536 items and 16 MiB, not arbitrary-size worlds. Profile, credentials and endpoint are fixed by the operator; no game effects or durable archive are enabled."
+    description = "Open a read-only operations/1.4 session. Capture one coherent native world and transfer immutable pages. Supports up to 65536 items and 16 MiB, not arbitrary-size worlds. Profile, credentials, endpoint and optional profile-bound durable history are fixed by the operator; no game effects are enabled."
 )]
 #[allow(clippy::too_many_arguments)]
 pub fn fortress_open_session(
@@ -101,6 +103,16 @@ pub fn fortress_open_session(
     let result = (|| -> Result<String> {
         validate_paged_environment()?;
         let capabilities = capabilities(requested_capabilities)?;
+        let journal_configuration = history::paged_configuration()?;
+        if journal_configuration.is_some()
+            && (!capabilities.contains(&Capability::Query)
+                || !capabilities.contains(&Capability::Observe))
+        {
+            return Err(error(
+                ErrorCode::CapabilityDenied,
+                "durable observation sessions require Query and Observe authority",
+            ));
+        }
         let paged = PagedOperationsLimits {
             jobs: max_jobs.unwrap_or(4096),
             buildings: max_buildings.unwrap_or(4096),
@@ -203,7 +215,11 @@ pub fn fortress_open_session(
             request: 0,
             _slot: slot,
         };
-        let context = session.context()?;
+        let mut context = session.context()?;
+        if let Some((path, repair)) = journal_configuration {
+            history::attach(&mut session, &path, repair, &context)?;
+            context.anchor = session.anchor()?;
+        }
         let response = packet(
             Some(&session),
             Some(&context),
@@ -211,7 +227,7 @@ pub fn fortress_open_session(
             json!({"ok":true,
             "granted_capabilities":capabilities.iter().map(|v|v.as_str()).collect::<Vec<_>>(),
             "acquisition":{"kind":"immutable_native_snapshot_pages","page_bytes":paged.page_bytes,
-                "maximum_payload_bytes":paged.payload_bytes,"maximum_items":paged.items,"durable_archive":false,
+                "maximum_payload_bytes":paged.payload_bytes,"maximum_items":paged.items,"durable_archive":session.journal.is_some(),
                 "snapshot_tick_is_capture_tick":true,"game_may_advance_during_transfer":true},
             "schema_discovery":{"tool":"fortress.query","arguments":{"session_id":id.to_string(),"mode":"schema"}}}),
         )?;
@@ -242,7 +258,7 @@ pub fn run_stdio() {
         .tool(self::FortressOpenSession).tool(super::FortressObserve).tool(super::FortressQuery).tool(super::FortressPlan)
         .tool(super::FortressCommit).tool(super::FortressWait).tool(super::FortressCancel).tool(super::FortressCheckpoint)
         .tool(super::FortressRestore).tool(super::FortressExplain).tool(super::FortressDoctor).request_timeout(60)
-        .instructions("Explicitly unadmitted operations/1.4. Open a paged session first. Jobs, buildings and inventory share one native capture; all pages are verified before publication. Snapshot game time is the capture time, not the transfer-completion time. Existing queries, production diagnosis, conditional allocation, baselines and foreground watches are available within their own budgets. furniture_allocation selects distinct items for every bed/chair/table target or explains a complete shortage; its furniture-plan requires fresh placement review. No live effects, map coverage, citizen data, durable journal or production admission. A failed acquisition preserves the prior snapshot and fences the source.")
+        .instructions("Explicitly unadmitted operations/1.4. Open a paged session first. Jobs, buildings and inventory share one native capture; all pages are verified before publication. Snapshot game time is the capture time, not the transfer-completion time. Existing queries, production diagnosis, conditional allocation, baselines and foreground watches are available within their own budgets. furniture_allocation selects distinct items for every bed/chair/table target or explains a complete shortage; its furniture-plan requires fresh placement review. An operator-configured operations/1.4 journal syncs complete captures before publication and retains exact history across restarts. history lists retained endpoints; historical_query inspects an exact record under current authority without restoring work or proving current freshness. Other profiles' archives cannot be reinterpreted. No live effects, map coverage, citizen data or production admission. A failed acquisition or journal publication preserves the prior snapshot and fences the source.")
         .build();
     crate::run_modern_stdio(server);
 }

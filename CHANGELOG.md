@@ -15,6 +15,21 @@
   references. Rust compilation, test execution and final formatting remain
   unverified after execution-host loss.
 
+## Unreleased — Durable history for paged operations sessions
+
+- Connect the existing operations/1.4 journal to the paged MCP runtime with
+  separate operator configuration, exact profile refusal, sync-before-publish
+  ordering, restart recovery and preserved observed entity generations.
+- Enable retained history listing and exact historical queries in both
+  operations profiles without native reads, restored handles or game effects.
+- Keep historical query authorization at the current session anchor, including
+  clock resets; share the original foreground deadline and separate complete
+  source allowance from response reservations.
+- Add ten real-file/public-handler regression functions for replay, large
+  archives, authority, response bounds, corruption, custody and repair. Scoped
+  formatting and independent source review pass; full MCP test execution and
+  native admission have not yet been established.
+
 ## Unreleased — Respect snapshot time in query evidence
 
 - Treat future-dated field comparisons as Unknown in the shared evaluator,

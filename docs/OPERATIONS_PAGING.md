@@ -35,8 +35,9 @@ cargo run --locked --bin dfmcp-live-operations-paged-dev-server
 ```
 
 The public library entry repeats the opt-in check. Other `DFMCP_*` settings,
-including old-profile credentials, all admission state, and journal/repair paths,
-are rejected. There is no client-selectable protocol, method, plugin, path or
+including old-profile credentials and journal paths and all admission state,
+are rejected. Optional history uses only this profile's own journal configuration
+described below. There is no client-selectable protocol, method, plugin, path or
 native address. Only Observe, Query and Doctor grants can be issued.
 
 ## Bounds
@@ -125,14 +126,52 @@ methods remain operations/1.3 with their existing 32,768-item/2-MiB limits and
 provenance even for a small otherwise identical roster. Semantic entity and edge
 keys are shared where their meanings are unchanged; full anchors bind the profile.
 
-Operations schema discovery exposes nineteen nonhistorical variants for 1.4.
-The existing 1.3 entry exposes twenty-one variants, including history.
+Operations schema discovery exposes the same bounded history and stateless query
+variants for both operations profiles. Historical queries require a journal for
+the exact profile selected by the server.
 `furniture_allocation` selects distinct exact items for a complete layout;
 `FURNITURE_ALLOCATION_MCP.md` documents its full-result budget and placement handoff.
-The durable archive currently replays 1.3 records only. The paged entry rejects
-journal configuration and historical queries instead of silently interpreting
-old records as new-profile evidence. Paged observations, watches and baselines
-remain process-local. Native snapshot tokens are not archive record identities.
+Paged observations can be retained in their own durable archive. Watches and
+baselines remain process-local. Native snapshot tokens are not archive record
+identities.
+
+## Durable history and restart
+
+Set `DFMCP_OPERATIONS_PAGED_JOURNAL` to an absolute normalized file path in an
+existing private directory to retain complete observations. The directory must
+have mode `0700`; the regular, single-link journal has mode `0600` and an
+exclusive writer lock. The optional exact value
+`DFMCP_OPERATIONS_PAGED_JOURNAL_REPAIR=1` permits repair only of a verified
+incomplete trailing frame. These settings are operator configuration, never
+MCP arguments. The 1.3 journal variables are rejected by this server.
+
+Journalled sessions require Observe and Query at opening. Bootstrap captures
+one complete authenticated 1.4 observation, verifies the existing archive, and
+syncs the new observation before publishing the recovered current state. Exact
+heartbeats do not append a duplicate. Restarts retain the canonical sequence,
+source anchors and observed entity generations; session handles, grants,
+baselines and watches are newly established.
+
+The file uses the existing `operations/1.4` profile and `DFMPJ001` header. A
+1.3 archive cannot be reopened as 1.4, even with repair enabled. No migration or
+protocol inference occurs. Later captures are published only after a matching
+profile append is synced. A failed append or capture preserves the last
+published anchor and fences the live source.
+
+Use `mode="history"` to list exact retained records and `historical_query` to
+inspect one by its record number and digest. Queries perform no native reads,
+keep current session authority and active work, and explicitly label past
+evidence as historical. Selecting an earlier epoch or larger historical tick
+cannot renew expired grants or expire a grant still valid at the current tick.
+The complete replay and query share one foreground deadline; source byte
+allowances remain separate from the output reserved for the Agent Turn.
+
+Archive retention defaults remain 64 MiB and 1,024 changed observations.
+Native acquisition limits do not enlarge individual query bounds: a captured
+world may exceed the complete-source structural or canonical-byte allowance
+of a particular structured query and be refused explicitly. See
+[operations history](OPERATIONS_HISTORY.md) for exact custody, replay,
+continuation and integrity limits.
 
 ## Validation performed and still required
 
@@ -167,5 +206,5 @@ real generated DF header build, protobuf linking, plugin loading, a live-game
 campaign, full repository qualification or production admission.
 
 Still absent: paging beyond these bounded roster/payload ceilings, incremental
-native capture, 1.4 durable archive integration, coherent citizen/announcement or
+native capture, coherent citizen/announcement or
 map coverage, full native requirement/path feasibility, and live game mutations.

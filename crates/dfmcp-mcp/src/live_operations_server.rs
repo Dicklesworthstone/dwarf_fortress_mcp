@@ -102,11 +102,7 @@ struct OperationsSession {
     id: SessionId,
     source: Box<dyn OperationsSource>,
     state: LiveOperationsState,
-    journal: Option<
-        dfmcp_adapter::operations_journal::OperationsJournal<
-            dfmcp_adapter::operations_journal::PrivateJournalFile,
-        >,
-    >,
+    journal: Option<history::Journal>,
     limits: OperationsLimits,
     budget: WorkBudget,
     grants: Vec<CapabilityGrant>,
@@ -142,6 +138,7 @@ impl OperationsSession {
         })
     }
     fn refresh(&mut self, context: &OperationContext) -> Result<JobPublication> {
+        let started = std::time::Instant::now();
         context.authorize(Capability::Observe, RiskTier::ReadOnly, &[], None)?;
         if context.anchor != self.anchor()? {
             return Err(error(ErrorCode::StaleAnchor, "operations refresh is stale"));
@@ -154,7 +151,7 @@ impl OperationsSession {
         }
         if let Some(journal) = &self.journal {
             context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
-            if self.state.profile() != OperationsProfile::V1_3
+            if self.state.profile() != journal.profile()
                 || journal.fenced()
                 || journal.state().snapshot().map(|s| s.anchor()) != Some(context.anchor)
             {
@@ -180,7 +177,8 @@ impl OperationsSession {
                 }
                 match self.journal.as_mut() {
                     Some(journal) => {
-                        let outcome = journal.append(value, context)?;
+                        let outcome = journal
+                            .append(value, &history::remaining_context(context, started)?)?;
                         self.state = journal.state().clone();
                         Ok(outcome)
                     }
@@ -658,7 +656,7 @@ fn finish_query(view: &QueryResponseProjection, value: Value) -> Result<String> 
     Ok(encoded)
 }
 #[tool(
-    description = "Query the coherent operations snapshot with typed filters, aggregates, graph relations, search, baselines and watches. Modes: schema, summary, jobs, buildings, items, production. History requires a compatible durable journal and is unavailable in the paged 1.4 profile. Production diagnosis joins observed conditions; inventory_plan allocates declared stack-unit demands without reserving or proving usable supply. furniture_allocation selects distinct observed items for every bed/chair/table target or explains a complete shortage; fresh placement review is required."
+    description = "Query the coherent operations snapshot with typed filters, aggregates, graph relations, search, baselines and watches. Modes: schema, summary, jobs, buildings, items, production, history. Optional profile-bound durable history supports exact historical queries under current authority in both 1.3 and paged 1.4. Production diagnosis joins observed conditions; inventory_plan allocates declared stack-unit demands without reserving or proving usable supply. furniture_allocation selects distinct observed items for every bed/chair/table target or explains a complete shortage; fresh placement review is required."
 )]
 pub fn fortress_query(
     session_id: Option<String>,
@@ -710,12 +708,6 @@ pub fn fortress_query(
                 .and_then(Value::as_str)
                 .unwrap_or("");
             if !schema && history::handles(&input) {
-                if session.state.profile() != OperationsProfile::V1_3 {
-                    return Err(error(
-                        ErrorCode::InvalidRequest,
-                        "durable archive queries are not implemented for operations/1.4; 1.3 archives cannot be reinterpreted",
-                    ));
-                }
                 let result = history::execute(session, &context, &input);
                 if matches!(&result,Err(failure) if failure.code==ErrorCode::CorruptLedger) {
                     session.source.fence();
@@ -757,11 +749,7 @@ pub fn fortress_query(
             let mut narrowed = context.clone();
             narrowed.budget.max_bytes = view.result_byte_budget()? as u64;
             if schema {
-                let schema = if session.state.profile() == OperationsProfile::V1_3 {
-                    history::query_schema()?
-                } else {
-                    production::query_schema()?
-                };
+                let schema = history::query_schema()?;
                 return semantic_query::publish_with_active_work(
                     &context,
                     json!({"query_schema":schema,"mode":"schema",
@@ -892,3 +880,7 @@ mod tests;
 #[cfg(test)]
 #[path = "operations_furniture_tests.rs"]
 mod furniture_tests;
+
+#[cfg(all(test, unix))]
+#[path = "operations_paged_history_tests.rs"]
+mod paged_history_tests;

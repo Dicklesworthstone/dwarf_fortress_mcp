@@ -357,9 +357,47 @@ pub(super) fn execute_with_output_budget(
     input: &Value,
     output_bytes: u64,
 ) -> Result<Value> {
-    let started = Instant::now();
-    context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
-    if context.anchor != snapshot.anchor() {
+    execute_at_source(
+        snapshot,
+        context,
+        input,
+        output_bytes,
+        Instant::now(),
+        false,
+    )
+}
+
+/// A trusted owner supplies exact replayed source bytes; current grants remain
+/// the authority for this query and its final publication.
+pub(super) fn execute_retained_with_output_budget(
+    snapshot: &WorldSnapshot,
+    current: &OperationContext,
+    input: &Value,
+    output_bytes: u64,
+    started: Instant,
+) -> Result<Value> {
+    execute_at_source(snapshot, current, input, output_bytes, started, true)
+}
+
+fn execute_at_source(
+    snapshot: &WorldSnapshot,
+    context: &OperationContext,
+    input: &Value,
+    output_bytes: u64,
+    started: Instant,
+    retained_source: bool,
+) -> Result<Value> {
+    let check = || {
+        context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
+        if started.elapsed().as_millis() >= u128::from(context.budget.max_wall_millis) {
+            return Err(exhausted("query exceeded its original foreground deadline"));
+        }
+        Ok(())
+    };
+    check()?;
+    if context.anchor.fortress_id != snapshot.fortress_id
+        || (!retained_source && context.anchor != snapshot.anchor())
+    {
         return Err(DfmcpError::new(
             ErrorCode::StaleAnchor,
             "query context does not match the published snapshot",
@@ -415,7 +453,7 @@ pub(super) fn execute_with_output_budget(
     )
     .map_err(|_| exhausted("query byte bound cannot be represented"))?;
     let identity = identity(snapshot, context, input)?;
-    match request.query {
+    let value = match request.query {
         Query::Aggregate {
             kinds: selected,
             predicate,
@@ -466,7 +504,9 @@ pub(super) fn execute_with_output_budget(
             };
             search(snapshot, identity, &spec, maximum)
         }
-    }
+    }?;
+    check()?;
+    Ok(value)
 }
 
 #[derive(Default)]

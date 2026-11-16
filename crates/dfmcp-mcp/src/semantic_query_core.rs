@@ -597,9 +597,57 @@ pub(super) fn execute_with_page_budget(
     output_bytes: u64,
     fits: &dyn Fn(&Value) -> Result<bool>,
 ) -> Result<Value> {
-    let started = Instant::now();
-    context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
-    if context.anchor != snapshot.anchor() {
+    execute_at_source(
+        snapshot,
+        context,
+        input,
+        output_bytes,
+        fits,
+        Instant::now(),
+        false,
+    )
+}
+
+/// The owning runtime has selected and verified this exact retained snapshot.
+/// Keep authorization at the current anchor, including after a clock reset.
+pub(super) fn execute_retained_with_output_budget(
+    snapshot: &WorldSnapshot,
+    current: &OperationContext,
+    input: &Value,
+    output_bytes: u64,
+    started: Instant,
+) -> Result<Value> {
+    execute_at_source(
+        snapshot,
+        current,
+        input,
+        output_bytes,
+        &|_| Ok(true),
+        started,
+        true,
+    )
+}
+
+fn execute_at_source(
+    snapshot: &WorldSnapshot,
+    context: &OperationContext,
+    input: &Value,
+    output_bytes: u64,
+    fits: &dyn Fn(&Value) -> Result<bool>,
+    started: Instant,
+    retained_source: bool,
+) -> Result<Value> {
+    let check = || {
+        context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
+        if started.elapsed().as_millis() >= u128::from(context.budget.max_wall_millis) {
+            return Err(budget("query exceeded its original foreground deadline"));
+        }
+        Ok(())
+    };
+    check()?;
+    if context.anchor.fortress_id != snapshot.fortress_id
+        || (!retained_source && context.anchor != snapshot.anchor())
+    {
         return Err(DfmcpError::new(
             ErrorCode::StaleAnchor,
             "query context does not name this snapshot",
@@ -800,8 +848,8 @@ pub(super) fn execute_with_page_budget(
     }
     if let Some(work) = source_work {
         work.check()?;
-        context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
     }
+    check()?;
     Ok(payload)
 }
 

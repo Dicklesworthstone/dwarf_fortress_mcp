@@ -250,6 +250,45 @@ pub fn execute(
     }
 }
 
+/// The enclosing runtime owns and verifies the retained snapshot and keeps its
+/// current session context unchanged. No retained record can revive grants,
+/// extend the request deadline, create local work, or acquire native data.
+/// Source allowance and rendered output reservation are independent.
+pub(super) fn execute_retained_with_output_budget(
+    snapshot: &WorldSnapshot,
+    current: &OperationContext,
+    input: &Value,
+    output_bytes: u64,
+    started: std::time::Instant,
+) -> Result<Value> {
+    match input
+        .get("query")
+        .and_then(|query| query.get("kind"))
+        .and_then(Value::as_str)
+    {
+        Some("aggregate" | "search") => operational_query::execute_retained_with_output_budget(
+            snapshot,
+            current,
+            input,
+            output_bytes,
+            started,
+        ),
+        Some("entities" | "inspect" | "traverse" | "dependencies") => {
+            core_query::execute_retained_with_output_budget(
+                snapshot,
+                current,
+                input,
+                output_bytes,
+                started,
+            )
+        }
+        _ => Err(DfmcpError::new(
+            ErrorCode::InvalidRequest,
+            "retained queries accept only stateless entities, inspect, traverse, dependencies, aggregate or search",
+        )),
+    }
+}
+
 pub(super) fn execute_events_with_page_budget(
     snapshot: &WorldSnapshot,
     context: &OperationContext,
@@ -475,7 +514,10 @@ where
         Some("schedule") => {
             let narrowed = result_context(&output_context)?;
             let value = dependency_schedule_query::execute_with_output_budget(
-                snapshot, context, input, narrowed.budget.max_bytes,
+                snapshot,
+                context,
+                input,
+                narrowed.budget.max_bytes,
             )?;
             publish_with_active_work(&output_context, value, publish)
         }

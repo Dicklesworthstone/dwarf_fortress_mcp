@@ -1,7 +1,7 @@
 # Durable operations observations and historical queries
 
-The operations/1.3 development server can now keep its canonical observation
-sequence in an optional local journal. It records source observations before
+The operations/1.3 and paged operations/1.4 development servers can keep their
+canonical observation sequences in optional, profile-specific local journals. It records source observations before
 publishing their live anchors and reconstructs the exact version chain after a
 restart. Historical queries reuse the existing typed query engine without
 replacing the current snapshot or evaluating a live watch against old facts.
@@ -10,7 +10,9 @@ This is source-present functionality. Rust execution, real filesystem crash
 qualification and live-game validation have not been established. The journal is
 not the prospective FrankenSQLite MVCC backend, an effect ledger, a game/save
 checkpoint, a durable watch service, signed provenance or an anti-rollback floor.
-No production admission, dependency pin or native bridge byte changed.
+No production admission, dependency pin or native bridge byte changed. The
+current implementation and executed verification scope are recorded in
+`IMPLEMENTATION_STATUS.md`.
 
 ## Enable storage as an operator
 
@@ -28,6 +30,12 @@ DFMCP_ALLOW_UNADMITTED_OPERATIONS_V1_3=1 \
 DFMCP_OPERATIONS_JOURNAL=/absolute/private/directory/operations.bin \
 cargo run --locked --bin dfmcp-live-operations-dev-server
 ```
+
+For paged operations/1.4, use `DFMCP_OPERATIONS_PAGED_JOURNAL` with
+`dfmcp-live-operations-paged-dev-server` and its existing 1.4 opt-in/token. Its
+optional recovery flag is `DFMCP_OPERATIONS_PAGED_JOURNAL_REPAIR=1`. Each server
+rejects the other profile's journal variables, and each file is decoded only as
+the server's fixed profile. An operations/1.3 file is not a 1.4 archive.
 
 The path is operator process configuration, never an MCP argument. Journalled
 sessions require both Query and Observe grants. File locking is exclusive and
@@ -94,8 +102,8 @@ rollback. Hash chaining is integrity evidence, not authentication.
 
 ## Query the retained history
 
-The operations schema adds two variants to its existing eighteen query forms.
-The shared sixteen-variant schema and other live runtimes remain unchanged.
+Both operations profiles expose the existing `history` and `historical_query`
+variants. Other live runtimes retain their own query and archive contracts.
 
 Pass this envelope to the existing `fortress.query` tool, with the session ID
 supplied normally. `mode="history"` is a convenience equivalent:
@@ -133,7 +141,12 @@ refresh the bridge, mutate the game or recursively query history. Generation
 checks and query continuations operate on the exact archived snapshot. An outer
 `expected_anchor`, when supplied, means the current session anchor, not the past
 anchor. Current Query authority is checked before replay; an old grant cannot
-be revived by selecting a historical tick.
+be revived by selecting a historical tick. All repeated semantic-query checks
+use the unchanged current authority context, including after a restore has
+made the current game tick smaller than the selected historical tick. Replay,
+query execution and final publication share one original foreground deadline.
+Source admission uses the full negotiated source allowance; Agent Turn and
+active-work reservations narrow only the response allowance.
 
 Historical reads re-read and verify the header and every frame needed to reach
 the selected record, rather than trusting a cached result. They return the
@@ -150,7 +163,8 @@ or offline-only server has not been added.
 
 ## Format and bounds
 
-The version-1 journal header is 80 bytes: eight-byte magic `DFMOJ001`, fortress
+The version-1 journal header is 80 bytes: eight-byte magic `DFMOJ001` for 1.3
+or `DFMPJ001` for 1.4, fortress
 u64, journal identity and domain-separated SHA-256 header digest. All journal
 integers are big-endian. Each frame has a 44-byte length header (`DFMOREC1`, u32
 body length, header digest), body, 32-byte frame digest and `DFMOEND1` footer.

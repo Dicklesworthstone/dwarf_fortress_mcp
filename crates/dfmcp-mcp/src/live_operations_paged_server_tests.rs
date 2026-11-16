@@ -205,7 +205,7 @@ fn large_paged_projection_uses_existing_queries_baselines_and_watches() -> Resul
         schema["query_schema"]["$defs"]["query"]["oneOf"]
             .as_array()
             .map(Vec::len),
-        Some(19)
+        Some(21)
     );
     assert_eq!(session.query(json!({"kind":"history"}))?["ok"], false);
     assert_eq!(
@@ -247,6 +247,10 @@ fn paged_environment_and_handle_family_cannot_admit_old_authority() {
         assert!(!allowed_paged_environment(name));
     }
     assert!(allowed_paged_environment("DFMCP_OPERATIONS_PAGED_TOKEN"));
+    assert!(allowed_paged_environment("DFMCP_OPERATIONS_PAGED_JOURNAL"));
+    assert!(allowed_paged_environment(
+        "DFMCP_OPERATIONS_PAGED_JOURNAL_REPAIR"
+    ));
     assert!(allowed_paged_environment(
         "DFMCP_ALLOW_UNADMITTED_OPERATIONS_V1_4"
     ));

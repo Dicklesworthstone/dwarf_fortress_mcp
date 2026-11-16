@@ -1,27 +1,44 @@
 //! Durable observation history, never archived session authority or live effects.
 use super::*;
-use dfmcp_adapter::operations_journal::{
-    JournalEntry, JournalLimits, OperationsJournal, PrivateJournalFile, TailRecovery,
-    open_private_journal,
-};
+use dfmcp_adapter::operations_journal::{JournalEntry, TailRecovery};
 use dfmcp_core::Digest32;
 use serde::Deserialize;
 use std::path::PathBuf;
+use std::time::Instant;
 
-type Journal = OperationsJournal<PrivateJournalFile>;
+#[path = "operations_history_journal.rs"]
+mod journal;
+pub(super) use journal::Journal;
 
 pub(super) fn configuration() -> Result<Option<(PathBuf, TailRecovery)>> {
-    let path = match std::env::var("DFMCP_OPERATIONS_JOURNAL") {
+    configuration_for(
+        "DFMCP_OPERATIONS_JOURNAL",
+        "DFMCP_OPERATIONS_JOURNAL_REPAIR",
+    )
+}
+
+pub(super) fn paged_configuration() -> Result<Option<(PathBuf, TailRecovery)>> {
+    configuration_for(
+        "DFMCP_OPERATIONS_PAGED_JOURNAL",
+        "DFMCP_OPERATIONS_PAGED_JOURNAL_REPAIR",
+    )
+}
+
+fn configuration_for(
+    path_setting: &str,
+    repair_setting: &str,
+) -> Result<Option<(PathBuf, TailRecovery)>> {
+    let path = match std::env::var(path_setting) {
         Ok(path) if !path.is_empty() => Some(PathBuf::from(path)),
         Err(std::env::VarError::NotPresent) => None,
         _ => {
             return Err(error(
                 ErrorCode::InvalidRequest,
-                "DFMCP_OPERATIONS_JOURNAL must be a nonempty UTF-8 operator path",
+                &format!("{path_setting} must be a nonempty UTF-8 operator path"),
             ));
         }
     };
-    let repair = match std::env::var("DFMCP_OPERATIONS_JOURNAL_REPAIR") {
+    let repair = match std::env::var(repair_setting) {
         Err(std::env::VarError::NotPresent) => TailRecovery::Refuse,
         Ok(value) if value == "1" && path.is_some() => TailRecovery::TruncateIncomplete,
         _ => {
@@ -34,20 +51,41 @@ pub(super) fn configuration() -> Result<Option<(PathBuf, TailRecovery)>> {
     Ok(path.map(|path| (path, repair)))
 }
 
+/// Replay, inspection and publication share the original request allowance.
+/// Retained source ticks never replace the current authorization anchor.
+pub(super) fn remaining_context(
+    context: &OperationContext,
+    started: Instant,
+) -> Result<OperationContext> {
+    context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
+    let elapsed = u64::try_from(started.elapsed().as_millis()).map_or(u64::MAX, |value| value);
+    let remaining = context.budget.max_wall_millis.saturating_sub(elapsed);
+    if remaining == 0 {
+        return Err(error(
+            ErrorCode::BudgetExceeded,
+            "operations history exceeded its original foreground deadline",
+        ));
+    }
+    let mut narrowed = context.clone();
+    narrowed.budget.max_wall_millis = remaining;
+    Ok(narrowed)
+}
+
 pub(super) fn attach(
     session: &mut OperationsSession,
     path: &std::path::Path,
     repair: TailRecovery,
     context: &OperationContext,
 ) -> Result<()> {
+    let started = Instant::now();
     let current = session.state.observation().cloned().ok_or_else(|| {
         error(
             ErrorCode::InternalInvariantViolation,
             "bootstrap observation missing",
         )
     })?;
-    let mut journal = open_private_journal(path, context, JournalLimits::default(), repair)?;
-    journal.append(current, context)?;
+    let mut journal = Journal::open(session.state.profile(), path, context, repair)?;
+    journal.append(current, &remaining_context(context, started)?)?;
     session.state = journal.state().clone();
     session.journal = Some(journal);
     Ok(())
@@ -58,6 +96,7 @@ pub(super) fn summary(journal: Option<&Journal>) -> Value {
         None => json!({"storage":"process_local","durable_observation_history":false}),
         Some(journal) => {
             json!({"storage":"synced_operations_journal","durable_observation_history":true,
+            "profile":format!("operations/{}",journal.profile().protocol()),
             "journal_id":journal.id().to_string(),"head":journal.head().to_string(),"records":journal.entries().len(),
             "retained_bytes":journal.retained_bytes(),"repaired_tail_bytes":journal.repaired_tail_bytes(),"fenced":journal.fenced(),
             "continuous_game_history":false,"watches_and_baselines_durable":false})
@@ -263,6 +302,7 @@ pub(super) fn execute(
     context: &OperationContext,
     input: &Value,
 ) -> Result<String> {
+    let started = Instant::now();
     context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
     let request = parse(input, context)?;
     let mut view = query_view(session, context)?;
@@ -270,8 +310,22 @@ pub(super) fn execute(
     result_context.budget.max_bytes = view.result_byte_budget()? as u64;
     let narrowed = semantic_query::result_context(&result_context)?;
     let live_source_fenced = session.source.poisoned();
-    let journal=session.journal.as_mut().ok_or_else(||error(ErrorCode::InvalidRequest,
-        "durable observation history is not configured; an operator must select DFMCP_OPERATIONS_JOURNAL before opening the session"))?;
+    let profile = session.state.profile();
+    let journal = session.journal.as_mut().ok_or_else(|| {
+        error(
+            ErrorCode::InvalidRequest,
+            "durable observation history is not configured; an operator must select this profile's journal before opening the session",
+        )
+    })?;
+    if journal.profile() != profile
+        || journal.state().snapshot().map(|snapshot| snapshot.anchor()) != Some(context.anchor)
+    {
+        return Err(error(
+            ErrorCode::CorruptLedger,
+            "journal profile or published anchor differs from this session",
+        ));
+    }
+    journal.validate_custody(&remaining_context(context, started)?)?;
     match request {
         Request::History {
             limit,
@@ -286,7 +340,9 @@ pub(super) fn execute(
             )?;
             value["source_stale"] = json!(live_source_fenced);
             semantic_query::publish_with_active_work(context, value, |value| {
-                finish_query(&view, value)
+                let result = finish_query(&view, value)?;
+                remaining_context(context, started)?;
+                Ok(result)
             })
         }
         Request::HistoricalQuery {
@@ -313,14 +369,15 @@ pub(super) fn execute(
                     )
                 })?;
             // Full acquisition/replay budget, not the narrowed output-page budget.
-            let snapshot = journal.snapshot_at(record, digest, context)?;
+            let snapshot =
+                journal.snapshot_at(record, digest, &remaining_context(context, started)?)?;
             let entry = journal
                 .entries()
                 .get((record - 1) as usize)
                 .cloned()
                 .ok_or_else(|| error(ErrorCode::CursorGap, "journal record is not retained"))?;
             view.anchor = anchor_json(snapshot.anchor());
-            view.briefing = json!({"runtime":"unadmitted_development","bridge_protocol":"1.3","read_only":true,
+            view.briefing = json!({"runtime":"unadmitted_development","bridge_protocol":profile.protocol(),"read_only":true,
                 "runtime_admitted":false,"mutation_admissible":false,"live":false,"historical":true,
                 "paused":snapshot.paused,"current_live_anchor":anchor_json(context.anchor),"live_source_fenced":live_source_fenced,
                 "active_work_basis":"current_session_not_archived","query_source":"verified_operations_replay"});
@@ -343,11 +400,12 @@ pub(super) fn execute(
                     )
                 })? as u64;
             historical_context = semantic_query::result_context(&historical_context)?;
-            historical_context.anchor = snapshot.anchor();
-            let mut value = semantic_query::execute(
+            let mut value = semantic_query::execute_retained_with_output_budget(
                 &snapshot,
-                &historical_context,
+                context,
                 &json!({"schema":"dfmcp.query/1","query":query}),
+                historical_context.budget.max_bytes,
+                started,
             )?;
             if let (Some(object), Some(additions)) = (value.as_object_mut(), metadata.as_object()) {
                 object.extend(
@@ -379,6 +437,7 @@ pub(super) fn execute(
                         "historical packet exceeds response budget",
                     ));
                 }
+                remaining_context(context, started)?;
                 Ok(encoded)
             })
         }

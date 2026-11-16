@@ -60,7 +60,7 @@ Handshake/bootstrap and first observation are separate bounded calls.
 The entire native roster must fit. This is **not native pagination**: an oversized
 world, byte budget, cyclic list, invalid record, unresolved same-roster reference,
 or incomplete relationship set refuses publication. Raising a limit cannot exceed
-the implementation ceiling. Large-fortress snapshot paging remains future work.
+the implementation ceiling. Larger bounded worlds use the separate [operations/1.4 paged profile](OPERATIONS_PAGING.md).
 
 No game clock is controlled, and no unpause occurs. `observe` and `wait` each
 refresh one native observation. A failed read fences the source and preserves the
@@ -225,4 +225,6 @@ constants and implementations were preserved, not used as qualification evidence
 
 Still absent: citizen/announcement integration into this coherent generation,
 map/path observations, complete material-requirement evaluation, labor eligibility,
-automatic blocker diagnosis, durable monitoring/history, and live mutations.
+full native blocker diagnosis, durable monitoring, and live mutations. Optional
+[durable observation history](OPERATIONS_HISTORY.md) is available for both
+operations profiles; monitoring handles remain process-local.

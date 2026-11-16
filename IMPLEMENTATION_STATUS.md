@@ -28,6 +28,35 @@ established.
 See `docs/QUERY_EXECUTION.md` and `docs/LAB_STRUCTURED_QUERY.md`.
 Owner: `df-lab-structured-query-f7q.5`; executable qualification remains open.
 
+## Unreleased — Retain paged operations observations across restarts
+
+The operations/1.4 development runtime now opens its existing profile-specific
+durable journal, syncs each complete native observation before publication, and
+recovers the canonical version and entity-generation chain after restart.
+Operator-only `DFMCP_OPERATIONS_PAGED_JOURNAL` and optional exact repair opt-in
+select storage; 1.3 files and configuration cannot be reinterpreted as 1.4.
+Bootstrap requires Query and Observe, while retained reads use current Query
+authority without acquiring a new native observation or restoring local work.
+
+Both operations profiles expose `history` and `historical_query` through the
+existing query tool. Historical core and aggregate/search queries retain the
+actual current authorization anchor after a clock reset, preserve one original
+foreground deadline, and admit source bytes separately from response and
+active-work reservations. Source/custody failures preserve the last published
+anchor. Existing archive encodings, native protocols, source ceilings, dependency
+pins, mutation refusals and the eleven-tool surface remain unchanged.
+
+Ten new regression functions exercise real private-file journals and public
+handlers, including large paged retained inspection, source/output budgeting,
+restart generations, current grants, corruption, custody and tail recovery.
+The new Rust tests are authored and scoped formatting/source review have passed;
+full MCP compilation and execution are not yet established. A latest-nightly
+locked dependency build was interrupted on an overloaded shared host before
+reaching MCP. No native-game or production admission is claimed.
+
+See `docs/OPERATIONS_PAGING.md` and `docs/OPERATIONS_HISTORY.md`.
+Owner: `df-operations-paged-history-p6h`; integration qualification remains open.
+
 ## Unreleased — Keep future facts out of source-bound query results
 
 Typed field comparisons now treat observations later than the selected world
