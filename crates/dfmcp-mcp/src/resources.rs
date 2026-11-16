@@ -248,7 +248,7 @@ pub(crate) fn session_entity(
                 "ok": true, "schema": "dfmcp.lab-entity/1", "resource": uri,
                 "session_id": session_id_hex, "anchor": anchor_json(&anchor),
                 "anchor_digest": current.to_hex(),
-                "entity": crate::observation_projection::entity_json(entity),
+                "entity": crate::observation_projection::entity_json(entity, snapshot.tick),
                 "coverage": {"status": "complete_for_named_projection",
                     "domain": "one_current_laboratory_entity", "absence_proof_scope": [],
                     "live_dwarf_fortress": "unavailable"},

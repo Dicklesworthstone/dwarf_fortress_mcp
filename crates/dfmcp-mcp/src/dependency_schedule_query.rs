@@ -224,7 +224,7 @@ fn execute_at_source(
         entries.push(json!({
             "entity_id":entry.entity_id.to_string(),
             "generation":entry.generation,"revision":entry.revision,
-            "duration":entry.duration,"duration_fact":fact_json(fact),
+            "duration":entry.duration,"duration_fact":fact_json(fact,snapshot.tick),
             "earliest_start":entry.earliest_start,"earliest_finish":entry.earliest_finish,
             "latest_start":entry.latest_start,"latest_finish":entry.latest_finish,
             "total_slack":entry.total_slack

@@ -395,13 +395,14 @@ pub(super) fn execute_with_page_budget(
             entity,
             &selection.fields,
             &geometry_fields,
+            snapshot.tick,
             maximum,
             &mut work,
         )? {
             break;
         }
-        let mut row = super::core_query::entity_json(entity, &selection.fields);
-        row["geometry"] = selection.spatial.witness(entity, geometry);
+        let mut row = super::core_query::entity_json(entity, &selection.fields, snapshot.tick);
+        row["geometry"] = selection.spatial.witness(entity, geometry, snapshot.tick);
         let rows = payload["rows"]
             .as_array_mut()
             .ok_or_else(|| invalid("spatial result rows are unavailable"))?;

@@ -927,6 +927,37 @@ the filter invalidates an old continuation. Every page rechecks Query authority.
 This is bounded lexical retrieval over published canonical facts. It adds no
 native reads, effects, hidden index, semantic model or FrankenSearch dependency.
 
+## Selected-source time in projected facts
+
+A fact's observation tick bounds when its value or absence may be reported.
+Structured entity inspection, ordinary entity pages, spatial selections,
+relationship selections and ranked pages use the selected snapshot's tick.
+A future Known fact renders as Unknown with a null value; a future Absent
+fact cannot establish absence either. The original observation tick, source
+and source digest remain visible. Earlier and same-tick facts keep their
+existing provenance classification. Redacted, omitted, unsupported, stale and
+contradictory states retain their own classifications instead of becoming
+apparently usable values.
+
+Output fitting applies this rule before estimating a complete projected row.
+A large future value can therefore be represented by a small Unknown field.
+Complete-source admission still accounts for its full backing data; temporal
+masking cannot evade input, work, integrity or authority checks. Announcement
+projections additionally keep the report's existing observation-batch boundary.
+
+Laboratory entity pages, profiled entity/relation observations, entity
+resources and briefing fields use the same selected-source boundary. Profiled
+event pages exclude entire future events before calculating eligible totals,
+offsets and continuations. The raw source total remains explicit; withheld
+future records mark coverage partial and cannot establish complete membership
+or absence. Canonical snapshots and profile/source hashes are not rewritten.
+
+World changes project each endpoint at its own tick. An unchanged stored fact
+becoming time-eligible is a real change in the displayed observation, including
+Unknown-to-Known and Unknown-to-Absent transitions on entities and relations.
+Future events become visible only at eligible endpoints. These are differences
+between selected observations, with the existing bounded change-report scope.
+
 ## Projected entity pages
 
 Structured `entities` queries budget the requested field projection and its

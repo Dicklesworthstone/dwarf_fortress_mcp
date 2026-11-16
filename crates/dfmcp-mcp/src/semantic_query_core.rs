@@ -5,8 +5,8 @@ use std::collections::BTreeMap;
 use std::time::Instant;
 
 use dfmcp_core::{
-    Capability, DfmcpError, Digest32, EntityId, ErrorCode, MapCoord, OperationContext, Result,
-    RiskTier, StateAnchor,
+    Capability, DfmcpError, Digest32, EntityId, ErrorCode, GameTick, MapCoord, OperationContext,
+    Result, RiskTier, StateAnchor,
 };
 use dfmcp_world::graph_query::{
     GraphBudget, GraphDirection, GraphTraversalQuery, GraphWitness, analyze_dependencies,
@@ -29,6 +29,10 @@ const MAX_INPUT_NODES: usize = 4_096;
 const MAX_INPUT_DEPTH: usize = 24;
 const MAX_ROWS: u32 = 512;
 const MAX_SOURCE_STRUCTURE_BYTES: u64 = 16 * 1024 * 1024;
+
+#[cfg(test)]
+#[path = "source_time_projection_tests.rs"]
+mod source_time_projection_tests;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -406,13 +410,13 @@ pub(super) fn world_value(value: &WorldValue) -> Value {
     }
 }
 
-pub(super) fn fact_json(fact: &Fact) -> Value {
+pub(super) fn fact_json(fact: &Fact, source_tick: GameTick) -> Value {
     let source_state = match &fact.source {
         FactSource::DfhackField(_) => "observed",
         FactSource::Derived(_) => "inferred",
         FactSource::AgentAssertion(_) | FactSource::Replay => "assumed",
     };
-    let (presence, state, reason, known) = match &fact.presence {
+    let (mut presence, mut state, mut reason, mut known) = match &fact.presence {
         None => ("known", source_state, Value::Null, true),
         Some(FactPresence::Known(value)) if value == &fact.value => {
             ("known", source_state, Value::Null, true)
@@ -430,20 +434,29 @@ pub(super) fn fact_json(fact: &Fact) -> Value {
         Some(FactPresence::Redacted(reason)) => ("redacted", "unknown", json!(reason), false),
         Some(FactPresence::Stale(anchor)) => ("stale", "stale", anchor_json(*anchor), false),
     };
+    // The enclosing anchor bounds truth, including a claim of absence. Keep
+    // unavailable/contradictory classifications, but never publish a later
+    // observation as a known value at this source (especially retained reads).
+    if fact.observed_at > source_tick && (known || presence == "absent") {
+        presence = "unknown";
+        state = "unknown";
+        reason = json!("fact was observed after the selected source tick");
+        known = false;
+    }
     json!({"presence":presence, "epistemic_state":state, "reason":reason,
         "value":if known { world_value(&fact.value) } else { Value::Null },
         "observed_at_game_tick":fact.observed_at.0, "source":format!("{:?}",fact.source),
         "source_digest":fact.source_digest.to_string()})
 }
 
-pub(super) fn entity_json(entity: &EntityRecord, fields: &[String]) -> Value {
+pub(super) fn entity_json(entity: &EntityRecord, fields: &[String], source_tick: GameTick) -> Value {
     let fields: BTreeMap<_, _> = fields
         .iter()
         .map(|field| {
             let fact = entity.fields.get(field).map_or_else(|| json!({
             "presence":"unknown", "epistemic_state":"unknown", "value":null,
             "reason":"field is not present in this observed projection; absence is not established"
-        }), fact_json);
+        }), |fact| fact_json(fact, source_tick));
             (field.clone(), fact)
         })
         .collect();
@@ -579,10 +592,10 @@ fn projected_entities(
     let mut rows = Vec::new();
     let mut accepted = None;
     for entity in candidates.entities() {
-        if !source::render_fits(entity, fields, &[], output.maximum_bytes, work)? {
+        if !source::render_fits(entity, fields, &[], snapshot.tick, output.maximum_bytes, work)? {
             break;
         }
-        rows.push(entity_json(entity, fields));
+        rows.push(entity_json(entity, fields, snapshot.tick));
         let page = projected_page(snapshot, &candidates, identity, &rows)?;
         if !output.accepts(&page)? {
             if !output.terminal_may_fit(&page, reaches_terminal)? {
@@ -812,7 +825,7 @@ fn execute_at_source(
                 ));
             }
             json!({"kind":"inspect", "truncated":false, "continuation":null,
-                "row":entity_json(entity,&fields)})
+                "row":entity_json(entity,&fields,snapshot.tick)})
         }
         Query::Traverse {
             roots,

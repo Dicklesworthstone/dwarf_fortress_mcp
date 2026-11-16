@@ -1,5 +1,41 @@
 # Implementation Status
 
+## Unreleased — Preserve observation time through query presentation
+
+Structured inspection and entity, spatial, relationship and ranked pages now
+render future Known values and future absence claims as Unknown with null
+values. Original observation ticks, sources and digests remain visible; older
+and same-tick facts and unavailable/contradictory classifications keep their
+semantics. Current and retained queries use the selected source tick. Ranking,
+geometry, announcement and dependency-duration projections pass their owned
+source time through the shared renderer.
+
+Whole-row fitting omits masked future payloads from its output lower bound,
+while complete-source admission still charges all backing data. A small
+Unknown projection can fit without expanding input budgets or authority.
+Legacy laboratory entity/relation observations, resource reads and briefing
+fields use the same temporal boundary.
+
+Profiled event pages filter future records before totals, offsets and page
+selection. Source totals and explicit temporal omissions prevent withheld
+events from becoming complete-membership or absence claims. World changes
+project before/after facts at their own endpoint ticks and report unchanged
+stored Known/Absent facts when they become time-eligible. Event changes use
+eligible endpoint membership. Canonical snapshots and profile hashes retain
+their original identities.
+
+Regression sources cover provenance classes, future absence, every entity
+query family, large hidden source values, retained/current authorization,
+eligible event pagination and temporal changes in entities, relations and
+events. Independent source review and exact GitHub blob readback are the
+available verification for this increment. The execution environment remains
+unavailable: no corrected-source Rust test pass, rustfmt completion, full MCP
+run or full qualification is claimed. The earlier reproduced pre-fix failures
+are recorded separately below.
+
+Owner: `df-lab-structured-query-f7q.6`, still in progress pending executable
+verification. No native-game, protocol-admission or new-tool claim is added.
+
 ## Unreleased — Bind legacy search and stock queries to selected source time
 
 Legacy laboratory search now excludes future-dated fact names/values and

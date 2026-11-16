@@ -3164,8 +3164,13 @@ pub(crate) fn plan_steps_json(plan: &PreparedPlan) -> Json {
 /// Most active-work entries and units a briefing lists explicitly.
 const MAX_BRIEFING_ITEMS: usize = 16;
 
-fn text_field<'a>(entity: &'a EntityRecord, name: &str) -> Option<&'a str> {
-    match entity.fields.get(name).and_then(Fact::known_value) {
+fn text_field<'a>(entity: &'a EntityRecord, name: &str, source_tick: GameTick) -> Option<&'a str> {
+    match entity
+        .fields
+        .get(name)
+        .filter(|fact| fact.observed_at <= source_tick)
+        .and_then(Fact::known_value)
+    {
         Some(Value::Text(value)) => Some(value),
         _ => None,
     }
@@ -3187,10 +3192,10 @@ pub(crate) fn briefing(snapshot: &WorldSnapshot) -> Json {
         .values()
         .filter(|entity| {
             matches!(
-                text_field(entity, effects::STATUS_FIELD),
+                text_field(entity, effects::STATUS_FIELD, snapshot.tick),
                 Some(effects::STATUS_ACTIVE)
             ) || matches!(
-                text_field(entity, effects::CONSTRUCTION_STAGE_FIELD),
+                text_field(entity, effects::CONSTRUCTION_STAGE_FIELD, snapshot.tick),
                 Some(effects::STAGE_PLANNED | effects::STAGE_UNDER_CONSTRUCTION)
             )
         })
@@ -3213,7 +3218,7 @@ pub(crate) fn briefing(snapshot: &WorldSnapshot) -> Json {
                 entity.fields.get(name).map(|fact| {
                     (
                         name.to_owned(),
-                        crate::observation_projection::fact_value(fact),
+                        crate::observation_projection::fact_value(fact, snapshot.tick),
                     )
                 })
             })
@@ -3241,6 +3246,7 @@ pub(crate) fn briefing(snapshot: &WorldSnapshot) -> Json {
                 .iter()
                 .filter(|(name, fact)| {
                     name.starts_with(effects::LABOR_FIELD_PREFIX)
+                        && fact.observed_at <= snapshot.tick
                         && fact.known_value() == Some(&Value::Bool(true))
                 })
                 .map(|(name, _)| &name[effects::LABOR_FIELD_PREFIX.len()..])
@@ -3248,9 +3254,9 @@ pub(crate) fn briefing(snapshot: &WorldSnapshot) -> Json {
             json!({
                 "entity_id": unit.id.get().to_string(),
                 "name": unit.label,
-                "profession": text_field(unit, "profession"),
+                "profession": text_field(unit, "profession", snapshot.tick),
                 "enabled_labors": labors,
-                "squad": unit.fields.get(effects::SQUAD_FIELD).map(crate::observation_projection::fact_value),
+                "squad": unit.fields.get(effects::SQUAD_FIELD).map(|fact| crate::observation_projection::fact_value(fact, snapshot.tick)),
             })
         })
         .collect();
@@ -3750,7 +3756,7 @@ fn entities_page(
         .iter()
         .skip(offset)
         .take(limit)
-        .map(|entity| crate::observation_projection::entity_json(entity))
+        .map(|entity| crate::observation_projection::entity_json(entity, snapshot.tick))
         .collect();
     let end = offset + rows.len();
     let page_complete = offset == 0 && end == matching.len();
@@ -3839,7 +3845,15 @@ fn observation_page(
         ObservationSection::Entities => (graph.entities.len(), snapshot.graph.entities.len()),
         ObservationSection::Relations => (graph.edges.len(), snapshot.graph.edges.len()),
         ObservationSection::Chunks => (graph.chunks.len(), snapshot.graph.chunks.len()),
-        ObservationSection::Events => (graph.events.len(), snapshot.graph.events.len()),
+        ObservationSection::Events => (
+            graph.events.values().filter(|event| event.tick <= snapshot.tick).count(),
+            snapshot.graph.events.len(),
+        ),
+    };
+    let future_event_records = if matches!(section, ObservationSection::Events) {
+        graph.events.len().saturating_sub(total)
+    } else {
+        0
     };
     if offset > total {
         return Err(DfmcpError::new(
@@ -3849,14 +3863,14 @@ fn observation_page(
     }
     let rows: Vec<Json> = match section {
         ObservationSection::Entities => graph.entities.values().skip(offset).take(limit)
-            .map(entity_json).collect(),
+            .map(|entity| entity_json(entity, snapshot.tick)).collect(),
         ObservationSection::Relations => graph.edges.values().skip(offset).take(limit).map(|edge| {
             json!({
                 "edge_id": edge.id.to_string(), "revision": edge.revision, "kind": edge.kind.as_str(),
                 "from": edge.from.to_string(), "to": edge.to.to_string(),
-                "fields": edge.fields.iter().map(|(name, fact)| (name.clone(), fact_value(fact)))
+                "fields": edge.fields.iter().map(|(name, fact)| (name.clone(), fact_value(fact, snapshot.tick)))
                     .collect::<BTreeMap<_, _>>(),
-                "field_presence": edge.fields.iter().map(|(name, fact)| (name.clone(), presence_json(fact)))
+                "field_presence": edge.fields.iter().map(|(name, fact)| (name.clone(), presence_json(fact, snapshot.tick)))
                     .collect::<BTreeMap<_, _>>(),
             })
         }).collect(),
@@ -3878,7 +3892,8 @@ fn observation_page(
                 )).collect::<BTreeMap<_, _>>(),
             })
         }).collect(),
-        ObservationSection::Events => graph.events.values().skip(offset).take(limit).map(|event| {
+        ObservationSection::Events => graph.events.values()
+            .filter(|event| event.tick <= snapshot.tick).skip(offset).take(limit).map(|event| {
             json!({
                 "event_id": event.id.to_string(), "tick": event.tick.0, "kind": event.kind.as_str(),
                 "subject": event.subject.map(|id| id.to_string()), "summary": event.summary,
@@ -3891,7 +3906,8 @@ fn observation_page(
     };
     let end = offset + rows.len();
     let page_complete = offset == 0 && end == total;
-    let complete_domain = included && page_complete;
+    let source_complete = included && future_event_records == 0;
+    let complete_domain = source_complete && page_complete;
     let domain = json!({
         "domain": section.domain(), "scope": "record_membership",
         "completeness_profile": profile.as_str(), "section": section.as_str(),
@@ -3905,7 +3921,7 @@ fn observation_page(
         next["offset"] = json!(end);
         next
     });
-    let omitted_domains = if included {
+    let mut omitted_domains = if included {
         vec![]
     } else {
         vec![
@@ -3913,6 +3929,12 @@ fn observation_page(
             "completeness_profile": profile.as_str()}),
         ]
     };
+    if future_event_records > 0 {
+        omitted_domains.push(json!({
+            "domain": section.domain(), "reason": "event_tick_after_selected_source",
+            "records": future_event_records, "source_game_tick": snapshot.tick.0,
+        }));
+    }
     Ok(json!({
         "mode": "observation", "completeness_profile": profile.as_str(), "section": section.as_str(),
         "anchor": anchor_json(&projected.source_anchor()),
@@ -3936,8 +3958,8 @@ fn observation_page(
         },
         "section_included": included, "source_total": source_total, "total": total,
         "offset": offset, "returned": rows.len(), "next_offset": (included && end < total).then_some(end),
-        "source_complete": included, "complete_domain": complete_domain,
-        "absence_proven": included && total == 0 && page_complete,
+        "source_complete": source_complete, "complete_domain": complete_domain,
+        "absence_proven": complete_domain && total == 0,
         "truncated": !complete_domain,
         "query": query, "continuation": continuation, "rows": rows,
         "observation_coverage": {
@@ -4887,6 +4909,80 @@ mod profiled_observation_query_tests {
             events["observation_coverage"]["complete_domains"][0]["scope"],
             "record_membership"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn future_events_preserve_eligible_pagination_without_claiming_complete_membership() -> Result<()> {
+        let mut snapshot = fixture()?;
+        let future_tick = GameTick(snapshot.tick.0 + 1);
+        snapshot.graph.events.clear();
+        for id in 1..=4 {
+            let future = id % 2 == 1;
+            snapshot.graph.events.insert(
+                EventId::new(id),
+                WorldEvent {
+                    id: EventId::new(id),
+                    tick: if future { future_tick } else { snapshot.tick },
+                    kind: WorldEventKind::AdapterNotice,
+                    subject: None,
+                    summary: if future { "future-event-payload" } else { "current event" }.into(),
+                    fields: BTreeMap::new(),
+                },
+            );
+        }
+        snapshot.refresh_hash();
+        let first = request(&snapshot, "historical", "events", 1)?;
+        assert_eq!(first["source_total"], 4);
+        assert_eq!(first["total"], 2);
+        assert_eq!(first["rows"][0]["event_id"], EventId::new(2).to_string());
+        assert_eq!(first["next_offset"], 1);
+        assert!(!first.to_string().contains("future-event-payload"));
+        let mut continuation = first["continuation"].clone();
+        let Some(object) = continuation.as_object_mut() else {
+            return Err(invalid("expected event continuation"));
+        };
+        object.remove("at");
+        let second = query(&snapshot, &continuation.to_string())?;
+        assert_eq!(second["rows"][0]["event_id"], EventId::new(4).to_string());
+        assert!(second["continuation"].is_null());
+        assert!(second["next_offset"].is_null());
+        assert!(!second.to_string().contains("future-event-payload"));
+
+        let whole = request(&snapshot, "historical", "events", 100)?;
+        assert_eq!(whole["source_complete"], false);
+        assert_eq!(whole["complete_domain"], false);
+        assert_eq!(whole["absence_proven"], false);
+        assert_eq!(whole["observation_coverage"]["page_complete"], true);
+        assert_eq!(whole["observation_coverage"]["absence_proof_scope"], json!([]));
+        assert_eq!(
+            whole["observation_coverage"]["omitted_domains"][0]["reason"],
+            "event_tick_after_selected_source"
+        );
+        assert_eq!(whole["observation_coverage"]["omitted_domains"][0]["records"], 2);
+        assert_eq!(whole["source_anchor"]["state_hash"], snapshot.state_hash.to_hex());
+
+        let mut only_future = snapshot.clone();
+        only_future.graph.events.retain(|_, event| event.tick > only_future.tick);
+        only_future.refresh_hash();
+        let empty = request(&only_future, "historical", "events", 100)?;
+        assert_eq!(empty["total"], 0);
+        assert_eq!(empty["rows"], json!([]));
+        assert_eq!(empty["complete_domain"], false);
+        assert_eq!(empty["absence_proven"], false);
+        assert!(empty["continuation"].is_null());
+
+        let mut later = snapshot.clone();
+        later.tick = future_tick;
+        later.cursor.sequence += 1;
+        later.refresh_hash();
+        let available = request(&later, "historical", "events", 100)?;
+        assert_eq!(available["total"], 4);
+        assert_eq!(available["source_complete"], true);
+        assert_eq!(available["complete_domain"], true);
+        assert!(available.to_string().contains("future-event-payload"));
+        assert_eq!(request(&snapshot, "historical", "events", 1)?, first);
+        assert!(snapshot.hash_is_valid());
         Ok(())
     }
 

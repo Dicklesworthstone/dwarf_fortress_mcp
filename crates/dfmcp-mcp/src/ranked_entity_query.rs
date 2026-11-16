@@ -295,8 +295,9 @@ fn row(
     candidate: &Candidate<'_>,
     selection: &Selection,
     relation: Option<&relation_selector::Evidence<'_>>,
+    source_tick: dfmcp_core::GameTick,
 ) -> Value {
-    let mut value = core_query::entity_json(candidate.entity, &selection.fields);
+    let mut value = core_query::entity_json(candidate.entity, &selection.fields, source_tick);
     let facts: BTreeMap<_, _> = selection
         .rank_fields
         .iter()
@@ -305,7 +306,7 @@ fn row(
                 .entity
                 .fields
                 .get(name)
-                .map(|fact| (name, core_query::fact_json(fact)))
+                .map(|fact| (name, core_query::fact_json(fact, source_tick)))
         })
         .collect();
     value["ranking"] = json!({
@@ -315,7 +316,7 @@ fn row(
         value["relations"] = relation.json();
     }
     if let (Some(spatial), Some(geometry)) = (&selection.spatial, candidate.geometry) {
-        value["geometry"] = spatial.witness(candidate.entity, geometry);
+        value["geometry"] = spatial.witness(candidate.entity, geometry, source_tick);
     }
     value
 }
@@ -736,6 +737,7 @@ pub(super) fn execute_with_page_budget(
             candidate.entity,
             &selection.fields,
             &required_fields,
+            snapshot.tick,
             maximum,
             &mut work,
         )? {
@@ -748,7 +750,7 @@ pub(super) fn execute_with_page_budget(
             .as_ref()
             .and_then(|relations| relations.candidates.get(&candidate.entity.id))
             .map(|candidate| &candidate.evidence);
-        rows.push(row(&candidate, &selection, relation));
+        rows.push(row(&candidate, &selection, relation, snapshot.tick));
         let count = rows.len();
         payload["returned"] = json!(count);
         payload["truncated"] = json!(count < remaining);

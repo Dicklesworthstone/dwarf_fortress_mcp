@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased — Keep projected observations within their source time
+
+- Mask future Known values and absence claims in structured entity inspection,
+  entity/spatial/relationship/ranked pages and legacy observation/resource
+  renderers while retaining provenance and explicit unavailable states.
+- Fit complete output rows after temporal masking; keep full backing values
+  subject to the original source budgets and current authorization.
+- Paginate only eligible profiled events and describe temporal omissions
+  without asserting complete membership or absence. Report entity/relation
+  availability transitions and event changes at their own endpoint ticks.
+- Add focused and public regression sources. Source review and exact blob
+  readback are complete; Rust execution, formatting and full qualification
+  remain pending after the execution environment became unavailable.
+
 ## Unreleased — Keep future data out of legacy search and stock totals
 
 - Apply selected-source time to legacy lexical fields and event documents,

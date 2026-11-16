@@ -2,7 +2,7 @@
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
-use dfmcp_core::{DfmcpError, EntityId, ErrorCode, OperationContext, Result};
+use dfmcp_core::{DfmcpError, EntityId, ErrorCode, GameTick, OperationContext, Result};
 use dfmcp_world::{EntityRecord, Fact, FactPresence, FactSource, Value, WorldSnapshot};
 
 const MAX_WORK: usize = 4_000_000;
@@ -126,6 +126,7 @@ pub(super) fn render_fits(
     entity: &EntityRecord,
     fields: &[String],
     geometry_fields: &[String],
+    source_tick: GameTick,
     maximum: usize,
     budget: &mut Budget,
 ) -> Result<bool> {
@@ -152,7 +153,13 @@ pub(super) fn render_fits(
             {
                 minimum = minimum.saturating_add(reason.len());
             }
-            let mut pending = fact.known_value().into_iter().collect::<Vec<_>>();
+            // Source admission above still accounts for every backing value.
+            // A temporally unavailable value is not part of this output row.
+            let mut pending = fact
+                .known_value()
+                .filter(|_| fact.observed_at <= source_tick)
+                .into_iter()
+                .collect::<Vec<_>>();
             while let Some(value) = pending.pop() {
                 budget.charge(0, 1)?;
                 // Even typed null occupies fifteen JSON bytes. Frontier

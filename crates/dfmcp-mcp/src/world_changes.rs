@@ -5,15 +5,17 @@
 //! versions each session has seen; this module compares the agent's previous
 //! anchor with the current one and reports entity, relation, retained-event,
 //! terrain, clock and pause changes. These are differences between exact
-//! canonical records, not proof of event authenticity or intervening history.
-//! Output has independent domain bounds and canonical identity/field ordering.
+//! canonical records as visible at each endpoint tick, not proof of event
+//! authenticity or intervening history. Output has independent domain bounds
+//! and canonical identity/field ordering.
 //! A different fortress or observation epoch yields a reset, never an ordinary
 //! delta that could disguise restore as game progress.
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use dfmcp_core::GameTick;
 use dfmcp_world::{
-    ChunkCoord, EdgeRecord, EntityRecord, Fact, MapChunk, WorldEvent, WorldSnapshot,
+    ChunkCoord, EdgeRecord, EntityRecord, Fact, FactPresence, MapChunk, WorldEvent, WorldSnapshot,
 };
 use serde_json::{Value, json};
 
@@ -47,10 +49,10 @@ fn entity_subject(entity: &EntityRecord) -> Value {
     })
 }
 
-fn change_presence(fact: Option<&Fact>) -> Value {
+fn change_presence(fact: Option<&Fact>, source_tick: GameTick) -> Value {
     match fact {
         Some(fact) => {
-            let mut presence = presence_json(fact);
+            let mut presence = presence_json(fact, source_tick);
             presence["recorded"] = json!(true);
             presence
         }
@@ -62,13 +64,28 @@ fn change_presence(fact: Option<&Fact>) -> Value {
     }
 }
 
-fn field_changes(before: &EntityRecord, after: &EntityRecord) -> (Vec<Value>, usize) {
-    fact_field_changes(&before.fields, &after.fields)
+/// An unchanged fact can become observable when the selected source reaches
+/// its observation tick. Unavailable and contradictory payloads stay masked.
+fn became_current(fact: &Fact, before_tick: GameTick, after_tick: GameTick) -> bool {
+    fact.observed_at > before_tick
+        && fact.observed_at <= after_tick
+        && (fact.known_value().is_some() || matches!(fact.presence, Some(FactPresence::Absent)))
+}
+
+fn field_changes(
+    before: &EntityRecord,
+    after: &EntityRecord,
+    before_tick: GameTick,
+    after_tick: GameTick,
+) -> (Vec<Value>, usize) {
+    fact_field_changes(&before.fields, &after.fields, before_tick, after_tick)
 }
 
 fn fact_field_changes(
     before: &BTreeMap<String, Fact>,
     after: &BTreeMap<String, Fact>,
+    before_tick: GameTick,
+    after_tick: GameTick,
 ) -> (Vec<Value>, usize) {
     let names: BTreeSet<&String> = before.keys().chain(after.keys()).collect();
     let mut changed = Vec::new();
@@ -76,17 +93,17 @@ fn fact_field_changes(
     for name in names {
         let old = before.get(name);
         let new = after.get(name);
-        if old == new {
+        if old == new && !old.is_some_and(|fact| became_current(fact, before_tick, after_tick)) {
             continue;
         }
         total += 1;
         if changed.len() < MAX_FIELDS_PER_ENTITY {
             changed.push(json!({
                 "field": name,
-                "before": old.map_or(Value::Null, fact_value),
-                "after": new.map_or(Value::Null, fact_value),
-                "before_presence": change_presence(old),
-                "after_presence": change_presence(new),
+                "before": old.map_or(Value::Null, |fact| fact_value(fact, before_tick)),
+                "after": new.map_or(Value::Null, |fact| fact_value(fact, after_tick)),
+                "before_presence": change_presence(old, before_tick),
+                "after_presence": change_presence(new, after_tick),
                 "provenance_changed": matches!((old, new), (Some(a), Some(b))
                     if a.observed_at != b.observed_at || a.source != b.source
                         || a.source_digest != b.source_digest),
@@ -139,8 +156,16 @@ fn relation_changes(base: &WorldSnapshot, target: &WorldSnapshot) -> Vec<Value> 
         let new = after.map(|edge| relation_subject(edge, target));
         // An endpoint's ABA generation change matters even if the edge bytes
         // did not change. Canonical kind spelling, rather than enum variant,
-        // determines the reported relationship.
-        if old == new && before.map(|e| &e.fields) == after.map(|e| &e.fields) {
+        // determines the reported relationship. Identical future facts can
+        // also become observable at this endpoint without changing edge bytes.
+        if old == new
+            && before.map(|e| &e.fields) == after.map(|e| &e.fields)
+            && !before.is_some_and(|edge| {
+                edge.fields
+                    .values()
+                    .any(|fact| became_current(fact, base.tick, target.tick))
+            })
+        {
             continue;
         }
         if out.len() == MAX_RELATION_CHANGES {
@@ -150,6 +175,8 @@ fn relation_changes(base: &WorldSnapshot, target: &WorldSnapshot) -> Vec<Value> 
         let (fields, total) = fact_field_changes(
             before.map_or(&empty, |edge| &edge.fields),
             after.map_or(&empty, |edge| &edge.fields),
+            base.tick,
+            target.tick,
         );
         out.push(json!({
             "kind": match (before, after) {
@@ -198,7 +225,7 @@ fn event_value_presence(value: Option<&dfmcp_world::Value>) -> Value {
             presence["recorded"] = json!(true);
             presence
         }
-        None => change_presence(None),
+        None => change_presence(None, GameTick(0)),
     }
 }
 
@@ -243,8 +270,18 @@ fn event_changes(base: &WorldSnapshot, target: &WorldSnapshot) -> Vec<Value> {
     let mut out = Vec::new();
     let mut omitted = 0;
     for id in ids {
-        let before = base.graph.events.get(id);
-        let after = target.graph.events.get(id);
+        // A retained future record is not yet an observation at this endpoint.
+        // Filtering each side also exposes an unchanged record when time reaches it.
+        let before = base
+            .graph
+            .events
+            .get(id)
+            .filter(|event| event.tick <= base.tick);
+        let after = target
+            .graph
+            .events
+            .get(id)
+            .filter(|event| event.tick <= target.tick);
         let old = before.map(event_subject);
         let new = after.map(event_subject);
         if old == new && before.map(|e| &e.fields) == after.map(|e| &e.fields) {
@@ -281,7 +318,7 @@ fn event_changes(base: &WorldSnapshot, target: &WorldSnapshot) -> Vec<Value> {
                 "field_provenance": "not_recorded_by_the_canonical_event_type",
                 "taint": "untrusted_source_text",
             },
-            "note": "retained record membership is observed; arrival need not mean a new occurrence, and removal never means the event was undone",
+            "note": "retained record membership is observed within each endpoint tick; arrival need not mean a new occurrence, and removal never means the event was undone",
         }));
     }
     if omitted > 0 {
@@ -464,8 +501,14 @@ pub(crate) fn describe(base: &WorldSnapshot, target: &WorldSnapshot) -> Vec<Valu
                 "invalidates": ["handles_naming_this_entity"],
                 "evidence": [],
             })),
-            (Some(before), Some(after)) if before != after => {
-                let (fields, total) = field_changes(before, after);
+            (Some(before), Some(after))
+                if before != after
+                    || before
+                        .fields
+                        .values()
+                        .any(|fact| became_current(fact, base.tick, target.tick)) =>
+            {
+                let (fields, total) = field_changes(before, after, base.tick, target.tick);
                 let old = entity_subject(before);
                 let new = entity_subject(after);
                 (total > 0 || old != new).then(|| {
@@ -706,7 +749,7 @@ mod tests {
             let mut target = successor(&base);
             let mut concealed = fact(presence);
             concealed.value = WorldValue::Text("relation-secret".to_owned());
-            let expected_presence = presence_json(&concealed);
+            let expected_presence = presence_json(&concealed, target.tick);
             let mut edge = relation(1);
             edge.fields.insert("secret".to_owned(), concealed);
             target.graph.edges.insert(edge.id, edge);
@@ -719,6 +762,208 @@ mod tests {
             assert!(changes[0]["fields"][0]["after"].is_null());
             assert!(!json!(changes).to_string().contains("relation-secret"));
         }
+    }
+
+    #[test]
+    fn unchanged_future_entity_and_relation_facts_become_observable_at_their_tick() {
+        let mut base = snapshot();
+        let legacy = Fact::known(
+            WorldValue::Text("future-legacy-value".to_owned()),
+            GameTick(23),
+            FactSource::Replay,
+            Digest32::ZERO,
+        );
+        let mut known = legacy.clone();
+        known.value = WorldValue::Text("future-explicit-value".to_owned());
+        known.presence = Some(FactPresence::Known(known.value.clone()));
+        let mut absent = Fact::with_presence(
+            FactPresence::Absent,
+            GameTick(23),
+            FactSource::Replay,
+            Digest32::ZERO,
+        );
+        absent.value = WorldValue::Text("never-visible-absence".to_owned());
+        let mut redacted = legacy.clone();
+        redacted.presence = Some(FactPresence::Redacted("policy/1".to_owned()));
+        redacted.value = WorldValue::Text("never-visible-redaction".to_owned());
+        let mut contradicted = known.clone();
+        contradicted.value = WorldValue::Text("never-visible-contradiction".to_owned());
+        let mut entity = record(None);
+        entity.fields = BTreeMap::from([
+            ("absent".to_owned(), absent),
+            ("contradicted".to_owned(), contradicted),
+            ("known".to_owned(), known),
+            ("legacy".to_owned(), legacy),
+            ("redacted".to_owned(), redacted),
+        ]);
+        let mut edge = relation(1);
+        edge.fields = entity.fields.clone();
+        base.graph.entities.insert(entity.id, entity);
+        base.graph.edges.insert(edge.id, edge);
+        base.refresh_hash();
+
+        let mut early = successor(&base);
+        early.tick = GameTick(22);
+        early.refresh_hash();
+        let early_changes = describe(&base, &early);
+        assert_eq!(early_changes.len(), 1);
+        assert_eq!(early_changes[0]["kind"], "game_time_passed");
+        assert!(!json!(early_changes).to_string().contains("future-"));
+
+        let mut visible = successor(&early);
+        visible.tick = GameTick(23);
+        visible.refresh_hash();
+        assert_eq!(base.graph.entities, visible.graph.entities);
+        assert_eq!(base.graph.edges, visible.graph.edges);
+        let changes = describe(&early, &visible);
+        assert_eq!(changes.len(), 3);
+        assert_eq!(changes[0]["kind"], "game_time_passed");
+        assert_eq!(changes[1]["kind"], "entity_changed");
+        assert_eq!(changes[2]["kind"], "relation_changed");
+        for change in &changes[1..] {
+            assert_eq!(change["before"], change["after"]);
+            assert_eq!(change["fields_changed"], 3);
+            assert_eq!(change["fields_omitted"], 0);
+            assert_eq!(change["fields"].as_array().map(Vec::len), Some(3));
+            for (index, name, state, value) in [
+                (0, "absent", "absent", Value::Null),
+                (1, "known", "known", json!("future-explicit-value")),
+                (2, "legacy", "known", json!("future-legacy-value")),
+            ] {
+                let field = &change["fields"][index];
+                assert_eq!(field["field"], name);
+                assert!(field["before"].is_null());
+                assert_eq!(field["before_presence"]["state"], "unknown");
+                assert_eq!(field["before_presence"]["observed_at_game_tick"], 23);
+                assert_eq!(field["before_presence"]["recorded"], true);
+                assert_eq!(field["after_presence"]["state"], state);
+                assert_eq!(field["after_presence"]["recorded"], true);
+                assert_eq!(field["after"], value);
+                assert_eq!(field["provenance_changed"], false);
+            }
+            assert_eq!(change["basis"]["from"], anchor_ref(&early));
+            assert_eq!(change["basis"]["to"], anchor_ref(&visible));
+        }
+        assert!(!json!(changes).to_string().contains("never-visible-"));
+
+        let mut later = successor(&visible);
+        later.tick = GameTick(24);
+        later.refresh_hash();
+        let later_changes = describe(&visible, &later);
+        assert_eq!(later_changes.len(), 1);
+        assert_eq!(later_changes[0]["kind"], "game_time_passed");
+    }
+
+    #[test]
+    fn changed_future_payloads_are_masked_independently_at_both_endpoints() {
+        for before_tick in [GameTick(20), GameTick(30)] {
+            let mut base = snapshot();
+            let before = Fact::known(
+                WorldValue::Text("payload-before".to_owned()),
+                before_tick,
+                FactSource::Replay,
+                Digest32::ZERO,
+            );
+            let entity = record(Some(before));
+            let mut edge = relation(1);
+            edge.fields = entity.fields.clone();
+            base.graph.entities.insert(entity.id, entity);
+            base.graph.edges.insert(edge.id, edge);
+            base.refresh_hash();
+
+            let mut target = successor(&base);
+            target.tick = GameTick(21);
+            let after = Fact::known(
+                WorldValue::Text("payload-after".to_owned()),
+                GameTick(30),
+                FactSource::Replay,
+                Digest32::ZERO,
+            );
+            let entity = record(Some(after));
+            let mut edge = relation(1);
+            edge.fields = entity.fields.clone();
+            target.graph.entities.insert(entity.id, entity);
+            target.graph.edges.insert(edge.id, edge);
+            target.refresh_hash();
+            let changes = describe(&base, &target);
+            assert_eq!(changes.len(), 3);
+            assert_eq!(changes[1]["kind"], "entity_changed");
+            assert_eq!(changes[2]["kind"], "relation_changed");
+            for change in &changes[1..] {
+                let field = &change["fields"][0];
+                assert_eq!(change["fields_changed"], 1);
+                assert!(field["after"].is_null());
+                assert_eq!(field["after_presence"]["state"], "unknown");
+                assert_eq!(field["after_presence"]["observed_at_game_tick"], 30);
+                if before_tick <= base.tick {
+                    assert_eq!(field["before"], "payload-before");
+                    assert_eq!(field["before_presence"]["state"], "known");
+                } else {
+                    assert!(field["before"].is_null());
+                    assert_eq!(field["before_presence"]["state"], "unknown");
+                }
+            }
+            let encoded = json!(changes).to_string();
+            assert!(!encoded.contains("payload-after"));
+            if before_tick > base.tick {
+                assert!(!encoded.contains("payload-before"));
+            }
+        }
+    }
+
+    #[test]
+    fn future_events_cannot_leak_or_consume_change_slots_before_their_tick() {
+        let mut base = snapshot();
+        for id in 1..=(MAX_EVENT_CHANGES as u128 + 3) {
+            let mut retained = event(id);
+            retained.tick = GameTick(if id == 1 { 22 } else { 100 });
+            retained.summary = "future-event-payload".to_owned();
+            retained.fields.insert(
+                "detail".to_owned(),
+                WorldValue::Text("future-field-payload".to_owned()),
+            );
+            base.graph.events.insert(retained.id, retained);
+        }
+        base.refresh_hash();
+        let mut early = successor(&base);
+        early.tick = GameTick(21);
+        early.refresh_hash();
+        let changes = describe(&base, &early);
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0]["kind"], "game_time_passed");
+        assert!(!json!(changes).to_string().contains("future-"));
+
+        let mut revised = successor(&early);
+        for retained in revised.graph.events.values_mut() {
+            retained.summary.push_str("-revised");
+            retained.fields.insert("revision".to_owned(), WorldValue::U64(2));
+        }
+        revised.refresh_hash();
+        assert!(describe(&early, &revised).is_empty());
+
+        let mut removed = successor(&revised);
+        removed.graph.events.clear();
+        removed.refresh_hash();
+        assert!(describe(&revised, &removed).is_empty());
+
+        let mut visible = successor(&revised);
+        visible.tick = GameTick(22);
+        visible.refresh_hash();
+        assert_eq!(revised.graph.events, visible.graph.events);
+        let changes = describe(&revised, &visible);
+        assert_eq!(changes.len(), 2);
+        assert_eq!(changes[0]["kind"], "game_time_passed");
+        assert_eq!(changes[1]["kind"], "event_observed");
+        assert!(changes[1]["before"].is_null());
+        assert_eq!(changes[1]["subject"]["event_id"], "1");
+        assert_eq!(changes[1]["subject"]["tick"], 22);
+        assert_eq!(changes[1]["after"]["summary"], "future-event-payload-revised");
+        assert_eq!(changes[1]["fields_changed"], 2);
+        assert_eq!(changes[1]["fields"][0]["after"], "future-field-payload");
+        assert_eq!(changes[1]["coverage"]["history_complete"], false);
+        assert_eq!(changes[1]["coverage"]["occurrence_since_basis_proven"], false);
+        assert_eq!(changes[1]["coverage"]["eligible_as_mutation_evidence"], false);
+        assert_eq!(changes, describe(&revised, &visible));
     }
 
     #[test]
@@ -893,9 +1138,14 @@ mod tests {
             before.value = WorldValue::Text("withheld-before".to_owned());
             let mut after = fact(presence);
             after.value = WorldValue::Text("withheld-after".to_owned());
-            let before_presence = presence_json(&before);
-            let after_presence = presence_json(&after);
-            let (changes, total) = field_changes(&record(Some(before)), &record(Some(after)));
+            let before_presence = presence_json(&before, GameTick(20));
+            let after_presence = presence_json(&after, GameTick(20));
+            let (changes, total) = field_changes(
+                &record(Some(before)),
+                &record(Some(after)),
+                GameTick(20),
+                GameTick(20),
+            );
             assert_eq!(total, 1);
             assert!(changes[0]["before"].is_null());
             assert!(changes[0]["after"].is_null());
@@ -940,7 +1190,12 @@ mod tests {
                 true,
             ),
         ] {
-            let (changes, total) = field_changes(&record(before), &record(after));
+            let (changes, total) = field_changes(
+                &record(before),
+                &record(after),
+                GameTick(20),
+                GameTick(20),
+            );
             assert_eq!(total, 1);
             assert!(changes[0]["before"].is_null());
             assert!(changes[0]["after"].is_null());
@@ -959,7 +1214,7 @@ mod tests {
         let after = record(Some(fact(FactPresence::Known(WorldValue::Object(
             BTreeMap::from([("slot".to_owned(), WorldValue::U64(7))]),
         )))));
-        let (changes, total) = field_changes(&before, &after);
+        let (changes, total) = field_changes(&before, &after, GameTick(20), GameTick(20));
         assert_eq!(total, 1);
         assert_eq!(changes[0]["before"], json!({"slot": null}));
         assert_eq!(changes[0]["after"], json!({"slot": 7}));

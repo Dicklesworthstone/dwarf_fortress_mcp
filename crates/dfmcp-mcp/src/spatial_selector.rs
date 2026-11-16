@@ -218,10 +218,15 @@ impl Selection {
         })
     }
 
-    pub(super) fn witness(&self, entity: &EntityRecord, geometry: MapCuboid) -> Value {
+    pub(super) fn witness(
+        &self,
+        entity: &EntityRecord,
+        geometry: MapCuboid,
+        source_tick: dfmcp_core::GameTick,
+    ) -> Value {
         json!({
             "min":coordinates(geometry.min), "max":coordinates(geometry.max),
-            "facts":super::super::core_query::entity_json(entity, &self.geometry.fields())["fields"],
+            "facts":super::super::core_query::entity_json(entity, &self.geometry.fields(), source_tick)["fields"],
             "eligible_as_mutation_evidence":false
         })
     }

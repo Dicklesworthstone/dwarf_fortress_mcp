@@ -157,8 +157,8 @@ fn continuation(raw: Option<&str>, identity: Digest32) -> Result<Option<Position
     Ok(Some(position))
 }
 
-fn row(candidate: &Candidate<'_>, fields: &[String]) -> Value {
-    let mut row = core_query::entity_json(candidate.entity, fields);
+fn row(candidate: &Candidate<'_>, fields: &[String], source_tick: dfmcp_core::GameTick) -> Value {
+    let mut row = core_query::entity_json(candidate.entity, fields, source_tick);
     row["relations"] = candidate.evidence.json();
     row
 }
@@ -370,13 +370,20 @@ pub(super) fn execute_with_page_budget(
         "source_cost":{"bounded_bytes":work.bytes, "estimated_scan_work_units":work.work}
     });
     for candidate in page {
-        if !source::render_fits(candidate.entity, &selection.fields, &[], maximum, &mut work)? {
+        if !source::render_fits(
+            candidate.entity,
+            &selection.fields,
+            &[],
+            snapshot.tick,
+            maximum,
+            &mut work,
+        )? {
             break;
         }
         let rows = payload["rows"]
             .as_array_mut()
             .ok_or_else(|| invalid("relation result rows are unavailable"))?;
-        rows.push(row(candidate, &selection.fields));
+        rows.push(row(candidate, &selection.fields, snapshot.tick));
         let count = rows.len();
         payload["returned"] = json!(count);
         payload["truncated"] = json!(count < remaining);

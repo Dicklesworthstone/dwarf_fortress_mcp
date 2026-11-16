@@ -478,6 +478,14 @@ continuity in the Agent Turn. It cannot supply fresh mutation evidence.
 An unknown or collected hash returns `stale_anchor`; there is no substitution
 of a newer world or another session's retained source.
 
+Field presentation uses the selected source tick as well. Future Known values
+and future claims of absence render as Unknown with a null value, retaining
+their original observation time and provenance. Advancing the current world
+does not make those fields eligible in an older retained snapshot. Existing
+redacted, omitted, stale, unsupported and contradictory states stay explicit.
+This applies to inspection, entity pages, spatial/relationship selections and
+ranked result fields.
+
 For entity, search, event, spatial, relationship or ranked pages, copy the returned `continuation` string into
 `request.query.continuation`. Keep the query selection unchanged. Entity
 continuations also bind selected fields, ordering, source anchor and session.
@@ -510,6 +518,9 @@ Entity pages render the requested `fields` and any required geometry, relation
 witnesses or ranking facts; event pages retain their selected fields and event
 metadata. Large unselected values do not consume the projected output allowance,
 while complete-source work admission still includes them.
+Future backing values are masked before complete-row fitting, so an Unknown
+field does not need enough output allowance for its hidden value. The complete
+source budget still accounts for that backing value.
 Rows form one ordered prefix and the continuation follows exactly that prefix.
 Neither an oversized row nor a zero-row advancing page is silently accepted.
 The final page can fit even when removing its continuation makes it smaller
@@ -548,3 +559,10 @@ basis, historical authority and deferred-context checks. Pure family regressions
 cover exact continuation replay, oversized required rows, smaller terminal
 packets, empty results and publisher errors. Focused helper and renderer execution is recorded
 separately from full public-facade execution in `IMPLEMENTATION_STATUS.md`.
+
+The source-time projection regressions also exercise large masked values,
+current and retained reads, current authorization and all five entity-query
+families. This increment has source review and regression additions; corrected
+Rust execution, formatting and full qualification remain pending after loss of
+the execution environment.
+

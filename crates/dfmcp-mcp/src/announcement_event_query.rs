@@ -109,7 +109,7 @@ impl Report<'_> {
     fn field(&self, name: &str) -> Value {
         match self.entity.fields.get(name) {
             Some(fact) => {
-                let mut value = core_query::fact_json(fact);
+                let mut value = core_query::fact_json(fact, self.observed_at);
                 if fact.known_value().is_some() && self.native(name).is_none() {
                     value["presence"] = json!("unknown");
                     value["epistemic_state"] = json!("unknown");
@@ -290,7 +290,14 @@ pub(super) fn execute(
     let mut rows = Vec::new();
     let mut accepted = None;
     for report in matching.iter().skip(start).take(request.limit) {
-        if !source::render_fits(report.entity, &fields, &mandatory, maximum, &mut work)? {
+        if !source::render_fits(
+            report.entity,
+            &fields,
+            &mandatory,
+            report.observed_at,
+            maximum,
+            &mut work,
+        )? {
             break;
         }
         work.charge(0, fields.len().saturating_add(mandatory.len()))?;

@@ -5,7 +5,7 @@
 
 use std::collections::BTreeMap;
 
-use dfmcp_core::{Result, StateAnchor};
+use dfmcp_core::{GameTick, Result, StateAnchor};
 use dfmcp_world::{EntityRecord, Fact, FactPresence, PredicateTruth, Value};
 use serde_json::{Value as Json, json};
 
@@ -71,8 +71,10 @@ pub(crate) fn value_json(value: &Value) -> Json {
     }
 }
 
-pub(crate) fn fact_value(fact: &Fact) -> Json {
-    fact.known_value().map_or(Json::Null, value_json)
+pub(crate) fn fact_value(fact: &Fact, source_tick: GameTick) -> Json {
+    fact.known_value()
+        .filter(|_| fact.observed_at <= source_tick)
+        .map_or(Json::Null, value_json)
 }
 
 /// Presence of the displayed value, which may summarize a known binary payload.
@@ -94,7 +96,15 @@ pub(crate) fn value_presence(value: &Value) -> Json {
     }
 }
 
-pub(crate) fn presence_json(fact: &Fact) -> Json {
+pub(crate) fn presence_json(fact: &Fact, source_tick: GameTick) -> Json {
+    if fact.observed_at > source_tick
+        && (fact.known_value().is_some() || matches!(fact.presence, Some(FactPresence::Absent)))
+    {
+        return json!({
+            "state": "unknown", "reason": "fact was observed after the selected source tick",
+            "observed_at_game_tick": fact.observed_at.0,
+        });
+    }
     match fact.presence.as_ref() {
         None => value_presence(&fact.value),
         Some(FactPresence::Known(value)) if value == &fact.value => value_presence(value),
@@ -114,7 +124,7 @@ pub(crate) fn presence_json(fact: &Fact) -> Json {
     }
 }
 
-pub(crate) fn entity_json(entity: &EntityRecord) -> Json {
+pub(crate) fn entity_json(entity: &EntityRecord, source_tick: GameTick) -> Json {
     json!({
         "entity_id": entity.id.get().to_string(),
         "kind": entity.kind.as_str(),
@@ -122,10 +132,10 @@ pub(crate) fn entity_json(entity: &EntityRecord) -> Json {
         "generation": entity.generation,
         "revision": entity.revision,
         "fields": entity.fields.iter()
-            .map(|(name, fact)| (name.clone(), fact_value(fact)))
+            .map(|(name, fact)| (name.clone(), fact_value(fact, source_tick)))
             .collect::<BTreeMap<_, _>>(),
         "field_presence": entity.fields.iter()
-            .map(|(name, fact)| (name.clone(), presence_json(fact)))
+            .map(|(name, fact)| (name.clone(), presence_json(fact, source_tick)))
             .collect::<BTreeMap<_, _>>(),
     })
 }
@@ -214,10 +224,10 @@ mod tests {
             if expected != "known" {
                 fact.value = Value::Text("unavailable retained value".into());
             }
-            assert!(fact_value(&fact).is_null());
-            assert_eq!(presence_json(&fact)["state"], expected);
+            assert!(fact_value(&fact, GameTick(20)).is_null());
+            assert_eq!(presence_json(&fact, GameTick(20))["state"], expected);
             assert!(
-                !presence_json(&fact)
+                !presence_json(&fact, GameTick(20))
                     .to_string()
                     .contains("unavailable retained value")
             );
@@ -240,7 +250,7 @@ mod tests {
             label: "Urist".into(),
             fields: BTreeMap::from([("future.optional".into(), fact)]),
         };
-        let projected = entity_json(&entity);
+        let projected = entity_json(&entity, GameTick(20));
         assert_eq!(projected["fields"]["future.optional"], json!([1, null]));
         assert_eq!(
             projected["field_presence"]["future.optional"]["state"],
@@ -257,8 +267,8 @@ mod tests {
             Digest32::ZERO,
         );
         fact.value = Value::Bool(false);
-        assert!(fact_value(&fact).is_null());
-        assert_eq!(presence_json(&fact)["state"], "unknown");
+        assert!(fact_value(&fact, GameTick(20)).is_null());
+        assert_eq!(presence_json(&fact, GameTick(20))["state"], "unknown");
     }
 
     #[test]
@@ -292,14 +302,55 @@ mod tests {
             Value::List(vec![Value::Null, Value::Bytes(vec![7, 8, 9])]),
         )]));
         let fact = Fact::known(value, GameTick(20), FactSource::Replay, Digest32::ZERO);
-        assert_eq!(fact_value(&fact), json!({"future": [null, {"bytes": 3}]}));
-        assert_eq!(presence_json(&fact)["state"], "omitted");
-        assert_eq!(presence_json(&fact)["source_state"], "known");
+        assert_eq!(fact_value(&fact, GameTick(20)), json!({"future": [null, {"bytes": 3}]}));
+        assert_eq!(presence_json(&fact, GameTick(20))["state"], "omitted");
+        assert_eq!(presence_json(&fact, GameTick(20))["source_state"], "known");
         assert_eq!(
-            presence_json(&fact)["projection"],
+            presence_json(&fact, GameTick(20))["projection"],
             "binary_payload_summarized"
         );
     }
+
+    #[test]
+    fn future_known_values_and_absence_use_the_selected_tick_without_losing_other_states() {
+        for observed in [19, 20, 21] {
+            for explicit in [false, true] {
+                let mut fact = Fact::known(
+                    Value::Text("later-payload".into()),
+                    GameTick(observed),
+                    FactSource::DfhackField("source".into()),
+                    Digest32::ZERO,
+                );
+                if explicit {
+                    fact.presence = Some(FactPresence::Known(fact.value.clone()));
+                }
+                let value = fact_value(&fact, GameTick(20));
+                let presence = presence_json(&fact, GameTick(20));
+                if observed > 20 {
+                    assert!(value.is_null());
+                    assert_eq!(presence["state"], "unknown");
+                    assert_eq!(presence["observed_at_game_tick"], 21);
+                    assert!(!presence.to_string().contains("later-payload"));
+                } else {
+                    assert_eq!(value, "later-payload");
+                    assert_eq!(presence["state"], "known");
+                }
+                fact.presence = Some(FactPresence::Absent);
+                assert!(fact_value(&fact, GameTick(20)).is_null());
+                assert_eq!(
+                    presence_json(&fact, GameTick(20))["state"],
+                    if observed > 20 { "unknown" } else { "absent" },
+                );
+                fact.presence = Some(FactPresence::Redacted("private".into()));
+                assert_eq!(presence_json(&fact, GameTick(20))["state"], "redacted");
+                assert!(fact_value(&fact, GameTick(20)).is_null());
+                fact.presence = Some(FactPresence::Known(Value::Bool(false)));
+                assert_eq!(presence_json(&fact, GameTick(20))["state"], "unknown");
+                assert!(fact_value(&fact, GameTick(20)).is_null());
+            }
+        }
+    }
+
     #[test]
     fn objective_projection_distinguishes_established_false_unknown_and_invalid() {
         for (truth, status, epistemic, predicate_truth) in [

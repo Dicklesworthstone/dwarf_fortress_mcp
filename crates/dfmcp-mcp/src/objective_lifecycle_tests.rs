@@ -423,7 +423,7 @@ fn entity_resources_do_not_certify_history_or_write_custody() -> TestResult {
                 .values()
                 .next()
                 .ok_or("fixture entity")?;
-            let mut rows = serde_json::json!({"mode":"entities", "rows":[crate::observation_projection::entity_json(entity)]});
+            let mut rows = serde_json::json!({"mode":"entities", "rows":[crate::observation_projection::entity_json(entity, snapshot.tick)]});
             crate::resources::link_entity_resources(
                 &mut rows,
                 guard.session_id,

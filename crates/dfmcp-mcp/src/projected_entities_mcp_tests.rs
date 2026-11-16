@@ -879,3 +879,209 @@ fn projected_page_families_defer_and_recheck_before_any_packet_fitting() -> Test
     }
     Ok(())
 }
+
+fn assert_source_time_typed_row(row: &Value, available: bool, digest: Digest32) {
+    assert_eq!(row["entity_id"], "1");
+    for (name, text, tick) in [("small", "1:ssss", 10), ("past", "prior-observation", 9)] {
+        let fact = &row["fields"][name];
+        assert_eq!(fact["presence"], "known", "{row}");
+        assert_eq!(fact["epistemic_state"], "assumed", "{row}");
+        assert_eq!(fact["value"], json!({"type":"text","value":text}));
+        assert_eq!(fact["observed_at_game_tick"], tick);
+    }
+    for (name, text) in [
+        ("future_legacy", "future-legacy-payload"),
+        ("future_explicit", "future-explicit-payload"),
+    ] {
+        let fact = &row["fields"][name];
+        assert_eq!(fact["observed_at_game_tick"], 11);
+        assert_eq!(fact["source"], "Replay");
+        assert_eq!(fact["source_digest"], digest.to_string());
+        if available {
+            assert_eq!(fact["presence"], "known", "{row}");
+            assert_eq!(fact["epistemic_state"], "assumed", "{row}");
+            assert_eq!(fact["value"], json!({"type":"text","value":text}));
+        } else {
+            assert_eq!(fact["presence"], "unknown", "{row}");
+            assert_eq!(fact["epistemic_state"], "unknown", "{row}");
+            assert_eq!(fact["value"], Value::Null, "{row}");
+        }
+    }
+    let absent = &row["fields"]["future_absent"];
+    assert_eq!(absent["observed_at_game_tick"], 11);
+    assert_eq!(absent["source"], "Replay");
+    assert_eq!(absent["source_digest"], digest.to_string());
+    assert_eq!(absent["value"], Value::Null);
+    assert_eq!(
+        absent["presence"],
+        if available { "absent" } else { "unknown" },
+        "{row}"
+    );
+    assert_eq!(
+        absent["epistemic_state"],
+        if available { "assumed" } else { "unknown" },
+        "{row}"
+    );
+}
+
+fn assert_source_time_legacy_row(row: &Value, available: bool) {
+    assert_eq!(row["entity_id"], "1");
+    assert_eq!(row["fields"]["small"], "1:ssss");
+    assert_eq!(row["fields"]["past"], "prior-observation");
+    for (name, text) in [
+        ("future_legacy", "future-legacy-payload"),
+        ("future_explicit", "future-explicit-payload"),
+    ] {
+        assert_eq!(
+            row["fields"][name],
+            if available { json!(text) } else { Value::Null },
+            "{row}"
+        );
+        assert_eq!(
+            row["field_presence"][name]["state"],
+            if available { "known" } else { "unknown" },
+            "{row}"
+        );
+    }
+    assert_eq!(row["fields"]["future_absent"], Value::Null);
+    assert_eq!(
+        row["field_presence"]["future_absent"]["state"],
+        if available { "absent" } else { "unknown" },
+        "{row}"
+    );
+}
+
+#[test]
+fn projected_entity_views_bind_future_facts_to_the_selected_source_tick() -> TestResult {
+    let _serial = crate::test_serial();
+    let (session, _) = fixture(1, 4, 0, false)?;
+    let digest = Digest32::of_bytes(b"public-source-time-projection");
+    let owner = crate::server::resolve_session(Some(session.clone()))?;
+    let source = {
+        let mut guard = owner.lock().map_err(|_| "session poisoned")?;
+        let mut source = guard.adapter.snapshot().clone();
+        let entity = source
+            .graph
+            .entities
+            .get_mut(&EntityId::new(1))
+            .ok_or("entity missing")?;
+        entity.fields.extend([
+            (
+                "past".to_owned(),
+                Fact::known(
+                    WorldValue::Text("prior-observation".to_owned()),
+                    GameTick(9),
+                    FactSource::Replay,
+                    digest,
+                ),
+            ),
+            (
+                "future_legacy".to_owned(),
+                Fact::known(
+                    WorldValue::Text("future-legacy-payload".to_owned()),
+                    GameTick(11),
+                    FactSource::Replay,
+                    digest,
+                ),
+            ),
+            (
+                "future_explicit".to_owned(),
+                Fact::with_presence(
+                    dfmcp_world::FactPresence::Known(WorldValue::Text(
+                        "future-explicit-payload".to_owned(),
+                    )),
+                    GameTick(11),
+                    FactSource::Replay,
+                    digest,
+                ),
+            ),
+            (
+                "future_absent".to_owned(),
+                Fact::with_presence(
+                    dfmcp_world::FactPresence::Absent,
+                    GameTick(11),
+                    FactSource::Replay,
+                    digest,
+                ),
+            ),
+        ]);
+        entity.revision += 1;
+        source.cursor = source.cursor.checked_next().ok_or("cursor exhausted")?;
+        source.refresh_hash();
+        guard.adapter.inject_snapshot(source.clone())?;
+        source
+    };
+    assert_eq!(source.tick, GameTick(10));
+    let fields = ["small", "past", "future_legacy", "future_explicit", "future_absent"];
+    let mut entities = request(1);
+    entities["request"]["query"]["fields"] = json!(fields);
+    let inspect = json!({"mode":"structured","request":{"schema":"dfmcp.query/1",
+        "query":{"kind":"inspect","entity_id":"1","generation":1,"fields":fields}}});
+    let legacy = json!({"mode":"entities","kind":"unit","limit":1});
+    let views = [("entities", entities), ("inspect", inspect), ("legacy", legacy)];
+
+    for (kind, selected) in &views {
+        let (_, page) = query(&session, selected)?;
+        assert_eq!(page["ok"], true, "{kind}: {page}");
+        assert_eq!(page["anchor"]["state_hash"], source.state_hash.to_string());
+        if *kind == "legacy" {
+            assert_source_time_legacy_row(&page["rows"][0], false);
+        } else {
+            let row = if *kind == "inspect" { &page["row"] } else { &page["rows"][0] };
+            assert_source_time_typed_row(row, false, digest);
+        }
+    }
+    assert_eq!(owner.lock().map_err(|_| "session poisoned")?.adapter.snapshot(), &source);
+
+    let current = advance(&session)?;
+    assert_eq!(current.tick, GameTick(11));
+    for (kind, selected) in &views {
+        let (_, page) = query(&session, selected)?;
+        assert_eq!(page["ok"], true, "{kind}: {page}");
+        assert_eq!(page["anchor"]["state_hash"], current.state_hash.to_string());
+        if *kind == "legacy" {
+            assert_source_time_legacy_row(&page["rows"][0], true);
+        } else {
+            let row = if *kind == "inspect" { &page["row"] } else { &page["rows"][0] };
+            assert_source_time_typed_row(row, true, digest);
+        }
+    }
+
+    let mut retained_views = Vec::new();
+    for (kind, selected) in &views {
+        let mut retained = selected.clone();
+        retained["at"] = json!(source.state_hash.to_string());
+        let (_, page) = query(&session, &retained)?;
+        assert_eq!(page["ok"], true, "{kind}: {page}");
+        assert_eq!(page["historical"], true, "{kind}: {page}");
+        assert_eq!(page["anchor"]["state_hash"], source.state_hash.to_string());
+        assert_eq!(
+            page["agent_turn"]["anchor"]["state_hash"],
+            current.state_hash.to_string()
+        );
+        if *kind == "legacy" {
+            assert_source_time_legacy_row(&page["rows"][0], false);
+        } else {
+            let row = if *kind == "inspect" { &page["row"] } else { &page["rows"][0] };
+            assert_source_time_typed_row(row, false, digest);
+        }
+        retained_views.push(retained);
+    }
+    {
+        let mut guard = owner.lock().map_err(|_| "session poisoned")?;
+        assert_eq!(guard.adapter.snapshot(), &current);
+        guard
+            .grants
+            .iter_mut()
+            .find(|grant| grant.capability == Capability::Query)
+            .ok_or("Query grant missing")?
+            .expires_at_tick = Some(source.tick);
+    }
+    for retained in retained_views {
+        let (_, denied) = query(&session, &retained)?;
+        refused(&denied, "capability_denied");
+        assert!(denied.get("row").is_none());
+    }
+    assert_eq!(owner.lock().map_err(|_| "session poisoned")?.adapter.snapshot(), &current);
+    Ok(())
+}
