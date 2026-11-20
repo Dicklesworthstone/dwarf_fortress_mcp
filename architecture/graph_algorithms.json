@@ -82,7 +82,18 @@
       ],
       "exactness": "exact",
       "tie_break": "stable_edge_key",
-      "refresh": "query-time pinned snapshot"
+      "refresh": "query-time pinned snapshot",
+      "reference_implementations": [
+        {
+          "api": "dfmcp_world::graph_query::maximum_flow",
+          "policy": "observed-directed-finite-capacity-dinic-stable-edge/1",
+          "source": "crates/dfmcp-world/src/graph_query/flow.rs",
+          "contract": "docs/NETWORK_FLOW.md",
+          "numeric_policy": "checked_finite_nonnegative_integer_capacities_with_equal_source_units",
+          "authority": "observed_projection_analysis_only",
+          "certificate": "edge_capacity_conservation_and_equal_minimum_cut"
+        }
+      ]
     },
     {
       "id": "GA-MCF",

@@ -24,6 +24,11 @@ pub use dominance::{
     analyze_dominators_with_check,
 };
 
+mod flow;
+pub use flow::{
+    FLOW_POLICY, FlowAnalysis, FlowEdge, FlowQuery, maximum_flow, maximum_flow_with_check,
+};
+
 mod scheduling;
 pub use scheduling::{
     DEPENDENCY_SCHEDULE_POLICY, DependencySchedule, DependencyScheduleQuery, ScheduleFront,

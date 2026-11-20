@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased — Analyze finite observed network capacity
+
+- Add a deterministic, bounded directed maximum-flow/minimum-cut graph API with
+  per-edge flows, full vertex partitions and source/scope/decision witnesses.
+- Require qualified finite integer capacities and matching source-recorded
+  units; retain parallel edges and residual rerouting without recursion.
+- Independently certify edge bounds, conservation and exact flow/cut equality.
+  Refuse overflow, invalid evidence, exhausted budgets and cancellation.
+- Pass 14 actual-source latest-nightly tests, including 9,199 independent cut
+  oracle cases. Keep the model advisory; public query integration follows.
+
 ## Unreleased — Expose weighted observed routes through the query tool
 
 - Add `weighted_routes` with multiple generation-bound sources, qualified

@@ -1,5 +1,38 @@
 # Implementation Status
 
+## Unreleased — Prove observed network throughput and bottleneck cuts
+
+The world graph API now implements the finite directed-network subset of
+`GA-FLOW`: deterministic maximum flow, per-edge flows and an equal-capacity
+minimum cut between two exact observed entities. Every selected edge requires
+independently qualified nonnegative integer capacity and source-recorded unit
+facts, including disconnected and zero-capacity edges. Units must agree exactly;
+missing, future, unavailable, mixed-unit or unqualified evidence refuses the
+whole model. Every integer capacity is finite, including `u64::MAX`.
+
+Iterative Dinic traversal preserves parallel and antiparallel edge identities,
+uses residual reverse arcs to repair earlier choices, and avoids graph-depth
+recursion or unit-by-unit augmentation. An independent certificate checks edge
+bounds, conservation, source/sink balance and exact flow/cut equality before
+publication. Checked overflow, work/frontier/input bounds and cancellation
+return no partial result. Source, scope, policy, qualified facts, requests,
+budgets and decisions are bound into deterministic witnesses.
+
+Latest-nightly actual-source compilation of the core/world libraries and new
+integration suite passes with warning denial on rustc 1.102.0-nightly
+(6905905bb, 2026-11-19). All 14 flow tests pass, including 9,199 independent
+exhaustive-cut oracle cases, a 4,000-vertex iterative chain, residual rerouting,
+units/provenance, exact bounds, cancellation and overflow. Inventories confirm
+unchanged source bytes across those executions. Scoped formatting and
+independent source review pass.
+
+These are component checks. Public query integration follows separately;
+full workspace, transport, native-game and production-admission qualification
+are not established. The analysis requires an already authorized canonical
+projection, collects no native capacity data and authorizes no game effects.
+Owner: `df-franken-storage-mvcc-54h.4.4`, in progress. See
+`docs/NETWORK_FLOW.md`.
+
 ## Unreleased — Query weighted observed routes
 
 The existing `fortress_query` structured entry point now accepts

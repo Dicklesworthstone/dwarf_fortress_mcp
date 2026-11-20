@@ -137,6 +137,12 @@ Multi-source search produces both distance and winning-source witnesses. Ties fo
 
 Capacities are semantic and unit-checked. A min-cut result is advisory until mapped back to buildable/controllable game objects and revalidated. Infinite capacities are represented explicitly, not as a magic large integer.
 
+The implemented finite directed-network model is described in
+`NETWORK_FLOW.md`. It requires source-qualified integer capacities and equal
+recorded units, and verifies capacity bounds, conservation and exact flow/cut
+equality before returning. This subset supports no infinite capacity, native
+throughput assertion or game mutation.
+
 ### 6.8 Minimum-cost flow
 
 **Questions:** How can bounded supply satisfy distributed demand while minimizing hauling, labor, danger, or delay?
