@@ -267,6 +267,14 @@ dwarf-fortress-mcp evaluate <scenario> <policy> <ticks>  # score idle | follow_r
 
 Laboratory results are semantics and calibration, never Dwarf Fortress evidence.
 
+Structured queries can now model [dependency schedules with shared capacity](docs/DEPENDENCY_SCHEDULING.md)
+and [weighted routes over observed relations](docs/WEIGHTED_ROUTES.md). Schedules
+report contention delays and slot assignments alongside their dependency-only
+lower bound. Weighted routes choose among multiple sources using qualified
+integer edge costs and return exact path evidence. Both support current and
+retained laboratory sources through the existing query tool, under current
+authority and complete input/output bounds.
+
 Production goals can combine DRINK, FOOD, BED, DOOR, TABLE and CHAIR quotas.
 Furniture orders consume finite wood, share finite worker/workshop
 capacity, and create inspectable items. The planner budgets all requested

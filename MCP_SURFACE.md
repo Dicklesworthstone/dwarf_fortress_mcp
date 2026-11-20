@@ -322,6 +322,19 @@ Executes bounded structured DfQL at a concrete anchor. Query plans are staticall
 Deterministic result ordering is mandatory. Coverage says exactly what an empty or partial answer
 can establish.
 
+Structured `schedule` computes a duration-qualified prerequisite closure.
+Optional `capacity: 1..64` adds identical shared slots, deterministic
+dispatch, start/finish offsets and queue delays; its separately labeled
+unlimited `baseline` retains the unlimited lower bound and slack.
+Structured `weighted_routes` computes least-cost observed paths from up to 64
+generation-bound roots using qualified nonnegative integer edge costs, optional
+targets and outgoing/incoming traversal. Selected paths retain exact edge versions
+and source cost facts. Both are conditional graph analyses with complete-source
+and whole-output admission, exact retained laboratory sources and current
+Query authority. They dispatch no work and establish no native resource or
+walkability claim. See [`docs/DEPENDENCY_SCHEDULING.md`](docs/DEPENDENCY_SCHEDULING.md)
+and [`docs/WEIGHTED_ROUTES.md`](docs/WEIGHTED_ROUTES.md).
+
 Structured `aggregate` accepts optional `relation` and `spatial` selectors,
 independently or together, using the same closed objects as `ranked_entities`.
 Source kinds and typed `where` run first, positive witnessed relationships next,

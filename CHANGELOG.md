@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased — Expose weighted observed routes through the query tool
+
+- Add `weighted_routes` with multiple generation-bound sources, qualified
+  integer edge costs, reverse traversal and complete selected path witnesses.
+- Wire current/retained laboratory queries and generic semantic execution,
+  schema discovery and output-reserving publication. Preserve current grants,
+  source identity, complete source/output budgets, bounded path rendering and
+  whole-result refusal.
+- Preserve the concurrently landed `capacity`/`baseline` scheduling contract.
+  Add three public weighted-route laboratory regression functions and document
+  usable requests through the existing eleven-tool surface.
+- Pass 111 actual-source query component tests on the final merged source,
+  with exact lockfile dependencies, plus closed/composed schema checks.
+- Execute all 175 tests across 25 world integration targets, including previously
+  pending source-time quantity and search regressions. Full MCP/facade and
+  world inline-unit qualification remain unestablished; repository verification
+  reaches bead coverage and stops on missing `br`.
+
 ## Unreleased — Expose finite-slot planning through the existing query tool
 
 - Add optional `capacity: 1..64` to current and retained structured schedules,

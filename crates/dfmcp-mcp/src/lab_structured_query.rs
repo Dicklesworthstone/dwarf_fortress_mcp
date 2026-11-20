@@ -33,6 +33,7 @@ use serde_json::{Value, json};
 
 use super::query_condition::Condition;
 use super::semantic_query::dependency_schedule_query;
+use super::semantic_query::weighted_route_query;
 
 const MAX_REQUEST_BYTES: usize = 65_536;
 
@@ -70,6 +71,14 @@ struct ConditionRequest {
 struct ScheduleRequest {
     mode: Mode,
     request: dependency_schedule_query::Envelope,
+    at: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WeightedRouteRequest {
+    mode: Mode,
+    request: weighted_route_query::Envelope,
     at: Option<String>,
 }
 
@@ -162,6 +171,7 @@ pub(super) fn parse(raw: &str) -> Result<Option<Request>> {
                 | "traverse"
                 | "dependencies"
                 | "schedule"
+                | "weighted_routes"
                 | "aggregate"
                 | "search"
                 | "events"
@@ -172,7 +182,7 @@ pub(super) fn parse(raw: &str) -> Result<Option<Request>> {
         )
     ) {
         return Err(invalid(
-            "structured laboratory queries support only entities, inspect, traverse, dependencies, schedule, aggregate, search, events, spatial_entities, related_entities, ranked_entities, and condition_evaluation",
+            "structured laboratory queries support only entities, inspect, traverse, dependencies, schedule, weighted_routes, aggregate, search, events, spatial_entities, related_entities, ranked_entities, and condition_evaluation",
         ));
     }
     if request.request["query"]["kind"] == "condition_evaluation" {
@@ -192,6 +202,14 @@ pub(super) fn parse(raw: &str) -> Result<Option<Request>> {
         request.at = parsed.at;
         request.request = serde_json::to_value(parsed.request)
             .map_err(|_| invalid("laboratory dependency schedule cannot be encoded"))?;
+    }
+    if request.request["query"]["kind"] == "weighted_routes" {
+        let parsed: WeightedRouteRequest = serde_json::from_str(raw)
+            .map_err(|error| invalid(format!("invalid laboratory weighted routes: {error}")))?;
+        let Mode::Structured = parsed.mode;
+        request.at = parsed.at;
+        request.request = serde_json::to_value(parsed.request)
+            .map_err(|_| invalid("laboratory weighted routes cannot be encoded"))?;
     }
     Ok(Some(request))
 }
@@ -213,6 +231,12 @@ pub(super) fn execute(
                 snapshot, current, &request.request, remaining_wall_millis(current, started)?,
             )?
         }
+        Some("weighted_routes") => weighted_route_query::execute_laboratory_source(
+            snapshot,
+            current,
+            &request.request,
+            remaining_wall_millis(current, started)?,
+        )?,
         Some("aggregate" | "search") => {
             operational_query::execute(snapshot, &source_context, &request.request)?
         }

@@ -1,0 +1,43 @@
+{
+  "title": "Cost-aware routes in an authorized observed graph",
+  "description": "Compute the minimum summed nonnegative integer edge cost from one to 64 generation-fenced roots. Costs must be usable source-qualified facts on every selected edge, including unreachable edges. Direction is outgoing by default or incoming. Omitted or empty targets return the complete shortest-path forest; explicit targets return only those routes and their exact paths. Results describe this projection, not native walkability, resource feasibility or complete-world absence. Full source, work, wall and complete output budgets apply; no truncation, effect or authority is created. Runtime also checks UTF-8 byte lengths, u64 IDs and duplicate endpoint IDs.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["kind", "roots", "edge_kinds", "cost_field"],
+  "properties": {
+    "kind": {"const": "weighted_routes"},
+    "edge_kinds": {
+      "type": "array", "minItems": 1, "maxItems": 32,
+      "items": {
+        "oneOf": [
+          {"enum": ["located_at", "contained_in", "assigned_to", "member_of", "performs", "requires", "produces", "uses", "supports", "threatens", "ordered_by", "parent_of"]},
+          {"type": "string", "pattern": "^custom:[^\u0000]+$", "maxLength": 128}
+        ]
+      }
+    },
+    "cost_field": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^(?=.*\\S)[^\u0000-\u001f\u007f-\u009f]+$"},
+    "direction": {"enum": ["outgoing", "incoming"], "default": "outgoing"},
+    "roots": {
+      "type": "array", "minItems": 1, "maxItems": 64, "uniqueItems": true,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["entity_id", "generation"],
+        "properties": {
+          "entity_id": {"type": "string", "pattern": "^[1-9][0-9]{0,19}$"},
+          "generation": {"type": "integer", "minimum": 0, "maximum": 4294967295}
+        }
+      }
+    },
+    "targets": {
+      "type": "array", "maxItems": 64, "uniqueItems": true,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["entity_id", "generation"],
+        "properties": {
+          "entity_id": {"type": "string", "pattern": "^[1-9][0-9]{0,19}$"},
+          "generation": {"type": "integer", "minimum": 0, "maximum": 4294967295}
+        }
+      }
+    }
+  }
+}

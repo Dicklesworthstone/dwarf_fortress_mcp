@@ -335,6 +335,7 @@ fn schedule_closed_grammar_refuses_malformed_selectors_and_duplicate_fields() ->
         ("edge_kinds", json!([])),
         ("edge_kinds", json!(["unknown"])),
         ("parallelism", json!(5)),
+        ("max_parallel", json!(5)),
         (
             "targets",
             json!(vec![json!({"entity_id":"4","generation":1}); 65]),
@@ -555,6 +556,7 @@ fn capacity_query_requires_a_closed_explicit_integer_assumption() -> TestResult 
         Value::Null,
         json!(0),
         json!(65),
+        json!(4_294_967_296_u64),
         json!(-1),
         json!(1.5),
         json!(1.0),

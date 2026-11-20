@@ -1,5 +1,56 @@
 # Implementation Status
 
+## Unreleased — Query weighted observed routes
+
+The existing `fortress_query` structured entry point now accepts
+`kind: "weighted_routes"` over current and exact retained laboratory sources.
+Up to 64 generation-bound roots and targets select a minimum-cost parent forest
+or complete paths using qualified nonnegative integer edge facts. Outgoing and
+incoming traversal, deterministic cost/hop/source/parent/edge ties, exact edge
+revisions and original cost provenance remain explicit. Unavailable or future
+costs refuse, including selected edges in unreachable components; no fallback
+cost or complete-world absence claim is introduced.
+
+The generic semantic executor, output-reserving publisher, composed schema,
+raw duplicate-key validation, public tool description and examples expose the
+same bounded operator. Current authorization at the actual current tick,
+source identity, original foreground deadlines and independent source/output
+allowances remain enforced. Path reconstruction, edge/field lookups and output
+rendering charge bounded work. Complete paths fit as a whole or refuse; the
+query creates no native observation, effect, reservation or mutation authority.
+The concurrent finite-capacity query remains compatible with its landed
+`capacity` request field and full unlimited `baseline` response.
+
+The final merged-source actual-source Cargo harness passes 111 tests with zero
+failures or ignored tests: eight weighted routes, 18 dependency/capacity
+schedules, 23 semantic/source-time, 16 spatial, 14 related and 32 ranked queries.
+Execution used `--locked --offline`; all 11 external package versions, sources
+and checksums match the repository lockfile. JSON Schema validation passes
+five accepted/19 rejected weighted requests and 13 accepted/44 rejected
+schedule requests plus two legacy cases. Combined schema checks pass six
+accepted/ten rejected requests and preserve all 20 original variants. Scoped
+formatting and whitespace checks pass. Three new public laboratory regression functions
+cover facade reachability, prepared-work preservation, retained generations,
+current grants, duplicate raw selectors and complete-packet refusal; they are
+registered but have not executed through the full MCP crate.
+
+The world crate's 25 Cargo integration targets pass all 175 distinct tests,
+including the graph oracles and the previously pending future-fact quantity
+and search regressions. These passes were collected across an integration run
+and one interrupted-target retry; they are not an uninterrupted all-targets
+pass. The initial all-targets run was SIGKILLed while compiling the library-test
+target, whose inline tests remain unexecuted. A later full MCP metadata check
+was intentionally interrupted during external dependency compilation when
+workspace reads stalled; it produced neither a completed check nor an MCP
+compiler diagnostic. The earlier capacity increment's Asupersync SIGKILL is
+recorded separately below. `verify.sh` passes its first 20 gate groups then
+stops at bead coverage because `br` is not installed. No full workspace,
+transport, native-game or production qualification is claimed.
+
+See `docs/WEIGHTED_ROUTES.md` and `docs/LAB_STRUCTURED_QUERY.md`.
+Owner: `df-franken-storage-mvcc-54h.4.3`, in progress pending full integration
+qualification.
+
 ## Unreleased — Query finite-capacity dependency schedules
 
 The existing structured `schedule` query now accepts an optional capacity of

@@ -72,6 +72,60 @@ Projection and decision witnesses bind the exact source anchor, authorization
 scope, selected edge kinds, cost field and canonical cost facts, roots,
 direction, policy, bounds and complete decisions. A witness grants no authority.
 
+## Existing-tool query
+
+The default laboratory runtime and generic semantic executor expose this
+analysis through the existing `fortress_query` structured mode. Pass the
+following object as the JSON string in `mode`:
+
+```json
+{
+  "mode": "structured",
+  "request": {
+    "schema": "dfmcp.query/1",
+    "query": {
+      "kind": "weighted_routes",
+      "edge_kinds": ["uses"],
+      "cost_field": "haul_cost",
+      "direction": "outgoing",
+      "roots": [{"entity_id": "10", "generation": 1}],
+      "targets": [{"entity_id": "42", "generation": 1}]
+    }
+  }
+}
+```
+
+Use inspected entity handles and an actual published integer edge field. This
+example does not imply that the starter world or a native profile publishes
+`haul_cost`. The query accepts no caller-provided weights or fallback costs.
+Roots must contain one to 64 distinct IDs with matching generations; optional
+targets accept at most 64 distinct generation-bound handles. Both sets are
+canonicalized for deterministic output. Direction defaults to `outgoing`;
+`incoming` computes costs along the reverse of each recorded relation, without
+asserting that movement in that direction is physically possible.
+
+Omitted or empty targets return the complete shortest-path forest as parent
+records. Explicit targets return selected records and complete reconstructed
+paths, including exact edge versions and original qualified cost facts. Root,
+target and returned entry handles carry entity generations/revisions; path
+vertex IDs refer to the exact source anchor. Unreachable targets are explicit.
+Every selected-kind edge must still have a
+usable cost, and all source records and canonical bytes are admitted before
+analysis; asking for one destination does not bypass complete-source checks.
+The full result must fit the output allowance. There is no truncation or
+pagination that could hide a path edge, and aggregate path reconstruction and
+rendering consume bounded work under the original deadline.
+
+The laboratory wrapper accepts an exact retained `at` hash. Roots and targets
+refer to generations in that source, while current Query authority is checked
+against the actual current tick, including across clock-reset restores. The
+source anchor, current anchor and scope/decision witnesses stay distinct.
+Reserved Agent Turn output does not reduce the separately admitted source
+allowance. No clock advancement, native acquisition, work reservation or
+mutation authority is created. Live profiles keep their own discovery and
+history allowlists; this addition does not claim universal live-profile
+support or native cost coverage.
+
 ## Verification scope
 
 `crates/dfmcp-world/tests/weighted_routes.rs` checks the real implementation
@@ -81,5 +135,12 @@ sources, parallel edges, exact ties, a 4,000-node chain, provenance/presence,
 complete-source refusal, overflow, frontier/work limits, cancellation and
 corrupt path witnesses. Exact executed scope is recorded in
 `IMPLEMENTATION_STATUS.md`; core tests do not establish live-game admission.
+
+Focused MCP tests cover whole-forest and selected-path results, incoming and
+multi-source decisions, generation and source anchors, original cost facts,
+source/output/work limits, cancellation, restored-clock authorization, schema
+composition and duplicate raw keys. Public laboratory regression sources cover
+facade reachability, retained generations and current grants. Executed
+component and full-facade evidence are recorded separately in the status file.
 
 Owning bead: `df-franken-storage-mvcc-54h.4.3`.

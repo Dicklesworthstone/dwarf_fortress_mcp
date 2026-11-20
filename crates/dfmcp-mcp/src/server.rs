@@ -150,6 +150,10 @@ mod temporal_watch_mcp_tests;
 mod structured_query_tests;
 
 #[cfg(test)]
+#[path = "lab_weighted_route_query_tests.rs"]
+mod lab_weighted_route_query_tests;
+
+#[cfg(test)]
 #[path = "lab_condition_mcp_tests.rs"]
 mod condition_mcp_tests;
 

@@ -37,6 +37,7 @@ inner envelope accepts the existing schema, `query`, and optional complete
 | `traverse` | Bounded observed graph traversal and a witnessed path to an optional target |
 | `dependencies` | Prerequisite order, cycle components, cycle blockers and an unweighted critical chain |
 | `schedule` | Qualified-duration prerequisite closure, unlimited baseline and optional finite-slot schedule with queue delays and dispatch order |
+| `weighted_routes` | Least-cost observed routes from multiple sources, qualified integer edge costs and exact selected path witnesses |
 | `events` | Inclusive retained-event windows, kind/subject selection, typed fields and chronological pages |
 | `spatial_entities` | Inclusive intersection or containment of explicitly named point/cuboid entity geometry |
 | `related_entities` | Entities with witnessed one-hop relations to targets selected by kinds, IDs and typed facts |
@@ -45,8 +46,8 @@ inner envelope accepts the existing schema, `query`, and optional complete
 There is no watch, baseline, native capture, plan or effect dispatch through
 this wrapper. Existing `summary`, `entities`, `terrain`, `path`, `search`,
 `observation`, `changes` and workflow query forms keep their own grammar.
-`path` remains the laboratory walkability query; structured `traverse`
-follows canonical graph edges and does not establish a walkable route.
+`path` remains the laboratory walkability query; structured `traverse` and
+`weighted_routes` follow canonical graph edges and do not establish walkability.
 
 ## Filters and exact aggregates
 
@@ -430,6 +431,22 @@ critical chain do not describe the finite schedule. Whole-source admission,
 current authority, exact historical generations and all-or-error complete
 publication apply to both models. Null, fractional or out-of-range capacities
 and duplicate original JSON fields refuse.
+
+To minimize a qualified cost over observed relations, use:
+
+```json
+{"kind":"weighted_routes","edge_kinds":["uses"],"cost_field":"haul_cost","roots":[{"entity_id":"10","generation":1}],"targets":[{"entity_id":"42","generation":1}],"direction":"outgoing"}
+```
+
+Every selected-kind edge needs an actual nonnegative integer cost fact,
+including edges in unreachable components. Multiple roots choose the cheapest
+source with deterministic ties. Omitted or empty targets return the complete
+parent forest; explicit targets return selected records and full paths with
+source-bound vertex IDs, exact edge versions and cost provenance. Up to 64 roots and 64 targets
+are accepted. `incoming` reverses the recorded relations without implying
+physical walkability. Complete source/output/work admission, source-generation
+fences and current authority also apply to retained sources. The query
+creates no native observations or effects. See `WEIGHTED_ROUTES.md`.
 
 ## Retained event windows
 

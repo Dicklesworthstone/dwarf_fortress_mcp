@@ -44,8 +44,9 @@ def main() -> None:
                     [{"entity_id": "1", "generation": 1, "extra": True}],
                     [{"entity_id": "1", "generation": 1}] * 2,
                     [{"entity_id": str(i + 1), "generation": 1} for i in range(65)]],
-        "capacity": [None, 0, 65, -1, 1.5, "1", True, [], {"slots": 1}],
+        "capacity": [None, 0, 65, 2**32, -1, 1.5, "1", True, [], {"slots": 1}],
         "parallelism": [1],
+        "max_parallel": [1],
     }.items():
         rejected.extend(dict(query, **{key: value}) for value in values)
     for item in accepted:
