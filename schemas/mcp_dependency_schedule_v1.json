@@ -1,6 +1,6 @@
 {
   "title": "Duration-aware dependency schedule in an authorized projection",
-  "description": "Conditional earliest/latest offsets, slack and critical chain from explicit dependent-to-prerequisite edges and qualified nonnegative integer durations. Optional generation-fenced targets select their complete transitive prerequisite closure; omitted or empty targets select all vertices. Every selected prerequisite requires a usable duration. Cycles, unavailable durations, overflow and exhausted budgets refuse the complete result. Units are those of the named source field; worker/resource contention and native completion are not established. No observation, plan, effect or authority is created. Runtime additionally checks UTF-8 byte lengths, u64 IDs, duplicate entity IDs, complete source custody, work, wall and final output budgets.",
+  "description": "Conditional dependency scheduling from explicit dependent-to-prerequisite edges and qualified nonnegative integer durations. Omit capacity for unlimited earliest/latest offsets, slack and critical chain; supply 1..64 identical slots for a deterministic nonpreemptive model with actual model offsets, queue delays, slot assignments and a separate unchanged unlimited baseline. Supplied capacity is assumed, not observed worker availability, and the heuristic makes no optimality claim. Optional generation-fenced targets select their complete transitive prerequisite closure; omitted or empty targets select all vertices. Every selected prerequisite requires a usable duration. Cycles, unavailable durations, overflow and exhausted budgets refuse the complete result. Units are those of the named source field; worker eligibility, materials, travel and native completion are not established. No observation, plan, effect or authority is created. Runtime additionally checks UTF-8 byte lengths, u64 IDs, duplicate entity IDs, complete source custody, work, wall and final output budgets.",
   "type": "object",
   "additionalProperties": false,
   "required": ["kind", "edge_kinds", "duration_field"],
@@ -16,6 +16,7 @@
       }
     },
     "duration_field": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^(?=.*\\S)[^\u0000-\u001f\u007f-\u009f]+$"},
+    "capacity": {"type": "integer", "minimum": 1, "maximum": 64, "description": "Assumed number of identical nonpreemptive slots. Zero-duration work consumes no slot. Omit for the unchanged unlimited model; null is refused."},
     "targets": {
       "type": "array", "maxItems": 64, "uniqueItems": true,
       "items": {

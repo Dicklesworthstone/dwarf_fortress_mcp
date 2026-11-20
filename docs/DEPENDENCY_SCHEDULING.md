@@ -141,9 +141,9 @@ Use an actual published integer field and inspected entity handles; this example
 does not imply that every native or starter-world entity has a `duration` fact.
 Omit `targets`, or supply an empty array, to schedule every observed vertex.
 Explicit targets must be distinct and their generations must match the selected
-source. The closed request accepts no caller durations, capacities, actions or
-execution directives. Duplicate schedule and target fields in the original
-laboratory request bytes are rejected before execution.
+source. The closed request accepts no caller durations, actions or execution
+directives. Duplicate schedule and target fields in the original laboratory
+request bytes are rejected before execution.
 
 The response includes each exact duration fact and its provenance, entity
 generation/revision, scheduling offsets/slack, makespan, critical chain,
@@ -151,6 +151,41 @@ dependency order, start-time groups and source/scope/decision witnesses.
 `model.epistemic_state` is `predicted`; `model.time_unit` is
 `selected_field_units`. The model creates no actions, clock advancement or
 retained monitor. Cycles can be inspected using `kind: "dependencies"`.
+
+### Supplied finite capacity
+
+Add `"capacity": 2` inside the same `schedule` query to model two identical
+nonpreemptive slots. Integers from one through 64 are accepted. Omission retains
+the existing unlimited request and response; explicit null, fractional or
+floating-point JSON numbers, strings, booleans, zero and out-of-range values are
+refused. Duplicate `capacity` fields are rejected in the original laboratory
+request bytes, so an ambiguous request cannot silently select another model.
+
+The finite response replaces the top-level schedule with its model `start`,
+`finish`, `ready_at`, `queue_delay`, `slot` and `downstream_duration` for each
+selected entity. Exact generation, revision, duration fact and provenance
+remain attached. `dispatch_order` preserves dependencies even when zero-duration
+tasks share a start offset; those tasks have `slot: null`. The top-level
+`makespan` describes this finite schedule. The entire unchanged unlimited result
+is retained under `baseline`, labeled `unlimited_capacity_dependency_lower_bound`.
+Its critical chain, earliest/latest offsets and slack remain confined to that
+baseline and must not be interpreted as finite-capacity flexibility.
+
+`model.epistemic_state` remains `predicted`, while the supplied
+`model.capacity.epistemic_state` is `assumed`. Only contention for the named
+identical slots is modeled. No worker identity, eligibility, material supply,
+travel, reservation, actual game completion or optimality is inferred. The
+finite decision witness binds capacity, the exact unlimited baseline, canonical
+dispatch policy, all offsets and slot assignments. The result includes a single
+combined graph-work count for the baseline and capacity passes.
+
+Both the current-source and retained-source laboratory paths use the existing
+Query capability, complete source admission and original foreground deadline.
+The complete finite model **and** its baseline must fit the final byte/token
+allowance; neither is silently dropped or paged to make a result fit. A valid
+unlimited baseline cannot turn an overflowing, cancelled or otherwise incomplete
+finite analysis into success. The operator also uses the existing stateless
+semantic executor and its independently reserved output allowance.
 
 The laboratory wrapper also accepts an exact retained `at` state hash. The
 source anchor identifies that historical model; the current anchor identifies
@@ -188,4 +223,15 @@ cover facade reachability, historical generation/current grants, duplicate raw
 keys and preserved source budgets. Their executed scope is recorded separately
 from the std-only core suite and from full transport qualification.
 
-Owning bead: `df-franken-storage-mvcc-54h.4.1`.
+Finite-capacity executor regressions additionally cover unchanged baseline
+equality, serial and parallel offsets, exact duration provenance, queue delays,
+zero-duration slot handling, capacity-bound witnesses, closed capacity grammar,
+generation and evidence fences, complete input admission, exact whole-result
+output bounds, current authority after a clock-reset restore, cancellation and
+capacity-only arithmetic overflow. `scripts/test_dependency_schedule_contract.py`
+checks the composed JSON Schema, including capacity bounds and legacy variants.
+JSON Schema describes mathematical integer values; the Rust decoder additionally
+rejects floating-point JSON encodings such as `1.0`.
+
+Owning beads: `df-franken-storage-mvcc-54h.4.1` (unlimited schedule) and
+`df-franken-storage-mvcc-54h.4.2` (finite-capacity model and query).

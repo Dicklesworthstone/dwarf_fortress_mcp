@@ -36,7 +36,7 @@ inner envelope accepts the existing schema, `query`, and optional complete
 | `search` | Bounded lexical retrieval over selected kinds, typed predicates, fields and labels |
 | `traverse` | Bounded observed graph traversal and a witnessed path to an optional target |
 | `dependencies` | Prerequisite order, cycle components, cycle blockers and an unweighted critical chain |
-| `schedule` | Qualified-duration prerequisite closure, earliest/latest offsets, slack, makespan and a conditional weighted critical chain |
+| `schedule` | Qualified-duration prerequisite closure, unlimited baseline and optional finite-slot schedule with queue delays and dispatch order |
 | `events` | Inclusive retained-event windows, kind/subject selection, typed fields and chronological pages |
 | `spatial_entities` | Inclusive intersection or containment of explicitly named point/cuboid entity geometry |
 | `related_entities` | Entities with witnessed one-hop relations to targets selected by kinds, IDs and typed facts |
@@ -418,6 +418,18 @@ duration evidence, cycles, overflow or insufficient complete-result budget refus
 the whole schedule. Exact retained sources recheck grants at the actual current
 tick even across a clock-reset restore. See `DEPENDENCY_SCHEDULING.md` for the
 complete model, provenance, zero-duration ordering and budget contract.
+
+Add `"capacity": 2` to model two identical nonpreemptive work slots. The finite
+result reports start/finish offsets, prerequisite readiness, capacity queue
+delays, slot assignments and canonical `dispatch_order`. Capacity is an
+explicit assumption, and the deterministic heuristic does not claim optimality
+or actual worker eligibility. Zero-duration tasks preserve dependency order
+without occupying a slot. The complete unlimited result is retained under
+`baseline` as a dependency-only lower bound; its slack, latest offsets and
+critical chain do not describe the finite schedule. Whole-source admission,
+current authority, exact historical generations and all-or-error complete
+publication apply to both models. Null, fractional or out-of-range capacities
+and duplicate original JSON fields refuse.
 
 ## Retained event windows
 

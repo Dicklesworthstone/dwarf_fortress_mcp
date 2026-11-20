@@ -24,6 +24,8 @@ def main() -> None:
                     (["uses", "requires"], ["custom:prerequisite"], ["requires"] * 32))
     accepted.append(dict(query, targets=[{"entity_id": str(i + 1), "generation": 1}
                                         for i in range(64)]))
+    accepted.extend(dict(query, capacity=capacity) for capacity in (1, 2, 64))
+    accepted.append(dict(query, capacity=3, targets=[{"entity_id": "4", "generation": 1}]))
     rejected = []
     for key in query:
         item = copy.deepcopy(query)
@@ -42,7 +44,8 @@ def main() -> None:
                     [{"entity_id": "1", "generation": 1, "extra": True}],
                     [{"entity_id": "1", "generation": 1}] * 2,
                     [{"entity_id": str(i + 1), "generation": 1} for i in range(65)]],
-        "capacity": [1],
+        "capacity": [None, 0, 65, -1, 1.5, "1", True, [], {"slots": 1}],
+        "parallelism": [1],
     }.items():
         rejected.extend(dict(query, **{key: value}) for value in values)
     for item in accepted:

@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased — Expose finite-slot planning through the existing query tool
+
+- Add optional `capacity: 1..64` to current and retained structured schedules,
+  with explicit assumed capacity, predicted offsets, queue delays, slot
+  assignments and deterministic dispatch order.
+- Preserve the full unlimited result as a separate lower-bound baseline and
+  preserve the original response when capacity is omitted.
+- Keep exact source/generation/current-authority checks, original deadlines,
+  combined work bounds and whole-response refusal; create no game work.
+- Pass 18 actual-source schedule executor tests, 43 locked/offline Cargo graph
+  tests and 57 composed-schema cases. Add three public-facade regressions;
+  full MCP test compilation remains blocked by SIGKILL in unchanged Asupersync.
+
 ## Unreleased — Finite-capacity scheduling and weighted route analysis
 
 - Add a bounded nonpreemptive shared-slot schedule with deterministic critical

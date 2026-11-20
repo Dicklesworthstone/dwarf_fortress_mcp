@@ -1,5 +1,42 @@
 # Implementation Status
 
+## Unreleased — Query finite-capacity dependency schedules
+
+The existing structured `schedule` query now accepts an optional capacity of
+one to 64 identical slots. Current and exact retained laboratory observations
+can expose predicted start/finish offsets, prerequisite readiness, capacity
+queue delays, slot assignments and canonical dispatch order. Capacity is an
+explicit assumption; no actual worker eligibility, optimality, native progress
+or effect authority is inferred. Zero-duration tasks preserve precedence while
+occupying no slot.
+
+The complete unchanged unlimited schedule remains under `baseline`, with an
+explicit dependency-only lower-bound role. Its slack, latest offsets and
+critical chain do not describe the finite schedule. Requests without capacity
+retain their original result. Closed original-byte parsing rejects duplicate,
+null, floating-point and out-of-range capacities. Complete source admission,
+current authorization for retained sources, exact generations, original
+deadlines, combined graph work and whole-result output limits remain enforced.
+
+Locked/offline Cargo execution passes all 43 graph integration tests on latest
+nightly rustc 1.102.0-nightly (6905905bb, 2026-11-19). An actual-source component
+build with the repository's exact serialization dependencies and warning denial
+passes all 18 schedule executor tests, including seven new finite-capacity
+regressions. The composed JSON schema passes 13 positive, 42 negative and two
+legacy cases. Scoped formatting and independent source review pass. A stale
+spatial projection regression call now supplies its required source tick.
+
+Three actual public-facade regressions cover finite versus unlimited behavior,
+retained generations/current authority across a clock reset, malformed original
+requests and complete-packet refusal. Full MCP test compilation was killed by
+SIGKILL in unchanged Asupersync 0.5.0 before this crate compiled; those facade
+regressions have not executed. `verify.sh` reaches bead coverage and stops
+because `br` is unavailable. Full workspace, transport and native-game
+qualification are not established by these checks.
+
+Owner: `df-franken-storage-mvcc-54h.4.2`, retained in progress for full integration
+qualification. See `docs/DEPENDENCY_SCHEDULING.md`.
+
 ## Unreleased — Model finite capacity and weighted observed routes
 
 The world graph API now provides two bounded planning analyses from the

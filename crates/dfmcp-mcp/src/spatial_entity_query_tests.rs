@@ -568,7 +568,7 @@ fn reusable_selector_obeys_caller_budget_and_preserves_match_witness() -> TestRe
     };
     let page = execute(&snapshot, &context, &input)?;
     assert_eq!(
-        selector.witness(entity, geometry),
+        selector.witness(entity, geometry, snapshot.tick),
         page["rows"][0]["geometry"]
     );
     assert_eq!(selector.geometry_fields(), vec!["position"]);

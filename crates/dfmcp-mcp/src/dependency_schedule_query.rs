@@ -7,8 +7,9 @@ use std::time::Instant;
 use dfmcp_core::{Capability, DfmcpError, Digest32, ErrorCode, OperationContext, Result, RiskTier};
 use dfmcp_world::WorldSnapshot;
 use dfmcp_world::graph_query::{
-    DEPENDENCY_SCHEDULE_POLICY, DependencyScheduleQuery, GraphBudget,
-    schedule_dependencies_with_check,
+    CAPACITY_SCHEDULE_POLICY, CapacitySchedule, DEPENDENCY_SCHEDULE_POLICY, DependencySchedule,
+    DependencyScheduleQuery, GraphBudget, MAX_PARALLEL_SLOTS,
+    schedule_dependencies_with_capacity_and_check, schedule_dependencies_with_check,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -37,6 +38,12 @@ enum Request {
         duration_field: String,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         targets: Vec<Target>,
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            deserialize_with = "capacity_if_present"
+        )]
+        capacity: Option<u32>,
     },
 }
 
@@ -45,6 +52,26 @@ enum Request {
 struct Target {
     entity_id: String,
     generation: u32,
+}
+
+// A supplied capacity is an explicit model assumption. Null must not silently
+// select the unlimited model, and JSON floats or strings cannot become slots.
+fn capacity_if_present<'de, D>(deserializer: D) -> std::result::Result<Option<u32>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let capacity = u32::deserialize(deserializer)?;
+    if !(1..=MAX_PARALLEL_SLOTS).contains(&capacity) {
+        return Err(serde::de::Error::custom(
+            "schedule capacity requires 1..=64 identical slots",
+        ));
+    }
+    Ok(Some(capacity))
+}
+
+enum Analysis {
+    Unlimited(DependencySchedule),
+    Finite(CapacitySchedule),
 }
 
 fn invalid(message: &str) -> DfmcpError {
@@ -137,6 +164,7 @@ fn execute_at_source(
         edge_kinds,
         duration_field,
         targets,
+        capacity,
     } = envelope.query;
     if edge_kinds.is_empty() || targets.len() > 64 {
         return Err(invalid(
@@ -203,10 +231,31 @@ fn execute_at_source(
         }))
         .map_err(|_| invalid("dependency schedule scope cannot be encoded"))?,
     );
-    let analysis = schedule_dependencies_with_check(snapshot, scope, &query, graph_budget, || {
+    let check_analysis = || {
         work.check()?;
         check()
-    })?;
+    };
+    let computed = match capacity {
+        Some(capacity) => Analysis::Finite(schedule_dependencies_with_capacity_and_check(
+            snapshot,
+            scope,
+            &query,
+            graph_budget,
+            capacity,
+            check_analysis,
+        )?),
+        None => Analysis::Unlimited(schedule_dependencies_with_check(
+            snapshot,
+            scope,
+            &query,
+            graph_budget,
+            check_analysis,
+        )?),
+    };
+    let analysis = match &computed {
+        Analysis::Unlimited(analysis) => analysis,
+        Analysis::Finite(analysis) => &analysis.baseline,
+    };
     let mut entries = Vec::with_capacity(analysis.entries.len());
     for entry in &analysis.entries {
         check()?;
@@ -231,11 +280,12 @@ fn execute_at_source(
         }));
     }
     let witness = &analysis.witness;
-    let payload = json!({
+    let target_records = target_records.into_values().collect::<Vec<_>>();
+    let mut payload = json!({
         "schema":"dfmcp.query.result/1", "kind":"schedule",
         "anchor":anchor_json(snapshot.anchor()), "policy":DEPENDENCY_SCHEDULE_POLICY,
         "edge_kinds":edge_kinds, "duration_field":duration_field,
-        "targets":target_records.into_values().collect::<Vec<_>>(),
+        "targets":target_records,
         "model":{"epistemic_state":"predicted", "time_unit":"selected_field_units",
             "start_offset":0, "independent_capacity":"unlimited",
             "resource_contention_modeled":false, "native_completion_proven":false},
@@ -260,6 +310,66 @@ fn execute_at_source(
             "examined_arcs":witness.examined_arcs,"work_units":witness.work_units,
             "source_structure_work_units":work.work}
     });
+    if let Analysis::Finite(finite) = &computed {
+        let mut entries = Vec::with_capacity(finite.entries.len());
+        for entry in &finite.entries {
+            check()?;
+            let fact = snapshot
+                .graph
+                .entities
+                .get(&entry.entity_id)
+                .and_then(|entity| entity.fields.get(&duration_field))
+                .ok_or_else(|| {
+                    DfmcpError::new(
+                        ErrorCode::InternalInvariantViolation,
+                        "capacity schedule duration lost its source fact",
+                    )
+                })?;
+            entries.push(json!({
+                "entity_id":entry.entity_id.to_string(),
+                "generation":entry.generation,"revision":entry.revision,
+                "duration":entry.duration,"duration_fact":fact_json(fact,snapshot.tick),
+                "start":entry.start,"finish":entry.finish,"ready_at":entry.ready_at,
+                "queue_delay":entry.queue_delay,"slot":entry.slot,
+                "downstream_duration":entry.downstream_duration
+            }));
+        }
+        // Keep the complete unlimited result unchanged and separately labeled:
+        // its slack/latest offsets do not describe the constrained schedule.
+        let baseline = payload;
+        let witness = &finite.witness;
+        payload = json!({
+            "schema":"dfmcp.query.result/1", "kind":"schedule",
+            "anchor":anchor_json(snapshot.anchor()), "policy":CAPACITY_SCHEDULE_POLICY,
+            "edge_kinds":edge_kinds, "duration_field":duration_field,
+            "targets":target_records,
+            "model":{"epistemic_state":"predicted", "time_unit":"selected_field_units",
+                "start_offset":0, "independent_capacity":"finite",
+                "capacity":{"slots":finite.max_parallel,"epistemic_state":"assumed",
+                    "slot_model":"identical_nonpreemptive"},
+                "zero_duration_occupies_slot":false,"shared_slot_contention_modeled":true,
+                "resource_contention_modeled":false,"optimality_proven":false,
+                "worker_eligibility_proven":false,"native_completion_proven":false,
+                "reservations_created":false},
+            "makespan":finite.makespan,"entries":entries,"returned":entries.len(),
+            "dispatch_order":finite.dispatch_order.iter().map(ToString::to_string).collect::<Vec<_>>(),
+            "baseline_role":"unlimited_capacity_dependency_lower_bound",
+            "analysis_complete":true,"truncated":false,"continuation":null,
+            "native_captures":0,"mutation_dispatched":false,
+            "coverage":{"domain":"observed_projection",
+                "selection":if target_ids.is_empty() {"all_vertices"} else {"complete_selected_prerequisite_closure"},
+                "absence_proven":false,"mutation_authorized":false},
+            "interpretation":"Conditional nonpreemptive schedule with a supplied pool of identical slots. Ready tasks use longest downstream duration, then stable identity; the smallest free slot is selected. Offsets use the duration field's units. Capacity is assumed, no optimality or native worker eligibility is proved, and materials, travel, interruptions and unobserved prerequisites are not modeled. The separate unlimited baseline is a dependency-only lower bound; its slack and latest offsets do not apply to this finite schedule.",
+            "witness":{"anchor":anchor_json(witness.source_anchor),
+                "authorization_scope_digest":witness.authorization_scope_digest.to_string(),
+                "projection_digest":witness.projection_digest.to_string(),
+                "decision_digest":witness.decision_digest.to_string(),
+                "scanned_vertices":witness.scanned_vertices,"scanned_edges":witness.scanned_edges,
+                "examined_arcs":witness.examined_arcs,"work_units":witness.work_units,
+                "source_structure_work_units":work.work}
+        });
+        payload["baseline"] = baseline;
+    }
     let maximum = context
         .budget
         .max_bytes
