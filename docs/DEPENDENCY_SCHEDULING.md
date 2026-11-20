@@ -74,6 +74,49 @@ Authorization filtering must precede the supplied projection. A selected
 closure is complete only within that projection; it proves neither complete
 fortress history nor absence of unobserved relations.
 
+## Finite shared-capacity model
+
+`schedule_dependencies_with_capacity` and
+`schedule_dependencies_with_capacity_and_check` add an explicit pool of one
+to 64 identical slots. Each positive-duration task occupies one slot for its
+entire duration. Zero-duration tasks preserve precedence and consume no slot,
+including when every slot is occupied. This is a conditional nonpreemptive
+list-scheduling heuristic, not an optimal schedule or a native worker allocator.
+
+Ready tasks are prioritized by longest remaining downstream duration, then
+stable entity identity. The smallest available slot is selected. All task
+finishes at a model instant are processed before new work is dispatched, so
+the iteration order of simultaneous completions cannot distort priorities.
+The algorithm advances between finish events rather than iterating over time.
+
+Each result includes actual model start/finish, the latest prerequisite finish
+(`ready_at`), capacity waiting time (`queue_delay`), slot identity, downstream
+duration and dispatch order. The original unlimited-capacity analysis remains
+available as `baseline`, unchanged. Its makespan is a dependency-only lower
+bound; its slack and latest offsets do not describe flexibility in the finite
+capacity schedule.
+
+Capacity is a supplied planning assumption, not observed worker availability.
+The model does not account for worker skills, materials, equipment, travel,
+interruptions or unobserved prerequisites. It reserves nothing and dispatches
+nothing. The same source qualification, complete closure, cycle refusal,
+checked arithmetic and current authority requirements still apply.
+
+One operation budget covers both baseline and capacity passes, including the
+second complete edge scan. The combined ready/running frontier is bounded and
+the caller's checks continue through analysis and final witness construction.
+Capacity, the exact baseline decision, deterministic policy and complete model
+outputs are bound into a separate witness. Existing unlimited calls and their
+output identities are unchanged.
+
+`crates/dfmcp-world/tests/graph_capacity_scheduling.rs` compares 6,912 small
+weighted-DAG/capacity cases with an independent tick-based scheduler and covers
+simultaneous finishes, zero-duration work, duplicate relations, target closure,
+overflow, exact/one-short budgets and cancellation. These tests qualify the
+mathematical model, not Dwarf Fortress's scheduling behavior.
+
+Owning bead: `df-franken-storage-mvcc-54h.4.2`.
+
 ## Existing-tool query
 
 The default laboratory runtime exposes this model through the existing

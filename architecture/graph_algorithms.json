@@ -60,7 +60,17 @@
       ],
       "exactness": "exact_or_bounded",
       "tie_break": "cost_then_insertion_sequence_then_identity",
-      "refresh": "query-time pinned snapshot"
+      "refresh": "query-time pinned snapshot",
+      "reference_implementations": [
+        {
+          "api": "dfmcp_world::graph_query::shortest_routes",
+          "policy": "observed-weighted-routes-cost-hops-source-parent-edge/1",
+          "source": "crates/dfmcp-world/src/graph_query/weighted_routes.rs",
+          "contract": "docs/WEIGHTED_ROUTES.md",
+          "numeric_policy": "checked_nonnegative_integer_edge_costs",
+          "authority": "observed_projection_analysis_only"
+        }
+      ]
     },
     {
       "id": "GA-FLOW",
@@ -107,7 +117,18 @@
       ],
       "exactness": "exact",
       "tie_break": "plan_step_ordinal",
-      "refresh": "incremental plan graph"
+      "refresh": "incremental plan graph",
+      "reference_implementations": [
+        {
+          "api": "dfmcp_world::graph_query::schedule_dependencies_with_capacity",
+          "policy": "dependency-unit-capacity-longest-tail-stable-id/1",
+          "source": "crates/dfmcp-world/src/graph_query/capacity_scheduling.rs",
+          "contract": "docs/DEPENDENCY_SCHEDULING.md",
+          "numeric_policy": "checked_nonnegative_integer_durations",
+          "authority": "conditional_nonoptimal_prediction_only",
+          "max_parallel_slots": 64
+        }
+      ]
     },
     {
       "id": "GA-CENTRAL",

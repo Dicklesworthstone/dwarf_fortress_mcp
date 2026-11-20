@@ -12,6 +12,12 @@ use dfmcp_core::{DfmcpError, Digest32, EdgeId, EntityId, ErrorCode, Result, Stat
 use crate::canonical::{put_bytes, put_str, put_u32, put_u64};
 use crate::{EdgeKind, WorldSnapshot};
 
+mod capacity_scheduling;
+pub use capacity_scheduling::{
+    CAPACITY_SCHEDULE_POLICY, CapacitySchedule, CapacityScheduledDependency, MAX_PARALLEL_SLOTS,
+    schedule_dependencies_with_capacity, schedule_dependencies_with_capacity_and_check,
+};
+
 mod dominance;
 pub use dominance::{
     DOMINANCE_POLICY, DominanceAnalysis, DominanceQuery, DominatorRecord, analyze_dominators,
@@ -22,6 +28,12 @@ mod scheduling;
 pub use scheduling::{
     DEPENDENCY_SCHEDULE_POLICY, DependencySchedule, DependencyScheduleQuery, ScheduleFront,
     ScheduledDependency, schedule_dependencies, schedule_dependencies_with_check,
+};
+
+mod weighted_routes;
+pub use weighted_routes::{
+    WEIGHTED_ROUTE_POLICY, WeightedRoutePath, WeightedRouteQuery, WeightedRouteRecord,
+    WeightedRoutes, shortest_routes, shortest_routes_with_check,
 };
 
 const MAX_VERTICES: usize = 100_000;

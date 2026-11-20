@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased — Finite-capacity scheduling and weighted route analysis
+
+- Add a bounded nonpreemptive shared-slot schedule with deterministic critical
+  tail priorities, slot assignments, queue delays and explicit dependency-only
+  baseline semantics. Preserve the existing unlimited schedule unchanged.
+- Add multi-source weighted observed routes with qualified integer edge costs,
+  source/hop/parent/edge ties, reversed traversal and exact path witnesses.
+- Refuse unknown costs, invalid source identity, overflow, exhausted bounds and
+  cancellation without partial results. Keep all analysis advisory.
+- Execute 43 actual-source graph integration tests on latest nightly, including
+  23,296 new independent oracle cases; scoped formatting and review pass.
+  Public MCP integration and broader qualification follow separately.
+
 ## Unreleased — Keep projected observations within their source time
 
 - Mask future Known values and absence claims in structured entity inspection,

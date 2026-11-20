@@ -1,5 +1,38 @@
 # Implementation Status
 
+## Unreleased — Model finite capacity and weighted observed routes
+
+The world graph API now provides two bounded planning analyses from the
+comprehensive plan. Finite-capacity scheduling models one to 64 identical
+slots, prioritizes ready work by longest remaining downstream duration, and
+reports actual model offsets, queue delays and slot assignments. Simultaneous
+finishes are processed together; zero-duration tasks consume no slot. The
+original unlimited-capacity schedule remains a separately labeled baseline.
+Capacity is an assumption and the heuristic makes no optimality or real-worker
+feasibility claim.
+
+Weighted routes use qualified nonnegative integer edge costs, multiple sources
+and explicit outgoing/incoming traversal. Cost, hop count, source, predecessor
+and edge identities define deterministic ties. Results retain exact identities,
+versions, costs and reconstructible path witnesses. Unknown or future costs do
+not become zero or disappear, including in unreachable selected components.
+Both analyses retain complete source admission, checked arithmetic, bounded
+work/frontiers, cancellation checks and source/scope/decision witnesses.
+
+Complete actual core/world libraries compile with warning denial on latest
+nightly rustc 1.102.0-nightly (6905905bb, 2026-11-19). All 14 weighted-route,
+13 capacity and 16 existing scheduling integration tests pass: 43 tests with
+no failures or ignored tests. New independent oracles cover 16,384 weighted
+route cases and 6,912 capacity cases. Deep 4,000-node graphs, unavailable facts,
+exact/one-short budgets, cancellation, overflow and corrupt path records are
+covered. Scoped formatting and independent source review pass. These are direct
+actual-source component executions, not full Cargo/workspace, MCP transport or
+native-game qualification. Public query integration follows separately.
+
+See `docs/WEIGHTED_ROUTES.md` and `docs/DEPENDENCY_SCHEDULING.md`.
+Owners: `df-franken-storage-mvcc-54h.4.2` and
+`df-franken-storage-mvcc-54h.4.3`, both in progress.
+
 ## Unreleased — Preserve observation time through query presentation
 
 Structured inspection and entity, spatial, relationship and ranked pages now
