@@ -335,6 +335,17 @@ Query authority. They dispatch no work and establish no native resource or
 walkability claim. See [`docs/DEPENDENCY_SCHEDULING.md`](docs/DEPENDENCY_SCHEDULING.md)
 and [`docs/WEIGHTED_ROUTES.md`](docs/WEIGHTED_ROUTES.md).
 
+Structured `max_flow` computes exact finite directed flow between distinct
+generation-bound source and sink handles. Explicit edge kinds, capacity and unit
+fields select qualified source facts; all selected units must agree. Results
+include per-edge flow/capacity/provenance and a minimum cut with both complete
+vertex partitions. Conservation and flow/cut equality are independently checked.
+Current and exact retained laboratory sources use current Query authority and
+complete-source, work, deadline and whole-result output bounds. The query is an
+advisory model, creates no effects and proves no native throughput. Missing facts,
+mixed units, overflow and exhausted allowances refuse without a partial cut.
+See [`docs/NETWORK_FLOW.md`](docs/NETWORK_FLOW.md).
+
 Structured `aggregate` accepts optional `relation` and `spatial` selectors,
 independently or together, using the same closed objects as `ranked_entities`.
 Source kinds and typed `where` run first, positive witnessed relationships next,

@@ -38,6 +38,7 @@ inner envelope accepts the existing schema, `query`, and optional complete
 | `dependencies` | Prerequisite order, cycle components, cycle blockers and an unweighted critical chain |
 | `schedule` | Qualified-duration prerequisite closure, unlimited baseline and optional finite-slot schedule with queue delays and dispatch order |
 | `weighted_routes` | Least-cost observed routes from multiple sources, qualified integer edge costs and exact selected path witnesses |
+| `max_flow` | Exact directed flow and a minimum bottleneck cut from qualified observed capacities in one common source-recorded unit |
 | `events` | Inclusive retained-event windows, kind/subject selection, typed fields and chronological pages |
 | `spatial_entities` | Inclusive intersection or containment of explicitly named point/cuboid entity geometry |
 | `related_entities` | Entities with witnessed one-hop relations to targets selected by kinds, IDs and typed facts |
@@ -448,6 +449,56 @@ physical walkability. Complete source/output/work admission, source-generation
 fences and current authority also apply to retained sources. The query
 creates no native observations or effects. See `WEIGHTED_ROUTES.md`.
 
+## Network throughput and bottlenecks
+
+Analyze a recorded directed network between two exact entity generations:
+
+```json
+{
+  "mode": "structured",
+  "request": {
+    "schema": "dfmcp.query/1",
+    "query": {
+      "kind": "max_flow",
+      "edge_kinds": ["uses"],
+      "capacity_field": "capacity",
+      "unit_field": "capacity_unit",
+      "source": {"entity_id": "1", "generation": 1},
+      "sink": {"entity_id": "4", "generation": 1}
+    }
+  }
+}
+```
+
+The example requires an existing source with these entities and edge facts;
+ordinary laboratory scenarios do not automatically acquire capacity data.
+Every selected edge must contain a qualified nonnegative integer capacity and
+a qualified nonblank text unit, such as `items_per_tick`. The unit strings must
+agree exactly, including on disconnected and zero-capacity edges. Missing,
+future, unavailable, mixed-unit or unqualified facts refuse the analysis.
+Capacities and units come from the source; the caller cannot supply replacements.
+The source and sink must differ, and stored edge direction is preserved.
+
+The complete result includes the maximum `value`, established `unit`, each
+selected edge's capacity, flow, source facts and exact endpoint handles, and a
+`minimum_cut` with its capacity, edge IDs and both vertex partitions. The engine
+independently verifies edge bounds, conservation and equality between the flow
+and cut capacity. Parallel and antiparallel edges keep separate identities.
+Witnesses bind the exact source, scope, request, policy, budgets and decisions.
+
+This is an inferred optimum within the observed finite network. It does not
+prove actual hauling, fluid or power throughput, collect native capacity facts,
+dispatch work or authorize effects. An empty selected network reports model
+flow zero with no established unit, without proving complete-world absence.
+
+The outer `at` selects an exact retained source. Both endpoint generations are
+checked in that source, while Query authority is checked at the actual current
+tick, including after a clock reset. The original deadline, complete-source
+admission and whole-response output bounds apply throughout. There is no partial
+flow, partial cut, pagination or continuation: an exhausted allowance returns
+`budget_exceeded`. See `NETWORK_FLOW.md` for the finite-capacity model and
+`schemas/mcp_max_flow_v1.json` for the closed query grammar.
+
 ## Retained event windows
 
 ```json
@@ -574,6 +625,12 @@ a budget too small to encode even the refusal receives the explicit minimal
 budget-error envelope.
 
 ## Verification scope
+
+`max_flow_mcp_tests.rs` adds public-facade regressions for exact flow/cut facts and
+no effects, retained generations/current authority across a clock reset, original
+JSON duplicates and complete-packet refusal. Focused executor and independent
+core-oracle execution are recorded separately from public-facade execution in
+`IMPLEMENTATION_STATUS.md`.
 
 `lab_structured_query_tests.rs` drives the actual public laboratory façade for
 the available kinds, exact historical/current anchors, capability refusal, unavailable

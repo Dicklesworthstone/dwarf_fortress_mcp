@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased — Expose network bottlenecks through the existing query tool
+
+- Add structured `max_flow` to current and retained laboratory queries, generic
+  semantic execution and schema discovery, with exact source/sink generations.
+- Return complete per-edge flow and provenance plus both minimum-cut partitions,
+  verified conservation, equal cut capacity and explicit inferred-model limits.
+- Preserve current authority, original deadlines and complete-source/work/output
+  bounds; reject duplicate raw selectors and partial certificates.
+- Bound JSON result materialization incrementally before the final whole-packet
+  check. Preserve concurrent weighted-route and finite-slot schedule support.
+- Pass 11 actual-source Cargo executor tests and 70 composed-schema cases; add
+  three public-facade regressions whose execution remains outstanding.
+
 ## Unreleased — Analyze finite observed network capacity
 
 - Add a deterministic, bounded directed maximum-flow/minimum-cut graph API with

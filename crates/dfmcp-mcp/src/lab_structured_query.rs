@@ -33,6 +33,7 @@ use serde_json::{Value, json};
 
 use super::query_condition::Condition;
 use super::semantic_query::dependency_schedule_query;
+use super::semantic_query::max_flow_query;
 use super::semantic_query::weighted_route_query;
 
 const MAX_REQUEST_BYTES: usize = 65_536;
@@ -79,6 +80,14 @@ struct ScheduleRequest {
 struct WeightedRouteRequest {
     mode: Mode,
     request: weighted_route_query::Envelope,
+    at: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MaxFlowRequest {
+    mode: Mode,
+    request: max_flow_query::Envelope,
     at: Option<String>,
 }
 
@@ -172,6 +181,7 @@ pub(super) fn parse(raw: &str) -> Result<Option<Request>> {
                 | "dependencies"
                 | "schedule"
                 | "weighted_routes"
+                | "max_flow"
                 | "aggregate"
                 | "search"
                 | "events"
@@ -182,7 +192,7 @@ pub(super) fn parse(raw: &str) -> Result<Option<Request>> {
         )
     ) {
         return Err(invalid(
-            "structured laboratory queries support only entities, inspect, traverse, dependencies, schedule, weighted_routes, aggregate, search, events, spatial_entities, related_entities, ranked_entities, and condition_evaluation",
+            "structured laboratory queries support only entities, inspect, traverse, dependencies, schedule, weighted_routes, max_flow, aggregate, search, events, spatial_entities, related_entities, ranked_entities, and condition_evaluation",
         ));
     }
     if request.request["query"]["kind"] == "condition_evaluation" {
@@ -211,6 +221,16 @@ pub(super) fn parse(raw: &str) -> Result<Option<Request>> {
         request.request = serde_json::to_value(parsed.request)
             .map_err(|_| invalid("laboratory weighted routes cannot be encoded"))?;
     }
+    if request.request["query"]["kind"] == "max_flow" {
+        // Parse the original bytes so duplicate identities and field selectors
+        // cannot be erased by the intermediate untyped JSON object.
+        let parsed: MaxFlowRequest = serde_json::from_str(raw)
+            .map_err(|error| invalid(format!("invalid laboratory flow query: {error}")))?;
+        let Mode::Structured = parsed.mode;
+        request.at = parsed.at;
+        request.request = serde_json::to_value(parsed.request)
+            .map_err(|_| invalid("laboratory flow query cannot be encoded"))?;
+    }
     Ok(Some(request))
 }
 
@@ -226,12 +246,19 @@ pub(super) fn execute(
     let mut source_context = current.clone();
     source_context.anchor = snapshot.anchor();
     let result = match request.request["query"]["kind"].as_str() {
-        Some("schedule") => {
-            dependency_schedule_query::execute_laboratory_source(
-                snapshot, current, &request.request, remaining_wall_millis(current, started)?,
-            )?
-        }
+        Some("schedule") => dependency_schedule_query::execute_laboratory_source(
+            snapshot,
+            current,
+            &request.request,
+            remaining_wall_millis(current, started)?,
+        )?,
         Some("weighted_routes") => weighted_route_query::execute_laboratory_source(
+            snapshot,
+            current,
+            &request.request,
+            remaining_wall_millis(current, started)?,
+        )?,
+        Some("max_flow") => max_flow_query::execute_laboratory_source(
             snapshot,
             current,
             &request.request,
@@ -707,8 +734,7 @@ mod projected_tests {
                 query["order_by"] =
                     json!([{"field":"rank","numeric_type":"u64","direction":"ascending"}]);
                 if matches!(kind, "ranked_related_entities" | "ranked_compound_entities") {
-                    query["relation"] =
-                        json!({"edge_kinds":["requires"],"target_kinds":["unit"]});
+                    query["relation"] = json!({"edge_kinds":["requires"],"target_kinds":["unit"]});
                 }
                 if matches!(kind, "ranked_spatial_entities" | "ranked_compound_entities") {
                     query["spatial"] = json!({

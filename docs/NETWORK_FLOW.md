@@ -86,4 +86,54 @@ cancellation and deep iterative graphs. Executed evidence is recorded in
 `IMPLEMENTATION_STATUS.md`; no native-game or production-admission claim follows
 from these mathematical model tests.
 
+## Public structured query
+
+Use the existing `fortress_query` tool with this JSON string as `mode`:
+
+```json
+{
+  "mode": "structured",
+  "request": {
+    "schema": "dfmcp.query/1",
+    "query": {
+      "kind": "max_flow",
+      "edge_kinds": ["uses"],
+      "capacity_field": "capacity",
+      "unit_field": "capacity_unit",
+      "source": {"entity_id": "1", "generation": 1},
+      "sink": {"entity_id": "4", "generation": 1}
+    }
+  }
+}
+```
+
+This example requires a canonical source containing those exact handles and
+qualified capacity/unit facts. Default laboratory scenarios do not automatically
+populate them. The closed grammar is `schemas/mcp_max_flow_v1.json`. It rejects
+caller-supplied capacities or units, direction overrides, limits, continuations,
+effects and unknown fields. Original laboratory JSON is parsed into the typed
+request so duplicate selector and identity fields cannot silently overwrite one
+another. Both endpoint generations must match the chosen source.
+
+The result exposes `value`, `unit`, all selected `edges`, and `minimum_cut` with
+its capacity, edge IDs, `source_side` and `sink_side`. Edge rows retain revisions,
+generation-bound endpoint handles and complete capacity/unit facts. Full source
+and authorization witnesses accompany the result. The `model` explicitly marks
+the conclusion as inferred and exact within the projection, with verified
+conservation and flow/cut equality; actual throughput and native completion
+remain unproven.
+
+The optional outer `at` selects an exact retained source hash. Authorization is
+checked at the actual current tick, including across a clock-reset restore;
+historical observations cannot renew expired grants. Generic semantic execution
+also exposes the operator through composed schema discovery and bounded
+publication. There is no pagination: the entire network result, cut and public
+wrapper must fit. Source admission uses the original complete-source allowance,
+while result construction incrementally bounds retained JSON and the final
+envelope receives an exact size check. A refusal publishes no partial analysis.
+
+Core and focused executor tests are distinct from the three public-facade
+regressions in `max_flow_mcp_tests.rs`. Executed coverage and remaining integration
+limits are recorded in `IMPLEMENTATION_STATUS.md`.
+
 Owning bead: `df-franken-storage-mvcc-54h.4.4`.

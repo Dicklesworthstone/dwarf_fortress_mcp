@@ -12,6 +12,8 @@ mod event_query;
 #[cfg(test)]
 #[path = "query_history_tests.rs"]
 mod history_tests;
+#[path = "max_flow_query.rs"]
+pub(super) mod max_flow_query;
 #[path = "operational_query.rs"]
 mod operational_query;
 #[path = "query_history.rs"]
@@ -112,8 +114,10 @@ pub(super) fn laboratory_baseline_work(context: &OperationContext) -> Result<Val
 }
 
 pub(crate) fn extend_watch_count_schema(schema: Value) -> Result<Value> {
-    weighted_route_query::extend_schema(dependency_schedule_query::extend_schema(
-        dominance_query::extend_schema(query_watch::extend_count_schema(schema)?)?,
+    max_flow_query::extend_schema(weighted_route_query::extend_schema(
+        dependency_schedule_query::extend_schema(dominance_query::extend_schema(
+            query_watch::extend_count_schema(schema)?,
+        )?)?,
     )?)
 }
 
@@ -284,6 +288,7 @@ pub fn execute(
         Some("dominators") => dominance_query::execute(snapshot, context, input),
         Some("schedule") => dependency_schedule_query::execute(snapshot, context, input),
         Some("weighted_routes") => weighted_route_query::execute(snapshot, context, input),
+        Some("max_flow") => max_flow_query::execute(snapshot, context, input),
         _ => core_query::execute(snapshot, context, input),
     }
 }
@@ -562,6 +567,16 @@ where
         Some("weighted_routes") => {
             let narrowed = result_context(&output_context)?;
             let value = weighted_route_query::execute_with_output_budget(
+                snapshot,
+                context,
+                input,
+                narrowed.budget.max_bytes,
+            )?;
+            publish_with_active_work(&output_context, value, publish)
+        }
+        Some("max_flow") => {
+            let narrowed = result_context(&output_context)?;
+            let value = max_flow_query::execute_with_output_budget(
                 snapshot,
                 context,
                 input,

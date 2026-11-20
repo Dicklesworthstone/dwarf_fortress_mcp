@@ -1,5 +1,46 @@
 # Implementation Status
 
+## Unreleased — Query observed network throughput and bottleneck cuts
+
+The existing structured `fortress_query` surface now accepts `max_flow` on
+current or exact retained laboratory sources, and generic semantic execution
+includes the operator in composed schema discovery and bounded publication.
+Requests name generation-bound source/sink handles, explicit edge kinds, a
+capacity field and a unit field. All selected source facts must satisfy the
+finite-capacity/common-unit contract; caller-supplied replacement capacities,
+units, direction overrides, effects and pagination are rejected.
+
+Complete results retain per-edge capacities, flows, revisions, endpoint
+generations and both source facts, plus the equal-capacity minimum cut and its
+complete vertex partitions. Source/scope/policy/decision witnesses and explicit
+inferred-model coverage accompany the result. Historical sources retain actual
+current Query authority even across clock resets. Original-byte typed parsing,
+complete-source structural/canonical admission, combined work, original
+deadlines, incremental output materialization bounds and exact complete-packet
+publication all remain enforced. A refusal publishes no partial certificate.
+
+All 11 focused max-flow executor tests pass through a latest-nightly Cargo
+component build of the actual core/world/query source with warning denial and
+the repository's exact serialization dependencies. Source inventories remain
+unchanged across execution, and every registry dependency matches the repository
+lock by version, source and checksum. The composed schema passes eight accepted,
+60 rejected and two legacy cases. The separate 14-test core run covers 9,199
+independent cut-oracle cases. New query/test modules pass latest-nightly
+formatting; source review preserves concurrently added weighted-route and
+finite-capacity-schedule integration.
+
+Three public-facade regressions cover flow/cut publication without effects,
+retained generations/current authority after restore, duplicate original JSON
+and complete-packet refusal. They have not executed; the focused component run
+does not qualify the integrated MCP server. `verify.sh` passes 20 gate groups,
+including 5,555 repository checks, then stops because `br` is unavailable.
+Full workspace, public-facade, native-game and production-admission qualification
+remain outstanding. Ordinary laboratory sources do not automatically acquire
+capacity/unit facts, and this advisory query collects no native rates or effects.
+
+Owner: `df-franken-storage-mvcc-54h.4.4`, retained in progress for integration
+qualification. See `docs/NETWORK_FLOW.md` and `docs/LAB_STRUCTURED_QUERY.md`.
+
 ## Unreleased — Prove observed network throughput and bottleneck cuts
 
 The world graph API now implements the finite directed-network subset of

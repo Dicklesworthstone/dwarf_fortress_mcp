@@ -275,6 +275,13 @@ integer edge costs and return exact path evidence. Both support current and
 retained laboratory sources through the existing query tool, under current
 authority and complete input/output bounds.
 
+The same tool exposes [observed network throughput and bottleneck cuts](docs/NETWORK_FLOW.md)
+through structured `max_flow`. Qualified finite edge capacities in one common
+source-recorded unit produce per-edge flows and an equal-capacity minimum cut.
+The certificate proves the optimum within that observed model. Source data must
+already contain the capacity and unit facts; the query does not collect native
+rates, dispatch work or establish actual game throughput.
+
 Production goals can combine DRINK, FOOD, BED, DOOR, TABLE and CHAIR quotas.
 Furniture orders consume finite wood, share finite worker/workshop
 capacity, and create inspectable items. The planner budgets all requested
