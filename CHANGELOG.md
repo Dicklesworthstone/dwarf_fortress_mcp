@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased — Cancel an explicitly selected original project group
+
+- Add `plans:<digest>,<digest>,...` to the existing laboratory cancellation
+  surface for one to eight live original commits owned by the current session.
+- Admit the complete selected custody, grants, inverses, leases and shared
+  budgets before any pause or stop; preserve unselected work and pending review.
+- Reuse progressive durable drainage, preserve historical proof, and bind the
+  final certificate and compact outcome to every selected original identity.
+- Refuse recovered, foreign, malformed and duplicate-actual selections before
+  effects. Add facade, durable failure, replay, output and modern stdio coverage.
+- Keep this source increment separate from full Rust, native-game and production
+  qualification. See `docs/LAB_PLAN_SET_CANCELLATION.md`.
+
 ## Unreleased — Predict shared outcomes for committed original projects
 
 - Add `forecast_originals` through the existing laboratory query for one to

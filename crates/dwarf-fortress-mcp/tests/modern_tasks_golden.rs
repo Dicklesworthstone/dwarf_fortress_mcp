@@ -19,6 +19,9 @@ type TestResult<T = ()> = Result<T, Box<dyn Error>>;
 const TASKS_EXTENSION: &str = "io.modelcontextprotocol/tasks";
 const TILE: [i32; 3] = [3, 5, 10];
 
+#[path = "support/selected_plan_set.rs"]
+mod selected_plan_set;
+
 /// The reader belongs to this client and is joined after the process exits.
 /// Notifications may precede replies, so requests match their JSON-RPC ID.
 struct StdioClient {

@@ -692,6 +692,18 @@ bundles nonreplayable. See `docs/LAB_CONDITION_WATCHES.md` and
 
 ### `fortress.cancel`
 
+The laboratory also accepts `scope="plans:<digest>[,<digest>...]"` for one to
+eight distinct current-session live original commits. Every member's complete
+custody, current grants, compensation, scope reservations and aggregate budgets
+are admitted before any pause or stop. The selected set drains newest originals
+first under one foreground deadline, preserving unrelated originals and excluding
+continuation descendants. Aliases retain requested and actual identities;
+duplicate actual originals, malformed selectors and recovered/foreign/unknown
+members refuse before effects. Complete selected identities and their canonical
+digest survive output fitting and bind the selected-only final certificate.
+Effects publish progressively, so a runtime failure reports partial cleanup and
+withholds the certificate. See [selected original cancellation sets](docs/LAB_PLAN_SET_CANCELLATION.md).
+
 Starts or advances request/drain/compensate/finalize. It never means “delete the record.” Active
 work remains visible throughout the drain.
 

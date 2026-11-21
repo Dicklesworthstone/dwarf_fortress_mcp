@@ -67,6 +67,8 @@ pub(crate) mod goal_explanation;
 
 #[path = "lab_plan_cancellation.rs"]
 mod plan_cancellation;
+#[path = "lab_plan_set_cancellation.rs"]
+mod plan_set_cancellation;
 #[path = "recovered_plan_cancellation.rs"]
 mod recovered_plan_cancellation;
 
@@ -6653,17 +6655,24 @@ pub(crate) fn cancel_in_scope(
         },
         None => None,
     };
+    let selected_plans = match scope.as_deref().filter(|value| value.starts_with("plans:")) {
+        Some(raw) => match plan_set_cancellation::parse_scope(raw) {
+            Ok(digests) => Some(digests),
+            Err(error) => return dfmcp_error_payload("fortress.cancel", &error),
+        },
+        None => None,
+    };
     let drain_scope = match scope.as_deref() {
         None | Some("last_action") => None,
         Some("plan") => Some("plan"),
         Some("session") => Some("session"),
         Some("oldest_open_plan") => Some("oldest_open_plan"),
-        Some(_) if selected_plan.is_some() || selected_goal.is_some() => None,
+        Some(_) if selected_plan.is_some() || selected_plans.is_some() || selected_goal.is_some() => None,
         Some(_) => {
             return coded_error_payload(
                 "fortress.cancel",
                 ErrorCode::InvalidRequest,
-                "unsupported cancellation scope; use last_action, plan, plan:<original-plan-digest>, oldest_open_plan, session, or goal:<original-plan-digest> with withdraw_goal",
+                "unsupported cancellation scope; use last_action, plan, plan:<original-plan-digest>, plans:<digest>[,<digest>...], oldest_open_plan, session, or goal:<original-plan-digest> with withdraw_goal",
             );
         }
     };
@@ -6682,7 +6691,7 @@ pub(crate) fn cancel_in_scope(
         Err(error) => return dfmcp_error_payload("fortress.cancel", &error),
     };
     let owns_publication = selected_goal.is_none()
-        && (selected_plan.is_some() || drain_scope.is_some());
+        && (selected_plan.is_some() || selected_plans.is_some() || drain_scope.is_some());
     with_explicit_publication(
         &session,
         owns_publication,
@@ -6733,6 +6742,9 @@ pub(crate) fn cancel_in_scope(
                     );
                 }
             };
+            if let Some(digests) = selected_plans {
+                return plan_set_cancellation::cancel(guard, cancel_mode, digests);
+            }
             if let Some(digest) = selected_plan {
                 return plan_cancellation::cancel(guard, cancel_mode, digest);
             }

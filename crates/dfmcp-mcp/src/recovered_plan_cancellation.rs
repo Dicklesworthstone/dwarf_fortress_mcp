@@ -533,6 +533,7 @@ pub(super) use scopes::oldest_open_plan;
 #[path = "recovered_session_cancellation.rs"]
 mod session_scope;
 pub(super) use session_scope::cancel_session;
+pub(super) use session_scope::{admit_live_scope, live_scope_lease_count};
 
 /// The explanation pin includes current grants, custody and the full selection.
 /// Inspecting this offer never polls a monitor or publishes durable progress.

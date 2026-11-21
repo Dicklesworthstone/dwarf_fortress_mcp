@@ -613,3 +613,6 @@ fn minimum_output_preserves_complete_multi_step_recovered_stop_outcome() -> Test
 
 #[path = "recovered_session_cancellation_tests.rs"]
 mod session_scopes;
+
+#[path = "plan_set_cancellation_recovery_tests.rs"]
+mod selected_plan_set_recovery;

@@ -534,6 +534,9 @@ fn cancellation_outcome(payload: &Value) -> Option<Map<String, Value>> {
         "selection_scope",
         "selection_origin",
         "selected_plans_digest",
+        "requested_plan_digests",
+        "selection_resolved",
+        "unselected_plans_included",
         "foreign_live_work_included",
         "original_owner_session_id",
         "dispatch_handles_restored",
@@ -550,6 +553,13 @@ fn cancellation_outcome(payload: &Value) -> Option<Map<String, Value>> {
         if let Some(value) = payload.get(key) {
             out.insert(key.to_owned(), value.clone());
         }
+    }
+    // Selected sets reserve every bounded original identity before effects.
+    // Whole-session drains retain their existing digest-only compact contract.
+    if payload["selection_scope"] == "exact_original_set"
+        && let Some(identities) = payload.get("selected_plans")
+    {
+        out.insert("selected_plans".to_owned(), identities.clone());
     }
     Some(out)
 }
@@ -1191,6 +1201,54 @@ mod tests {
                 assert_eq!(minimal["emergency_pause"], raw["emergency_pause"]);
                 assert_eq!(minimal["finalize_certificate"], raw["finalize_certificate"]);
             }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn bounded_selected_set_keeps_every_original_identity_and_certificate()
+    -> Result<(), serde_json::Error> {
+        for succeeded in [true, false] {
+            let (mut raw, mut response) =
+                cancellation_with_oversized_orientation("continuous", succeeded, succeeded);
+            let originals = (1..=8u64).map(|index| json!({
+                "requested_plan_digest":format!("{index:064x}"),
+                "plan_digest":format!("{:064x}", index + 100),
+                "plan_id":format!("{index:032x}"),
+                "actions":[format!("{:032x}", index + 200)],
+            })).collect::<Vec<_>>();
+            let requested = originals.iter().map(|row| row["requested_plan_digest"].clone())
+                .collect::<Vec<_>>();
+            let identities = json!({"schema":"dfmcp-selected-originals-cancellation-selection/1",
+                "session_id":raw["session_id"],"originals":originals});
+            for (key, value) in [
+                ("scope", json!(format!("plans:{}", (1..=8u64)
+                    .map(|index| format!("{index:064x}")).collect::<Vec<_>>().join(",")))),
+                ("selection_scope", json!("exact_original_set")),
+                ("selection_resolved", json!(true)),
+                ("requested_plan_digests", json!(requested)),
+                ("selected_plans", identities.clone()),
+                ("selected_plans_digest", json!("c".repeat(64))),
+                ("unselected_plans_included", json!(false)),
+            ] {
+                raw[key] = value.clone();
+                response[key] = value;
+            }
+            if succeeded {
+                raw["finalize_certificate"]["selected_plans"] = identities;
+                response["finalize_certificate"] = raw["finalize_certificate"].clone();
+            }
+            let budget = (raw.to_string().len() as u64 + 2_048).div_ceil(4);
+            let fitted = fit(&response.to_string(), budget);
+            let output: Value = serde_json::from_str(&fitted)?;
+            assert_eq!(output["output_budget"]["tier"], "cancellation_receipt", "{output}");
+            assert_eq!(output["selected_plans"], raw["selected_plans"]);
+            assert_eq!(output["requested_plan_digests"], raw["requested_plan_digests"]);
+            assert_eq!(output["selected_plans_digest"], raw["selected_plans_digest"]);
+            assert_eq!(output["finalize_certificate"], raw["finalize_certificate"]);
+            assert_eq!(output["error"], raw["error"]);
+            assert_eq!(output["unselected_plans_included"], false);
+            assert!(estimate_tokens(&fitted) <= budget);
         }
         Ok(())
     }

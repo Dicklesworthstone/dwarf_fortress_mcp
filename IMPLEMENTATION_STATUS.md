@@ -1,5 +1,35 @@
 # Implementation Status
 
+## Unreleased — Stop an explicit group of original laboratory projects
+
+The existing cancellation tool accepts `scope: "plans:<digest>,<digest>,..."`
+for one to eight exact live originals owned by the current session. A caller
+can stop selected projects together while preserving other originals, pending
+reviews and later continuations. Canonical requested-to-actual identities and a
+selection digest remain visible in the outcome and selected-only certificate.
+
+Every selected original passes complete commit-custody, current authority,
+compensation-preimage, lease and shared source/action/time/output admission
+before the first effect. The existing drain engine pauses at most once for an
+explicit emergency request, drains newer originals and dependent actions first,
+and publishes each changed frontier before another stop. An execution or
+publication failure retains the actual partial outcome and withholds final
+proof. Recovered, foreign, unknown and duplicate-actual members refuse before
+any selected work changes; recovered originals retain their existing exact
+single-original cleanup path.
+
+Regression source exercises selective cleanup and repeat requests, aliases,
+whole-set capability and inverse refusal, aggregate budgets, preservation of
+failed historical proofs, durable restart/publication faults, complete compact
+receipts, deterministic replay and the real modern stdio route. Independent
+source review and scoped formatting have been performed. Rust execution and
+full qualification remain pending while the execution host stalls in block
+device I/O before Cargo reaches project compilation. This is laboratory source
+implementation, not native-game or production-admission evidence.
+
+Owner: `df-cancellation-progress-certificates-vvw`. Public semantics and examples
+are in `docs/LAB_PLAN_SET_CANCELLATION.md`.
+
 ## Unreleased — Forecast committed originals together under shared resources
 
 The existing laboratory query accepts `forecast_originals` for one to eight

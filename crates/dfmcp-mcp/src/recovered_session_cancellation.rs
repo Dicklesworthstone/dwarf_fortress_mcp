@@ -67,7 +67,7 @@ fn live_effects(session: &LabSession, original: &LiveOriginal, mode: CancelMode)
 
 /// Conservative count without first cloning variable-length action scopes.
 /// Assignment scopes may deduplicate IDs, so their upper bound is sufficient.
-fn live_scope_lease_count(action: &Action) -> u64 {
+pub(crate) fn live_scope_lease_count(action: &Action) -> u64 {
     match action {
         Action::Pause { .. } | Action::CreateWorkOrder { .. }
         | Action::SetStandingOrder { .. } | Action::Extension { .. } => 0,
@@ -83,7 +83,7 @@ fn live_scope_lease_count(action: &Action) -> u64 {
 /// Check a selected live effect against current reservations and the retained
 /// physical work of other owners. The private manager never publishes a lease
 /// or consumes a real identifier when complete session admission is refused.
-fn admit_live_scope(
+pub(crate) fn admit_live_scope(
     session: &LabSession,
     leases: &mut dfmcp_core::lease::LeaseManager,
     action: &Action,

@@ -925,6 +925,9 @@ fn forecast_reports_advancement_refusal_instead_of_an_available_prediction() -> 
 #[path = "plan_cancellation_mcp_tests.rs"]
 mod selected_plan_cancellation;
 
+#[path = "plan_set_cancellation_mcp_tests.rs"]
+mod selected_plan_set_cancellation;
+
 #[test]
 fn emergency_session_pause_works_without_actions_and_requires_current_clock_grant() -> TestResult {
     let _serial = crate::test_serial();

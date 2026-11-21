@@ -23,6 +23,14 @@ digits. `last_action` and `plan` retain their live-handle meanings.
 durable recovery and current live work. `session` selects all eligible recovered
 originals and all complete originals owned by the requesting live session.
 Live-only selections support all three existing cancellation modes.
+
+An explicit set of one to eight live originals can be drained together with
+`scope="plans:<digest>[,<digest>...]"`. The complete set is admitted before any
+pause or stop, and unselected originals and descendants remain outside the drain.
+All existing modes are supported. Recovered originals require a separate exact
+`plan:<digest>` or session request; their presence refuses the whole selected set
+before effects. See [selected original sets](LAB_PLAN_SET_CANCELLATION.md) for
+canonical identities, shared budgets, partial-failure semantics and examples.
 An explicit `emergency_pause_and_drain` also pauses the shared fortress clock
 under current clock authority; ordinary `stop_future_steps` needs no clock
 advance or clock grant.
