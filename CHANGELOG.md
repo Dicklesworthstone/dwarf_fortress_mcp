@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased — Reclaim operations sessions without restarting the server
+
+- Add explicit resource-only session release to the existing `fortress.cancel`
+  surface for operations/1.3 and paged operations/1.4.
+- Close native connections, release archive locks and reclaim both session
+  capacity counters, including when another request retains an old handle.
+- Require explicit consent before discarding retained baselines or watches;
+  preflight the complete receipt before any cleanup and retain bounded repeat
+  acknowledgements. Expired grants and damaged sources do not trap resources.
+- Preserve journal bytes, refuse old handles, and add lifecycle, capacity,
+  consent, output-budget and archive-reopen regressions. Native gameplay and
+  production admission remain unchanged.
+
 ## Unreleased — Minimize finite network delivery cost
 
 - Implement bounded minimum-cost delivery over qualified observed capacities,

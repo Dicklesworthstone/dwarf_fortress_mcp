@@ -70,8 +70,14 @@ bounded storage. Real memory use and pause/latency behavior are not benchmarked.
 Capture validity is checked lazily on cache operations; no background expiration
 worker is introduced. Expired bytes may remain allocated until a subsequent
 cache operation, world reset or shutdown, always within the retention ceiling.
-MCP sessions currently last until process shutdown; there is no new close-session
-operation. Restart is needed after retained session capacity is exhausted.
+Release an MCP session with the existing `fortress.cancel` tool and
+`{"session_id":"<handle>","scope":"session"}`. This closes its connection,
+releases its journal lock and returns both session capacity slots without a
+native capture or changes to journal bytes. Retained baselines or watches require
+explicit `"discard_process_local_work": true` or their prior release through
+query operations. A fenced source can be closed and replaced without restarting
+the server. [Operations history](OPERATIONS_HISTORY.md#release-and-reopen-a-session)
+documents preflight, repeat receipts and fresh reopen semantics.
 
 ## Capture, page, verify, release, publish
 

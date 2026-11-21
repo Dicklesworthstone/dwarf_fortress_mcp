@@ -7,6 +7,8 @@ mod history;
 pub mod paged;
 #[path = "query_schema_projection.rs"]
 mod query_schema_projection;
+#[path = "operations_session_release.rs"]
+mod session_release;
 // Shared module compiled into several servers; each copy uses a subset.
 #[allow(dead_code, clippy::duplicate_mod)]
 #[path = "operations_production.rs"]
@@ -62,7 +64,9 @@ fn lock<T>(value: &Mutex<T>) -> Result<MutexGuard<'_, T>> {
         )
     })
 }
-struct SessionSlot;
+struct SessionSlot {
+    held: bool,
+}
 impl SessionSlot {
     fn reserve() -> Result<Self> {
         SLOTS
@@ -75,12 +79,18 @@ impl SessionSlot {
                     "operations session capacity reached",
                 )
             })?;
-        Ok(Self)
+        Ok(Self { held: true })
+    }
+    fn release(&mut self) {
+        if self.held {
+            self.held = false;
+            SLOTS.fetch_sub(1, Ordering::AcqRel);
+        }
     }
 }
 impl Drop for SessionSlot {
     fn drop(&mut self) {
-        SLOTS.fetch_sub(1, Ordering::AcqRel);
+        self.release();
     }
 }
 
@@ -88,6 +98,9 @@ trait OperationsSource: Send {
     fn read(&mut self, timeout: Duration) -> Result<LiveOperationsObservation>;
     fn poisoned(&self) -> bool;
     fn fence(&mut self);
+    fn closed(&self) -> bool {
+        false
+    }
 }
 impl OperationsSource for OperationsRpcClient<DeadlineStream> {
     fn read(&mut self, timeout: Duration) -> Result<LiveOperationsObservation> {
@@ -112,7 +125,17 @@ struct OperationsSession {
     _slot: SessionSlot,
 }
 impl OperationsSession {
+    fn require_open(&self) -> Result<()> {
+        if self.source.closed() {
+            return Err(error(
+                ErrorCode::SessionNotFound,
+                "operations session is closed",
+            ));
+        }
+        Ok(())
+    }
     fn anchor(&self) -> Result<StateAnchor> {
+        self.require_open()?;
         self.state
             .snapshot()
             .map(|snapshot| snapshot.anchor())
@@ -124,6 +147,7 @@ impl OperationsSession {
             })
     }
     fn context(&mut self) -> Result<OperationContext> {
+        self.require_open()?;
         self.request = self.request.checked_add(1).ok_or_else(|| {
             error(
                 ErrorCode::BudgetExceeded,
@@ -140,6 +164,7 @@ impl OperationsSession {
         })
     }
     fn refresh(&mut self, context: &OperationContext) -> Result<JobPublication> {
+        self.require_open()?;
         let started = std::time::Instant::now();
         context.authorize(Capability::Observe, RiskTier::ReadOnly, &[], None)?;
         if context.anchor != self.anchor()? {
@@ -205,7 +230,7 @@ fn next_id() -> Result<SessionId> {
     *next += 1;
     Ok(id)
 }
-fn resolve(raw: Option<String>) -> Result<Arc<Mutex<OperationsSession>>> {
+fn parse_session_id(raw: Option<String>) -> Result<SessionId> {
     let text = raw.ok_or_else(|| {
         error(
             ErrorCode::InvalidRequest,
@@ -230,6 +255,10 @@ fn resolve(raw: Option<String>) -> Result<Arc<Mutex<OperationsSession>>> {
             "not an encoded operations runtime handle",
         ));
     }
+    Ok(id)
+}
+fn resolve(raw: Option<String>) -> Result<Arc<Mutex<OperationsSession>>> {
+    let id = parse_session_id(raw)?;
     lock(&SESSIONS)?
         .get(&id)
         .cloned()
@@ -845,7 +874,7 @@ fn no_effect(id: Option<String>, operation: &str) -> String {
     with_session(id, operation, Capability::Query, |_, _| {
         Err(error(
             ErrorCode::CapabilityDenied,
-            "operations read profiles have no prepare, commit, cancellation, save, or restore effect",
+            "operations read profiles have no prepare, commit, game-effect cancellation, save, or restore effect",
         ))
     })
 }
@@ -858,10 +887,14 @@ pub fn fortress_commit(session_id: Option<String>) -> String {
     no_effect(session_id, "fortress.commit")
 }
 #[tool(
-    description = "Unavailable for game actions. Local condition watches use query cancel_watch."
+    description = "Release an operations session with scope=session. Set discard_process_local_work=true to discard retained baselines or watches. Drops the connection and journal lock without observing, modifying files or cancelling game effects. Local condition watches use query cancel_watch."
 )]
-pub fn fortress_cancel(session_id: Option<String>) -> String {
-    no_effect(session_id, "fortress.cancel")
+pub fn fortress_cancel(
+    session_id: Option<String>,
+    scope: Option<String>,
+    discard_process_local_work: Option<bool>,
+) -> String {
+    session_release::cancel(session_id, scope, discard_process_local_work)
 }
 #[tool(description = "Unavailable: operations read profiles create no game or save checkpoint.")]
 pub fn fortress_checkpoint(session_id: Option<String>) -> String {
@@ -882,7 +915,7 @@ pub fn run_stdio() {
         .tool(FortressOpenSession).tool(FortressObserve).tool(FortressQuery).tool(FortressPlan)
         .tool(FortressCommit).tool(FortressWait).tool(FortressCancel).tool(FortressCheckpoint)
         .tool(FortressRestore).tool(FortressExplain).tool(FortressDoctor).request_timeout(60)
-        .instructions("Explicitly unadmitted operations/1.3. Open a session first. Jobs, buildings, items and their observed links share one native observation. Query filters, aggregates, traversal, baselines and foreground watches are available. production_diagnosis joins observed job/input conditions; inventory_plan returns a conditional allocation and shortage certificate, not game feasibility or a reservation. furniture_allocation selects distinct items for a complete bed/chair/table layout or explains its shortage; fresh placement review is required. Do not infer material availability, access or completion from raw fields. No citizen data, map data, live mutation or production admission. When an operator configures a durable journal, history lists committed observations and historical_query replays a stateless query at an exact past record. Archived facts do not establish current freshness. Use schema mode for structured requests.")
+        .instructions("Explicitly unadmitted operations/1.3. Open a session first. Jobs, buildings, items and their observed links share one native observation. Query filters, aggregates, traversal, baselines and foreground watches are available. production_diagnosis joins observed job/input conditions; inventory_plan returns a conditional allocation and shortage certificate, not game feasibility or a reservation. furniture_allocation selects distinct items for a complete bed/chair/table layout or explains its shortage; fresh placement review is required. Do not infer material availability, access or completion from raw fields. No citizen data, map data, live mutation or production admission. When an operator configures a durable journal, history lists committed observations and historical_query replays a stateless query at an exact past record. Archived facts do not establish current freshness. Use schema mode for structured requests. Release a session through fortress.cancel with scope=session; retained baselines or watches require discard_process_local_work=true. Release closes the connection and journal lock without native observation or changes to journal bytes, allowing a fresh session to reopen the archive.")
         .build();
     crate::run_modern_stdio(server);
 }

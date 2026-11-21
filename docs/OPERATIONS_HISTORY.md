@@ -42,14 +42,53 @@ The path is operator process configuration, never an MCP argument. Journalled
 sessions require both Query and Observe grants. File locking is exclusive and
 nonblocking for the lifetime of the session; a second writer refuses rather
 than sharing or racing the stream. The current process-configured path therefore
-supports one journal-owning session at a time. Existing sessions end at process
-shutdown; session-close and automatic rotation are separate unfinished work.
+supports one journal-owning session at a time. Explicit session release drops
+this lock so a fresh session can reopen the same journal without restarting the
+process. Automatic rotation remains separate unfinished work.
 
 The file and parent are checked before and after opening and at I/O boundaries.
 Their inode identities, owner relationships, modes and link count must remain
 consistent. Ancestors and the owning account/root are trusted. These checks and
 advisory locking are not protection against a hostile owner rewriting storage.
 Non-Unix platforms refuse this backend instead of silently dropping custody.
+
+## Release and reopen a session
+
+Both operations/1.3 and operations/1.4 accept this call through the existing
+`fortress.cancel` tool:
+
+```json
+{
+  "session_id": "<current operations session handle>",
+  "scope": "session"
+}
+```
+
+Release waits for any foreground request holding the session, closes its native
+connection, drops the observation-journal lock, clears its cached projection and
+returns its session capacity. Paged sessions return both the shared slot and the
+paged slot immediately, including when another request still holds an old
+session reference. Subsequent calls with the closed handle cannot read the old
+snapshot or resume the connection. A new session performs the normal fresh
+bootstrap and journal recovery described below.
+
+Retained process-local baselines or condition-watch records make the call refuse
+with `conflict`. Release those records through their existing query operations
+first, or explicitly include `"discard_process_local_work": true` to discard
+them during teardown. This consent applies even to completed watch records.
+The full close receipt must fit the session's output budget before anything is
+released; a refusal leaves the connection, journal lock and query records owned
+by the original session.
+
+Cleanup is available after a source failure, exhausted request IDs or expired
+read grants. It performs no native acquisition, watch evaluation, journal
+validation, append, repair, save, restore or game-effect cancellation. The receipt
+reports resource counts and partial continuity without a game-state anchor.
+Journal bytes are untouched, so damaged archives still require the explicit
+recovery policy on their next open. Ordinary cancellation without `scope` keeps
+its existing unavailable response. The most recent 32 successful close receipts
+are retained in process memory for exact repeat acknowledgements; older closed
+handles return `session_not_found`. These receipts do not survive process exit.
 
 ## Publication and restart
 

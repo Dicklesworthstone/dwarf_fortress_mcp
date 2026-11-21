@@ -386,7 +386,20 @@ fn paged_reopen_preserves_retirement_generations_and_rejects_old_session_records
     assert_eq!(before["matched"], 3);
     assert_eq!(fixture.session.query(inspect(2))?["ok"], true);
     let old_session = fixture.session.id;
-    fixture.session.detach()?;
+    let stale = resolve(fixture.session.handle())?;
+    let before_close = io(fs::read(&fixture.path))?;
+    let closed = decode(&fortress_cancel(
+        fixture.session.handle(),
+        Some("session".into()),
+        Some(true),
+    ))?;
+    assert_eq!(closed["ok"], true, "{closed}");
+    assert_eq!(
+        closed["process_local_resources"]["process_local_watch_records_discarded"],
+        1
+    );
+    assert_eq!(io(fs::read(&fixture.path))?, before_close);
+    assert!(matches!(lock(&stale)?.context(), Err(e) if e.code == ErrorCode::SessionNotFound));
     let reopened = register(OperationsProfile::PagedV1_4, returned, Vec::new(), 8192)?;
     reopened.attach(&fixture.path, TailRecovery::Refuse)?;
     fixture.session = reopened;
@@ -413,6 +426,58 @@ fn paged_reopen_preserves_retirement_generations_and_rejects_old_session_records
         false
     );
     assert_eq!(fixture.session.calls.load(Ordering::SeqCst), 0);
+    Ok(())
+}
+
+#[test]
+fn operations_close_preflights_the_receipt_then_releases_the_unchanged_archive() -> Result<()> {
+    let _serial = crate::test_serial();
+    for profile in [OperationsProfile::V1_3, OperationsProfile::PagedV1_4] {
+        let first = observation(2, 3);
+        let fixture = archived(profile, first.clone(), Vec::new(), 8192)?;
+        let before = fixture.session.history()?;
+        let bytes = io(fs::read(&fixture.path))?;
+        let stale = resolve(fixture.session.handle())?;
+        let context = lock(&stale)?.context()?;
+        lock(&stale)?.budget.max_output_tokens = 1;
+        let refused = decode(&fortress_cancel(
+            fixture.session.handle(),
+            Some("session".into()),
+            None,
+        ))?;
+        lock(&stale)?.budget.max_output_tokens = 2048;
+        assert_eq!(refused["error"]["code"], "budget_exceeded");
+        assert!(
+            history::Journal::open(profile, &fixture.path, &context, TailRecovery::Refuse).is_err()
+        );
+        assert!(lock(&stale)?.journal.is_some());
+        assert!(!lock(&stale)?.source.closed());
+        assert_eq!(io(fs::read(&fixture.path))?, bytes);
+        let closed = decode(&fortress_cancel(
+            fixture.session.handle(),
+            Some("session".into()),
+            None,
+        ))?;
+        assert_eq!(closed["ok"], true, "{closed}");
+        assert_eq!(closed["observation_journal_present"], true);
+        assert_eq!(closed["observation_journal_modified"], false);
+        assert_eq!(io(fs::read(&fixture.path))?, bytes);
+        assert!(lock(&stale)?.journal.is_none());
+        let reopened = register(profile, first, Vec::new(), 8192)?;
+        reopened.attach(&fixture.path, TailRecovery::Refuse)?;
+        assert_eq!(reopened.history()?["rows"], before["rows"]);
+        assert_eq!(io(fs::read(&fixture.path))?, bytes);
+        assert_eq!(fixture.session.calls.load(Ordering::SeqCst), 0);
+        assert_eq!(reopened.calls.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            decode(&fortress_cancel(
+                reopened.handle(),
+                Some("session".into()),
+                None
+            ))?["ok"],
+            true
+        );
+    }
     Ok(())
 }
 

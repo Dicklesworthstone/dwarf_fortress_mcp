@@ -2,6 +2,9 @@ use super::*;
 use dfmcp_adapter::live_operations::{building_entity_id, item_entity_id};
 use std::collections::VecDeque;
 
+#[path = "operations_session_release_tests.rs"]
+mod session_release_tests;
+
 struct Script {
     observations: VecDeque<LiveOperationsObservation>,
     fenced: bool,

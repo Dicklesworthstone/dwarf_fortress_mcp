@@ -52,6 +52,9 @@ fn parse(text: &str) -> Result<Value> {
         .map_err(|_| error(ErrorCode::InternalInvariantViolation, "test JSON"))
 }
 fn register() -> Result<Registered> {
+    register_items(40000)
+}
+fn register_items(items: u32) -> Result<Registered> {
     let id = next_paged_id()?;
     let source = LiveOperationsObservation {
         jobs: LiveJobObservation {
@@ -67,10 +70,10 @@ fn register() -> Result<Registered> {
             jobs: Vec::new(),
         },
         next_building_id: 0,
-        next_item_id: 40000,
+        next_item_id: items,
         buildings: Vec::new(),
         attachments: Vec::new(),
-        items: (0..40000)
+        items: (0..items)
             .map(|id| LiveItem {
                 native_id: id,
                 item_type: 1,
@@ -269,4 +272,44 @@ fn paged_environment_and_handle_family_cannot_admit_old_authority() {
         "DFMCP_ALLOW_UNADMITTED_OPERATIONS_V1_4"
     ));
     assert!(resolve(Some(format!("{:032x}", (1u128 << 127) | PAGED_FAMILY | 1))).is_err());
+}
+
+#[test]
+fn paged_session_close_returns_both_capacity_slots_before_old_arcs_drop() -> Result<()> {
+    let _serial = crate::test_serial();
+    let mut handles = Vec::new();
+    for _ in 0..5 {
+        let session = register_items(1)?;
+        let handle = resolve(Some(session.id.to_string()))?;
+        let context = lock(&handle)?.context()?;
+        let encoded = super::super::fortress_cancel(
+            Some(session.id.to_string()),
+            Some("session".into()),
+            None,
+        );
+        let closed = parse(&encoded)?;
+        assert_eq!(closed["ok"], true, "{closed}");
+        assert_eq!(closed["observation_journal_modified"], false);
+        assert_eq!(closed["game_state_observed"], false);
+        assert_eq!(session.calls.load(Ordering::SeqCst), 0);
+        {
+            let mut stale = lock(&handle)?;
+            assert!(
+                matches!(stale.refresh(&context), Err(e) if e.code == ErrorCode::SessionNotFound)
+            );
+            assert_eq!(stale.state.profile(), OperationsProfile::PagedV1_4);
+            assert!(stale.state.snapshot().is_none());
+            assert!(!stale._slot.held);
+        }
+        assert_eq!(
+            super::super::fortress_cancel(
+                Some(session.id.to_string()),
+                Some("session".into()),
+                None,
+            ),
+            encoded
+        );
+        handles.push(handle);
+    }
+    Ok(())
 }

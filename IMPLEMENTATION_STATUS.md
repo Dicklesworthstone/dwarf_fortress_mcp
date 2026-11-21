@@ -1,5 +1,29 @@
 # Implementation Status
 
+## Unreleased — Operations sessions release connections and capacity
+
+Operations/1.3 and paged operations/1.4 now accept explicit session teardown
+through the existing `fortress.cancel` tool with `scope=session`. Teardown
+releases the native connection, shared and paged session capacity, retained
+query resources and the optional observation-journal lock. Stale handles cannot
+observe cached state after close; reopening performs the normal fresh bootstrap.
+
+Consent for discarding retained baselines or watches and complete receipt
+rendering precede all cleanup. Expired/revoked grants, exhausted request IDs,
+poisoned session mutexes and damaged sources can still release their resources
+without reading the game or changing journal bytes. The latest 32 close receipts
+are retained for exact process-local replay.
+
+Focused lifecycle/public-facade and archive-reopen regressions are present.
+Scoped latest-nightly formatting and independent source/callsite review pass;
+Rust test execution and integrated qualification are still in progress. The
+repository's first 21 verification gate groups passed before an executor reset
+interrupted the Python test phase. This is source/static evidence, not a full
+Rust qualification or native/live admission claim.
+
+Owner: `dfmcp-operations-session-release-09si`, retained in progress for execution
+qualification. See `docs/OPERATIONS_HISTORY.md` and `docs/OPERATIONS_PAGING.md`.
+
 ## Unreleased — Minimize cost for bounded observed network demand
 
 The world graph API now implements the finite, nonnegative-cost `GA-MCF`
