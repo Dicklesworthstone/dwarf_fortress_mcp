@@ -11,20 +11,25 @@ use dfmcp_world::graph_query::{
     analyze_dominators_with_check,
 };
 use dfmcp_world::{EdgeKind, WorldSnapshot};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use super::core_query::anchor_json;
 
-#[derive(Deserialize)]
+#[path = "spatial_query_source.rs"]
+#[allow(dead_code, clippy::duplicate_mod)] // Only the shared source admission is used here.
+mod source;
+
+#[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-struct Envelope {
+pub(crate) struct Envelope {
     schema: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     expected_anchor: Option<Value>,
     query: Request,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 enum Request {
     Dominators {
@@ -32,16 +37,36 @@ enum Request {
         root_generation: u32,
         edge_kinds: Vec<String>,
         direction: Option<Direction>,
+        #[serde(
+            default,
+            deserialize_with = "present_target",
+            skip_serializing_if = "Option::is_none"
+        )]
         target: Option<String>,
+        #[serde(
+            default,
+            deserialize_with = "present_target",
+            skip_serializing_if = "Option::is_none"
+        )]
         target_generation: Option<u32>,
     },
 }
 
-#[derive(Clone, Copy, Deserialize)]
+#[derive(Clone, Copy, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 enum Direction {
     Outgoing,
     Incoming,
+}
+
+// An omitted endpoint is optional; an explicit null is not a valid handle.
+// Keep this distinction when the laboratory redecodes the original JSON bytes.
+fn present_target<'de, D, T>(deserializer: D) -> std::result::Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    T::deserialize(deserializer).map(Some)
 }
 
 fn failure(code: ErrorCode, message: &str) -> DfmcpError {
@@ -169,6 +194,43 @@ pub(super) fn execute(
     context: &OperationContext,
     input: &Value,
 ) -> Result<Value> {
+    execute_with_output_budget(snapshot, context, input, context.budget.max_bytes)
+}
+
+pub(super) fn execute_with_output_budget(
+    snapshot: &WorldSnapshot,
+    context: &OperationContext,
+    input: &Value,
+    output_bytes: u64,
+) -> Result<Value> {
+    execute_at_source(snapshot, context, input, output_bytes, false)
+}
+
+/// History selection belongs to the laboratory owner. Keep authorization on
+/// its actual current anchor, including when a restore moved the clock back.
+pub(crate) fn execute_laboratory_source(
+    snapshot: &WorldSnapshot,
+    current: &OperationContext,
+    input: &Value,
+    remaining_wall_millis: u64,
+) -> Result<Value> {
+    if remaining_wall_millis == 0 {
+        return Err(bounded(
+            "dominator query exhausted its original foreground deadline",
+        ));
+    }
+    let mut context = current.clone();
+    context.budget.max_wall_millis = context.budget.max_wall_millis.min(remaining_wall_millis);
+    execute_at_source(snapshot, &context, input, context.budget.max_bytes, true)
+}
+
+fn execute_at_source(
+    snapshot: &WorldSnapshot,
+    context: &OperationContext,
+    input: &Value,
+    output_bytes: u64,
+    retained_laboratory_source: bool,
+) -> Result<Value> {
     let started = Instant::now();
     // Whole-fortress Query only. Empty selectors must not widen a scoped grant.
     let check = || {
@@ -179,10 +241,12 @@ pub(super) fn execute(
         Ok(())
     };
     check()?;
-    if context.anchor != snapshot.anchor() {
+    if context.anchor.fortress_id != snapshot.fortress_id
+        || (!retained_laboratory_source && context.anchor != snapshot.anchor())
+    {
         return Err(failure(
             ErrorCode::StaleAnchor,
-            "dominator context names another snapshot",
+            "dominator context names another source",
         ));
     }
     validate_input(input)?;
@@ -202,11 +266,11 @@ pub(super) fn execute(
     if parsed
         .expected_anchor
         .as_ref()
-        .is_some_and(|anchor| anchor != &anchor_json(context.anchor))
+        .is_some_and(|anchor| anchor != &anchor_json(snapshot.anchor()))
     {
         return Err(failure(
             ErrorCode::StaleAnchor,
-            "dominator expected_anchor differs from the complete current anchor",
+            "dominator expected_anchor differs from the complete source anchor",
         ));
     }
     let Request::Dominators {
@@ -225,6 +289,27 @@ pub(super) fn execute(
             "target and target_generation must be supplied together",
         ));
     }
+    let maximum = context
+        .budget
+        .max_bytes
+        .min(output_bytes)
+        .min(u64::from(context.budget.max_output_tokens).saturating_mul(4));
+    if maximum == 0 {
+        return Err(bounded(
+            "dominator query has no complete-response allowance",
+        ));
+    }
+    // A target view limits presentation, never source validation or analysis.
+    // Bound nesting and frontier allocation before canonical hashing.
+    let mut structural_context = context.clone();
+    structural_context.budget.max_bytes = 16 * 1024 * 1024;
+    let mut work = source::preflight(snapshot, &structural_context, started)?;
+    if snapshot.canonical_bytes().len() as u64 > context.budget.max_bytes {
+        return Err(bounded(
+            "dominator query exceeds its canonical source byte allowance",
+        ));
+    }
+    work.check()?;
     let root = entity(&root, root_generation, snapshot)?;
     let target = match (target, target_generation) {
         (Some(id), Some(generation)) => Some(entity(&id, generation, snapshot)?),
@@ -246,26 +331,37 @@ pub(super) fn execute(
     };
     let graph_budget = GraphBudget {
         max_vertices: (context.budget.max_entities as usize).min(100_000),
-        max_edges: (context.budget.max_entities as usize)
-            .saturating_mul(8)
-            .min(1_000_000),
+        max_edges: (context.budget.max_entities as usize).min(1_000_000),
         max_frontier: (context.budget.max_entities as usize).min(4_096),
-        max_work: 2_000_000,
+        max_work: 4_000_000u64.saturating_sub(work.work as u64).min(2_000_000),
     };
     let scope = Digest32::of_bytes(&serde_json::to_vec(&json!({
         "domain":"dfmcp-dominance-authorized-scope/1",
         "session":context.session_id.to_string(),"fortress":context.anchor.fortress_id.to_string(),
         "capability":"query","scope":"whole_fortress"
     })).map_err(|_| invalid("dominator scope cannot be encoded"))?);
-    let analysis = analyze_dominators_with_check(snapshot, scope, &request, graph_budget, &check)?;
+    let analysis = analyze_dominators_with_check(snapshot, scope, &request, graph_budget, || {
+        work.check()?;
+        check()
+    })?;
+    let source_structure_work = work.work;
+    let graph_work = usize::try_from(analysis.witness.work_units)
+        .map_err(|_| bounded("dominator work count cannot be represented"))?;
+    work.charge(0, graph_work)?;
+    // Chain validation builds a bounded identity index over the complete tree.
+    // Account for it even though a focused view emits only the selected chain.
+    if target.is_some() {
+        work.charge(0, analysis.vertices.len())?;
+    }
     let chain = target
         .map(|id| analysis.dominator_chain_to(id))
         .transpose()?
         .flatten();
-    let records: Vec<_> = match &chain {
-        Some(chain) => chain
-            .iter()
-            .map(|id| {
+    let mut output_used = 0;
+    let mut records = Vec::new();
+    match &chain {
+        Some(chain) => {
+            for id in chain {
                 let index = analysis
                     .vertices
                     .binary_search_by_key(id, |record| record.entity_id)
@@ -275,16 +371,56 @@ pub(super) fn execute(
                             "dominator chain lost its record",
                         )
                     })?;
-                Ok(record_json(&analysis.vertices[index]))
-            })
-            .collect::<Result<_>>()?,
-        None if target.is_none() => analysis.vertices.iter().map(record_json).collect(),
-        None => Vec::new(),
-    };
+                push_output(
+                    &mut records,
+                    record_json(&analysis.vertices[index]),
+                    &mut output_used,
+                    maximum,
+                    &mut work,
+                )?;
+            }
+        }
+        None if target.is_none() => {
+            for record in &analysis.vertices {
+                push_output(
+                    &mut records,
+                    record_json(record),
+                    &mut output_used,
+                    maximum,
+                    &mut work,
+                )?;
+            }
+        }
+        None => {}
+    }
+    let mut unreachable = Vec::new();
+    if target.is_none() {
+        for id in &analysis.unreachable {
+            push_output(
+                &mut unreachable,
+                json!(id.to_string()),
+                &mut output_used,
+                maximum,
+                &mut work,
+            )?;
+        }
+    }
+    let mut chain_json = Vec::new();
+    if let Some(chain) = &chain {
+        for id in chain {
+            push_output(
+                &mut chain_json,
+                json!(id.to_string()),
+                &mut output_used,
+                maximum,
+                &mut work,
+            )?;
+        }
+    }
     let witness = &analysis.witness;
     let payload = json!({
         "schema":"dfmcp.query.result/1","kind":"dominators",
-        "anchor":anchor_json(context.anchor),"root":root.to_string(),
+        "anchor":anchor_json(snapshot.anchor()),"root":root.to_string(),
         "root_generation":root_generation,
         "direction":if direction == GraphDirection::Incoming {"incoming"} else {"outgoing"},
         "edge_kinds":edge_kinds,"policy":DOMINANCE_POLICY,
@@ -293,13 +429,15 @@ pub(super) fn execute(
         "target_status":target.map(|_| if chain.is_some() {"reachable"} else {"unreachable_in_projection"}),
         "vertices":records,"returned":records.len(),
         "reachable_count":analysis.vertices.len(),"unreachable_count":analysis.unreachable.len(),
-        "unreachable":if target.is_none() {Some(analysis.unreachable.iter().map(ToString::to_string).collect::<Vec<_>>())} else {None},
-        "dominator_chain":chain.as_ref().map(|ids| ids.iter().map(ToString::to_string).collect::<Vec<_>>()),
+        "unreachable":if target.is_none() {Some(unreachable)} else {None},
+        "dominator_chain":chain.as_ref().map(|_| chain_json),
         "analysis_complete":true,"truncated":false,"continuation":null,
         "native_captures":0,"mutation_dispatched":false,
         "coverage":{"domain":"observed_projection","absence_proven":false,
             "walkability_proven":false,"mutation_authorized":false},
         "interpretation":"Unavoidable vertices on selected directed relation paths, not a traversable route, resource feasibility, causal necessity, or whole-world absence. Impact counts exclude the removed vertex. The target view omits unrelated tree rows, not analysis work.",
+        "budget":{"source_structure_work":source_structure_work,
+            "analysis_work":graph_work,"total_work":work.work},
         "witness":{"anchor":anchor_json(witness.source_anchor),
             "authorization_scope_digest":witness.authorization_scope_digest.to_string(),
             "projection_digest":witness.projection_digest.to_string(),
@@ -308,10 +446,6 @@ pub(super) fn execute(
             "examined_arcs":witness.examined_arcs,"work_units":witness.work_units,
             "fixed_point_passes":analysis.fixed_point_passes,"intersection_steps":analysis.intersection_steps}
     });
-    let maximum = context
-        .budget
-        .max_bytes
-        .min(u64::from(context.budget.max_output_tokens) * 4);
     if serde_json::to_vec(&payload)
         .map_err(|_| invalid("dominator result cannot be encoded"))?
         .len() as u64
@@ -321,8 +455,33 @@ pub(super) fn execute(
             "complete dominator result exceeds the output budget; select a target or increase the negotiated budget",
         ));
     }
+    work.check()?;
     check()?;
     Ok(payload)
+}
+
+fn push_output(
+    output: &mut Vec<Value>,
+    value: Value,
+    used: &mut u64,
+    maximum: u64,
+    work: &mut source::Budget,
+) -> Result<()> {
+    work.charge(0, 1)?;
+    let bytes = serde_json::to_vec(&value)
+        .map_err(|_| invalid("dominator output child cannot be encoded"))?
+        .len() as u64;
+    let next = used
+        .checked_add(bytes)
+        .ok_or_else(|| bounded("dominator output length overflows"))?;
+    if next > maximum {
+        return Err(bounded(
+            "dominator output materialization exceeds the complete-response allowance",
+        ));
+    }
+    *used = next;
+    output.push(value);
+    Ok(())
 }
 
 pub(super) fn extend_schema(mut schema: Value) -> Result<Value> {
@@ -339,3 +498,7 @@ pub(super) fn extend_schema(mut schema: Value) -> Result<Value> {
 #[cfg(test)]
 #[path = "dominance_query_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "dominance_query_history_tests.rs"]
+mod history_tests;

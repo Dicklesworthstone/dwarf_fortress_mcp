@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased — Query unavoidable dependencies in the laboratory
+
+- Connect the existing directed dominator analysis to current and exact retained
+  sources through the default structured query tool.
+- Preserve generation-bound target chains, complete rooted trees, impact counts
+  and deterministic witnesses without claiming walkability or game effects.
+- Recheck current authority through restored-time historical queries; reject
+  duplicate original selectors and null target handles.
+- Admit complete source shape/bytes and cumulative work independently from the
+  response reservation; bound rendered children and publish no partial analysis.
+- Add independent public and retained-source regression coverage; record final
+  execution results separately from source presence and live admission.
+
 ## Unreleased — Reclaim jobs session capacity and verify release components
 
 - Extend explicit resource-only close to jobs/1.2, returning its 16-session

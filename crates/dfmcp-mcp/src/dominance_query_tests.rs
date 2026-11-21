@@ -293,19 +293,25 @@ fn typed_selector_and_shape_bounds_reject_malformed_requests() {
 #[test]
 fn target_focus_fits_when_full_tree_cannot_and_bounds_never_truncate() -> Result<()> {
     let (snapshot, mut context) = fixture(100, &(2..=100).map(|id| (1, id)).collect::<Vec<_>>());
-    context.budget.max_bytes = 4000;
+    // The full source remains admitted independently of the narrow response.
+    // Selecting one target cannot evade complete-source verification.
     assert!(
-        matches!(execute(&snapshot, &context, &request(None)), Err(e) if e.code == ErrorCode::BudgetExceeded)
+        matches!(execute_with_output_budget(&snapshot, &context, &request(None), 4000), Err(e) if e.code == ErrorCode::BudgetExceeded)
     );
-    let focused = execute(&snapshot, &context, &request(Some(2)))?;
+    let focused = execute_with_output_budget(&snapshot, &context, &request(Some(2)), 4000)?;
     assert_eq!(focused["reachable_count"], 100);
     assert_eq!(focused["returned"], 2);
-    context.budget.max_bytes = serde_json::to_vec(&focused).unwrap().len() as u64;
-    assert_eq!(focused, execute(&snapshot, &context, &request(Some(2)))?);
-    context.budget.max_bytes -= 1;
-    assert!(
-        matches!(execute(&snapshot, &context, &request(Some(2))), Err(e) if e.code == ErrorCode::BudgetExceeded)
+    let exact_output = serde_json::to_vec(&focused).unwrap().len() as u64;
+    assert_eq!(
+        focused,
+        execute_with_output_budget(&snapshot, &context, &request(Some(2)), exact_output)?
     );
+    assert!(
+        matches!(execute_with_output_budget(&snapshot, &context, &request(Some(2)), exact_output - 1), Err(e) if e.code == ErrorCode::BudgetExceeded)
+    );
+    context.budget.max_bytes = 4000;
+    assert!(matches!(execute(&snapshot, &context, &request(Some(2))),
+        Err(e) if e.code == ErrorCode::BudgetExceeded));
     context.budget.max_bytes = 262144;
     context.budget.max_output_tokens = 1;
     assert!(

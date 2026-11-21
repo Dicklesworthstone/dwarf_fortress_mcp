@@ -36,6 +36,7 @@ inner envelope accepts the existing schema, `query`, and optional complete
 | `search` | Bounded lexical retrieval over selected kinds, typed predicates, fields and labels |
 | `traverse` | Bounded observed graph traversal and a witnessed path to an optional target |
 | `dependencies` | Prerequisite order, cycle components, cycle blockers and an unweighted critical chain |
+| `dominators` | Unavoidable vertices and their downstream impact on selected directed relationships, with an optional exact target view |
 | `schedule` | Qualified-duration prerequisite closure, unlimited baseline and optional finite-slot schedule with queue delays and dispatch order |
 | `weighted_routes` | Least-cost observed routes from multiple sources, qualified integer edge costs and exact selected path witnesses |
 | `max_flow` | Exact directed flow and a minimum bottleneck cut from qualified observed capacities in one common source-recorded unit |
@@ -449,6 +450,49 @@ are accepted. `incoming` reverses the recorded relations without implying
 physical walkability. Complete source/output/work admission, source-generation
 fences and current authority also apply to retained sources. The query
 creates no native observations or effects. See `WEIGHTED_ROUTES.md`.
+
+## Unavoidable dependencies and directed bottlenecks
+
+Use the existing dominator engine through the same laboratory wrapper:
+
+```json
+{
+  "mode": "structured",
+  "request": {
+    "schema": "dfmcp.query/1",
+    "query": {
+      "kind": "dominators",
+      "root": "1",
+      "root_generation": 1,
+      "edge_kinds": ["requires"],
+      "target": "5",
+      "target_generation": 1
+    }
+  }
+}
+```
+
+The IDs are illustrative: choose actual entities and generations from the
+selected canonical source. With a target, `dominator_chain` lists the vertices
+on **every** selected directed path from the root to that target. In a diamond,
+neither alternative branch is unavoidable, but their reconvergence can be.
+Omit both target fields for the complete dominator tree and unreachable set.
+`direction: "incoming"` reverses the recorded edge direction.
+
+Each record includes its generation, revision, immediate dominator and count
+of other reachable vertices that would lose rooted reachability if it were
+removed. These are statements about the supplied relation graph. A dominator
+chain is not a traversable route, a production-feasibility proof or mutation
+authority. Selecting a target reduces output, never the analysis scope.
+
+The optional outer `at` selects an exact retained source; endpoint generations
+and `expected_anchor` bind that source. Query authorization remains at the actual
+current tick even after a restore moves the clock backwards. Duplicate original
+JSON selectors and explicit null endpoint handles refuse. Complete-source
+records, nesting, canonical bytes, graph work and the original deadline remain
+bounded independently of the complete output allowance. Exhaustion returns an
+error without a partial tree, cursor, new observation or effect.
+See `GRAPH_DOMINANCE.md` for the graph semantics and witness policy.
 
 ## Network throughput and bottlenecks
 

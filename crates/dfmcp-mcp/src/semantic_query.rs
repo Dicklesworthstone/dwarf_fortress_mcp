@@ -6,7 +6,7 @@ mod core_query;
 #[path = "dependency_schedule_query.rs"]
 pub(super) mod dependency_schedule_query;
 #[path = "dominance_query.rs"]
-mod dominance_query;
+pub(super) mod dominance_query;
 #[path = "event_query.rs"]
 mod event_query;
 #[cfg(test)]
@@ -550,6 +550,16 @@ where
         Some("aggregate" | "search") => {
             let narrowed = result_context(&output_context)?;
             let value = operational_query::execute_with_output_budget(
+                snapshot,
+                context,
+                input,
+                narrowed.budget.max_bytes,
+            )?;
+            publish_with_active_work(&output_context, value, publish)
+        }
+        Some("dominators") => {
+            let narrowed = result_context(&output_context)?;
+            let value = dominance_query::execute_with_output_budget(
                 snapshot,
                 context,
                 input,

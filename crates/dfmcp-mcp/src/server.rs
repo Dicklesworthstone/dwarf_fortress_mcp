@@ -160,6 +160,10 @@ mod structured_query_tests;
 mod lab_weighted_route_query_tests;
 
 #[cfg(test)]
+#[path = "lab_dominance_mcp_tests.rs"]
+mod lab_dominance_mcp_tests;
+
+#[cfg(test)]
 #[path = "lab_condition_mcp_tests.rs"]
 mod condition_mcp_tests;
 

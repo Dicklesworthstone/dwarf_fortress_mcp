@@ -33,6 +33,7 @@ use serde_json::{Value, json};
 
 use super::query_condition::Condition;
 use super::semantic_query::dependency_schedule_query;
+use super::semantic_query::dominance_query;
 use super::semantic_query::max_flow_query;
 use super::semantic_query::min_cost_flow_query;
 use super::semantic_query::weighted_route_query;
@@ -73,6 +74,14 @@ struct ConditionRequest {
 struct ScheduleRequest {
     mode: Mode,
     request: dependency_schedule_query::Envelope,
+    at: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DominanceRequest {
+    mode: Mode,
+    request: dominance_query::Envelope,
     at: Option<String>,
 }
 
@@ -188,6 +197,7 @@ pub(super) fn parse(raw: &str) -> Result<Option<Request>> {
                 | "inspect"
                 | "traverse"
                 | "dependencies"
+                | "dominators"
                 | "schedule"
                 | "weighted_routes"
                 | "max_flow"
@@ -202,8 +212,18 @@ pub(super) fn parse(raw: &str) -> Result<Option<Request>> {
         )
     ) {
         return Err(invalid(
-            "structured laboratory queries support only entities, inspect, traverse, dependencies, schedule, weighted_routes, max_flow, min_cost_flow, aggregate, search, events, spatial_entities, related_entities, ranked_entities, and condition_evaluation",
+            "structured laboratory queries support only entities, inspect, traverse, dependencies, dominators, schedule, weighted_routes, max_flow, min_cost_flow, aggregate, search, events, spatial_entities, related_entities, ranked_entities, and condition_evaluation",
         ));
+    }
+    if request.request["query"]["kind"] == "dominators" {
+        // Preserve original-byte ambiguity checks through the wrapper. A Value
+        // round trip alone would erase duplicate endpoint/selector fields.
+        let parsed: DominanceRequest = serde_json::from_str(raw)
+            .map_err(|error| invalid(format!("invalid laboratory dominator query: {error}")))?;
+        let Mode::Structured = parsed.mode;
+        request.at = parsed.at;
+        request.request = serde_json::to_value(parsed.request)
+            .map_err(|_| invalid("laboratory dominator query cannot be encoded"))?;
     }
     if request.request["query"]["kind"] == "condition_evaluation" {
         let parsed: ConditionRequest = serde_json::from_str(raw)
@@ -269,6 +289,12 @@ pub(super) fn execute(
     let mut source_context = current.clone();
     source_context.anchor = snapshot.anchor();
     let result = match request.request["query"]["kind"].as_str() {
+        Some("dominators") => dominance_query::execute_laboratory_source(
+            snapshot,
+            current,
+            &request.request,
+            remaining_wall_millis(current, started)?,
+        )?,
         Some("schedule") => dependency_schedule_query::execute_laboratory_source(
             snapshot,
             current,

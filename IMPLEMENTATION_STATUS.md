@@ -1,5 +1,30 @@
 # Implementation Status
 
+## Unreleased — Inspect directed bottlenecks from the default laboratory loop
+
+The existing structured laboratory query now exposes `dominators` over current
+and exact retained worlds. Agents can inspect the full rooted dominator tree
+or the unavoidable vertices for one exact generation-bound target, together
+with downstream impact counts and deterministic graph witnesses. Existing
+recorded relations supply the model; no synthetic edges or game effects are
+created.
+
+Historical analysis preserves the actual current authority context across
+clock-reset restores, while endpoint identities and expected anchors bind the
+selected source. Original JSON is decoded without erasing duplicate selectors
+or explicit null target handles. Complete source records, nested values and
+canonical bytes are admitted before graph hashing; source work and final output
+reservations stay distinct. Output children are bounded before retention and
+partial trees never publish. The existing generic dispatcher uses the same
+separate response-reservation path.
+
+Independent current/history, generation, direction, no-effect, source-budget,
+output-budget and original-JSON regressions are being executed. Validation is
+in progress; this entry does not claim a passed Rust integration or full
+qualification. The compatibility registry and production protocol map are
+unchanged. Owner: `df-lab-directed-bottlenecks-r3k`. Usage and semantics are in
+`docs/GRAPH_DOMINANCE.md` and `docs/LAB_STRUCTURED_QUERY.md`.
+
 ## Unreleased — Reclaim jobs sessions and verify shared release components
 
 The jobs/1.2 development server now supports the same explicit

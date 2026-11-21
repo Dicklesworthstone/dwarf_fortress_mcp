@@ -97,6 +97,31 @@ deadline, entity budget, response byte/token budget, and the bounded graph work
 allowance. Active-watch metadata reservation and complete-turn publication use
 the existing dispatcher; failed rendering does not register work or mutate state.
 
+### Default laboratory and retained history
+
+The default laboratory now exposes this same engine through the existing
+`fortress_query` mode argument. Wrap the request above in
+`{"mode":"structured","request":...}` and optionally add an outer `at`
+with an exact retained state hash. Both endpoint generations and a supplied
+`expected_anchor` are checked against the selected source. Grants are checked
+at the actual current session tick throughout, even when restored time is
+earlier than the historical source. The original foreground deadline continues
+through source admission, graph analysis and final publication.
+
+The wrapper decodes endpoint and selector fields from the original JSON, so
+duplicate keys cannot silently change the meaning. Omitted targets remain
+optional; explicit null target handles refuse. Existing direction/null defaults
+are unchanged. The shared executor now validates complete-source record count,
+nested-value shape and canonical bytes before hashing or analysis. Source work
+and the smaller response reservation stay separate. Output children are admitted
+before retention, followed by an exact complete-envelope check; a small target
+view does not admit an oversized or malformed source.
+
+This is read-only analysis of recorded relationships. It creates no native
+capture, retained work, new graph facts, forecast of game effects or game
+mutation. The laboratory owner remains responsible for selecting authorized
+history and publishing the complete result with its current Agent Turn.
+
 Ten additional Rust regressions cover semantic dispatch, target focus, reversed
 relations, generation/anchor fences, scope/cancellation/expiry, malformed inputs,
 output/deadline budgets, failed publication, and runtime schema composition.
