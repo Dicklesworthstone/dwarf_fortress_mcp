@@ -167,6 +167,9 @@ mod capacity_schedule_mcp_tests;
 #[cfg(test)]
 #[path = "max_flow_mcp_tests.rs"]
 mod max_flow_mcp_tests;
+#[cfg(test)]
+#[path = "min_cost_flow_mcp_tests.rs"]
+mod min_cost_flow_mcp_tests;
 
 #[cfg(test)]
 #[path = "lab_query_budget_mcp_tests.rs"]

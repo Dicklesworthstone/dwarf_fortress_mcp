@@ -1,0 +1,119 @@
+{
+  "title": "Minimum-cost finite demand in an authorized directed projection",
+  "description": "Maximize delivery up to a positive finite u64 demand, then minimize its exact total cost. All selected directed edges require qualified nonnegative integer capacities and per-flow-unit costs plus exact common source-recorded capacity and cost units. The four field names must differ. This includes unreachable, zero-capacity and self-loop edges. No caller-supplied capacities, costs, units, negative original costs, infinity, effects or pagination are accepted. Results retain complete per-edge allocations and source facts, globally feasible residual potentials and a shortfall cut when demand cannot be met. Wide total cost and signed potentials use decimal strings. Runtime also checks canonical IDs, endpoint generations, UTF-8 byte bounds, original duplicate JSON fields, source integrity, current authority, work/frontier/deadline limits and complete publication.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "edge_kinds",
+    "capacity_field",
+    "unit_field",
+    "cost_field",
+    "cost_unit_field",
+    "demand",
+    "source",
+    "sink"
+  ],
+  "properties": {
+    "kind": {
+      "const": "min_cost_flow"
+    },
+    "edge_kinds": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "items": {
+        "oneOf": [
+          {
+            "enum": [
+              "located_at",
+              "contained_in",
+              "assigned_to",
+              "member_of",
+              "performs",
+              "requires",
+              "produces",
+              "uses",
+              "supports",
+              "threatens",
+              "ordered_by",
+              "parent_of"
+            ]
+          },
+          {
+            "type": "string",
+            "pattern": "^custom:[^\u0000]+(?![\\s\\S])",
+            "maxLength": 128
+          }
+        ]
+      }
+    },
+    "capacity_field": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^(?=.*\\S)[^\u0000-\u001f-]+(?![\\s\\S])"
+    },
+    "unit_field": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^(?=.*\\S)[^\u0000-\u001f-]+(?![\\s\\S])"
+    },
+    "cost_field": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^(?=.*\\S)[^\u0000-\u001f-]+(?![\\s\\S])"
+    },
+    "cost_unit_field": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^(?=.*\\S)[^\u0000-\u001f-]+(?![\\s\\S])"
+    },
+    "demand": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 18446744073709551615
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "entity_id",
+        "generation"
+      ],
+      "properties": {
+        "entity_id": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}(?![\\s\\S])"
+        },
+        "generation": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        }
+      }
+    },
+    "sink": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "entity_id",
+        "generation"
+      ],
+      "properties": {
+        "entity_id": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}(?![\\s\\S])"
+        },
+        "generation": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        }
+      }
+    }
+  }
+}

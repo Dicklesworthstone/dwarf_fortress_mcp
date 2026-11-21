@@ -14,6 +14,8 @@ mod event_query;
 mod history_tests;
 #[path = "max_flow_query.rs"]
 pub(super) mod max_flow_query;
+#[path = "min_cost_flow_query.rs"]
+pub(super) mod min_cost_flow_query;
 #[path = "operational_query.rs"]
 mod operational_query;
 #[path = "query_history.rs"]
@@ -114,9 +116,9 @@ pub(super) fn laboratory_baseline_work(context: &OperationContext) -> Result<Val
 }
 
 pub(crate) fn extend_watch_count_schema(schema: Value) -> Result<Value> {
-    max_flow_query::extend_schema(weighted_route_query::extend_schema(
-        dependency_schedule_query::extend_schema(dominance_query::extend_schema(
-            query_watch::extend_count_schema(schema)?,
+    min_cost_flow_query::extend_schema(max_flow_query::extend_schema(
+        weighted_route_query::extend_schema(dependency_schedule_query::extend_schema(
+            dominance_query::extend_schema(query_watch::extend_count_schema(schema)?)?,
         )?)?,
     )?)
 }
@@ -289,6 +291,7 @@ pub fn execute(
         Some("schedule") => dependency_schedule_query::execute(snapshot, context, input),
         Some("weighted_routes") => weighted_route_query::execute(snapshot, context, input),
         Some("max_flow") => max_flow_query::execute(snapshot, context, input),
+        Some("min_cost_flow") => min_cost_flow_query::execute(snapshot, context, input),
         _ => core_query::execute(snapshot, context, input),
     }
 }
@@ -577,6 +580,16 @@ where
         Some("max_flow") => {
             let narrowed = result_context(&output_context)?;
             let value = max_flow_query::execute_with_output_budget(
+                snapshot,
+                context,
+                input,
+                narrowed.budget.max_bytes,
+            )?;
+            publish_with_active_work(&output_context, value, publish)
+        }
+        Some("min_cost_flow") => {
+            let narrowed = result_context(&output_context)?;
+            let value = min_cost_flow_query::execute_with_output_budget(
                 snapshot,
                 context,
                 input,

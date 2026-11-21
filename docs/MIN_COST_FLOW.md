@@ -138,3 +138,78 @@ graphs. Actual execution evidence and its scope are recorded in
 production admission.
 
 Owning bead: `df-franken-storage-mvcc-54h.4.5`.
+
+## Public structured query
+
+The existing `fortress_query` tool accepts this JSON string as its `mode`:
+
+```json
+{
+  "mode": "structured",
+  "request": {
+    "schema": "dfmcp.query/1",
+    "query": {
+      "kind": "min_cost_flow",
+      "edge_kinds": ["uses"],
+      "capacity_field": "capacity",
+      "unit_field": "capacity_unit",
+      "cost_field": "haul_cost",
+      "cost_unit_field": "cost_unit",
+      "demand": 3,
+      "source": {"entity_id": "1", "generation": 1},
+      "sink": {"entity_id": "4", "generation": 1}
+    }
+  }
+}
+```
+
+This requires those exact entities and qualified facts in the chosen canonical
+source. Ordinary laboratory scenarios and native profiles do not automatically
+populate capacity/cost/unit data. The closed grammar is
+`schemas/mcp_min_cost_flow_v1.json`. The caller selects source fields and a
+positive finite demand; it cannot replace their values, reverse the graph,
+inject effects or request a partial certificate.
+
+The result includes `demand`, delivered `value`, `unmet_demand`, `demand_met`,
+`unit`, `cost_unit` and exact `total_cost`. Every selected edge retains
+capacity, per-unit cost, flow, revision, exact endpoint handles and all four
+source facts. The complete `potentials` array includes one exact entity handle
+and signed dual potential per observed vertex. Total cost and potentials use
+decimal strings to preserve their full u128/i128 ranges.
+
+`minimum_cut` is null when the request is satisfied. When demand is unmet it
+contains the cut capacity, exact edge IDs and complete source/sink vertex
+partitions. Its capacity equals delivered flow. An impossible request is a
+complete successful analysis with an explicit shortfall, rather than a
+fabricated fulfilled goal or a partially computed answer.
+
+For example, if a cheap path can carry two items at two cost units per item,
+and the next cheapest route can carry one at three cost units, demand three
+has model delivery three and total cost `"7"`. A request beyond network
+capacity reports maximum possible delivery at its minimum cost and the
+remaining shortfall. This is model arithmetic, not observed game completion.
+
+The optional outer `at` selects an exact retained laboratory source. Both
+endpoint generations must match that source, and Query authority is checked at
+the actual current tick even across clock-reset restores. Original request
+bytes are parsed into the typed grammar, so duplicate demand, field selectors
+and endpoint identities cannot silently overwrite one another.
+
+The complete source is structurally admitted and canonically verified before
+solving, including unselected records and fields. Source allowance is separate
+from rendered output reservations. Work, original deadlines, authorization
+and cancellation cover solving and rendering. Serialized children are admitted
+incrementally before retention, then the exact complete result and Agent Turn
+must fit. There is no pagination, partial allocation, partial cost certificate
+or budget-driven false shortfall.
+
+The generic semantic executor exposes the same operator in schema discovery
+and bounded publication. This adds no top-level MCP tool or native request.
+The result declares inferred model coverage, no complete-world absence proof,
+zero native captures and no mutation dispatch.
+
+The focused executor suite is `min_cost_flow_query_tests.rs`; three actual
+public-facade regressions in `min_cost_flow_mcp_tests.rs` cover allocation and
+shortfall publication, retained generations/current authority after restore,
+original JSON duplicates and complete-packet refusal. Their execution scopes
+are recorded separately in `IMPLEMENTATION_STATUS.md`.

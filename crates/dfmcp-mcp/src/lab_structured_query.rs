@@ -34,6 +34,7 @@ use serde_json::{Value, json};
 use super::query_condition::Condition;
 use super::semantic_query::dependency_schedule_query;
 use super::semantic_query::max_flow_query;
+use super::semantic_query::min_cost_flow_query;
 use super::semantic_query::weighted_route_query;
 
 const MAX_REQUEST_BYTES: usize = 65_536;
@@ -88,6 +89,14 @@ struct WeightedRouteRequest {
 struct MaxFlowRequest {
     mode: Mode,
     request: max_flow_query::Envelope,
+    at: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MinCostFlowRequest {
+    mode: Mode,
+    request: min_cost_flow_query::Envelope,
     at: Option<String>,
 }
 
@@ -182,6 +191,7 @@ pub(super) fn parse(raw: &str) -> Result<Option<Request>> {
                 | "schedule"
                 | "weighted_routes"
                 | "max_flow"
+                | "min_cost_flow"
                 | "aggregate"
                 | "search"
                 | "events"
@@ -192,7 +202,7 @@ pub(super) fn parse(raw: &str) -> Result<Option<Request>> {
         )
     ) {
         return Err(invalid(
-            "structured laboratory queries support only entities, inspect, traverse, dependencies, schedule, weighted_routes, max_flow, aggregate, search, events, spatial_entities, related_entities, ranked_entities, and condition_evaluation",
+            "structured laboratory queries support only entities, inspect, traverse, dependencies, schedule, weighted_routes, max_flow, min_cost_flow, aggregate, search, events, spatial_entities, related_entities, ranked_entities, and condition_evaluation",
         ));
     }
     if request.request["query"]["kind"] == "condition_evaluation" {
@@ -231,6 +241,19 @@ pub(super) fn parse(raw: &str) -> Result<Option<Request>> {
         request.request = serde_json::to_value(parsed.request)
             .map_err(|_| invalid("laboratory flow query cannot be encoded"))?;
     }
+    if request.request["query"]["kind"] == "min_cost_flow" {
+        // Retain original JSON identity and selector multiplicity. Parsing a
+        // Value first would silently erase duplicate demand or evidence fields.
+        let parsed: MinCostFlowRequest = serde_json::from_str(raw).map_err(|error| {
+            invalid(format!(
+                "invalid laboratory minimum-cost-flow query: {error}"
+            ))
+        })?;
+        let Mode::Structured = parsed.mode;
+        request.at = parsed.at;
+        request.request = serde_json::to_value(parsed.request)
+            .map_err(|_| invalid("laboratory minimum-cost-flow query cannot be encoded"))?;
+    }
     Ok(Some(request))
 }
 
@@ -259,6 +282,12 @@ pub(super) fn execute(
             remaining_wall_millis(current, started)?,
         )?,
         Some("max_flow") => max_flow_query::execute_laboratory_source(
+            snapshot,
+            current,
+            &request.request,
+            remaining_wall_millis(current, started)?,
+        )?,
+        Some("min_cost_flow") => min_cost_flow_query::execute_laboratory_source(
             snapshot,
             current,
             &request.request,

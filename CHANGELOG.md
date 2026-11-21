@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased — Expose minimum-cost observed delivery through the query tool
+
+- Add structured `min_cost_flow` to current/retained laboratory queries,
+  generic semantic execution, schema discovery and bounded publication.
+- Return complete edge allocations and source facts, exact wide total cost,
+  global dual potentials and an equal-capacity cut for unmet demand.
+- Preserve current authority, generation-bound identity, original deadlines,
+  complete source/work/output limits and whole Agent Turn publication.
+- Reject duplicate original JSON and partial certificates; retain explicit
+  modeled-network coverage without native capture or game effects.
+- Pass all 14 actual-source query tests and warning-denied component checking
+  with exact locked dependencies, plus 108 composed-schema cases. Add three
+  public-facade regressions; full MCP/native qualification remains outstanding.
+
 ## Unreleased — Finish furnished blueprint goals and scale their deadlines
 
 - Require every ordinary bedroom/dining-room furnishing to reach its completed
@@ -33,10 +47,10 @@
   equal-capacity cut for unmet demand and use checked wide integer arithmetic.
 - Preserve source/scope/policy witnesses, deterministic ties, cancellation and
   complete input/work/frontier bounds without native effects.
-- Pass 16 actual-source core integration tests with 3,684 independent exhaustive
-  oracle cases before a final private certificate-argument refactor. Final
-  rebuilt-source and full integration qualification remain pending after
-  executor outages; exact scope is recorded in IMPLEMENTATION_STATUS.md.
+- Pass all 16 actual-source core integration tests, including 3,684 independent
+  exhaustive oracle cases, on the final formatted committed source with warning
+  denial and unchanged source inventories. Full integration qualification
+  remains pending; exact scope is recorded in IMPLEMENTATION_STATUS.md.
 
 ## Unreleased — Expose network bottlenecks through the existing query tool
 

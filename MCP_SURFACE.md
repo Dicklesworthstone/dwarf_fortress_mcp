@@ -346,6 +346,35 @@ advisory model, creates no effects and proves no native throughput. Missing fact
 mixed units, overflow and exhausted allowances refuse without a partial cut.
 See [`docs/NETWORK_FLOW.md`](docs/NETWORK_FLOW.md).
 
+Structured `min_cost_flow` maximizes delivery up to a positive finite `u64`
+`demand`, then minimizes the total cost of that delivered amount. It requires
+distinct `source` and `sink` handles with `entity_id` and `generation`, explicit
+`edge_kinds`, and four distinct source field names: `capacity_field`,
+`unit_field`, `cost_field` and `cost_unit_field`. Every selected edge, including
+unreachable, zero-capacity and self-loop edges, must have qualified nonnegative
+integer capacity and cost per unit of flow. Capacity units must agree exactly
+across the selected edges, as must cost units. Missing, future or unqualified
+facts, mixed units and negative original costs refuse; no replacement values or
+unit conversions are supplied by the caller.
+
+Results retain `demand`, delivered `value`, `unmet_demand`, `demand_met`, all
+per-edge capacities/costs/flows and their source facts, and one residual
+`potential` per observed vertex. `total_cost` and signed potentials are exact
+decimal strings. Independent conservation and globally nonnegative residual
+reduced-cost checks certify the minimum cost at the delivered value. A shortfall
+also returns `minimum_cut`, whose capacity equals `value` and whose complete
+partitions explain the model's delivery limit. Satisfied demand returns a null
+cut and makes no maximum-throughput claim.
+
+Current and exact retained laboratory sources use current Query authority,
+original deadlines, complete-source admission and whole-result output bounds.
+There is no pagination or partial certificate; overflow and insufficient
+allowances refuse the whole result. This inferred model collects no native
+capacity/cost facts, issues no jobs and establishes no actual logistics,
+worker/material feasibility or goal completion. See
+[`docs/MIN_COST_FLOW.md`](docs/MIN_COST_FLOW.md) and the closed grammar in
+[`schemas/mcp_min_cost_flow_v1.json`](schemas/mcp_min_cost_flow_v1.json).
+
 Structured `aggregate` accepts optional `relation` and `spatial` selectors,
 independently or together, using the same closed objects as `ranked_entities`.
 Source kinds and typed `where` run first, positive witnessed relationships next,

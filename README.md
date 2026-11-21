@@ -282,6 +282,13 @@ The certificate proves the optimum within that observed model. Source data must
 already contain the capacity and unit facts; the query does not collect native
 rates, dispatch work or establish actual game throughput.
 
+Structured `min_cost_flow` adds [allocation at minimum cost](docs/MIN_COST_FLOW.md):
+maximize delivery up to an explicit demand, then minimize its total cost.
+Qualified capacities, costs per unit of flow and their source-recorded units
+produce per-edge allocations, checkable residual potentials and a minimum cut
+when demand cannot be met. This advisory analysis requires existing source
+facts and creates no native dispatch.
+
 Production goals can combine DRINK, FOOD, BED, DOOR, TABLE and CHAIR quotas.
 Furniture orders consume finite wood, share finite worker/workshop
 capacity, and create inspectable items. The planner budgets all requested

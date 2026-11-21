@@ -1,5 +1,58 @@
 # Implementation Status
 
+## Unreleased — Query minimum-cost finite network delivery
+
+The existing structured `fortress_query` surface now accepts `min_cost_flow`
+over current and exact retained laboratory sources. Generation-bound endpoints,
+explicit edge kinds, four source field selectors and positive finite demand
+select qualified capacities, costs and common source-recorded units. The
+generic semantic executor, composed schema and output-reserving publisher
+expose the same operator without adding a top-level tool.
+
+Complete results include requested/delivered/unmet quantities, every original
+edge and all four source facts, exact endpoint generations, total cost and
+global dual potentials. Decimal strings preserve full u128/i128 ranges. A
+shortfall includes an equal-capacity minimum cut; satisfied demand does not
+assert maximum network throughput. Explicit coverage describes an inferred
+observed-network model rather than native completion or complete-world absence.
+
+Original-byte parsing rejects duplicate selectors and demands. Historical
+queries retain actual current authority across clock-reset restores. Complete
+source identity/structure, original deadlines, cancellation and combined work
+remain enforced. JSON children are admitted incrementally before retention,
+then the exact complete result and Agent Turn must fit. No partial certificate,
+pagination, native capture, mutation dispatch or budget-induced false shortfall
+is introduced.
+
+All 14 focused query tests pass on the final formatted actual-source
+component with latest-nightly Cargo, `--locked --offline` and warning denial.
+The component's `cargo check --tests` also passes. All 11 external dependency
+versions, sources and checksums match the repository lockfile; 75 actual source
+files and six harness inputs remain unchanged across checking and execution.
+Extraction-only unused legacy modules and the reused source helper's unrelated
+entity-rendering functions have narrow dead-code allowances; all new query
+logic remains warning-denied. The generic test-helper alias was corrected
+before this successful final-source run.
+
+The composed JSON Schema passes 108 cases: 11 accepted, 92 rejected and five
+legacy variants. Scoped latest-nightly formatting and whitespace checks pass.
+Three additional public-facade regressions cover allocation/shortfall,
+retained authority/generations, duplicate original JSON and complete-packet
+refusal; they are authored and reviewed but have not executed through the full
+MCP crate. Repository verification passes 20 gate groups, including 5,572
+repository checks, then stops because `br` is unavailable. Release qualification
+refuses the dirty development checkout before running its gates. These are
+component/static checks; full MCP, transport, native-game and production
+qualification remain outstanding.
+
+Ordinary laboratory scenarios and native profiles do not automatically
+populate the required capacity/cost/unit facts. This query requires an already
+authorized canonical source containing them and does not collect or invent
+native rates or costs.
+
+Owner: `df-franken-storage-mvcc-54h.4.5`, retained in progress for integrated
+qualification. See `docs/MIN_COST_FLOW.md` and `docs/LAB_STRUCTURED_QUERY.md`.
+
 ## Unreleased — Furnished room goals include their completed furniture
 
 Fresh ordinary bedroom-cluster and dining-hall blueprints now require both
@@ -73,13 +126,13 @@ residual rerouting, global dual checks, deep graphs, provenance, exact bounds,
 cancellation and overflow. Inventories confirmed unchanged source/test bytes
 through that execution. These are direct actual-source component checks.
 
-After that pass, the final source packages certificate arguments into a private
-`CertificateInput` struct to avoid an oversized argument list. The semantics
-are unchanged and the recovered final bytes were independently reviewed and
-read back from GitHub; a final formatted-source rebuild/rerun did not complete
-before repeated executor outages. The prior pass is not a final-source or full
-workspace qualification claim. Query integration follows separately; native
-collection, gameplay, transport and production admission remain unestablished.
+The final committed source, including the private `CertificateInput`
+argument bundle and scoped formatting, was subsequently rebuilt with warning
+denial and all 16 tests passed again. A 61-file inventory was unchanged across
+that final-source run. This supersedes the earlier executor-outage rerun gap.
+These remain component checks: full workspace, native collection, gameplay,
+transport and production admission remain unestablished. Query integration is
+recorded separately above.
 
 Owner: `df-franken-storage-mvcc-54h.4.5`, retained in progress for final
 integration qualification. See `docs/MIN_COST_FLOW.md`.

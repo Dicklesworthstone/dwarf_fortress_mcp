@@ -39,6 +39,7 @@ inner envelope accepts the existing schema, `query`, and optional complete
 | `schedule` | Qualified-duration prerequisite closure, unlimited baseline and optional finite-slot schedule with queue delays and dispatch order |
 | `weighted_routes` | Least-cost observed routes from multiple sources, qualified integer edge costs and exact selected path witnesses |
 | `max_flow` | Exact directed flow and a minimum bottleneck cut from qualified observed capacities in one common source-recorded unit |
+| `min_cost_flow` | Minimum-cost delivery up to finite demand, complete allocation and dual certificate, with an exact shortfall cut |
 | `events` | Inclusive retained-event windows, kind/subject selection, typed fields and chronological pages |
 | `spatial_entities` | Inclusive intersection or containment of explicitly named point/cuboid entity geometry |
 | `related_entities` | Entities with witnessed one-hop relations to targets selected by kinds, IDs and typed facts |
@@ -499,6 +500,34 @@ flow, partial cut, pagination or continuation: an exhausted allowance returns
 `budget_exceeded`. See `NETWORK_FLOW.md` for the finite-capacity model and
 `schemas/mcp_max_flow_v1.json` for the closed query grammar.
 
+## Minimum-cost delivery
+
+Use `kind: "min_cost_flow"` to allocate a finite requested quantity across
+shared directed capacities at the lowest modeled cost. It requires the same
+generation-bound `source`, `sink`, `edge_kinds`, `capacity_field` and
+`unit_field` as maximum flow, plus `cost_field`, `cost_unit_field` and a
+positive `u64` `demand`. All four field names must differ. Every selected
+edge, including disconnected components, needs qualified nonnegative integer
+capacity and per-unit cost facts with exact common recorded units in both
+dimensions.
+
+The solver maximizes delivery up to demand, then minimizes cost at that
+delivered value. It returns every original edge's allocation and provenance,
+`value`, `unmet_demand`, `demand_met`, exact decimal-string `total_cost`
+and complete signed decimal-string dual `potentials`. Independently checked
+conservation and nonnegative residual reduced costs certify the cost optimum.
+Unmet demand also returns an equal-capacity `minimum_cut`; a fulfilled request
+has no cut or claim to have reached maximum network throughput.
+
+This is an advisory result over an existing source. No capacity, cost or unit
+is invented, and ordinary scenarios do not automatically populate them.
+Current authority, selected historical source time, exact generations,
+original-byte duplicate rejection and complete source/work/deadline/output
+limits apply. The allocation and complete Agent Turn publish together or
+refuse; no effect, reservation or native capture is created.
+See `MIN_COST_FLOW.md` for the complete request, model and certificates,
+and `schemas/mcp_min_cost_flow_v1.json` for the closed grammar.
+
 ## Retained event windows
 
 ```json
@@ -625,6 +654,11 @@ a budget too small to encode even the refusal receives the explicit minimal
 budget-error envelope.
 
 ## Verification scope
+
+`min_cost_flow_mcp_tests.rs` adds three public-facade regressions for allocation,
+shortfall certificates, retained generations/current authority, original JSON
+duplicates and complete-packet refusal. Independent core, focused executor and
+public-facade execution are reported separately in `IMPLEMENTATION_STATUS.md`.
 
 `max_flow_mcp_tests.rs` adds public-facade regressions for exact flow/cut facts and
 no effects, retained generations/current authority across a clock reset, original
