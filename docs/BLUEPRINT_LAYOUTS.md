@@ -30,10 +30,43 @@ do not establish aquifer, water pressure, load-bearing support, unit access,
 hidden geology, or overall safety. Its `Safe` enum variant means only that those
 listed checks found no hazard. No live compatibility or admission is added.
 
-Intent and obligation terminal predicates remain `False`, because this path has
-no registered excavation-completion witness. Geometry success, plan source and
-an immediate acknowledgement must not discharge excavation work. No native
-writer, bridge protocol, top-level MCP tool, or mutation authority is added.
+The excavation compiler seals `RegionTerrain` predicates for every excavated
+part. Geometry success, a retained plan source and an immediate acknowledgement
+do not discharge excavation work: a later observation must establish the target
+terrain. These are laboratory predicates; this path adds no native writer,
+bridge protocol, top-level MCP tool, or mutation authority.
+
+## Furnished laboratory plans
+
+Ordinary laboratory `fortress.plan` blueprint requests now seal the
+`furnished_blueprint_v2` compiler identity in their retained source. Bedrooms
+require one completed bed in each room; dining halls require a completed table
+and chair. Their original goal requires all excavation plus the exact generated
+building identities, kinds, positions, footprints and completed construction
+stages. Finishing excavation alone cannot mark a furnished goal achieved.
+Workshops and stockpile vaults retain excavation-only semantics; their templates
+do not request workshop construction or stockpile configuration.
+
+New ordinary requests leave synthetic step deadlines to the planner. On a
+`shared-workforce/1` scenario, its conservative deadline floor includes queued
+work and all planned service, while dependent furniture deadlines also account
+for their excavation prerequisites. This removes the fixed 1,000-tick mining
+deadline that could expire before a large project received enough worker time.
+Explicit caller obligations elsewhere keep their original deadline policy.
+
+Furniture footprints must be distinct and inside the excavated room. A
+one-tile-wide dining hall uses its north/south axis; a 1x1 hall is refused before
+preparation because it cannot fit both furnishings. This compiler still uses
+abstract laboratory construction. It does not select or consume furniture
+items, prove native access, or assign room ownership; the separate provisioned
+and connected-room compilers own their stronger contracts.
+
+Already retained, unversioned ordinary blueprint sources reconstruct the prior
+compiler exactly, including excavation-only goals and fixed excavation
+deadlines. Recovery never silently strengthens their original goal or changes
+their reviewed plan. Public intake stamps new requests with the current marker,
+accepts that same marker idempotently, and refuses legacy, unknown, null or
+duplicate markers. Candidate comparison uses the same intake path as planning.
 
 ## Validation
 
@@ -41,10 +74,13 @@ The Rust geometry suite checks exact perimeter-minus-crossing sets for 1,666
 small moat configurations, connected/disjoint bedroom layouts for 1,176 cases,
 24 workshop configurations, preserved walls, deterministic output and malformed,
 oversized and coordinate-boundary inputs. Existing compiler tests retain magma,
-missing-coverage, span, zero-dimension and false-completion checks where present.
-Rust/Cargo/rustfmt are unavailable in the editing environment: these tests have
-not been compiled or executed there. Independent Python geometry checks are
-reference evidence only, not Rust, MCP, native DFHack or live-game qualification.
+missing-coverage, span and zero-dimension checks. Furnished-plan regressions cover
+excavation without furniture, incorrect or missing furnishings, narrow halls,
+queued work with a shared worker, current intake and exact legacy reconstruction.
+The MCP regression exercises ordinary plan, commit and wait through the public
+facade. Test execution and qualification evidence remain recorded in the owning
+Beads and implementation status; laboratory tests are not native DFHack or
+live-game qualification.
 
 ## Coherent spatial query
 

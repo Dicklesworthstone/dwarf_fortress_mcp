@@ -10,10 +10,10 @@
 
 use dfmcp_core::{
     DfmcpError, ErrorCode, GameTick, IntentId, MapCoord, MapCuboid, Result, RiskTier, StateAnchor,
+    StepId,
 };
-use dfmcp_world::Predicate;
-use dfmcp_world::TileType;
 use dfmcp_world::spatial_index::{ChunkSpatialIndex, TemperatureBand};
+use dfmcp_world::{CompareOp, EntityKind, Predicate, TileType, Value};
 
 use crate::action::{Action, DigMode};
 use crate::plan::{Constraint, Intent, ObligationSpec, RequestedAction};
@@ -126,7 +126,7 @@ impl BlueprintPlanner {
     }
 
     /// Compile geometry only after every part's bounded preflight succeeds.
-    /// False terminal predicates preserve the existing fail-closed completion rule.
+    /// This original excavation compiler retains its sealed deadline policy.
     pub fn compile_blueprint_intent(
         &self,
         intent_id: IntentId,
@@ -135,13 +135,19 @@ impl BlueprintPlanner {
         template: BlueprintTemplate,
         spatial_index: &ChunkSpatialIndex,
     ) -> Result<Intent> {
-        let deadline = GameTick(anchor.tick.0.checked_add(1_000).ok_or_else(|| {
-            DfmcpError::new(
-                ErrorCode::BudgetExceeded,
-                "blueprint obligation deadline overflows the game tick range",
-            )
-        })?);
+        let deadline = legacy_deadline(anchor)?;
         let layout = self.layout(origin, template)?;
+        self.compile_layout_intent(intent_id, anchor, &layout, spatial_index, Some(deadline))
+    }
+
+    fn compile_layout_intent(
+        &self,
+        intent_id: IntentId,
+        anchor: StateAnchor,
+        layout: &BlueprintLayout,
+        spatial_index: &ChunkSpatialIndex,
+        deadline: Option<GameTick>,
+    ) -> Result<Intent> {
         // Sum the *actual* repeated halo work, not just unique excavated tiles.
         let mut scan_tiles = 0_u64;
         for part in layout.excavations() {
@@ -217,9 +223,9 @@ const MAX_HAZARD_TILES: u64 = 131_072;
 
 impl BlueprintPlanner {
     /// Compile a blueprint and furnish its rooms: a bed in every bedroom, and a
-    /// table with a chair in a dining hall, each placed at the room's centre
-    /// and depending on that room's excavation. Furniture steps carry the
-    /// reference construction semantics (and default obligations) once sealed.
+    /// table with a chair in a dining hall. The original goal requires both the
+    /// complete terrain and each exact completed furnishing. Omitted obligations
+    /// let the ordinary planner account for workload and prerequisite deadlines.
     pub fn compile_furnished_blueprint_intent(
         &self,
         intent_id: IntentId,
@@ -228,15 +234,43 @@ impl BlueprintPlanner {
         template: BlueprintTemplate,
         spatial_index: &ChunkSpatialIndex,
     ) -> Result<Intent> {
+        self.compile_furnished(intent_id, anchor, origin, template, spatial_index, false)
+    }
+
+    /// Reconstruct already retained, unversioned blueprint requests exactly.
+    /// New requests must use the current compiler; old goals cannot be silently
+    /// strengthened or their sealed deadlines extended during recovery.
+    pub fn compile_furnished_blueprint_intent_legacy(
+        &self,
+        intent_id: IntentId,
+        anchor: StateAnchor,
+        origin: MapCoord,
+        template: BlueprintTemplate,
+        spatial_index: &ChunkSpatialIndex,
+    ) -> Result<Intent> {
+        self.compile_furnished(intent_id, anchor, origin, template, spatial_index, true)
+    }
+
+    fn compile_furnished(
+        &self,
+        intent_id: IntentId,
+        anchor: StateAnchor,
+        origin: MapCoord,
+        template: BlueprintTemplate,
+        spatial_index: &ChunkSpatialIndex,
+        legacy: bool,
+    ) -> Result<Intent> {
         let furniture: &[&str] = match &template {
             BlueprintTemplate::BedroomCluster { .. } => &["Bed"],
             BlueprintTemplate::DiningHall { .. } => &["Table", "Chair"],
             _ => &[],
         };
-        let layout = self.layout(origin, template.clone())?;
+        let layout = self.layout(origin, template)?;
+        let deadline = legacy.then(|| legacy_deadline(anchor)).transpose()?;
         let mut intent =
-            self.compile_blueprint_intent(intent_id, anchor, origin, template, spatial_index)?;
+            self.compile_layout_intent(intent_id, anchor, &layout, spatial_index, deadline)?;
         let mut added = Vec::new();
+        let mut terminal = vec![intent.terminal_condition.clone()];
         for (index, part) in layout.excavations().iter().enumerate() {
             if part.role != ExcavationRole::Room {
                 continue;
@@ -248,23 +282,43 @@ impl BlueprintPlanner {
                 y: part.area.min.y + (part.area.max.y - part.area.min.y) / 2,
                 z: part.area.min.z,
             };
+            let mut occupied = Vec::new();
             for (offset, name) in furniture.iter().enumerate() {
                 let shift = i32::try_from(offset).map_err(|_| invalid("furniture offset"))?;
-                let location = MapCoord {
-                    x: if centre.x + shift <= part.area.max.x {
-                        centre.x + shift
-                    } else {
-                        centre.x - shift
-                    },
-                    ..centre
+                let location = if legacy {
+                    MapCoord {
+                        x: if centre.x + shift <= part.area.max.x {
+                            centre.x + shift
+                        } else {
+                            centre.x - shift
+                        },
+                        ..centre
+                    }
+                } else {
+                    furniture_location(part.area, centre, &occupied)?
                 };
+                occupied.push(location);
+                let action = Action::Build {
+                    kind: crate::action::BuildingKind::Furniture((*name).to_owned()),
+                    location,
+                    footprint: MapCuboid::new(location, location)?,
+                    material: crate::action::MaterialSelector::default(),
+                };
+                if !legacy {
+                    let step_number = u32::try_from(intent.requested_actions.len() + added.len())
+                        .map_err(|_| {
+                        invalid("blueprint step index exceeds its representation")
+                    })?;
+                    let key = crate::derive_step_idempotency_key(
+                        intent_id,
+                        anchor,
+                        StepId::new(step_number),
+                        &action,
+                    );
+                    terminal.extend(furnishing_goal(&action, &key, anchor));
+                }
                 added.push(RequestedAction {
-                    action: Action::Build {
-                        kind: crate::action::BuildingKind::Furniture((*name).to_owned()),
-                        location,
-                        footprint: MapCuboid::new(location, location)?,
-                        material: crate::action::MaterialSelector::default(),
-                    },
+                    action,
                     preconditions: Vec::new(),
                     postconditions: Vec::new(),
                     compensation: None,
@@ -280,8 +334,72 @@ impl BlueprintPlanner {
             ));
         }
         intent.requested_actions.extend(added);
+        if !legacy {
+            intent.terminal_condition = Predicate::All(terminal).normalized();
+            intent.terminal_condition.validate_shape()?;
+        }
         Ok(intent)
     }
+}
+
+fn legacy_deadline(anchor: StateAnchor) -> Result<GameTick> {
+    anchor.tick.checked_add(1_000).ok_or_else(|| {
+        DfmcpError::new(
+            ErrorCode::BudgetExceeded,
+            "blueprint obligation deadline overflows the game tick range",
+        )
+    })
+}
+
+/// Preserve ordinary east/west placement, then use the vertical room axis for
+/// narrow halls. Every selected tile is distinct and inside the room footprint.
+fn furniture_location(
+    area: MapCuboid,
+    centre: MapCoord,
+    occupied: &[MapCoord],
+) -> Result<MapCoord> {
+    [(0, 0), (1, 0), (-1, 0), (0, 1), (0, -1)]
+        .into_iter()
+        .filter_map(|(dx, dy)| checked_coord_offset(centre, dx, dy, 0))
+        .find(|point| area.contains(*point) && !occupied.contains(point))
+        .ok_or_else(|| invalid("furnished room cannot fit its distinct furniture footprints"))
+}
+
+/// A completed unrelated building or a moved/mistyped furnishing cannot satisfy
+/// this original blueprint. These are laboratory construction predicates, not
+/// native item custody or room ownership claims.
+fn furnishing_goal(action: &Action, key: &str, anchor: StateAnchor) -> Vec<Predicate> {
+    let mut predicates = crate::effects::default_postconditions(action, key, anchor.fortress_id);
+    if let Action::Build {
+        kind,
+        location,
+        footprint,
+        ..
+    } = action
+    {
+        let entity_id = crate::effects::created_entity_id(key, 0);
+        predicates.push(Predicate::EntityKind {
+            entity_id,
+            kind: EntityKind::Building,
+        });
+        for (field, value) in [
+            (
+                "building_kind",
+                Value::Text(crate::effects::building_kind_label(kind)),
+            ),
+            ("position", Value::Coord(*location)),
+            ("footprint_min", Value::Coord(footprint.min)),
+            ("footprint_max", Value::Coord(footprint.max)),
+        ] {
+            predicates.push(Predicate::FieldCompare {
+                entity_id,
+                field: field.to_owned(),
+                op: CompareOp::Eq,
+                value,
+            });
+        }
+    }
+    predicates
 }
 
 fn hazard_halo(area: &MapCuboid) -> Result<MapCuboid> {
@@ -325,7 +443,7 @@ fn inclusive_span(minimum: i32, maximum: i32) -> u64 {
     (i64::from(maximum.max(minimum)) - i64::from(minimum.min(maximum)) + 1) as u64
 }
 
-fn dig_request(area: MapCuboid, mode: DigMode, deadline_tick: GameTick) -> RequestedAction {
+fn dig_request(area: MapCuboid, mode: DigMode, deadline_tick: Option<GameTick>) -> RequestedAction {
     RequestedAction {
         action: Action::DesignateDig { area, mode },
         preconditions: Vec::new(),
@@ -334,7 +452,7 @@ fn dig_request(area: MapCuboid, mode: DigMode, deadline_tick: GameTick) -> Reque
             tile_code: crate::effects::dig_target_tile_code(mode),
         }],
         compensation: None,
-        obligation: Some(ObligationSpec {
+        obligation: deadline_tick.map(|deadline_tick| ObligationSpec {
             terminal: Predicate::RegionTerrain {
                 area,
                 tile_code: crate::effects::dig_target_tile_code(mode),

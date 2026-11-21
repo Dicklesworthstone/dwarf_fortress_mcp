@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased — Finish furnished blueprint goals and scale their deadlines
+
+- Require every ordinary bedroom/dining-room furnishing to reach its completed
+  state at the exact planned kind, position and footprint before the room goal
+  is satisfied; excavation alone no longer completes a furnished room.
+- Use the planner's existing workload/dependency-aware horizons for ordinary
+  blueprint digging and keep narrow dining-hall furniture inside distinct cells.
+- Stamp fresh ordinary sources with `furnished_blueprint_v2`; reconstruct
+  retained unversioned sources with the historical lowering so sealed durable
+  plans keep their original identity. Apply the same intake to plan comparison.
+- Add focused completion, layout, deadline, source-version and recovery tests.
+
 ## Unreleased — Reclaim operations sessions without restarting the server
 
 - Add explicit resource-only session release to the existing `fortress.cancel`

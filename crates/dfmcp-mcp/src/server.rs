@@ -53,6 +53,9 @@ mod restore_work;
 mod objectives;
 use objectives::{Objective, objective_history_roots};
 
+#[path = "blueprint_source.rs"]
+mod blueprint_source;
+
 #[path = "plan_resources.rs"]
 pub(crate) mod plan_resources;
 
@@ -2337,16 +2340,7 @@ impl PlanSource {
                         .compile(id, snapshot, summary)
                         .map(|(intent, analysis)| (intent, Some(analysis)));
                 }
-                let (origin, template) = crate::lab_world::parse_blueprint(raw)?;
-                let index = crate::lab_world::spatial_index(snapshot)?;
-                let mut intent = dfmcp_intent::BlueprintPlanner
-                    .compile_furnished_blueprint_intent(
-                        id,
-                        snapshot.anchor(),
-                        origin,
-                        template,
-                        &index,
-                    )?;
+                let mut intent = blueprint_source::compile(id, snapshot, raw)?;
                 if !summary.is_empty() {
                     intent.summary = summary.clone();
                 }
@@ -4252,7 +4246,10 @@ fn plan_request_legacy(
                                 Err(error) => return dfmcp_error_payload("fortress.plan", &error),
                             }
                         } else {
-                            raw
+                            match blueprint_source::canonical_current(&raw) {
+                                Ok(raw) => raw,
+                                Err(error) => return dfmcp_error_payload("fortress.plan", &error),
+                            }
                         };
                         PlanSource::Blueprint { summary, raw }
                     }

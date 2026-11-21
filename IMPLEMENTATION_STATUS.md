@@ -1,5 +1,30 @@
 # Implementation Status
 
+## Unreleased — Furnished room goals include their completed furniture
+
+Fresh ordinary bedroom-cluster and dining-hall blueprints now require both
+excavation and every exact completed furnishing. Furniture predicates bind the
+same deterministic building identity as dispatch, its kind, location and
+footprint. Ordinary excavation delegates its obligation horizon to the existing
+workload/dependency-aware planner rather than imposing a fixed 1,000-tick bound.
+Narrow dining halls use two distinct in-room cells or refuse impossible layouts.
+
+Fresh ordinary sources carry `furnished_blueprint_v2` in both planning and plan
+comparison. Strict bounded parsing rejects duplicate/unknown selectors and
+unsupported versions. Retained unversioned sources use the historical compiler
+and preserve their excavation-only terminal condition and original fixed
+obligation. Provisioned-room compilation retains its separate existing contract.
+
+All four focused planner regressions pass on current source with latest-nightly
+warning denial, using the exact freshly built core/world/intent dependencies.
+Source inventories remain unchanged across execution. Four MCP source/facade/
+recovery regressions are present but have not executed. Source review and scoped
+formatting pass. This component evidence does not qualify the integrated MCP
+server, full workspace or native gameplay.
+
+Owner: `dfmcp-furnished-blueprint-goal-xsce`, retained in progress for integrated
+execution. See `docs/BLUEPRINT_LAYOUTS.md`.
+
 ## Unreleased — Operations sessions release connections and capacity
 
 Operations/1.3 and paged operations/1.4 now accept explicit session teardown

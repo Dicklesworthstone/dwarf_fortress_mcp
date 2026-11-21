@@ -361,7 +361,7 @@ impl Candidate {
         } else if super::room_provisioning::is_provisioned_room(&raw) {
             super::room_provisioning::ProvisionedRoomRequest::parse_current(&raw)?.canonical_json()
         } else {
-            raw
+            super::blueprint_source::canonical_current(&raw)?
         };
         Ok(PlanSource::Blueprint { summary, raw })
     }
