@@ -185,7 +185,7 @@ pub(crate) fn finish_response(response: String, elapsed: Duration) -> String {
     }
     let structured = matches!(
         payload["mode"].as_str(),
-        Some("structured" | "query_changes" | "condition_replay" | "history")
+        Some("structured" | "query_changes" | "condition_replay" | "history" | "forecast_originals")
     );
     let publishable = serde_json::from_str::<Value>(&fitted).is_ok_and(|value| {
         matches!(

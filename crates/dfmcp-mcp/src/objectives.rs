@@ -236,6 +236,47 @@ impl Objective {
         self.current_truth(session)
     }
 
+    /// Evaluate an already-admitted live original on a private descendant.
+    /// This creates no observation, historical proof or continuation. Current
+    /// owner/restore/withdrawal custody must first pass SelectedPlanWait.
+    pub(super) fn forecast_truth_at(
+        &self,
+        snapshot: &dfmcp_world::WorldSnapshot,
+    ) -> Result<(PredicateTruth, PredicateTruth)> {
+        let plan = self.resource_plan().ok_or_else(|| {
+            DfmcpError::new(ErrorCode::CorruptLedger, "forecast original plan is unavailable")
+        })?;
+        let active = self.active_observation_anchor.ok_or_else(|| {
+            DfmcpError::new(ErrorCode::Conflict, "forecast original has no active lineage")
+        })?;
+        let anchor = snapshot.anchor();
+        if !self.original_handles_live
+            || self.is_withdrawn()
+            || self.restore_abandoned_anchor.is_some()
+            || anchor.fortress_id != active.fortress_id
+            || anchor.cursor.epoch != active.cursor.epoch
+            || anchor.tick < active.tick
+        {
+            return Err(DfmcpError::new(
+                ErrorCode::Conflict,
+                "forecast original is outside its verified live observation lineage",
+            ));
+        }
+        if self.requires_output_ledger() {
+            self.bound_resource_output_ledger()?.validate_current(snapshot)?;
+        }
+        let stage = crate::lab_world::plan_goal_truth(snapshot, plan)?;
+        let goal = if self.is_resource_aware_room() {
+            self.source.resource_room_goal_truth(snapshot)?
+        } else if self.requires_output_ledger() {
+            self.resource_output_truth_at(snapshot)?
+        } else {
+            stage
+        };
+        Ok((goal, stage))
+    }
+
+
     pub(super) fn selected_wait_can_continue(&self) -> bool {
         self.source.can_continue()
     }

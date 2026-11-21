@@ -1,5 +1,40 @@
 # Implementation Status
 
+## Unreleased — Forecast committed originals together under shared resources
+
+The existing laboratory query accepts `forecast_originals` for one to eight
+exact committed original plans. One discarded adapter fork advances the
+selected goals together with all current-session pending actions in original
+commit order. Finite workers, stocks, materials and consumption are shared.
+The forecast preserves original action identities, observation runtimes,
+absolute deadlines, sampling cadence, pause state and exact reserve frontiers;
+it does not recompile originals or create later project stages.
+
+Current Observe, Query and Plan authority, owned original custody and the
+complete retained source are admitted before the model is cloned. Deferred
+actions recheck their real effect permissions at the predicted frontier.
+Recovered, withdrawn or stale-lineage originals refuse; no replacement live
+handles or clock grants are manufactured. Already-dispatched competing work
+evolves in the shared model, while another owner's deferred work is an explicit
+unmodeled assumption.
+
+Each selected original reports predicted goal/stage truth, action completion,
+physical quiescence and reserve status at the common modeled frontier. Shared
+action, source, predicate, slice, poll, horizon and foreground deadline limits
+bound the operation. The whole response and Agent Turn publish losslessly or
+refuse; predictions never become observations, retained snapshots, completion
+proofs, journal entries or mutation authority.
+
+Ten real-model and seven public-facade regression cases cover finite worker
+and material contention, original stability/deadlines, competing deferred
+pause/resume, authority, reserve endpoints, source/output refusal and live-state
+isolation. Independent source review is complete. Rust regression execution
+and full MCP integration remain unverified. No native/game qualification or
+production admission is claimed. Owner: `df-lab-joint-original-forecast-c2s`.
+Usage and the bounded model contract are in
+`docs/LAB_ORIGINAL_PLAN_FORECAST.md` and
+`architecture/laboratory_original_forecast_v1.json`.
+
 ## Unreleased — Inspect directed bottlenecks from the default laboratory loop
 
 The existing structured laboratory query now exposes `dominators` over current
@@ -18,11 +53,21 @@ reservations stay distinct. Output children are bounded before retention and
 partial trees never publish. The existing generic dispatcher uses the same
 separate response-reservation path.
 
-Independent current/history, generation, direction, no-effect, source-budget,
-output-budget and original-JSON regressions are being executed. Validation is
-in progress; this entry does not claim a passed Rust integration or full
-qualification. The compatibility registry and production protocol map are
-unchanged. Owner: `df-lab-directed-bottlenecks-r3k`. Usage and semantics are in
+Five public-facade and four direct historical-executor regressions are present
+and independently source-reviewed. Latest-nightly actual-source Cargo checking
+passes for the complete dominance executor, shared semantic helpers, source
+preflight and actual core/world crates. The isolated component uses all 11
+external packages at exactly the repository lockfile versions and checksums;
+it does not substitute an algorithm or source helper. The independent Python
+reference check passes 75,634 graph/root cases and remains design-only evidence.
+
+A bounded world-graph Rust test build reached its 180-second limit before any
+test execution. The renewed code-generation pressure stalled the host, so no
+passed Rust integration, full verification or qualification is inferred. The
+Agent contract (11 tools, 19 packet fields, nine epistemic states, 13 invariants)
+and dependency policy (34 declarations) pass on the changed source. The
+compatibility registry and production protocol map are unchanged. Owner:
+`df-lab-directed-bottlenecks-r3k`. Usage and semantics are in
 `docs/GRAPH_DOMINANCE.md` and `docs/LAB_STRUCTURED_QUERY.md`.
 
 ## Unreleased — Reclaim jobs sessions and verify shared release components

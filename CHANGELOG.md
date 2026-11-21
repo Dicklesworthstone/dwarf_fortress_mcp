@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased — Predict shared outcomes for committed original projects
+
+- Add `forecast_originals` through the existing laboratory query for one to
+  eight exact committed originals on one discarded finite-resource world.
+- Include all owned pending work in original dispatch order, preserving action
+  identities, observation cadence, deadlines, pause state and reserve endpoints.
+- Report individual predicted goals, physical work and stop reasons at a common
+  frontier without publishing observations, proofs, new plans or game effects.
+- Admit complete current source and original custody; recheck actual deferred
+  effect grants and refuse recovered handles, stale originals and expired grants.
+- Bound aggregate simulation and publish the complete response losslessly or
+  refuse. Add ten model and seven public regression cases, independently
+  source-reviewed; keep their execution boundary explicit.
+- Pass latest-nightly actual dominator executor/source-helper checking with
+  exact locked dependencies and the 75,634-case Python reference check. Do not
+  promote design or component evidence to full MCP/native qualification.
+
 ## Unreleased — Query unavoidable dependencies in the laboratory
 
 - Connect the existing directed dominator analysis to current and exact retained

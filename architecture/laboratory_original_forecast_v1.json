@@ -1,0 +1,117 @@
+{
+  "schema": "dfmcp.laboratory-original-forecast-contract/1",
+  "surface": {
+    "tool": "fortress.query",
+    "mode": "forecast_originals",
+    "new_top_level_tools": 0,
+    "output_schema": "dfmcp.lab-original-forecast/1"
+  },
+  "request": {
+    "required": [
+      "mode",
+      "plan_digests",
+      "horizon_ticks"
+    ],
+    "unknown_fields": "refuse",
+    "duplicate_fields": "refuse",
+    "max_bytes": 2048,
+    "min_originals": 1,
+    "max_originals": 8,
+    "digest": "64 lowercase hexadecimal characters; exact current-session live original",
+    "aliases": "retain requested and actual identities; reject duplicate actual originals",
+    "historical_source": false
+  },
+  "source": {
+    "current_anchor": "exact owned current snapshot",
+    "model": "one discarded MemoryAdapter clone with existing original obligation runtimes",
+    "admission": "current world plus complete retained original source union, reserve snapshots and owned competing receipts before clone; repeat derived-source admission",
+    "source_heap_bytes_measured": false
+  },
+  "progression": {
+    "tracked": "all current-session open actions in original commit order",
+    "other_owners": "already-dispatched physical work evolves; their deferred actions are not polled",
+    "first_round": "zero modeled ticks when horizon positive",
+    "zero_horizon": "no polls or dispatch",
+    "interval_ticks": 100,
+    "clip_to": [
+      "remaining simulated horizon",
+      "active original cadence",
+      "active original deadline",
+      "each selected absolute reserve endpoint"
+    ],
+    "prune": "terminal and physically quiet actions; retain original receipts",
+    "automatic_unpause": false,
+    "new_plan_commit": false,
+    "new_project_stage": false,
+    "deadline_renewal": false,
+    "stability_reset": false
+  },
+  "outcome": {
+    "group_completion": "all selected original goals true, required exact reserve samples true, original actions Verified and physical work quiet at one same modeled frontier",
+    "prior_completion_latched": false,
+    "stage_goal_separate": true,
+    "retained_reserve_immutable": true,
+    "late_reserve_reconstruction": false,
+    "continuous_maintenance_proven": false,
+    "stop": [
+      "all_complete",
+      "attention_required",
+      "horizon_reached",
+      "paused"
+    ]
+  },
+  "authority": {
+    "current": [
+      "Observe",
+      "Query",
+      "Plan"
+    ],
+    "live_ControlClock_required_for_simulated_time": false,
+    "modeled_Observe_expiry_checked": true,
+    "deferred_effects": "original current grants and scope checked at modeled dispatch; no new grants",
+    "recovery_only": "refuse before fork",
+    "withdrawn_or_abandoned": "refuse before fork"
+  },
+  "bounds": {
+    "max_rounds": 4096,
+    "max_action_polls": 65536,
+    "max_tracked_actions": 1024,
+    "max_goal_predicate_node_bound": 4000000,
+    "max_source_and_custody_bytes": 16777216,
+    "negotiated": [
+      "wall time",
+      "source entities and bytes",
+      "selected plus competing action union",
+      "simulated game ticks",
+      "complete response bytes and tokens"
+    ],
+    "output": "lossless full or compact Agent Turn; otherwise explicit refusal"
+  },
+  "publication": {
+    "current_anchor_preserved": true,
+    "predicted_anchor_separate": true,
+    "actual_game_ticks_advanced": 0,
+    "canonical_world_changed": false,
+    "pending_plan_changed": false,
+    "original_receipts_changed": false,
+    "objective_proof_changed": false,
+    "reserve_endpoint_retained": false,
+    "snapshot_history_changed": false,
+    "durable_progress_published": false,
+    "task_progress_notified": false,
+    "observation_acknowledgment_published": false,
+    "request_and_replay_metadata": "ordinary query metadata remains",
+    "continuity": "partial",
+    "eligible_as_mutation_evidence": false
+  },
+  "qualification": {
+    "laboratory_only": true,
+    "native_execution": false,
+    "production_admission": false
+  },
+  "regression_sources": [
+    "crates/dfmcp-mcp/src/original_forecast_model_tests.rs",
+    "crates/dfmcp-mcp/src/lab_original_forecast_tests.rs"
+  ]
+}
+

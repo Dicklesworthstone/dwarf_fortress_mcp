@@ -229,6 +229,8 @@ mod selected_plan_wait;
 
 #[path = "selected_plan_set_wait.rs"]
 mod selected_plan_set_wait;
+#[path = "lab_original_forecast.rs"]
+mod original_forecast;
 
 #[cfg(test)]
 #[path = "selected_plan_set_wait_facade_tests.rs"]
@@ -3549,15 +3551,18 @@ fn query_publication(
     let comparison = query_comparison::parse(&mode);
     let replay = condition_replay::parse(&mode);
     let history = history_catalog::parse(&mode);
+    let originals = original_forecast::parse(&mode);
     let temporal = temporal_query::parse(&mode);
     let is_structured = matches!(&structured, Ok(Some(_)));
     let is_temporal = matches!(&temporal, Ok(Some(_)));
     let is_replay = matches!(&replay, Ok(Some(_)));
     let is_history = matches!(&history, Ok(Some(_)));
+    let is_original_forecast = matches!(&originals, Ok(Some(_)));
     let invalid_query = structured.is_err()
         || comparison.is_err()
         || replay.is_err()
         || history.is_err()
+        || originals.is_err()
         || temporal.is_err();
     let session = match resolve_session(session_id) {
         Ok(value) => value,
@@ -3567,7 +3572,7 @@ fn query_publication(
     };
     with_query_session(
         &session,
-        is_temporal || is_replay || is_history || invalid_query,
+        is_temporal || is_replay || is_history || is_original_forecast || invalid_query,
         || QueryPublication::Pending(mutex_poisoned_payload("fortress.query")),
         |guard| {
             let (_, ctx) = match next_context(guard) {
@@ -3585,11 +3590,13 @@ fn query_publication(
                     let comparison = comparison?;
                     let replay = replay?;
                     let history = history?;
+                    let originals = originals?;
                     let temporal = temporal?;
                     if structured.is_none()
                         && comparison.is_none()
                         && replay.is_none()
                         && history.is_none()
+                        && originals.is_none()
                         && temporal.is_none()
                         && mode.len() > MAX_MODE_BYTES
                     {
@@ -3597,6 +3604,12 @@ fn query_publication(
                             ErrorCode::BudgetExceeded,
                             "query mode exceeds its explicit byte bound",
                         ));
+                    }
+                    if let Some(request) = &originals {
+                        let payload = original_forecast::execute(guard, &ctx, request, started)?;
+                        return Ok(QueryPublication::Pending(query_budget::response(
+                            Ok(payload), &ctx, false,
+                        )));
                     }
                     if let Some(request) = &temporal {
                         let spent_millis = started.elapsed().as_nanos().div_ceil(1_000_000);
@@ -3709,11 +3722,13 @@ fn query_publication(
                 });
             match result {
                 Ok(published) => published,
-                Err(error) => QueryPublication::Pending(query_budget::response(
-                    Err(error),
-                    &ctx,
-                    is_structured,
-                )),
+                Err(error) => {
+                    let mut payload = query_budget::response_payload(Err(error), &ctx, is_structured);
+                    if is_original_forecast {
+                        payload["mode"] = json!("forecast_originals");
+                    }
+                    QueryPublication::Pending(payload.to_string())
+                }
             }
         },
     )
