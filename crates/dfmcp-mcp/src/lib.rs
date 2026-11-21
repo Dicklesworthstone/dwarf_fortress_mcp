@@ -55,6 +55,8 @@ pub mod manager_appointment_v1_23_server;
 mod observation_projection;
 mod output_budget;
 mod project_staffing;
+mod read_session_release;
+mod read_session_release_packet;
 pub mod replay;
 pub mod resources;
 mod sealed_plan_review;

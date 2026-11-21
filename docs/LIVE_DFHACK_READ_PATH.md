@@ -268,6 +268,18 @@ Only after R1–R5 pass for named versions may the read-only live adapter become
 `Supported` requires the wider compatibility, recovery, security, and release gates in the master
 plan.
 
+## Release a process session
+
+`fortress_cancel` accepts the explicit selector `scope: "session"` to release
+an opened citizen session, drop its connection and return its registry capacity.
+Omit both `mode` and the legacy `_mode`. Ordinary game-effect cancellation remains
+unavailable. Close performs no bridge observation or mutation and can clean up
+expired, fenced or exhausted sessions. The complete acknowledgement must fit
+before release; retained handles cannot query old state afterwards. A fresh
+open uses normal authentication and bootstrap. See
+[LIVE_SESSION_RELEASE.md](LIVE_SESSION_RELEASE.md) for repeat receipts, custody
+and the other read profiles.
+
 ## Non-goals of V1
 
 - mutation of any kind;

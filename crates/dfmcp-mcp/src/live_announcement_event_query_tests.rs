@@ -294,3 +294,119 @@ fn capsule_work_is_admitted_before_validation_and_cannot_restart_the_deadline() 
     ).map_err(|failure| failure.code), Err(ErrorCode::BudgetExceeded));
     Ok(())
 }
+
+
+fn release_fixture_query(
+    snapshot: &dfmcp_world::WorldSnapshot,
+    context: &OperationContext,
+    query: JsonValue,
+) -> Result<JsonValue> {
+    let out = semantic_query::execute_with_publisher_budget(
+        snapshot,
+        context,
+        &json!({"schema": "dfmcp.query/1", "query": query}),
+        context.budget.max_bytes,
+        |value| Ok(value.to_string()),
+    )?;
+    decode(&out)
+}
+
+#[test]
+fn session_release_uses_this_profiles_actual_query_store_and_preserves_refusals() -> Result<()> {
+    let _serial = crate::test_serial();
+    let (_, projection, mut context) = fixture(true, false, 3)?;
+    context.session_id = next_session_id()?;
+    let mut observe = context.grants[0].clone();
+    observe.capability = Capability::Observe;
+    context.grants.push(observe);
+    let mut other = context.clone();
+    other.session_id = next_session_id()?;
+    let snapshot = &projection.snapshot;
+    let before = snapshot.canonical_bytes();
+    for owner in [&context, &other] {
+        let captured = release_fixture_query(
+            snapshot,
+            owner,
+            json!({
+                "kind": "capture",
+                "key": "release-owned-announcements",
+                "max_game_ticks": 100,
+                "select": {
+                    "kind": "entities",
+                    "kinds": ["announcement"],
+                    "fields": ["text"],
+                },
+            }),
+        )?;
+        assert_eq!(captured["ok"], true);
+        let watch = release_fixture_query(
+            snapshot,
+            owner,
+            json!({
+                "kind": "watch",
+                "key": "release-owned-watch",
+                "condition": {"op": "tick_at_least", "value": owner.anchor.tick.get() + 1},
+                "deadline_tick": owner.anchor.tick.get() + 100,
+                "stable_observations": 1,
+            }),
+        )?;
+        assert_eq!(watch["ok"], true);
+    }
+    let baselines = release_fixture_query(snapshot, &context, json!({"kind": "baselines"}))?
+        ["baselines"].clone();
+    let watches = release_fixture_query(snapshot, &context, json!({"kind": "watches"}))?
+        ["records"].clone();
+    let other_watches = release_fixture_query(snapshot, &other, json!({"kind": "watches"}))?
+        ["records"].clone();
+    let mut published = false;
+    assert!(matches!(
+        release_session_resources(context.session_id, false, |_| {
+            published = true;
+            Ok("must not publish without discard consent".to_owned())
+        }),
+        Err(failure) if failure.code == ErrorCode::Conflict
+    ));
+    assert!(!published);
+    let narrow = WorkBudget { max_output_tokens: 1, ..context.budget };
+    assert!(matches!(
+        release_session_resources(context.session_id, true, |released| {
+            crate::read_session_release_packet::render(
+                context.session_id, narrow, "announcements/1.1", true, false, released,
+            )
+        }),
+        Err(failure) if failure.code == ErrorCode::BudgetExceeded
+    ));
+    assert_eq!(
+        release_fixture_query(snapshot, &context, json!({"kind": "baselines"}))?["baselines"],
+        baselines
+    );
+    assert_eq!(
+        release_fixture_query(snapshot, &context, json!({"kind": "watches"}))?["records"],
+        watches
+    );
+    let authorized = context.clone();
+    context.grants.clear();
+    let out = release_session_resources(context.session_id, true, |released| {
+        crate::read_session_release_packet::render(
+            context.session_id, context.budget, "announcements/1.1", true, false, released,
+        )
+    })?;
+    let released = decode(&out)?;
+    assert_eq!(released["process_local_resources"]["process_local_baselines_discarded"], 1);
+    assert_eq!(released["process_local_resources"]["process_local_watch_records_discarded"], 1);
+    assert_eq!(
+        release_fixture_query(snapshot, &authorized, json!({"kind": "baselines"}))?["baselines"],
+        json!([])
+    );
+    assert_eq!(
+        release_fixture_query(snapshot, &authorized, json!({"kind": "watches"}))?["records"],
+        json!([])
+    );
+    assert_eq!(
+        release_fixture_query(snapshot, &other, json!({"kind": "watches"}))?["records"],
+        other_watches
+    );
+    release_session_resources(other.session_id, true, |value| Ok(value.to_string()))?;
+    assert_eq!(snapshot.canonical_bytes(), before);
+    Ok(())
+}

@@ -83,7 +83,15 @@
     "probe_manifest": "crates/dwarf-fortress-mcp/Cargo.toml",
     "announcement_probe": "crates/dwarf-fortress-mcp/src/bin/dfmcp-live-announcement-probe.rs",
     "stream_documentation": "docs/LIVE_ANNOUNCEMENT_STREAM.md",
-    "implementation_status": "docs/LIVE_ANNOUNCEMENT_IMPLEMENTATION_STATUS.md"
+    "implementation_status": "docs/LIVE_ANNOUNCEMENT_IMPLEMENTATION_STATUS.md",
+    "read_session_release": "crates/dfmcp-mcp/src/read_session_release.rs",
+    "read_session_release_packet": "crates/dfmcp-mcp/src/read_session_release_packet.rs",
+    "read_session_release_tests": "crates/dfmcp-mcp/src/read_session_release_tests.rs",
+    "read_session_release_validation_tests": "crates/dfmcp-mcp/src/read_session_release_validation_tests.rs",
+    "announcement_query_session_release": "crates/dfmcp-mcp/src/live_query_v1_1.rs",
+    "read_session_release_documentation": "docs/LIVE_SESSION_RELEASE.md",
+    "read_session_release_packet_tests": "crates/dfmcp-mcp/src/read_session_release_packet_tests.rs",
+    "announcement_query_session_release_tests": "crates/dfmcp-mcp/src/live_announcement_event_query_tests.rs"
   },
   "source_custody": {
     "snapshot_schema": "dfmcp.qualification-source-snapshot/1",

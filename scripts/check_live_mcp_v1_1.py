@@ -18,6 +18,8 @@ PROCESS_TESTS = ROOT / "crates/dwarf-fortress-mcp/tests/live_v1_1_development_ad
 SOURCE_CONTRACT = ROOT / "architecture/live_announcement_source_qualification_v1_1.json"
 STATUS = ROOT / "docs/LIVE_ANNOUNCEMENT_IMPLEMENTATION_STATUS.md"
 STREAM_DOC = ROOT / "docs/LIVE_ANNOUNCEMENT_STREAM.md"
+RELEASE_CORE = ROOT / "crates/dfmcp-mcp/src/read_session_release.rs"
+RELEASE_PACKET = ROOT / "crates/dfmcp-mcp/src/read_session_release_packet.rs"
 
 EXPECTED_TOOLS = [
     "fortress.open_session",
@@ -57,6 +59,14 @@ EXPECTED_SOURCE_DIGESTS = {
     "announcement_mcp_process_tests": "crates/dwarf-fortress-mcp/tests/live_v1_1_development_admission.rs",
     "announcement_mcp_checker": "scripts/check_live_mcp_v1_1.py",
     "announcement_mcp_checker_tests": "scripts/test_live_mcp_v1_1.py",
+    "read_session_release_packet_tests": "crates/dfmcp-mcp/src/read_session_release_packet_tests.rs",
+    "announcement_query_session_release_tests": "crates/dfmcp-mcp/src/live_announcement_event_query_tests.rs",
+    "read_session_release": "crates/dfmcp-mcp/src/read_session_release.rs",
+    "read_session_release_packet": "crates/dfmcp-mcp/src/read_session_release_packet.rs",
+    "read_session_release_tests": "crates/dfmcp-mcp/src/read_session_release_tests.rs",
+    "read_session_release_validation_tests": "crates/dfmcp-mcp/src/read_session_release_validation_tests.rs",
+    "announcement_query_session_release": "crates/dfmcp-mcp/src/live_query_v1_1.rs",
+    "read_session_release_documentation": "docs/LIVE_SESSION_RELEASE.md",
 }
 
 
@@ -162,6 +172,28 @@ def check_contract() -> None:
     require(
         session.get("wrong_generation_session_ids_rejected") is True,
         "wrong-generation sessions are accepted",
+    )
+    require(
+        session.get("resource_release") == {
+            "tool": "fortress.cancel",
+            "scope": "session",
+            "discard_consent_argument": "discard_process_local_work",
+            "forbidden_non_null_arguments": [
+                "mode",
+                "_mode"
+            ],
+            "retained_query_work_requires_explicit_consent": True,
+            "complete_receipt_before_release": True,
+            "expired_read_grants_do_not_prevent_release": True,
+            "closed_handles_rejected": True,
+            "native_observations": False,
+            "game_effects_cancelled": False,
+            "native_mutation_dispatched": False,
+            "maximum_retained_close_receipts": 32,
+            "receipt_durable": False,
+            "reopen_requires_fresh_bootstrap": True
+        },
+        "session release must preserve explicit consent, complete receipts and read-only custody",
     )
     semantics = value.get("agent_semantics", {})
     require(isinstance(semantics, dict), "runtime Agent Turn contract must be an object")
@@ -271,6 +303,18 @@ def check_server_source() -> None:
             f"protocol-1.1 MCP server contains forbidden path {forbidden}",
         )
 
+    for path in [RELEASE_CORE, RELEASE_PACKET]:
+        release_source = path.read_text(encoding="utf-8")
+        for forbidden in [
+            ".prepare(", ".commit(", ".request_cancel(", ".finalize_cancel(",
+            ".checkpoint(", ".restore(", "RunCommand", "RunLua", "shell=True",
+            "current_admission_provenance",
+        ]:
+            require(
+                forbidden not in release_source,
+                f"read-session release helper contains forbidden path {forbidden}",
+            )
+
 
 def check_binary_and_exports() -> None:
     library = MCP_ROOT.read_text(encoding="utf-8")
@@ -278,6 +322,11 @@ def check_binary_and_exports() -> None:
         "mod live_server_v1_1;" in library,
         "MCP crate does not compile the protocol-1.1 server",
     )
+    for module in ["read_session_release", "read_session_release_packet"]:
+        require(
+            f"mod {module};" in library,
+            f"MCP crate does not compile private session-release module {module}",
+        )
     require(
         "pub fn run_live_v1_1_development_stdio()" in library,
         "MCP crate does not expose the guarded development runner",

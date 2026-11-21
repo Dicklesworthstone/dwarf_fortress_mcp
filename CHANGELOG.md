@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased — Reclaim citizen and announcement session capacity
+
+- Add explicit resource-only close to the existing cancellation tool for the
+  citizen/1.0 and announcement/1.1 live servers, returning their session capacity
+  without a restart and dropping native resources even with stale handles.
+- Require complete response preflight and explicit consent for retained
+  announcement baselines/watches. Permit cleanup after grant expiry, fencing,
+  counter exhaustion or session-mutex poison; keep ordinary reads fenced.
+- Reject conflicting selectors and raw identifier aliases; replay the last 32
+  complete close receipts exactly and require fresh authentication/bootstrap
+  when reopening. Preserve read-only native and development-admission limits.
+- Pass 12 actual shared-helper regressions before the execution host outage,
+  including real socket destruction and concurrent close. Record recovered-source,
+  profile, renderer, schema and full-integration execution limits explicitly.
+
 ## Unreleased — Verify room completion and safe cancellation regressions
 
 - Pass 252 final intent unit tests, all 146 laboratory unit tests, four furnished

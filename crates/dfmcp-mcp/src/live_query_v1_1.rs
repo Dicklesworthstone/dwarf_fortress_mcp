@@ -16,6 +16,19 @@ mod watch_refresh;
 
 use query_response::QueryResponseProjection;
 
+/// Release the exact baseline/watch store used by this profile, not the
+/// independent copies compiled into the laboratory or other live profiles.
+pub(super) fn release_session_resources<F>(
+    session: SessionId,
+    discard_process_local: bool,
+    publish: F,
+) -> Result<String>
+where
+    F: FnOnce(JsonValue) -> Result<String>,
+{
+    semantic_query::release_session_resources(session, discard_process_local, publish)
+}
+
 /// Read-only watch and baseline catalogs for an observation publication candidate.
 /// The caller still owns the canonical publication and original wall deadline.
 pub(super) fn with_observation_work<F>(
@@ -40,7 +53,11 @@ pub(super) fn query(
         Ok(value) => value,
         Err(failure) => return unbound_error(operation, AgentPhase::Inspect, &failure),
     };
-    let mut guard = match lock_session(&session) {
+    let mut session_slot = match lock_session(&session) {
+        Ok(value) => value,
+        Err(failure) => return unbound_error(operation, AgentPhase::Inspect, &failure),
+    };
+    let guard = match require_open(&mut session_slot) {
         Ok(value) => value,
         Err(failure) => return unbound_error(operation, AgentPhase::Inspect, &failure),
     };
@@ -52,7 +69,7 @@ pub(super) fn query(
         Ok(value) => value,
         Err(failure) => {
             return session_error(
-                &guard,
+                guard,
                 operation,
                 AgentPhase::Inspect,
                 ObservationProfile::Tactical,
@@ -137,14 +154,14 @@ pub(super) fn query(
             session_id: guard.session_id.to_string(),
             request_id: request_id.to_string(),
             anchor: anchor_json(anchor),
-            briefing: briefing_json(&guard),
-            attention: announcement_attention(&guard),
-            affordances: affordances_json(&guard),
-            uncertainty: uncertainties_json(&guard),
-            coverage: coverage_json(&guard),
+            briefing: briefing_json(guard),
+            attention: announcement_attention(guard),
+            affordances: affordances_json(guard),
+            uncertainty: uncertainties_json(guard),
+            coverage: coverage_json(guard),
             budget: budget_json(guard.budget),
-            references: references_json(&guard),
-            maximum_bytes: response_byte_limit(&guard),
+            references: references_json(guard),
+            maximum_bytes: response_byte_limit(guard),
         };
         let result_bytes = view.result_byte_budget()?;
         let mut result_context = context.clone();
@@ -290,7 +307,7 @@ pub(super) fn query(
                 ContinuityStatus::Continuous
             };
             let raw = session_error(
-                &guard,
+                guard,
                 operation,
                 AgentPhase::Inspect,
                 ObservationProfile::Tactical,
@@ -313,7 +330,7 @@ pub(super) fn query(
                     payload["agent_turn"]["active_work"]["obligations"] =
                         metadata["_condition_watch_work"].clone();
                     let encoded = payload.to_string();
-                    if encoded.len() > response_byte_limit(&guard) {
+                    if encoded.len() > response_byte_limit(guard) {
                         return Err(error(
                             ErrorCode::BudgetExceeded,
                             "query error and active work exceed the response budget",

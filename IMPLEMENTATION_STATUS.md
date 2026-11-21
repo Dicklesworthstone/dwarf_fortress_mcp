@@ -1,5 +1,47 @@
 # Implementation Status
 
+## Unreleased — Release citizen and announcement sessions without restart
+
+The protocol-1.0 citizen server and protocol-1.1 announcement development server
+now expose process-resource release through the existing `fortress.cancel`
+surface with `scope: "session"`. Finished sessions no longer permanently consume
+their 32-session registries. Teardown removes the session and immediately drops
+its native adapter, socket, credentials and cached observations even when another
+caller retains the old internal handle. Every ordinary entry point checks the
+closed state while holding the same session mutex.
+
+Closing uses the exact profile-owned handle without taking another observation
+or requiring current read grants, a usable native source or another request
+counter value. Only teardown can recover a poisoned session guard; damaged
+registry/receipt custody still refuses. The announcement path releases its own
+retained-query registries and requires explicit `discard_process_local_work`
+consent when baselines or watches remain. Both profiles preflight the complete
+Agent Turn response before cleanup, reject conflicting `mode`/`_mode` selectors,
+and retain the last 32 successful receipts for byte-exact repeated closes.
+Reopening requires normal authentication, configuration and fresh bootstrap.
+There is no game-effect cancellation, journal write, native mutation or current
+game-state anchor; protocol 1.1 remains explicitly unadmitted development.
+
+Before the execution host became unavailable, the actual shared custody helper
+and core compiled with `rustc 1.102.0-nightly (c7d5ba59d 2026-11-20)`, warnings
+denied. All 12 focused tests passed with four test threads: three implementation
+tests and nine independent regressions. They cover atomic preflight refusal,
+ownership replacement, registry/receipt poison, concurrent exact-once close, bounded receipts, isolation, foreground custody and immediate
+real Unix socket EOF while a stale handle is retained.
+
+The final source bundle was recovered from pinned repository files and recorded
+edits after the host outage and preserved through read-back-verified GitHub
+blobs. The 12-test result is evidence for the executed local helper, not a rerun
+of that recovered bundle. Profile routing, Agent Turn renderer, retained-query
+and generated-schema regressions are present but unexecuted. Updated Python
+contract checks and mutations, integrated MCP compilation, full verification and
+native/game qualification also remain unexecuted. No compatibility registry,
+production protocol map or admission claim is changed.
+
+Owner: `dfmcp-live-read-session-release-r4s`, retained in progress for jobs/1.2
+integration and final integrated validation. See
+[the public release contract](docs/LIVE_SESSION_RELEASE.md).
+
 ## Unreleased — Final room and cancellation component results
 
 The functional changes in `7d0e6a5e`, `27290d68` and `f48611d2` were checked on

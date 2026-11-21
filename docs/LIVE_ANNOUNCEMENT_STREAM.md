@@ -137,9 +137,15 @@ fortress.explain       → explain an entity or combined source/coverage identit
 fortress.doctor        → diagnose versions, coverage, source fencing, and development posture
 ```
 
-`fortress.plan`, `fortress.commit`, `fortress.cancel`, `fortress.checkpoint`, and
-`fortress.restore` remain registered for the narrow-waist contract and fail closed. There is **no
-mutation** bridge method or alternate effect route.
+`fortress.plan`, `fortress.commit`, `fortress.checkpoint`, and `fortress.restore`
+remain registered for the narrow-waist contract and fail closed. Ordinary
+`fortress.cancel` also refuses game-effect cancellation. Its explicit
+`scope: "session"` alternative releases only the process session and connection;
+retained baselines/watches require `discard_process_local_work: true`. Omit
+`mode` and `_mode`. The full acknowledgement is checked before cleanup, stale
+handles cannot serve old state, and reopening uses fresh bootstrap. See
+[LIVE_SESSION_RELEASE.md](LIVE_SESSION_RELEASE.md). There is **no mutation**
+bridge method or alternate effect route.
 
 Every success and failure carries a canonical Agent Turn. The turn explicitly states that the
 runtime is unadmitted development, the server artifact is not qualified, no runtime admission has

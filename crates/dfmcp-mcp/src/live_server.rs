@@ -2,9 +2,9 @@
 //!
 //! This module preserves the frozen eleven-tool waist. Six tools are useful in
 //! bridge protocol V1 (`open_session`, `observe`, `query`, `wait`, `explain`,
-//! and `doctor`). The five mutation-stage tools remain registered so clients
-//! never have to discover a different protocol shape, but they fail closed and
-//! cannot reach a bridge effect path. Connection secrets and endpoints come
+//! and `doctor`). The mutation-stage tools remain registered and cannot reach a
+//! bridge effect path. Explicit `cancel(scope=session)` only releases process
+//! resources. Connection secrets and endpoints come
 //! only from the process environment, never MCP arguments.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -15,6 +15,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use crate::agent_turn::{
     AgentPhase, AgentTurnBuilder, ContinuityStatus, ObservationProfile, RecoveryClass,
     empty_active_work, recommendation, recovery_guidance, uncertainty,
+};
+use crate::read_session_release::{
+    self, CloseReceipts, SessionHandle, SessionRegistry, require_open,
 };
 use dfmcp_adapter::{
     AuthenticatedLiveSource, BridgeCredentials, GameAdapter, InterestSet, LiveConnectionConfig,
@@ -85,6 +88,8 @@ const OMITTED_LIVE_DOMAINS: [(&str, &str); 7] = [
 
 type LiveMcpSource = PrimedLiveSource<AuthenticatedLiveSource>;
 type LiveMcpAdapter = LiveReadAdapter<LiveMcpSource>;
+type LiveSessionHandle = SessionHandle<LiveSession>;
+type LiveSessionRegistry = SessionRegistry<LiveSession>;
 
 struct LiveSession {
     session_id: SessionId,
@@ -141,15 +146,17 @@ impl LiveSession {
     }
 }
 
-static LIVE_SESSIONS: LazyLock<Mutex<BTreeMap<SessionId, Arc<Mutex<LiveSession>>>>> =
+static LIVE_SESSIONS: LazyLock<Mutex<LiveSessionRegistry>> =
     LazyLock::new(|| Mutex::new(BTreeMap::new()));
+static CLOSED_LIVE_SESSIONS: LazyLock<Mutex<CloseReceipts>> =
+    LazyLock::new(|| Mutex::new(CloseReceipts::new()));
 static NEXT_LIVE_SESSION_ID: LazyLock<Mutex<u128>> = LazyLock::new(|| Mutex::new(1u128 << 127));
 
 fn error(code: ErrorCode, message: impl Into<String>) -> DfmcpError {
     DfmcpError::new(code, message)
 }
 
-fn sessions() -> Result<MutexGuard<'static, BTreeMap<SessionId, Arc<Mutex<LiveSession>>>>> {
+fn sessions() -> Result<MutexGuard<'static, LiveSessionRegistry>> {
     LIVE_SESSIONS.lock().map_err(|_| {
         error(
             ErrorCode::InternalInvariantViolation,
@@ -194,16 +201,17 @@ fn parse_session_id(value: &str) -> Result<SessionId> {
             "session_id is not a valid hexadecimal u128 identifier",
         )
     })?;
-    if parsed == 0 {
+    let id = SessionId::new(parsed);
+    if parsed != id.get() || !id.is_process_scoped_live() {
         return Err(error(
             ErrorCode::InvalidRequest,
-            "session_id zero is reserved",
+            "session_id must be the exact process-scoped live handle returned by fortress_open_session",
         ));
     }
-    Ok(SessionId::new(parsed))
+    Ok(id)
 }
 
-fn resolve_session(value: Option<String>) -> Result<Arc<Mutex<LiveSession>>> {
+fn resolve_session(value: Option<String>) -> Result<LiveSessionHandle> {
     let raw = value.ok_or_else(|| {
         error(
             ErrorCode::InvalidRequest,
@@ -219,7 +227,7 @@ fn resolve_session(value: Option<String>) -> Result<Arc<Mutex<LiveSession>>> {
     })
 }
 
-fn lock_session(session: &Arc<Mutex<LiveSession>>) -> Result<MutexGuard<'_, LiveSession>> {
+fn lock_session(session: &LiveSessionHandle) -> Result<MutexGuard<'_, Option<LiveSession>>> {
     session.lock().map_err(|_| {
         error(
             ErrorCode::InternalInvariantViolation,
@@ -1135,13 +1143,13 @@ pub fn fortress_open_session(
         }
     }
     let grants = capability_grants(anchor.fortress_id, &capabilities);
-    let session = Arc::new(Mutex::new(LiveSession {
+    let session = Arc::new(Mutex::new(Some(LiveSession {
         session_id,
         adapter,
         grants,
         budget,
         next_request_id: 1,
-    }));
+    })));
     {
         let mut registry = match sessions() {
             Ok(value) => value,
@@ -1168,7 +1176,11 @@ pub fn fortress_open_session(
             );
         }
     }
-    let guard = match lock_session(&session) {
+    let mut session_slot = match lock_session(&session) {
+        Ok(value) => value,
+        Err(failure) => return unbound_error(operation, AgentPhase::Bootstrap, &failure),
+    };
+    let guard = match require_open(&mut session_slot) {
         Ok(value) => value,
         Err(failure) => return unbound_error(operation, AgentPhase::Bootstrap, &failure),
     };
@@ -1187,7 +1199,7 @@ pub fn fortress_open_session(
     };
     let request_id = RequestId::new(1);
     attach_turn(
-        &guard,
+        guard,
         operation,
         AgentPhase::Bootstrap,
         ObservationProfile::Briefing,
@@ -1255,7 +1267,11 @@ pub fn fortress_observe(session_id: Option<String>) -> String {
         Ok(value) => value,
         Err(failure) => return unbound_error(operation, AgentPhase::Orient, &failure),
     };
-    let mut guard = match lock_session(&session) {
+    let mut session_slot = match lock_session(&session) {
+        Ok(value) => value,
+        Err(failure) => return unbound_error(operation, AgentPhase::Orient, &failure),
+    };
+    let guard = match require_open(&mut session_slot) {
         Ok(value) => value,
         Err(failure) => return unbound_error(operation, AgentPhase::Orient, &failure),
     };
@@ -1267,7 +1283,7 @@ pub fn fortress_observe(session_id: Option<String>) -> String {
         Ok(value) => value,
         Err(failure) => {
             return session_error(
-                &guard,
+                guard,
                 operation,
                 AgentPhase::Orient,
                 ObservationProfile::Pulse,
@@ -1291,7 +1307,7 @@ pub fn fortress_observe(session_id: Option<String>) -> String {
         Ok(value) => value,
         Err(failure) => {
             return session_error(
-                &guard,
+                guard,
                 operation,
                 AgentPhase::Orient,
                 ObservationProfile::Pulse,
@@ -1306,7 +1322,7 @@ pub fn fortress_observe(session_id: Option<String>) -> String {
         Ok(value) => value,
         Err(failure) => {
             return session_error(
-                &guard,
+                guard,
                 operation,
                 AgentPhase::Orient,
                 ObservationProfile::Pulse,
@@ -1351,7 +1367,7 @@ pub fn fortress_observe(session_id: Option<String>) -> String {
                 "live bridge V1 unexpectedly returned a delta payload",
             );
             return session_error(
-                &guard,
+                guard,
                 operation,
                 AgentPhase::Orient,
                 ObservationProfile::Pulse,
@@ -1364,7 +1380,7 @@ pub fn fortress_observe(session_id: Option<String>) -> String {
     };
     let capsule = guard.adapter.last_capsule();
     attach_turn(
-        &guard,
+        guard,
         operation,
         AgentPhase::Orient,
         ObservationProfile::Pulse,
@@ -1418,7 +1434,11 @@ pub fn fortress_query(session_id: Option<String>, mode: Option<String>) -> Strin
         Ok(value) => value,
         Err(failure) => return unbound_error(operation, AgentPhase::Inspect, &failure),
     };
-    let mut guard = match lock_session(&session) {
+    let mut session_slot = match lock_session(&session) {
+        Ok(value) => value,
+        Err(failure) => return unbound_error(operation, AgentPhase::Inspect, &failure),
+    };
+    let guard = match require_open(&mut session_slot) {
         Ok(value) => value,
         Err(failure) => return unbound_error(operation, AgentPhase::Inspect, &failure),
     };
@@ -1430,7 +1450,7 @@ pub fn fortress_query(session_id: Option<String>, mode: Option<String>) -> Strin
         Ok(value) => value,
         Err(failure) => {
             return session_error(
-                &guard,
+                guard,
                 operation,
                 AgentPhase::Inspect,
                 ObservationProfile::Tactical,
@@ -1447,7 +1467,7 @@ pub fn fortress_query(session_id: Option<String>, mode: Option<String>) -> Strin
         "all" => Vec::new(),
         _ => {
             return session_error(
-                &guard,
+                guard,
                 operation,
                 AgentPhase::Inspect,
                 ObservationProfile::Tactical,
@@ -1480,7 +1500,7 @@ pub fn fortress_query(session_id: Option<String>, mode: Option<String>) -> Strin
         Ok(value) => value,
         Err(failure) => {
             return session_error(
-                &guard,
+                guard,
                 operation,
                 AgentPhase::Inspect,
                 ObservationProfile::Tactical,
@@ -1492,7 +1512,7 @@ pub fn fortress_query(session_id: Option<String>, mode: Option<String>) -> Strin
         }
     };
     attach_turn(
-        &guard,
+        guard,
         operation,
         AgentPhase::Inspect,
         ObservationProfile::Tactical,
@@ -1529,7 +1549,11 @@ fn read_only_tool_error(session_id: Option<String>, operation: &str, phase: Agen
         Ok(value) => value,
         Err(failure) => return unbound_error(operation, phase, &failure),
     };
-    let mut guard = match lock_session(&session) {
+    let mut session_slot = match lock_session(&session) {
+        Ok(value) => value,
+        Err(failure) => return unbound_error(operation, phase, &failure),
+    };
+    let guard = match require_open(&mut session_slot) {
         Ok(value) => value,
         Err(failure) => return unbound_error(operation, phase, &failure),
     };
@@ -1541,7 +1565,7 @@ fn read_only_tool_error(session_id: Option<String>, operation: &str, phase: Agen
         Ok(value) => value,
         Err(failure) => {
             return session_error(
-                &guard,
+                guard,
                 operation,
                 phase,
                 ObservationProfile::Tactical,
@@ -1559,7 +1583,7 @@ fn read_only_tool_error(session_id: Option<String>, operation: &str, phase: Agen
         ),
     );
     attach_turn(
-        &guard,
+        guard,
         operation,
         phase,
         ObservationProfile::Tactical,
@@ -1610,7 +1634,11 @@ pub fn fortress_wait(session_id: Option<String>) -> String {
         Ok(value) => value,
         Err(failure) => return unbound_error(operation, AgentPhase::Verify, &failure),
     };
-    let mut guard = match lock_session(&session) {
+    let mut session_slot = match lock_session(&session) {
+        Ok(value) => value,
+        Err(failure) => return unbound_error(operation, AgentPhase::Verify, &failure),
+    };
+    let guard = match require_open(&mut session_slot) {
         Ok(value) => value,
         Err(failure) => return unbound_error(operation, AgentPhase::Verify, &failure),
     };
@@ -1622,7 +1650,7 @@ pub fn fortress_wait(session_id: Option<String>) -> String {
         Ok(value) => value,
         Err(failure) => {
             return session_error(
-                &guard,
+                guard,
                 operation,
                 AgentPhase::Verify,
                 ObservationProfile::Pulse,
@@ -1649,7 +1677,7 @@ pub fn fortress_wait(session_id: Option<String>) -> String {
         Vec::new()
     };
     attach_turn(
-        &guard,
+        guard,
         operation,
         AgentPhase::Verify,
         ObservationProfile::Pulse,
@@ -1672,11 +1700,72 @@ pub fn fortress_wait(session_id: Option<String>) -> String {
     )
 }
 
+fn close_session(session_id: Option<String>) -> Result<String> {
+    let raw = session_id.ok_or_else(|| {
+        error(
+            ErrorCode::InvalidRequest,
+            "session_id is required for resource-only session release",
+        )
+    })?;
+    let id = parse_session_id(&raw)?;
+    read_session_release::close(
+        id,
+        &LIVE_SESSIONS,
+        &CLOSED_LIVE_SESSIONS,
+        |session, poisoned| {
+            // Protocol 1.0 has no baseline/watch surface. Never touch another
+            // runtime's separately compiled query registries during this close.
+            crate::read_session_release_packet::render(
+                id,
+                session.budget,
+                "read/1.0",
+                false,
+                poisoned,
+                json!({
+                    "process_local_baselines_discarded": 0,
+                    "process_local_watch_records_discarded": 0,
+                    "watch_handles_released": 0,
+                    "watch_journal_present": false,
+                    "watch_journal_modified": false,
+                    "watch_evidence_revalidated": false,
+                    "durable_watch_recovery_required": false,
+                    "baseline_registry_poisoned": false,
+                    "watch_registry_poisoned": false,
+                    "game_effects_cancelled": false,
+                }),
+            )
+        },
+    )
+}
+
 #[tool(
-    description = "Unavailable in authenticated live bridge protocol V1; fails closed without cancellation effects."
+    description = "Release this read-only session with scope=session; retained query work requires discard_process_local_work=true. This closes process resources without reading or changing the game. Ordinary effect cancellation remains unavailable."
 )]
-pub fn fortress_cancel(session_id: Option<String>, _mode: Option<String>) -> String {
-    read_only_tool_error(session_id, "fortress.cancel", AgentPhase::Reconcile)
+pub fn fortress_cancel(
+    session_id: Option<String>,
+    _mode: Option<String>,
+    mode: Option<String>,
+    scope: Option<String>,
+    discard_process_local_work: Option<bool>,
+) -> String {
+    match read_session_release::session_close_requested(
+        scope.as_deref(),
+        mode.as_deref(),
+        _mode.as_deref(),
+        discard_process_local_work,
+    ) {
+        Ok(false) => {
+            return read_only_tool_error(session_id, "fortress.cancel", AgentPhase::Reconcile);
+        }
+        Err(failure) => {
+            return unbound_error("fortress.cancel", AgentPhase::Inspect, &failure);
+        }
+        Ok(true) => {}
+    }
+    match close_session(session_id) {
+        Ok(out) => out,
+        Err(failure) => unbound_error("fortress.cancel", AgentPhase::Inspect, &failure),
+    }
 }
 
 #[tool(
@@ -1702,7 +1791,11 @@ pub fn fortress_explain(session_id: Option<String>, entity_id: Option<String>) -
         Ok(value) => value,
         Err(failure) => return unbound_error(operation, AgentPhase::Inspect, &failure),
     };
-    let mut guard = match lock_session(&session) {
+    let mut session_slot = match lock_session(&session) {
+        Ok(value) => value,
+        Err(failure) => return unbound_error(operation, AgentPhase::Inspect, &failure),
+    };
+    let guard = match require_open(&mut session_slot) {
         Ok(value) => value,
         Err(failure) => return unbound_error(operation, AgentPhase::Inspect, &failure),
     };
@@ -1714,7 +1807,7 @@ pub fn fortress_explain(session_id: Option<String>, entity_id: Option<String>) -
         Ok(value) => value,
         Err(failure) => {
             return session_error(
-                &guard,
+                guard,
                 operation,
                 AgentPhase::Inspect,
                 ObservationProfile::Forensic,
@@ -1727,7 +1820,7 @@ pub fn fortress_explain(session_id: Option<String>, entity_id: Option<String>) -
     };
     if let Err(failure) = context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None) {
         return session_error(
-            &guard,
+            guard,
             operation,
             AgentPhase::Inspect,
             ObservationProfile::Forensic,
@@ -1739,7 +1832,7 @@ pub fn fortress_explain(session_id: Option<String>, entity_id: Option<String>) -
     }
     let Some(projection) = guard.adapter.current_projection() else {
         return session_error(
-            &guard,
+            guard,
             operation,
             AgentPhase::Inspect,
             ObservationProfile::Forensic,
@@ -1758,7 +1851,7 @@ pub fn fortress_explain(session_id: Option<String>, entity_id: Option<String>) -
                 Ok(value) => value,
                 Err(failure) => {
                     return session_error(
-                        &guard,
+                        guard,
                         operation,
                         AgentPhase::Inspect,
                         ObservationProfile::Forensic,
@@ -1771,7 +1864,7 @@ pub fn fortress_explain(session_id: Option<String>, entity_id: Option<String>) -
             };
             let Some(entity) = projection.snapshot.graph.entities.get(&parsed) else {
                 return session_error(
-                    &guard,
+                    guard,
                     operation,
                     AgentPhase::Inspect,
                     ObservationProfile::Forensic,
@@ -1800,7 +1893,7 @@ pub fn fortress_explain(session_id: Option<String>, entity_id: Option<String>) -
             "source_capsule_digest": projection.receipt.source_capsule_digest().to_string(),
             "bridge_generation": projection.receipt.source_bridge_generation(),
             "anchor": anchor_json(anchor),
-            "coverage": coverage_json(&guard),
+            "coverage": coverage_json(guard),
             "authority": {
                 "observe": guard.has_grant(Capability::Observe),
                 "query": guard.has_grant(Capability::Query),
@@ -1810,7 +1903,7 @@ pub fn fortress_explain(session_id: Option<String>, entity_id: Option<String>) -
         }),
     };
     attach_turn(
-        &guard,
+        guard,
         operation,
         AgentPhase::Inspect,
         ObservationProfile::Forensic,
@@ -1839,7 +1932,11 @@ pub fn fortress_doctor(session_id: Option<String>) -> String {
         Ok(value) => value,
         Err(failure) => return unbound_error(operation, AgentPhase::Inspect, &failure),
     };
-    let mut guard = match lock_session(&session) {
+    let mut session_slot = match lock_session(&session) {
+        Ok(value) => value,
+        Err(failure) => return unbound_error(operation, AgentPhase::Inspect, &failure),
+    };
+    let guard = match require_open(&mut session_slot) {
         Ok(value) => value,
         Err(failure) => return unbound_error(operation, AgentPhase::Inspect, &failure),
     };
@@ -1851,7 +1948,7 @@ pub fn fortress_doctor(session_id: Option<String>) -> String {
         Ok(value) => value,
         Err(failure) => {
             return session_error(
-                &guard,
+                guard,
                 operation,
                 AgentPhase::Inspect,
                 ObservationProfile::Forensic,
@@ -1866,7 +1963,7 @@ pub fn fortress_doctor(session_id: Option<String>) -> String {
         Ok(value) => value,
         Err(failure) => {
             return session_error(
-                &guard,
+                guard,
                 operation,
                 AgentPhase::Inspect,
                 ObservationProfile::Forensic,
@@ -1893,7 +1990,7 @@ pub fn fortress_doctor(session_id: Option<String>) -> String {
         Vec::new()
     };
     attach_turn(
-        &guard,
+        guard,
         operation,
         AgentPhase::Inspect,
         ObservationProfile::Forensic,
@@ -1933,7 +2030,7 @@ pub fn fortress_doctor(session_id: Option<String>) -> String {
             "warnings": health.warnings,
             "source_poisoned": poisoned,
             "source_poison_reason": guard.source_poison_reason(),
-            "coverage": coverage_json(&guard),
+            "coverage": coverage_json(guard),
         }),
     )
 }
@@ -1957,7 +2054,8 @@ pub fn run_live_stdio() {
             "Authenticated Dwarf Fortress live read-only control plane. The endpoint and bearer \
              token are process configuration and never tool arguments. Call fortress_open_session \
              first. The server preserves the frozen eleven-tool waist, but bridge protocol V1 \
-             registers only Handshake and ReadObservation; all mutation-stage tools fail closed. \
+             registers only Handshake and ReadObservation; game effects remain unavailable. \
+             Explicit cancel(scope=session) releases process resources without a game read or effect. \
              Every result includes an agent_turn packet with an exact canonical anchor, coverage, \
              omissions, authority, continuity, and the minimum safe next step.",
         )
@@ -2012,6 +2110,8 @@ mod tests {
         assert_eq!(parse_session_id(&session.to_string())?, session);
         assert!(parse_session_id("17").is_err());
         assert!(parse_session_id("00000000000000000000000000000000").is_err());
+        assert!(parse_session_id("80000000000000000000000000000011").is_err());
+        assert!(parse_session_id("11000000000000000000000000000011").is_err());
         Ok(())
     }
 
@@ -2079,5 +2179,118 @@ mod tests {
             recovery_class(ErrorCode::AdapterFailure),
             RecoveryClass::Backoff
         );
+    }
+
+    struct ClosedSessionFixture(SessionId);
+
+    impl Drop for ClosedSessionFixture {
+        fn drop(&mut self) {
+            if let Ok(mut registry) = sessions() {
+                registry.remove(&self.0);
+            }
+            if let Ok(mut receipts) = CLOSED_LIVE_SESSIONS.lock() {
+                receipts.retain(|(id, _)| *id != self.0);
+            }
+        }
+    }
+
+    fn decode_release_test(raw: &str) -> Result<JsonValue> {
+        serde_json::from_str(raw)
+            .map_err(|failure| error(ErrorCode::InternalInvariantViolation, failure.to_string()))
+    }
+
+    #[test]
+    fn every_ordinary_handler_rejects_closed_custody_before_cached_state() -> Result<()> {
+        let _serial = crate::test_serial();
+        let fixture = ClosedSessionFixture(next_session_id()?);
+        let stale = Arc::new(Mutex::new(None));
+        sessions()?.insert(fixture.0, Arc::clone(&stale));
+        let handle = || Some(fixture.0.to_string());
+        for encoded in [
+            fortress_observe(handle()),
+            fortress_query(handle(), None),
+            fortress_plan(handle(), None, None),
+            fortress_commit(handle(), String::new()),
+            fortress_wait(handle()),
+            fortress_cancel(handle(), None, None, None, None),
+            fortress_checkpoint(handle(), None),
+            fortress_restore(handle(), String::new()),
+            fortress_explain(handle(), None),
+            fortress_doctor(handle()),
+        ] {
+            let value = decode_release_test(&encoded)?;
+            assert_eq!(value["ok"], false);
+            assert_eq!(value["error"]["code"], "session_not_found");
+            assert!(value["agent_turn"]["anchor"].is_null());
+            assert!(value.get("calendar_year").is_none());
+        }
+        assert!(lock_session(&stale)?.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn session_close_rejects_ambiguous_selectors_before_resolving_resources() -> Result<()> {
+        let _serial = crate::test_serial();
+        let fixture = ClosedSessionFixture(next_session_id()?);
+        sessions()?.insert(fixture.0, Arc::new(Mutex::new(None)));
+        for (legacy, mode, scope, discard) in [
+            (Some("effect"), None, Some("session"), None),
+            (None, Some("effect"), Some("session"), None),
+            (None, None, Some("goal"), None),
+            (None, None, None, Some(true)),
+            (None, None, None, Some(false)),
+        ] {
+            let encoded = fortress_cancel(
+                Some(fixture.0.to_string()),
+                legacy.map(str::to_owned),
+                mode.map(str::to_owned),
+                scope.map(str::to_owned),
+                discard,
+            );
+            let value = decode_release_test(&encoded)?;
+            assert_eq!(value["error"]["code"], "invalid_request");
+            assert!(value["agent_turn"]["anchor"].is_null());
+            assert!(sessions()?.contains_key(&fixture.0));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn cancel_schema_exposes_resource_scope_consent_and_both_mode_spellings() {
+        let definition = FortressCancel.definition();
+        for field in ["session_id", "_mode", "mode", "scope", "discard_process_local_work"] {
+            assert!(definition.input_schema["properties"].get(field).is_some());
+        }
+    }
+
+    #[test]
+    fn only_explicit_session_close_replays_its_exact_recent_receipt() -> Result<()> {
+        let _serial = crate::test_serial();
+        let fixture = ClosedSessionFixture(next_session_id()?);
+        let expected = crate::read_session_release_packet::render(
+            fixture.0,
+            LIVE_BUDGET_CEILING,
+            "read/1.0",
+            false,
+            false,
+            json!({}),
+        )?;
+        CLOSED_LIVE_SESSIONS
+            .lock()
+            .map_err(|_| error(ErrorCode::InternalInvariantViolation, "test receipts poisoned"))?
+            .push_back((fixture.0, expected.clone()));
+        for discard in [None, Some(true)] {
+            assert_eq!(
+                fortress_cancel(
+                    Some(fixture.0.to_string()), None, None, Some("session".to_owned()), discard,
+                ),
+                expected
+            );
+        }
+        let ordinary = decode_release_test(&fortress_cancel(
+            Some(fixture.0.to_string()), None, None, None, None,
+        ))?;
+        assert_eq!(ordinary["error"]["code"], "session_not_found");
+        Ok(())
     }
 }

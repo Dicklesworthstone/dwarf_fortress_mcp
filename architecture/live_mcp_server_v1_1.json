@@ -73,7 +73,26 @@
     "wrong_generation_session_ids_rejected": true,
     "maximum_capability_requests": 8,
     "source_poisoning_is_permanent_per_session": true,
-    "mutation_tools_remain_registered_and_fail_closed": true
+    "mutation_tools_remain_registered_and_fail_closed": true,
+    "resource_release": {
+      "tool": "fortress.cancel",
+      "scope": "session",
+      "discard_consent_argument": "discard_process_local_work",
+      "forbidden_non_null_arguments": [
+        "mode",
+        "_mode"
+      ],
+      "retained_query_work_requires_explicit_consent": true,
+      "complete_receipt_before_release": true,
+      "expired_read_grants_do_not_prevent_release": true,
+      "closed_handles_rejected": true,
+      "native_observations": false,
+      "game_effects_cancelled": false,
+      "native_mutation_dispatched": false,
+      "maximum_retained_close_receipts": 32,
+      "receipt_durable": false,
+      "reopen_requires_fresh_bootstrap": true
+    }
   },
   "environment": {
     "DFMCP_BRIDGE_ENDPOINT": {

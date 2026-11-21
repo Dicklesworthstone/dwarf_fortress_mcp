@@ -188,7 +188,15 @@ entering the private server. Session identifiers use a distinct `0x11` high-byte
 protocol-1.0 session handle cannot alias a protocol-1.1 session.
 
 The runtime preserves the frozen eleven-tool MCP waist. Read-only operations use the protocol-1.1
-adapter; mutation-stage operations stay registered and fail closed. Legacy `fortress.query` modes
+adapter; game mutation operations stay registered and fail closed. Explicit
+`fortress.cancel(scope: "session")` can release this process session and native
+connection without observing or changing the game. It preflights the complete
+receipt and explicit consent for retained baselines/watches, drops state even
+when a stale internal handle remains, and retains 32 exact repeat receipts.
+The structured-query cleanup targets this profile's own query registries.
+Expired grants, exhausted request identifiers and poisoned session mutexes do
+not trap resources. See `LIVE_SESSION_RELEASE.md`; source presence does not
+establish integrated/native qualification or admission. Legacy `fortress.query` modes
 are `summary, citizens, announcements, or all`; `mode: "schema"` discovers the shared structured
 `dfmcp.query/1` grammar. Structured `kind: "events", source: "announcements"` queries the existing
 report entities by original report date, selected typed fields and chronological continuations.

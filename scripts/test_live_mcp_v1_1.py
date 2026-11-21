@@ -17,6 +17,8 @@ FILES = [
     ROOT / "architecture/live_mcp_server_v1_1.json",
     ROOT / "architecture/live_admission_ticket_v2.json",
     ROOT / "crates/dfmcp-mcp/src/live_server_v1_1.rs",
+    ROOT / "crates/dfmcp-mcp/src/read_session_release.rs",
+    ROOT / "crates/dfmcp-mcp/src/read_session_release_packet.rs",
     ROOT / "crates/dfmcp-mcp/src/lib.rs",
     ROOT / "crates/dwarf-fortress-mcp/src/bin/dfmcp-live-v1-1-dev-server.rs",
     ROOT / "crates/dwarf-fortress-mcp/Cargo.toml",
@@ -163,6 +165,44 @@ class LiveMcpV1_1ContractTests(unittest.TestCase):
             del value["required_source_digests"]["production_admission_ticket_contract"]
             path.write_text(json.dumps(value) + "\n", encoding="utf-8")
             self.assertNotEqual(self.run_checker(root).returncode, 0)
+
+    def test_session_release_cannot_acquire_game_effects_or_drop_preflight(self) -> None:
+        for field, bad in [
+            ("retained_query_work_requires_explicit_consent", False),
+            ("complete_receipt_before_release", False),
+            ("closed_handles_rejected", False),
+            ("native_observations", True),
+            ("game_effects_cancelled", True),
+            ("native_mutation_dispatched", True),
+            ("maximum_retained_close_receipts", 33),
+        ]:
+            with self.subTest(field=field):
+                temporary, root = self.fixture()
+                with temporary:
+                    path = root / "architecture/live_mcp_server_v1_1.json"
+                    value = json.loads(path.read_text(encoding="utf-8"))
+                    value["session"]["resource_release"][field] = bad
+                    path.write_text(json.dumps(value) + "\n", encoding="utf-8")
+                    self.assertNotEqual(self.run_checker(root).returncode, 0)
+
+    def test_session_release_helpers_are_bound_and_remain_read_only(self) -> None:
+        for helper in ["read_session_release", "read_session_release_packet"]:
+            with self.subTest(helper=helper):
+                temporary, root = self.fixture()
+                with temporary:
+                    path = root / "architecture/live_announcement_source_qualification_v1_1.json"
+                    value = json.loads(path.read_text(encoding="utf-8"))
+                    del value["required_source_digests"][helper]
+                    path.write_text(json.dumps(value) + "\n", encoding="utf-8")
+                    self.assertNotEqual(self.run_checker(root).returncode, 0)
+                temporary, root = self.fixture()
+                with temporary:
+                    path = root / f"crates/dfmcp-mcp/src/{helper}.rs"
+                    path.write_text(
+                        path.read_text(encoding="utf-8") + "\n// .request_cancel(\n",
+                        encoding="utf-8",
+                    )
+                    self.assertNotEqual(self.run_checker(root).returncode, 0)
 
     def test_documented_unadmitted_posture_is_required(self) -> None:
         temporary, root = self.fixture()
