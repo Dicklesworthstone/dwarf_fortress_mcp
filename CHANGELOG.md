@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased — Verify room completion and safe cancellation regressions
+
+- Pass 252 final intent unit tests, all 146 laboratory unit tests, four furnished
+  blueprint regressions and two exact historical-compiler recovery regressions
+  on latest nightly with warnings denied. Keep the existing exact explicit/
+  automatic plan and archive equivalence assertion intact.
+- Record the remaining integration boundary: `dfmcp-mcp --tests` checking stops
+  in pinned `asupersync 0.5.0` compilation with SIGKILL before MCP source checking.
+  Operations lifecycle and public-facade regressions remain unexecuted.
+- Normalize formatting only in the new compensation test module; preserve
+  unrelated baseline formatting. Record incomplete full verification and
+  qualification without promoting component evidence to native/live admission.
+
 ## Unreleased — Restore only settings actually changed by a plan
 
 - Derive automatic pause, labor and burrow compensation from qualified observed

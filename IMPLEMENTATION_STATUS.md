@@ -1,5 +1,44 @@
 # Implementation Status
 
+## Unreleased — Final room and cancellation component results
+
+The functional changes in `7d0e6a5e`, `27290d68` and `f48611d2` were checked on
+`rustc 1.102.0-nightly (c7d5ba59d 2026-11-20)` with warnings denied:
+
+| Executed scope | Result | Boundary |
+| --- | --- | --- |
+| Current intent unit suite | 252 passed | Actual source with exact core/world Cargo metadata and libraries |
+| Laboratory unit suite | 146 passed | Locked/offline Cargo, including all 10 new compensation regressions |
+| Furnished blueprint regressions | 4 passed | Locked/offline Cargo against the final planner |
+| Exact historical-compiler recovery | 2 passed | Actual recovery module with exact final dependency artifacts |
+
+These 404 checks cover complete furniture goals, deadline scaling, legacy
+blueprint semantics, source-qualified inverses, no-op and later-writer custody,
+emergency pause, recovery, drain atomicity and unchanged explicit/automatic
+plan/archive equality. The two preexisting laboratory assertion mismatches
+identified during execution are corrected, and the final complete lab suite
+passes. Only formatting normalization of the new compensation test module
+followed the semantic checks; this is not a full-workspace qualification receipt.
+
+The locked/offline `dfmcp-mcp --tests` check failed before checking MCP source:
+its `asupersync 0.5.0` library compiler was killed by signal 9 (SIGKILL) while
+emitting metadata. No Rust source diagnostic preceded the termination. Resource
+exhaustion is plausible but not confirmed. The operations-session lifecycle and
+MCP public-facade regressions therefore remain present but unexecuted, and the
+three feature beads remain in progress for their integration acceptance items.
+
+`verify.sh` passed the first 21 gate groups and numerous Python suites before
+being interrupted; it did not complete. A clean-source `qualify_local.sh` attempt
+on `f48611d2d80e80651777853aad104e07b4e73004` exceeded its 180-second bound during
+the repository validation test's recursive Markdown walk through build output.
+The full formatting check also found 103 preexisting source-file failures plus
+one new test-module failure; the new module now passes scoped formatting.
+Unrelated baseline formatting was not rewritten. Native/game and production
+admission evidence remain absent; component success does not change that status.
+
+Owners: `dfmcp-operations-session-release-09si`,
+`dfmcp-furnished-blueprint-goal-xsce`, `dfmcp-source-bound-compensation-3176`.
+
 ## Unreleased — Cancellation preserves preexisting and newer settings
 
 The planner now derives automatic pause, labor and burrow restoration from

@@ -190,12 +190,22 @@ fn mixed_labor_and_burrow_cancellation_preserve_preexisting_configuration() -> R
     for (action, target) in [
         (labor(vec![FIRST, SECOND], true), true),
         (labor(vec![FIRST, SECOND], false), false),
-        (Action::SetBurrowMembership {
-            units: vec![FIRST, SECOND], burrow: BURROW, assigned: true,
-        }, true),
-        (Action::SetBurrowMembership {
-            units: vec![FIRST, SECOND], burrow: BURROW, assigned: false,
-        }, false),
+        (
+            Action::SetBurrowMembership {
+                units: vec![FIRST, SECOND],
+                burrow: BURROW,
+                assigned: true,
+            },
+            true,
+        ),
+        (
+            Action::SetBurrowMembership {
+                units: vec![FIRST, SECOND],
+                burrow: BURROW,
+                assigned: false,
+            },
+            false,
+        ),
     ] {
         let field = if matches!(&action, Action::SetLabor { .. }) {
             "labor.MINE"
@@ -243,7 +253,10 @@ fn mixed_labor_and_burrow_cancellation_preserve_preexisting_configuration() -> R
         );
         assert_eq!(value(&adapter, FIRST, field), Some(Value::Bool(true)));
         assert_eq!(value(&adapter, SECOND, field), Some(Value::Bool(false)));
-        assert_eq!(adapter.snapshot().graph.entities[&unchanged], unchanged_before);
+        assert_eq!(
+            adapter.snapshot().graph.entities[&unchanged],
+            unchanged_before
+        );
     }
     Ok(())
 }
@@ -252,29 +265,33 @@ fn mixed_labor_and_burrow_cancellation_preserve_preexisting_configuration() -> R
 fn no_op_setter_has_no_inverse_even_inside_an_unfinished_goal() -> Result<()> {
     for no_op in [
         labor(vec![FIRST], true),
-        Action::SetBurrowMembership { units: vec![FIRST], burrow: BURROW, assigned: true },
+        Action::SetBurrowMembership {
+            units: vec![FIRST],
+            burrow: BURROW,
+            assigned: true,
+        },
         Action::Pause { paused: true },
     ] {
-    let mut adapter = MemoryAdapter::new(world());
-    let plan = prepare(
-        &adapter,
-        2,
-        vec![
-            request(no_op, true),
-            request(labor(vec![SECOND], true), true),
-        ],
-        false,
-    )?;
-    assert!(plan.steps[0].compensation.is_none());
-    assert!(plan.steps[1].compensation.is_some());
-    let ids = commit(&mut adapter, &plan)?;
-    let before = adapter.snapshot().clone();
-    assert_eq!(cancel(&mut adapter, ids[0])?.state, CommitState::Cancelled);
-    assert_eq!(&before, adapter.snapshot());
-    assert_eq!(
-        value(&adapter, FIRST, "labor.MINE"),
-        Some(Value::Bool(true))
-    );
+        let mut adapter = MemoryAdapter::new(world());
+        let plan = prepare(
+            &adapter,
+            2,
+            vec![
+                request(no_op, true),
+                request(labor(vec![SECOND], true), true),
+            ],
+            false,
+        )?;
+        assert!(plan.steps[0].compensation.is_none());
+        assert!(plan.steps[1].compensation.is_some());
+        let ids = commit(&mut adapter, &plan)?;
+        let before = adapter.snapshot().clone();
+        assert_eq!(cancel(&mut adapter, ids[0])?.state, CommitState::Cancelled);
+        assert_eq!(&before, adapter.snapshot());
+        assert_eq!(
+            value(&adapter, FIRST, "labor.MINE"),
+            Some(Value::Bool(true))
+        );
     }
     Ok(())
 }
