@@ -1,5 +1,59 @@
 # Implementation Status
 
+## Unreleased — Reclaim jobs sessions and verify shared release components
+
+The jobs/1.2 development server now supports the same explicit
+`fortress.cancel` session scope as the citizen and announcement servers.
+Closing returns its reserved slot immediately, including while stale internal
+handles remain, so the 16-session ceiling no longer permanently exhausts.
+Teardown replaces and drops the native source, clears observations and grants,
+removes the registry entry, and fences every stale context, anchor, refresh and
+query projection. Failed bootstrap still releases its reservation exactly once.
+
+The jobs path uses its own retained-query registries, requires explicit discard
+consent for baselines/watches, preflights the complete shared receipt before
+cleanup, and retains 32 byte-exact repeat acknowledgements independently of the
+session ceiling. Explicit `mode` and `_mode` parameters prevent ignored unknown
+selectors from accidentally closing a session; every non-null value, including
+an empty string, refuses. Expired/revoked grants, fenced sources, exhausted
+counters and poisoned session guards do not trap resources. Closing produces
+no native observation, current-state anchor, gameplay completion claim or
+game-effect cancellation. The profile remains unadmitted development.
+
+After the execution environment recovered, the exact main source was restored
+with all 3,159 tracked blobs and file modes verified before applying the jobs
+overlay. Final component validation used
+`rustc 1.102.0-nightly (c7d5ba59d 2026-11-20)`:
+
+| Executed final scope | Result | Boundary |
+| --- | --- | --- |
+| Actual shared custody helper | 12 passed | Standalone, `-Dwarnings -Funsafe_code`, four test threads |
+| Actual helper, receipt renderer and Agent Turn modules | 21 passed | Includes the same 12 helper tests, three renderer tests and six Agent Turn tests |
+| Protocol-1.1 contract checker and regression suite | PASS; 14 tests passed | Public selectors, qualification bindings and read-only/admission fences |
+| New lifecycle helper/test module formatting | Seven files passed | Existing unrelated formatting was preserved |
+
+The 21-test component used locked/offline dependencies with every external
+version and checksum matched to the repository lockfile. Its admission
+provenance dependency was the verbatim 1,929-byte production block with its
+existing `OnceLock` import; it did not substitute a fake admission provider.
+All 17 relevant source files were unchanged across final compilation and
+execution. This supersedes the earlier outage limitation for the final shared
+helper, renderer and their formatted tests, while remaining component evidence.
+
+Eight jobs public-handler regressions and nine citizen/announcement handler or
+retained-store regressions are present and independently source-reviewed but
+unexecuted. The actual locked/offline `cargo check -p dfmcp-mcp --tests` attempt
+exited 101 during dependency resolution: `inout` was absent from the restored
+crates.io index (required by `aead -> aes-gcm -> asupersync`). The previous
+temporary dependency cache was lost during the host restart; 310 of 321 locked
+registry packages are absent from the persistent cache. No project source was
+checked by that attempt. Full MCP integration, full verification and native/game
+qualification remain outstanding; no production admission is inferred.
+
+Owner: `dfmcp-live-read-session-release-r4s`, retained in progress for integrated
+validation. Public usage: [session release](docs/LIVE_SESSION_RELEASE.md) and
+[jobs profile](docs/LIVE_JOBS.md).
+
 ## Unreleased — Release citizen and announcement sessions without restart
 
 The protocol-1.0 citizen server and protocol-1.1 announcement development server
@@ -38,8 +92,8 @@ contract checks and mutations, integrated MCP compilation, full verification and
 native/game qualification also remain unexecuted. No compatibility registry,
 production protocol map or admission claim is changed.
 
-Owner: `dfmcp-live-read-session-release-r4s`, retained in progress for jobs/1.2
-integration and final integrated validation. See
+Owner: `dfmcp-live-read-session-release-r4s`, retained in progress for final
+integrated validation. See
 [the public release contract](docs/LIVE_SESSION_RELEASE.md).
 
 ## Unreleased — Final room and cancellation component results

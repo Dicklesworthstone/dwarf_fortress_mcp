@@ -9,6 +9,11 @@ mod query_response;
 #[allow(dead_code, clippy::duplicate_mod)]
 #[path = "semantic_query.rs"]
 mod semantic_query;
+#[path = "jobs_session_release.rs"]
+mod session_release;
+#[cfg(test)]
+#[path = "jobs_session_release_tests.rs"]
+mod session_release_tests;
 
 use crate::agent_turn::{
     AgentPhase, AgentTurnBuilder, ContinuityStatus, ObservationProfile, empty_active_work,
@@ -49,7 +54,9 @@ fn lock<T>(value: &Mutex<T>) -> Result<MutexGuard<'_, T>> {
         )
     })
 }
-struct SessionSlot;
+struct SessionSlot {
+    held: bool,
+}
 impl SessionSlot {
     fn reserve() -> Result<Self> {
         SLOTS
@@ -62,12 +69,18 @@ impl SessionSlot {
                     "jobs runtime session capacity reached",
                 )
             })?;
-        Ok(Self)
+        Ok(Self { held: true })
+    }
+    fn release(&mut self) {
+        if self.held {
+            self.held = false;
+            SLOTS.fetch_sub(1, Ordering::AcqRel);
+        }
     }
 }
 impl Drop for SessionSlot {
     fn drop(&mut self) {
-        SLOTS.fetch_sub(1, Ordering::AcqRel);
+        self.release();
     }
 }
 
@@ -75,6 +88,9 @@ trait JobSource: Send {
     fn read(&mut self, timeout: Duration) -> Result<LiveJobObservation>;
     fn poisoned(&self) -> bool;
     fn fence(&mut self);
+    fn closed(&self) -> bool {
+        false
+    }
 }
 impl JobSource for JobsRpcClient<DeadlineStream> {
     fn read(&mut self, timeout: Duration) -> Result<LiveJobObservation> {
@@ -97,7 +113,14 @@ struct JobSession {
     _slot: SessionSlot,
 }
 impl JobSession {
+    fn require_open(&self) -> Result<()> {
+        if self.source.closed() {
+            return Err(error(ErrorCode::SessionNotFound, "jobs session is closed"));
+        }
+        Ok(())
+    }
     fn anchor(&self) -> Result<StateAnchor> {
+        self.require_open()?;
         self.state
             .snapshot()
             .map(|snapshot| snapshot.anchor())
@@ -109,6 +132,7 @@ impl JobSession {
             })
     }
     fn context(&mut self) -> Result<OperationContext> {
+        self.require_open()?;
         self.request = self
             .request
             .checked_add(1)
@@ -123,6 +147,7 @@ impl JobSession {
         })
     }
     fn refresh(&mut self, context: &OperationContext) -> Result<JobPublication> {
+        self.require_open()?;
         context.authorize(Capability::Observe, RiskTier::ReadOnly, &[], None)?;
         if context.anchor != self.anchor()? {
             return Err(error(
@@ -168,7 +193,7 @@ fn next_id() -> Result<SessionId> {
     *counter += 1;
     Ok(id)
 }
-fn resolve(id: Option<String>) -> Result<Arc<Mutex<JobSession>>> {
+fn parse_session_id(id: Option<String>) -> Result<SessionId> {
     let raw = id.ok_or_else(|| {
         error(
             ErrorCode::InvalidRequest,
@@ -194,6 +219,10 @@ fn resolve(id: Option<String>) -> Result<Arc<Mutex<JobSession>>> {
             "session belongs to a different runtime or is not an encoded handle",
         ));
     }
+    Ok(id)
+}
+fn resolve(id: Option<String>) -> Result<Arc<Mutex<JobSession>>> {
+    let id = parse_session_id(id)?;
     lock(&SESSIONS)?
         .get(&id)
         .cloned()
@@ -534,6 +563,7 @@ pub fn fortress_wait(session_id: Option<String>) -> String {
 }
 
 fn query_view(session: &JobSession, context: &OperationContext) -> Result<QueryResponseProjection> {
+    session.require_open()?;
     let source = session
         .state
         .observation()
@@ -729,7 +759,7 @@ fn no_effect(id: Option<String>, operation: &str) -> String {
     with_session(id, operation, Capability::Query, |_, _| {
         Err(error(
             ErrorCode::CapabilityDenied,
-            "jobs/1.2 is read-only; no prepare, commit, cancellation, checkpoint or restore effect exists",
+            "jobs/1.2 is read-only; no prepare, commit, game-effect cancellation, checkpoint or restore effect exists",
         ))
     })
 }
@@ -742,10 +772,16 @@ pub fn fortress_commit(session_id: Option<String>) -> String {
     no_effect(session_id, "fortress.commit")
 }
 #[tool(
-    description = "Unavailable for game actions. Cancel a foreground condition using query kind cancel_watch."
+    description = "Use scope=session to release this read-only session and its connection. Explicit discard_process_local_work consents to discarding retained baselines and watches. Do not combine scope=session with mode or _mode. No game effects are cancelled; use query kind cancel_watch for one foreground watch."
 )]
-pub fn fortress_cancel(session_id: Option<String>) -> String {
-    no_effect(session_id, "fortress.cancel")
+pub fn fortress_cancel(
+    session_id: Option<String>,
+    scope: Option<String>,
+    discard_process_local_work: Option<bool>,
+    mode: Option<String>,
+    _mode: Option<String>,
+) -> String {
+    session_release::cancel(session_id, scope, discard_process_local_work, mode, _mode)
 }
 #[tool(description = "Unavailable: no game or save checkpoint is created.")]
 pub fn fortress_checkpoint(session_id: Option<String>) -> String {
@@ -821,7 +857,7 @@ mod tests {
             }],
         }
     }
-    fn register() -> Result<SessionId> {
+    pub(super) fn register() -> Result<SessionId> {
         let id = next_id()?;
         let mut state = LiveJobsState::default();
         state.publish(observation(true, 1))?;
@@ -860,12 +896,13 @@ mod tests {
         lock(&SESSIONS)?.insert(id, Arc::new(Mutex::new(session)));
         Ok(id)
     }
-    fn decode(text: &str) -> Result<Value> {
+    pub(super) fn decode(text: &str) -> Result<Value> {
         serde_json::from_str(text)
             .map_err(|_| error(ErrorCode::InternalInvariantViolation, "fixture JSON"))
     }
     #[test]
     fn actual_query_handlers_filter_refresh_and_keep_effects_unavailable() -> Result<()> {
+        let _serial = crate::test_serial();
         let id = register()?;
         let handle = Some(id.to_string());
         let input = json!({"schema":"dfmcp.query/1","query":{"kind":"entities","kinds":["job"],"fields":["suspended"],
@@ -893,6 +930,7 @@ mod tests {
     }
     #[test]
     fn baseline_changes_use_the_actual_native_job_projection() -> Result<()> {
+        let _serial = crate::test_serial();
         let id = register()?;
         let handle = Some(id.to_string());
         let capture = decode(&fortress_query(
@@ -917,6 +955,7 @@ mod tests {
     }
     #[test]
     fn await_watch_consumes_one_job_observation_and_terminal_retry_skips_io() -> Result<()> {
+        let _serial = crate::test_serial();
         let id = register()?;
         let handle = Some(id.to_string());
         let deadline = 105u64 * 403_200 + 50;
@@ -949,6 +988,7 @@ mod tests {
     }
     #[test]
     fn local_watch_cancellation_remains_available_after_source_failure() -> Result<()> {
+        let _serial = crate::test_serial();
         let id = register()?;
         let handle = Some(id.to_string());
         let created = decode(&fortress_query(

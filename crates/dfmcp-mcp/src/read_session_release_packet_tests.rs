@@ -58,7 +58,10 @@ fn development_release_preserves_explicit_unadmitted_posture() -> Result<()> {
     assert_eq!(value["runtime"], "unadmitted_development");
     assert_eq!(value["runtime_admitted"], false);
     assert_eq!(value["agent_turn"]["briefing"]["runtime_admitted"], false);
-    assert_eq!(value["agent_turn"]["briefing"]["compatibility_admitted"], false);
+    assert_eq!(
+        value["agent_turn"]["briefing"]["compatibility_admitted"],
+        false
+    );
     Ok(())
 }
 

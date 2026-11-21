@@ -68,9 +68,25 @@ Open a session with `fortress_open_session`. Optional arguments are `max_jobs`
 `session_id`; the profile cannot grant mutation authority.
 
 Sixteen sessions, including concurrent bootstrap attempts, is the process ceiling.
-There is currently no session-close operation; restarting the development process
-releases sessions and its process-local monitoring state. Failed bootstrap
-releases its reserved slot and never publishes a session handle.
+Release a finished or unusable session through `fortress_cancel`:
+
+```json
+{"session_id":"<returned handle>","scope":"session","discard_process_local_work":true}
+```
+
+Omit `discard_process_local_work` if there are no retained query baselines or
+watches; otherwise explicit consent is required. Omit `mode` and `_mode`.
+The complete acknowledgement must fit before cleanup. Successful close drops
+the native connection, clears cached observations and grants, invalidates stale
+handles and immediately returns its reserved slot, even while another caller
+retains the internal session handle. Expired grants, fenced sources, exhausted
+request counters and session-mutex poison do not prevent resource release.
+Failed bootstrap also returns its reserved slot without publishing a handle.
+
+The last 32 successful close responses can be repeated byte-for-byte. Reopen
+through normal authentication and fresh bootstrap; old handles never regain
+state. Closing makes no native read, game-effect cancellation or completion
+claim. See [the shared session-release contract](LIVE_SESSION_RELEASE.md).
 
 ## Useful queries
 

@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased — Reclaim jobs session capacity and verify release components
+
+- Extend explicit resource-only close to jobs/1.2, returning its 16-session
+  capacity immediately and dropping native sources despite stale internal
+  handles. Fence cached/context/query access after closure.
+- Preserve retained-work consent, complete response preflight, exact bounded
+  retries and fresh-bootstrap reopening. Reject both mode spellings explicitly,
+  including empty strings, without native reads or game effects.
+- Pass the final 21-test actual-source component suite (12 lifecycle, three
+  receipt and six Agent Turn tests), the 14-test announcement contract suite and
+  scoped formatting. Preserve source/version/checksum custody.
+- Add eight jobs handler regressions; full MCP checking stops before source at
+  missing offline dependencies after the host restart. Record that boundary
+  separately from the successful component execution.
+
 ## Unreleased — Reclaim citizen and announcement session capacity
 
 - Add explicit resource-only close to the existing cancellation tool for the

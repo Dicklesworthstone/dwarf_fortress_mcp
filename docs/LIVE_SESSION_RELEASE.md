@@ -1,7 +1,7 @@
 # Release a read-only live session
 
-The protocol-1.0 citizen server and protocol-1.1 announcement development server
-can release a finished or unusable session through the existing cancellation
+The protocol-1.0 citizen server, protocol-1.1 announcement development server
+and protocol-1.2 jobs development server can release a finished or unusable session through the existing cancellation
 tool. This returns capacity to the running server without restarting it or
 changing the game.
 
@@ -9,6 +9,7 @@ changing the game.
 | --- | --- | --- |
 | Citizens / protocol 1.0 | 32 registered sessions | `fortress_cancel` with `scope: "session"` |
 | Announcements / protocol 1.1 | 32 registered sessions | `fortress_cancel` with `scope: "session"` |
+| Jobs / protocol 1.2 | 16 sessions, including in-flight bootstrap | `fortress_cancel` with `scope: "session"` |
 
 The operations/1.3 and paged operations/1.4 servers already expose the same
 resource-release selectors; see [operations history](OPERATIONS_HISTORY.md).

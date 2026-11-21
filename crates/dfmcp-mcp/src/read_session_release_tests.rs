@@ -63,8 +63,18 @@ fn failed_complete_receipt_preflight_preserves_every_owned_resource() -> Result<
 #[test]
 fn teardown_selectors_are_explicit_and_do_not_reinterpret_ordinary_cancel() -> Result<()> {
     assert!(session_close_requested(Some("session"), None, None, None)?);
-    assert!(session_close_requested(Some("session"), None, None, Some(true))?);
-    assert!(!session_close_requested(None, Some("legacy"), Some("legacy"), None)?);
+    assert!(session_close_requested(
+        Some("session"),
+        None,
+        None,
+        Some(true)
+    )?);
+    assert!(!session_close_requested(
+        None,
+        Some("legacy"),
+        Some("legacy"),
+        None
+    )?);
     for (scope, mode, legacy, discard) in [
         (Some("session"), Some(""), None, None),
         (Some("session"), None, Some(""), None),

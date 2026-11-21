@@ -79,7 +79,9 @@ fn simultaneous_close_publishes_one_receipt_and_drops_resources_once() -> Result
     start.wait();
     for worker in workers {
         assert_eq!(
-            worker.join().map_err(|_| failure("close worker panicked"))??,
+            worker
+                .join()
+                .map_err(|_| failure("close worker panicked"))??,
             "complete-receipt-1"
         );
     }
@@ -117,7 +119,9 @@ fn foreground_owner_completes_before_close_prepares_its_receipt() -> Result<()> 
     assert!(held(&receipts)?.is_empty());
     require_open(&mut foreground)?.value = 77;
     drop(foreground);
-    let result = worker.join().map_err(|_| failure("close worker panicked"))?;
+    let result = worker
+        .join()
+        .map_err(|_| failure("close worker panicked"))?;
     resolved?;
     assert_eq!(result?, "after-foreground");
     assert_eq!(drops.load(Ordering::SeqCst), 1);
@@ -149,7 +153,9 @@ fn replaced_registry_owner_cannot_be_closed_through_a_previously_resolved_arc() 
     })));
     held(&registry)?.insert(id, Arc::clone(&replacement));
     drop(foreground);
-    let result = worker.join().map_err(|_| failure("close worker panicked"))?;
+    let result = worker
+        .join()
+        .map_err(|_| failure("close worker panicked"))?;
     resolved?;
     assert!(matches!(result, Err(error) if error.code == ErrorCode::SessionNotFound));
     assert_eq!(prepared.load(Ordering::SeqCst), 0);
@@ -180,7 +186,10 @@ fn every_preparation_refusal_preserves_exact_session_custody() -> Result<()> {
         let result = close(id, &registry, &receipts, |session, poisoned| {
             assert!(!poisoned);
             assert_eq!(session.value, 1);
-            Err(dfmcp_core::DfmcpError::new(code, "prepared response refused"))
+            Err(dfmcp_core::DfmcpError::new(
+                code,
+                "prepared response refused",
+            ))
         });
         assert!(matches!(result, Err(error) if error.code == code));
         assert!(
@@ -270,7 +279,9 @@ fn poisoned_global_registries_refuse_before_releasing_any_session_resource() -> 
             prepared.fetch_add(1, Ordering::SeqCst);
             Ok("must-not-publish".to_owned())
         });
-        assert!(matches!(result, Err(error) if error.code == ErrorCode::InternalInvariantViolation));
+        assert!(
+            matches!(result, Err(error) if error.code == ErrorCode::InternalInvariantViolation)
+        );
         assert_eq!(prepared.load(Ordering::SeqCst), 0);
         assert_eq!(drops.load(Ordering::SeqCst), 0);
         assert_eq!(require_open(&mut *held(&stale)?)?.value, 1);
@@ -351,17 +362,24 @@ fn closing_one_session_does_not_wait_for_or_mutate_a_different_owner() -> Result
     let worker_receipts = Arc::clone(&receipts);
     let (sender, receiver) = mpsc::channel();
     let worker = std::thread::spawn(move || {
-        let result = close(second_id, &worker_registry, &worker_receipts, |session, _| {
-            assert_eq!(session.value, 2);
-            Ok("second-only".to_owned())
-        });
+        let result = close(
+            second_id,
+            &worker_registry,
+            &worker_receipts,
+            |session, _| {
+                assert_eq!(session.value, 2);
+                Ok("second-only".to_owned())
+            },
+        );
         let _ = sender.send(result);
     });
     let result = receiver.recv_timeout(Duration::from_secs(2));
     // Release foreground custody even on a failed assertion/timeout, allowing
     // the supervised test worker to join rather than leaving a detached task.
     drop(foreground);
-    worker.join().map_err(|_| failure("close worker panicked"))?;
+    worker
+        .join()
+        .map_err(|_| failure("close worker panicked"))?;
     assert_eq!(
         result.map_err(|_| failure("unrelated session blocked close"))??,
         "second-only"
@@ -388,7 +406,9 @@ fn actual_socket_is_closed_before_return_even_when_a_stale_arc_survives() -> Res
     let registry = Mutex::new(BTreeMap::from([(id, Arc::clone(&stale))]));
     let receipts = Mutex::new(CloseReceipts::new());
     assert_eq!(
-        close(id, &registry, &receipts, |_, _| Ok("socket-released".to_owned()))?,
+        close(id, &registry, &receipts, |_, _| Ok(
+            "socket-released".to_owned()
+        ))?,
         "socket-released"
     );
     let mut byte = [0; 1];
