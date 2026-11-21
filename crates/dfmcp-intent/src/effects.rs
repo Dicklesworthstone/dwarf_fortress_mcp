@@ -32,6 +32,8 @@ use crate::plan::ObligationSpec;
 mod capacity;
 #[path = "effects_carpentry.rs"]
 mod carpentry;
+#[path = "effects_compensation.rs"]
+mod compensation;
 #[path = "effects_construction_materials.rs"]
 mod construction_materials;
 #[path = "effects_furniture.rs"]
@@ -88,6 +90,9 @@ pub use furniture::{
     validate_furniture_completion, validate_furniture_goal, validate_furniture_identity,
     validate_furniture_location,
 };
+
+pub use compensation::default_compensation_with_evidence;
+pub(crate) use compensation::{setters_overlap, source_bound_compensation};
 
 /// Validate the original identity and material custody behind a terminal action.
 ///
@@ -675,9 +680,10 @@ pub fn default_obligation(
     }))
 }
 
-/// Exact inverse of an action whose prior state is fully determined by the
-/// action itself. Actions that overwrite unobserved prior configuration
-/// (stockpiles, squads, standing orders) have no default compensation.
+/// Historical target-negation recipe, retained only to reconstruct an exact
+/// previously sealed plan. A setter does not determine its prior state, so this
+/// recipe does **not** establish that the action can be reversed safely.
+/// New plans must use [`default_compensation_with_evidence`] instead.
 #[must_use]
 pub fn default_compensation(action: &Action) -> Option<Action> {
     match action {

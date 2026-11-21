@@ -492,7 +492,12 @@ fn recovered_cleanup_bounds_every_source_before_hashing_and_is_atomic_on_publica
         }
         assert_eq!(
             assert_refusal_is_atomic(&mut adapter, &original.reference(), &request)?.code,
-            ErrorCode::BudgetExceeded
+            if mutation == 2 {
+                // A zero action dimension is an invalid budget, not exhaustion.
+                ErrorCode::InvalidRequest
+            } else {
+                ErrorCode::BudgetExceeded
+            }
         );
     }
     let mut oversized = original.plan.clone();

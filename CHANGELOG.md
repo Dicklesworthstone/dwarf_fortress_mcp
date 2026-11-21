@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased — Restore only settings actually changed by a plan
+
+- Derive automatic pause, labor and burrow compensation from qualified observed
+  preimages. Mixed assignments restore only changed units; no-op or unknown
+  preimages receive no automatic inverse.
+- Seal prior-state guards for deferred dispatch and capture exact poststate
+  custody. Refuse cancellation after drift, replacement, provenance changes,
+  ABA, overlapping/no-op writers or emergency pause reassertion.
+- Preflight compensation for the entire selected plan before draining any step;
+  preserve atomic refusal, immutable terminal proofs and registered civilian
+  protection policy. Remedy reversibility now requires source evidence.
+- Recover historical compiler output only against the complete original sealed
+  digest, without granting recovered actions new dispatch or undo authority.
+- Pass all 252 final intent unit tests, including unchanged exact plan/archive
+  equivalence, plus ten planner-to-adapter cancellation regressions and two
+  historical-compiler recovery regressions. Final adapter rerun and integrated
+  MCP execution remain in progress.
+
 ## Unreleased — Expose minimum-cost observed delivery through the query tool
 
 - Add structured `min_cost_flow` to current/retained laboratory queries,

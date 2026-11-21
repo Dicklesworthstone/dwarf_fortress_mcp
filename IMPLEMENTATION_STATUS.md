@@ -1,5 +1,49 @@
 # Implementation Status
 
+## Unreleased — Cancellation preserves preexisting and newer settings
+
+The planner now derives automatic pause, labor and burrow restoration from
+qualified source values. It restores only the units actually changed by the
+original request, omits inverses for no-op/unknown preimages, seals source guards
+for deferred dispatch, and refuses automatic inverse reuse for overlapping
+setters in one plan. The adapter records actual dispatch preimages and exact
+poststate custody before allowing compensation.
+
+Cancellation revalidates that custody, including entity generation, revision,
+qualified value/provenance and pause-writer generation. Later successful
+writers supersede earlier inverse custody even when the later write is a no-op.
+Every authorized emergency pause reassertion blocks an older unpause inverse.
+Selected-plan cancellation checks every required compensation before beginning
+any drain. Refusal leaves pending work and journal state intact; existing
+terminal proofs and the registered civilian-protection release policy retain
+their separate semantics.
+
+Old compiler output remains available only for bounded historical reconstruction
+against the complete archived plan digest. Fresh planning and replanning use
+source-bound compensation, and recovery does not restore old dispatch handles.
+Alert-remedy reversibility classification uses the same qualified-source rule.
+
+The final current intent unit suite passes all 252 tests with latest-nightly
+warning denial and unchanged source inventories. Existing explicit/automatic
+inverse equivalence remains exact: a source guard already sealed in the caller's
+preconditions is not duplicated merely by automatic compensation lowering.
+
+All ten new planner-to-adapter regression tests pass through locked/offline
+Cargo on latest nightly with warnings denied. They cover mixed and no-op
+assignments, unavailable evidence, deferred dispatch, old unsafe inverses,
+intervening writes, generation reuse, ABA, overlapping setters, current
+provenance and emergency pause reassertion. Both exact historical-compiler
+reconstruction tests also pass with unchanged source inventories. The broader
+laboratory run passed 144 tests and exposed two preexisting test expectations:
+zero action budgets are invalid requests, and future facts are not currently
+true. Those assertions now follow the unchanged production contracts while
+retaining all denial and atomicity checks; the full rerun is pending. Integrated
+MCP execution remains outstanding. This is component evidence, not full-workspace,
+native or production-admission qualification.
+
+Owner: `dfmcp-source-bound-compensation-3176`, retained in progress for integrated
+execution. See `docs/LAB_PLAN_CANCELLATION.md`.
+
 ## Unreleased — Query minimum-cost finite network delivery
 
 The existing structured `fortress_query` surface now accepts `min_cost_flow`

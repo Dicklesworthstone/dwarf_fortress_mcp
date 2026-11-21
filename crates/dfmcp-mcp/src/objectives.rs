@@ -1427,13 +1427,7 @@ pub(super) fn recover_objective(
         let intent = objective
             .source
             .intent(IntentId::new(retained.intent_id), &sealed)?;
-        let plan = StaticPlanner::default().prepare_laboratory(&sealed, &intent, &ctx)?;
-        if plan.digest != retained.plan_digest {
-            return Err(DfmcpError::new(
-                ErrorCode::CorruptLedger,
-                "the original goal source does not reproduce its sealed plan digest",
-            ));
-        }
+        let plan = recovery_compiler::prepare_exact(&sealed, &intent, &ctx, retained.plan_digest)?;
         if objective.requires_output_ledger() {
             let original = crate::lab_world::ProductionGoalLedger::capture(&sealed)?;
             original.validate_plan(&plan)?;

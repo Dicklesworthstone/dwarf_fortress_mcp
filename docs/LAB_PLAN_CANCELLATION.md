@@ -117,6 +117,22 @@ Each adapter effect still rechecks current authority at its own boundary.
 This preflight prevents a known missing capability on an earlier prerequisite
 from allowing a later selected action to stop first.
 
+Automatic compensation for pause, labor and burrow setters is derived from
+qualified prior state. A mixed assignment restores only members whose settings
+actually changed; a no-op or unknown prior value does not acquire an automatic
+inverse. The sealed plan retains source guards, and dispatch captures the exact
+restoration basis. Cancellation checks that basis and the current effect state
+before any selected drain, and again before applying compensation. A replaced
+entity, intervening setting change or unavailable evidence refuses restoration
+instead of overwriting later work. Explicit registered civilian protection
+remedies retain their distinct protective policy. Terminal receipts still do
+not reopen for compensation.
+
+Recovery can reproduce the historical target-negation compiler only when the
+entire reconstructed plan digest matches the archived seal. This preserves old
+evidence; it does not create a live action handle or authorize an unsafe inverse.
+Fresh plans, rebases and continuations use source-qualified compensation.
+
 A witness-rebased commit can retain both the originally requested digest and
 the actual newly sealed digest. Either retained alias selects the same complete
 original commit. The response distinguishes `requested_plan_digest` and
@@ -131,6 +147,34 @@ bypassed by falling back to recovery. Unknown or unavailable selection refuses.
 Restore and restart never reconstruct old foreground effect handles.
 
 ## Drain and proof semantics
+
+Automatic compensation for pause, labor and burrow setters now comes from the
+qualified planning source. A mixed selection restores only units whose prior
+boolean differs from the requested target. Existing assignments remain intact;
+missing, unknown, unavailable or unadmitted facts never become an assumed
+`false`. A complete no-op has no inverse. The planner seals the observed prior
+values as dispatch guards. If an earlier step writes the same configuration,
+the later setter has no automatic inverse from that initial source.
+
+For an unfinished setter, the live adapter checks the sealed inverse against
+its actual dispatch preimage and retains the effect identity. Cancellation
+checks that this preimage matched and that the affected entity generations, revisions and
+field facts still match the observed effect. This conservatively refuses even
+an unrelated edit to the same entity; stop without compensation and review a
+fresh action when configuration has changed. A later explicit setter of the
+same field supersedes the earlier inverse even when its value does not change.
+Pause compensation also refuses
+after another explicit clock action, including an emergency reassertion, while
+ordinary observation and time advancement do not by themselves supersede it.
+The checks run before the cancellation request and again before the effect;
+a refused finalization leaves its pending receipt and the world intact.
+
+Explicit protective reassertions keep their authored policy. The registered
+civilian-release compensation still restores protection under its sealed roster
+identity checks when danger returns. Historical plan reconstruction preserves
+its original exact digest; it neither restores live compensation custody nor
+authorizes an unsafe legacy inverse. These rules do not make an already
+Verified or Failed receipt cancellable.
 
 The shared laboratory drain executes dependents before prerequisites and never
 polls a deferred action into dispatch. Failed and Verified receipts stay

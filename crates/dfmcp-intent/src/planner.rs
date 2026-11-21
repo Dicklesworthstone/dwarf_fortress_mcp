@@ -73,6 +73,25 @@ impl StaticPlanner {
             intent,
             context,
             true,
+            false,
+        )
+    }
+
+    /// Reconstruct the old target-negation defaults solely for an archived
+    /// digest comparison. Callers must accept the result only when its complete
+    /// digest equals the retained historical seal; never use it for fresh work.
+    pub fn prepare_laboratory_legacy_compensation(
+        &self,
+        snapshot: &WorldSnapshot,
+        intent: &Intent,
+        context: &OperationContext,
+    ) -> Result<PreparedPlan> {
+        self.prepare_scoped(
+            &PredicateEvidence::laboratory(snapshot)?,
+            intent,
+            context,
+            true,
+            true,
         )
     }
 
@@ -83,7 +102,7 @@ impl StaticPlanner {
         intent: &Intent,
         context: &OperationContext,
     ) -> Result<PreparedPlan> {
-        self.prepare_scoped(evidence, intent, context, false)
+        self.prepare_scoped(evidence, intent, context, false, false)
     }
 
     fn prepare_scoped(
@@ -92,6 +111,7 @@ impl StaticPlanner {
         intent: &Intent,
         context: &OperationContext,
         laboratory: bool,
+        legacy_compensation: bool,
     ) -> Result<PreparedPlan> {
         let snapshot = evidence.snapshot();
         validate_policy(&self.policy)?;
@@ -235,6 +255,28 @@ impl StaticPlanner {
                 intent.anchor.fortress_id,
                 earliest_start,
             )?;
+            if normalized.compensation.is_none() {
+                if legacy_compensation {
+                    normalized.compensation =
+                        crate::effects::default_compensation(&normalized.action);
+                } else if !steps.iter().any(|step: &PlanStep| {
+                    crate::effects::setters_overlap(&step.action, &normalized.action)
+                }) && let Some((compensation, source_guard)) =
+                    crate::effects::source_bound_compensation(&normalized.action, evidence)?
+                {
+                    normalized.compensation = Some(compensation);
+                    // The top-level preconditions are already a conjunction.
+                    // Preserve an existing exact seal when every source guard
+                    // is already present instead of nesting a redundant All.
+                    let already_guarded = normalized.preconditions.contains(&source_guard)
+                        || matches!(&source_guard, Predicate::All(guards)
+                            if guards.iter().all(|guard| normalized.preconditions.contains(guard)));
+                    if !already_guarded {
+                        normalized.preconditions.push(source_guard);
+                        normalized.preconditions = normalize_predicates(&normalized.preconditions);
+                    }
+                }
+            }
             if let Some(materials) = &construction_materials {
                 materials.bind(snapshot, &mut normalized, &idempotency_key)?;
             }
@@ -574,14 +616,7 @@ fn validate_intent_shape(
 
 fn normalize_requested(requested: &RequestedAction) -> RequestedAction {
     let action = requested.action.normalized();
-    let compensation = requested
-        .compensation
-        .as_ref()
-        .map(Action::normalized)
-        .or(match &action {
-            Action::Pause { paused } => Some(Action::Pause { paused: !*paused }),
-            _ => None,
-        });
+    let compensation = requested.compensation.as_ref().map(Action::normalized);
     let mut postconditions = requested.postconditions.clone();
     if postconditions.is_empty()
         && let Action::Pause { paused } = &action
@@ -599,9 +634,9 @@ fn normalize_requested(requested: &RequestedAction) -> RequestedAction {
 }
 
 /// Fill omitted semantics from the reference action model: postconditions
-/// that prove the effect, a bounded obligation for temporal work, and an exact
-/// inverse compensation where the action fully determines it. Explicit caller
-/// choices always win; everything synthesized is sealed into the plan digest.
+/// that prove the effect and a bounded obligation for temporal work. Inverse
+/// setters additionally require the independently qualified planning source.
+/// Explicit caller choices win; everything synthesized is sealed into the plan.
 fn complete_reference_semantics(
     requested: &mut RequestedAction,
     idempotency_key: &str,
@@ -620,9 +655,6 @@ fn complete_reference_semantics(
             crate::effects::default_obligation(&requested.action, idempotency_key, fortress, now)?
                 .as_ref()
                 .map(normalize_obligation);
-    }
-    if requested.compensation.is_none() {
-        requested.compensation = crate::effects::default_compensation(&requested.action);
     }
     Ok(())
 }

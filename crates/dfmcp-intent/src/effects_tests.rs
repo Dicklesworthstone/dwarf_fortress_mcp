@@ -142,26 +142,38 @@ fn immediate_unit_actions_satisfy_their_reference_postconditions() -> Result<()>
 }
 
 #[test]
-fn compensation_is_the_exact_inverse_for_self_describing_actions() -> Result<()> {
+fn compensation_restores_a_qualified_prior_configuration() -> Result<()> {
     let mut s = world();
+    if let Some(unit) = s.graph.entities.get_mut(&UNIT_A) {
+        unit.fields
+            .insert("labor.MINE".to_owned(), known(Value::Bool(false), s.tick));
+    }
+    s.refresh_hash();
     let action = Action::SetLabor {
         units: vec![UNIT_A],
         labor: "MINE".to_owned(),
         enabled: true,
     };
+    let undo = default_compensation_with_evidence(
+        &action,
+        &dfmcp_world::PredicateEvidence::laboratory(&s)?,
+    )?
+    .ok_or_else(|| DfmcpError::new(ErrorCode::InternalInvariantViolation, "no compensation"))?;
     apply_effect(&mut s, &action, "k")?;
-    let undo = default_compensation(&action)
-        .ok_or_else(|| DfmcpError::new(ErrorCode::InternalInvariantViolation, "no compensation"))?;
     apply_effect(&mut s, &undo, "k")?;
     assert!(all_hold(
         &s,
         &default_postconditions(&undo, "k", s.fortress_id)
     ));
+    s.refresh_hash();
     assert!(
-        default_compensation(&Action::AssignSquad {
-            units: vec![UNIT_A],
-            squad: SQUAD
-        })
+        default_compensation_with_evidence(
+            &Action::AssignSquad {
+                units: vec![UNIT_A],
+                squad: SQUAD
+            },
+            &dfmcp_world::PredicateEvidence::laboratory(&s)?
+        )?
         .is_none()
     );
     Ok(())

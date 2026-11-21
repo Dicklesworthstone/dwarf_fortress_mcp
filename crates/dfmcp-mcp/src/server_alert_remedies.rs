@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use dfmcp_core::{Capability, DfmcpError, ErrorCode, IntentId, OperationContext, Result, RiskTier};
 use dfmcp_intent::{Intent, StaticPlanner};
-use dfmcp_world::WorldSnapshot;
+use dfmcp_world::{PredicateEvidence, WorldSnapshot};
 use serde_json::{Map, Value, json};
 
 use super::{PlanSource, civilian_recovery};
@@ -26,9 +26,13 @@ pub(super) fn qualify(
         let Some(remedy) = alert.get_mut("remedy").filter(|value| value.is_object()) else {
             continue;
         };
-        let fields = assessed
-            .entry(remedy.to_string())
-            .or_insert_with(|| assessment(context, lower(snapshot, recovery, context, remedy)));
+        let fields = assessed.entry(remedy.to_string()).or_insert_with(|| {
+            assessment(
+                snapshot,
+                context,
+                lower(snapshot, recovery, context, remedy),
+            )
+        });
         if let Some(remedy) = remedy.as_object_mut() {
             remedy.extend(fields.clone());
         }
@@ -111,7 +115,11 @@ fn lower(
         .map(|(intent, _)| intent)
 }
 
-fn assessment(context: &OperationContext, intent: Result<Intent>) -> Map<String, Value> {
+fn assessment(
+    snapshot: &WorldSnapshot,
+    context: &OperationContext,
+    intent: Result<Intent>,
+) -> Map<String, Value> {
     let mut fields = Map::new();
     fields.insert("available".to_owned(), json!(false));
     fields.insert("risk".to_owned(), Value::Null);
@@ -142,11 +150,16 @@ fn assessment(context: &OperationContext, intent: Result<Intent>) -> Map<String,
                 .require_checkpoint_at_or_above;
     fields.insert("risk".to_owned(), json!(risk.as_str()));
     let reversible = !intent.requested_actions.is_empty()
-        && intent.requested_actions.iter().all(|step| {
-            dfmcp_intent::effects::default_compensation(&step.action).is_some_and(|inverse| {
-                step.compensation
-                    .as_ref()
-                    .is_none_or(|compensation| *compensation == inverse)
+        && PredicateEvidence::laboratory(snapshot).is_ok_and(|evidence| {
+            intent.requested_actions.iter().all(|step| {
+                dfmcp_intent::effects::default_compensation_with_evidence(&step.action, &evidence)
+                    .is_ok_and(|inverse| {
+                        inverse.is_some_and(|inverse| {
+                            step.compensation
+                                .as_ref()
+                                .is_none_or(|compensation| *compensation == inverse)
+                        })
+                    })
             })
         });
     fields.insert(

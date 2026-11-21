@@ -58,19 +58,22 @@ fn military_advice_retains_guarded_risk_and_requires_real_checkpoint_authority()
             (Capability::ConfigureMilitary, RiskTier::Reversible),
         ],
     );
-    let denied = assessment(&context, Ok(intent.clone()));
+    let denied = assessment(&snapshot, &context, Ok(intent.clone()));
     assert_eq!(denied["available"], false);
     assert_eq!(denied["risk"], "guarded");
     assert_eq!(denied["reversibility"], "not_compensable");
     assert_eq!(denied["requires_checkpoint"], true);
     assert_eq!(denied["requires_confirmation"], false);
     context.grants[1].max_risk = RiskTier::Guarded;
-    assert_eq!(assessment(&context, Ok(intent.clone()))["available"], false);
+    assert_eq!(
+        assessment(&snapshot, &context, Ok(intent.clone()))["available"],
+        false
+    );
     context
         .grants
         .push(grant(&snapshot, Capability::Checkpoint, RiskTier::Guarded));
     let before = context.clone();
-    let allowed = assessment(&context, Ok(intent));
+    let allowed = assessment(&snapshot, &context, Ok(intent));
     assert_eq!(allowed["available"], true, "{allowed:?}");
     assert_eq!(
         context, before,
@@ -101,12 +104,15 @@ fn current_expiry_fortress_entity_scope_and_use_limits_are_not_capability_names(
             3 => military.remaining_uses = Some(0),
             _ => military.remaining_uses = Some(1),
         }
-        let result = assessment(&restricted, Ok(intent.clone()));
+        let result = assessment(&snapshot, &restricted, Ok(intent.clone()));
         assert_eq!(result["available"], false, "case {case}: {result:?}");
     }
     let mut scoped = base;
     scoped.grants[1].scope.entity_ids = BTreeSet::from([EntityId::new(1001), EntityId::new(8001)]);
-    assert_eq!(assessment(&scoped, Ok(intent))["available"], true);
+    assert_eq!(
+        assessment(&snapshot, &scoped, Ok(intent))["available"],
+        true
+    );
     Ok(())
 }
 
@@ -125,19 +131,22 @@ fn civilian_workflow_requires_guarded_global_logistics() -> Result<()> {
             (Capability::Checkpoint, RiskTier::Guarded),
         ],
     );
-    let denied = assessment(&context, Ok(intent.clone()));
+    let denied = assessment(&snapshot, &context, Ok(intent.clone()));
     assert_eq!(denied["risk"], "guarded");
     assert_eq!(denied["requires_checkpoint"], true);
     assert_eq!(denied["available"], false);
     context.grants[1].max_risk = RiskTier::Guarded;
-    assert_eq!(assessment(&context, Ok(intent.clone()))["available"], true);
+    assert_eq!(
+        assessment(&snapshot, &context, Ok(intent.clone()))["available"],
+        true
+    );
     context.grants[1].scope.entity_ids = BTreeSet::from([
         EntityId::new(1001),
         EntityId::new(1002),
         EntityId::new(9001),
     ]);
     assert_eq!(
-        assessment(&context, Ok(intent))["available"],
+        assessment(&snapshot, &context, Ok(intent))["available"],
         false,
         "named membership authority does not cover the global standing order"
     );
@@ -162,7 +171,7 @@ fn production_uses_current_lowering_and_admin_authority_is_respected() -> Result
             (Capability::ConfigureProduction, RiskTier::Reversible),
         ],
     );
-    let allowed = assessment(&context, Ok(intent));
+    let allowed = assessment(&snapshot, &context, Ok(intent));
     assert_eq!(allowed["available"], true, "{allowed:?}");
     assert_eq!(allowed["risk"], "reversible");
     assert_eq!(allowed["reversibility"], "not_compensable");
@@ -172,7 +181,7 @@ fn production_uses_current_lowering_and_admin_authority_is_respected() -> Result
         ..context
     };
     assert_eq!(
-        assessment(&administrator, actions(&snapshot, RECRUIT))["available"],
+        assessment(&snapshot, &administrator, actions(&snapshot, RECRUIT))["available"],
         true
     );
     let labor = actions(
@@ -180,8 +189,17 @@ fn production_uses_current_lowering_and_admin_authority_is_respected() -> Result
         r#"[{"action":{"kind":"set_labor","units":["1001"],"labor":"BREW","enabled":true}}]"#,
     )?;
     assert_eq!(
-        assessment(&administrator, Ok(labor))["reversibility"],
+        assessment(&snapshot, &administrator, Ok(labor))["reversibility"],
         "reversible"
+    );
+    let unknown_prior = actions(
+        &snapshot,
+        r#"[{"action":{"kind":"set_labor","units":["1001"],"labor":"UNOBSERVED_LABOR","enabled":true}}]"#,
+    )?;
+    assert_eq!(
+        assessment(&snapshot, &administrator, Ok(unknown_prior))["reversibility"],
+        "not_compensable",
+        "an unobserved prior setting cannot support a restoration claim"
     );
     Ok(())
 }

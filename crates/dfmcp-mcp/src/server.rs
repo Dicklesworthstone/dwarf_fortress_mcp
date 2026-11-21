@@ -53,6 +53,9 @@ mod restore_work;
 mod objectives;
 use objectives::{Objective, objective_history_roots};
 
+#[path = "recovery_compiler.rs"]
+mod recovery_compiler;
+
 #[path = "blueprint_source.rs"]
 mod blueprint_source;
 
@@ -1428,7 +1431,9 @@ fn recover_commit(
     };
     let recompiled = source
         .intent(IntentId::new(commit.intent_id), &sealed)
-        .and_then(|intent| StaticPlanner::default().prepare_laboratory(&sealed, &intent, &context));
+        .and_then(|intent| {
+            recovery_compiler::prepare_exact(&sealed, &intent, &context, commit.plan_digest)
+        });
     let plan = match recompiled {
         Ok(plan) if plan.digest == commit.plan_digest => plan,
         outcome => {

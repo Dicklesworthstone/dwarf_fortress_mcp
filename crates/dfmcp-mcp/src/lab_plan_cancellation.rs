@@ -199,6 +199,7 @@ pub(super) fn authorize(session: &LabSession, selected: &Selection, mode: Cancel
             let inverse_scope = compensation.scope();
             context.authorize(compensation.capability(), compensation.risk(),
                 &inverse_scope.entity_ids, inverse_scope.map_area)?;
+            session.adapter.validate_action_compensation(*id)?;
             if compensation.naturally_temporal()
                 && session.adapter.action_work_state(*id)? != dfmcp_intent::EffectWorkState::NeverDispatched
             {

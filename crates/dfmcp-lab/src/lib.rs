@@ -18,6 +18,7 @@ use dfmcp_intent::{
     Action, EffectWorkState, ObligationRuntime, ObligationStatus, PlanStep, PreparedPlan, effects,
     inspect_effect_work,
 };
+mod compensation;
 pub mod durable;
 pub mod event_history;
 pub mod faults;
@@ -29,6 +30,8 @@ pub use recovered_effect_drain::{RecoveredWorkDrainReceipt, RecoveredWorkRef};
 #[cfg(test)]
 #[path = "civilian_release_tests.rs"]
 mod civilian_release_tests;
+#[cfg(test)]
+mod compensation_tests;
 #[cfg(test)]
 mod effect_drain_tests;
 #[cfg(test)]
@@ -125,6 +128,7 @@ struct LabAction {
     /// Whether the step's effect was ever applied. A step still waiting on
     /// its dependencies has nothing to compensate.
     dispatched: bool,
+    compensation_guard: Option<compensation::CompensationGuard>,
 }
 
 #[derive(Clone, Debug)]
@@ -143,6 +147,8 @@ pub struct MemoryAdapter {
     /// Exact source and first observation for this recovery. Restore or external
     /// injection invalidates this lineage along with live execution handles.
     recovery_origin: Option<(StateAnchor, StateAnchor)>,
+    /// Live-only clock writer incarnation, including explicit no-op reassertions.
+    pause_generation: u64,
 }
 
 impl MemoryAdapter {
@@ -177,6 +183,7 @@ impl MemoryAdapter {
                 schema_digest: Digest32::of_bytes(b"dfmcp-memory-lab-schema-v1"),
             },
             snapshot,
+            pause_generation: 0,
             prepared: BTreeMap::new(),
             plans: BTreeMap::new(),
             actions: BTreeMap::new(),
@@ -305,6 +312,23 @@ impl MemoryAdapter {
         self.actions.get(&action_id).map(|action| &action.step)
     }
 
+    /// Read-only preflight for a selected live compensation. The coordinator
+    /// still owns current authority; finalization repeats this custody check.
+    pub fn validate_action_compensation(&self, action_id: ActionId) -> Result<()> {
+        let action = self.actions.get(&action_id).ok_or_else(|| {
+            DfmcpError::new(
+                ErrorCode::InvalidRequest,
+                format!("unknown action {action_id}"),
+            )
+        })?;
+        if action.dispatched
+            && let Some(guard) = &action.compensation_guard
+        {
+            guard.validate(&action.step, &self.snapshot, self.pause_generation)?;
+        }
+        Ok(())
+    }
+
     /// Pause under fresh authority independently of retained action handles.
     /// Emergency session drains need this boundary after recovery, when work
     /// can remain in the world although no foreground action handle survives.
@@ -318,7 +342,7 @@ impl MemoryAdapter {
         self.check_anchor(context.anchor)?;
         context.authorize(Capability::Observe, RiskTier::ReadOnly, &[], None)?;
         context.authorize(Capability::ControlClock, RiskTier::Reversible, &[], None)?;
-        apply_action(&mut self.snapshot, &Action::Pause { paused: true }, "")?;
+        self.apply_current_action(&Action::Pause { paused: true }, "")?;
         Ok(evidence(
             self.snapshot.anchor(),
             EvidenceKind::Postcondition,
@@ -416,7 +440,9 @@ impl MemoryAdapter {
                             "emergency pause requires an available action budget",
                         )
                     })?;
-                apply_action(&mut self.snapshot, &Action::Pause { paused: true }, "")?;
+            }
+            if mode == CancelMode::EmergencyPauseAndDrain {
+                self.apply_current_action(&Action::Pause { paused: true }, "")?;
             }
             let (before, after, stopped_work) = drain_step_work(
                 &mut self.snapshot,
@@ -687,6 +713,23 @@ impl MemoryAdapter {
         })
     }
 
+    fn apply_current_action(&mut self, action: &Action, key: &str) -> Result<()> {
+        let next_pause_generation = if matches!(action, Action::Pause { .. }) {
+            self.pause_generation.checked_add(1).ok_or_else(|| {
+                DfmcpError::new(
+                    ErrorCode::BudgetExceeded,
+                    "laboratory clock writer generation exhausted",
+                )
+            })?
+        } else {
+            self.pause_generation
+        };
+        apply_action(&mut self.snapshot, action, key)?;
+        self.pause_generation = next_pause_generation;
+        compensation::supersede_written_guards(&mut self.actions, action);
+        Ok(())
+    }
+
     fn dispatch_step(
         &mut self,
         plan_id: PlanId,
@@ -702,6 +745,7 @@ impl MemoryAdapter {
             ));
         }
         let mut obligation_runtime = None;
+        let mut compensation_guard = None;
         let state = if self.dependencies_verified(plan_id, step) {
             let observation = PredicateEvidence::laboratory(&self.snapshot)?;
             if !predicates_established(&observation, &step.preconditions)? {
@@ -711,7 +755,12 @@ impl MemoryAdapter {
                 ));
             }
             obligation_runtime = register_step_obligation(action_id, step, &self.snapshot)?;
-            apply_action(&mut self.snapshot, &step.action, &step.idempotency_key)?;
+            compensation_guard =
+                compensation::CompensationGuard::capture_source(step, &self.snapshot)?;
+            self.apply_current_action(&step.action, &step.idempotency_key)?;
+            if let Some(guard) = &mut compensation_guard {
+                guard.bind_effect(&step.action, &self.snapshot, self.pause_generation)?;
+            }
             let observation = PredicateEvidence::laboratory(&self.snapshot)?;
             if let Some(runtime) = obligation_runtime.as_mut() {
                 obligation_commit_state(runtime, action_id, &observation)?
@@ -754,6 +803,7 @@ impl MemoryAdapter {
                 obligation_runtime,
                 cancel_mode: None,
                 dispatched: state != CommitState::Prepared,
+                compensation_guard,
             },
         );
         Ok(receipt)
@@ -827,9 +877,15 @@ impl MemoryAdapter {
                 ));
             }
             obligation_runtime = register_step_obligation(action_id, &step, &self.snapshot)?;
-            apply_action(&mut self.snapshot, &step.action, &step.idempotency_key)?;
+            let mut compensation_guard =
+                compensation::CompensationGuard::capture_source(&step, &self.snapshot)?;
+            self.apply_current_action(&step.action, &step.idempotency_key)?;
+            if let Some(guard) = &mut compensation_guard {
+                guard.bind_effect(&step.action, &self.snapshot, self.pause_generation)?;
+            }
             if let Some(stored) = self.actions.get_mut(&action_id) {
                 stored.dispatched = true;
+                stored.compensation_guard = compensation_guard;
             }
         }
 
@@ -1397,8 +1453,11 @@ impl GameAdapter for MemoryAdapter {
         }
 
         let state = CommitState::CancelRequested;
-        if mode == CancelMode::EmergencyPauseAndDrain && !self.snapshot.paused {
-            apply_action(&mut self.snapshot, &Action::Pause { paused: true }, "")?;
+        if mode == CancelMode::CompensateReversible {
+            self.validate_action_compensation(action_id)?;
+        }
+        if mode == CancelMode::EmergencyPauseAndDrain {
+            self.apply_current_action(&Action::Pause { paused: true }, "")?;
         }
         if let Some(stored) = self.actions.get_mut(&action_id) {
             stored.cancel_mode = Some(mode);
@@ -1465,6 +1524,9 @@ impl GameAdapter for MemoryAdapter {
                 ));
             }
             let mut compensation_action = None;
+            if action.cancel_mode == Some(CancelMode::CompensateReversible) {
+                self.validate_action_compensation(action_id)?;
+            }
             let (_, _, stopped_work) =
                 drain_step_work(&mut self.snapshot, &action.step, action.dispatched, context)?;
             if action.cancel_mode == Some(CancelMode::CompensateReversible) && action.dispatched {
@@ -1504,7 +1566,7 @@ impl GameAdapter for MemoryAdapter {
                         &action.step,
                         &self.snapshot,
                     )?;
-                    apply_action(&mut self.snapshot, compensation, &compensation_key)?;
+                    self.apply_current_action(compensation, &compensation_key)?;
                     let observation = PredicateEvidence::laboratory(&self.snapshot)?;
                     let postconditions = effects::default_postconditions(
                         compensation,
@@ -2083,11 +2145,14 @@ mod tests {
         };
         for fact in ineligible_facts(GameTick(1)) {
             let mut source = snapshot();
+            let source_time_valid = fact.observed_at <= source.tick;
             add_authority_fields(&mut source, fact);
-            assert!(dfmcp_world::evaluate(
-                &source,
-                &authority_predicate("ready")
-            ));
+            // Generic truth also rejects future facts; provenance rejection
+            // remains the adapter's independent responsibility in every case.
+            assert_eq!(
+                dfmcp_world::evaluate(&source, &authority_predicate("ready")),
+                source_time_valid
+            );
             // An otherwise sealed plan can arrive from another planner. The
             // adapter must enforce evidence authority independently.
             let intent = unpause_intent(&source, 31, None);
