@@ -1,5 +1,40 @@
 # Implementation Status
 
+## Unreleased — Minimize cost for bounded observed network demand
+
+The world graph API now implements the finite, nonnegative-cost `GA-MCF`
+model: maximize delivery up to a positive requested amount, then minimize cost
+at that value. All selected directed edges require qualified nonnegative
+integer capacities and per-unit costs, plus exact common source-recorded units
+for both dimensions, including disconnected and zero-capacity edges.
+
+Deterministic shortest residual paths use global integer potentials and
+bottleneck augmentation. A separate pass verifies capacities, conservation,
+exact total cost and nonnegative reduced costs on every positive residual arc.
+Unmet demand includes an equal-capacity minimum cut. Satisfied demand makes no
+maximum-throughput claim. Original edge identity, revisions, endpoint
+generations, facts, scope, demand, policy and bounds remain witnessed.
+Work/frontier/input bounds, cancellation, no graph-depth recursion and checked
+u128/i128 arithmetic apply throughout.
+
+Actual core/world libraries compiled with warning denial on latest nightly
+rustc 1.102.0-nightly (c7d5ba59d, 2026-11-20). All 16 independent integration
+tests passed, including 3,684 exhaustive integer-assignment oracle cases,
+residual rerouting, global dual checks, deep graphs, provenance, exact bounds,
+cancellation and overflow. Inventories confirmed unchanged source/test bytes
+through that execution. These are direct actual-source component checks.
+
+After that pass, the final source packages certificate arguments into a private
+`CertificateInput` struct to avoid an oversized argument list. The semantics
+are unchanged and the recovered final bytes were independently reviewed and
+read back from GitHub; a final formatted-source rebuild/rerun did not complete
+before repeated executor outages. The prior pass is not a final-source or full
+workspace qualification claim. Query integration follows separately; native
+collection, gameplay, transport and production admission remain unestablished.
+
+Owner: `df-franken-storage-mvcc-54h.4.5`, retained in progress for final
+integration qualification. See `docs/MIN_COST_FLOW.md`.
+
 ## Unreleased — Query observed network throughput and bottleneck cuts
 
 The existing structured `fortress_query` surface now accepts `max_flow` on

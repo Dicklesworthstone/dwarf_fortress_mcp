@@ -149,6 +149,13 @@ throughput assertion or game mutation.
 
 This is useful for planning allocations, not issuing individual jobs blindly. Costs and capacities come from an anchor; the output becomes a candidate intent set. Integer algorithms and checked arithmetic are preferred for deterministic replay.
 
+The implemented finite, nonnegative-cost model is described in
+`MIN_COST_FLOW.md`. It maximizes delivery up to an explicit demand, minimizes
+cost at that value, and independently verifies conservation and globally
+feasible residual potentials. Unmet demand includes an equal-capacity cut.
+All selected edges require qualified capacities, per-unit costs and common
+source-recorded units; no allocation authorizes an effect.
+
 ### 6.9 Matching and assignment
 
 Bipartite or weighted matching supports dwarf-to-job, bed-to-patient, squad-to-position, workshop-to-order, and vehicle-to-route candidates. Feasibility filters are applied before optimization. The objective is lexicographic unless a versioned scalarization policy says otherwise:

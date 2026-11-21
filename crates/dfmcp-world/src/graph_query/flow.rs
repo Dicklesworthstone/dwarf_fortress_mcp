@@ -95,7 +95,7 @@ fn qualified_value(fact: &Fact, tick: GameTick) -> Option<&Value> {
     }
 }
 
-fn capacity(fact: &Fact, tick: GameTick) -> Option<u64> {
+pub(super) fn capacity(fact: &Fact, tick: GameTick) -> Option<u64> {
     match qualified_value(fact, tick)? {
         Value::U64(value) => Some(*value),
         Value::I64(value) => u64::try_from(*value).ok(),
@@ -103,7 +103,7 @@ fn capacity(fact: &Fact, tick: GameTick) -> Option<u64> {
     }
 }
 
-fn unit(fact: &Fact, tick: GameTick) -> Option<&str> {
+pub(super) fn unit(fact: &Fact, tick: GameTick) -> Option<&str> {
     match qualified_value(fact, tick)? {
         Value::Text(value)
             if !value.trim().is_empty()

@@ -104,7 +104,18 @@
       ],
       "exactness": "exact",
       "tie_break": "cost_then_stable_edge_key",
-      "refresh": "query-time pinned snapshot"
+      "refresh": "query-time pinned snapshot",
+      "reference_implementations": [
+        {
+          "api": "dfmcp_world::graph_query::minimum_cost_flow",
+          "policy": "observed-directed-demand-min-cost-global-potentials-stable-edge/1",
+          "source": "crates/dfmcp-world/src/graph_query/min_cost_flow.rs",
+          "contract": "docs/MIN_COST_FLOW.md",
+          "numeric_policy": "checked_finite_nonnegative_capacities_and_costs_with_equal_source_units",
+          "authority": "observed_projection_analysis_only",
+          "certificate": "capacity_conservation_global_residual_dual_and_shortfall_cut"
+        }
+      ]
     },
     {
       "id": "GA-MATCH",

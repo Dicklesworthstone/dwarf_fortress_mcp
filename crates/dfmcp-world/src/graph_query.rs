@@ -29,6 +29,12 @@ pub use flow::{
     FLOW_POLICY, FlowAnalysis, FlowEdge, FlowQuery, maximum_flow, maximum_flow_with_check,
 };
 
+mod min_cost_flow;
+pub use min_cost_flow::{
+    CostFlowCut, CostFlowEdge, CostFlowPotential, MIN_COST_FLOW_POLICY, MinCostFlowAnalysis,
+    MinCostFlowQuery, minimum_cost_flow, minimum_cost_flow_with_check,
+};
+
 mod scheduling;
 pub use scheduling::{
     DEPENDENCY_SCHEDULE_POLICY, DependencySchedule, DependencyScheduleQuery, ScheduleFront,

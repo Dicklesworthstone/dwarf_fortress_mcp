@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased — Minimize finite network delivery cost
+
+- Implement bounded minimum-cost delivery over qualified observed capacities,
+  costs and common source-recorded units, preserving original edge identities.
+- Verify allocation feasibility and global residual dual potentials; include an
+  equal-capacity cut for unmet demand and use checked wide integer arithmetic.
+- Preserve source/scope/policy witnesses, deterministic ties, cancellation and
+  complete input/work/frontier bounds without native effects.
+- Pass 16 actual-source core integration tests with 3,684 independent exhaustive
+  oracle cases before a final private certificate-argument refactor. Final
+  rebuilt-source and full integration qualification remain pending after
+  executor outages; exact scope is recorded in IMPLEMENTATION_STATUS.md.
+
 ## Unreleased — Expose network bottlenecks through the existing query tool
 
 - Add structured `max_flow` to current and retained laboratory queries, generic
