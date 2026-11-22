@@ -71,7 +71,7 @@ fn lower(
     let source = if let Some(raw) = arguments.get("actions").and_then(Value::as_str) {
         PlanSource::Actions {
             summary,
-            raw: raw.to_owned(),
+            raw: crate::lab_world::canonical_current_actions(raw)?,
         }
     } else if let Some(paused_target) = arguments.get("paused_target").and_then(Value::as_bool) {
         PlanSource::Pause {

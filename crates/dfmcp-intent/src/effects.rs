@@ -533,6 +533,10 @@ fn item_stock_field(token: &str) -> String {
 
 /// Postconditions that prove `action` took effect, or empty when the action
 /// family has no reference semantics (extensions must state their own).
+///
+/// The historical stockpile template proves its filter only. Versioned
+/// stockpile request compilers use `complete_stockpile_postconditions` so old
+/// retained plan digests can still reconstruct their original interpretation.
 #[must_use]
 pub fn default_postconditions(
     action: &Action,
@@ -626,6 +630,40 @@ pub fn default_postconditions(
         )],
         Action::Extension { .. } => Vec::new(),
     }
+}
+
+/// Complete configuration proof for the registered stockpile settings source.
+/// Omitted optional capacities are not writes and therefore are not new goals.
+/// An explicit zero is an exact requested setting, never an omitted value.
+#[must_use]
+pub fn complete_stockpile_postconditions(action: &Action) -> Option<Vec<Predicate>> {
+    let Action::ConfigureStockpile {
+        stockpile,
+        accepts,
+        max_bins,
+        max_barrels,
+        max_wheelbarrows,
+    } = action
+    else {
+        return None;
+    };
+    let mut predicates = vec![
+        Predicate::EntityKind {
+            entity_id: *stockpile,
+            kind: EntityKind::Stockpile,
+        },
+        field_eq(*stockpile, STOCKPILE_ACCEPTS_FIELD, accepts_value(accepts)),
+    ];
+    for (field, requested) in [
+        (STOCKPILE_MAX_BINS_FIELD, max_bins),
+        (STOCKPILE_MAX_BARRELS_FIELD, max_barrels),
+        (STOCKPILE_MAX_WHEELBARROWS_FIELD, max_wheelbarrows),
+    ] {
+        if let Some(value) = requested {
+            predicates.push(field_eq(*stockpile, field, Value::U64(u64::from(*value))));
+        }
+    }
+    Some(predicates)
 }
 
 /// Default bounded obligation for naturally temporal actions. The terminal is
@@ -2655,3 +2693,7 @@ mod construction_materials_tests;
 #[cfg(test)]
 #[path = "effects_provisions_tests.rs"]
 mod provisions_tests;
+
+#[cfg(test)]
+#[path = "effects_stockpile_tests.rs"]
+mod stockpile_tests;

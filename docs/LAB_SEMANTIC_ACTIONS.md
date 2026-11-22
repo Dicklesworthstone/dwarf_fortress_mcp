@@ -20,7 +20,7 @@ Fortress or DFHack behaviour**; progress rates are a laboratory calibration.
 | `set_labor` | `labor.<LABOR>` on each unit | field equality per unit | no |
 | `set_burrow_membership` | `burrow.<id>` on each unit | field equality per unit | no |
 | `assign_squad` | `squad` on each unit | field equality per unit | no |
-| `configure_stockpile` | `accepts`, optional bin/barrel/wheelbarrow limits | `accepts` equality | no |
+| `configure_stockpile` | `accepts`, optional bin/barrel/wheelbarrow limits | exact stockpile kind, filters and every supplied capacity in current action sources | no |
 | `set_standing_order` | `standing_order.<key>` on the fortress settings entity | field equality | no |
 
 Entities an action creates get an identity derived only from the step's
@@ -205,6 +205,55 @@ re-checks that authority. Effect capabilities are never granted by default.
 The `starter_fortress` scenario is 48x48 rock at z=9..11 with, at z=10, a carved
 10x3 hall at (0..9, 0..2), seven dwarves (entity IDs 1001–1007), a stockpile
 (2001), a burrow (3001) and a squad (4001).
+
+## Complete stockpile settings
+
+Stockpile configuration can change capacity while retaining the same accepted
+categories. The current action compiler seals every supplied setting into both
+the step's postconditions and the original intent's terminal condition:
+
+```json
+[
+  {
+    "action": {
+      "kind": "configure_stockpile",
+      "stockpile": "2001",
+      "accepts": ["FOOD"],
+      "max_bins": 0,
+      "max_barrels": 8,
+      "max_wheelbarrows": 2
+    }
+  }
+]
+```
+
+`accepts` replaces the complete category set. Each optional capacity is an
+exact unsigned 32-bit setting when supplied, including zero; omission leaves
+that setting unchanged and adds no goal for it. A request whose filters already
+hold but whose requested capacity differs remains actionable. Only a request
+whose complete requested settings already hold is rejected as already
+satisfied. Missing, unavailable or future-dated capacity evidence cannot prove
+completion. The original goal can become false again after another authorized
+configuration changes one of its requested settings, while its first-achievement
+history remains intact.
+
+Normal Plan and ConfigureLogistics authority, source revalidation, preparation,
+idempotency and proof still govern execution. Candidate comparisons and their
+fresh selections use the same complete settings compiler. This remains a
+laboratory action without a native stockpile route or a new MCP tool.
+
+Fresh intake automatically records the closed `stockpile_settings_v1` proof
+marker on each stockpile step before retaining the source. Callers can repeat
+that marker but cannot select an older or unknown proof generation; duplicate,
+null and misplaced markers are refused. The normalized source must still fit
+the existing action-request byte bound. Ordinary callers keep using the action
+array above and do not need to supply the marker.
+
+Unmarked archived arrays preserve their historical filter-only goal and exact
+sealed plan identity. Recovery never upgrades old proof into evidence for
+capacities. The shared historical default effect template is unchanged; the
+current source explicitly supplies the complete postconditions. Other action
+families retain their existing source bytes and semantics.
 
 ## Caller guards for labor and burrow setters
 

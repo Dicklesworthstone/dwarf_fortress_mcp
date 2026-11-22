@@ -1,5 +1,33 @@
 # Implementation Status
 
+## Unreleased — Prove every requested stockpile setting
+
+Fresh laboratory `configure_stockpile` requests now seal the stockpile kind,
+accepted categories and every explicitly supplied bin, barrel and wheelbarrow
+limit as both step postconditions and the complete original goal. Capacity-only
+changes are plannable even when filters already match. Omitted limits retain
+their existing settings; an explicit zero remains a real requested value.
+Later capacity changes make current original-goal truth false while historical
+first achievement remains history.
+
+A closed `stockpile_settings_v1` source marker records the stronger semantics
+before current plan, candidate-comparison or remedy source custody. Original
+bytes are validated before canonicalization, so duplicate fields, unknown/null
+markers and markers on another action cannot be laundered by a JSON roundtrip.
+Unrelated action sources retain their exact bytes. Unmarked historical sources
+keep their original filter-only plan interpretation and can reconstruct only
+their exact old seal; they are not upgraded during recovery.
+
+Three new intent tests passed in the actual repository with locked/offline
+dependencies on the latest nightly. Three source/parser tests and four real
+facade/source-recovery/comparison tests are authored; their remaining execution
+is tracked separately. Independent source review and whitespace checks passed.
+Full MCP checking was killed in unchanged Asupersync before MCP source checking.
+No complete-workspace, modern-stdio, native-game or admission pass is claimed.
+
+Owner: `df-lab-stockpile-settings-k8s`.
+See `docs/LAB_SEMANTIC_ACTIONS.md#complete-stockpile-settings`.
+
 ## Unreleased — Cancel selected projects across durable recovery
 
 The existing `plans:<digest>,<digest>` cancellation scope now accepts a chosen

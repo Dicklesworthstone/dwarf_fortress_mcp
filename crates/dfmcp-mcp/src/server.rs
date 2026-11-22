@@ -59,6 +59,10 @@ mod recovery_compiler;
 #[path = "blueprint_source.rs"]
 mod blueprint_source;
 
+#[cfg(test)]
+#[path = "stockpile_goal_tests.rs"]
+mod stockpile_goal_tests;
+
 #[path = "plan_resources.rs"]
 pub(crate) mod plan_resources;
 
@@ -4282,7 +4286,13 @@ fn plan_request_legacy(
                         };
                         PlanSource::Blueprint { summary, raw }
                     }
-                    (_, Some(raw), None) => PlanSource::Actions { summary, raw },
+                    (_, Some(raw), None) => {
+                        let raw = match crate::lab_world::canonical_current_actions(&raw) {
+                            Ok(raw) => raw,
+                            Err(error) => return dfmcp_error_payload("fortress.plan", &error),
+                        };
+                        PlanSource::Actions { summary, raw }
+                    }
                     (None, None, None) => PlanSource::Pause {
                         summary,
                         paused_target: paused_target.is_some_and(|value| value),
@@ -4357,11 +4367,20 @@ fn semantic_intent(
             })?);
         let action = requested.action.normalized();
         let key = dfmcp_intent::derive_step_idempotency_key(id, snapshot.anchor(), step, &action);
-        terminal.extend(dfmcp_intent::effects::default_postconditions(
-            &action,
-            &key,
-            snapshot.fortress_id,
-        ));
+        if matches!(action, Action::ConfigureStockpile { .. })
+            && !requested.postconditions.is_empty()
+        {
+            // The retained stockpile_settings_v1 source supplies the complete
+            // settings predicate. Unmarked archived sources keep their
+            // original filter-only goal and original sealed digest.
+            terminal.extend(requested.postconditions.clone());
+        } else {
+            terminal.extend(dfmcp_intent::effects::default_postconditions(
+                &action,
+                &key,
+                snapshot.fortress_id,
+            ));
+        }
         max_risk = max_risk.max(action.risk());
     }
     Ok(Intent {

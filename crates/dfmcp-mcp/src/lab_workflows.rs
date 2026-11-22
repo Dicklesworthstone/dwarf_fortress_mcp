@@ -14,6 +14,9 @@ mod civilian_protection_workflow;
 mod labor_analysis_query;
 #[path = "labor_workflow.rs"]
 mod labor_workflow;
+#[path = "stockpile_source.rs"]
+mod stockpile_source;
+pub(crate) use stockpile_source::canonical_current_actions;
 
 use dfmcp_core::{DfmcpError, ErrorCode, Result};
 use dfmcp_intent::RequestedAction;

@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased — Complete stockpile configuration goals
+
+- Make current laboratory stockpile goals prove filters and every supplied
+  bin, barrel and wheelbarrow capacity, including capacity-only changes and zero.
+- Retain omitted limits and expose a later capacity reversal as an unmet
+  current original goal without rewriting historical achievement.
+- Seal a closed complete-settings source generation through direct requests,
+  candidate comparisons and remedies, preserving exact historical recovery.
+- Add three intent, three parser/source and four real-facade regressions.
+  The three actual intent tests pass; broader execution remains separate.
+
 ## Unreleased — Stop a chosen project group after recovery
 
 - Extend the existing selected-set cancellation scope to exact durable recovered

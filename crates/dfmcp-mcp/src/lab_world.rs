@@ -484,6 +484,23 @@ struct StepSpec {
     depends_on: Vec<u32>,
     #[serde(default)]
     preconditions: Vec<ActionGuardSpec>,
+    #[serde(default, deserialize_with = "present_stockpile_proof")]
+    proof: Option<StockpileProof>,
+}
+
+#[derive(Deserialize)]
+enum StockpileProof {
+    #[serde(rename = "stockpile_settings_v1")]
+    Complete,
+}
+
+fn present_stockpile_proof<'de, D>(
+    deserializer: D,
+) -> std::result::Result<Option<StockpileProof>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    StockpileProof::deserialize(deserializer).map(Some)
 }
 
 const MAX_ACTION_GUARD_NODES: usize = 256;
@@ -1048,6 +1065,14 @@ pub(crate) fn parse_steps(raw: &str) -> Result<Vec<RequestedAction>> {
         .into_iter()
         .map(|step| {
             let action = action(step.action)?;
+            let postconditions = match step.proof {
+                Some(StockpileProof::Complete) => {
+                    effects::complete_stockpile_postconditions(&action).ok_or_else(|| {
+                        invalid("stockpile_settings_v1 proof requires configure_stockpile")
+                    })?
+                }
+                None => Vec::new(),
+            };
             if step.preconditions.len() > MAX_LIST_ITEMS {
                 return Err(invalid("a step accepts at most 64 action preconditions"));
             }
@@ -1068,7 +1093,7 @@ pub(crate) fn parse_steps(raw: &str) -> Result<Vec<RequestedAction>> {
                     .into_iter()
                     .map(|guard| action_guard(guard, 0, &mut guard_nodes))
                     .collect::<Result<Vec<_>>>()?,
-                postconditions: Vec::new(),
+                postconditions,
                 compensation: None,
                 obligation: None,
                 depends_on: step.depends_on,

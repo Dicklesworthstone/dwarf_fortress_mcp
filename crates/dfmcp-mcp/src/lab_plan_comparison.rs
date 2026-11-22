@@ -321,7 +321,7 @@ impl Candidate {
                     .summary
                     .clone()
                     .unwrap_or_else(|| super::describe_actions(&raw)),
-                raw,
+                raw: crate::lab_world::canonical_current_actions(&raw)?,
             });
         }
         let blueprint = self
