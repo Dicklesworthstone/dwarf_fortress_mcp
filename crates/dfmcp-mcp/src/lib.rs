@@ -72,6 +72,9 @@ pub mod tasks;
 pub mod tree_harvest_server;
 mod witness;
 pub mod workshop_construction_server;
+mod workshop_production_config;
+mod workshop_production_runtime;
+pub mod workshop_production_server;
 mod world_changes;
 
 pub use admission::{AdmissionProvenance, current_admission_provenance, run_live_stdio};

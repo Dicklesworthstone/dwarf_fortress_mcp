@@ -298,7 +298,26 @@
     "scripts/qualify_local.sh",
     "docs/WORKSHOP_CONSTRUCTION_MCP.md",
     "docs/TREE_HARVEST_MCP.md",
-    "docs/WORKSHOP_CLOCK.md"
+    "docs/WORKSHOP_CLOCK.md",
+    "crates/dfmcp-mcp/src/workshop_construction_server/parent_config.rs",
+    "crates/dfmcp-mcp/src/workshop_construction_server/parent_owner.rs",
+    "crates/dfmcp-mcp/src/workshop_production_config.rs",
+    "crates/dfmcp-mcp/src/workshop_production_config_tests.rs",
+    "crates/dfmcp-mcp/src/workshop_production_runtime.rs",
+    "crates/dfmcp-mcp/src/workshop_production_runtime_tests.rs",
+    "crates/dfmcp-mcp/src/workshop_production_server.rs",
+    "crates/dfmcp-mcp/src/workshop_production_server_tests.rs",
+    "crates/dfmcp-mcp/src/live_production_runtime.rs",
+    "crates/dfmcp-mcp/src/live_production_runtime/config.rs",
+    "crates/dfmcp-mcp/src/live_production_runtime/parent_config_tests.rs",
+    "crates/dfmcp-mcp/src/live_production_runtime/workshop_parent.rs",
+    "crates/dfmcp-mcp/src/live_production_server.rs",
+    "crates/dfmcp-mcp/src/live_production_presentation.rs",
+    "crates/dwarf-fortress-mcp/src/main.rs",
+    "tests/stdio/gameplay_cli.py",
+    "crates/dwarf-fortress-mcp/tests/gameplay_cli.rs",
+    "docs/WORKSHOP_PRODUCTION_MCP.md",
+    "docs/COMBINED_PRODUCTION_MCP.md"
   ],
   "upstream_api_inspection": {
     "dfhack_revision": "0bf381cc1615656acf756e6e67573fffca715125",
@@ -405,7 +424,12 @@
     "clock_mcp_config_cases": 7,
     "clock_mcp_presentation_cases": 12,
     "clock_python_stdio_cases": 10,
-    "production_handoff_mcp_cases": 6
+    "production_handoff_mcp_cases": 6,
+    "staged_config_cases": 10,
+    "staged_production_child_config_cases": 4,
+    "staged_runtime_cases": 4,
+    "staged_server_cases": 7,
+    "gameplay_cli_python_cases": 3
   },
   "shared_native_engine": {
     "source": "bridge/common/one_attempt_native.h",
@@ -618,5 +642,55 @@
     "import_requirement": "release the Workshop owner, reopen exact donor custody Offline and freshly qualify original completion before every production effect",
     "native_protocols_unchanged": true,
     "public_tools_added": false
+  },
+  "staged_production_consumer": {
+    "profile": [
+      "serve-gameplay-dev",
+      "workshop-production"
+    ],
+    "configuration_schema": "dfmcp.workshop-production-development/1",
+    "recovery_schema": "dfmcp.workshop-production-recovery/1",
+    "owner": "workshop_production_runtime::Runtime",
+    "stages": [
+      "workshop",
+      "transition",
+      "production"
+    ],
+    "public_tools_added": false,
+    "native_protocols_unchanged": true,
+    "production_admitted": false,
+    "one_session": true,
+    "monotone_parent_request_ids": true,
+    "all_operator_configurations_checked_before_initial_owner_open": true,
+    "empty_production_custody_opened_before_workshop": true,
+    "exact_completed_handoff_required": true,
+    "configured_workshop_clock_must_be_settled": true,
+    "transition_entry": "Runtime::begin_production",
+    "handoff_native_calls": 0,
+    "construction_writer_released_before_import": true,
+    "donor_import_mode": "offline",
+    "transition_reinitializes_native_custody": false,
+    "transition_failure_retains_stage_and_handoff": true,
+    "transition_retry": "read-only import of the same retained original",
+    "transition_prepaid_work_bytes": 1342177280,
+    "construction_clock_and_production_reviews_separate": true,
+    "authority_tick_floor_distinct_from_canonical_anchor": true,
+    "cached_handoff_verification_is_historical": true,
+    "fresh_workshop_prerequisite_before_production_effect": true,
+    "cross_stage_canonical_continuity": "unknown",
+    "current_workshop_completion_proven_by_handoff": false,
+    "complete_cross_stage_goal_proven": false,
+    "automatic_redispatch": false,
+    "parent_journal": false,
+    "external_checkpoint_required": true,
+    "recovery_references": [
+      "parent",
+      "workshop",
+      "production",
+      "production_handoff"
+    ],
+    "transition_request": {
+      "kind": "begin_production"
+    }
   }
 }

@@ -334,7 +334,7 @@ fn next_step(
         "Inspect the observed eligibility blockers before another observation or plan.",
     )
 }
-pub(super) fn packet(
+pub(crate) fn packet(
     operation: &str,
     session: Option<SessionId>,
     request: Option<RequestId>,

@@ -24,6 +24,13 @@ completion and broad fortress competence remain unproved. Exact evidence and
 the still-open restart-timeout and qualification issues are recorded in
 [`IMPLEMENTATION_STATUS.md`](IMPLEMENTATION_STATUS.md).
 
+For a construction-to-production session, use
+[`serve-gameplay-dev workshop-production`](docs/WORKSHOP_PRODUCTION_MCP.md).
+It carries the exact completed original workshop into already-open production
+custody, then requires fresh workforce observations and separately reviewed
+labor and finite-order effects. Recovery retains both originals and their
+independent clocks; source availability does not establish live qualification.
+
 The motivating problem is not merely “let a model press keys.” Dwarf Fortress is an unusually rich
 long-horizon environment, but a naive automation layer would expose incomplete observations,
 command acknowledgements mistaken for success, unsafe retries, version drift, unbounded output,
@@ -188,6 +195,7 @@ also accepts one closed startup profile:
 ```text
 dwarf-fortress-mcp serve-gameplay-dev tree
 dwarf-fortress-mcp serve-gameplay-dev workshop
+dwarf-fortress-mcp serve-gameplay-dev workshop-production
 dwarf-fortress-mcp serve-gameplay-dev manager-v1-23
 dwarf-fortress-mcp serve-gameplay-dev bounded-clock
 dwarf-fortress-mcp serve-gameplay-dev finite-bed
@@ -196,6 +204,7 @@ dwarf-fortress-mcp serve-gameplay-dev labor-order
 
 These select the existing [Tree 1.21](docs/TREE_HARVEST_MCP.md),
 [workshop 1.20](docs/WORKSHOP_CONSTRUCTION_MCP.md),
+[staged workshop and production](docs/WORKSHOP_PRODUCTION_MCP.md),
 [cache-bearing Manager 1.23](docs/MANAGER_APPOINTMENT_V1_23.md),
 [standalone clock 1.13](docs/BOUNDED_SIMULATION_MCP.md), or
 [finite furniture-order](docs/SEMANTIC_WORK_ORDER_MCP.md) server, or the

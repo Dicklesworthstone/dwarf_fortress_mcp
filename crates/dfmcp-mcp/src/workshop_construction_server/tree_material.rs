@@ -46,6 +46,10 @@ pub(super) struct Config {
 }
 
 impl Config {
+    pub(super) fn directory(&self) -> &std::path::Path {
+        &self.directory
+    }
+
     pub(super) fn parse(input: Input, workshop: &super::Input) -> Result<Self> {
         let path = input
             .directory

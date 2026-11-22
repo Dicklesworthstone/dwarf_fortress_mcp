@@ -37,6 +37,25 @@ SOURCES = [
     "scripts/test_workshop_source_inventory.py", "scripts/check_workshop_construction.py", "scripts/verify.sh",
     "scripts/qualify_local.sh", "docs/WORKSHOP_CONSTRUCTION_MCP.md", "docs/TREE_HARVEST_MCP.md",
     "docs/WORKSHOP_CLOCK.md",
+    "crates/dfmcp-mcp/src/workshop_construction_server/parent_config.rs",
+    "crates/dfmcp-mcp/src/workshop_construction_server/parent_owner.rs",
+    "crates/dfmcp-mcp/src/workshop_production_config.rs",
+    "crates/dfmcp-mcp/src/workshop_production_config_tests.rs",
+    "crates/dfmcp-mcp/src/workshop_production_runtime.rs",
+    "crates/dfmcp-mcp/src/workshop_production_runtime_tests.rs",
+    "crates/dfmcp-mcp/src/workshop_production_server.rs",
+    "crates/dfmcp-mcp/src/workshop_production_server_tests.rs",
+    "crates/dfmcp-mcp/src/live_production_runtime.rs",
+    "crates/dfmcp-mcp/src/live_production_runtime/config.rs",
+    "crates/dfmcp-mcp/src/live_production_runtime/parent_config_tests.rs",
+    "crates/dfmcp-mcp/src/live_production_runtime/workshop_parent.rs",
+    "crates/dfmcp-mcp/src/live_production_server.rs",
+    "crates/dfmcp-mcp/src/live_production_presentation.rs",
+    "crates/dwarf-fortress-mcp/src/main.rs",
+    "tests/stdio/gameplay_cli.py",
+    "crates/dwarf-fortress-mcp/tests/gameplay_cli.rs",
+    "docs/WORKSHOP_PRODUCTION_MCP.md",
+    "docs/COMBINED_PRODUCTION_MCP.md",
 ]
 
 
@@ -125,6 +144,11 @@ def check(root: Path = ROOT) -> dict:
         "production_origin_adapter_rust_cases": text[ADAPTER + "production_origin_tests.rs"].count("#[test]"),
         "mcp_unit_cases": text[MCP + "workshop_construction_server/tests.rs"].count("#[test]"),
         "production_handoff_mcp_cases": text[MCP + "workshop_construction_server/production_handoff_tests.rs"].count("#[test]"),
+        "staged_config_cases": text[MCP + "workshop_production_config_tests.rs"].count("#[test]"),
+        "staged_production_child_config_cases": text[MCP + "live_production_runtime/parent_config_tests.rs"].count("#[test]"),
+        "staged_runtime_cases": text[MCP + "workshop_production_runtime_tests.rs"].count("#[test]"),
+        "staged_server_cases": text[MCP + "workshop_production_server_tests.rs"].count("#[test]"),
+        "gameplay_cli_python_cases": len(re.findall(r"^    def test_", text["tests/stdio/gameplay_cli.py"], re.MULTILINE)),
         "clock_mcp_config_cases": text[MCP + "workshop_construction_server/clock_config_tests.rs"].count("#[test]"),
         "clock_mcp_presentation_cases": text[MCP + "workshop_construction_server/clock_presentation_tests.rs"].count("#[test]"),
         "clock_python_stdio_cases": len(re.findall(r"^    def test_", text["tests/stdio/workshop_clock.py"], re.MULTILINE)),
@@ -138,6 +162,79 @@ def check(root: Path = ROOT) -> dict:
     }
     if any(contract["focused_test_contract"][key] != value for key, value in actual_counts.items()):
         raise ValueError(f"workshop exact registered test count differs: {actual_counts}")
+    expected_staged = {
+        "profile": ["serve-gameplay-dev", "workshop-production"],
+        "configuration_schema": "dfmcp.workshop-production-development/1",
+        "recovery_schema": "dfmcp.workshop-production-recovery/1",
+        "owner": "workshop_production_runtime::Runtime",
+        "stages": ["workshop", "transition", "production"],
+        "public_tools_added": False,
+        "native_protocols_unchanged": True,
+        "production_admitted": False,
+        "one_session": True,
+        "monotone_parent_request_ids": True,
+        "all_operator_configurations_checked_before_initial_owner_open": True,
+        "empty_production_custody_opened_before_workshop": True,
+        "exact_completed_handoff_required": True,
+        "configured_workshop_clock_must_be_settled": True,
+        "transition_entry": "Runtime::begin_production",
+        "transition_request": {"kind": "begin_production"},
+        "handoff_native_calls": 0,
+        "construction_writer_released_before_import": True,
+        "donor_import_mode": "offline",
+        "transition_reinitializes_native_custody": False,
+        "transition_failure_retains_stage_and_handoff": True,
+        "transition_retry": "read-only import of the same retained original",
+        "transition_prepaid_work_bytes": 1342177280,
+        "construction_clock_and_production_reviews_separate": True,
+        "authority_tick_floor_distinct_from_canonical_anchor": True,
+        "cached_handoff_verification_is_historical": True,
+        "fresh_workshop_prerequisite_before_production_effect": True,
+        "cross_stage_canonical_continuity": "unknown",
+        "current_workshop_completion_proven_by_handoff": False,
+        "complete_cross_stage_goal_proven": False,
+        "automatic_redispatch": False,
+        "parent_journal": False,
+        "external_checkpoint_required": True,
+        "recovery_references": ["parent", "workshop", "production", "production_handoff"],
+    }
+    if contract.get("staged_production_consumer") != expected_staged:
+        raise ValueError("staged Workshop/production ownership or recovery contract differs")
+    staged = compact[MCP + "workshop_production_runtime.rs"]
+    attach = compact[MCP + "live_production_runtime/workshop_parent.rs"]
+    parent_config = compact[MCP + "workshop_production_config.rs"]
+    if any(token not in staged for token in (
+        "production::Runtime::open_for_parent(", "workshop::Runtime::open_for_parent(",
+        "pub(crate)fnbegin_production(", "self.stage=Stage::Transition;",
+        "drop(self.workshop.take());", "self.production.attach_parent_workshop(",
+        "self.stage=Stage::Production;", "self.issued=Some((self.stage,c.clone()));",
+        "\"cross_stage_canonical_continuity\":\"unknown\"",
+        "\"parent_journal\":false", "\"external_checkpoint_required\":true",
+    )):
+        raise ValueError("staged parent owner or caller-held recovery wiring missing")
+    if any(token not in attach for token in (
+        "config.parent_configuration_digest()", "config.require_parent_workshop(",
+        "selected.acknowledged!=handoff.pin()", "SharedWorkshop::open(",
+        "self.retain_parent_authority_floor(handoff.authority_tick_floor());",
+        "self.workshop=Some(workshop);",
+    )):
+        raise ValueError("staged production attachment lost exact original custody")
+    if any(token in attach for token in (
+        ".open_control(", "open_private_", ".prepare_next(", ".commit(", ".plan_run(",
+    )):
+        raise ValueError("staged attachment cannot initialize or dispatch native work")
+    if any(token not in parent_config for token in (
+        "DFMCP_ALLOW_UNADMITTED_WORKSHOP_PRODUCTION", "current.digest()!=pinned",
+        "disjoint_directories(&directories)", "self.recovery",
+        "ProductionConfig::from_parent_environment(",
+    )):
+        raise ValueError("staged operator union or exact configuration guard missing")
+    staged_server = text[MCP + "workshop_production_server.rs"]
+    handlers = re.findall(r"pub fn (fortress_\w+)\(", staged_server)
+    if len(handlers) != len(TOOLS) or set(handlers) != set(TOOLS):
+        raise ValueError("staged parent must register the same eleven public handlers")
+    if "\"workshop-production\"" not in text["crates/dwarf-fortress-mcp/src/main.rs"]:
+        raise ValueError("staged parent startup profile is not wired into the CLI")
     expected_handoff = {
         "api": "workshop_construction_server::runtime::Runtime::production_handoff",
         "schema": "dfmcp.workshop-production-handoff/1",

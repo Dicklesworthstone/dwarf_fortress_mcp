@@ -21,7 +21,7 @@ use std::sync::{
 use std::time::Instant;
 
 #[path = "live_production_presentation.rs"]
-mod presentation;
+pub(crate) mod presentation;
 use presentation::{RESPONSE_RESERVE, packet};
 
 const FAMILY: u128 = 24u128 << 57;
@@ -108,7 +108,7 @@ fn merge_recovery(old: &mut Option<Value>, latest: &Value) {
         retained["frontier"]["review"] = Value::Null;
     }
 }
-enum Action {
+pub(crate) enum Action {
     Observe(ObserveRequest),
     Inspect,
     InspectOrder(u32),
@@ -159,7 +159,7 @@ impl Action {
                 | Self::CancelInventoryRun(..)
         )
     }
-    fn perform(self, runtime: &mut Runtime, c: &OperationContext) -> Result<View> {
+    pub(crate) fn perform(self, runtime: &mut Runtime, c: &OperationContext) -> Result<View> {
         match self {
             Self::Observe(request) => runtime.observe(request, c),
             Self::Inspect => runtime.inspect(c),
@@ -507,7 +507,7 @@ struct StepRequest {
     kind: String,
     original_plan_digest: String,
 }
-fn plan_action(raw: &str) -> Result<Action> {
+pub(crate) fn plan_action(raw: &str) -> Result<Action> {
     if raw.len() > 8192 {
         return Err(error(
             ErrorCode::BudgetExceeded,
@@ -586,7 +586,7 @@ fn scoped_run(raw: &str) -> Result<(String, Option<u32>)> {
     ))
 }
 
-fn commit_action(
+pub(crate) fn commit_action(
     scope: Option<&str>,
     seal: &str,
     confirmed: bool,
@@ -604,7 +604,7 @@ fn commit_action(
     }
 }
 
-fn cancel_action(scope: Option<&str>, step: Option<u32>) -> Result<Action> {
+pub(crate) fn cancel_action(scope: Option<&str>, step: Option<u32>) -> Result<Action> {
     match scope {
         None | Some("step") if step.is_none() => Ok(Action::Cancel),
         Some("run") => Ok(Action::CancelRun(step)),

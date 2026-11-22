@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased — Join original workshop construction and finite production
+
+- Add the fixed `workshop-production` CLI profile and closed staged session,
+  keeping the existing eleven tools and independent construction, labor, order
+  and clock reviews.
+- Open production custodians before construction; import only the exact
+  acknowledged completed Workshop and settled clock into those same owners.
+  Retain an interrupted transition for read-only retry.
+- Pin the combined operator environment and source/custody relationships;
+  preserve mode, stage recovery and consumed authority time before opening I/O
+  without rewriting production's canonical anchor.
+- Publish complete child recovery, honest historical evidence and bounded
+  refusal/close responses. Require fresh production observation and existing
+  current workshop/prerequisite checks before effects.
+- Add 25 configuration, actual-owner and frontend regressions plus standard CLI
+  route coverage. Existing source contracts and all 11 Workshop inventory
+  negatives pass; see Implementation Status for final Rust execution evidence.
+
 ## Unreleased — Export completed original workshop custody
 
 - Add `fortress_query(mode="production_handoff")` to the existing Workshop

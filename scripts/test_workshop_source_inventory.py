@@ -149,12 +149,23 @@ class WorkshopSourceInventoryTests(unittest.TestCase):
 
 
 
-    def test_missing_production_handoff_module_or_tests_is_refused(self) -> None:
-        for name in ("production_handoff.rs", "production_handoff_tests.rs"):
+    def test_missing_handoff_or_staged_owner_sources_are_refused(self) -> None:
+        names = [
+            "workshop_construction_server/production_handoff.rs",
+            "workshop_construction_server/production_handoff_tests.rs",
+            "workshop_construction_server/parent_config.rs",
+            "workshop_construction_server/parent_owner.rs",
+            "workshop_production_config.rs", "workshop_production_config_tests.rs",
+            "workshop_production_runtime.rs", "workshop_production_runtime_tests.rs",
+            "workshop_production_server.rs", "workshop_production_server_tests.rs",
+            "live_production_runtime/workshop_parent.rs",
+            "live_production_runtime/parent_config_tests.rs",
+        ]
+        for name in names:
             with self.subTest(name=name), tempfile.TemporaryDirectory() as folder:
                 root = Path(folder)
                 self.copy_consumer(root)
-                (root / "crates/dfmcp-mcp/src/workshop_construction_server" / name).unlink()
+                (root / "crates/dfmcp-mcp/src" / name).unlink()
                 with self.assertRaises(ValueError):
                     check(root)
 

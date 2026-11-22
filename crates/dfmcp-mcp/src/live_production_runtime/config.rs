@@ -253,6 +253,19 @@ pub(crate) struct Config {
     pub(crate) orders: orders::native::NativeShell,
     check: Arc<dyn Fn() -> Result<()> + Send + Sync>,
     runtime_check: fn() -> Result<()>,
+    parent_configuration_digest: Option<Digest32>,
+}
+
+/// Closed child configuration facts needed before the staged parent opens either owner.
+pub(crate) struct ParentMetadata {
+    pub(crate) directory: PathBuf,
+    pub(crate) initialize: bool,
+    pub(crate) has_original: bool,
+    pub(crate) clock: bool,
+    pub(crate) inventory_clock: bool,
+    pub(crate) manager_directory: Option<PathBuf>,
+    pub(crate) workshop_checkpoint: bool,
+    pub(crate) authority_tick_floor: u64,
 }
 
 fn environment() -> Result<[String; 3]> {
@@ -270,17 +283,7 @@ fn environment() -> Result<[String; 3]> {
             "combined and both family development opt-ins are required",
         ));
     }
-    let read = |name| -> Result<String> {
-        let raw = std::env::var(name)
-            .map_err(|_| denied("required combined operator configuration is missing"))?;
-        if raw.is_empty() || raw.len() > MAX_CONFIG_BYTES {
-            return Err(invalid(
-                "combined operator configuration exceeds its fixed bound",
-            ));
-        }
-        Ok(raw)
-    };
-    let raw = [read(CONFIG)?, read(WORKFORCE_CONFIG)?, read(ORDER_CONFIG)?];
+    let raw = configuration_strings()?;
     let (_, _, _, clock, inventory_clock, workshop, _, manager, _, _, _) = parse(&raw[0])?;
     for (key, _) in std::env::vars_os() {
         let key = key.to_string_lossy();
@@ -297,6 +300,52 @@ fn environment() -> Result<[String; 3]> {
         }
     }
     Ok(raw)
+}
+
+fn configuration_strings() -> Result<[String; 3]> {
+    let read = |name| -> Result<String> {
+        let raw = std::env::var(name)
+            .map_err(|_| denied("required combined operator configuration is missing"))?;
+        if raw.is_empty() || raw.len() > MAX_CONFIG_BYTES {
+            return Err(invalid(
+                "combined operator configuration exceeds its fixed bound",
+            ));
+        }
+        Ok(raw)
+    };
+    Ok([read(CONFIG)?, read(WORKFORCE_CONFIG)?, read(ORDER_CONFIG)?])
+}
+
+fn parent_fingerprint(raw: &[String; 3]) -> Digest32 {
+    let mut bytes = b"dfmcp.workshop-production-child-configurations/1".to_vec();
+    for value in raw {
+        bytes.extend_from_slice(&(value.len() as u64).to_be_bytes());
+        bytes.extend_from_slice(value.as_bytes());
+    }
+    Digest32::of_bytes(&bytes)
+}
+
+/// Decode the original closed input before inserting an internal donor. In
+/// particular, a Value round trip must not conceal duplicate operator fields.
+fn parent_configuration(raw: &str, workshop: Option<&serde_json::Value>) -> Result<String> {
+    let _ = decode_input(raw)?;
+    let mut value: serde_json::Value = serde_json::from_str(raw)
+        .map_err(|_| invalid("invalid closed combined operator configuration"))?;
+    let object = value
+        .as_object_mut()
+        .ok_or_else(|| invalid("combined configuration must be an object"))?;
+    if object.contains_key("workshop_prerequisite") {
+        return Err(denied(
+            "staged production obtains its Workshop prerequisite only from its verified original",
+        ));
+    }
+    if let Some(workshop) = workshop {
+        object.insert("workshop_prerequisite".to_owned(), workshop.clone());
+        serde_json::to_string(&value)
+            .map_err(|_| invalid("could not encode the verified Workshop prerequisite"))
+    } else {
+        Ok(raw.to_owned())
+    }
 }
 
 fn allowed_key(
@@ -322,21 +371,7 @@ fn matches_digests(raw: &[String; 3], expected: [Digest32; 3]) -> bool {
         == expected
 }
 
-fn parse(
-    raw: &str,
-) -> Result<(
-    PathBuf,
-    bool,
-    Option<Recovery>,
-    Option<ClockConfig>,
-    Option<ClockConfig>,
-    Option<WorkshopConfig>,
-    Option<WorkshopPrerequisiteCheckpoint>,
-    Option<ManagerConfig>,
-    Option<ManagerPrerequisiteCheckpoint>,
-    Option<InputConfig>,
-    Option<InputCheckpoint>,
-)> {
+fn decode_input(raw: &str) -> Result<Input> {
     if raw.is_empty() || raw.len() > MAX_CONFIG_BYTES {
         return Err(invalid("combined operator configuration exceeds 16 KiB"));
     }
@@ -355,6 +390,25 @@ fn parse(
             "invalid combined schema, custody directory or recovery mode",
         ));
     }
+    Ok(input)
+}
+
+fn parse(
+    raw: &str,
+) -> Result<(
+    PathBuf,
+    bool,
+    Option<Recovery>,
+    Option<ClockConfig>,
+    Option<ClockConfig>,
+    Option<WorkshopConfig>,
+    Option<WorkshopPrerequisiteCheckpoint>,
+    Option<ManagerConfig>,
+    Option<ManagerPrerequisiteCheckpoint>,
+    Option<InputConfig>,
+    Option<InputCheckpoint>,
+)> {
+    let input = decode_input(raw)?;
     let clock = input
         .clock
         .map(|clock| clock.validate(input.initialize))
@@ -607,6 +661,122 @@ impl Config {
         let digests = raw
             .each_ref()
             .map(|value| Digest32::of_bytes(value.as_bytes()));
+        let check: Arc<dyn Fn() -> Result<()> + Send + Sync> = Arc::new(move || {
+            let current = environment()?;
+            if !matches_digests(&current, digests) {
+                return Err(denied(
+                    "combined operator configuration changed; close this session",
+                ));
+            }
+            Ok(())
+        });
+        Self::from_configuration(&raw[0], check, runtime_check, None)
+    }
+
+    /// The fixed staged parent owns the union allowlist and pins all five raw
+    /// configurations. Native family readers retain their own exact checks.
+    pub(crate) fn from_parent_environment(
+        parent_check: Arc<dyn Fn() -> Result<()> + Send + Sync>,
+        runtime_check: fn() -> Result<()>,
+        verified_workshop: Option<&serde_json::Value>,
+    ) -> Result<Self> {
+        runtime_check()?;
+        parent_check()?;
+        let raw = configuration_strings()?;
+        let fingerprint = parent_fingerprint(&raw);
+        let digests = raw
+            .each_ref()
+            .map(|value| Digest32::of_bytes(value.as_bytes()));
+        let configuration = parent_configuration(&raw[0], verified_workshop)?;
+        let check: Arc<dyn Fn() -> Result<()> + Send + Sync> = Arc::new(move || {
+            parent_check()?;
+            if !matches_digests(&configuration_strings()?, digests) {
+                return Err(denied(
+                    "staged production child configuration changed; close this session",
+                ));
+            }
+            Ok(())
+        });
+        Self::from_configuration(&configuration, check, runtime_check, Some(fingerprint))
+    }
+
+    pub(crate) fn parent_configuration_digest(&self) -> Option<Digest32> {
+        self.parent_configuration_digest
+    }
+
+    pub(crate) fn require_parent_workshop(
+        &self,
+        binding: &dfmcp_adapter::workshop_construction::WorkshopBinding,
+        directory: &Path,
+    ) -> Result<()> {
+        if !self.workshop_prerequisite.as_ref().is_some_and(|workshop| {
+            &workshop.binding == binding && workshop.directory.as_path() == directory
+        }) {
+            return Err(denied(
+                "staged production donor differs from its owned Workshop source or custody",
+            ));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn parent_allowed_key(
+        key: &str,
+        clock: bool,
+        inventory_clock: bool,
+        manager: bool,
+    ) -> bool {
+        allowed_key(key, clock, inventory_clock, true, manager)
+    }
+
+    pub(crate) fn parent_metadata(raw: &str) -> Result<ParentMetadata> {
+        // This validates the closed operator input before handoff is available.
+        // Complete original recovery is validated by the ordinary parser after
+        // the independently verified original donor has been injected locally.
+        parent_configuration(raw, None)?;
+        let input = decode_input(raw)?;
+        let clock = input
+            .clock
+            .map(|c| c.validate(input.initialize))
+            .transpose()?;
+        let inventory_clock = input
+            .inventory_clock
+            .map(|c| c.validate(input.initialize))
+            .transpose()?;
+        let manager = input
+            .manager_prerequisite
+            .map(|m| m.validate(&input.directory))
+            .transpose()?;
+        let authority_tick_floor = [
+            input
+                .recovery
+                .as_ref()
+                .map(|r| r.frontier.authority_tick_floor),
+            input.workshop_prerequisite_checkpoint.map(|c| c.floor.tick),
+            input.manager_prerequisite_checkpoint.map(|c| c.floor.tick),
+            input.input_supply_checkpoint.map(|c| c.floor.tick),
+        ]
+        .into_iter()
+        .flatten()
+        .max()
+        .unwrap_or(0);
+        Ok(ParentMetadata {
+            directory: input.directory,
+            initialize: input.initialize,
+            has_original: input.recovery.is_some(),
+            clock: clock.is_some(),
+            inventory_clock: inventory_clock.is_some(),
+            manager_directory: manager.map(|m| m.directory),
+            workshop_checkpoint: input.workshop_prerequisite_checkpoint.is_some(),
+            authority_tick_floor,
+        })
+    }
+
+    fn from_configuration(
+        raw: &str,
+        check: Arc<dyn Fn() -> Result<()> + Send + Sync>,
+        runtime_check: fn() -> Result<()>,
+        parent_configuration_digest: Option<Digest32>,
+    ) -> Result<Self> {
         let (
             directory,
             initialize,
@@ -619,16 +789,7 @@ impl Config {
             manager_prerequisite_checkpoint,
             input_supply,
             input_supply_checkpoint,
-        ) = parse(&raw[0])?;
-        let check: Arc<dyn Fn() -> Result<()> + Send + Sync> = Arc::new(move || {
-            let current = environment()?;
-            if !matches_digests(&current, digests) {
-                return Err(denied(
-                    "combined operator configuration changed; close this session",
-                ));
-            }
-            Ok(())
-        });
+        ) = parse(raw)?;
         let w = workforce::native::Config::from_combined_environment(
             Arc::clone(&check),
             runtime_check,
@@ -711,6 +872,7 @@ impl Config {
             orders,
             check,
             runtime_check,
+            parent_configuration_digest,
         })
     }
     pub(crate) fn current(&self) -> Result<()> {
@@ -737,3 +899,7 @@ mod tests;
 #[cfg(test)]
 #[path = "manager_config_tests.rs"]
 mod manager_tests;
+
+#[cfg(test)]
+#[path = "parent_config_tests.rs"]
+mod parent_tests;

@@ -273,6 +273,11 @@ references, and never fabricate a canonical world anchor.
 
 ## Hand off an original workshop to production
 
+The [staged Workshop and production profile](WORKSHOP_PRODUCTION_MCP.md) keeps
+both owners in one process and imports this exact original through a guarded
+stage transition. The standalone export below remains useful for separately
+configured production sessions.
+
 The adapter exposes `workshop_construction::production_origin` so an importing
 production host can require the exact original Carpenter workshop to be complete
 before its own effects. The [combined production host](COMBINED_PRODUCTION_MCP.md#require-an-exact-completed-original-workshop)

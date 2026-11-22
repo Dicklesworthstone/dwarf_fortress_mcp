@@ -38,6 +38,13 @@ establish the complete original parent goal at its exact reported anchor.
 
 ## Operator configuration
 
+For one session that first completes its own Carpenter workshop, use the
+[staged Workshop and production profile](WORKSHOP_PRODUCTION_MCP.md). It opens
+empty production custody before construction, imports the exact completed
+Workshop original and then exposes this host's existing production requests.
+Its closed parent configuration supplies the union of child profile state;
+the standalone `labor-order` configuration below keeps its existing allowlist.
+
 Set all three opt-ins to exactly `1`:
 
 - `DFMCP_ALLOW_UNADMITTED_COMBINED_PRODUCTION`

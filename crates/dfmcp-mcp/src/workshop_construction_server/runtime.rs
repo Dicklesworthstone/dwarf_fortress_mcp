@@ -4,12 +4,16 @@
 mod clock;
 #[path = "material_selection.rs"]
 mod material_selection;
+#[path = "parent_config.rs"]
+mod parent_config;
+#[path = "parent_owner.rs"]
+mod parent_owner;
 #[path = "production_handoff.rs"]
 mod production_handoff;
 pub(crate) use production_handoff::ProductionHandoff;
 #[cfg(test)]
 #[path = "production_handoff_tests.rs"]
-mod production_handoff_tests;
+pub(crate) mod production_handoff_tests;
 #[path = "tree_material.rs"]
 mod tree_material;
 use dfmcp_adapter::build_placement::journal::private_file::PrivateBuildFile;
@@ -169,7 +173,7 @@ struct Input {
     checkpoint: String,
 }
 #[derive(Clone)]
-pub(super) struct Config {
+pub(crate) struct Config {
     input: Input,
     endpoint: SocketAddr,
     selection: Option<WorkshopSelection>,
@@ -180,6 +184,7 @@ pub(super) struct Config {
     identity: FortressIdentity,
     pin: Option<WorkshopPin>,
     hash: Digest32,
+    parent_guard: Option<Arc<dyn Fn() -> Result<()> + Send + Sync>>,
 }
 fn area(raw: [u32; 6], dimensions: [u32; 3]) -> Result<MapCuboid> {
     if (0..3).any(|i| raw[i] > raw[i + 3] || raw[i + 3] >= dimensions[i]) {
@@ -284,6 +289,7 @@ impl Config {
             identity,
             pin,
             hash: Digest32::of_bytes(raw.as_bytes()),
+            parent_guard: None,
         })
     }
     pub(super) fn environment() -> Result<Self> {
@@ -309,7 +315,11 @@ impl Config {
     }
     fn current(&self) -> Result<()> {
         runtime_io()?;
-        validate_environment()?;
+        if let Some(guard) = &self.parent_guard {
+            guard()?;
+        } else {
+            validate_environment()?;
+        }
         self.material_environment()?;
         self.clock_environment()?;
         let raw =
@@ -562,7 +572,7 @@ impl Work {
         self.current(bytes)
     }
 }
-pub(super) enum Action {
+pub(crate) enum Action {
     Inspect,
     ProductionHandoff,
     Observe,
@@ -581,10 +591,10 @@ struct PlanInput {
     expected_observation: String,
     material: String,
 }
-pub(super) struct Runtime {
+pub(crate) struct Runtime {
     pub(super) session: SessionId,
     pub(super) mode: WorkshopMode,
-    pub(super) budget: WorkBudget,
+    pub(crate) budget: WorkBudget,
     config: Config,
     journal: WorkshopJournal<PrivateBuildFile>,
     guard: Guard,
@@ -652,11 +662,34 @@ impl Runtime {
             })
             .collect()
     }
-    pub(super) fn open(
+    pub(crate) fn open(
         config: Config,
         mode: WorkshopMode,
         session: SessionId,
         budget: WorkBudget,
+    ) -> Result<Self> {
+        Self::open_at_floor(config, mode, session, budget, 0)
+    }
+    pub(crate) fn open_for_parent(
+        config: Config,
+        mode: WorkshopMode,
+        session: SessionId,
+        budget: WorkBudget,
+        authority_tick_floor: u64,
+    ) -> Result<Self> {
+        if config.parent_guard.is_none()
+            || authority_tick_floor > dfmcp_adapter::bounded_run::MAX_NATIVE_TICK
+        {
+            return Err(denied("invalid staged Workshop owner or authority floor"));
+        }
+        Self::open_at_floor(config, mode, session, budget, authority_tick_floor)
+    }
+    fn open_at_floor(
+        config: Config,
+        mode: WorkshopMode,
+        session: SessionId,
+        budget: WorkBudget,
+        authority_tick_floor: u64,
     ) -> Result<Self> {
         config.current()?;
         let control = mode == WorkshopMode::Control
@@ -673,7 +706,7 @@ impl Runtime {
             anchor: StateAnchor {
                 fortress_id: config.identity.fortress_id(),
                 cursor: ObservationCursor::ORIGIN,
-                tick: GameTick(0),
+                tick: GameTick(authority_tick_floor),
                 state_hash: Digest32::ZERO,
             },
             grants: Self::grants(
@@ -687,6 +720,7 @@ impl Runtime {
             budget,
             cancellation_requested: false,
         };
+        context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
         let mut work = Work::new(&context, config.view_bytes())?;
         let mut tree_material = if config.input.initialize {
             config
@@ -822,7 +856,7 @@ impl Runtime {
             next_request: 2,
         })
     }
-    pub(super) fn context(&mut self) -> Result<OperationContext> {
+    pub(crate) fn context(&mut self) -> Result<OperationContext> {
         let request = self.next_request;
         self.next_request = self.next_request.checked_add(1).ok_or_else(exhausted)?;
         // This clock is an authority floor only. The observed native anchor
@@ -971,7 +1005,7 @@ impl Runtime {
         }
         result
     }
-    pub(super) fn perform(&mut self, action: Action, c: &OperationContext) -> Result<Value> {
+    pub(crate) fn perform(&mut self, action: Action, c: &OperationContext) -> Result<Value> {
         let mut workshop_source_entered = false;
         let result = (|| {
             self.config.current()?;
@@ -1190,7 +1224,7 @@ impl Runtime {
         }
         result
     }
-    pub(super) fn withdraw(&mut self) {
+    pub(crate) fn withdraw(&mut self) {
         self.observation = None;
         self.anchor = None;
         self.source = None;
@@ -1202,7 +1236,7 @@ impl Runtime {
         }
         self.journal.abandon();
     }
-    pub(super) fn failure_reference(&self) -> Value {
+    pub(crate) fn failure_reference(&self) -> Value {
         json!({"journal_pin_unverified":pin_json(self.journal.pin()),"original_custody_currently_verified":false,
             "original":self.journal.unverified_original_reference().map(|e|json!({"key":e.plan().key(),
                 "plan_digest":e.plan().digest().to_hex(),"review_seal":seal(self.journal.pin().journal_id,e.plan()).to_hex(),

@@ -287,9 +287,19 @@ impl RunSource for RunNative {
     }
 }
 
-struct Fixture {
+pub(crate) struct Fixture {
     directory: PathBuf,
     config: Value,
+}
+impl Fixture {
+    pub(crate) fn configuration(&self) -> Value {
+        self.config.clone()
+    }
+}
+
+/// Reuse the actual independently acknowledged original for staged-owner tests.
+pub(crate) fn completed_original_fixture() -> Result<Fixture> {
+    fixture(Original::Complete, ClockSeed::Absent)
 }
 impl Drop for Fixture {
     fn drop(&mut self) {

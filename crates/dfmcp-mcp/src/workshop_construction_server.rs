@@ -1,8 +1,8 @@
 #![forbid(unsafe_code)]
 //! Explicitly unadmitted eleven-tool workshop/1.20 stdio consumer.
 //! No tool accepts endpoints, paths, native commands or native addresses.
-mod presentation;
-mod runtime;
+pub(crate) mod presentation;
+pub(crate) mod runtime;
 use dfmcp_adapter::workshop_construction::journal::WorkshopMode;
 use dfmcp_core::{ErrorCode, RequestId, Result, SessionId, WorkBudget};
 use fastmcp_rust::modern::ServerBuilder;

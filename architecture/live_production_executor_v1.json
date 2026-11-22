@@ -396,7 +396,30 @@
       "crates/dfmcp-mcp/src/production_chain_compare_tests.rs",
       "crates/dfmcp-mcp/src/production_chain_runtime_tests.rs",
       "crates/dfmcp-mcp/src/spatial_production.rs",
-      "tests/stdio/combined_input_supply_runtime_peer.py"
+      "tests/stdio/combined_input_supply_runtime_peer.py",
+      "crates/dfmcp-mcp/src/workshop_construction_server/parent_config.rs",
+      "crates/dfmcp-mcp/src/workshop_construction_server/parent_owner.rs",
+      "crates/dfmcp-mcp/src/workshop_production_config.rs",
+      "crates/dfmcp-mcp/src/workshop_production_config_tests.rs",
+      "crates/dfmcp-mcp/src/workshop_production_runtime.rs",
+      "crates/dfmcp-mcp/src/workshop_production_runtime_tests.rs",
+      "crates/dfmcp-mcp/src/workshop_production_server.rs",
+      "crates/dfmcp-mcp/src/workshop_production_server_tests.rs",
+      "crates/dfmcp-mcp/src/live_production_runtime/parent_config_tests.rs",
+      "crates/dfmcp-mcp/src/live_production_runtime/workshop_parent.rs",
+      "tests/stdio/gameplay_cli.py",
+      "crates/dwarf-fortress-mcp/tests/gameplay_cli.rs",
+      "docs/WORKSHOP_PRODUCTION_MCP.md",
+      "crates/dfmcp-mcp/src/workshop_construction_server.rs",
+      "crates/dfmcp-mcp/src/workshop_construction_server/runtime.rs",
+      "crates/dfmcp-mcp/src/workshop_construction_server/production_handoff.rs",
+      "crates/dfmcp-mcp/src/workshop_construction_server/production_handoff_tests.rs",
+      "crates/dfmcp-mcp/src/workshop_construction_server/tree_material.rs",
+      "crates/dfmcp-mcp/src/workshop_construction_server/presentation.rs",
+      "architecture/workshop_construction_v1_20.json",
+      "scripts/check_workshop_construction.py",
+      "scripts/test_workshop_source_inventory.py",
+      "docs/WORKSHOP_CONSTRUCTION_MCP.md"
     ],
     "private_custody_platforms": [
       "linux-x86_64",
@@ -1416,6 +1439,19 @@
       "admission": false,
       "native_test_campaign": "tests/stdio/combined_input_supply_runtime_peer.py",
       "execution_evidence": "source integration under focused execution; final results recorded in IMPLEMENTATION_STATUS.md"
+    },
+    "staged_workshop_parent": {
+      "contract": "architecture/workshop_construction_v1_20.json#staged_production_consumer",
+      "cli_profile": [
+        "serve-gameplay-dev",
+        "workshop-production"
+      ],
+      "configuration_schema": "dfmcp.workshop-production-development/1",
+      "recovery_schema": "dfmcp.workshop-production-recovery/1",
+      "child_runtime": "live_production_runtime::Runtime",
+      "original_owner_preserved": true,
+      "native_protocols_unchanged": true,
+      "production_admission_added": false
     }
   },
   "selected_work_order_goal_monitor": {

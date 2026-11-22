@@ -1,5 +1,53 @@
 # Implementation Status
 
+## Unreleased — Continue an original workshop into production in one session
+
+The standard CLI now selects `serve-gameplay-dev workshop-production`. This
+fixed eleven-tool development profile owns the original Carpenter workshop and
+the existing combined workforce/finite-order owner in one staged session.
+Production custodians open before construction becomes reachable. The closed
+`begin_production` Plan request verifies the completed Workshop original,
+independent ACK and settled clock, retains their exact handoff identity, releases
+the construction writer and imports that original into the already-open
+production owners. A failed import stays in Transition with a read-only retry;
+it cannot create new native custody or resume construction.
+
+The parent pins all five operator configurations, optional authority and
+credential presence, shared fortress/software identity and disjoint custody.
+Stage-specific recovery retains the child originals, clock references, exact
+handoff and consumed authority floor. Workshop opening authorizes that floor
+before custody I/O, including a newer floor from preopened production owners.
+Production preserves its observed canonical anchor and carries later authority
+time separately. The parent checkpoint is externally retained and has no
+independent durable journal or protection against coordinated rollback.
+
+Production starts with fresh observation and reuses its existing workforce
+choices, finite targets/portfolios, optional Manager/input policies and separately
+reviewed clocks. Order preparation and dispatch freshly qualify the imported
+original workshop. Historical construction, order completion and actual output
+remain distinct; cross-stage canonical continuity and causal output are not
+invented. Complete output, refusal and close paths retain recovery and withdraw
+reviews, with bounded diagnostic text and explicit whole-checkpoint omission.
+
+Validation: 25 new configuration, staged-runtime and frontend regression sources
+join the first increment's six actual Workshop custody cases and one public
+routing case. Actual Workshop source/inventory checks pass on 81 inputs with
+all 11 negative cases; agent-contract, dependency-policy, implementation-status
+and whitespace checks pass. All ten new Rust modules and the two previously
+format-clean production owner/config files pass scoped formatting; unrelated
+existing formatting is preserved. Exact locked dependencies, including FastMCP
+revision `13461caf`, were fetched successfully. A single-job, locked/offline
+actual `dfmcp-mcp --lib` check was killed with exit 137 while compiling unchanged
+Asupersync 0.5.0, before repository source diagnostics. Toolchain:
+`rustc 1.100.0-nightly (bba531001 2026-09-20)`.
+The 32 new Rust cases and modern CLI route remain unexecuted at this commit.
+Full MCP, native-game and production admission qualification remain open.
+
+Owners: `dfmcp-reality-wiring-proof-4bf.14.7`,
+`dfmcp-reality-wiring-proof-4bf.14.4` and
+`df-dfhack-bridge-plane-c-pic.4.1`. See
+`docs/WORKSHOP_PRODUCTION_MCP.md`.
+
 ## Unreleased — Export the exact completed workshop for production
 
 The existing Workshop `fortress_query` now accepts

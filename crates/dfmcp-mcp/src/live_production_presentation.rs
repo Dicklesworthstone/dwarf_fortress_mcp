@@ -1871,7 +1871,7 @@ fn recommendation_fn(tool: &str, reason: &str, confirm: bool, arguments: Value) 
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(super) fn packet(
+pub(crate) fn packet(
     operation: &str,
     session: Option<SessionId>,
     anchor: Option<StateAnchor>,

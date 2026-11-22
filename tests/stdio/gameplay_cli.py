@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[2]
 PROFILES = {
     "tree": ("DFMCP_ALLOW_UNADMITTED_TREE_HARVEST_V1_21", "dfmcp-tree-harvest-v1-21-dev"),
     "workshop": ("DFMCP_ALLOW_UNADMITTED_WORKSHOP_V1_20", "dfmcp-workshop-v1-20-dev"),
+    "workshop-production": ("DFMCP_ALLOW_UNADMITTED_WORKSHOP_PRODUCTION", "dfmcp-workshop-production-dev"),
     "bounded-clock": ("DFMCP_ALLOW_UNADMITTED_RUN_V1_13", "dfmcp-live-run-dev"),
     "finite-bed": ("DFMCP_ALLOW_UNADMITTED_SEMANTIC_WORK_ORDERS", "dfmcp-live-semantic-work-orders-dev"),
 }
@@ -53,7 +54,7 @@ class GameplayCliTests(unittest.TestCase):
                 self.assertEqual(result.stdout, b"")
                 self.assertIn(b"usage: dwarf-fortress-mcp serve-gameplay-dev", result.stderr)
 
-    def test_four_routes_have_exact_modern_waist_and_refuse_ungranted_control(self):
+    def test_routes_have_exact_modern_waist_and_refuse_ungranted_control(self):
         spec = importlib.util.spec_from_file_location("gameplay_tree_client", ROOT / "tests/stdio/tree_harvest.py")
         module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
         module.BINARY = BINARY

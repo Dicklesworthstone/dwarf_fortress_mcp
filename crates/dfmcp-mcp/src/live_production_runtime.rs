@@ -78,6 +78,7 @@ mod stock_targets_request;
 mod stock_targets_tests;
 mod workshop_binding;
 mod workshop_config;
+mod workshop_parent;
 mod workshop_prerequisite;
 #[cfg(all(
     test,
@@ -284,6 +285,7 @@ pub(crate) struct Runtime {
     workforce_journal: Digest32,
     order_journal: Digest32,
     initialization_failed: bool,
+    parent_frontier_uncertain: bool,
     fenced: bool,
     goal_monitor: Option<SelectedWorkOrderGoalMonitor<File>>,
     goal_history_present: bool,
@@ -372,6 +374,16 @@ impl Runtime {
         session: SessionId,
         budget: WorkBudget,
     ) -> Result<Self> {
+        Self::open_reserved(config, mode, session, budget, budget, 0)
+    }
+    fn open_reserved(
+        config: Config,
+        mode: Mode,
+        session: SessionId,
+        budget: WorkBudget,
+        opening_budget: WorkBudget,
+        authority_tick_floor: u64,
+    ) -> Result<Self> {
         config.current()?;
         budget.validate()?;
         if session == SessionId::NIL
@@ -405,9 +417,14 @@ impl Runtime {
             tick: GameTick(0),
             state_hash: Digest32::ZERO,
         });
-        let observation_tick_floor = GameTick(config.recovery.map_or(anchor.tick.get(), |r| {
-            anchor.tick.get().max(r.frontier.authority_tick_floor)
-        }));
+        let observation_tick_floor = GameTick(
+            config
+                .recovery
+                .map_or(anchor.tick.get(), |r| {
+                    anchor.tick.get().max(r.frontier.authority_tick_floor)
+                })
+                .max(authority_tick_floor),
+        );
         let mut out = Self {
             config,
             mode,
@@ -446,6 +463,7 @@ impl Runtime {
             workforce_journal: Digest32::ZERO,
             order_journal: Digest32::ZERO,
             initialization_failed: false,
+            parent_frontier_uncertain: false,
             fenced: false,
             goal_monitor: None,
             goal_history_present: false,
@@ -455,7 +473,11 @@ impl Runtime {
             portfolio: None,
             portfolio_sample: None,
         };
-        let c = out.context(false)?;
+        let mut c = out.context(false)?;
+        c.budget = opening_budget;
+        let mut authorization = c.clone();
+        authorization.anchor.tick = authorization.anchor.tick.max(out.authority_tick_floor());
+        authorization.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
         let mut work = Work::new(&c)?;
         let clock_output = work.take(8 * MIB)?;
         let inventory_clock_output = work.take(8 * MIB)?;
@@ -1005,7 +1027,9 @@ impl Runtime {
             .map(|r| r.plan().key().to_owned())
             .collect::<std::collections::BTreeSet<_>>();
         if let Some(frontier) = &mut self.frontier {
-            for entry in frontier.inspect(&work.take(8 * MIB)?)?.entries {
+            let retained = frontier.inspect(&work.take(8 * MIB)?)?;
+            self.parent_frontier_uncertain = retained.needs_reconciliation();
+            for entry in retained.entries {
                 if entry.preparation.is_some()
                     || entry.receipt.is_some()
                     || entry.dispatch_attempted
@@ -1174,6 +1198,9 @@ impl Runtime {
         } else {
             None
         };
+        self.parent_frontier_uncertain = frontier
+            .as_ref()
+            .is_some_and(durable::View::needs_reconciliation);
         if let Some((w, o)) = &mut self.parts
             && (!w.inventory(&work.take(144 * MIB)?)?.records.is_empty()
                 || !o.inventory(&work.take(16 * MIB)?)?.is_empty())
