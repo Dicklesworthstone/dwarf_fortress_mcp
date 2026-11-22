@@ -106,6 +106,12 @@ pub fn validate_terminal_action_identity(
     step: &crate::PlanStep,
 ) -> Result<()> {
     let entity = created_entity_id(&step.idempotency_key, 0);
+    if matches!(
+        step.action,
+        Action::Build { .. } | Action::CreateWorkOrder { .. }
+    ) {
+        crate::effect_quiescence::validate_reference_work_identity(snapshot, &step.action, entity)?;
+    }
     validate_construction_material_completion(snapshot, entity, &step.action)?;
     validate_provisions_completion(snapshot, entity, &step.action)?;
     validate_harvest_completion(snapshot, entity, &step.action)?;

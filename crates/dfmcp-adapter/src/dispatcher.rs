@@ -676,21 +676,7 @@ impl MutationDispatcher {
                 ),
             ));
         }
-        effects::validate_construction_material_completion(
-            snapshot,
-            effects::created_entity_id(&step.idempotency_key, 0),
-            &step.action,
-        )?;
-        effects::validate_provisions_completion(
-            snapshot,
-            effects::created_entity_id(&step.idempotency_key, 0),
-            &step.action,
-        )?;
-        effects::validate_harvest_completion(
-            snapshot,
-            effects::created_entity_id(&step.idempotency_key, 0),
-            &step.action,
-        )?;
+        effects::validate_terminal_action_identity(snapshot, step)?;
         Ok(action_receipt(
             plan,
             step,
@@ -718,24 +704,10 @@ impl MutationDispatcher {
         })?;
         let state = obligation_commit_state(runtime, action_id, observation)?;
         if state == CommitState::Verified {
-            // Field predicates do not encode generations or the unique
-            // material-ledger census. Validate current original custody before
-            // publishing proof or retiring the obligation monitor.
-            effects::validate_construction_material_completion(
-                snapshot,
-                effects::created_entity_id(&step.idempotency_key, 0),
-                &step.action,
-            )?;
-            effects::validate_provisions_completion(
-                snapshot,
-                effects::created_entity_id(&step.idempotency_key, 0),
-                &step.action,
-            )?;
-            effects::validate_harvest_completion(
-                snapshot,
-                effects::created_entity_id(&step.idempotency_key, 0),
-                &step.action,
-            )?;
+            // Field predicates do not encode original typed identities or
+            // exclusive material custody. Apply the same source-bound checks
+            // as laboratory and recovered proof before retiring the monitor.
+            effects::validate_terminal_action_identity(snapshot, step)?;
         }
         let message = match state {
             CommitState::Verified => "obligation terminal proven on stable scheduled observations",
@@ -949,6 +921,10 @@ mod construction_material_tests;
 #[cfg(test)]
 #[path = "dispatcher_provisions_tests.rs"]
 mod provisions_tests;
+
+#[cfg(test)]
+#[path = "dispatcher_terminal_identity_tests.rs"]
+mod terminal_identity_tests;
 
 #[cfg(test)]
 mod tests {

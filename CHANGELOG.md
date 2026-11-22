@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased — Verify the original construction and work order
+
+- Bind ordinary construction and work-order terminal proof to typed identity,
+  original generation, geometry and immutable order parameters, including the
+  original total quantity; share the check with physical-work inspection.
+- Preserve retryable pending state on identity refusal and keep terminal receipts
+  immutable. Explicit early completion still permits remaining physical work.
+- Add laboratory regressions for sixteen corruptions and early construction
+  proof, plus a dispatcher journal/monitor refusal-and-retry regression.
+- Pass all 155 actual laboratory library tests on nightly 2026-11-22. The full
+  adapter test build was killed before execution; broader qualification remains
+  pending. No native protocol or live-admission change.
+
 ## Unreleased — Traverse complete protocol-1.0 query results
 
 - Add bounded source-bound continuation pages to the existing `fortress_query`

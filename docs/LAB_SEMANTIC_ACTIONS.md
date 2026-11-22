@@ -27,6 +27,19 @@ Entities an action creates get an identity derived only from the step's
 idempotency key (`effects::created_entity_id`), so the sealed plan names them
 before dispatch and a retry cannot create a duplicate.
 
+Before publishing a new terminal proof, ordinary `build` and
+`create_work_order` actions also require the original typed entity at generation
+one and eligible, nonfuture evidence for its immutable parameters. Building
+kind, location and footprint must match the sealed action; work-order name,
+job, original total quantity and canonical conditions must match. A completion
+word or zero remaining quantity on a replacement record cannot prove the
+original work. Refusal leaves the pending proof monitor and receipt history
+unchanged, so a later valid observation can still establish completion. These
+shared checks apply to laboratory, recovered and in-process dispatcher proof
+without changing sealed postconditions or compiler generations. An explicit
+early terminal predicate can still prove its goal while physical work remains
+active; already published terminal receipts remain immutable.
+
 Item-backed beds, doors, tables and chairs use the distinct `place_furniture`
 action. See [item-backed furniture](LAB_ITEM_FURNITURE.md) for the closed request,
 inventory conservation, cancellation and recovery contract. Existing abstract

@@ -66,6 +66,15 @@ fn started(
     early_proof: bool,
     compensation: Option<Action>,
 ) -> Result<(MemoryAdapter, ActionId, EntityId)> {
+    started_with_deadline(action, early_proof, compensation, GameTick(110))
+}
+
+fn started_with_deadline(
+    action: Action,
+    early_proof: bool,
+    compensation: Option<Action>,
+    deadline_tick: GameTick,
+) -> Result<(MemoryAdapter, ActionId, EntityId)> {
     let chunk = ChunkCoord { x: 0, y: 0, z: 10 };
     let mut graph = WorldGraph::default();
     graph.chunks.insert(
@@ -109,7 +118,7 @@ fn started(
             obligation: Some(ObligationSpec {
                 terminal,
                 failure: None,
-                deadline_tick: GameTick(110),
+                deadline_tick,
                 poll_interval_ticks: 1,
                 stable_for_observations: 1,
             }),
@@ -126,6 +135,210 @@ fn started(
     let commit = adapter.commit(&plan, &prepared, &context(&adapter))?;
     let action_id = commit.actions[0].action_id;
     Ok((adapter, action_id, entity_id))
+}
+
+fn set_identity_field(
+    record: &mut dfmcp_world::EntityRecord,
+    field: &str,
+    value: Value,
+    tick: GameTick,
+) {
+    record.fields.insert(
+        field.to_owned(),
+        dfmcp_world::Fact::known(
+            value,
+            tick,
+            FactSource::Derived("dfmcp.lab-scenario/1".to_owned()),
+            Digest32::ZERO,
+        ),
+    );
+}
+
+/// Default completion predicates must not let a replacement record inherit
+/// an original action. A refused observation must also leave its monitor usable.
+fn terminal_identity_refusal(
+    action: Action,
+    ticks: u64,
+    corrupt: fn(&mut dfmcp_world::EntityRecord, GameTick),
+) -> Result<()> {
+    let (mut adapter, action_id, entity_id) =
+        started_with_deadline(action, false, None, GameTick(10_000))?;
+    let pending = adapter.action_receipt(action_id).cloned();
+    adapter.advance_ticks(ticks)?;
+    let complete = adapter.snapshot.clone();
+    let tick = adapter.snapshot.tick;
+    let record = adapter
+        .snapshot
+        .graph
+        .entities
+        .get_mut(&entity_id)
+        .ok_or_else(|| {
+            DfmcpError::new(
+                ErrorCode::InternalInvariantViolation,
+                "test work entity was not created",
+            )
+        })?;
+    corrupt(record, tick);
+    adapter.snapshot.refresh_hash();
+    let refused_anchor = adapter.snapshot.anchor();
+    let transcript = adapter.transcript.clone();
+    let error = refusal(adapter.poll_action(action_id, &context(&adapter)))?;
+    assert_eq!(error.code, ErrorCode::PreconditionsFailed);
+    assert_eq!(adapter.snapshot.anchor(), refused_anchor);
+    assert_eq!(adapter.transcript, transcript);
+    assert_eq!(adapter.action_receipt(action_id), pending.as_ref());
+
+    // Retry the same scheduled observation with the original identity. A
+    // refused proof cannot consume its sample or poison the terminal history.
+    adapter.snapshot = complete;
+    let proof = adapter.poll_action(action_id, &context(&adapter))?;
+    assert_eq!(proof.state, CommitState::Verified);
+    if let Some(record) = adapter.snapshot.graph.entities.get_mut(&entity_id) {
+        record.generation = 2;
+    }
+    adapter.snapshot.refresh_hash();
+    assert_eq!(adapter.poll_action(action_id, &context(&adapter))?, proof);
+    assert!(matches!(
+        adapter.action_work_state(action_id)?,
+        EffectWorkState::Unknown { .. }
+    ));
+    Ok(())
+}
+
+#[test]
+fn terminal_build_proof_requires_the_original_typed_identity_and_geometry() -> Result<()> {
+    let site = MapCoord::new(1, 1, 10);
+    let action = Action::Build {
+        kind: BuildingKind::Workshop("Still".to_owned()),
+        location: site,
+        footprint: MapCuboid::new(site, MapCoord::new(2, 2, 10))?,
+        material: MaterialSelector::default(),
+    };
+    let corruptions: [fn(&mut dfmcp_world::EntityRecord, GameTick); 8] = [
+        |record, _| record.kind = dfmcp_world::EntityKind::Unit,
+        |record, _| record.kind = dfmcp_world::EntityKind::Other("building".to_owned()),
+        |record, _| record.generation = 2,
+        |record, tick| {
+            set_identity_field(
+                record,
+                "position",
+                Value::Coord(MapCoord::new(3, 3, 10)),
+                tick,
+            );
+        },
+        |record, tick| {
+            set_identity_field(
+                record,
+                "footprint_min",
+                Value::Coord(MapCoord::new(0, 0, 10)),
+                tick,
+            );
+        },
+        |record, tick| {
+            set_identity_field(
+                record,
+                "footprint_max",
+                Value::Coord(MapCoord::new(3, 3, 10)),
+                tick,
+            );
+        },
+        |record, tick| {
+            set_identity_field(
+                record,
+                "building_kind",
+                Value::Text("other".to_owned()),
+                tick,
+            );
+        },
+        |record, _| {
+            record.fields.remove("position");
+        },
+    ];
+    for corrupt in corruptions {
+        terminal_identity_refusal(action.clone(), effects::BUILD_TICKS, corrupt)?;
+    }
+    Ok(())
+}
+
+#[test]
+fn terminal_work_order_proof_requires_qualified_original_quantity_and_identity() -> Result<()> {
+    let action = Action::CreateWorkOrder {
+        name: "original bounded order".to_owned(),
+        job_token: "MAKE_TEST".to_owned(),
+        amount: 2,
+        conditions: Vec::new(),
+    };
+    let corruptions: [fn(&mut dfmcp_world::EntityRecord, GameTick); 8] = [
+        |record, _| record.kind = dfmcp_world::EntityKind::Unit,
+        |record, _| record.kind = dfmcp_world::EntityKind::Other("work_order".to_owned()),
+        |record, _| record.generation = 2,
+        |record, tick| set_identity_field(record, "amount_total", Value::U64(1), tick),
+        |record, _| {
+            record.fields.remove("amount_total");
+        },
+        |record, tick| {
+            set_identity_field(record, "amount_total", Value::U64(2), GameTick(tick.0 + 1));
+        },
+        |record, tick| {
+            record.fields.insert(
+                "amount_total".to_owned(),
+                dfmcp_world::Fact::known(
+                    Value::U64(2),
+                    tick,
+                    FactSource::AgentAssertion("quantity claim".to_owned()),
+                    Digest32::ZERO,
+                ),
+            );
+        },
+        |record, tick| {
+            record.fields.insert(
+                "amount_total".to_owned(),
+                dfmcp_world::Fact::known(
+                    Value::U64(2),
+                    tick,
+                    FactSource::Derived("dfmcp.lab-scenario/1".to_owned()),
+                    Digest32::of_bytes(b"wrong source seal"),
+                ),
+            );
+        },
+    ];
+    for corrupt in corruptions {
+        terminal_identity_refusal(
+            action.clone(),
+            effects::WORK_ORDER_TICKS_PER_UNIT * 2,
+            corrupt,
+        )?;
+    }
+    Ok(())
+}
+
+#[test]
+fn early_build_proof_checks_identity_without_requiring_physical_completion() -> Result<()> {
+    let site = MapCoord::new(1, 1, 10);
+    let (mut adapter, action_id, entity_id) = started(
+        Action::Build {
+            kind: BuildingKind::Workshop("Still".to_owned()),
+            location: site,
+            footprint: MapCuboid::new(site, MapCoord::new(2, 2, 10))?,
+            material: MaterialSelector::default(),
+        },
+        true,
+        None,
+    )?;
+    adapter.advance_ticks(1)?;
+    let proof = adapter.poll_action(action_id, &context(&adapter))?;
+    assert_eq!(proof.state, CommitState::Verified);
+    assert_eq!(
+        adapter.action_work_state(action_id)?,
+        EffectWorkState::Active { entity_id }
+    );
+    adapter.advance_ticks(10)?;
+    assert_eq!(adapter.poll_action(action_id, &context(&adapter))?, proof);
+    assert_eq!(
+        adapter.action_work_state(action_id)?,
+        EffectWorkState::Active { entity_id }
+    );
+    Ok(())
 }
 
 fn fail(adapter: &mut MemoryAdapter, action_id: ActionId) -> Result<ActionReceipt> {

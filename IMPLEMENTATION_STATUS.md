@@ -1,5 +1,28 @@
 # Implementation Status
 
+## Unreleased — Bind terminal construction and order proof to original identity
+
+Ordinary `Build` and `CreateWorkOrder` terminal proofs now require the original
+typed entity, generation and eligible immutable action parameters. This includes
+construction position and footprint, and the work order's original total
+quantity, job token and conditions. A matching completion field on a replacement
+entity or an altered order can no longer complete the original receipt. The
+shared check also rejects string-kind aliases during physical-work inspection.
+
+Laboratory, carried terminal verification and in-process dispatcher proof share
+this rule. Failed identity admission preserves the pending monitor, journal and
+observation for a valid retry; previously published receipts remain immutable.
+Explicit early goal proof remains independent of physical quiescence, so an
+appropriately scoped goal can still be proven while the original work continues.
+
+Validation on nightly 2026-11-22: all 155 actual laboratory library tests passed,
+including 23 effect/drain cases and the new identity, quantity and early-build
+proof regressions. Sixteen corruption variants cover typed identity, generation,
+geometry, quantities and missing/ineligible evidence. The full adapter library
+test build was killed by the execution host before tests ran; dispatcher-specific
+execution and full workspace/release qualification remain pending. Sealed
+predicates, compiler generations and native/live admission are unchanged.
+
 ## Unreleased — Page the complete published protocol-1.0 citizen roster
 
 The existing `fortress_query` tool now accepts optional `limit` and
