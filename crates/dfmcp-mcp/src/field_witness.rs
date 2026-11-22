@@ -11,6 +11,9 @@ use dfmcp_intent::{Action, PreparedPlan, effects};
 use dfmcp_world::{EdgeRecord, EntityKind, Fact, FactPresence, Predicate, Value, WorldSnapshot};
 use serde_json::{Value as Json, json};
 
+#[path = "configuration_witness.rs"]
+mod configuration;
+
 const MAX_FIELDS: usize = 256;
 const MAX_IDENTITIES: usize = 256;
 const MAX_QUANTITIES: usize = 64;
@@ -513,6 +516,7 @@ fn model_free(snapshot: &WorldSnapshot, budget: WorkBudget, meter: &mut Meter) -
 /// reviewed contract, and use normal current authorization/lease/commit gates.
 pub(crate) struct FieldWitness {
     description: Json,
+    configuration: bool,
 }
 
 impl FieldWitness {
@@ -522,6 +526,14 @@ impl FieldWitness {
         now: &WorldSnapshot,
         budget: WorkBudget,
     ) -> Check<Self> {
+        if plan.steps.iter().all(|step| {
+            matches!(
+                step.action,
+                Action::ConfigureStockpile { .. } | Action::SetStandingOrder { .. }
+            )
+        }) {
+            return configuration::prove(plan, base, now, budget);
+        }
         if base.anchor() != plan.anchor
             || base.fortress_id != now.fortress_id
             || base.cursor.epoch != now.cursor.epoch
@@ -659,7 +671,10 @@ impl FieldWitness {
             description["aggregate_domains"] = json!(quantities);
             description["bounds"]["aggregate_reads"] = json!(MAX_QUANTITIES);
         }
-        Ok(Self { description })
+        Ok(Self {
+            description,
+            configuration: false,
+        })
     }
 
     pub(crate) fn certificate(
@@ -668,12 +683,23 @@ impl FieldWitness {
         to: &PreparedPlan,
         coarse_conflict: &Json,
     ) -> Json {
+        let (schema, policy) = if self.configuration {
+            (
+                "dfmcp.configuration-merge/1",
+                "original_intent_replay_with_identical_reviewed_contract_preserving_current_unwritten_fields_and_refusing_divergent_writes",
+            )
+        } else {
+            (
+                "dfmcp.field-witness-rebase/1",
+                "original_intent_replay_with_identical_reviewed_contract_after_unchanged_field_reads_and_prior_writes",
+            )
+        };
         let body = json!({
-            "schema":"dfmcp.field-witness-rebase/1", "from_digest":from.digest.to_hex(),
+            "schema":schema, "from_digest":from.digest.to_hex(),
             "to_digest":to.digest.to_hex(), "base_state_hash":from.anchor.state_hash.to_hex(),
             "current_state_hash":to.anchor.state_hash.to_hex(), "witness":self.description,
             "coarse_conflict":coarse_conflict,
-            "policy":"original_intent_replay_with_identical_reviewed_contract_after_unchanged_field_reads_and_prior_writes",
+            "policy":policy,
         });
         let digest = Digest32::of_bytes(body.to_string().as_bytes()).to_hex();
         json!({"certificate":body, "certificate_digest":digest})

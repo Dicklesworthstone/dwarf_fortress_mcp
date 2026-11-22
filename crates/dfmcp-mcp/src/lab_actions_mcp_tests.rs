@@ -881,6 +881,9 @@ fn a_plan_made_stale_by_another_agent_is_replayed_not_committed_blind() -> TestR
 #[path = "field_witness_mcp_tests.rs"]
 mod field_witness_mcp_tests;
 
+#[path = "configuration_witness_mcp_tests.rs"]
+mod configuration_witness_mcp_tests;
+
 #[test]
 fn plan_forecasts_predict_completion_blocking_and_doomed_steps() -> TestResult {
     let session = open("72009", false, &ALL_EFFECTS)?;

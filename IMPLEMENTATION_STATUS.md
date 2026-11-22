@@ -1,5 +1,35 @@
 # Implementation Status
 
+## Unreleased — Compose concurrent stockpile and standing-order settings
+
+The real laboratory commit path can now replay independent stockpile capacities
+and standing-order keys after another member changes the same canonical record.
+Shared write fields must retain their exact base fact or already hold the exact
+requested qualified value. Divergent writes require explicit review. Concurrent
+creation of the canonical fortress settings entity follows its registered
+identity and generation rule; unrelated current settings remain intact.
+
+This closed configuration proof admits only immediate raw stockpile and
+standing-order actions with generated positive result predicates. It binds
+source hashes, plan digests, complete written facts or structural absence,
+typed writes, identities/generations and deterministic decisions in a
+`dfmcp.configuration-merge/1` certificate. Original-source replay, the entire
+reviewed execution contract, current grants, leases, checkpoint and normal
+preparation/commit gates still apply. Arbitrary guards, mixed actions, temporal
+obligations, compensation, optional model domains and exhausted bounds require
+review; no synthesized world replaces current observations.
+
+All 33 actual production witness component tests passed against the real
+semantic dependencies, including eight new configuration regressions and all
+25 existing witness cases. Four public-facade regressions cover shared commits,
+conflict review, current authority and original-digest retry; those remain
+unexecuted because full MCP checking was SIGKILLed in unchanged Asupersync before
+MCP source checking. Independent source review and whitespace checks passed.
+General structural merge, full MCP/stdio execution and native qualification
+remain open under `dfmcp-reality-wiring-proof-4bf.10`.
+
+See `docs/LAB_FIELD_REBASE.md#concurrent-stockpile-and-standing-order-settings`.
+
 ## Unreleased — Prove every requested stockpile setting
 
 Fresh laboratory `configure_stockpile` requests now seal the stockpile kind,
@@ -19,9 +49,9 @@ keep their original filter-only plan interpretation and can reconstruct only
 their exact old seal; they are not upgraded during recovery.
 
 Three new intent tests passed in the actual repository with locked/offline
-dependencies on the latest nightly. Three source/parser tests and four real
-facade/source-recovery/comparison tests are authored; their remaining execution
-is tracked separately. Independent source review and whitespace checks passed.
+dependencies on the latest nightly. All three actual source/parser component
+tests also passed. Four real facade/source-recovery/comparison tests are
+authored but unexecuted. Independent source review and whitespace checks passed.
 Full MCP checking was killed in unchanged Asupersync before MCP source checking.
 No complete-workspace, modern-stdio, native-game or admission pass is claimed.
 
@@ -53,7 +83,9 @@ repeat requests and another restart, unrelated work/pending preservation,
 whole-set authority and budget refusal before pause, malformed live custody,
 duplicate aliases, progressive publication failure/retry and complete recovered
 identities under output pressure. Independent source review, scoped latest-nightly
-formatting and whitespace checks passed. Full MCP checking was SIGKILLed in
+formatting and whitespace checks passed. The actual output-budget regression
+preserving complete recovered identities and the selected-only certificate
+passed in the component harness. Full MCP checking was SIGKILLed in
 unchanged Asupersync before reaching MCP source. The new facade regressions
 remain unexecuted; no new full Rust, modern-stdio, native-game or admission
 qualification is claimed.

@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased — Merge independent fortress configuration changes
+
+- Let shared members compose distinct stockpile capacities and standing-order
+  keys, including concurrent creation of canonical fortress settings.
+- Accept shared write fields only when unchanged from the sealed source or
+  already converged to the exact requested qualified value; review conflicts.
+- Preserve current unwritten settings through ordinary original-source replay
+  and emit a deterministic configuration certificate without changing authority.
+- Keep guards, mixed contracts, model domains and incomplete proofs on the
+  reviewed path. All 33 production witness component tests pass, including
+  eight new cases; four new public-facade regressions remain unexecuted.
+
 ## Unreleased — Complete stockpile configuration goals
 
 - Make current laboratory stockpile goals prove filters and every supplied
@@ -9,7 +21,7 @@
 - Seal a closed complete-settings source generation through direct requests,
   candidate comparisons and remedies, preserving exact historical recovery.
 - Add three intent, three parser/source and four real-facade regressions.
-  The three actual intent tests pass; broader execution remains separate.
+  All six intent and parser/source tests pass; facade execution remains separate.
 
 ## Unreleased — Stop a chosen project group after recovery
 
@@ -22,7 +34,8 @@
 - Retain recovered owner/archive/custody/step identities in complete output and
   additive `/2` certificates without restoring dispatch handles.
 - Add mixed/recovered lifetime, admission, ordering, failure/retry and compact
-  output regressions. Full execution evidence remains separate from source.
+  output regressions. The actual compact recovered-certificate test passes;
+  full facade execution remains separate from source.
 
 ## Unreleased — Forecast whole original projects on one shared world
 

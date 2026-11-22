@@ -1,4 +1,4 @@
-# Concurrent unit setters in the laboratory
+# Concurrent unit and fortress configuration in the laboratory
 
 Two members of a shared laboratory fortress can prepare work against the same
 unit. When one member changes `labor.BREW`, the other member's sealed
@@ -6,6 +6,13 @@ unit. When one member changes `labor.BREW`, the other member's sealed
 conflict. The host checks a bounded field witness, recompiles the original
 semantic action request at the actual current anchor, and commits only if the
 entire reviewed execution contract remains identical.
+
+Ordinary stockpile and standing-order requests have a second closed refinement.
+Members can change different capacities on one stockpile or different
+fortress-wide order keys without losing each other's settings. It can also
+reuse the canonical settings entity when another member created it first.
+The host accepts a shared written field only when its source fact is unchanged
+or its current qualified value already equals the exact requested value.
 
 The receipt carries a deterministic `witness_rebase` certificate with schema
 `dfmcp.field-witness-rebase/1`. It binds both plan digests and source state hashes,
@@ -16,7 +23,7 @@ coarse conflict that the field proof resolved. A retry using the original
 reviewed digest returns the same committed action receipts through the normal
 idempotency path.
 
-## Closed implementation boundary
+## Unit-field refinement boundary
 
 This refinement runs only after the ordinary whole-record witness reports a
 conflict. The original source must be raw semantic `actions`; every action and
@@ -102,6 +109,75 @@ hide endpoint removal, generation reuse, kind drift or another endpoint-record
 change. Relation certificates declare `edge_endpoint_records: true`; witnesses
 without relation reads retain their exact prior certificate representation.
 
+## Concurrent stockpile and standing-order settings
+
+The configuration path is limited to raw action sources containing only
+`configure_stockpile` and `set_standing_order`. Every action must be immediate,
+without caller guards, compensation or temporal obligations. The original
+goal and each step's postconditions must contain only positive equality and
+kind results established by the reviewed configuration writes. Arbitrary
+boolean, spatial, relation, aggregate and owned-history predicates remain on
+the explicit reviewed replay path. Mixed action families do too.
+
+For a stockpile, `accepts` is one complete sorted set. Each supplied
+`max_bins`, `max_barrels` or `max_wheelbarrows` value is a separate exact write;
+an omitted capacity is untouched. For a standing order, only its exact
+`standing_order.<key>` field is written. The proof constructs the sorted
+write footprint from the real actions and compares the retained base fact,
+current fact and requested value for every field:
+
+| Current write field | Decision |
+| --- | --- |
+| Complete fact unchanged from the base, including structural absence | Replay the exact reviewed write. |
+| Fact changed, but its qualified known value equals the exact requested value | Preserve the converged value while replaying the remaining writes. |
+| Fact changed to a different value, became unavailable, or lost qualified provenance | Require explicit review; dispatch no effect automatically. |
+
+For example, two members can request `accepts:["FOOD"]` together while one
+sets bins to 7 and the other sets barrels to 8. After the first commit, the
+second proof records that the filters converged, its barrel source fact
+remained unchanged, and the current bin field will be preserved. A competing
+bin value or a different filter set requires review. Filter sets are never
+unioned. The unchanged original action source is replayed against the actual
+current snapshot, so every omitted field survives through the ordinary
+reference effect. No synthesized merged world replaces current observations.
+
+The current stockpile source also seals the full requested goal, including
+all supplied capacities and the exact stockpile kind; see
+[complete stockpile settings](LAB_SEMANTIC_ACTIONS.md#complete-stockpile-settings).
+A partially converged request remains actionable until its remaining
+settings are satisfied. If every original goal already holds, the ordinary
+planner can refuse a redundant replay; the refinement does not fabricate a
+commit receipt. Historical stockpile sources retain their exact historical
+proof interpretation during reconstruction.
+
+Stockpile targets retain their exact identity, nonzero generation and kind.
+Existing fortress settings do too. Revisions cannot regress or be exhausted,
+and a changed written fact requires an advancing revision. A previously
+missing settings entity may be reused only at the deterministic identity for
+this fortress, with the exact `fortress_settings` kind, generation 1 and a
+bounded complete set of qualified known standing-order fields. This is the
+registered standing-order creation rule; it permits no arbitrary entity
+insertion, deletion or replacement.
+
+Every written field's source facts retain their provenance, source digest,
+observation tick, compatibility value and presence marker. Missing fields
+remain distinct from explicit `Absent`. Unknown, unsupported, omitted,
+redacted, stale, future-dated and inconsistent facts cannot be treated as
+converged settings. Filter values are bounded canonical text sets, capacities
+are unsigned 32-bit values, and standing-order values are bounded nonempty
+text. Repeated identical writes may share a field; ordered different writes
+to one field require review. The complete entity-and-edge absence census for
+optional laboratory models applies to this path as well.
+
+The resulting `witness_rebase` certificate uses schema
+`dfmcp.configuration-merge/1`. It binds both source state hashes, the original
+and replayed plan digests, exact identity and generation information,
+original and current fact digests or structural absence, typed requested
+values, owning step numbers, the decision for each write and the original
+coarse conflict. Its deterministic policy preserves current unwritten fields,
+accepts unchanged source facts or exact convergence, and refuses divergence.
+The existing unit-field certificate representation is unchanged.
+
 ## Bounds and authority
 
 The proof admits at most 64 steps, 256 entity identities, 256 distinct fields,
@@ -124,6 +200,13 @@ no authority and does not create or publish a merged synthetic world.
 This is a deterministic laboratory feature. It does not admit a native bridge,
 implement arbitrary structural three-way merge, or establish general action
 commutativity.
+
+The configuration branch uses the same action, identity, field, model-census,
+operation, byte and wall-time limits. It admits at most 64 filter tokens per
+stockpile. Its certificate is a compatibility proof only: ordinary original
+source replay must still preserve the entire reviewed execution contract,
+and current capabilities, risk grants, checkpoint requirements, leases and
+normal preparation and commit admission still apply.
 
 ## Focused verification
 
@@ -156,3 +239,16 @@ MCP test and typecheck attempts, including a bounded codegen-partition retry,
 were SIGKILLed in unchanged Asupersync under observed memory pressure before
 MCP diagnostics or execution. The component results do not establish a
 successful full MCP build, real stdio execution or native admission.
+
+`configuration_witness_tests.rs` exercises the actual planner and reference
+effects for independent capacities, exact filter convergence, partially
+converged goals, divergent writes, complete standing-order entity creation,
+missing versus explicit absence, invalid provenance and future facts,
+generation/revision changes, unsupported execution contracts, model markers
+on entities and edges, bounded work and deterministic certificates.
+`configuration_witness_mcp_tests.rs` supplies four public-facade regressions
+for shared stockpile updates, simultaneous standing-order creation, explicit
+review of conflicts, revoked current authority and original-digest retry.
+Those facade regressions have not executed because full MCP compilation is
+still blocked in unchanged Asupersync; component tests do not substitute for
+that integration check.
