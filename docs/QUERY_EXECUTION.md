@@ -26,6 +26,26 @@ them. Stateful watch and baseline operations keep their existing atomic
 publication context, and the enclosing runtime validates the complete final
 Agent Turn after the shared publisher accepts its own bounded result.
 
+## Complete-source admission for structured inspection and operational queries
+
+Exact `inspect`, `traverse`, `dependencies`, ordinary `aggregate` and structured
+`search` requests admit the complete supplied snapshot before canonical hashing.
+The record budget includes entities, edges, chunks and retained events, even
+when a query selects one entity, one kind, no matches or a compact total.
+Unselected and unavailable backing values still count toward structural work,
+nesting and canonical bytes. Structural limits are checked before canonical
+allocation; the exact canonical-byte allowance is inclusive and remains
+independent of the reserved output size.
+
+Plain aggregate and search execution carry admitted source work into selection,
+grouping, metrics and lexical scans, with the original deadline checked across
+the operation. Existing relationship/spatial/multi-field aggregate structural
+admission and its `source_cost` metadata remain unchanged. Ordinary responses
+keep their established output shape, query identities and lexical ordering.
+Retained-source queries still use current Query authority and verify the exact
+saved source hash. Refusals cannot publish a partial aggregate, advance a cursor
+or consume retained watch evidence.
+
 ## Continuation contract
 
 Treat returned continuations as opaque. A page is bound to the fortress,

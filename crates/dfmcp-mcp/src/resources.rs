@@ -850,7 +850,8 @@ impl ResourceHandler for SessionViewResource {
             page if page.starts_with("state-") => state::read(raw, uri, page),
             "checkpoints" => checkpoints::read(raw, uri, view),
             checkpoint
-                if checkpoint.starts_with("checkpoint-") || checkpoint.starts_with("checkpoints-") =>
+                if checkpoint.starts_with("checkpoint-")
+                    || checkpoint.starts_with("checkpoints-") =>
             {
                 checkpoints::read(raw, uri, checkpoint)
             }

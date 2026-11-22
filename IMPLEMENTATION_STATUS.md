@@ -1,5 +1,46 @@
 # Implementation Status
 
+## Unreleased — Bound ordinary aggregates and lexical search before hashing
+
+Plain `aggregate` and structured `search` now admit the complete source before
+recursive canonical serialization or hash verification. Entities, edges, chunks,
+retained events and all hidden/unselected backing values count. Plain modes keep
+a separate fixed structural ceiling and enforce the original exact canonical
+byte allowance; existing compound aggregate structural admission remains intact.
+The admitted source work and original deadline continue through scans and result
+construction. Ordinary response shapes, identities, lexical order and compound
+metadata conditions remain unchanged.
+
+Three new executor regressions cover complete record and exact byte boundaries,
+small output against larger admitted sources, hidden nesting in every record
+family before hashing, and current authority for retained worlds. Three existing
+shared-publisher cases now include ordinary aggregate/search under active-watch
+reservations and refusal without publication. Existing output boundary fixtures
+use the separate response allowance, preserving exact and one-byte-under checks.
+
+Validation after host recovery: all 56 actual operational component tests passed
+(29 inline cases, including the three new regressions, plus 27 aggregate
+composition/grouping/future-fact cases). The 152 laboratory and 21 query-core
+component tests also passed as detailed below. These selected-source workspaces
+use unchanged production module bodies and eleven exact `Cargo.lock` registry
+versions with archive checksum verification. Toolchain:
+`rustc 1.100.0-nightly (bba531001 2026-09-20)`,
+`cargo 1.100.0-nightly (495c385d0 2026-09-16)`.
+The temporary workspace manifests and adapter API export root avoid unrelated
+native adapter modules. This is component execution on the available nightly,
+not a latest-nightly full-workspace, MCP transport or native admission result.
+Shared-publisher and resource/handler regressions remain unexecuted.
+The three new checkpoint files pass the available nightly's full rustfmt check;
+existing files are formatted only in the touched ranges. Unrelated pre-existing
+formatting is preserved, and the formatted Rust diff passes whitespace checks.
+Test execution preceded the final rustfmt-only normalization; exact formatted
+bytes have not been re-executed. The host disconnected again after these results,
+blocking final repository-wide/static gates on the final commit.
+
+Owners: `df-lab-structured-query-f7q` and
+`df-cx-authority-budget-threading-lmu`, both still in progress.
+See `docs/QUERY_EXECUTION.md` and `docs/LAB_STRUCTURED_QUERY.md`.
+
 ## Unreleased — Discover and inspect retained checkpoints after recovery
 
 Laboratory sessions now expose `checkpoint_catalog`, and checkpoint creation
@@ -29,9 +70,12 @@ label custody and conflict atomicity, source validation and capacity, passive
 inspection, pagination and catalog gaps, current authority, work/output/deadline
 bounds and real durable create/reopen/discover/preview/restore paths. The existing
 resource-discovery expectation now includes the new view. Independent source
-review completed. Compilation, Rust tests, formatting and full modern-stdio
-qualification remain unexecuted after loss of the execution host; no native
-checkpoint, live compatibility or admission claim is added.
+review completed. After execution-host recovery, all 152 actual laboratory
+component tests passed, including all six new adapter regressions. The component
+uses actual core/world/intent, the real adapter API and the full laboratory
+module. The seven MCP resource/handler regressions remain source-reviewed but
+unexecuted; this does not establish full MCP/modern-stdio, native checkpoint,
+live compatibility or admission qualification.
 
 Owner: `dfmcp-reality-wiring-proof-4bf.11`, which remains open for its wider
 resource scope and execution evidence. See
@@ -58,10 +102,11 @@ Five new actual-executor/shared-publisher regression sources cover all three
 modes, exact byte and record boundaries, large unselected redacted values,
 depth refusal before hashing, retained current authority, active-watch output
 reservation and zero publication on refusal. Independent source review completed.
-These tests, Rust compilation and formatting remain unexecuted because the
-execution host became unavailable. Three baseline repository checks passed
-before these edits; they do not qualify the changed source. No new full Rust,
-native-game or admission evidence is claimed.
+After execution-host recovery, all 21 actual query-core component tests passed,
+including the three new executor cases. The two new shared-publisher regressions
+remain source-reviewed but unexecuted. The selected-source component uses the
+actual core/world and query modules with exact locked semantic dependencies;
+it does not establish full MCP/transport, native-game or admission evidence.
 
 Owners: `df-lab-structured-query-f7q` and
 `df-cx-authority-budget-threading-lmu`. See

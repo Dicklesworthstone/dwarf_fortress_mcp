@@ -427,17 +427,22 @@ fn execute_at_source(
             "expected_anchor does not match the complete current anchor",
         ));
     }
-    // Compound selection and multi-field grouping admit the complete source,
-    // including unselected values, before hashing or building any group/index.
-    // Existing plain aggregates and lexical searches retain their allowance.
-    let work = if matches!(&request.query, Query::Aggregate { relation, spatial, group_by, .. }
+    // Every operation admits the complete source before recursive canonical
+    // encoding or hash verification, including unselected and hidden values.
+    // Plain aggregates and searches use the canonical source-byte allowance;
+    // compound aggregates retain their stricter structural-byte contract.
+    let compound = matches!(&request.query, Query::Aggregate { relation, spatial, group_by, .. }
         if relation.is_some() || spatial.is_some()
-            || matches!(group_by, Some(GroupBy::Fields { .. })))
-    {
-        Some(source::preflight(snapshot, context, started)?)
-    } else {
-        None
-    };
+            || matches!(group_by, Some(GroupBy::Fields { .. })));
+    let mut source_context = context.clone();
+    if !compound {
+        source_context.budget.max_bytes = MAX_SCAN_BYTES as u64;
+    }
+    let mut work = source::preflight(snapshot, &source_context, started)?;
+    if snapshot.canonical_bytes().len() as u64 > context.budget.max_bytes {
+        return Err(exhausted("query exceeds its canonical source byte budget"));
+    }
+    work.check()?;
     if !snapshot.hash_is_valid() {
         return Err(DfmcpError::new(
             ErrorCode::InternalInvariantViolation,
@@ -478,7 +483,7 @@ fn execute_at_source(
                 metrics,
                 max_groups: max_groups.map_or(32, |value| value),
             };
-            aggregate(snapshot, identity, &spec, maximum, work)
+            aggregate(snapshot, identity, &spec, maximum, &mut work)
         }
         Query::Search {
             text,
@@ -502,9 +507,10 @@ fn execute_at_source(
                 limit: limit.unwrap_or(4),
                 continuation,
             };
-            search(snapshot, identity, &spec, maximum)
+            search(snapshot, identity, &spec, maximum, &mut work)
         }
     }?;
+    work.check()?;
     check()?;
     Ok(value)
 }
@@ -647,7 +653,7 @@ fn aggregate(
     identity: Digest32,
     spec: &AggregateSpec,
     maximum: usize,
-    mut work: Option<source::Budget>,
+    work: &mut source::Budget,
 ) -> Result<Value> {
     let AggregateSpec {
         kinds: selected,
@@ -708,7 +714,7 @@ fn aggregate(
     if aggregate_work > MAX_WORK {
         return Err(exhausted("aggregate scan exceeds its operation bound"));
     }
-    if let Some(work) = &mut work {
+    {
         let relation_work = relation.as_ref().map_or(0, |relation| {
             let target_validation = relation
                 .predicate
@@ -760,12 +766,6 @@ fn aggregate(
         )?;
     }
     let relations = if let Some(relation) = relation {
-        let work = work.as_ref().ok_or_else(|| {
-            DfmcpError::new(
-                ErrorCode::InternalInvariantViolation,
-                "compound aggregate source was not admitted",
-            )
-        })?;
         Some(relation_selector::prepare(
             snapshot,
             selected,
@@ -797,9 +797,7 @@ fn aggregate(
         });
     let mut geometry_counts = GeometryCounts::default();
     for entity in snapshot.graph.entities.values() {
-        if let Some(work) = &work {
-            work.check()?;
-        }
+        work.check()?;
         if let Some(relations) = &relations {
             if !relations
                 .candidates
@@ -828,12 +826,6 @@ fn aggregate(
             }
         }
         if let Some(spatial) = spatial {
-            let work = work.as_ref().ok_or_else(|| {
-                DfmcpError::new(
-                    ErrorCode::InternalInvariantViolation,
-                    "compound aggregate source was not admitted",
-                )
-            })?;
             match spatial.evaluate(entity, snapshot, &mut || work.check())? {
                 spatial_selector::Decision::Matched(_) => geometry_counts.matched += 1,
                 spatial_selector::Decision::Outside => {
@@ -866,9 +858,7 @@ fn aggregate(
     let rows = groups
         .into_iter()
         .map(|(key, group)| {
-            if let Some(work) = &work {
-                work.check()?;
-            }
+            work.check()?;
             let key = match key {
                 GroupKey::All => json!({"kind":"all"}),
                 GroupKey::Kind(kind) => json!({"kind":"entity_kind","value":kind}),
@@ -920,7 +910,7 @@ fn aggregate(
             "note":"only True rows contribute; Unknown is not False and filtered totals do not establish complete-world absence"
         });
     }
-    if let Some(work) = &work {
+    if relation.is_some() || spatial.is_some() || matches!(group_by, Some(GroupBy::Fields { .. })) {
         compose_aggregate_metadata(
             &mut result,
             spec,
@@ -934,12 +924,10 @@ fn aggregate(
                 filter_unknown: excluded_unknown,
             },
         );
-        work.check()?;
     }
+    work.check()?;
     let result = finish(snapshot, identity, result, maximum)?;
-    if let Some(work) = &work {
-        work.check()?;
-    }
+    work.check()?;
     Ok(result)
 }
 
@@ -1157,6 +1145,7 @@ fn search(
     identity: Digest32,
     spec: &SearchSpec,
     maximum: usize,
+    work: &mut source::Budget,
 ) -> Result<Value> {
     if spec.text.is_empty()
         || spec.text.len() > 512
@@ -1188,18 +1177,19 @@ fn search(
         .predicate
         .as_ref()
         .map_or(0, |predicate| predicate.complexity().saturating_mul(3));
-    if snapshot.graph.entities.len().saturating_mul(
+    let search_work = snapshot.graph.entities.len().saturating_mul(
         (spec.text_fields.len() + 1)
             .saturating_mul(terms.len())
             .saturating_add(predicate_work),
-    ) > MAX_WORK
-    {
+    );
+    if search_work > MAX_WORK {
         return Err(exhausted(if spec.predicate.is_some() {
             "search exceeds its combined term/field/predicate work bound"
         } else {
             "search exceeds its term/field scan bound"
         }));
     }
+    work.charge(0, search_work)?;
     let after = parse_cursor(spec.continuation.as_deref(), identity)?;
     let mut after_found = after.is_none();
     let (mut matched, mut remaining, mut scanned, mut unavailable) = (0u64, 0usize, 0usize, 0u64);
@@ -1207,6 +1197,7 @@ fn search(
         (0u64, 0u64, 0u64, 0u64);
     let mut best: BTreeMap<Rank, Hit<'_>> = BTreeMap::new();
     for entity in snapshot.graph.entities.values() {
+        work.check()?;
         if !spec.kinds.is_empty() && !spec.kinds.contains(&kind_name(&entity.kind)) {
             continue;
         }
@@ -1232,6 +1223,7 @@ fn search(
             fields.push("$label");
         }
         for field in &spec.text_fields {
+            work.check()?;
             let fact = entity.fields.get(field);
             match presence(fact, snapshot.tick) {
                 (_, Some(WorldValue::Text(text))) => {
@@ -1280,19 +1272,27 @@ fn search(
     }
     let ordered: Vec<_> = best.into_iter().collect();
     let build = |count: usize| -> Result<Value> {
+        work.check()?;
         let truncated = remaining > count;
         let continuation = if truncated && count > 0 {
             Some(cursor(identity, ordered[count - 1].0))
         } else {
             None
         };
-        let rows:Vec<_>=ordered.iter().take(count).map(|(_,hit)|json!({
-            "entity_id":hit.entity.id.to_string(),"generation":hit.entity.generation,"revision":hit.entity.revision,
-            "kind":kind_name(&hit.entity.kind),"label":hit.entity.label,"matched_terms":hit.terms,
-            "matched_fields":hit.fields,"source_digests":hit.source_digests,
-            "inspect":{"kind":"inspect","entity_id":hit.entity.id.to_string(),"generation":hit.entity.generation,
-                "fields":hit.fields.iter().filter(|&&field|field!="$label").collect::<Vec<_>>()}
-        })).collect();
+        let rows = ordered
+            .iter()
+            .take(count)
+            .map(|(_, hit)| {
+                work.check()?;
+                Ok(json!({
+                    "entity_id":hit.entity.id.to_string(),"generation":hit.entity.generation,"revision":hit.entity.revision,
+                    "kind":kind_name(&hit.entity.kind),"label":hit.entity.label,"matched_terms":hit.terms,
+                    "matched_fields":hit.fields,"source_digests":hit.source_digests,
+                    "inspect":{"kind":"inspect","entity_id":hit.entity.id.to_string(),"generation":hit.entity.generation,
+                        "fields":hit.fields.iter().filter(|&&field|field!="$label").collect::<Vec<_>>()}
+                }))
+            })
+            .collect::<Result<Vec<_>>>()?;
         let mut result = json!({"kind":"search","matched":matched,"returned":count,
             "truncated":truncated,"continuation":continuation,"rows":rows,"terms":terms,
             "ranking":"distinct matching terms descending, then stable entity ID ascending",
@@ -1309,7 +1309,9 @@ fn search(
                 "note":"only True predicate rows are searched; matched_predicate precedes lexical matching, Unknown is not False, and neither count proves complete-world absence"
             });
         }
-        finish(snapshot, identity, result, maximum)
+        let result = finish(snapshot, identity, result, maximum)?;
+        work.check()?;
+        Ok(result)
     };
     if ordered.is_empty() {
         return build(0);
@@ -1337,10 +1339,13 @@ fn search(
 mod tests {
     use super::*;
     use dfmcp_core::{
-        CapabilityGrant, CapabilityScope, FortressId, GameTick, ObservationCursor, RequestId,
-        SessionId, WorkBudget,
+        CapabilityGrant, CapabilityScope, EdgeId, EventId, FortressId, GameTick, ObservationCursor,
+        RequestId, SessionId, WorkBudget,
     };
-    use dfmcp_world::WorldGraph;
+    use dfmcp_world::{
+        ChunkCoord, EdgeKind, EdgeRecord, MapChunk, TerrainRun, WorldEvent, WorldEventKind,
+        WorldGraph,
+    };
 
     fn fact(value: WorldValue) -> Fact {
         Fact::known(
@@ -1453,6 +1458,224 @@ mod tests {
         envelope(
             json!({"kind":"search","text":"cavern flood","text_fields":["message"],"match_mode":"any","limit":1}),
         )
+    }
+
+    fn complete_source_fixture() -> Result<(WorldSnapshot, OperationContext)> {
+        let (mut snapshot, mut context) = fixture();
+        let mut hidden = fact(WorldValue::Text("hidden source marker".repeat(4096)));
+        hidden.presence = Some(FactPresence::Redacted("not selected".to_owned()));
+        snapshot
+            .graph
+            .entities
+            .get_mut(&EntityId::new(4))
+            .ok_or_else(|| invalid("missing unselected entity"))?
+            .fields
+            .insert("unselected".to_owned(), hidden.clone());
+        let edge = EdgeRecord {
+            id: EdgeId::new(1),
+            revision: 1,
+            kind: EdgeKind::Requires,
+            from: EntityId::new(3),
+            to: EntityId::new(4),
+            fields: BTreeMap::from([("unselected".to_owned(), hidden)]),
+        };
+        snapshot.graph.edges.insert(edge.id, edge);
+        let coord = ChunkCoord { x: 0, y: 0, z: 0 };
+        snapshot.graph.chunks.insert(
+            coord,
+            MapChunk {
+                coord,
+                revision: 1,
+                width: 1,
+                height: 1,
+                terrain_runs: vec![TerrainRun {
+                    tile_code: 0,
+                    length: 1,
+                }],
+                sparse_overlays: BTreeMap::from([(
+                    0,
+                    BTreeMap::from([(
+                        "unselected".to_owned(),
+                        WorldValue::Text("hidden chunk marker".repeat(256)),
+                    )]),
+                )]),
+            },
+        );
+        let event = WorldEvent {
+            id: EventId::new(1),
+            tick: snapshot.tick,
+            kind: WorldEventKind::AdapterNotice,
+            subject: None,
+            summary: "unselected event".to_owned(),
+            fields: BTreeMap::from([(
+                "unselected".to_owned(),
+                WorldValue::Text("hidden event marker".repeat(256)),
+            )]),
+        };
+        snapshot.graph.events.insert(event.id, event);
+        snapshot.refresh_hash();
+        context.anchor = snapshot.anchor();
+        Ok((snapshot, context))
+    }
+
+    fn plain_operational_requests() -> [Value; 2] {
+        let mut aggregate = numeric_query();
+        aggregate["query"]["kinds"] = json!(["unit"]);
+        let mut search = search_query();
+        search["query"]["kinds"] = json!(["unit"]);
+        [aggregate, search]
+    }
+
+    #[test]
+    fn plain_operational_queries_admit_complete_sources_before_small_results() -> Result<()> {
+        let (snapshot, mut context) = complete_source_fixture()?;
+        let source_bytes = snapshot.canonical_bytes().len() as u64;
+        let records = snapshot.graph.entities.len()
+            + snapshot.graph.edges.len()
+            + snapshot.graph.chunks.len()
+            + snapshot.graph.events.len();
+        assert!(source_bytes > 8192);
+        context.budget.max_bytes = source_bytes;
+        context.budget.max_entities = records as u32;
+        for input in plain_operational_requests() {
+            let result = execute_with_output_budget(&snapshot, &context, &input, 8192)?;
+            assert_eq!(result["kind"], input["query"]["kind"]);
+            assert!(result.get("source_cost").is_none());
+            assert!(result.to_string().len() <= 8192);
+            assert!(!result.to_string().contains("hidden"));
+
+            let mut smaller = context.clone();
+            smaller.budget.max_bytes = source_bytes - 1;
+            assert!(matches!(
+                execute_with_output_budget(&snapshot, &smaller, &input, 8192),
+                Err(error) if error.code == ErrorCode::BudgetExceeded
+                    && error.message.contains("canonical source byte")
+            ));
+            smaller = context.clone();
+            smaller.budget.max_entities = records as u32 - 1;
+            assert!(matches!(
+                execute_with_output_budget(&snapshot, &smaller, &input, 8192),
+                Err(error) if error.code == ErrorCode::BudgetExceeded
+                    && error.message.contains("complete-source record")
+            ));
+
+            // Even an empty selection cannot waive the backing projection.
+            let mut empty = input.clone();
+            empty["query"]["kinds"] = json!(["item"]);
+            assert!(matches!(
+                execute_with_output_budget(&snapshot, &smaller, &empty, 8192),
+                Err(error) if error.code == ErrorCode::BudgetExceeded
+            ));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn plain_operational_queries_bound_hidden_values_before_hashing() -> Result<()> {
+        for location in 0..4 {
+            let (mut snapshot, context) = complete_source_fixture()?;
+            let mut nested = WorldValue::Null;
+            for _ in 0..66 {
+                nested = WorldValue::List(vec![nested]);
+            }
+            match location {
+                0 => {
+                    snapshot
+                        .graph
+                        .entities
+                        .get_mut(&EntityId::new(4))
+                        .and_then(|entity| entity.fields.get_mut("unselected"))
+                        .ok_or_else(|| invalid("unselected entity fact"))?
+                        .value = nested
+                }
+                1 => {
+                    snapshot
+                        .graph
+                        .edges
+                        .get_mut(&EdgeId::new(1))
+                        .and_then(|edge| edge.fields.get_mut("unselected"))
+                        .ok_or_else(|| invalid("unselected edge fact"))?
+                        .value = nested
+                }
+                2 => {
+                    snapshot
+                        .graph
+                        .chunks
+                        .get_mut(&ChunkCoord { x: 0, y: 0, z: 0 })
+                        .and_then(|chunk| chunk.sparse_overlays.get_mut(&0))
+                        .ok_or_else(|| invalid("unselected chunk overlay"))?
+                        .insert("unselected".to_owned(), nested);
+                }
+                _ => {
+                    snapshot
+                        .graph
+                        .events
+                        .get_mut(&EventId::new(1))
+                        .ok_or_else(|| invalid("unselected event"))?
+                        .fields
+                        .insert("unselected".to_owned(), nested);
+                }
+            }
+            // Keep the old hash: admission must refuse this hidden source
+            // before recursive canonical encoding or hash verification.
+            for input in plain_operational_requests() {
+                assert!(matches!(
+                    execute(&snapshot, &context, &input),
+                    Err(error) if error.code == ErrorCode::BudgetExceeded
+                        && error.message.contains("nesting")
+                ));
+                let mut denied = context.clone();
+                denied.grants.clear();
+                assert!(matches!(
+                    execute(&snapshot, &denied, &input),
+                    Err(error) if error.code == ErrorCode::CapabilityDenied
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn retained_operational_queries_keep_current_authority_and_exact_source_limits() -> Result<()> {
+        let (snapshot, mut context) = complete_source_fixture()?;
+        let mut current = snapshot.clone();
+        current.tick = GameTick(100);
+        current.cursor.sequence += 1;
+        current.refresh_hash();
+        context.anchor = current.anchor();
+        context.budget.max_bytes = snapshot.canonical_bytes().len() as u64;
+        for mut input in plain_operational_requests() {
+            input["expected_anchor"] = anchor_json(snapshot.anchor());
+            let result = execute_retained_with_output_budget(
+                &snapshot,
+                &context,
+                &input,
+                8192,
+                Instant::now(),
+            )?;
+            assert_eq!(result["anchor"], anchor_json(snapshot.anchor()));
+            assert!(matches!(
+                execute(&snapshot, &context, &input),
+                Err(error) if error.code == ErrorCode::StaleAnchor
+            ));
+            let mut smaller = context.clone();
+            smaller.budget.max_bytes -= 1;
+            assert!(matches!(
+                execute_retained_with_output_budget(
+                    &snapshot, &smaller, &input, 8192, Instant::now()
+                ),
+                Err(error) if error.code == ErrorCode::BudgetExceeded
+            ));
+            let mut expired = context.clone();
+            expired.grants[0].expires_at_tick = Some(GameTick(50));
+            assert!(matches!(
+                execute_retained_with_output_budget(
+                    &snapshot, &expired, &input, 8192, Instant::now()
+                ),
+                Err(error) if error.code == ErrorCode::CapabilityDenied
+            ));
+        }
+        Ok(())
     }
 
     #[test]
@@ -1671,29 +1894,29 @@ mod tests {
 
     #[test]
     fn search_pages_fit_whole_rows_and_never_continue_from_a_terminal_hit() -> Result<()> {
-        let (snapshot, mut ctx) = fixture();
+        let (snapshot, ctx) = fixture();
         let mut request = search_query();
         let one = execute(&snapshot, &ctx, &request)?;
-        ctx.budget.max_bytes = serde_json::to_vec(&one)
+        let output_bytes = serde_json::to_vec(&one)
             .map_err(|_| invalid("fixture JSON"))?
             .len() as u64;
         request["query"]["limit"] = json!(128);
-        let bounded = execute(&snapshot, &ctx, &request)?;
+        let bounded = execute_with_output_budget(&snapshot, &ctx, &request, output_bytes)?;
         assert_eq!(bounded["returned"], 1);
         assert!(
             serde_json::to_vec(&bounded)
                 .map_err(|_| invalid("fixture JSON"))?
                 .len() as u64
-                <= ctx.budget.max_bytes
+                <= output_bytes
         );
         let identity = identity(&snapshot, &ctx, &request)?;
         request["query"]["continuation"] = json!(cursor(identity, (Reverse(1), EntityId::new(4))));
         assert!(
             matches!(execute(&snapshot,&ctx,&request),Err(error) if error.code==ErrorCode::CursorGap)
         );
-        ctx.budget.max_bytes = 1;
         assert!(
-            matches!(execute(&snapshot,&ctx,&search_query()),Err(error) if error.code==ErrorCode::BudgetExceeded)
+            matches!(execute_with_output_budget(&snapshot,&ctx,&search_query(),1),
+                Err(error) if error.code==ErrorCode::BudgetExceeded)
         );
         Ok(())
     }
@@ -1908,6 +2131,7 @@ mod tests {
         snapshot.refresh_hash();
         ctx.anchor = snapshot.anchor();
         ctx.budget.max_entities = 10_000;
+        ctx.budget.max_bytes = MAX_SCAN_BYTES as u64;
         let request = envelope(json!({"kind":"aggregate","kinds":["item"],
             "where":{"op":"all","args":vec![boolean_filter("unobserved");140]}}));
         assert!(matches!(execute(&snapshot,&ctx,&request),
@@ -1918,7 +2142,7 @@ mod tests {
 
     #[test]
     fn invalid_filters_and_output_refusal_leave_the_exact_source_unchanged() -> Result<()> {
-        let (snapshot, mut ctx) = fixture();
+        let (snapshot, ctx) = fixture();
         let original = snapshot.anchor();
         for filter in [
             json!({"op":"compare","field":"alive","comparison":"equal", "value":{"type":"bool","value":true}}),
@@ -1937,11 +2161,14 @@ mod tests {
         let bytes = serde_json::to_vec(&exact)
             .map_err(|_| invalid("cannot encode fixture"))?
             .len();
-        ctx.budget.max_bytes = bytes as u64;
-        assert_eq!(execute(&snapshot, &ctx, &request)?, exact);
-        ctx.budget.max_bytes -= 1;
-        assert!(matches!(execute(&snapshot,&ctx,&request),
-            Err(error) if error.code == ErrorCode::BudgetExceeded));
+        assert_eq!(
+            execute_with_output_budget(&snapshot, &ctx, &request, bytes as u64)?,
+            exact
+        );
+        assert!(
+            matches!(execute_with_output_budget(&snapshot,&ctx,&request,bytes as u64 - 1),
+            Err(error) if error.code == ErrorCode::BudgetExceeded)
+        );
         assert_eq!(snapshot.anchor(), original);
         assert!(snapshot.hash_is_valid());
         Ok(())
@@ -2160,6 +2387,7 @@ mod tests {
         snapshot.refresh_hash();
         ctx.anchor = snapshot.anchor();
         ctx.budget.max_entities = 10_000;
+        ctx.budget.max_bytes = MAX_SCAN_BYTES as u64;
         for selected in [json!(["item"]), json!(["unit"])] {
             let request = envelope(json!({"kind":"search","text":"Urist","kinds":selected,
                 "where":{"op":"all","args":vec![boolean_filter("unobserved");140]}}));
@@ -2172,7 +2400,7 @@ mod tests {
 
     #[test]
     fn filtered_search_publication_accounts_for_selection_and_rechecks_authority() -> Result<()> {
-        let (snapshot, mut ctx) = fixture();
+        let (snapshot, ctx) = fixture();
         let original = snapshot.anchor();
         let mut request = search_query();
         request["query"]["where"] = json!({"op":"all","args":[]});
@@ -2180,13 +2408,15 @@ mod tests {
         let bytes = serde_json::to_vec(&one)
             .map_err(|_| invalid("cannot encode search fixture"))?
             .len() as u64;
-        ctx.budget.max_bytes = bytes;
         request["query"]["limit"] = json!(128);
-        assert_eq!(execute(&snapshot, &ctx, &request)?, one);
-        ctx.budget.max_bytes -= 1;
-        assert!(matches!(execute(&snapshot, &ctx, &request),
-            Err(error) if error.code == ErrorCode::BudgetExceeded));
-        ctx.budget.max_bytes = bytes;
+        assert_eq!(
+            execute_with_output_budget(&snapshot, &ctx, &request, bytes)?,
+            one
+        );
+        assert!(
+            matches!(execute_with_output_budget(&snapshot, &ctx, &request, bytes - 1),
+            Err(error) if error.code == ErrorCode::BudgetExceeded)
+        );
         for restriction in 0..5 {
             let mut denied = ctx.clone();
             match restriction {

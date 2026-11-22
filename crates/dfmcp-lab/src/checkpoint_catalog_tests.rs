@@ -5,8 +5,8 @@
 
 use dfmcp_adapter::GameAdapter;
 use dfmcp_core::{
-    Capability, CapabilityGrant, CapabilityScope, CheckpointId, ErrorCode, FortressId,
-    GameTick, ObservationCursor, OperationContext, RequestId, RiskTier, SessionId, WorkBudget,
+    Capability, CapabilityGrant, CapabilityScope, CheckpointId, ErrorCode, FortressId, GameTick,
+    ObservationCursor, OperationContext, RequestId, RiskTier, SessionId, WorkBudget,
 };
 use dfmcp_world::{WorldGraph, WorldSnapshot};
 
@@ -79,7 +79,10 @@ fn checkpoint_catalog_keeps_exact_labels_and_read_only_identifier_order() {
     let without_read = control
         .checkpoint("next", &context(&control))
         .expect("next checkpoint without inspection");
-    assert_eq!(next, without_read, "inspection must not consume identity state");
+    assert_eq!(
+        next, without_read,
+        "inspection must not consume identity state"
+    );
 }
 
 #[test]
@@ -159,7 +162,12 @@ fn checkpoint_adoption_checks_labels_and_source_before_publication() {
     let original = source(7, 3);
     let mut adapter = MemoryAdapter::new(source(7, 9));
     let id = CheckpointId::new(4);
-    for bad in ["x".repeat(257), "é".repeat(129), "line\nbreak".to_owned(), "\u{7f}".to_owned()] {
+    for bad in [
+        "x".repeat(257),
+        "é".repeat(129),
+        "line\nbreak".to_owned(),
+        "\u{7f}".to_owned(),
+    ] {
         assert_eq!(
             adapter
                 .adopt_checkpoint_labeled(id, original.clone(), &bad)
@@ -261,5 +269,8 @@ fn full_checkpoint_store_refuses_new_labels_but_allows_exact_metadata_recovery()
         .adopt_checkpoint_labeled(existing, original, "retained at capacity")
         .expect("existing exact custody may recover its original label");
     assert_eq!(adapter.checkpoint_count(), MAX_LAB_CHECKPOINTS);
-    assert_eq!(adapter.checkpoint_label(existing), Some("retained at capacity"));
+    assert_eq!(
+        adapter.checkpoint_label(existing),
+        Some("retained at capacity")
+    );
 }

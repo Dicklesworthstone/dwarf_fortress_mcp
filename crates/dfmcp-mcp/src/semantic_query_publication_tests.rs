@@ -337,8 +337,7 @@ fn enclosing_response_reservation_keeps_the_original_source_for_every_projected_
     inputs.extend(compound_aggregates());
     inputs.push(json!({"schema":"dfmcp.query/1","query":{"kind":"entities",
         "kinds":["unit"],"fields":["rank"],"limit":1}}));
-    inputs.push(json!({"schema":"dfmcp.query/1","query":{"kind":"search",
-        "kinds":["unit"],"text":"unit","limit":1}}));
+    inputs.extend(plain_operational_requests());
     for mut input in inputs {
         // This is the allowance remaining after a live runtime reserves its
         // complete Agent Turn, before the shared publisher reserves watches.
@@ -369,8 +368,16 @@ fn enclosing_response_reservation_keeps_the_original_source_for_every_projected_
     Ok(())
 }
 
+fn plain_operational_requests() -> [Value; 2] {
+    [
+        json!({"schema":"dfmcp.query/1","query":{"kind":"aggregate","kinds":["unit"]}}),
+        json!({"schema":"dfmcp.query/1","query":{"kind":"search",
+            "kinds":["unit"],"text":"unit","limit":1}}),
+    ]
+}
+
 #[test]
-fn compound_output_reserves_active_watches_and_retains_their_exact_evidence() -> TestResult {
+fn operational_output_reserves_active_watches_and_retains_their_exact_evidence() -> TestResult {
     let (snapshot, context) = fixture();
     let watch = publish(
         &snapshot,
@@ -379,7 +386,10 @@ fn compound_output_reserves_active_watches_and_retains_their_exact_evidence() ->
         "kind":"watch","key":"compound-count-watch","condition":{"op":"paused","value":false},
         "deadline_tick":100}}),
     )?;
-    for input in compound_aggregates() {
+    for input in compound_aggregates()
+        .into_iter()
+        .chain(plain_operational_requests())
+    {
         let raw = execute_with_publisher_budget(&snapshot, &context, &input, 8192, |value| {
             Ok(value.to_string())
         })?;
@@ -396,24 +406,26 @@ fn compound_output_reserves_active_watches_and_retains_their_exact_evidence() ->
 }
 
 #[test]
-fn independent_output_budget_cannot_expand_sources_grants_or_publish_partial_aggregates()
--> TestResult {
+fn independent_output_budget_cannot_expand_operational_sources_or_publish_refusals() -> TestResult {
     let (snapshot, context) = fixture();
-    for input in compound_aggregates() {
+    for input in compound_aggregates()
+        .into_iter()
+        .chain(plain_operational_requests())
+    {
         let called = Cell::new(false);
         let publisher = |value: Value| {
             called.set(true);
             Ok(value.to_string())
         };
         let mut source_limited = context.clone();
-        source_limited.budget.max_bytes = 8192;
+        source_limited.budget.max_bytes = snapshot.canonical_bytes().len() as u64 - 1;
         assert!(
             matches!(execute_with_publisher_budget(&snapshot, &source_limited, &input,
             u64::MAX, publisher), Err(error) if error.code == ErrorCode::BudgetExceeded)
         );
         assert!(!called.get());
         let mut record_limited = context.clone();
-        record_limited.budget.max_entities = 1;
+        record_limited.budget.max_entities = snapshot.graph.entities.len() as u32;
         assert!(
             matches!(execute_with_publisher_budget(&snapshot, &record_limited, &input,
             u64::MAX, publisher), Err(error) if error.code == ErrorCode::BudgetExceeded)

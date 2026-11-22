@@ -537,13 +537,8 @@ where
             query_watch::execute(snapshot, &output_context, input, publish)
         }
         Some(
-            kind @ ("entities"
-            | "inspect"
-            | "traverse"
-            | "dependencies"
-            | "spatial_entities"
-            | "related_entities"
-            | "ranked_entities"),
+            kind @ ("entities" | "inspect" | "traverse" | "dependencies" | "spatial_entities"
+            | "related_entities" | "ranked_entities"),
         ) => {
             let narrowed = result_context(&output_context)?;
             let execute_page = match kind {

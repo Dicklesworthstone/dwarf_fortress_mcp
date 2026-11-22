@@ -476,8 +476,7 @@ pub(crate) fn retained_resource_snapshot<'a>(
                     "checkpoint version lookup exceeds the negotiated source record budget",
                 ));
             }
-            let requested = Digest32::from_hex(hash)
-                .filter(|digest| digest.to_hex() == hash);
+            let requested = Digest32::from_hex(hash).filter(|digest| digest.to_hex() == hash);
             session
                 .adapter
                 .checkpoint_entries()

@@ -29,7 +29,10 @@ const MAX_RESOURCE_BYTES: u64 = 60_000;
 
 #[derive(Debug, PartialEq, Eq)]
 enum Address {
-    Catalog { digest: Option<Digest32>, offset: usize },
+    Catalog {
+        digest: Option<Digest32>,
+        offset: usize,
+    },
     Checkpoint(CheckpointId),
 }
 
@@ -43,38 +46,56 @@ fn exhausted(message: impl Into<String>) -> DfmcpError {
 
 fn lower_hex(raw: &str, length: usize) -> bool {
     raw.len() == length
-        && raw.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        && raw
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
 fn address(view: &str) -> Result<Address> {
     if view == "checkpoints" {
-        return Ok(Address::Catalog { digest: None, offset: 0 });
+        return Ok(Address::Catalog {
+            digest: None,
+            offset: 0,
+        });
     }
     if view.len() > 128 {
-        return Err(invalid("checkpoint resource address exceeds its byte bound"));
+        return Err(invalid(
+            "checkpoint resource address exceeds its byte bound",
+        ));
     }
     if let Some(raw) = view.strip_prefix("checkpoints-") {
-        let (hash, raw_offset) = raw.split_once('~')
+        let (hash, raw_offset) = raw
+            .split_once('~')
             .ok_or_else(|| invalid("checkpoint catalog requires a digest and offset"))?;
         if !lower_hex(hash, 64) {
-            return Err(invalid("checkpoint catalog digest requires 64 lowercase hexadecimal digits"));
+            return Err(invalid(
+                "checkpoint catalog digest requires 64 lowercase hexadecimal digits",
+            ));
         }
-        let digest = Digest32::from_hex(hash)
-            .ok_or_else(|| invalid("invalid checkpoint catalog digest"))?;
-        let offset = raw_offset.parse::<usize>()
+        let digest =
+            Digest32::from_hex(hash).ok_or_else(|| invalid("invalid checkpoint catalog digest"))?;
+        let offset = raw_offset
+            .parse::<usize>()
             .map_err(|_| invalid("invalid checkpoint catalog offset"))?;
         if raw_offset != offset.to_string() {
-            return Err(invalid("checkpoint catalog offset requires canonical nonnegative decimal digits"));
+            return Err(invalid(
+                "checkpoint catalog offset requires canonical nonnegative decimal digits",
+            ));
         }
-        return Ok(Address::Catalog { digest: Some(digest), offset });
+        return Ok(Address::Catalog {
+            digest: Some(digest),
+            offset,
+        });
     }
-    let raw = view.strip_prefix("checkpoint-")
+    let raw = view
+        .strip_prefix("checkpoint-")
         .ok_or_else(|| invalid("unknown checkpoint resource"))?;
     if !lower_hex(raw, 32) {
-        return Err(invalid("checkpoint identity requires 32 lowercase hexadecimal digits"));
+        return Err(invalid(
+            "checkpoint identity requires 32 lowercase hexadecimal digits",
+        ));
     }
-    let id = u128::from_str_radix(raw, 16)
-        .map_err(|_| invalid("invalid checkpoint identity"))?;
+    let id = u128::from_str_radix(raw, 16).map_err(|_| invalid("invalid checkpoint identity"))?;
     if id == 0 {
         return Err(invalid("checkpoint identity zero is reserved"));
     }
@@ -109,8 +130,14 @@ fn refusal(session: &str, error: DfmcpError, authorized_anchor: Option<StateAnch
     let gap = matches!(error.code, ErrorCode::StaleAnchor | ErrorCode::CursorGap);
     let mut turn = AgentTurnBuilder::new(OPERATION, AgentPhase::Inspect)
         .continuity(
-            if gap { ContinuityStatus::Gap } else { ContinuityStatus::Partial },
-            None, gap.then(|| json!({"reason": error.message})), None,
+            if gap {
+                ContinuityStatus::Gap
+            } else {
+                ContinuityStatus::Partial
+            },
+            None,
+            gap.then(|| json!({"reason": error.message})),
+            None,
         )
         .coverage(json!({"status":"unknown", "complete_domains":[], "absence_proof_scope":[]}))
         .uncertainty(vec![json!({"kind":"unknown", "reason":error.message})]);
@@ -120,7 +147,8 @@ fn refusal(session: &str, error: DfmcpError, authorized_anchor: Option<StateAnch
     if let Some(anchor) = authorized_anchor {
         turn = turn.anchor(anchor_json(&anchor));
     }
-    let mut result = McpError::invalid_request(format!("{}: {}", error.code.as_str(), error.message));
+    let mut result =
+        McpError::invalid_request(format!("{}: {}", error.code.as_str(), error.message));
     result.data = Some(json!({
         "schema":"dfmcp.resource-error/1", "ok":false,
         "error":{"code":error.code.as_str(), "message":error.message,
@@ -135,7 +163,9 @@ fn check_deadline(
     elapsed: &mut impl FnMut() -> std::time::Duration,
 ) -> Result<()> {
     if elapsed() >= std::time::Duration::from_millis(budget.max_wall_millis) {
-        return Err(exhausted("checkpoint inspection exceeded its shared wall-time allowance"));
+        return Err(exhausted(
+            "checkpoint inspection exceeded its shared wall-time allowance",
+        ));
     }
     Ok(())
 }
@@ -150,11 +180,15 @@ struct SourceWork {
 impl SourceWork {
     fn check(&self, budget: WorkBudget) -> Result<()> {
         if self.records > budget.max_entities as usize || self.records > MAX_CATALOG_RECORDS {
-            return Err(exhausted("checkpoint inspection exceeds its metadata record allowance"));
+            return Err(exhausted(
+                "checkpoint inspection exceeds its metadata record allowance",
+            ));
         }
         let bytes = self.metadata_bytes.saturating_add(self.catalog_hash_bytes);
         if bytes as u64 > budget.max_bytes.min(MAX_SOURCE_BYTES) {
-            return Err(exhausted("checkpoint inspection exceeds its complete metadata byte allowance"));
+            return Err(exhausted(
+                "checkpoint inspection exceeds its complete metadata byte allowance",
+            ));
         }
         Ok(())
     }
@@ -171,8 +205,10 @@ impl SourceWork {
         self.records = self.records.saturating_add(1);
         self.check(budget)?;
         if snapshot.fortress_id != current.fortress_id || id.get() == 0 {
-            return Err(DfmcpError::new(ErrorCode::CorruptLedger,
-                "retained checkpoint identity does not match its fortress"));
+            return Err(DfmcpError::new(
+                ErrorCode::CorruptLedger,
+                "retained checkpoint identity does not match its fortress",
+            ));
         }
         // Bound borrowed variable text before JSON cloning or escaping. The
         // remaining fields have fixed-size typed identities and anchors.
@@ -180,7 +216,9 @@ impl SourceWork {
         if self.metadata_bytes.saturating_add(raw_bytes) as u64
             > budget.max_bytes.min(MAX_SOURCE_BYTES)
         {
-            return Err(exhausted("checkpoint label exceeds the remaining metadata byte allowance"));
+            return Err(exhausted(
+                "checkpoint label exceeds the remaining metadata byte allowance",
+            ));
         }
         let row = json!({
             "checkpoint_id":id.to_string(), "label":label,
@@ -214,8 +252,11 @@ fn read_with_elapsed(
     mut elapsed: impl FnMut() -> std::time::Duration,
 ) -> McpResult<Vec<ResourceContent>> {
     if uri.len() > 192 || uri != format!("df://session/{session_id}/{view}") {
-        return Err(refusal(session_id,
-            invalid("checkpoint URI does not match its session parameters"), None));
+        return Err(refusal(
+            session_id,
+            invalid("checkpoint URI does not match its session parameters"),
+            None,
+        ));
     }
     let target = address(view).map_err(|error| refusal(session_id, error, None))?;
     let session = resolve_session(Some(session_id.to_owned()))
@@ -236,29 +277,59 @@ fn read_with_elapsed(
                 match target {
                     Address::Catalog { digest, offset } => {
                         let count = guard.adapter.checkpoint_count();
-                        if count > guard.budget.max_entities as usize || count > MAX_CATALOG_RECORDS {
-                            return Err(exhausted("checkpoint catalog exceeds its complete record allowance"));
+                        if count > guard.budget.max_entities as usize || count > MAX_CATALOG_RECORDS
+                        {
+                            return Err(exhausted(
+                                "checkpoint catalog exceeds its complete record allowance",
+                            ));
                         }
                         let mut rows = Vec::with_capacity(count);
                         for (id, snapshot, label) in guard.adapter.checkpoint_entries() {
                             check_deadline(guard.budget, &mut elapsed)?;
-                            rows.push(work.row(&session, id, snapshot, label, current, guard.budget)?);
+                            rows.push(work.row(
+                                &session,
+                                id,
+                                snapshot,
+                                label,
+                                current,
+                                guard.budget,
+                            )?);
                         }
                         if rows.len() != count {
-                            return Err(DfmcpError::new(ErrorCode::InternalInvariantViolation,
-                                "checkpoint count changed under its immutable inspection boundary"));
+                            return Err(DfmcpError::new(
+                                ErrorCode::InternalInvariantViolation,
+                                "checkpoint count changed under its immutable inspection boundary",
+                            ));
                         }
-                        rows.sort_by(|left, right| left["checkpoint_id"].as_str()
-                            .cmp(&right["checkpoint_id"].as_str()));
-                        catalog(&session, uri, digest, offset, rows, current, guard.budget,
-                            &mut work, &mut elapsed)
+                        rows.sort_by(|left, right| {
+                            left["checkpoint_id"]
+                                .as_str()
+                                .cmp(&right["checkpoint_id"].as_str())
+                        });
+                        catalog(
+                            &session,
+                            uri,
+                            digest,
+                            offset,
+                            rows,
+                            current,
+                            guard.budget,
+                            &mut work,
+                            &mut elapsed,
+                        )
                     }
                     Address::Checkpoint(id) => {
                         let snapshot = guard.adapter.checkpoint_snapshot(id)
                             .ok_or_else(|| DfmcpError::new(ErrorCode::StaleAnchor,
                                 "the named checkpoint is not retained by this session's fortress; refresh its checkpoint catalog"))?;
-                        let mut payload = work.row(&session, id, snapshot,
-                            guard.adapter.checkpoint_label(id), current, guard.budget)?;
+                        let mut payload = work.row(
+                            &session,
+                            id,
+                            snapshot,
+                            guard.adapter.checkpoint_label(id),
+                            current,
+                            guard.budget,
+                        )?;
                         payload["schema"] = json!("dfmcp.lab-checkpoint/1");
                         payload["canonical_uri"] = json!(checkpoint_uri(&session, id));
                         payload["snapshot_contents"] = json!("inspect_the_exact_state_resource");
@@ -273,13 +344,24 @@ fn read_with_elapsed(
                             "status":"selected_checkpoint_metadata", "complete_domains":[],
                             "absence_proof_scope":[], "snapshot_contents":"not_inspected",
                         });
-                        render(payload, &session, uri, snapshot.anchor(), current,
-                            guard.budget, &work, &mut elapsed)?
-                            .ok_or_else(|| exhausted("checkpoint metadata exceeds the complete output allowance"))
+                        render(
+                            payload,
+                            &session,
+                            uri,
+                            snapshot.anchor(),
+                            current,
+                            guard.budget,
+                            &work,
+                            &mut elapsed,
+                        )?
+                        .ok_or_else(|| {
+                            exhausted("checkpoint metadata exceeds the complete output allowance")
+                        })
                     }
                 }
             })();
-            result.map(|text| super::text_content(uri, text))
+            result
+                .map(|text| super::text_content(uri, text))
                 .map_err(|error| refusal(session_id, error, Some(current)))
         },
     )
@@ -303,21 +385,27 @@ fn catalog(
         "session_id":session, "anchor_v2":anchor_v2, "rows":[]});
     // Admit the complete hash input before cloning all rows or serializing it.
     // The empty array's two delimiters remain; only rows and commas are added.
-    work.catalog_hash_bytes = identity.to_string().len()
+    work.catalog_hash_bytes = identity
+        .to_string()
+        .len()
         .saturating_add(work.metadata_bytes)
         .saturating_add(rows.len().saturating_sub(1));
     work.check(budget)?;
     identity["rows"] = json!(rows);
     let bytes = identity.to_string();
     if bytes.len() != work.catalog_hash_bytes {
-        return Err(DfmcpError::new(ErrorCode::InternalInvariantViolation,
-            "checkpoint catalog hash accounting differs from its admitted metadata"));
+        return Err(DfmcpError::new(
+            ErrorCode::InternalInvariantViolation,
+            "checkpoint catalog hash accounting differs from its admitted metadata",
+        ));
     }
     let digest = Digest32::of_bytes(bytes.as_bytes());
     check_deadline(budget, elapsed)?;
     if expected.is_some_and(|expected| expected != digest) {
-        return Err(DfmcpError::new(ErrorCode::CursorGap,
-            "checkpoint catalog or current anchor changed; restart at checkpoints"));
+        return Err(DfmcpError::new(
+            ErrorCode::CursorGap,
+            "checkpoint catalog or current anchor changed; restart at checkpoints",
+        ));
     }
     if start > rows.len() || (start == rows.len() && !rows.is_empty()) {
         return Err(invalid("checkpoint offset is outside its retained catalog"));
@@ -346,13 +434,15 @@ fn catalog(
                 "game_checkpoint_completeness":"not_established",
             },
         });
-        if let Some(text) = render(payload, session, uri, current, current,
-            budget, work, elapsed)?
-        {
+        if let Some(text) = render(
+            payload, session, uri, current, current, budget, work, elapsed,
+        )? {
             return Ok(text);
         }
         if returned <= 1 {
-            return Err(exhausted("checkpoint catalog metadata or one indivisible row exceeds the output allowance"));
+            return Err(exhausted(
+                "checkpoint catalog metadata or one indivisible row exceeds the output allowance",
+            ));
         }
         returned /= 2;
     }
@@ -371,9 +461,12 @@ fn render(
 ) -> Result<Option<String>> {
     check_deadline(budget, elapsed)?;
     let historical = anchor != current;
-    let max_bytes = budget.max_bytes
-        .min(u64::from(budget.max_output_tokens)
-            .saturating_mul(crate::output_budget::BYTES_PER_TOKEN as u64))
+    let max_bytes = budget
+        .max_bytes
+        .min(
+            u64::from(budget.max_output_tokens)
+                .saturating_mul(crate::output_budget::BYTES_PER_TOKEN as u64),
+        )
         .min(MAX_RESOURCE_BYTES);
     payload["ok"] = json!(true);
     payload["session_id"] = json!(session);
@@ -391,7 +484,8 @@ fn render(
     });
     payload["source_work"] = work.json();
     let mut active = empty_active_work();
-    active["coverage"] = json!({"status":"omitted", "reason":"use the authorized handoff resource"});
+    active["coverage"] =
+        json!({"status":"omitted", "reason":"use the authorized handoff resource"});
     let mut references = vec![
         json!({"kind":"checkpoint_catalog", "uri":format!("df://session/{session}/checkpoints")}),
         json!({"kind":"active_work", "uri":format!("df://session/{session}/handoff")}),

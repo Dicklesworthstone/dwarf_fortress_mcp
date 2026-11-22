@@ -663,9 +663,12 @@ work before canonical serialization. Its conservative estimate is distinct from
 the exact negotiated canonical-byte allowance. A one-row page cannot bypass
 source verification costs, including fields omitted from the response.
 
-The same complete-source admission applies to exact `inspect` lookups and
-`traverse`/`dependencies` analysis. Unselected, redacted and deeply nested
-backing values remain part of the source even when the result is small.
+The same complete-source admission applies to exact `inspect` lookups,
+`traverse`/`dependencies` analysis, ordinary `aggregate` counts/grouping and
+structured lexical `search`. Unselected entities, edges, chunks, retained events,
+redacted backing values and deep nesting remain part of the source even when
+the result is small. Plain aggregate and search scans share the admitted work
+and original deadline; existing compound aggregate admission remains unchanged.
 Inspection checks its selected-value rendering bound before constructing that
 JSON. Source authorization uses the original session allowance; reserving bytes
 for the response and active watches only narrows output, so a small answer can

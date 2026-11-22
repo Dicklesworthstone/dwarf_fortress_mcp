@@ -1465,11 +1465,11 @@ mod tests {
 
     fn inspection_and_graph_requests() -> [Value; 3] {
         [
+            envelope(json!({"kind":"inspect","entity_id":"1","generation":1,"fields":["sane"]})),
             envelope(
-                json!({"kind":"inspect","entity_id":"1","generation":1,"fields":["sane"]}),
+                json!({"kind":"traverse","roots":["4"],"edge_kinds":["requires"],
+                "max_depth":4,"target":"3"}),
             ),
-            envelope(json!({"kind":"traverse","roots":["4"],"edge_kinds":["requires"],
-                "max_depth":4,"target":"3"})),
             envelope(json!({"kind":"dependencies","edge_kinds":["requires"]})),
         ]
     }
@@ -1546,23 +1546,20 @@ mod tests {
         // Deliberately leave the hash invalid. The depth refusal must precede
         // recursive canonical serialization/hash validation of the full world.
         for input in inspection_and_graph_requests() {
-            assert!(
-                matches!(execute(&snapshot, &ctx, &input),
+            assert!(matches!(execute(&snapshot, &ctx, &input),
                     Err(error) if error.code == ErrorCode::BudgetExceeded
-                        && error.message.contains("nesting"))
-            );
+                        && error.message.contains("nesting")));
             let mut denied = ctx.clone();
             denied.grants.clear();
-            assert!(
-                matches!(execute(&snapshot, &denied, &input),
-                    Err(error) if error.code == ErrorCode::CapabilityDenied)
-            );
+            assert!(matches!(execute(&snapshot, &denied, &input),
+                    Err(error) if error.code == ErrorCode::CapabilityDenied));
         }
         Ok(())
     }
 
     #[test]
-    fn retained_inspection_and_graph_queries_keep_current_authority_and_source_limits() -> Result<()> {
+    fn retained_inspection_and_graph_queries_keep_current_authority_and_source_limits() -> Result<()>
+    {
         let (mut snapshot, mut ctx) = fixture();
         snapshot
             .graph
@@ -1588,32 +1585,21 @@ mod tests {
         ctx.budget.max_bytes = snapshot.canonical_bytes().len() as u64;
         for mut input in inspection_and_graph_requests() {
             input["expected_anchor"] = anchor_json(snapshot.anchor());
-            let result = execute_retained_with_output_budget(
-                &snapshot,
-                &ctx,
-                &input,
-                8192,
-                Instant::now(),
-            )?;
+            let result =
+                execute_retained_with_output_budget(&snapshot, &ctx, &input, 8192, Instant::now())?;
             assert_eq!(result["anchor"], anchor_json(snapshot.anchor()));
-            assert!(
-                matches!(execute(&snapshot, &ctx, &input),
-                    Err(error) if error.code == ErrorCode::StaleAnchor)
-            );
+            assert!(matches!(execute(&snapshot, &ctx, &input),
+                    Err(error) if error.code == ErrorCode::StaleAnchor));
             let mut too_small = ctx.clone();
             too_small.budget.max_bytes -= 1;
-            assert!(
-                matches!(execute_retained_with_output_budget(
+            assert!(matches!(execute_retained_with_output_budget(
                     &snapshot, &too_small, &input, 8192, Instant::now()),
-                    Err(error) if error.code == ErrorCode::BudgetExceeded)
-            );
+                    Err(error) if error.code == ErrorCode::BudgetExceeded));
             let mut expired = ctx.clone();
             expired.grants[0].expires_at_tick = Some(GameTick(50));
-            assert!(
-                matches!(execute_retained_with_output_budget(
+            assert!(matches!(execute_retained_with_output_budget(
                     &snapshot, &expired, &input, 8192, Instant::now()),
-                    Err(error) if error.code == ErrorCode::CapabilityDenied)
-            );
+                    Err(error) if error.code == ErrorCode::CapabilityDenied));
         }
         Ok(())
     }

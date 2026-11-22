@@ -33,7 +33,10 @@ fn open(fortress: u64, tokens: u32, durable: bool) -> Value {
 }
 
 fn session_id(opened: &Value) -> String {
-    opened["session_id"].as_str().expect("session id").to_owned()
+    opened["session_id"]
+        .as_str()
+        .expect("session id")
+        .to_owned()
 }
 
 fn checkpoint(session: &str, label: &str) -> Value {
@@ -52,7 +55,11 @@ fn view(session: &str, view: &str) -> McpResult<Vec<ResourceContent>> {
 
 fn from_uri(session: &str, uri: &str) -> McpResult<Vec<ResourceContent>> {
     let prefix = format!("df://session/{session}/");
-    read(session, uri, uri.strip_prefix(&prefix).expect("session URI"))
+    read(
+        session,
+        uri,
+        uri.strip_prefix(&prefix).expect("session URI"),
+    )
 }
 
 fn payload(contents: Vec<ResourceContent>) -> Value {
@@ -66,7 +73,10 @@ fn error_data(error: McpError, code: &str) -> Value {
     assert_eq!(data["error"]["code"], code);
     assert_eq!(data["error"]["effect_may_have_occurred"], false);
     assert_eq!(data["agent_turn"]["schema"], "dfmcp.agent_turn/1");
-    assert_eq!(data["agent_turn"]["coverage"]["complete_domains"], json!([]));
+    assert_eq!(
+        data["agent_turn"]["coverage"]["complete_domains"],
+        json!([])
+    );
     data
 }
 
@@ -76,7 +86,10 @@ fn checkpoint_addresses_are_closed_canonical_and_session_bound() {
     let hash = Digest32::of_bytes(b"checkpoint catalog");
     assert_eq!(
         address("checkpoints").expect("catalog"),
-        Address::Catalog { digest: None, offset: 0 }
+        Address::Catalog {
+            digest: None,
+            offset: 0
+        }
     );
     assert_eq!(
         address(&format!("checkpoint-{id}")).expect("detail"),
@@ -84,18 +97,36 @@ fn checkpoint_addresses_are_closed_canonical_and_session_bound() {
     );
     assert_eq!(
         address(&format!("checkpoints-{hash}~17")).expect("page"),
-        Address::Catalog { digest: Some(hash), offset: 17 }
+        Address::Catalog {
+            digest: Some(hash),
+            offset: 17
+        }
     );
     for bad in [
-        "", "checkpoint", "checkpoints-", "checkpoint-0",
+        "",
+        "checkpoint",
+        "checkpoints-",
+        "checkpoint-0",
         "checkpoint-00000000000000000000000000000000",
         "checkpoint-0000000000000000000000000000000A",
         "checkpoint-00000000000000000000000000000007/extra",
     ] {
         assert!(address(bad).is_err(), "{bad}");
     }
-    for suffix in ["", "~", "~+1", "~-1", "~01", "~1~2", "~0?x=1", "~184467440737095516160"] {
-        assert!(address(&format!("checkpoints-{hash}{suffix}")).is_err(), "{suffix}");
+    for suffix in [
+        "",
+        "~",
+        "~+1",
+        "~-1",
+        "~01",
+        "~1~2",
+        "~0?x=1",
+        "~184467440737095516160",
+    ] {
+        assert!(
+            address(&format!("checkpoints-{hash}{suffix}")).is_err(),
+            "{suffix}"
+        );
     }
     assert!(address(&format!("checkpoints-{}~0", "A".repeat(64))).is_err());
     let opened = open(391_201, 4_096, false);
@@ -117,7 +148,10 @@ fn public_checkpoint_discovery_retains_labels_and_inspection_has_no_effects() {
     assert_eq!(empty["absence_proven"], true);
     assert_eq!(empty["complete_catalog"], true);
     assert_eq!(empty["coverage"]["absence_proof_scope"], json!([DOMAIN]));
-    assert_eq!(empty["coverage"]["game_checkpoint_completeness"], "not_established");
+    assert_eq!(
+        empty["coverage"]["game_checkpoint_completeness"],
+        "not_established"
+    );
 
     let created = checkpoint(&id, "before the first dig");
     assert_eq!(created["checkpoint_catalog"], uri);
@@ -125,26 +159,39 @@ fn public_checkpoint_discovery_retains_labels_and_inspection_has_no_effects() {
     let session = resolve_session(Some(id.clone())).expect("session");
     let (anchor, transcript) = {
         let guard = session.lock().expect("lock");
-        (guard.adapter.snapshot().anchor(), guard.adapter.transcript().clone())
+        (
+            guard.adapter.snapshot().anchor(),
+            guard.adapter.transcript().clone(),
+        )
     };
     let before_request = next_context(&mut session.lock().expect("lock"))
-        .expect("request before inspection").0;
+        .expect("request before inspection")
+        .0;
     let first = from_uri(&id, &uri).expect("catalog");
     let again = from_uri(&id, &uri).expect("same catalog");
     assert_eq!(first[0].text, again[0].text);
     let catalog = payload(first);
     assert_eq!(catalog["total"], 1);
-    assert_eq!(catalog["rows"][0]["checkpoint_id"], created["checkpoint_id"]);
+    assert_eq!(
+        catalog["rows"][0]["checkpoint_id"],
+        created["checkpoint_id"]
+    );
     assert_eq!(catalog["rows"][0]["label"], "before the first dig");
     assert_eq!(catalog["rows"][0]["label_status"], "retained");
     assert_eq!(catalog["rows"][0]["uri"], detail_uri);
-    assert_eq!(catalog["rows"][0]["content_digest"], created["content_digest"]);
+    assert_eq!(
+        catalog["rows"][0]["content_digest"],
+        created["content_digest"]
+    );
     assert_eq!(catalog["rows"][0]["source_anchor"], created["anchor"]);
     assert_eq!(catalog["source_work"]["snapshot_contents_scanned"], false);
     let detail = payload(from_uri(&id, detail_uri).expect("detail"));
     assert_eq!(detail["schema"], "dfmcp.lab-checkpoint/1");
     assert_eq!(detail["label"], created["label"]);
-    assert_eq!(detail["restore"]["arguments"]["checkpoint_id"], created["checkpoint_id"]);
+    assert_eq!(
+        detail["restore"]["arguments"]["checkpoint_id"],
+        created["checkpoint_id"]
+    );
     assert_eq!(detail["restore"]["authorization"], "not_evaluated");
     assert_eq!(detail["restore_authority_granted"], false);
     assert_eq!(detail["game_mutation_dispatched"], false);
@@ -152,11 +199,13 @@ fn public_checkpoint_discovery_retains_labels_and_inspection_has_no_effects() {
     assert_eq!(detail["agent_turn"]["anchor"], detail["source_anchor"]);
     let state_uri = detail["state"].as_str().expect("exact state");
     let state_view = state_uri.rsplit('/').next().expect("state view");
-    let state = payload(crate::resources::state::read(&id, state_uri, state_view)
-        .expect("checkpoint state"));
+    let state = payload(
+        crate::resources::state::read(&id, state_uri, state_view).expect("checkpoint state"),
+    );
     assert_eq!(state["anchor"], created["anchor"]);
     let after_request = next_context(&mut session.lock().expect("lock"))
-        .expect("request after inspection").0;
+        .expect("request after inspection")
+        .0;
     assert_eq!(after_request, before_request + 1);
     let guard = session.lock().expect("lock");
     assert_eq!(guard.adapter.snapshot().anchor(), anchor);
@@ -171,16 +220,26 @@ fn historical_unknown_labels_stay_unknown_and_empty_retained_labels_stay_exact()
     {
         let mut guard = session.lock().expect("lock");
         let source = guard.adapter.snapshot().clone();
-        guard.adapter.adopt_checkpoint(CheckpointId::new(2), source.clone())
+        guard
+            .adapter
+            .adopt_checkpoint(CheckpointId::new(2), source.clone())
             .expect("unlabeled historical checkpoint");
-        guard.adapter.adopt_checkpoint_labeled(CheckpointId::new(1), source, "")
+        guard
+            .adapter
+            .adopt_checkpoint_labeled(CheckpointId::new(1), source, "")
             .expect("exact historical empty label");
     }
     let catalog = payload(view(&id, "checkpoints").expect("catalog"));
-    assert_eq!(catalog["rows"][0]["checkpoint_id"], CheckpointId::new(1).to_string());
+    assert_eq!(
+        catalog["rows"][0]["checkpoint_id"],
+        CheckpointId::new(1).to_string()
+    );
     assert_eq!(catalog["rows"][0]["label"], "");
     assert_eq!(catalog["rows"][0]["label_status"], "retained");
-    assert_eq!(catalog["rows"][1]["checkpoint_id"], CheckpointId::new(2).to_string());
+    assert_eq!(
+        catalog["rows"][1]["checkpoint_id"],
+        CheckpointId::new(2).to_string()
+    );
     assert_eq!(catalog["rows"][1]["label"], Value::Null);
     assert_eq!(catalog["rows"][1]["label_status"], "unavailable");
     assert_eq!(catalog["absence_proven"], false);
@@ -196,8 +255,14 @@ fn checkpoint_pages_keep_complete_identities_and_reject_changed_catalog_or_ancho
         expected.insert(created["checkpoint_id"].as_str().expect("id").to_owned());
     }
     let first = payload(view(&id, "checkpoints").expect("first page"));
-    let mut uri = first["canonical_uri"].as_str().expect("canonical page").to_owned();
-    let old_next = first["next"].as_str().expect("bounded continuation").to_owned();
+    let mut uri = first["canonical_uri"]
+        .as_str()
+        .expect("canonical page")
+        .to_owned();
+    let old_next = first["next"]
+        .as_str()
+        .expect("bounded continuation")
+        .to_owned();
     let digest = first["catalog_digest"].clone();
     let mut seen = BTreeSet::new();
     let mut pages = 0;
@@ -227,15 +292,31 @@ fn checkpoint_pages_keep_complete_identities_and_reject_changed_catalog_or_ancho
     assert!(pages > 1);
 
     checkpoint(&id, "a later checkpoint at the same world anchor");
-    let gap = error_data(from_uri(&id, &old_next).expect_err("catalog changed"), "cursor_gap");
+    let gap = error_data(
+        from_uri(&id, &old_next).expect_err("catalog changed"),
+        "cursor_gap",
+    );
     assert_eq!(gap["agent_turn"]["continuity"]["status"], "gap");
     let fresh = payload(view(&id, "checkpoints").expect("fresh catalog"));
-    let fresh_uri = fresh["canonical_uri"].as_str().expect("fresh URI").to_owned();
+    let fresh_uri = fresh["canonical_uri"]
+        .as_str()
+        .expect("fresh URI")
+        .to_owned();
     let session = resolve_session(Some(id.clone())).expect("session");
-    with_session(&session, || panic!("session unavailable"), |guard| {
-        guard.adapter.advance_ticks(1).expect("advance current world");
-    });
-    error_data(from_uri(&id, &fresh_uri).expect_err("anchor changed"), "cursor_gap");
+    with_session(
+        &session,
+        || panic!("session unavailable"),
+        |guard| {
+            guard
+                .adapter
+                .advance_ticks(1)
+                .expect("advance current world");
+        },
+    );
+    error_data(
+        from_uri(&id, &fresh_uri).expect_err("anchor changed"),
+        "cursor_gap",
+    );
 }
 
 #[test]
@@ -243,12 +324,17 @@ fn checkpoint_reads_reauthorize_before_existence_and_never_grant_restore() {
     for mode in ["revoked", "expired", "entity-scoped"] {
         let id = session_id(&open(391_205, 4_096, false));
         let created = checkpoint(&id, "private checkpoint");
-        let known = created["resource_uri"].as_str().expect("known URI").to_owned();
+        let known = created["resource_uri"]
+            .as_str()
+            .expect("known URI")
+            .to_owned();
         let session = resolve_session(Some(id.clone())).expect("session");
         {
             let mut guard = session.lock().expect("lock");
             if mode == "revoked" {
-                guard.grants.retain(|grant| grant.capability != Capability::Observe);
+                guard
+                    .grants
+                    .retain(|grant| grant.capability != Capability::Observe);
             } else {
                 for grant in &mut guard.grants {
                     if grant.capability == Capability::Observe {
@@ -274,14 +360,19 @@ fn checkpoint_reads_reauthorize_before_existence_and_never_grant_restore() {
     let id = session_id(&open(391_206, 4_096, false));
     let created = checkpoint(&id, "inspect without restoring");
     let session = resolve_session(Some(id.clone())).expect("session");
-    session.lock().expect("lock").grants
+    session
+        .lock()
+        .expect("lock")
+        .grants
         .retain(|grant| grant.capability == Capability::Observe);
     let uri = created["resource_uri"].as_str().expect("detail URI");
     let detail = payload(from_uri(&id, uri).expect("read-only metadata"));
     assert_eq!(detail["restore_authority_granted"], false);
     let restored: Value = serde_json::from_str(&fortress_restore(
-        Some(id), created["checkpoint_id"].as_str().expect("id").to_owned(),
-    )).expect("restore JSON");
+        Some(id),
+        created["checkpoint_id"].as_str().expect("id").to_owned(),
+    ))
+    .expect("restore JSON");
     assert_eq!(restored["error"]["code"], "capability_denied");
 }
 
@@ -293,16 +384,28 @@ fn checkpoint_metadata_source_output_and_wall_work_share_explicit_budgets() {
     let session = resolve_session(Some(id.clone())).expect("session");
     let budget = session.lock().expect("lock").budget;
     session.lock().expect("lock").budget.max_entities = 1;
-    error_data(view(&id, "checkpoints").expect_err("complete catalog source bound"), "budget_exceeded");
+    error_data(
+        view(&id, "checkpoints").expect_err("complete catalog source bound"),
+        "budget_exceeded",
+    );
     let detail_uri = first["resource_uri"].as_str().expect("detail");
-    assert!(from_uri(&id, detail_uri).is_ok(), "one selected metadata row fits");
+    assert!(
+        from_uri(&id, detail_uri).is_ok(),
+        "one selected metadata row fits"
+    );
 
     session.lock().expect("lock").budget = budget;
     session.lock().expect("lock").budget.max_bytes = 1;
-    error_data(view(&id, "checkpoints").expect_err("metadata bytes"), "budget_exceeded");
+    error_data(
+        view(&id, "checkpoints").expect_err("metadata bytes"),
+        "budget_exceeded",
+    );
     session.lock().expect("lock").budget = budget;
     session.lock().expect("lock").budget.max_output_tokens = 1;
-    error_data(view(&id, "checkpoints").expect_err("indivisible output"), "budget_exceeded");
+    error_data(
+        view(&id, "checkpoints").expect_err("indivisible output"),
+        "budget_exceeded",
+    );
     session.lock().expect("lock").budget = budget;
 
     let detail_view = detail_uri.rsplit('/').next().expect("detail view");
@@ -313,7 +416,10 @@ fn checkpoint_metadata_source_output_and_wall_work_share_explicit_budgets() {
             calls += 1;
             Duration::from_millis(if expired { budget.max_wall_millis } else { 0 })
         });
-        error_data(result.expect_err("shared wall allowance"), "budget_exceeded");
+        error_data(
+            result.expect_err("shared wall allowance"),
+            "budget_exceeded",
+        );
         assert_eq!(calls, expire_at + 1);
     }
     assert!(read_with_elapsed(&id, detail_uri, detail_view, || Duration::ZERO).is_ok());
@@ -330,7 +436,8 @@ fn durable_reopen_discovers_original_checkpoint_label_world_and_restore_without_
     }
     let _serial = serialized_durable_tests();
     let path = std::env::temp_dir().join(format!(
-        "dfmcp-checkpoint-resource-recovery-{}", std::process::id()
+        "dfmcp-checkpoint-resource-recovery-{}",
+        std::process::id()
     ));
     let _ = std::fs::remove_dir_all(&path);
     simulate_durable_restart(Some(path.clone()));
@@ -338,7 +445,10 @@ fn durable_reopen_discovers_original_checkpoint_label_world_and_restore_without_
     let original_session = session_id(&open(391_208, 16_384, true));
     let created = checkpoint(&original_session, "before first workshop");
     assert_eq!(created["durable"], true, "{created}");
-    let original_uri = created["resource_uri"].as_str().expect("old URI").to_owned();
+    let original_uri = created["resource_uri"]
+        .as_str()
+        .expect("old URI")
+        .to_owned();
     let source_anchor = created["anchor"].clone();
     let original_digest = created["content_digest"].clone();
 
@@ -347,7 +457,9 @@ fn durable_reopen_discovers_original_checkpoint_label_world_and_restore_without_
     let current_session = session_id(&reopened);
     assert_ne!(current_session, original_session);
     assert_ne!(reopened["anchor"], source_anchor);
-    let catalog_uri = reopened["checkpoint_catalog"].as_str().expect("cold discovery URI");
+    let catalog_uri = reopened["checkpoint_catalog"]
+        .as_str()
+        .expect("cold discovery URI");
     let catalog = payload(from_uri(&current_session, catalog_uri).expect("recovered catalog"));
     assert_eq!(catalog["total"], 1);
     let row = &catalog["rows"][0];
@@ -366,9 +478,10 @@ fn durable_reopen_discovers_original_checkpoint_label_world_and_restore_without_
     // checkpoint world remains inspectable without rewriting its old anchor.
     let state_uri = detail["state"].as_str().expect("original state");
     let state_view = state_uri.rsplit('/').next().expect("state view");
-    let state = payload(crate::resources::state::read(
-        &current_session, state_uri, state_view,
-    ).expect("original checkpoint world after process restart"));
+    let state = payload(
+        crate::resources::state::read(&current_session, state_uri, state_view)
+            .expect("original checkpoint world after process restart"),
+    );
     assert_eq!(state["anchor"], source_anchor);
     assert_eq!(state["historical"], true);
     assert_eq!(state["current_anchor"], reopened["anchor"]);
@@ -379,15 +492,24 @@ fn durable_reopen_discovers_original_checkpoint_label_world_and_restore_without_
     );
     let restored: Value = serde_json::from_str(&fortress_restore(
         Some(current_session.clone()),
-        row["checkpoint_id"].as_str().expect("discovered checkpoint id").to_owned(),
-    )).expect("restore JSON");
+        row["checkpoint_id"]
+            .as_str()
+            .expect("discovered checkpoint id")
+            .to_owned(),
+    ))
+    .expect("restore JSON");
     assert_eq!(restored["ok"], true, "{restored}");
     assert_eq!(restored["content_digest"], original_digest);
     assert!(
-        restored["restored_anchor"]["epoch"].as_u64().expect("restored epoch")
-            > reopened["anchor"]["epoch"].as_u64().expect("recovered epoch")
+        restored["restored_anchor"]["epoch"]
+            .as_u64()
+            .expect("restored epoch")
+            > reopened["anchor"]["epoch"]
+                .as_u64()
+                .expect("recovered epoch")
     );
-    let retained = payload(from_uri(&current_session, detail_uri).expect("original remains retained"));
+    let retained =
+        payload(from_uri(&current_session, detail_uri).expect("original remains retained"));
     assert_eq!(retained["source_anchor"], source_anchor);
     assert_eq!(retained["label"], "before first workshop");
 }

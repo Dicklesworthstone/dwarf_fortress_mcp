@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased — Admit complete aggregate and lexical sources before hashing
+
+- Apply complete record, hidden-value, nesting and canonical-byte admission to
+  ordinary aggregates and structured search before recursive encoding/hashing.
+- Carry admitted work and the original deadline through scanning and rendering,
+  preserving compound admission, plain response shapes and exact source identity.
+- Add three executor regressions and extend three shared-publisher cases; keep
+  output-boundary fixtures independent of complete source allowances.
+- Pass all 56 actual operational component tests, including 29 inline and 27
+  aggregate compatibility cases, on the available recorded nightly with exact
+  locked semantic dependencies. Full MCP/publisher/resource execution and
+  latest-nightly/native qualification remain open.
+
 ## Unreleased — Discover retained checkpoint IDs and saved worlds
 
 - Add bounded session checkpoint catalogs, exact checkpoint detail and discovery
@@ -12,9 +25,10 @@
   pagination to the whole catalog and current anchor, preserve complete metadata
   and separate restore authorization from passive inspection.
 - Add six adapter and seven resource/handler regressions, including durable
-  reopen/discover/preview/restore. Source review completed; Rust execution and
-  formatting remain unavailable. Storage durability and live admission are
-  explicitly not certified by these resources.
+  reopen/discover/preview/restore. All 152 actual laboratory component tests pass,
+  including the six new adapter cases; the seven MCP resource/handler cases remain
+  unexecuted. Storage durability and live admission are not certified by these
+  resources.
 
 ## Unreleased — Bound exact inspection and graph analysis before hashing
 
@@ -24,9 +38,10 @@
   and active-watch bytes separately; bound inspected values before rendering.
 - Keep current authority on retained reads and refuse without publication or
   watch-state changes when any source, output or authority limit fails.
-- Add five production-executor/shared-publisher regressions. Independent source
-  review completed; Rust compilation, test execution and formatting remain
-  blocked by the unavailable execution host. No qualification is inferred.
+- Add five production-executor/shared-publisher regressions. All 21 actual query
+  core component tests pass, including the three new executor cases; the two new
+  shared-publisher cases remain source-reviewed but unexecuted. No full MCP or
+  native qualification is inferred.
 
 ## Unreleased — Include committed continuations in whole-project forecasts
 

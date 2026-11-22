@@ -28,10 +28,10 @@ pub use faults::{Boundary, CampaignReport, Fault, FaultPoint, FaultSchedule};
 pub use recovered_effect_drain::{RecoveredWorkDrainReceipt, RecoveredWorkRef};
 
 #[cfg(test)]
+mod checkpoint_catalog_tests;
+#[cfg(test)]
 #[path = "civilian_release_tests.rs"]
 mod civilian_release_tests;
-#[cfg(test)]
-mod checkpoint_catalog_tests;
 #[cfg(test)]
 mod compensation_tests;
 #[cfg(test)]
@@ -253,7 +253,9 @@ impl MemoryAdapter {
     /// Original label when it was retained. Unlabeled historical adoption stays unknown.
     #[must_use]
     pub fn checkpoint_label(&self, checkpoint_id: CheckpointId) -> Option<&str> {
-        self.checkpoint_labels.get(&checkpoint_id).map(String::as_str)
+        self.checkpoint_labels
+            .get(&checkpoint_id)
+            .map(String::as_str)
     }
 
     /// Borrow exact checkpoint identities, worlds and known labels in identifier order.
@@ -294,7 +296,8 @@ impl MemoryAdapter {
         // The existing admission checks identity, fortress, seal, collision and
         // capacity before any new metadata becomes visible.
         self.adopt_checkpoint(checkpoint_id, snapshot)?;
-        self.checkpoint_labels.insert(checkpoint_id, label.to_owned());
+        self.checkpoint_labels
+            .insert(checkpoint_id, label.to_owned());
         Ok(())
     }
 
@@ -746,7 +749,8 @@ impl MemoryAdapter {
         }
         self.checkpoints
             .insert(checkpoint_id, self.snapshot.clone());
-        self.checkpoint_labels.insert(checkpoint_id, label.to_owned());
+        self.checkpoint_labels
+            .insert(checkpoint_id, label.to_owned());
         let evidence = evidence(
             self.snapshot.anchor(),
             EvidenceKind::Checkpoint,
