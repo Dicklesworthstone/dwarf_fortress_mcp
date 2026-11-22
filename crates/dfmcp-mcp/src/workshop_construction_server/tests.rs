@@ -341,3 +341,27 @@ fn tree_material_agent_turn_never_substitutes_a_legacy_or_unmatched_offer() -> R
     }
     Ok(())
 }
+
+#[test]
+fn workshop_query_modes_preserve_inspection_and_reject_untrusted_selectors() -> Result<()> {
+    let missing = SessionId::new((1u128 << 127) | FAMILY | u128::from(SEQUENCE_LIMIT - 1));
+    for mode in [None, Some("inspect"), Some("production_handoff")] {
+        let packet: Value = serde_json::from_str(&fortress_query(
+            missing.to_string(),
+            mode.map(str::to_owned),
+        ))
+        .map_err(|_| error(ErrorCode::InvalidRequest, "invalid Query packet"))?;
+        assert_eq!(packet["result"]["error"]["code"], "session_not_found");
+        assert_eq!(packet["result"]["current_goal_available"], false);
+    }
+    for mode in ["", "all", "clock", "production", "../custody", "production_handoff\0"] {
+        let packet: Value = serde_json::from_str(&fortress_query(
+            missing.to_string(),
+            Some(mode.to_owned()),
+        ))
+        .map_err(|_| error(ErrorCode::InvalidRequest, "invalid Query refusal"))?;
+        assert_eq!(packet["result"]["error"]["code"], "invalid_request", "{mode:?}");
+        assert_eq!(packet["result"]["current_goal_available"], false);
+    }
+    Ok(())
+}

@@ -342,10 +342,24 @@ pub fn fortress_observe(session_id: String) -> String {
     with_session(session_id, "fortress.observe", Action::Observe)
 }
 #[tool(
-    description = "Inspect the original workshop plan, material/worker/footprint/source witnesses, exact review, insertion receipt, historical goal samples and independent durable acknowledgement. When configured, also inspect the separately retained bounded run and its recovery reference. This local read does not establish current game facts."
+    description = "mode=inspect (default) inspects the original workshop, witnesses, receipt, historical goal samples and independent recovery custody. mode=production_handoff exports the exact acknowledged completed original and settled clock custody for a production prerequisite. It performs no native contact or effect and establishes no current workshop readiness; the importer must freshly qualify the original before production."
 )]
-pub fn fortress_query(session_id: String) -> String {
-    with_session(session_id, "fortress.query", Action::Inspect)
+pub fn fortress_query(session_id: String, mode: Option<String>) -> String {
+    match query_action(mode.as_deref()) {
+        Ok(action) => with_session(session_id, "fortress.query", action),
+        Err(cause) => scope_failure(&session_id, "fortress.query", cause),
+    }
+}
+
+fn query_action(mode: Option<&str>) -> Result<Action> {
+    match mode.unwrap_or("inspect") {
+        "inspect" => Ok(Action::Inspect),
+        "production_handoff" => Ok(Action::ProductionHandoff),
+        _ => Err(error(
+            ErrorCode::InvalidRequest,
+            "workshop query mode must be inspect or production_handoff",
+        )),
+    }
 }
 #[tool(
     description = "Prepare the original Carpenter workshop without constructing it. Closed JSON contains kind=carpenters, expected_observation and material, or kind=carpenters_from_tree_supply with one exact observed Tree material handle. Optional kind=run_workshop takes the returned target_id, game_ticks and wall_millis to prepare a separately authorized bounded run for that original workshop. Review its distinct exact seal before commit. Planning never constructs or unpauses; no replacement workshop keys or manager changes."

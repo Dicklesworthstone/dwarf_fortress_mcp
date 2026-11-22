@@ -29,7 +29,7 @@ SOURCES = [
     *[TREE + name for name in ("mod.rs", "journal.rs", "material_origin.rs", "rpc.rs", "tests.rs", "journal_tests.rs")],
     "tests/native/tree_harvest/vectors.json",
     MCP + "lib.rs", MCP + "workshop_construction_server.rs",
-    *[MCP + "workshop_construction_server/" + name for name in ("runtime.rs", "presentation.rs", "tests.rs", "clock.rs", "clock_config_tests.rs", "clock_presentation_tests.rs", "material_selection.rs", "tree_material.rs", "tree_material_tests.rs")],
+    *[MCP + "workshop_construction_server/" + name for name in ("runtime.rs", "production_handoff.rs", "production_handoff_tests.rs", "presentation.rs", "tests.rs", "clock.rs", "clock_config_tests.rs", "clock_presentation_tests.rs", "material_selection.rs", "tree_material.rs", "tree_material_tests.rs")],
     MCP + "bin/dfmcp-workshop-v1-20-dev-server.rs", "crates/dfmcp-mcp/tests/workshop_construction_stdio.rs",
     *["tests/native/workshop/" + name for name in ("stubs.h", "handler.cpp", "vectors.json", "continuity_vectors.json")],
     "tests/stdio/workshop.py", "tests/stdio/workshop_tree_material.py", "tests/stdio/workshop_clock.py", "tests/stdio/tree_harvest.py",
@@ -69,7 +69,9 @@ def check(root: Path = ROOT) -> dict:
         TREE + "material_origin.rs": ["pubfnmaterial_origin<", "acknowledgement.verify_tree(", "self.material_projection(&self.raw"],
         ADAPTER + "tree_material.rs": ["pubconstMAX_OFFERS:usize=64;", "Progress::decode(progress.bytes(),&origin.original().plan)?!=progress", "capture.tick()!=self.progress.tick"],
         ADAPTER + "rpc.rs": ["self.prepared.take().as_ref()==Some(permit.plan())"],
-        MCP + "workshop_construction_server/runtime.rs": ["open_private_acknowledgements(", "acks.latest()", "self.withdraw();", "modtree_material;", "modmaterial_selection;", "self.tree_material=None;", "advance_authorization_tick"],
+        MCP + "workshop_construction_server/runtime.rs": ["open_private_acknowledgements(", "acks.latest()", "self.withdraw();", "modtree_material;", "modmaterial_selection;", "self.tree_material=None;", "advance_authorization_tick", "modproduction_handoff;", "Action::ProductionHandoff"],
+        MCP + "workshop_construction_server/production_handoff.rs": ["pub(crate)structProductionHandoff", "fncomplete_original(", "entry.goal_complete()", "entry.needs_reconciliation()", "acknowledgements.latest()!=Some(pin)", "self.handoff_ack(pin,", "pub(crate)fnproduction_handoff(", "pub(crate)fnproduction_handoff_view(", "\"current_completion_proven\":false", "\"production_ready\":false", "\"native_calls\":0", "self.withdraw();"],
+        MCP + "workshop_construction_server/clock.rs": ["retained_tick_floor", "journal.cached_records().fold(", "pub(super)fnproduction_handoff(", "self.prepared_seal().is_some()", "view.pending", "view.unresolved", "self.advancement_fenced"],
         MCP + "workshop_construction_server/tree_material.rs": ["WorkshopMode::Offline", "self.journal.material_origin(", "source.progress(", "self.high_tick=self.high_tick.max(progress.tick)", "self.verify(work)?;"],
         MCP + "workshop_construction_server/material_selection.rs": ["donor.qualify(handle,&capture,work)?;", "donor.verify(work)?;", "self.guard.selection=Some(selection);"],
         MCP + "workshop_construction_server/presentation.rs": ["spine(operation,session,request)", "canonical_world_anchor_available", "\"fortress_commit\"", "\"fortress_plan\"", "\"fortress_observe\""],
@@ -81,6 +83,10 @@ def check(root: Path = ROOT) -> dict:
     handlers = re.findall(r"pub fn (fortress_\w+)\(", server)
     if len(handlers) != len(TOOLS) or set(handlers) != set(TOOLS):
         raise ValueError("registered workshop handler list differs")
+    query = re.search(r"pub fn fortress_query\s*\(\s*session_id\s*:\s*String\s*,\s*mode\s*:\s*Option<String>\s*,?\s*\)", server)
+    if query is None or any(token not in compact[MCP + "workshop_construction_server.rs"] for token in
+                            ("\"production_handoff\"", "Action::ProductionHandoff", "\"inspect\"")):
+        raise ValueError("Workshop Query must retain optional closed inspect/production_handoff routing")
     for handler in ("OpenSession", "Observe", "Query", "Plan", "Commit", "Wait", "Cancel", "Checkpoint", "Restore", "Explain", "Doctor"):
         if f".tool(Fortress{handler})" not in compact[MCP + "workshop_construction_server.rs"]:
             raise ValueError("workshop handler is not registered")
@@ -118,6 +124,7 @@ def check(root: Path = ROOT) -> dict:
         "tree_material_adapter_rust_cases": text[ADAPTER + "tree_material_tests.rs"].count("#[test]"),
         "production_origin_adapter_rust_cases": text[ADAPTER + "production_origin_tests.rs"].count("#[test]"),
         "mcp_unit_cases": text[MCP + "workshop_construction_server/tests.rs"].count("#[test]"),
+        "production_handoff_mcp_cases": text[MCP + "workshop_construction_server/production_handoff_tests.rs"].count("#[test]"),
         "clock_mcp_config_cases": text[MCP + "workshop_construction_server/clock_config_tests.rs"].count("#[test]"),
         "clock_mcp_presentation_cases": text[MCP + "workshop_construction_server/clock_presentation_tests.rs"].count("#[test]"),
         "clock_python_stdio_cases": len(re.findall(r"^    def test_", text["tests/stdio/workshop_clock.py"], re.MULTILINE)),
@@ -131,6 +138,54 @@ def check(root: Path = ROOT) -> dict:
     }
     if any(contract["focused_test_contract"][key] != value for key, value in actual_counts.items()):
         raise ValueError(f"workshop exact registered test count differs: {actual_counts}")
+    expected_handoff = {
+        "api": "workshop_construction_server::runtime::Runtime::production_handoff",
+        "schema": "dfmcp.workshop-production-handoff/1",
+        "query_mode": "production_handoff",
+        "query_default": "inspect",
+        "modes": [
+            "control",
+            "recover",
+            "offline"
+        ],
+        "original": "one resolved continuous original Placed Carpenter receipt with a retained Complete observation",
+        "historical_completion_required": True,
+        "exact_independent_ack_required": True,
+        "custody_reverified_after_clock_inspection": True,
+        "configured_clock_must_be": "verified, settled, without unresolved history, live preparation or advancement fence",
+        "recovered_clock_floor": "maximum of every retained Run plan and native receipt tick, preserved before target binding and later refusal",
+        "descriptor_max_bytes": 16384,
+        "descriptor_binds": [
+            "private directory",
+            "exact Workshop source binding",
+            "independent ACK",
+            "original key and plan digest",
+            "Placed receipt",
+            "original building and material IDs",
+            "historical completion tick and witness",
+            "settled clock identity"
+        ],
+        "moving_authority_tick_floor_in_digest": False,
+        "current_completion_proven": False,
+        "current_pause_proven": False,
+        "production_ready": False,
+        "mutation_authority": False,
+        "native_calls": 0,
+        "native_credentials_read": False,
+        "donor_writes": False,
+        "creates_production_session": False,
+        "closes_workshop_session": False,
+        "import_requirement": "release the Workshop owner, reopen exact donor custody Offline and freshly qualify original completion before every production effect",
+        "native_protocols_unchanged": True,
+        "public_tools_added": False
+    }
+    if contract.get("production_handoff_consumer") != expected_handoff:
+        raise ValueError("Workshop production handoff contract differs")
+    handoff = compact[MCP + "workshop_construction_server/production_handoff.rs"]
+    if any(token in handoff for token in
+           ("source.prepare(", "source.commit(", "source.cancel(", "source.progress(",
+            "self.journal.sample(", ".acknowledge(", "open_private_")):
+        raise ValueError("Workshop production handoff cannot contact native sources or repair custody")
     expected_production_origin = {
         "api": "workshop_construction::production_origin",
         "origin": "exact original Placed receipt and independently acknowledged private Offline Workshop custody",

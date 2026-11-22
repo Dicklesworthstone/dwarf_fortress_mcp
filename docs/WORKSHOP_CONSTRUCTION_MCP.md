@@ -280,6 +280,28 @@ uses this embedding API for closed operator configuration, an immutable original
 plan association and fresh checks at every order preparation and dispatch boundary.
 It adds no MCP tool or native method and creates no canonical workshop fact.
 
+A completed workshop owner can now export its exact production prerequisite
+without manually reconstructing the original identity or source pins:
+
+```json
+{"session_id":"<opened workshop session>","mode":"production_handoff"}
+```
+
+Pass this to `fortress_query`. The result's `production_handoff` carries the
+operator-derived prerequisite configuration, exact independently acknowledged
+original key and plan, the placement receipt, historical completion evidence,
+settled clock recovery and a deterministic handoff digest. It requires the
+single original to be placed and historically complete, with no unresolved
+effects, intact source continuity and no prepared, active or ambiguous clock
+interval.
+
+Export is a bounded local custody read. It neither samples the game nor writes
+the journal, reads native credentials, creates an order or restores a review.
+The consumed authority floor survives the handoff. Historical completion is
+explicitly distinct from current readiness: the production importer must still
+obtain its own fresh original-building qualification at planning and dispatch.
+Omitting `mode` retains ordinary inspection; unknown modes are rejected.
+
 Close the workshop session before importing its exclusive private custody. Open
 both `workshop.journal` and `workshop.ack` in Offline mode with the independently
 retained acknowledgement, then call `WorkshopJournal::production_origin` with

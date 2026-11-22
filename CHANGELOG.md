@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased — Export completed original workshop custody
+
+- Add `fortress_query(mode="production_handoff")` to the existing Workshop
+  profile, exporting the exact original prerequisite, receipt, completion
+  history, acknowledgement and settled clock reference.
+- Refuse incomplete or unresolved originals, changed acknowledgements and
+  prepared, active, uncertain or fenced clocks. Bind immutable handoff identity
+  separately from the moving authority floor; require fresh production checks.
+- Preserve every validated recovered clock tick before target binding so an
+  expired or failed reopen cannot lower subsequent authority checks.
+- Add actual-runtime custody and public routing regression sources plus source
+  inventory negatives. Execution and formatting remain pending because the
+  execution host is unavailable; no native or admission qualification is claimed.
+
 ## Unreleased — Verify the original construction and work order
 
 - Bind ordinary construction and work-order terminal proof to typed identity,

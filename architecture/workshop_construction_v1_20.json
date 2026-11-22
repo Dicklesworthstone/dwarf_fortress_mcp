@@ -270,6 +270,8 @@
     "crates/dfmcp-mcp/src/lib.rs",
     "crates/dfmcp-mcp/src/workshop_construction_server.rs",
     "crates/dfmcp-mcp/src/workshop_construction_server/runtime.rs",
+    "crates/dfmcp-mcp/src/workshop_construction_server/production_handoff.rs",
+    "crates/dfmcp-mcp/src/workshop_construction_server/production_handoff_tests.rs",
     "crates/dfmcp-mcp/src/workshop_construction_server/presentation.rs",
     "crates/dfmcp-mcp/src/workshop_construction_server/tests.rs",
     "crates/dfmcp-mcp/src/workshop_construction_server/clock.rs",
@@ -381,10 +383,10 @@
   },
   "focused_test_contract": {
     "adapter_rust_cases": 24,
-    "mcp_unit_cases": 9,
+    "mcp_unit_cases": 10,
     "rust_stdio_cases": 3,
     "python_stdio_cases": 7,
-    "python_inventory_cases": 9,
+    "python_inventory_cases": 11,
     "native_scenarios": 13,
     "compiled_mutants": 12,
     "failed_allowed": 0,
@@ -402,7 +404,8 @@
     "clock_adapter_rust_cases": 20,
     "clock_mcp_config_cases": 7,
     "clock_mcp_presentation_cases": 12,
-    "clock_python_stdio_cases": 10
+    "clock_python_stdio_cases": 10,
+    "production_handoff_mcp_cases": 6
   },
   "shared_native_engine": {
     "source": "bridge/common/one_attempt_native.h",
@@ -574,5 +577,46 @@
     "default_goal_wait_unchanged": true,
     "native_protocols_unchanged": true,
     "post_run_progress_floor": "at least the maximum consumed Run/Workshop tick; typed RPC rejects stale completion before journal retention"
+  },
+  "production_handoff_consumer": {
+    "api": "workshop_construction_server::runtime::Runtime::production_handoff",
+    "schema": "dfmcp.workshop-production-handoff/1",
+    "query_mode": "production_handoff",
+    "query_default": "inspect",
+    "modes": [
+      "control",
+      "recover",
+      "offline"
+    ],
+    "original": "one resolved continuous original Placed Carpenter receipt with a retained Complete observation",
+    "historical_completion_required": true,
+    "exact_independent_ack_required": true,
+    "custody_reverified_after_clock_inspection": true,
+    "configured_clock_must_be": "verified, settled, without unresolved history, live preparation or advancement fence",
+    "recovered_clock_floor": "maximum of every retained Run plan and native receipt tick, preserved before target binding and later refusal",
+    "descriptor_max_bytes": 16384,
+    "descriptor_binds": [
+      "private directory",
+      "exact Workshop source binding",
+      "independent ACK",
+      "original key and plan digest",
+      "Placed receipt",
+      "original building and material IDs",
+      "historical completion tick and witness",
+      "settled clock identity"
+    ],
+    "moving_authority_tick_floor_in_digest": false,
+    "current_completion_proven": false,
+    "current_pause_proven": false,
+    "production_ready": false,
+    "mutation_authority": false,
+    "native_calls": 0,
+    "native_credentials_read": false,
+    "donor_writes": false,
+    "creates_production_session": false,
+    "closes_workshop_session": false,
+    "import_requirement": "release the Workshop owner, reopen exact donor custody Offline and freshly qualify original completion before every production effect",
+    "native_protocols_unchanged": true,
+    "public_tools_added": false
   }
 }

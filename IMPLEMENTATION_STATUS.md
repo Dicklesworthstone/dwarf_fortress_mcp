@@ -1,5 +1,38 @@
 # Implementation Status
 
+## Unreleased — Export the exact completed workshop for production
+
+The existing Workshop `fortress_query` now accepts
+`mode: "production_handoff"`. It exports the operator-derived prerequisite
+configuration, independently acknowledged journal head, original placement
+identity and receipt, historical completion sample and settled clock custody.
+The deterministic handoff digest binds immutable donor identity; the moving
+authority tick floor is retained separately. Ordinary inspection remains the
+default, and unknown modes refuse.
+
+Export requires exactly one resolved, completed original with continuous source
+identity and intact acknowledgements. A prepared, pending, unresolved or fenced
+clock refuses the handoff. The operation performs bounded local custody reads
+without native credentials, a new sample, a journal append or an effect permit.
+Production still imports the exact original Offline after the donor writer is
+closed and freshly qualifies the workshop before its own effects.
+
+Workshop clock recovery now retains the greatest validated tick from all
+recovered Run records before binding the target. A later failure or expired
+authority cannot erase that floor when a temporary clock owner is consumed.
+
+Six actual-runtime/private-custody regression sources and one public Query
+routing case cover exact export, recovery, incomplete originals, acknowledgement
+damage, unresolved clocks and consumed-floor retention. Source inventory checks
+include the new files and two additional negative cases. Independent source/API
+review is complete; the execution host is unavailable, so these new Rust and
+Python tests, formatting and final static gates have not been run. This source
+increment does not establish modern MCP, real-game or admission qualification.
+
+Owners: `dfmcp-reality-wiring-proof-4bf.14.4` and
+`dfmcp-reality-wiring-proof-4bf.14.6`, both still in progress. See
+`docs/WORKSHOP_CONSTRUCTION_MCP.md#hand-off-an-original-workshop-to-production`.
+
 ## Unreleased — Bind terminal construction and order proof to original identity
 
 Ordinary `Build` and `CreateWorkOrder` terminal proofs now require the original

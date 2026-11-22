@@ -148,5 +148,42 @@ class WorkshopSourceInventoryTests(unittest.TestCase):
                     check(root)
 
 
+
+    def test_missing_production_handoff_module_or_tests_is_refused(self) -> None:
+        for name in ("production_handoff.rs", "production_handoff_tests.rs"):
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                self.copy_consumer(root)
+                (root / "crates/dfmcp-mcp/src/workshop_construction_server" / name).unlink()
+                with self.assertRaises(ValueError):
+                    check(root)
+
+    def test_production_handoff_requires_exact_history_without_new_authority(self) -> None:
+        mutations = (
+            ("historical_completion_required", False),
+            ("exact_independent_ack_required", False),
+            ("custody_reverified_after_clock_inspection", False),
+            ("moving_authority_tick_floor_in_digest", True),
+            ("current_completion_proven", True),
+            ("current_pause_proven", True),
+            ("production_ready", True),
+            ("mutation_authority", True),
+            ("native_calls", 1),
+            ("native_credentials_read", True),
+            ("donor_writes", True),
+            ("closes_workshop_session", True),
+        )
+        for field, value in mutations:
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                self.copy_consumer(root)
+                path = root / "architecture/workshop_construction_v1_20.json"
+                contract = json.loads(path.read_text())
+                contract["production_handoff_consumer"][field] = value
+                path.write_text(json.dumps(contract))
+                with self.assertRaises(ValueError):
+                    check(root)
+
+
 if __name__ == "__main__":
     unittest.main()

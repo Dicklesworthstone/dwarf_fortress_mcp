@@ -4,6 +4,12 @@
 mod clock;
 #[path = "material_selection.rs"]
 mod material_selection;
+#[path = "production_handoff.rs"]
+mod production_handoff;
+pub(crate) use production_handoff::ProductionHandoff;
+#[cfg(test)]
+#[path = "production_handoff_tests.rs"]
+mod production_handoff_tests;
 #[path = "tree_material.rs"]
 mod tree_material;
 use dfmcp_adapter::build_placement::journal::private_file::PrivateBuildFile;
@@ -558,6 +564,7 @@ impl Work {
 }
 pub(super) enum Action {
     Inspect,
+    ProductionHandoff,
     Observe,
     Plan(String),
     Commit { seal: String, confirmed: bool },
@@ -976,6 +983,9 @@ impl Runtime {
             let mut fresh = false;
             match action {
                 Action::Inspect => {}
+                Action::ProductionHandoff => {
+                    return self.production_handoff_view(&work.current(work.bytes)?);
+                }
                 Action::Unavailable => {
                     return Err(denied(
                         "this isolated profile has no checkpoint, restore, manager or activation provider",

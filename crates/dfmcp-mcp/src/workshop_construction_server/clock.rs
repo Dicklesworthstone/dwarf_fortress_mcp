@@ -154,6 +154,7 @@ pub(super) struct Owner {
     recovery: Recovery,
     verified: bool,
     advancement_fenced: bool,
+    retained_tick_floor: u64,
     unbound_active: Option<DurableRun>,
 }
 impl Owner {
@@ -201,6 +202,13 @@ impl Owner {
             journal_id: journal.id(),
             head: journal.head(),
         };
+        // Retain every validated recovered Run tick before binding its target.
+        // Clock::new may consume that history and then refuse current authority;
+        // losing its temporary owner must not erase the observed high-water.
+        let retained_tick_floor = journal.cached_records().fold(0u64, |floor, run| {
+            floor.max(run.plan().before().tick().unwrap_or(0))
+                .max(run.native().and_then(|record| record.observed_tick()).unwrap_or(0))
+        });
         let unbound_active = journal
             .cached_records()
             .find(|run| !run.terminal() || run.unresolved())
@@ -214,6 +222,7 @@ impl Owner {
             recovery,
             verified: false,
             advancement_fenced: false,
+            retained_tick_floor,
             unbound_active,
         })
     }
@@ -224,7 +233,7 @@ impl Owner {
         (current, native)
     }
     pub(super) fn high_tick(&self) -> u64 {
-        self.clock.as_ref().map_or(0, Clock::high_tick)
+        self.retained_tick_floor.max(self.clock.as_ref().map_or(0, Clock::high_tick))
     }
     pub(super) fn withdraw(&mut self) {
         self.verified = false;
@@ -256,6 +265,7 @@ impl Owner {
         c: &OperationContext,
     ) -> Result<Option<ClockView>> {
         self.verified = false;
+        self.retained_tick_floor = self.high_tick().max(c.anchor.tick.get());
         let entry = inventory.entries().first();
         if let Some(clock) = &self.clock {
             if clock.target().workshop_journal_id() != inventory.journal_id
@@ -325,6 +335,80 @@ impl Owner {
             "unresolved":view.as_ref().map_or(owner_lost || self.unbound_active.as_ref().is_some_and(DurableRun::unresolved),|view|view.unresolved),
             "active_run":view.as_ref().and_then(|view|view.active()).or(unbound_run.as_ref()).map(|run|run_json(run,false)),
             "current_pause_proven":false,"workshop_completion_proven":false,"automatic_redispatch":false})
+    }
+}
+
+
+/// Immutable settled clock custody, separate from its moving authority floor.
+#[derive(Clone, Debug)]
+pub(super) struct ProductionHandoff {
+    journal_id: Digest32,
+    head: Digest32,
+    target_id: Digest32,
+    generation: u64,
+    recovery_generation: u64,
+    deadline_tick: u64,
+    high_tick: u64,
+}
+
+pub(super) const HANDOFF_BYTES: u64 = 3 * VIEW_BYTES;
+
+impl ProductionHandoff {
+    pub(super) fn append_identity(&self, bytes: &mut Vec<u8>) {
+        bytes.extend_from_slice(self.journal_id.as_bytes());
+        bytes.extend_from_slice(self.head.as_bytes());
+        bytes.extend_from_slice(self.target_id.as_bytes());
+        bytes.extend_from_slice(&self.generation.to_be_bytes());
+        bytes.extend_from_slice(&self.recovery_generation.to_be_bytes());
+        bytes.extend_from_slice(&self.deadline_tick.to_be_bytes());
+        // high_tick may also include later caller authority. The acknowledged
+        // clock head, not that moving rejection floor, identifies its history.
+    }
+
+    pub(super) fn to_json(&self) -> Value {
+        json!({
+            "enabled":true,"verified":true,
+            "recovery":{"journal_id":self.journal_id.to_hex(),"head":self.head.to_hex()},
+            "target_id":self.target_id.to_hex(),
+            "generation":self.generation,"recovery_generation":self.recovery_generation,
+            "deadline_tick":self.deadline_tick,"high_tick":self.high_tick,
+            "pending":false,"unresolved":false,"advancement_fenced":false,
+            "current_pause_proven":false,"workshop_completion_proven":false,
+            "automatic_redispatch":false,
+        })
+    }
+}
+
+impl Owner {
+    pub(super) fn production_handoff(
+        &mut self,
+        binding: &WorkshopBinding,
+        inventory: &WorkshopInventory,
+        c: &OperationContext,
+    ) -> Result<ProductionHandoff> {
+        let view = self.inspect(binding, inventory, c)?
+            .ok_or_else(|| denied("production handoff has no original workshop clock target"))?;
+        if !view.verified
+            || view.pending
+            || view.unresolved
+            || self.advancement_fenced
+            || self.prepared_seal().is_some()
+            || view.runs.iter().any(|run| !run.entry.terminal() || run.entry.unresolved())
+        {
+            return Err(error(
+                ErrorCode::EffectIndeterminate,
+                "settle and verify every original workshop clock before exporting production custody",
+            ));
+        }
+        Ok(ProductionHandoff {
+            journal_id: self.recovery.journal_id,
+            head: self.recovery.head,
+            target_id: view.target_id,
+            generation: self.config.binding.manifest().generation,
+            recovery_generation: self.config.recovery_generation,
+            deadline_tick: self.config.deadline_tick,
+            high_tick: self.high_tick(),
+        })
     }
 }
 
