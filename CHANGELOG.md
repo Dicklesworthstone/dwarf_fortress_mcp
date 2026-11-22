@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased — Forecast recovered original projects through later stages
+
+- Extend explicit complete-project forecasts to Verified, physically quiet
+  durable recovered production, provisioned-room and connected-room roots.
+- Capture immutable exact-source custody during recovery, then predict on the
+  shared finite-resource model without reopening archives or restoring handles.
+- Preserve original proofs, deadlines and reserve endpoints; charge complete
+  archived source structure and original steps to the shared query bounds.
+- Pass all 33 actual model component tests, including seven recovered cases;
+  compile the exact new witness capture and source-shape helper. Four new public
+  durable-facade cases remain unexecuted, with full MCP/native qualification open.
+
 ## Unreleased — Admit complete aggregate and lexical sources before hashing
 
 - Apply complete record, hidden-value, nesting and canonical-byte admission to

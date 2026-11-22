@@ -5,7 +5,8 @@
     "mode": "forecast_originals",
     "new_top_level_tools": 0,
     "output_schema": "dfmcp.lab-original-forecast/1",
-    "complete_project_output_schema": "dfmcp.lab-original-forecast/2"
+    "complete_project_output_schema": "dfmcp.lab-original-forecast/2",
+    "recovered_complete_project_output_schema": "dfmcp.lab-original-forecast/3"
   },
   "request": {
     "required": [
@@ -18,7 +19,7 @@
     "max_bytes": 2048,
     "min_originals": 1,
     "max_originals": 8,
-    "digest": "64 lowercase hexadecimal characters; exact current-session live original",
+    "digest": "64 lowercase hexadecimal characters; exact current-session live original, or an admitted recovered quiet root in complete_project",
     "aliases": "retain requested and actual identities; reject duplicate actual originals",
     "historical_source": false,
     "optional": [
@@ -43,7 +44,9 @@
     "model": "one discarded MemoryAdapter clone with existing original obligation runtimes",
     "admission": "current world plus complete retained original source union, reserve snapshots and owned competing receipts before clone; repeat derived-source admission",
     "source_heap_bytes_measured": false,
-    "complete_project_originals": "every root and retained descendant requires its exact retained sealed source; root stock-ledger identity/generation stays stable while each child ledger validates its own source-bound plan; sources, archives, receipts, reserve snapshots and predicates join the complete union before cloning"
+    "complete_project_originals": "every root and retained descendant requires its exact retained sealed source; root stock-ledger identity/generation stays stable while each child ledger validates its own source-bound plan; sources, archives, receipts, reserve snapshots and predicates join the complete union before cloning",
+    "recovered_complete_project": "ordinary durable recovery captures exact sealed-source anchor, qualified ledger, canonical records/bytes and ordinary source structural bytes/work; query charges their complete union with current/original/reserve sources and performs no archive reads or history hydration",
+    "recovered_reserve_endpoint": "existing exact retained endpoint snapshot must already be present in bounded session history; otherwise refuse without hydration or replacing its first truth; an explicit selected wait may load previously published endpoint evidence"
   },
   "progression": {
     "tracked": "all current-session open actions in original commit order",
@@ -66,7 +69,8 @@
     "hypothetical_stage_order": "ready actual original digests ascending; defer qualified tracked active-output conflicts while other ready originals proceed; existing and modeled action polls retain commit order",
     "active_output_conflicts": "only the exact compiler-qualified canonical producer with matching tracked Active physical work may defer; bounded ordinary polling and recompile from observed stock; no future-output credit or new stage/action charge; untracked, unknown and other errors refuse",
     "new_stage_deadlines": "own separately reviewed compiler-derived obligations; no original obligation is renewed",
-    "retained_stages": "reuse original action receipts and obligation runtimes without preparing or recommitting; predecessors already Verified and physically quiet; final stage may have prepared or active work"
+    "retained_stages": "reuse original action receipts and obligation runtimes without preparing or recommitting; predecessors already Verified and physically quiet; final stage may have prepared or active work",
+    "recovered_originals": "immutable verified historical steps; no ActionIds, restored handles, original polls, stability resets or deadline renewal; current quiet physical identities checked on every private frontier"
   },
   "outcome": {
     "group_completion": "all selected original goals true, required exact reserve samples true, original actions Verified and physical work quiet at one same modeled frontier",
@@ -85,7 +89,8 @@
     "initial_actions_distinct_from_future_stages": true,
     "retained_stages": "parent-ordered real plan/action identities with exact source anchors, unchanged obligations, independent reserve samples and predicted outcomes; custody already_committed_original; recommitted_by_forecast false",
     "committed_actions_distinct_from_future_stages": true,
-    "reserve_samples_shared_between_pursuits": false
+    "reserve_samples_shared_between_pursuits": false,
+    "recovered_originals": "complete exact original step rows, action_id null, verified_recovered_history state origin, original source/receipt/proof anchors and deadlines; historical steps count toward completion and action limits; hypothetical successors remain separate"
   },
   "authority": {
     "current": [
@@ -97,13 +102,13 @@
     "modeled_Observe_expiry_checked": true,
     "complete_project_modeled_Query_expiry_checked": true,
     "deferred_effects": "original current grants and scope checked at modeled dispatch; no new grants",
-    "recovery_only": "refuse before fork",
+    "recovery_only": "complete_project only: exact recovered root, every original step already Verified and physically quiet; no committed descendants; complete archived source and active recovery lineage required; current_stage still refuses",
     "withdrawn_or_abandoned": "refuse before fork",
     "future_stages": "modeled Observe, Query, Plan, every effect scope/risk and checkpoint checked before charging or preparing the model stage",
     "continued_project_refusals": [
       "gapped, cyclic, branched or duplicate lineage",
       "changed typed root request or source family",
-      "foreign, recovered, withdrawn or restore-abandoned custody",
+      "foreign, recovered descendant, withdrawn or restore-abandoned custody",
       "missing exact stage source, plan, commit or action custody",
       "failed, cancelled, indeterminate or unknown physical stage work",
       "unverified or nonquiescent predecessor",
@@ -127,7 +132,10 @@
     "max_future_stages_per_original": 3,
     "hypothetical_costs": "root, retained, competing and model actions share negotiated action/entity ceiling; all original archives and modeled plan archives share complete source byte allowance",
     "additional_semantic_nodes_per_project_evaluation": 130,
-    "max_committed_stages_per_project_including_root": 8
+    "max_committed_stages_per_project_including_root": 8,
+    "recovered_original_steps": "share original/competing/hypothetical action ceilings even without live ActionIds",
+    "recovered_complete_source_structural_bytes": 16777216,
+    "recovered_complete_source_structural_work": 4000000
   },
   "publication": {
     "current_anchor_preserved": true,
@@ -158,6 +166,8 @@
     "crates/dfmcp-mcp/src/original_project_forecast_tests.rs",
     "crates/dfmcp-mcp/src/original_retained_project_forecast_tests.rs",
     "crates/dfmcp-mcp/src/original_project_lineage_mcp_tests.rs",
-    "crates/dfmcp-mcp/src/original_project_lineage_tests.rs"
+    "crates/dfmcp-mcp/src/original_project_lineage_tests.rs",
+    "crates/dfmcp-mcp/src/original_recovered_project_forecast_tests.rs",
+    "crates/dfmcp-mcp/src/recovered_original_forecast_mcp_tests.rs"
   ]
 }

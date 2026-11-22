@@ -22,6 +22,10 @@ const MAX_TRACKED: usize = 1_024;
 mod projects;
 pub(super) use projects::Project;
 
+#[path = "recovered_original_forecast.rs"]
+mod recovery;
+pub(super) use recovery::RecoveredOriginal;
+
 #[derive(Clone)]
 pub(super) struct Original {
     pub(super) requested: Digest32,
@@ -101,15 +105,32 @@ fn observe(
     goal: PredicateTruth,
     stage: PredicateTruth,
 ) -> Result<Outcome> {
-    let mut verified = 0;
-    let mut terminal = 0;
+    observe_with_recovery(fork, original, reserve, goal, stage, None)
+}
+
+fn observe_with_recovery(
+    fork: &MemoryAdapter,
+    original: &Original,
+    reserve: Option<PredicateTruth>,
+    goal: PredicateTruth,
+    stage: PredicateTruth,
+    recovered: Option<&RecoveredOriginal>,
+) -> Result<Outcome> {
+    let mut steps = match recovered {
+        Some(recovered) => recovered.rows(fork.snapshot())?,
+        None => Vec::new(),
+    };
+    let recovered_count = steps.len();
+    let total = original.actions.len().saturating_add(recovered_count);
+    let mut verified = recovered_count;
+    let mut terminal = recovered_count;
     let mut active = 0;
     let mut unknown = 0;
     let mut failed = false;
     let mut cancelled = false;
     let mut cancelling = false;
     let mut indeterminate = false;
-    let mut steps = Vec::with_capacity(original.actions.len());
+    steps.reserve(original.actions.len());
     for id in &original.actions {
         let receipt = fork.action_receipt(*id).ok_or_else(|| {
             error(
@@ -142,8 +163,8 @@ fn observe(
         );
     }
     let quiet = unknown == 0 && active == 0;
-    let all_verified = !original.actions.is_empty() && verified == original.actions.len();
-    let all_terminal = !original.actions.is_empty() && terminal == original.actions.len();
+    let all_verified = total > 0 && verified == total;
+    let all_terminal = total > 0 && terminal == total;
     let now = fork.snapshot().tick.0;
     let reserve_complete =
         original.reserve_until.is_none() || reserve == Some(PredicateTruth::True);
@@ -181,7 +202,7 @@ fn observe(
     } else {
         "pending"
     };
-    Ok(Outcome {
+    let mut outcome = Outcome {
         complete,
         continuation: false,
         attention: !matches!(stop, "complete" | "pending" | "reserve_pending"),
@@ -197,7 +218,11 @@ fn observe(
             "reserve_observation_origin":if original.reserve_observation.is_some() {"retained_original"} else {"private_prediction"},
             "continuous_maintenance_proven":false, "steps":steps,
         }),
-    })
+    };
+    if let Some(recovered) = recovered {
+        recovered.annotate(&mut outcome.value);
+    }
+    Ok(outcome)
 }
 
 /// The caller admits exact current custody and the complete source before this
@@ -297,13 +322,17 @@ pub(super) fn forecast(
     for original in originals {
         all_actions.extend(&original.actions);
     }
+    let recovered_steps = projects.as_ref().map_or(0, |projects| {
+        projects.iter().map(Project::recovered_steps).sum::<usize>()
+    });
     if let Some(projects) = &projects {
         for project in projects {
             all_actions.extend(project.retained_actions());
         }
-        if all_actions.len() > MAX_TRACKED
-            || all_actions.len() > context.budget.max_actions as usize
-            || all_actions.len() > context.budget.max_entities as usize
+        let complete_steps = all_actions.len().saturating_add(recovered_steps);
+        if complete_steps > MAX_TRACKED
+            || complete_steps > context.budget.max_actions as usize
+            || complete_steps > context.budget.max_entities as usize
         {
             return Err(error(
                 ErrorCode::BudgetExceeded,
@@ -405,9 +434,13 @@ pub(super) fn forecast(
             check(context, started)?;
             let added_actions = plan.steps.len() as u64;
             let next_actions = modeled_actions.saturating_add(added_actions);
-            if (all_actions.len() as u64).saturating_add(added_actions)
+            if (all_actions.len() as u64)
+                .saturating_add(recovered_steps as u64)
+                .saturating_add(added_actions)
                 > u64::from(context.budget.max_actions).min(MAX_TRACKED as u64)
-                || (all_actions.len() as u64).saturating_add(added_actions)
+                || (all_actions.len() as u64)
+                    .saturating_add(recovered_steps as u64)
+                    .saturating_add(added_actions)
                     > u64::from(context.budget.max_entities)
             {
                 return Err(error(
@@ -633,6 +666,14 @@ pub(super) fn forecast(
         report["assumptions"][3] = json!(
             "already committed continuations retain their actual receipts and deadlines; each eligible selected root receives a separately reviewed hypothetical continuation only after its admitted chain is Verified and quiet; unselected roots receive no new stages"
         );
+        if recovered_steps > 0 {
+            report["forecast_work"]["verified_recovered_original_steps"] = json!(recovered_steps);
+            report["assumptions"].as_array_mut().ok_or_else(|| {
+                error(ErrorCode::InternalInvariantViolation, "forecast assumptions disappeared")
+            })?.push(json!(
+                "recovered original steps were already Verified and physically quiet before the forecast; immutable historical proof is retained without restoring handles or sampling old obligations"
+            ));
+        }
     }
     Ok(report)
 }

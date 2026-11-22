@@ -1,7 +1,9 @@
 # Joint forecasts of committed laboratory originals
 
 The existing `fortress.query` tool can forecast one to eight **already committed,
-current-session original plans together**. This answers a practical question
+original plans together**. The default scope selects current-session live
+originals; complete-project forecasting also accepts recovered, verified quiet
+roots as described below. This answers a practical question
 that independent plan comparisons cannot answer: will these originals still
 finish when they share the same finite workforce, materials and consumption?
 
@@ -45,7 +47,8 @@ cannot be counted twice. Results are sorted by actual original digest.
 Add `"forecast_scope": "complete_project"` to predict subsequent stages of an
 ordinary production, provisioned-room or connected-room root. The default is
 `"current_stage"`; omitting the field preserves the original `/1` response.
-Complete-project responses use `dfmcp.lab-original-forecast/2`.
+Live complete-project responses use `dfmcp.lab-original-forecast/2`. A request
+containing an admitted recovered root uses `dfmcp.lab-original-forecast/3`.
 
 ```json
 {
@@ -101,7 +104,7 @@ committed stage can still have prepared or active work. Its real receipts,
 remaining work, prior stability observations and absolute deadlines are copied
 into the shared model. No committed stage is prepared or committed again.
 
-Each stage must belong to this live session and retain the unchanged typed
+Each stage in a live continuation chain must belong to this session and retain the unchanged typed
 production, room or connected-room request, its exact sealed plan and source
 snapshot, and complete action custody. The root's qualified stock-ledger
 identity and generation must remain the same in every stage source and the
@@ -189,7 +192,8 @@ available for outcome inspection.
 ## Read the result
 
 A successful current-stage response has schema `dfmcp.lab-original-forecast/1`;
-complete-project responses use `/2`. Both contain a
+live complete-project responses use `/2`, and complete-project responses with
+recovered originals use `/3`. All contain a
 `prediction` object with `epistemic_state: "predicted"`. Its top-level `anchor`
 and the Agent Turn anchor are the actual current source. A separate predicted
 frontier tick and hash describe the discarded model.
@@ -253,15 +257,66 @@ grant and expiry at the modeled frontier. For example, a deferred pause cannot
 borrow a synthetic ControlClock grant. Modeled observation also respects Observe
 expiry; complete-project observations also respect modeled Query expiry.
 
-The query accepts only complete live original receipts owned by this session.
-Pending plans, foreign originals, withdrawn or restore-abandoned pursuits,
-missing original custody and recovery-only originals refuse before the model
-fork. Existing original inspection and selected-wait APIs remain the way to
-inspect recovered evidence; forecast does not recreate dispatch handles.
+The default `current_stage` scope accepts only complete live original receipts
+owned by this session. Pending plans, foreign originals, withdrawn or
+restore-abandoned pursuits and missing original custody refuse before the model
+fork. Complete-project forecasting has the following bounded recovery path.
+
+### Forecast a completed stage after durable reopen
+
+A reopened durable fortress can forecast the next stages of an exact ordinary
+production, provisioned-room or connected-room root whose **every original step
+is already Verified and whose original physical work is provably quiet**.
+For example, a resource-aware BED goal whose wood harvest finished before
+restart can forecast subsequent furniture production alongside other selected
+projects, using the same finite current world.
+
+Select the exact original digest and `forecast_scope: "complete_project"`.
+The accepted recovery lineage, unchanged source and reconstructed plan, full
+anchored step-receipt map and current physical effect identities pass the
+existing recovered-original verifier. A dispatched step subsequently verified
+by its real recovered monitor is eligible. The forecast never creates such
+verification itself. Active, unknown, failed, cancelled and never-dispatched
+original steps refuse; continue observing or explicitly review the appropriate
+recovery action first. Recovered roots with already committed descendants
+remain outside this increment, including mixed recovered/live chains.
+
+Ordinary durable recovery already loads and verifies the original sealed
+snapshot. It retains a compact forecast witness binding that complete source's
+anchor, qualified stock-ledger identity and generation, full canonical byte and
+record counts, and the ordinary query inspector's structural byte/work bounds.
+Forecast admission charges these counts alongside current, original and reserve
+sources. It does not read the store, hydrate history or reconstruct the old world
+during the query. Unavailable forecast-specific qualification does not prevent
+ordinary goal recovery; it only refuses this optional forecast.
+
+Recovered rows state `selection_origin: "durable_recovery"`,
+`owns_original_dispatch: false` and `dispatch_handles_restored: false`.
+Their original steps retain exact step IDs, historical proof and receipt
+anchors and original obligation deadlines. `action_id` is `null`, with
+`action_state_origin: "verified_recovered_history"`; no invented handle or
+fresh stability observation stands in for history. The model checks original
+physical quiet again at every predicted frontier. These historical steps count
+toward original action completion and the same cumulative action allowance as
+live and hypothetical steps.
+
+New predicted successor plans still require current scoped effect and
+checkpoint authority. They exist only in the discarded model and carry the
+existing separate-review requirement. Original deadlines, receipts, stability,
+goal history and accepted recovery lineage remain unchanged.
+
+An already retained reserve endpoint must have its exact snapshot in the
+session's bounded history before forecasting. Immediately after restart, an
+explicit selected wait may be needed to load that previously published
+endpoint. Forecasting refuses an unavailable snapshot and does not replace its
+first True, False or Unknown sample with current stock. A missed past endpoint
+still blocks complete-project success. Zero horizon performs no successor
+preparation, including for a recovered root.
 
 One request shares its wall deadline and negotiated source, action, tick and
 output budgets. The complete selected and competing action union must fit the
-action budget. Current and distinct retained reserve sources, original archives,
+action budget. Current and distinct retained reserve sources, authenticated
+recovered sealed-source witnesses, original archives,
 semantic requests and owned commit receipts participate in admission. Every
 derived source is checked again against the complete retained-custody allowance.
 Hard ceilings include:
@@ -316,6 +371,9 @@ custody, shared source accounting and read-only query projection.
 `Objective::forecast_truth_at` preserves original semantic room/output and
 stock-ledger identity during pure private evaluation.
 `original_project_lineage.rs` validates the bounded exact retained chain.
+`objective_forecast_recovery.rs` retains forecast-specific sealed-source custody
+during ordinary recovery; `recovered_original_forecast.rs` carries complete
+verified historical steps without creating adapter handles.
 `original_project_forecast.rs` preserves already committed descendants and
 reuses the existing complete-project compilers for explicitly hypothetical
 successor stages, separating their receipts from live originals.
@@ -331,7 +389,13 @@ recommit, complete action-union limits, independent historical endpoints, and
 real furniture allocation that consumes a previously produced bed and requires
 further private harvest/production stages. Lineage regressions exercise missing
 parents, cycles, branches, owner and restore-epoch mismatches, changed requests,
-lost handles and the committed-stage bound. Execution results and environment limitations are recorded
+lost handles and the committed-stage bound. Recovered-model regressions cover
+residual projects without old handles, cumulative action limits, immutable
+negative/missing reserve evidence, current effect authority and reset refusal.
+Durable facade regression sources cover actual reopen and compaction, source
+and output admission, unfinished work, malformed live-custody precedence,
+replacement ledgers and preservation of pending review, world and history.
+Execution results and environment limitations are recorded
 in the implementation status; source presence alone is not a test result.
 
 Machine-readable contract:

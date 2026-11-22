@@ -20,6 +20,20 @@ fn exhausted(message: &str) -> DfmcpError {
     DfmcpError::new(ErrorCode::BudgetExceeded, message)
 }
 
+/// Pure bounded shape inspection for a source already held by its caller.
+/// This supplies no read authority: query callers authorize separately, while
+/// durable recovery uses its existing authenticated archived-source read.
+pub(super) fn source_shape(
+    snapshot: &WorldSnapshot,
+    context: &OperationContext,
+    started: Instant,
+) -> Result<(u64, u64)> {
+    let mut structural = context.clone();
+    structural.budget.max_bytes = MAX_STRUCTURAL_SOURCE_BYTES as u64;
+    let admitted = source::preflight(snapshot, &structural, started)?;
+    Ok((admitted.bytes as u64, admitted.work as u64))
+}
+
 /// Authorize at the actual current tick before inspecting selected sources.
 /// Changes charge both distinct endpoints together; a page charges the complete
 /// source, including records outside its selectors and presentation profile.
@@ -185,7 +199,9 @@ pub(crate) fn finish_response(response: String, elapsed: Duration) -> String {
     }
     let structured = matches!(
         payload["mode"].as_str(),
-        Some("structured" | "query_changes" | "condition_replay" | "history" | "forecast_originals")
+        Some(
+            "structured" | "query_changes" | "condition_replay" | "history" | "forecast_originals"
+        )
     );
     let publishable = serde_json::from_str::<Value>(&fitted).is_ok_and(|value| {
         matches!(

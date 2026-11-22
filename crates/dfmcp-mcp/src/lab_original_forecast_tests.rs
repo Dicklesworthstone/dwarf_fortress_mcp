@@ -8,6 +8,9 @@ use dfmcp_core::{CommitState, SessionId};
 #[path = "original_project_lineage_mcp_tests.rs"]
 mod retained;
 
+#[path = "recovered_original_forecast_mcp_tests.rs"]
+mod recovered;
+
 type TestResult<T = ()> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 struct Owner(String);

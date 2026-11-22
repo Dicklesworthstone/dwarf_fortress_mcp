@@ -27,6 +27,7 @@ pub(crate) struct Project {
     pub(crate) original: Digest32,
     source: ProjectSource,
     ledger: ProductionGoalLedger,
+    recovered: Option<RecoveredOriginal>,
     retained: Vec<RetainedStage>,
     stages: Vec<Stage>,
 }
@@ -41,6 +42,7 @@ impl Project {
             original,
             source,
             ledger,
+            recovered: None,
             retained: Vec::new(),
             stages: Vec::new(),
         }
@@ -48,6 +50,21 @@ impl Project {
 
     pub(crate) fn goal_truth(&self, snapshot: &WorldSnapshot) -> Result<PredicateTruth> {
         self.source.goal_truth(snapshot, self.ledger)
+    }
+
+    pub(in super::super) fn with_recovery(mut self, recovered: RecoveredOriginal) -> Result<Self> {
+        if recovered.original() != self.original || !self.retained.is_empty() {
+            return Err(error(
+                ErrorCode::InvalidPlan,
+                "recovered project identity changed",
+            ));
+        }
+        self.recovered = Some(recovered);
+        Ok(self)
+    }
+
+    pub(super) fn recovered_steps(&self) -> usize {
+        self.recovered.as_ref().map_or(0, RecoveredOriginal::len)
     }
 
     /// The caller has admitted the exact live source, lineage and complete
@@ -59,6 +76,12 @@ impl Project {
         original: Original,
         sealed: &WorldSnapshot,
     ) -> Result<()> {
+        if self.recovered.is_some() {
+            return Err(error(
+                ErrorCode::Conflict,
+                "recovered complete-project forecasts do not yet admit committed descendant chains",
+            ));
+        }
         if self.retained.len() + 1 >= MAX_COMMITTED_PROJECT_STAGES {
             return Err(error(
                 ErrorCode::BudgetExceeded,
@@ -128,13 +151,27 @@ impl Project {
         goal: PredicateTruth,
         original_stage: PredicateTruth,
     ) -> Result<Outcome> {
-        let initial = observe(fork, original, reserve, goal, original_stage)?;
+        if self.recovered.is_some() && !original.actions.is_empty() {
+            return Err(error(
+                ErrorCode::InvalidPlan,
+                "recovered project cannot contain live original handles",
+            ));
+        }
+        let initial = observe_with_recovery(
+            fork,
+            original,
+            reserve,
+            goal,
+            original_stage,
+            self.recovered.as_ref(),
+        )?;
         let mut actions = original.actions.clone();
         actions.extend(self.retained_actions());
-        let committed_verified = actions.iter().all(|id| {
-            fork.action_receipt(*id)
-                .is_some_and(|receipt| receipt.state == CommitState::Verified)
-        });
+        let committed_verified = (self.recovered_steps() > 0 || !actions.is_empty())
+            && actions.iter().all(|id| {
+                fork.action_receipt(*id)
+                    .is_some_and(|receipt| receipt.state == CommitState::Verified)
+            });
         for stage in &self.stages {
             actions.extend_from_slice(&stage.actions);
         }
@@ -146,7 +183,14 @@ impl Project {
             reserve_observation: original.reserve_observation,
             can_continue: true,
         };
-        let mut outcome = observe(fork, &combined, reserve, goal, PredicateTruth::True)?;
+        let mut outcome = observe_with_recovery(
+            fork,
+            &combined,
+            reserve,
+            goal,
+            PredicateTruth::True,
+            self.recovered.as_ref(),
+        )?;
         let retained = self.retained_stage_views(fork, goal)?;
         // Action failures take precedence as in ordinary original inspection.
         // Otherwise every admitted pursuit's endpoint remains independently

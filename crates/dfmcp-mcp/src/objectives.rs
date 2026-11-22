@@ -22,6 +22,9 @@ mod withdrawal;
 #[path = "original_project_lineage.rs"]
 mod forecast_lineage;
 
+#[path = "objective_forecast_recovery.rs"]
+mod forecast_recovery;
+
 pub(super) fn withdraw_goal(session: &mut LabSession, digest: &Digest32) -> Result<Value> {
     withdrawal::withdraw_goal(session, digest)
 }
@@ -91,6 +94,9 @@ pub(super) struct Objective {
     /// the original commit. This book grants observation only and never
     /// reconstructs missing terminal receipts from an achieved goal.
     recovered_wait_custody: Option<super::selected_plan_wait::RecoveredPlanCustody>,
+    /// Exact archived source qualification, captured during ordinary recovery.
+    /// Failure affects only the optional forecast, never existing goal recovery.
+    recovered_project_source: Option<Result<forecast_recovery::RecoveredProjectSource>>,
     /// Positive retired-step custody, verified against the original seal and
     /// exact archived frontier. A missing entity never populates this map.
     retired_never_dispatched: BTreeMap<u32, goal_custody::RetiredNondispatchProof>,
@@ -246,6 +252,19 @@ impl Objective {
         &self,
         snapshot: &dfmcp_world::WorldSnapshot,
     ) -> Result<(PredicateTruth, PredicateTruth)> {
+        if !self.original_handles_live {
+            return Err(DfmcpError::new(
+                ErrorCode::Conflict,
+                "forecast original requires its live action custody",
+            ));
+        }
+        self.forecast_truth_at_source(snapshot)
+    }
+
+    fn forecast_truth_at_source(
+        &self,
+        snapshot: &dfmcp_world::WorldSnapshot,
+    ) -> Result<(PredicateTruth, PredicateTruth)> {
         let plan = self.resource_plan().ok_or_else(|| {
             DfmcpError::new(
                 ErrorCode::CorruptLedger,
@@ -259,8 +278,7 @@ impl Objective {
             )
         })?;
         let anchor = snapshot.anchor();
-        if !self.original_handles_live
-            || self.is_withdrawn()
+        if self.is_withdrawn()
             || self.restore_abandoned_anchor.is_some()
             || anchor.fortress_id != active.fortress_id
             || anchor.cursor.epoch != active.cursor.epoch
@@ -495,6 +513,7 @@ impl Objective {
             active_observation_anchor: Some(plan.anchor),
             original_handles_live: true,
             recovered_wait_custody: None,
+            recovered_project_source: None,
             retired_never_dispatched: BTreeMap::new(),
             first_satisfied_anchor: None,
             historical_proof_verified: false,
@@ -1447,6 +1466,7 @@ pub(super) fn recover_objective(
         active_observation_anchor: None,
         original_handles_live: false,
         recovered_wait_custody: None,
+        recovered_project_source: None,
         retired_never_dispatched: BTreeMap::new(),
         first_satisfied_anchor: retained.first_satisfied_anchor,
         historical_proof_verified: false,
@@ -1490,6 +1510,16 @@ pub(super) fn recover_objective(
             .source
             .intent(IntentId::new(retained.intent_id), &sealed)?;
         let plan = recovery_compiler::prepare_exact(&sealed, &intent, &ctx, retained.plan_digest)?;
+        if matches!(
+            &objective.source,
+            PlanSource::Production { .. } | PlanSource::ConnectedRoom { .. }
+        ) || matches!(&objective.source, PlanSource::Blueprint { raw, .. }
+                if room_provisioning::is_provisioned_room(raw))
+        {
+            objective.recovered_project_source = Some(
+                forecast_recovery::RecoveredProjectSource::capture(&sealed, &plan, &ctx),
+            );
+        }
         if objective.requires_output_ledger() {
             let original = crate::lab_world::ProductionGoalLedger::capture(&sealed)?;
             original.validate_plan(&plan)?;

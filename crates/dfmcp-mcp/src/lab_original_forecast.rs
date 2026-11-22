@@ -203,6 +203,13 @@ pub(super) fn execute(
     let mut action_union = BTreeSet::new();
     let mut projects = Vec::new();
     let mut project_snapshots = Vec::new();
+    let mut recovered_goals = BTreeSet::new();
+    let mut recovered_sources = Vec::new();
+    let mut recovered_records = 0u64;
+    let mut recovered_bytes = 0u64;
+    let mut recovered_steps = 0usize;
+    let mut recovered_shape = (0u64, 0u64);
+    let mut reserve_snapshots = Vec::new();
     let mut next_wait_digests = Vec::new();
     let mut reserve_endpoint_pursuits = Vec::new();
     let mut admitted_snapshots = BTreeSet::from([context.anchor.state_hash]);
@@ -213,23 +220,69 @@ pub(super) fn execute(
             .find(|goal| goal.plan_digest == member.actual_digest())
             && let Some((anchor, _)) = original.selected_wait_reserve_observation
         {
-            admitted_snapshots.insert(anchor.state_hash);
+            if admitted_snapshots.insert(anchor.state_hash) {
+                let snapshot = session
+                    .history
+                    .get(&anchor.state_hash)
+                    .filter(|snapshot| snapshot.anchor() == anchor)
+                    .ok_or_else(|| invalid("forecast reserve source disappeared"))?;
+                reserve_snapshots.push(snapshot);
+            }
         }
     }
     for member in &members {
         remaining(context, started)?;
-        // Recovery-only originals remain inspectable, but cannot synthesize
-        // dispatch handles or reset obligation runtimes for a prediction.
-        let selected = super::plan_cancellation::select(session, member.requested_digest())?;
         let original = session
             .objectives
             .iter()
-            .find(|original| original.plan_digest == selected.actual)
+            .find(|original| original.plan_digest == member.actual_digest())
             .ok_or_else(|| invalid("forecast original goal disappeared"))?;
+        // A present live receipt remains authoritative: malformed live custody
+        // cannot fall back to recovery. The default current-stage route keeps
+        // its existing live-only behavior.
+        let recovery = if request.forecast_scope == Scope::CompleteProject
+            && !session
+                .commit_receipts
+                .contains_key(&member.requested_digest().to_hex())
+        {
+            let plan = original
+                .resource_plan()
+                .ok_or_else(|| invalid("recovered project seal disappeared"))?;
+            let (source, census, evidence) = original.forecast_recovered_project(session)?;
+            let recovered =
+                model::RecoveredOriginal::new(plan, census, evidence, session.adapter.snapshot())?;
+            recovered_steps = recovered_steps.saturating_add(plan.steps.len());
+            recovered_goals.insert(member.actual_digest());
+            Some((source, recovered))
+        } else {
+            None
+        };
+        let selected = if recovery.is_some() {
+            super::plan_cancellation::Selection {
+                requested: member.requested_digest(),
+                actual: member.actual_digest(),
+                plan_id: original
+                    .resource_plan()
+                    .ok_or_else(|| invalid("recovered project seal disappeared"))?
+                    .id
+                    .to_string(),
+                actions: Vec::new(),
+            }
+        } else {
+            super::plan_cancellation::select(session, member.requested_digest())?
+        };
         let continued = project_lineages
             .get(&selected.actual)
             .is_some_and(|(_, descendants)| !descendants.is_empty());
-        admit_live_actions(session, &selected, &mut action_union, continued, continued)?;
+        if recovery.is_some() && continued {
+            return Err(DfmcpError::new(
+                ErrorCode::Conflict,
+                "recovered complete-project forecasting currently requires a root without committed descendants",
+            ));
+        }
+        if recovery.is_none() {
+            admit_live_actions(session, &selected, &mut action_union, continued, continued)?;
+        }
         original.selected_wait_truth(session)?;
         original.selected_wait_stage_truth(session)?;
         if request.forecast_scope == Scope::CompleteProject {
@@ -239,23 +292,47 @@ pub(super) fn execute(
             let plan = original
                 .resource_plan()
                 .ok_or_else(|| invalid("project original seal disappeared"))?;
-            let sealed = session
-                .history
-                .get(&plan.anchor.state_hash)
-                .filter(|snapshot| snapshot.anchor() == plan.anchor)
-                .ok_or_else(|| {
-                    invalid("complete_project requires the exact retained original source")
-                })?;
-            // Admit exact source bytes before checking the original ledger or
-            // preparing any hypothetical future stage. No historical hydration.
-            if admitted_snapshots.insert(sealed.state_hash) {
-                project_snapshots.push(sealed);
-            }
-            super::query_budget::admit_sources(&[sealed], &remaining(context, started)?)?;
-            let ledger = crate::lab_world::ProductionGoalLedger::capture(sealed)?;
-            ledger.validate_plan(plan)?;
-            ledger.validate_current(session.adapter.snapshot())?;
-            let mut project = model::Project::new(selected.actual, project_source, ledger);
+            let (mut project, ledger) = if let Some((archived, recovered)) = recovery {
+                if admitted_snapshots.insert(archived.anchor.state_hash) {
+                    recovered_records = recovered_records.saturating_add(archived.records);
+                    recovered_bytes = recovered_bytes.saturating_add(archived.bytes);
+                    recovered_shape.0 = recovered_shape.0.saturating_add(archived.structural_bytes);
+                    recovered_shape.1 = recovered_shape.1.saturating_add(archived.structural_work);
+                    recovered_sources.push(json!({
+                        "anchor":anchor_json(&archived.anchor),
+                        "records":archived.records,"canonical_bytes":archived.bytes,
+                        "structural_bytes":archived.structural_bytes,"structural_work":archived.structural_work,
+                        "verification":"exact_sealed_snapshot_during_durable_recovery",
+                        "query_archive_reads":0,
+                    }));
+                }
+                (
+                    model::Project::new(selected.actual, project_source, archived.ledger)
+                        .with_recovery(recovered)?,
+                    archived.ledger,
+                )
+            } else {
+                let sealed = session
+                    .history
+                    .get(&plan.anchor.state_hash)
+                    .filter(|snapshot| snapshot.anchor() == plan.anchor)
+                    .ok_or_else(|| {
+                        invalid("complete_project requires the exact retained original source")
+                    })?;
+                // Admit exact source bytes before checking the original ledger
+                // or preparing any future stage. No historical hydration.
+                if admitted_snapshots.insert(sealed.state_hash) {
+                    project_snapshots.push(sealed);
+                }
+                super::query_budget::admit_sources(&[sealed], &remaining(context, started)?)?;
+                let ledger = crate::lab_world::ProductionGoalLedger::capture(sealed)?;
+                ledger.validate_plan(plan)?;
+                ledger.validate_current(session.adapter.snapshot())?;
+                (
+                    model::Project::new(selected.actual, project_source, ledger),
+                    ledger,
+                )
+            };
             let root_reserve = original.selected_wait_reserve_horizon()?;
             next_wait_digests.push(descendants.last().map_or_else(
                 || member.requested_digest().to_hex(),
@@ -372,7 +449,7 @@ pub(super) fn execute(
             );
         }
     }
-    if action_union.len() > context.budget.max_actions as usize {
+    if action_union.len().saturating_add(recovered_steps) > context.budget.max_actions as usize {
         return Err(exhausted(
             "selected and competing original actions exceed the shared action budget",
         ));
@@ -394,10 +471,27 @@ pub(super) fn execute(
     };
     let project_records = project_sources["records"]
         .as_u64()
-        .ok_or_else(|| invalid("project source record accounting missing"))?;
+        .ok_or_else(|| invalid("project source record accounting missing"))?
+        .saturating_add(recovered_records);
     let project_bytes = project_sources["canonical_bytes"]
         .as_u64()
-        .ok_or_else(|| invalid("project source byte accounting missing"))?;
+        .ok_or_else(|| invalid("project source byte accounting missing"))?
+        .saturating_add(recovered_bytes);
+    // Archived shapes have already passed the same iterative inspector during
+    // recovery. Combine their authenticated bounds with all retained original
+    // and reserve sources; every private current source joins this union below.
+    let mut fixed_shape = recovered_shape;
+    if !recovered_goals.is_empty() {
+        for snapshot in project_snapshots.iter().chain(&reserve_snapshots) {
+            let shape = super::query_budget::source_shape(
+                snapshot,
+                &remaining(context, started)?,
+                Instant::now(),
+            )?;
+            fixed_shape.0 = fixed_shape.0.saturating_add(shape.0);
+            fixed_shape.1 = fixed_shape.1.saturating_add(shape.1);
+        }
+    }
     let fixed_records = source
         .records
         .saturating_sub(current_records)
@@ -428,8 +522,22 @@ pub(super) fn execute(
         started,
         (request.forecast_scope == Scope::CompleteProject).then_some(projects),
         |snapshot, modeled_actions, modeled_plan_bytes| {
-            let remaining = remaining(context, started)?;
-            let work = super::query_budget::admit_sources(&[snapshot], &remaining)?;
+            if !recovered_goals.is_empty() {
+                let shape = super::query_budget::source_shape(
+                    snapshot,
+                    &remaining(context, started)?,
+                    Instant::now(),
+                )?;
+                if fixed_shape.0.saturating_add(shape.0) > 16 * 1024 * 1024
+                    || fixed_shape.1.saturating_add(shape.1) > 4_000_000
+                {
+                    return Err(exhausted(
+                        "recovered forecast exceeds its complete structural source byte or work bound",
+                    ));
+                }
+            }
+            let work =
+                super::query_budget::admit_sources(&[snapshot], &remaining(context, started)?)?;
             let records = work["records"]
                 .as_u64()
                 .ok_or_else(|| invalid("forecast source record accounting missing"))?
@@ -469,12 +577,14 @@ pub(super) fn execute(
                     "joint forecast exceeds its aggregate predicate-work bound",
                 ));
             }
-            goals
-                .get(&digest)
-                .ok_or_else(|| {
-                    invalid("selected original goal disappeared during private forecast")
-                })?
-                .forecast_truth_at(snapshot)
+            let original = goals.get(&digest).ok_or_else(|| {
+                invalid("selected original goal disappeared during private forecast")
+            })?;
+            if recovered_goals.contains(&digest) {
+                original.forecast_recovered_truth_at(snapshot)
+            } else {
+                original.forecast_truth_at(snapshot)
+            }
         },
     )?;
     let remaining = remaining(context, started)?;
@@ -514,6 +624,14 @@ pub(super) fn execute(
         response["next_step"]["reserve_capture_rule"] = json!(
             "each pursuit retains its own exact endpoint; a tip wait does not retain predecessor samples; use explicit zero-tick selected waits in groups of at most eight at that absolute tick before advancing again"
         );
+        if !recovered_goals.is_empty() {
+            response["schema"] = json!("dfmcp.lab-original-forecast/3");
+            response["source_work"]["recovered_original_source_witnesses"] =
+                json!(recovered_sources);
+            response["source_work"]["verified_recovered_original_steps"] = json!(recovered_steps);
+            response["source_work"]["fixed_structural_bytes"] = json!(fixed_shape.0);
+            response["source_work"]["fixed_structural_work"] = json!(fixed_shape.1);
+        }
     }
     Ok(response)
 }

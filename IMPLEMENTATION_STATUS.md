@@ -1,5 +1,38 @@
 # Implementation Status
 
+## Unreleased — Forecast complete original projects after durable recovery
+
+The existing `forecast_originals` query now accepts exact durable recovered
+production, provisioned-room and connected-room roots in explicit
+`forecast_scope: "complete_project"`. Every original step must already be
+Verified and physically quiet, with no committed descendant. The recovered
+`/3` response predicts later stages together on the existing finite-resource
+model while preserving default current-stage `/1` and live complete-project
+`/2` behavior.
+
+Recovery captures a compact authenticated source/ledger witness during its
+existing sealed-source read. Forecasting performs no archive reads or history
+hydration, restores no action handles, and changes no world, proof, deadline,
+reserve sample or pending review. Historical rows retain original receipt and
+proof anchors with `action_id: null`; all modeled frontiers recheck recovery
+lineage and physical quiet. Archived sources and historical steps share the
+complete source, structural work, action and wall-time bounds. Missing exact
+reserve endpoints refuse until an explicit selected wait loads the previously
+published endpoint; later stock cannot repair failed historical reserves.
+
+All 33 actual forecast/model component tests pass on
+`rustc 1.102.0-nightly (bdf712ee8 2026-11-21)`, including seven new recovered
+production, room, connected-room, authority, reserve and budget regressions.
+The component compiles the unchanged production model modules, real semantic
+crates and adapter API, plus the exact new source-witness capture implementation
+and structural helper. Final source hashes match the executed inventory.
+Four public durable-facade regressions are authored and source-reviewed but
+remain unexecuted; full MCP transport/facade and native qualification are not
+established by this component run. Scoped formatting and whitespace checks pass.
+
+Owner: `df-lab-joint-original-forecast-c2s`, which remains in progress for broader
+integration and qualification. See `docs/LAB_ORIGINAL_PLAN_FORECAST.md`.
+
 ## Unreleased — Bound ordinary aggregates and lexical search before hashing
 
 Plain `aggregate` and structured `search` now admit the complete source before

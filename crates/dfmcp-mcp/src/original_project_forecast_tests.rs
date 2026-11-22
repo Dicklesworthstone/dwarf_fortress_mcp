@@ -16,6 +16,9 @@ use server::project_forecast::ProjectSource;
 #[path = "original_retained_project_forecast_tests.rs"]
 mod retained;
 
+#[path = "original_recovered_project_forecast_tests.rs"]
+mod recovered;
+
 fn context(adapter: &MemoryAdapter) -> OperationContext {
     OperationContext {
         session_id: SessionId::new(816_201),
