@@ -29,6 +29,7 @@ use serde_json::{Value as Json, json};
 #[path = "production_workload.rs"]
 mod production_workload;
 use production_workload::ProductionWorkload;
+pub(crate) use production_workload::active_output_producer;
 
 #[path = "production_consumption.rs"]
 mod production_consumption;

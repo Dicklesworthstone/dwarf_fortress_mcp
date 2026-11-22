@@ -56,7 +56,8 @@ Complete-project responses use `dfmcp.lab-original-forecast/2`.
 ```
 
 For example, a committed BED stock goal may currently own only wood harvesting.
-The default forecast reports that stage's completion and `needs_continuation`.
+The default forecast can report Verified, quiet harvest actions while the
+original output-stock seal remains False and the outcome is `goal_unmet`.
 Complete-project prediction waits for Verified, physically quiet initial work,
 then recompiles the unchanged BED goal from the wood actually present on the
 shared fork. A room similarly includes residual excavation, workshop/staffing
@@ -70,6 +71,18 @@ again before another successor is considered. This declared tie-break policy
 is deterministic; it is not an optimal project scheduler. Unselected originals
 receive no invented successors. The same model can therefore expose resource
 shortages or earlier goal invalidation caused by later work.
+
+A qualified active producer of the same output can block a successor's quota
+review. The model waits only when the compiler identifies the exact canonical
+producer and a tracked action still proves that producer's physical work is
+Active. It tries other ready originals before advancing the ordinary bounded
+polling frontier, then recompiles from the stock actually observed. An unrelated
+long-running order does not impose a global stage barrier. Deferred reviews
+consume no new stage or action allowance and are reported in
+`forecast_work.stage_reviews_deferred`. A waiting original may include
+`next_stage_wait` describing the predicted producer. Its possible future output
+is never counted as current stock. Foreign or untracked producers, unknown work,
+missing authority and all other compiler refusals remain explicit errors.
 
 Current stock minima do not establish a future reserve. Once a stage is quiet,
 the source's unchanged reserve compiler checks whether remaining future demand
@@ -167,10 +180,13 @@ is not latched: consumption or competing work can invalidate a goal while anothe
 member is still progressing.
 
 A finished resource-acquisition stage does not complete the original furnished
-room or output project. The result reports `needs_continuation` when the stage
-is proved and quiet but the full original goal is still false. The default
-`current_stage` query does not compile, review or commit that
-continuation; `complete_project` only models it under the explicit contract above.
+room or output project. A room acquisition stage can have a separate material
+predicate and report `needs_continuation` when that stage is proved and quiet
+but the full room goal is still False. A production acquisition stage retains
+the original output-stock seal: when that predicate is False, the stable
+current-stage outcome is `goal_unmet` even if every harvest action is Verified.
+The default `current_stage` query does not compile, review or commit another
+stage; `complete_project` models successors under the explicit contract above.
 
 The group stops when all members complete, any member needs attention, the
 horizon is reached, or the predicted world remains paused. Failed proof does not
@@ -223,7 +239,10 @@ Hard ceilings include:
 | Conservatively charged goal-predicate nodes | 4,000,000 |
 | Canonical source and retained custody | Current negotiated bytes, capped at 16 MiB |
 
-Repeated source inspections and simulated work are reported. Canonical snapshot
+Complete-project evaluation charges an additional conservative 130 semantic
+predicate nodes per original against the shared 4,000,000-node ceiling,
+including its full-goal and remaining-reserve inspection. Repeated source
+inspections, deferred stage reviews and simulated work are reported. Canonical snapshot
 and custody bytes are not a measured heap-size count of the adapter's retained
 plans, checkpoints and transcript. The full result and Agent Turn must fit
 losslessly; generic row clipping cannot turn an incomplete forecast into a

@@ -12,6 +12,13 @@
   limits; sample exact reserve frontiers before same-tick hypothetical effects.
   Revisit goals under ongoing consumption and fund future reserves even when
   the present stock minimum is already satisfied.
+- Defer exact tracked active-output conflicts while allowing other ready
+  projects to advance. Keep untracked producers and unrelated preconditions
+  as refusals, and never count unfinished production as current stock.
+- Treat validated planned and constructing furniture as incomplete room-goal
+  evidence, retaining exact custody, terrain and occupancy checks plus strict
+  residual planning. Add focused scheduler and pending-furniture regressions;
+  correct inherited contention fixtures to use the actual finite recipe.
 - Add model, public-query and modern-stdio regressions for stage progression,
   contention, reserves, capability expiry, bounds and live-state isolation.
   Predictions create no live work, executable reviews or completion evidence.

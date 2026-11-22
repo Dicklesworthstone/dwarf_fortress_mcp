@@ -4,9 +4,13 @@ use super::super::super as server;
 use super::*;
 use crate::lab_world::{ProductionGoalLedger, ProductionRequest, scenario_snapshot};
 use dfmcp_core::{
-    CapabilityGrant, CapabilityScope, FortressId, IntentId, RequestId, SessionId, WorkBudget,
+    CapabilityGrant, CapabilityScope, FortressId, IntentId, RequestId, SessionId, StepId,
+    WorkBudget,
 };
-use dfmcp_intent::{PreparedPlan, StaticPlanner};
+use dfmcp_intent::{
+    Action, Constraint, Intent, PreparedPlan, RequestedAction, StaticPlanner, effects,
+};
+use dfmcp_world::Predicate;
 use server::project_forecast::ProjectSource;
 
 fn context(adapter: &MemoryAdapter) -> OperationContext {
@@ -190,10 +194,14 @@ fn harvested_input_becomes_a_complete_original_project_only_in_explicit_scope() 
             ))
         },
     )?;
+    // Resource harvesting retains the original output-stock seal. Verified
+    // acquisition does not turn that still-false BED predicate into stage proof.
     assert_eq!(
-        stages["originals"][0]["predicted_outcome"], "needs_continuation",
+        stages["originals"][0]["predicted_outcome"], "goal_unmet",
         "{stages}"
     );
+    assert_eq!(stages["originals"][0]["predicted_stage_truth"], "false");
+    assert_eq!(stages["originals"][0]["predicted_actions_complete"], true);
     let result = run(
         &adapter,
         &[plan],
@@ -246,6 +254,12 @@ fn production_and_room_projects_progress_on_the_same_finite_source() -> Result<(
     assert_eq!(result["all_complete"], true, "{result}");
     assert_eq!(result["forecast_work"]["source_forks"], 1);
     assert_eq!(result["originals"].as_array().map(Vec::len), Some(2));
+    assert!(
+        result["forecast_work"]["stage_reviews_deferred"]
+            .as_u64()
+            .is_some_and(|count| count > 0),
+        "{result}"
+    );
     assert_eq!(format!("{adapter:?}"), before);
     Ok(())
 }
@@ -470,5 +484,183 @@ fn failed_original_reserve_sample_is_not_rescued_by_a_future_stage() -> Result<(
     assert_eq!(result["all_complete"], false, "{result}");
     assert_eq!(result["originals"][0]["reserve_frontier_truth"], "false");
     assert_eq!(result["forecast_work"]["hypothetical_stages"], 0);
+    Ok(())
+}
+
+fn finish_original(adapter: &mut MemoryAdapter, original: &Original) -> Result<()> {
+    for _ in 0..200 {
+        for id in &original.actions {
+            let ctx = context(adapter);
+            let receipt = adapter.poll_action(*id, &ctx)?;
+            if receipt.state == CommitState::Failed {
+                return Err(error(
+                    ErrorCode::PreconditionsFailed,
+                    "fixture original failed before its next-stage frontier",
+                ));
+            }
+        }
+        let mut complete = true;
+        for id in &original.actions {
+            complete &= adapter
+                .action_receipt(*id)
+                .is_some_and(|receipt| receipt.state == CommitState::Verified)
+                && adapter.action_work_state(*id)?.is_quiescent();
+        }
+        if complete {
+            return Ok(());
+        }
+        adapter.advance_ticks(10)?;
+    }
+    Err(error(
+        ErrorCode::BudgetExceeded,
+        "fixture original did not reach a quiet verified frontier",
+    ))
+}
+
+fn competing_beds(adapter: &mut MemoryAdapter) -> Result<Vec<ActionId>> {
+    let id = IntentId::new(900);
+    let action = Action::CreateWorkOrder {
+        name: "tracked competing bed producer".to_owned(),
+        job_token: "CONSTRUCT_BED".to_owned(),
+        amount: 10,
+        conditions: Vec::new(),
+    };
+    let key = dfmcp_intent::derive_step_idempotency_key(
+        id,
+        adapter.snapshot().anchor(),
+        StepId::new(0),
+        &action,
+    );
+    let postconditions =
+        effects::default_postconditions(&action, &key, adapter.snapshot().fortress_id);
+    let obligation = effects::default_obligation(
+        &action,
+        &key,
+        adapter.snapshot().fortress_id,
+        adapter.snapshot().tick,
+    )?;
+    let intent = Intent {
+        id,
+        anchor: adapter.snapshot().anchor(),
+        summary: "independent tracked physical producer".to_owned(),
+        terminal_condition: Predicate::All(postconditions.clone()).normalized(),
+        constraints: vec![Constraint::MaxRisk(RiskTier::Reversible)],
+        requested_actions: vec![RequestedAction {
+            action,
+            depends_on: Vec::new(),
+            preconditions: Vec::new(),
+            postconditions,
+            compensation: None,
+            obligation,
+        }],
+    };
+    let ctx = context(adapter);
+    let plan = StaticPlanner::default().prepare_laboratory(adapter.snapshot(), &intent, &ctx)?;
+    let prepared = adapter.prepare(&plan, &ctx)?;
+    let receipt = adapter.commit(&plan, &prepared, &ctx)?;
+    Ok(receipt.actions.into_iter().map(|row| row.action_id).collect())
+}
+
+#[test]
+fn blocked_lower_digest_does_not_starve_an_independent_ready_project() -> Result<()> {
+    let mut adapter = fixture()?;
+    let (first, blocked, blocked_project) = commit_project(&mut adapter, 40, beds()?)?;
+    finish_original(&mut adapter, &blocked)?;
+    let drinks = ProjectSource::Production(ProductionRequest::parse_current(
+        &json!({
+            "template":"production","quotas":[{"item":"DRINK","minimum":160}],
+            "acquire_resources":{"assign_labor":false},
+        })
+        .to_string(),
+    )?);
+    // Choose a genuine later sealed digest, without rewriting a plan identity
+    // or relying on a particular random-looking digest order in the fixture.
+    let mut selected = None;
+    for id in 100..164 {
+        let mut candidate = adapter.clone();
+        let (plan, original, project) = commit_project(&mut candidate, id, drinks.clone())?;
+        if original.actual > blocked.actual {
+            selected = Some((candidate, plan, original, project));
+            break;
+        }
+    }
+    let (mut adapter, second, independent, independent_project) =
+        selected.ok_or_else(|| error(ErrorCode::InvalidPlan, "no later fixture digest"))?;
+    finish_original(&mut adapter, &independent)?;
+    let tracked = competing_beds(&mut adapter)?;
+    let source_tick = adapter.snapshot().tick.0;
+    let before = format!("{adapter:?}");
+    let plans = [first, second];
+    let originals = [blocked, independent];
+    let ctx = context(&adapter);
+    let result = forecast(
+        &adapter,
+        &originals,
+        &tracked,
+        &ctx,
+        10,
+        Instant::now(),
+        Some(vec![blocked_project, independent_project]),
+        |_, _, _| Ok(()),
+        |digest, snapshot| {
+            let plan = plans
+                .iter()
+                .find(|plan| plan.digest == digest)
+                .ok_or_else(|| error(ErrorCode::InvalidPlan, "fixture plan missing"))?;
+            let truth = crate::lab_world::plan_goal_truth(snapshot, plan)?;
+            Ok((truth, truth))
+        },
+    )?;
+    assert_eq!(
+        result["originals"][0]["future_stages"].as_array().map(Vec::len),
+        Some(0),
+        "{result}"
+    );
+    assert_eq!(
+        result["originals"][1]["future_stages"].as_array().map(Vec::len),
+        Some(1),
+        "{result}"
+    );
+    assert_eq!(result["originals"][1]["future_stages"][0]["from_tick"], source_tick);
+    assert_eq!(result["originals"][0]["predicted_goal_truth"], "false");
+    assert_eq!(result["forecast_work"]["hypothetical_stages"], 1);
+    assert!(
+        result["forecast_work"]["stage_reviews_deferred"]
+            .as_u64()
+            .is_some_and(|count| count > 0),
+        "{result}"
+    );
+    assert_eq!(format!("{adapter:?}"), before);
+    Ok(())
+}
+
+#[test]
+fn active_output_blocker_without_tracked_custody_is_not_adopted() -> Result<()> {
+    let mut adapter = fixture()?;
+    let (plan, original, project) = commit_project(&mut adapter, 41, beds()?)?;
+    finish_original(&mut adapter, &original)?;
+    let _untracked = competing_beds(&mut adapter)?;
+    let before = format!("{adapter:?}");
+    let refused = forecast(
+        &adapter,
+        std::slice::from_ref(&original),
+        &[],
+        &context(&adapter),
+        10,
+        Instant::now(),
+        Some(vec![project]),
+        |_, _, _| Ok(()),
+        |_, snapshot| {
+            let truth = crate::lab_world::plan_goal_truth(snapshot, &plan)?;
+            Ok((truth, truth))
+        },
+    )
+    .expect_err("an untracked producer cannot become forecast-owned work");
+    assert_eq!(refused.code, ErrorCode::PreconditionsFailed);
+    assert!(crate::lab_world::active_output_producer(&refused).is_some());
+    let mut untagged = refused;
+    untagged.details.retain(|(key, _)| key != "reason");
+    assert_eq!(crate::lab_world::active_output_producer(&untagged), None);
+    assert_eq!(format!("{adapter:?}"), before);
     Ok(())
 }

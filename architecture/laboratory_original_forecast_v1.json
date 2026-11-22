@@ -63,7 +63,8 @@
     "new_project_stage": "complete_project only: at most three hypothetical successors per selected root",
     "deadline_renewal": false,
     "stability_reset": false,
-    "hypothetical_stage_order": "ready actual original digests ascending; existing and modeled action polls retain commit order",
+    "hypothetical_stage_order": "ready actual original digests ascending; defer qualified tracked active-output conflicts while other ready originals proceed; existing and modeled action polls retain commit order",
+    "active_output_conflicts": "only the exact compiler-qualified canonical producer with matching tracked Active physical work may defer; bounded ordinary polling and recompile from observed stock; no future-output credit or new stage/action charge; untracked, unknown and other errors refuse",
     "new_stage_deadlines": "own separately reviewed compiler-derived obligations; no original obligation is renewed"
   },
   "outcome": {

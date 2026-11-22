@@ -12,6 +12,33 @@ use dfmcp_intent::{Intent, ObligationSpec, derive_step_idempotency_key};
 
 const MAX_WORKLOAD_ORDERS: usize = 128;
 const MAX_WORKLOAD_ROWS: usize = 16;
+const ACTIVE_OUTPUT_PRODUCER: &str = "active_output_producer";
+
+/// Recognize only the qualified active-producer refusal emitted below.
+/// Its identity is a blocker, never credited future output or proof of progress.
+pub(crate) fn active_output_producer(error: &DfmcpError) -> Option<EntityId> {
+    if error.code != ErrorCode::PreconditionsFailed
+        || !error
+            .details
+            .iter()
+            .filter(|(key, _)| key == "reason")
+            .map(|(_, value)| value.as_str())
+            .eq([ACTIVE_OUTPUT_PRODUCER])
+    {
+        return None;
+    }
+    let mut identities = error
+        .details
+        .iter()
+        .filter(|(key, _)| key == "active_producer_entity_id")
+        .map(|(_, value)| value.as_str());
+    let identity = identities.next()?;
+    let number = identity.parse::<u64>().ok()?;
+    if identities.next().is_some() || identity != number.to_string() {
+        return None;
+    }
+    Some(EntityId::new(number))
+}
 
 struct ExistingOrder {
     id: EntityId,
@@ -150,7 +177,9 @@ impl ProductionWorkload {
                         snapshot.tick.0,
                         snapshot.state_hash.to_hex(),
                     ),
-                ));
+                )
+                .with_detail("reason", ACTIVE_OUTPUT_PRODUCER)
+                .with_detail("active_producer_entity_id", record.id.get().to_string()));
             }
             if is_carpentry_output(output) {
                 result.wood_units = result

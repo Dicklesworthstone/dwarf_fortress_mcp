@@ -46,8 +46,9 @@ fn requested(action: Action, depends_on: Vec<u32>) -> RequestedAction {
 }
 
 fn order(name: &str, amount: u32) -> RequestedAction {
+    // The real carpentry recipe shares finite workers and wood; generic jobs do not.
     requested(Action::CreateWorkOrder {
-        name:name.to_owned(), job_token:"MAKE_BED".to_owned(), amount, conditions:Vec::new(),
+        name:name.to_owned(), job_token:"CONSTRUCT_BED".to_owned(), amount, conditions:Vec::new(),
     },Vec::new())
 }
 

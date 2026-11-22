@@ -14,6 +14,9 @@ mod residual;
 #[path = "room_resource_tests.rs"]
 mod resources;
 
+#[path = "room_pending_furniture_tests.rs"]
+mod pending_furniture;
+
 fn source() -> Result<WorldSnapshot> {
     crate::lab_world::scenario_snapshot("starter_fortress", FortressId::new(963), false)
 }

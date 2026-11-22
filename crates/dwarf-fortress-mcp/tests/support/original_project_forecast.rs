@@ -48,9 +48,11 @@ fn complete_original_project_forecast_crosses_the_resource_handoff_over_stdio() 
     )?;
     assert_eq!(current["schema"], "dfmcp.lab-original-forecast/1");
     assert_eq!(current["prediction"]["all_complete"], false);
+    // The original acquisition seal retains the full output predicate. The
+    // existing /1 result stays unmet even after the harvest itself is Verified.
     assert_eq!(
         current["prediction"]["originals"][0]["predicted_outcome"],
-        "needs_continuation"
+        "goal_unmet"
     );
 
     let complete = client.query(

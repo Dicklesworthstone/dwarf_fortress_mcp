@@ -200,9 +200,9 @@ fn resource_acquisition_success_does_not_complete_the_original_production_goal()
     assert_eq!(result["ok"],true,"{result}");
     let original=&result["prediction"]["originals"][0];
     assert_eq!(original["predicted_actions_complete"],true,"{result}");
-    assert_eq!(original["predicted_stage_truth"],"true");
+    assert_eq!(original["predicted_stage_truth"],"false");
     assert_eq!(original["predicted_goal_truth"],"false");
-    assert_eq!(original["predicted_outcome"],"needs_continuation");
+    assert_eq!(original["predicted_outcome"],"goal_unmet");
     assert_eq!(result["prediction"]["all_complete"],false);
     assert_eq!(view(&owner,|session|Ok(session.adapter.snapshot().tick.0))?,1);
     Ok(())
@@ -270,7 +270,7 @@ fn public_complete_project_predicts_harvest_then_output_without_publishing_any_s
         session.objectives.iter().map(|goal|goal.selected_wait_reserve_observation).collect::<Vec<_>>())))?;
     let default=query(&owner,std::slice::from_ref(&digest),4_000)?;
     assert_eq!(default["schema"],"dfmcp.lab-original-forecast/1");
-    assert_eq!(default["prediction"]["originals"][0]["predicted_outcome"],"needs_continuation");
+    assert_eq!(default["prediction"]["originals"][0]["predicted_outcome"],"goal_unmet");
     let result=complete_query(&owner,std::slice::from_ref(&digest),4_000)?;
     assert_eq!(result["ok"],true,"{result}");
     assert_eq!(result["schema"],"dfmcp.lab-original-forecast/2");

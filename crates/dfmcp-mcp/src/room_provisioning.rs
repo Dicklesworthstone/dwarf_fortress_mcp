@@ -319,7 +319,9 @@ impl ProvisionedRoomRequest {
         let slots = furniture_slots(&layout, self.layout.furniture())?;
         validate_complete_occupancy(snapshot, &layout)?;
         let evidence = PredicateEvidence::laboratory(snapshot)?;
-        let retained = retained_installations(snapshot, &layout, &slots)?;
+        // Valid owned placements can still be in progress while the full room
+        // goal is observed. They do not count as installed furniture.
+        let retained = retained_installations(snapshot, &layout, &slots, true)?;
         let mut terrain_complete = true;
         let mut terrain_unknown = false;
         for part in layout.excavations() {
@@ -430,7 +432,7 @@ impl ProvisionedRoomRequest {
             validate_complete_occupancy(snapshot, &layout)?;
         }
         let retained = if residual {
-            retained_installations(snapshot, &layout, &slots)?
+            retained_installations(snapshot, &layout, &slots, false)?
         } else {
             reject_occupied_geometry(snapshot, &layout)?;
             BTreeMap::new()
@@ -1024,6 +1026,7 @@ fn retained_installations(
     snapshot: &WorldSnapshot,
     layout: &BlueprintLayout,
     slots: &[Slot],
+    observe_incomplete: bool,
 ) -> Result<BTreeMap<usize, effects::FurnitureInstallation>> {
     let mut positions = BTreeMap::new();
     for (index, slot) in slots.iter().enumerate() {
@@ -1035,6 +1038,7 @@ fn retained_installations(
     }
     let mut retained = BTreeMap::new();
     let mut items = BTreeSet::new();
+    let mut occupied_slots = BTreeSet::new();
     for building in snapshot
         .graph
         .entities
@@ -1061,7 +1065,46 @@ fn retained_installations(
                 )
             })?;
         let slot = &slots[slot_index];
-        let installation = effects::inspect_complete_furniture(snapshot, building.id)?;
+        let incomplete = observe_incomplete
+            && matches!(
+                building
+                    .fields
+                    .get(effects::CONSTRUCTION_STAGE_FIELD)
+                    .and_then(|fact| laboratory_fact_value(fact, snapshot.tick)),
+                Some(Value::Text(stage))
+                    if stage == effects::STAGE_PLANNED
+                        || stage == effects::STAGE_UNDER_CONSTRUCTION
+            );
+        let installation = if incomplete {
+            let item = match building
+                .fields
+                .get(effects::FURNITURE_SOURCE_ITEM_FIELD)
+                .and_then(|fact| laboratory_fact_value(fact, snapshot.tick))
+            {
+                Some(Value::Entity(item)) => *item,
+                _ => {
+                    return Err(precondition(
+                        "pending furniture has no qualified exact source item",
+                    ));
+                }
+            };
+            effects::validate_furniture_identity(
+                snapshot,
+                building.id,
+                slot.kind,
+                item,
+                slot.location,
+            )?;
+            effects::validate_furniture_binding(snapshot, building.id)?;
+            effects::FurnitureInstallation {
+                building: building.id,
+                kind: slot.kind,
+                item,
+                location: slot.location,
+            }
+        } else {
+            effects::inspect_complete_furniture(snapshot, building.id)?
+        };
         if installation.kind != slot.kind || installation.location != slot.location {
             return Err(precondition(
                 "occupied room slot does not contain its requested furniture kind and location",
@@ -1073,10 +1116,13 @@ fn retained_installations(
                 "a retained installation does not stand on its original observed room terrain",
             ));
         }
-        if !items.insert(installation.item) || retained.insert(slot_index, installation).is_some() {
+        if !items.insert(installation.item) || !occupied_slots.insert(slot_index) {
             return Err(precondition(
                 "duplicate furniture occupancy cannot satisfy distinct original room slots",
             ));
+        }
+        if !incomplete {
+            retained.insert(slot_index, installation);
         }
     }
     Ok(retained)

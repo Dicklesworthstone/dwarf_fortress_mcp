@@ -10,6 +10,14 @@ Finite workers, materials, consumption and competing committed work remain
 shared. The default `current_stage` scope keeps the existing `/1` response;
 whole-project predictions use `dfmcp.lab-original-forecast/2`.
 
+An exact active producer can defer a competing quota review only when that
+producer belongs to tracked active work. Later independent ready projects can
+still start at the same frontier; ordinary bounded polling supplies progress,
+without crediting unfinished output as stock. Room semantic observation treats
+qualified planned or constructing furniture as incomplete while preserving
+exact identity, reciprocal item custody, terrain and duplicate-slot checks.
+Residual planning continues to require completed installations.
+
 Exact retained original sources and ledger identities bind each modeled
 project. Original actions, proofs, deadlines and reserve endpoints remain
 unchanged. Future stages have separately labeled model identities and their
@@ -26,16 +34,31 @@ roots, existing continuation custody, missing exact snapshots, expired grants
 and exhausted bounds refuse without publishing predictions as evidence.
 No live world, review, proof, reserve sample, clock or Task state is changed.
 
-Nine added real-model regressions and three public-query regressions cover
+Eleven added real-model regressions and three public-query regressions cover
 cross-stage completion, shared production/room resources, reserve funding and
 failure, authority expiry, aggregate budgets, paused/zero-horizon behavior,
 default compatibility and live-state isolation. An actual modern-stdio
-regression covers the opt-in through the public protocol. Independent source
-review, scoped latest-nightly formatting, diff checks, the architecture JSON
-parse and the implementation-status, agent-contract and dependency-policy
-checks pass. A genuine locked/offline full MCP test-target check has reached
-dependency compilation after host I/O stalls; Rust test execution and full
-qualification remain pending. Native admission is not claimed.
+regression covers the opt-in through the public protocol. Three additional
+room-boundary regressions exercise real placement progression, nine corrupt
+custody/lifecycle variants in both pending phases, duplicate occupancy and
+strict residual refusal. Two inherited contention fixtures now select the
+real finite-carpentry recipe rather than generic work.
+
+Independent source review, scoped latest-nightly formatting and diff checks
+completed before the execution host became unavailable. Earlier architecture
+JSON, implementation-status, agent-contract and dependency-policy checks passed.
+A genuine component using actual repository modules, five semantic crates and
+exact locked dependencies executed the model tests. An earlier candidate
+passed 16 of 19 cases, exposing the pending-room observation defect and the two
+inherited fixture defects; those are corrected in the final source. The
+preceding run also exposed the producer scheduling defect. Final executable
+reruns were terminated by SIGKILL before tests ran; a metadata-only retry was
+likewise killed in the unchanged adapter dependency. The final source has not
+passed an executed model suite. Full MCP checking was killed in `asupersync`
+before reaching MCP sources. Final corrective patches were recovered through
+GitHub after the execution host became unavailable. Facade, stdio,
+full-workspace and native qualification remain unverified; native admission
+is not claimed.
 
 Owners: `df-lab-joint-original-forecast-c2s` and `df-lab-project-forecast-p7q`.
 See `docs/LAB_ORIGINAL_PLAN_FORECAST.md` and
@@ -63,11 +86,14 @@ Regression source exercises selective cleanup and repeat requests, aliases,
 whole-set capability and inverse refusal, aggregate budgets, preservation of
 failed historical proofs, durable restart/publication faults, complete compact
 receipts, deterministic replay and the real modern stdio route. Independent
-source review, scoped formatting, diff checks and the implementation-status,
-agent-contract and dependency-policy checks pass. The locked/offline full MCP
-test-target check has reached dependency compilation after host I/O stalls;
-Rust test execution and full qualification remain pending. This is laboratory
-source implementation, not native-game or production-admission evidence.
+source review, scoped formatting and diff checks completed before host loss;
+earlier implementation-status, agent-contract and dependency-policy checks
+passed. The actual output-budget regression preserving all eight original
+identities and the certificate passed in the real-source component. Full MCP
+checking was killed in `asupersync` before reaching MCP sources; cancellation
+facade, durable recovery, replay and modern-stdio tests remain unexecuted.
+Full qualification is not established. This is laboratory implementation,
+not native-game or production-admission evidence.
 
 Owner: `df-cancellation-progress-certificates-vvw`. Public semantics and examples
 are in `docs/LAB_PLAN_SET_CANCELLATION.md`.

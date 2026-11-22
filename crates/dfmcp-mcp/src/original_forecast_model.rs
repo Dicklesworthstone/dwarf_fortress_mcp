@@ -6,8 +6,8 @@ use std::time::{Duration, Instant};
 
 use dfmcp_adapter::GameAdapter;
 use dfmcp_core::{
-    ActionId, Capability, CommitState, DfmcpError, Digest32, ErrorCode, OperationContext, Result,
-    RiskTier,
+    ActionId, Capability, CommitState, DfmcpError, Digest32, EntityId, ErrorCode, OperationContext,
+    Result, RiskTier,
 };
 use dfmcp_intent::EffectWorkState;
 use dfmcp_lab::MemoryAdapter;
@@ -77,6 +77,21 @@ struct Outcome {
     complete: bool,
     attention: bool,
     continuation: bool,
+}
+
+fn tracked_active_producer(
+    fork: &MemoryAdapter,
+    tracked: &[ActionId],
+    producer: EntityId,
+) -> Result<bool> {
+    for action in tracked {
+        if matches!(fork.action_work_state(*action)?, EffectWorkState::Active { entity_id }
+            if entity_id == producer)
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 fn observe(
@@ -285,6 +300,7 @@ pub(super) fn forecast(
     let mut modeled_actions = 0u64;
     let mut modeled_plan_bytes = 0u64;
     let mut modeled_stages = 0u64;
+    let mut stage_reviews_deferred = 0u64;
     let mut project_order: Vec<_> = (0..originals.len()).collect();
     project_order.sort_by_key(|index| originals[*index].actual);
     inspect(adapter.snapshot(), 0, 0)?;
@@ -327,21 +343,50 @@ pub(super) fn forecast(
         // Capture every exact reserve endpoint above before any future stage
         // can change the shared world at this same tick. One deterministic
         // successor is admitted at a time, then all goals are reevaluated.
+        let mut ready_stage = None;
         if fork.snapshot().tick.0 < horizon
             && !outcomes.iter().any(|outcome| outcome.attention)
-            && let Some(projects) = projects.as_mut()
-            && let Some(index) = project_order
-                .iter()
-                .copied()
-                .find(|index| outcomes[*index].continuation)
+            && let Some(projects) = projects.as_ref()
         {
-            check(context, started)?;
-            inspect(fork.snapshot(), modeled_actions, modeled_plan_bytes)?;
-            let modeled_context = OperationContext {
-                anchor: fork.snapshot().anchor(),
-                ..context.clone()
-            };
-            let plan = projects[index].prepare_stage(&fork, &modeled_context)?;
+            for index in project_order.iter().copied() {
+                if !outcomes[index].continuation {
+                    continue;
+                }
+                check(context, started)?;
+                inspect(fork.snapshot(), modeled_actions, modeled_plan_bytes)?;
+                let modeled_context = OperationContext {
+                    anchor: fork.snapshot().anchor(),
+                    ..context.clone()
+                };
+                match projects[index].prepare_stage(&fork, &modeled_context) {
+                    Ok(plan) => {
+                        ready_stage = Some((index, plan, modeled_context));
+                        break;
+                    }
+                    Err(failure) => {
+                        let Some(producer) = crate::lab_world::active_output_producer(&failure)
+                        else {
+                            return Err(failure);
+                        };
+                        if !tracked_active_producer(&fork, &pending, producer)? {
+                            return Err(failure);
+                        }
+                        // The compiler proved an exact active output conflict,
+                        // and this owner already progresses that physical work.
+                        // Try another ready root; only ordinary bounded polling
+                        // may make this review eligible at a later frontier.
+                        stage_reviews_deferred += 1;
+                        outcomes[index].value["next_stage_wait"] = json!({
+                            "reason":"active_output_producer",
+                            "predicted_entity_id":producer.get().to_string(),
+                            "tracked_physical_work":"active",
+                            "future_output_counted_as_stock":false,
+                        });
+                    }
+                }
+            }
+        }
+        if let Some((index, plan, modeled_context)) = ready_stage {
             check(context, started)?;
             let added_actions = plan.steps.len() as u64;
             let next_actions = modeled_actions.saturating_add(added_actions);
@@ -384,7 +429,13 @@ pub(super) fn forecast(
                 ));
             }
             pending.extend(&actions);
-            projects[index].committed(plan, actions);
+            projects.as_mut().ok_or_else(|| {
+                error(
+                    ErrorCode::InternalInvariantViolation,
+                    "joint project sources disappeared",
+                )
+            })?[index]
+                .committed(plan, actions);
             modeled_actions = next_actions;
             modeled_plan_bytes = next_bytes;
             modeled_stages += 1;
@@ -544,6 +595,7 @@ pub(super) fn forecast(
             "all selected original semantic goals true, exact reserves true, original and hypothetical actions Verified, and all their physical work quiet at one shared frontier"
         );
         report["forecast_work"]["hypothetical_stages"] = json!(modeled_stages);
+        report["forecast_work"]["stage_reviews_deferred"] = json!(stage_reviews_deferred);
         report["forecast_work"]["hypothetical_action_steps"] = json!(modeled_actions);
         report["forecast_work"]["hypothetical_plan_bytes"] = json!(modeled_plan_bytes);
         report["forecast_work"]["maximum_future_stages_per_original"] =
