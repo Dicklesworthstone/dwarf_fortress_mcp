@@ -55,7 +55,7 @@ impl ProjectSource {
         }
     }
 
-    fn source_digest(&self) -> Digest32 {
+    pub(crate) fn source_digest(&self) -> Digest32 {
         let mut bytes = b"dfmcp-project-forecast-source/1\0".to_vec();
         bytes.extend_from_slice(self.canonical_json().as_bytes());
         Digest32::of_bytes(&bytes)
@@ -113,7 +113,7 @@ impl ProjectSource {
         }
     }
 
-    fn remaining_reserve_required(&self, snapshot: &WorldSnapshot) -> Result<bool> {
+    pub(crate) fn remaining_reserve_required(&self, snapshot: &WorldSnapshot) -> Result<bool> {
         let Self::Production(request) = self else {
             return Ok(false);
         };
@@ -136,7 +136,7 @@ impl ProjectSource {
         }
     }
 
-    fn goal_truth(
+    pub(crate) fn goal_truth(
         &self,
         snapshot: &WorldSnapshot,
         ledger: ProductionGoalLedger,
@@ -160,7 +160,7 @@ impl ProjectSource {
         }
     }
 
-    fn stage_name(&self, plan: &PreparedPlan) -> &'static str {
+    pub(crate) fn stage_name(&self, plan: &PreparedPlan) -> &'static str {
         if plan
             .steps
             .iter()
@@ -173,6 +173,35 @@ impl ProjectSource {
                 Self::Room(_) | Self::ConnectedRoom(_) => "room",
             }
         }
+    }
+
+    /// A future review exists only inside one discarded shared-world forecast.
+    /// Its identity binds the unchanged original request and exact model source.
+    /// Original action deadlines are never edited or reconstructed here.
+    pub(crate) fn prepare_joint_stage(
+        &self,
+        original: Digest32,
+        index: usize,
+        snapshot: &WorldSnapshot,
+        context: &OperationContext,
+    ) -> Result<PreparedPlan> {
+        for capability in [Capability::Observe, Capability::Query, Capability::Plan] {
+            context.authorize(capability, RiskTier::ReadOnly, &[], None)?;
+        }
+        if context.anchor != snapshot.anchor() {
+            return Err(invalid("joint project stage requires its exact predicted source"));
+        }
+        let identity = format!(
+            "dfmcp-joint-project-stage/1\0{}:{}:{index}:{}",
+            original.to_hex(), self.source_digest().to_hex(), snapshot.state_hash.to_hex(),
+        );
+        let id = IntentId::new(Digest32::of_bytes(identity.as_bytes()).first_u128().max(1));
+        let (intent, _) = self.compile_next(id, snapshot)?;
+        let plan = StaticPlanner::default().prepare_laboratory(snapshot, &intent, context)?;
+        // Authority failure precedes cumulative action/source accounting and
+        // adapter preparation, including checkpoint and future grant expiry.
+        authorize_model_stage(&plan, context)?;
+        Ok(plan)
     }
 }
 

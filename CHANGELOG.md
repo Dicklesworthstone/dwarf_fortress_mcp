@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased — Forecast whole original projects on one shared world
+
+- Add opt-in `forecast_scope: "complete_project"` to `forecast_originals`, with
+  a `/2` response and unchanged default current-stage behavior.
+- Continue supported original production and room projects through bounded
+  hypothetical stages using the real compilers and one shared finite-resource
+  adapter model. Keep original action identities, proofs, deadlines and reserve
+  endpoints separate from explicitly labeled future model actions.
+- Check predicted authority and cumulative source/action/predicate/output
+  limits; sample exact reserve frontiers before same-tick hypothetical effects.
+  Revisit goals under ongoing consumption and fund future reserves even when
+  the present stock minimum is already satisfied.
+- Add model, public-query and modern-stdio regressions for stage progression,
+  contention, reserves, capability expiry, bounds and live-state isolation.
+  Predictions create no live work, executable reviews or completion evidence.
+
 ## Unreleased — Cancel an explicitly selected original project group
 
 - Add `plans:<digest>,<digest>,...` to the existing laboratory cancellation

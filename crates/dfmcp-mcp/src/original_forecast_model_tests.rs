@@ -93,8 +93,8 @@ fn predict(
     adapter: &MemoryAdapter, plans: &[&PreparedPlan], originals: &[Original],
     tracked: &[ActionId], ticks: u64, ctx: &OperationContext,
 ) -> Result<Value> {
-    forecast(adapter, originals, tracked, ctx, ticks, Instant::now(),
-        |snapshot| {
+    forecast(adapter, originals, tracked, ctx, ticks, Instant::now(),None,
+        |snapshot, _, _| {
             if snapshot.hash_is_valid() {Ok(())}
             else {Err(error(ErrorCode::StaleAnchor,"invalid fixture source"))}
         },
@@ -261,8 +261,8 @@ fn exact_reserve_endpoints_do_not_latch_a_goal_that_consumption_later_invalidate
         entity_id:starter::STOCK_LEDGER,field:effects::STOCK_DRINK_FIELD.to_owned(),
         op:CompareOp::Ge,value:WorldValue::U64(40),
     };
-    let result=forecast(&adapter,&[first,second],&tracked,&context(&adapter),1_500,Instant::now(),
-        |_|Ok(()),
+    let result=forecast(&adapter,&[first,second],&tracked,&context(&adapter),1_500,Instant::now(),None,
+        |_, _, _|Ok(()),
         |_,snapshot| {
             let truth=dfmcp_world::PredicateEvidence::laboratory(snapshot)?.evaluate(&goal)?;
             Ok((truth,truth))
@@ -304,8 +304,8 @@ fn source_admission_and_expired_wall_budget_refuse_before_any_private_work() -> 
     let before=format!("{adapter:?}");
     let ctx=context(&adapter);
     let result=forecast(&adapter,&[original],&tracked,&ctx,100,
-        Instant::now()-Duration::from_millis(ctx.budget.max_wall_millis+1),
-        |_|Ok(()),|_,_|Ok((PredicateTruth::True,PredicateTruth::True)));
+        Instant::now()-Duration::from_millis(ctx.budget.max_wall_millis+1),None,
+        |_, _, _|Ok(()),|_,_|Ok((PredicateTruth::True,PredicateTruth::True)));
     assert_eq!(result.err().map(|error|error.code),Some(ErrorCode::BudgetExceeded));
     assert_eq!(format!("{adapter:?}"),before);
     Ok(())

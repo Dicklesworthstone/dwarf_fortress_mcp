@@ -6,8 +6,10 @@ that independent plan comparisons cannot answer: will these originals still
 finish when they share the same finite workforce, materials and consumption?
 
 The query uses one discarded copy of the current laboratory adapter, including
-its existing action receipts and obligation runtimes. It never recommits an
-original or prepares another project stage. The default laboratory remains
+its existing action receipts and obligation runtimes. The default scope never
+recommits an original or prepares another project stage. An explicit
+complete-project scope can model separately reviewed future stages on that
+same discarded copy. The default laboratory remains
 separate from native Dwarf Fortress and DFHack execution.
 
 ## Request
@@ -37,6 +39,84 @@ action arrays are not accepted. Requested aliases retain their requested identit
 while resolving to the actual sealed original. Two aliases for the same original
 cannot be counted twice. Results are sorted by actual original digest.
 
+## Complete projects under shared resources
+
+Add `"forecast_scope": "complete_project"` to predict subsequent stages of an
+ordinary production, provisioned-room or connected-room root. The default is
+`"current_stage"`; omitting the field preserves the original `/1` response.
+Complete-project responses use `dfmcp.lab-original-forecast/2`.
+
+```json
+{
+  "mode": "forecast_originals",
+  "plan_digests": ["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],
+  "horizon_ticks": 4000,
+  "forecast_scope": "complete_project"
+}
+```
+
+For example, a committed BED stock goal may currently own only wood harvesting.
+The default forecast reports that stage's completion and `needs_continuation`.
+Complete-project prediction waits for Verified, physically quiet initial work,
+then recompiles the unchanged BED goal from the wood actually present on the
+shared fork. A room similarly includes residual excavation, workshop/staffing
+setup, furniture production and exact installed-item custody; a connected room
+also retains its entrance, routing domain and movement model.
+
+All selected projects and existing competing work use one finite world. Ready
+successors are considered in ascending actual original-digest order. One
+successor commits only inside that private model, then every goal is evaluated
+again before another successor is considered. This declared tie-break policy
+is deterministic; it is not an optimal project scheduler. Unselected originals
+receive no invented successors. The same model can therefore expose resource
+shortages or earlier goal invalidation caused by later work.
+
+Current stock minima do not establish a future reserve. Once a stage is quiet,
+the source's unchanged reserve compiler checks whether remaining future demand
+requires another stage, even when the current minimum is True. Every selected
+exact reserve endpoint is sampled before any hypothetical successor changes the
+world at that same tick. A False, Unknown or missed endpoint cannot be rescued
+by later production.
+
+This scope accepts ordinary roots only. Continuation wrappers, roots with any
+retained continuation custody, raw action/pause plans and stand-alone resource
+acquisition requests refuse before the fork; use `current_stage` to inspect
+them. The exact original snapshot must still be retained. Its qualified stock
+ledger identity and generation are checked against every predicted descendant.
+No original snapshot is fetched from disk or reconstructed during the query.
+
+Each original keeps its initial `steps`, `predicted_actions_complete` and
+`predicted_stage_truth`. Additional `future_stages` contain clearly labeled
+model plan/action identities, stage names, required capabilities/risk,
+checkpoint burden, stage deadlines/cadence and current action/work
+outcomes. `predicted_project_actions_complete` covers both initial and modeled
+work; `predicted_original_physical_quiescent` preserves initial work separately.
+Overall completion requires all selected full goals, every required exact
+reserve endpoint, Verified initial and future actions, and quiet physical work
+at the same shared frontier.
+
+There are at most three hypothetical successors per root. They share the
+original request's wall deadline, common simulation horizon, action/record
+allowance, canonical source bytes, retained plan-archive bytes, predicate-work
+meter and final lossless output reservation. Original action obligations are
+never renewed. A future stage has its own compiler-derived obligations because
+it represents a separate future review; those obligations cannot extend the
+query's horizon or replace an original reserve endpoint.
+
+Each future stage checks Observe, Query, Plan, every scoped effect grant and
+checkpoint authority at its predicted tick **before** consuming cumulative
+stage/action allowances or preparing on the private adapter. Missing/expired
+authority, unavailable evidence, insufficient resources or exhausted bounds
+refuse the complete prediction without publishing partial success. Zero horizon
+performs no stage preparation. Pause remains authoritative and no clock grant
+or unpause is invented.
+
+The model assumes the agent reviews each eligible next stage without additional
+delay. `future_stage_plans_are_executable` is false. Actual progress still needs
+an explicit wait, fresh current evidence and a separate ordinary `continue_goal`
+review/commit. The query changes no live pending plan, original receipt, goal
+history, reserve sample, Task, journal or actual game tick.
+
 ## Shared progression
 
 The forecast starts from the exact current world. Every current-session open
@@ -64,7 +144,8 @@ available for outcome inspection.
 
 ## Read the result
 
-A successful response has schema `dfmcp.lab-original-forecast/1` and a
+A successful current-stage response has schema `dfmcp.lab-original-forecast/1`;
+complete-project responses use `/2`. Both contain a
 `prediction` object with `epistemic_state: "predicted"`. Its top-level `anchor`
 and the Agent Turn anchor are the actual current source. A separate predicted
 frontier tick and hash describe the discarded model.
@@ -87,8 +168,9 @@ member is still progressing.
 
 A finished resource-acquisition stage does not complete the original furnished
 room or output project. The result reports `needs_continuation` when the stage
-is proved and quiet but the full original goal is still false. The query does not
-compile, review or commit that continuation.
+is proved and quiet but the full original goal is still false. The default
+`current_stage` query does not compile, review or commit that
+continuation; `complete_project` only models it under the explicit contract above.
 
 The group stops when all members complete, any member needs attention, the
 horizon is reached, or the predicted world remains paused. Failed proof does not
@@ -114,7 +196,7 @@ and source admission. Actual live-clock authority is unnecessary for a discarded
 simulation. An already-committed deferred effect still checks its real scoped
 grant and expiry at the modeled frontier. For example, a deferred pause cannot
 borrow a synthetic ControlClock grant. Modeled observation also respects Observe
-expiry.
+expiry; complete-project observations also respect modeled Query expiry.
 
 The query accepts only complete live original receipts owned by this session.
 Pending plans, foreign originals, withdrawn or restore-abandoned pursuits,
@@ -135,6 +217,7 @@ Hard ceilings include:
 | Selected originals | 8 |
 | Original steps | Existing 64-step custody ceiling per original |
 | Tracked action identities | 1,024 and current negotiated allowances |
+| Hypothetical successors (complete-project scope) | 3 per selected root |
 | Private polling rounds | 4,096 |
 | Action polls | 65,536 |
 | Conservatively charged goal-predicate nodes | 4,000,000 |
@@ -167,6 +250,9 @@ custody, shared source accounting and read-only query projection.
 `original_forecast_model.rs` drives the real cloned `MemoryAdapter`;
 `Objective::forecast_truth_at` preserves original semantic room/output and
 stock-ledger identity during pure private evaluation.
+`original_project_forecast.rs` reuses the existing complete-project compilers
+for explicitly hypothetical successor stages and separates their receipts from
+the selected original.
 
 The model regression file exercises real finite worker and wood contention,
 retained stability at a deadline, unselected ready deferred pause, pause/resume

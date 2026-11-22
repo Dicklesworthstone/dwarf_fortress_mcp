@@ -22,6 +22,9 @@ const TILE: [i32; 3] = [3, 5, 10];
 #[path = "support/selected_plan_set.rs"]
 mod selected_plan_set;
 
+#[path = "support/original_project_forecast.rs"]
+mod original_project_forecast;
+
 /// The reader belongs to this client and is joined after the process exits.
 /// Notifications may precede replies, so requests match their JSON-RPC ID.
 struct StdioClient {

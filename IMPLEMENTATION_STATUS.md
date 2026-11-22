@@ -1,5 +1,46 @@
 # Implementation Status
 
+## Unreleased — Forecast whole original projects through shared future stages
+
+`forecast_originals` now accepts the explicit `forecast_scope: "complete_project"`
+opt-in. Ordinary production, provisioned-room and connected-room originals can
+progress through at most three hypothetical successor stages on the same
+discarded world, using the existing project compilers, planner and adapter.
+Finite workers, materials, consumption and competing committed work remain
+shared. The default `current_stage` scope keeps the existing `/1` response;
+whole-project predictions use `dfmcp.lab-original-forecast/2`.
+
+Exact retained original sources and ledger identities bind each modeled
+project. Original actions, proofs, deadlines and reserve endpoints remain
+unchanged. Future stages have separately labeled model identities and their
+own compiler-derived obligations; they are never executable reviews or live
+handles. Every original reserve endpoint is sampled before same-tick future
+effects, and failed, unknown or missed reserve observations cannot be repaired
+by later production. Current stock satisfaction does not hide an underfunded
+future reserve. Goals are reevaluated at the common shared frontier.
+
+All hypothetical stages share the request's action, source, predicate, wall-time,
+horizon and complete-output allowances. Modeled Observe, Query, Plan, effect
+and checkpoint authority are checked before a stage is prepared. Unsupported
+roots, existing continuation custody, missing exact snapshots, expired grants
+and exhausted bounds refuse without publishing predictions as evidence.
+No live world, review, proof, reserve sample, clock or Task state is changed.
+
+Nine added real-model regressions and three public-query regressions cover
+cross-stage completion, shared production/room resources, reserve funding and
+failure, authority expiry, aggregate budgets, paused/zero-horizon behavior,
+default compatibility and live-state isolation. An actual modern-stdio
+regression covers the opt-in through the public protocol. Independent source
+review, scoped latest-nightly formatting, diff checks, the architecture JSON
+parse and the implementation-status, agent-contract and dependency-policy
+checks pass. A genuine locked/offline full MCP test-target check has reached
+dependency compilation after host I/O stalls; Rust test execution and full
+qualification remain pending. Native admission is not claimed.
+
+Owners: `df-lab-joint-original-forecast-c2s` and `df-lab-project-forecast-p7q`.
+See `docs/LAB_ORIGINAL_PLAN_FORECAST.md` and
+`architecture/laboratory_original_forecast_v1.json`.
+
 ## Unreleased — Stop an explicit group of original laboratory projects
 
 The existing cancellation tool accepts `scope: "plans:<digest>,<digest>,..."`
@@ -22,10 +63,11 @@ Regression source exercises selective cleanup and repeat requests, aliases,
 whole-set capability and inverse refusal, aggregate budgets, preservation of
 failed historical proofs, durable restart/publication faults, complete compact
 receipts, deterministic replay and the real modern stdio route. Independent
-source review and scoped formatting have been performed. Rust execution and
-full qualification remain pending while the execution host stalls in block
-device I/O before Cargo reaches project compilation. This is laboratory source
-implementation, not native-game or production-admission evidence.
+source review, scoped formatting, diff checks and the implementation-status,
+agent-contract and dependency-policy checks pass. The locked/offline full MCP
+test-target check has reached dependency compilation after host I/O stalls;
+Rust test execution and full qualification remain pending. This is laboratory
+source implementation, not native-game or production-admission evidence.
 
 Owner: `df-cancellation-progress-certificates-vvw`. Public semantics and examples
 are in `docs/LAB_PLAN_SET_CANCELLATION.md`.

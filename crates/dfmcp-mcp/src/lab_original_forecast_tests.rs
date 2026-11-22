@@ -233,3 +233,89 @@ fn exact_future_reserves_are_predicted_without_becoming_retained_endpoint_eviden
     Ok(())
 }
 
+
+fn complete_query(owner: &Owner,digests: &[String],ticks:u64) -> TestResult<Value> {
+    parsed(&facade::fortress_query(Some(owner.0.clone()),Some(json!({
+        "mode":"forecast_originals","plan_digests":digests,"horizon_ticks":ticks,
+        "forecast_scope":"complete_project",
+    }).to_string())))
+}
+
+#[test]
+fn complete_project_scope_is_closed_and_default_compatible() {
+    let digest="1".repeat(64);
+    for scope in ["current_stage","complete_project"] {
+        assert!(matches!(parse(&json!({"mode":"forecast_originals","plan_digests":[digest],
+            "horizon_ticks":100,"forecast_scope":scope}).to_string()),Ok(Some(_))));
+    }
+    for scope in [Value::Null,json!(true),json!({}),json!("all"),json!("complete")] {
+        assert!(parse(&json!({"mode":"forecast_originals","plan_digests":[digest],
+            "horizon_ticks":100,"forecast_scope":scope}).to_string()).is_err());
+    }
+    let duplicate=format!(r#"{{"mode":"forecast_originals","plan_digests":["{digest}"],"horizon_ticks":100,"forecast_scope":"current_stage","forecast_scope":"complete_project"}}"#);
+    assert!(parse(&duplicate).is_err());
+}
+
+#[test]
+fn public_complete_project_predicts_harvest_then_output_without_publishing_any_stage() -> TestResult {
+    let _serial=crate::test_serial();
+    let owner=open("8161201","starter_fortress_resources",false)?;
+    let digest=commit(&owner,None,Some(json!({
+        "template":"production","quotas":[{"item":"BED","minimum":24}],
+        "acquire_resources":{"assign_labor":false},
+    })))?;
+    let pending=plan(&owner,Some(order("unchanged pending review",1)),None)?;
+    let before=view(&owner,|session|Ok((format!("{:?}",session.adapter),
+        session.commit_receipts.clone(),session.open_actions.clone(),session.history.len(),
+        session.objectives.iter().map(|goal|goal.selected_wait_reserve_observation).collect::<Vec<_>>())))?;
+    let default=query(&owner,std::slice::from_ref(&digest),4_000)?;
+    assert_eq!(default["schema"],"dfmcp.lab-original-forecast/1");
+    assert_eq!(default["prediction"]["originals"][0]["predicted_outcome"],"needs_continuation");
+    let result=complete_query(&owner,std::slice::from_ref(&digest),4_000)?;
+    assert_eq!(result["ok"],true,"{result}");
+    assert_eq!(result["schema"],"dfmcp.lab-original-forecast/2");
+    assert_eq!(result["prediction"]["all_complete"],true,"{result}");
+    let original=&result["prediction"]["originals"][0];
+    assert_eq!(original["actual_plan_digest"],digest);
+    assert_eq!(original["predicted_actions_complete"],true);
+    assert_eq!(original["predicted_project_actions_complete"],true);
+    assert_eq!(original["future_stages"].as_array().map(Vec::len),Some(1));
+    assert_eq!(original["future_stages"][0]["executable_review"],false);
+    assert_eq!(original["future_stage_plans_are_executable"],false);
+    assert_eq!(result["agent_turn"]["anchor"],result["anchor"]);
+    assert_eq!(result["agent_turn"]["coverage"]["eligible_as_mutation_evidence"],false);
+    assert_eq!(view(&owner,|session|Ok((format!("{:?}",session.adapter),
+        session.commit_receipts.clone(),session.open_actions.clone(),session.history.len(),
+        session.objectives.iter().map(|goal|goal.selected_wait_reserve_observation).collect::<Vec<_>>())))?,before);
+    assert_eq!(view(&owner,|session|Ok(session.pending.as_ref().map(|value|value.plan.digest.to_hex())))?,Some(pending));
+    Ok(())
+}
+
+#[test]
+fn complete_project_rejects_unsupported_originals_missing_sources_and_clipped_output() -> TestResult {
+    let _serial=crate::test_serial();
+    let owner=open("8161202","starter_fortress_resources",false)?;
+    let raw=commit(&owner,Some(order("ordinary raw order",1)),None)?;
+    assert_eq!(complete_query(&owner,&[raw],4_000)?["error"]["code"],"invalid_request");
+    let digest=commit(&owner,None,Some(json!({
+        "template":"production","quotas":[{"item":"BED","minimum":24}],
+        "acquire_resources":{"assign_labor":false},
+    })))?;
+    let before=view(&owner,|session|Ok(format!("{:?}",session.adapter)))?;
+    edit(&owner,|session|{session.budget.max_output_tokens=600;Ok(())})?;
+    let clipped=complete_query(&owner,std::slice::from_ref(&digest),4_000)?;
+    assert_eq!(clipped["ok"],false,"{clipped}");
+    assert!(clipped["prediction"].is_null());
+    edit(&owner,|session|{
+        session.budget.max_output_tokens=32_768;
+        let plan=session.objectives.iter().find(|goal|goal.plan_digest.to_hex()==digest)
+            .and_then(|goal|goal.resource_plan()).ok_or("original plan missing")?;
+        let source=plan.anchor.state_hash;
+        session.history.remove(&source);
+        Ok(())
+    })?;
+    let missing=complete_query(&owner,&[digest],4_000)?;
+    assert_eq!(missing["ok"],false,"{missing}");
+    assert_eq!(view(&owner,|session|Ok(format!("{:?}",session.adapter)))?,before);
+    Ok(())
+}

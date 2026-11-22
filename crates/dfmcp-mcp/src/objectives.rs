@@ -277,6 +277,34 @@ impl Objective {
     }
 
 
+    /// Complete-project prediction begins only with an ordinary retained root.
+    /// A later owned pursuit has separate receipt/lineage custody and must not
+    /// be silently duplicated by an invented successor on the private fork.
+    pub(super) fn forecast_project_source(
+        &self,
+        session: &LabSession,
+    ) -> Result<super::project_forecast::ProjectSource> {
+        use super::project_forecast::ProjectSource;
+        let source = match &self.source {
+            PlanSource::Production { raw, .. } => ProjectSource::parse_production(raw)?,
+            PlanSource::Blueprint { raw, .. } if room_provisioning::is_provisioned_room(raw) => {
+                ProjectSource::parse_room(raw)?
+            }
+            PlanSource::ConnectedRoom { raw, .. } => ProjectSource::parse_connected_room(raw)?,
+            _ => return Err(DfmcpError::new(ErrorCode::InvalidRequest,
+                "complete_project requires ordinary production, provisioned_room or connected_room original roots; use current_stage for other originals")),
+        };
+        for other in &session.objectives {
+            if other.plan_digest != self.plan_digest
+                && other.source.continuation_root(other.plan_digest)? == Some(self.plan_digest)
+            {
+                return Err(DfmcpError::new(ErrorCode::Conflict,
+                    "complete_project cannot invent another pursuit for a root with retained continuation custody; use current_stage"));
+            }
+        }
+        Ok(source)
+    }
+
     pub(super) fn selected_wait_can_continue(&self) -> bool {
         self.source.can_continue()
     }
