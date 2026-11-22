@@ -18,6 +18,9 @@ use super::plan_forecast::{ForecastBudget, MAX_PROJECT_STAGES, forecast_stage_bo
 use super::room_provisioning::ProvisionedRoomRequest;
 use crate::lab_world::{ProductionGoalLedger, ProductionPlanner, ProductionRequest};
 
+/// Root plus the exact already committed descendants admitted by one query.
+pub(crate) const MAX_COMMITTED_PROJECT_STAGES: usize = 8;
+
 /// Fixed original source generations, independent of mutable session history.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum ProjectSource {
@@ -106,7 +109,7 @@ impl ProjectSource {
         }))
     }
 
-    fn reserve_until_tick(&self) -> Option<u64> {
+    pub(crate) fn reserve_until_tick(&self) -> Option<u64> {
         match self {
             Self::Production(request) => request.reserve_until_tick(),
             Self::Room(_) | Self::ConnectedRoom(_) => None,
@@ -189,11 +192,15 @@ impl ProjectSource {
             context.authorize(capability, RiskTier::ReadOnly, &[], None)?;
         }
         if context.anchor != snapshot.anchor() {
-            return Err(invalid("joint project stage requires its exact predicted source"));
+            return Err(invalid(
+                "joint project stage requires its exact predicted source",
+            ));
         }
         let identity = format!(
             "dfmcp-joint-project-stage/1\0{}:{}:{index}:{}",
-            original.to_hex(), self.source_digest().to_hex(), snapshot.state_hash.to_hex(),
+            original.to_hex(),
+            self.source_digest().to_hex(),
+            snapshot.state_hash.to_hex(),
         );
         let id = IntentId::new(Digest32::of_bytes(identity.as_bytes()).first_u128().max(1));
         let (intent, _) = self.compile_next(id, snapshot)?;

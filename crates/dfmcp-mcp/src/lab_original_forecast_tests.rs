@@ -5,6 +5,9 @@ use super::super as server;
 use crate::agent_facade as facade;
 use dfmcp_core::{CommitState, SessionId};
 
+#[path = "original_project_lineage_mcp_tests.rs"]
+mod retained;
+
 type TestResult<T = ()> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 struct Owner(String);

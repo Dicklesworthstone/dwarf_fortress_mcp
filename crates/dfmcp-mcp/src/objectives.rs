@@ -19,6 +19,9 @@ pub(super) use reserve::{ensure_reserve_snapshot, retain_reserve_observation};
 #[path = "objective_withdrawal.rs"]
 mod withdrawal;
 
+#[path = "original_project_lineage.rs"]
+mod forecast_lineage;
+
 pub(super) fn withdraw_goal(session: &mut LabSession, digest: &Digest32) -> Result<Value> {
     withdrawal::withdraw_goal(session, digest)
 }
@@ -244,10 +247,16 @@ impl Objective {
         snapshot: &dfmcp_world::WorldSnapshot,
     ) -> Result<(PredicateTruth, PredicateTruth)> {
         let plan = self.resource_plan().ok_or_else(|| {
-            DfmcpError::new(ErrorCode::CorruptLedger, "forecast original plan is unavailable")
+            DfmcpError::new(
+                ErrorCode::CorruptLedger,
+                "forecast original plan is unavailable",
+            )
         })?;
         let active = self.active_observation_anchor.ok_or_else(|| {
-            DfmcpError::new(ErrorCode::Conflict, "forecast original has no active lineage")
+            DfmcpError::new(
+                ErrorCode::Conflict,
+                "forecast original has no active lineage",
+            )
         })?;
         let anchor = snapshot.anchor();
         if !self.original_handles_live
@@ -263,7 +272,8 @@ impl Objective {
             ));
         }
         if self.requires_output_ledger() {
-            self.bound_resource_output_ledger()?.validate_current(snapshot)?;
+            self.bound_resource_output_ledger()?
+                .validate_current(snapshot)?;
         }
         let stage = crate::lab_world::plan_goal_truth(snapshot, plan)?;
         let goal = if self.is_resource_aware_room() {
@@ -276,33 +286,16 @@ impl Objective {
         Ok((goal, stage))
     }
 
-
-    /// Complete-project prediction begins only with an ordinary retained root.
-    /// A later owned pursuit has separate receipt/lineage custody and must not
-    /// be silently duplicated by an invented successor on the private fork.
+    /// Keep every already committed pursuit separate from hypothetical stages.
+    /// Only an exact, successful linear lineage can be extended in the model.
     pub(super) fn forecast_project_source(
         &self,
         session: &LabSession,
-    ) -> Result<super::project_forecast::ProjectSource> {
-        use super::project_forecast::ProjectSource;
-        let source = match &self.source {
-            PlanSource::Production { raw, .. } => ProjectSource::parse_production(raw)?,
-            PlanSource::Blueprint { raw, .. } if room_provisioning::is_provisioned_room(raw) => {
-                ProjectSource::parse_room(raw)?
-            }
-            PlanSource::ConnectedRoom { raw, .. } => ProjectSource::parse_connected_room(raw)?,
-            _ => return Err(DfmcpError::new(ErrorCode::InvalidRequest,
-                "complete_project requires ordinary production, provisioned_room or connected_room original roots; use current_stage for other originals")),
-        };
-        for other in &session.objectives {
-            if other.plan_digest != self.plan_digest
-                && other.source.continuation_root(other.plan_digest)? == Some(self.plan_digest)
-            {
-                return Err(DfmcpError::new(ErrorCode::Conflict,
-                    "complete_project cannot invent another pursuit for a root with retained continuation custody; use current_stage"));
-            }
-        }
-        Ok(source)
+    ) -> Result<(
+        super::project_forecast::ProjectSource,
+        Vec<(Digest32, Digest32)>,
+    )> {
+        forecast_lineage::source(self, session)
     }
 
     pub(super) fn selected_wait_can_continue(&self) -> bool {

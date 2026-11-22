@@ -420,6 +420,26 @@ and retains current authority and Agent Turn anchors separately from historical
 evidence. It creates no watch or game effect and cannot prove continuous truth
 between observations. See [retained condition replay](docs/LAB_CONDITION_REPLAY.md).
 
+Laboratory `forecast_originals` predicts one to eight selected live committed
+originals together on one discarded current world. Its `plan_digests` and
+`horizon_ticks` request shares finite workers, materials and consumption while
+preserving real action identities, deadlines, stability, pause and exact reserve
+endpoints. The default `current_stage` scope prepares no successor stages.
+
+Optional `forecast_scope: "complete_project"` selects ordinary production,
+provisioned-room or connected-room roots and includes each exact live committed
+continuation chain, up to eight committed stages including its root. Verified,
+physically quiet predecessors retain their receipts; the latest stage may still
+be active. Up to three further hypothetical stages can follow on the same world.
+Root, retained and future actions remain distinct, every real deadline stays
+unchanged, and each pursuit keeps its own exact reserve sample. Complete source,
+custody, current authority and cumulative work/output bounds apply before the
+private model. Next-step advice identifies the latest committed tips and the
+independent reserve pursuits that still require exact-endpoint observation.
+Predictions do not advance actual time, alter pending review, recommit plans or
+publish observations or effect authority. See
+[joint original forecasts](docs/LAB_ORIGINAL_PLAN_FORECAST.md).
+
 ### `fortress.plan`
 
 Compiles an objective/intent without effects. Returns immutable candidate plan(s), digest, action

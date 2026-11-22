@@ -1,5 +1,45 @@
 # Implementation Status
 
+## Unreleased — Forecast projects through already committed continuations
+
+`forecast_originals` with `forecast_scope: "complete_project"` now accepts an
+ordinary supported root with an exact retained live continuation chain. Up to
+eight committed stages, including the root, keep their real action receipts,
+remaining work, prior stability observations, source anchors and absolute
+deadlines on the same shared finite-resource model. No retained stage is
+prepared or committed again. Further hypothetical stages begin only after the
+admitted chain is Verified and physically quiet.
+
+Admission proves exact parent order, unchanged typed requests, current owned
+custody, every retained sealed source and stable root stock-ledger identity.
+Each child ledger validates its own source-bound plan. Gaps, cycles, branches,
+foreign/recovered/withdrawn custody, interrupted stages, unknown physical work
+and missing archives or receipts refuse before the fork. The complete action,
+source, predicate and output budgets include roots, retained stages, competing
+work and hypothetical successors.
+
+The additive `/2` response separates actual `retained_stages` from hypothetical
+`future_stages`. Root and child reserve endpoints remain independent; one
+pursuit cannot lend historical proof to another. Next-step advice waits the
+latest admitted committed tip and lists every independent reserve pursuit that
+needs exact-endpoint capture. Default current-stage `/1` behavior is unchanged.
+
+All 26 actual forecast/model component tests passed, including five new
+retained-chain regressions. Execution exposed and corrected a child-source
+ledger-anchor mismatch. The cases cover in-progress real continuations without
+recommit or deadline renewal, zero horizon, the complete action union,
+independent historical reserves, and real furniture consumption followed by
+additional hypothetical harvesting and production. All three actual pending
+furniture tests from the prior increment also passed. Four new public-facade
+and three private-lineage tests are authored but remain unexecuted: full MCP
+checking was SIGKILLed in unchanged Asupersync before MCP source checking.
+Independent source review, scoped latest-nightly formatting, contract JSON and
+whitespace checks passed. Full MCP/stdio/workspace and native qualification
+remain open under `df-lab-joint-original-forecast-c2s`.
+
+See `docs/LAB_ORIGINAL_PLAN_FORECAST.md` and
+`architecture/laboratory_original_forecast_v1.json`.
+
 ## Unreleased — Compose concurrent stockpile and standing-order settings
 
 The real laboratory commit path can now replay independent stockpile capacities

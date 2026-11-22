@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased — Include committed continuations in whole-project forecasts
+
+- Expand each selected ordinary root into its exact live linear continuation
+  chain, with up to eight committed stages, unchanged requests and complete
+  original receipt/source custody.
+- Preserve real work, stability and deadlines; start further hypothetical
+  stages only after the committed chain is Verified and physically quiet.
+- Separate actual retained stages from future model plans and keep each
+  pursuit's reserve endpoint independent. Admit their complete shared costs.
+- Direct next-step waits to committed tips and expose predecessor reserve
+  pursuits requiring separate exact-endpoint capture. Preserve default `/1`.
+- Pass all 26 actual forecast/model tests, including five retained-chain cases,
+  and all three prior pending-furniture cases. Add seven facade/lineage tests;
+  full MCP integration remains unexecuted after a dependency compiler SIGKILL.
+
 ## Unreleased — Merge independent fortress configuration changes
 
 - Let shared members compose distinct stockpile capacities and standing-order

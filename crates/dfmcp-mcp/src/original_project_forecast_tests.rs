@@ -13,6 +13,9 @@ use dfmcp_intent::{
 use dfmcp_world::Predicate;
 use server::project_forecast::ProjectSource;
 
+#[path = "original_retained_project_forecast_tests.rs"]
+mod retained;
+
 fn context(adapter: &MemoryAdapter) -> OperationContext {
     OperationContext {
         session_id: SessionId::new(816_201),
@@ -558,7 +561,11 @@ fn competing_beds(adapter: &mut MemoryAdapter) -> Result<Vec<ActionId>> {
     let plan = StaticPlanner::default().prepare_laboratory(adapter.snapshot(), &intent, &ctx)?;
     let prepared = adapter.prepare(&plan, &ctx)?;
     let receipt = adapter.commit(&plan, &prepared, &ctx)?;
-    Ok(receipt.actions.into_iter().map(|row| row.action_id).collect())
+    Ok(receipt
+        .actions
+        .into_iter()
+        .map(|row| row.action_id)
+        .collect())
 }
 
 #[test]
@@ -612,16 +619,23 @@ fn blocked_lower_digest_does_not_starve_an_independent_ready_project() -> Result
         },
     )?;
     assert_eq!(
-        result["originals"][0]["future_stages"].as_array().map(Vec::len),
+        result["originals"][0]["future_stages"]
+            .as_array()
+            .map(Vec::len),
         Some(0),
         "{result}"
     );
     assert_eq!(
-        result["originals"][1]["future_stages"].as_array().map(Vec::len),
+        result["originals"][1]["future_stages"]
+            .as_array()
+            .map(Vec::len),
         Some(1),
         "{result}"
     );
-    assert_eq!(result["originals"][1]["future_stages"][0]["from_tick"], source_tick);
+    assert_eq!(
+        result["originals"][1]["future_stages"][0]["from_tick"],
+        source_tick
+    );
     assert_eq!(result["originals"][0]["predicted_goal_truth"], "false");
     assert_eq!(result["forecast_work"]["hypothetical_stages"], 1);
     assert!(

@@ -297,6 +297,20 @@ pub(super) fn forecast(
     for original in originals {
         all_actions.extend(&original.actions);
     }
+    if let Some(projects) = &projects {
+        for project in projects {
+            all_actions.extend(project.retained_actions());
+        }
+        if all_actions.len() > MAX_TRACKED
+            || all_actions.len() > context.budget.max_actions as usize
+            || all_actions.len() > context.budget.max_entities as usize
+        {
+            return Err(error(
+                ErrorCode::BudgetExceeded,
+                "joint project exceeds its complete already-committed action budget",
+            ));
+        }
+    }
     let mut modeled_actions = 0u64;
     let mut modeled_plan_bytes = 0u64;
     let mut modeled_stages = 0u64;
@@ -327,8 +341,9 @@ pub(super) fn forecast(
         let mut outcomes = Vec::with_capacity(originals.len());
         for (index, original) in originals.iter().enumerate() {
             let (mut goal, stage) = evaluate(original.actual, fork.snapshot())?;
-            if let Some(projects) = &projects {
+            if let Some(projects) = &mut projects {
                 goal = projects[index].goal_truth(fork.snapshot())?;
+                projects[index].sample_retained_reserves(fork.snapshot().tick.0, goal);
             }
             if samples[index].is_none() && original.reserve_until == Some(fork.snapshot().tick.0) {
                 samples[index] = Some(goal);
@@ -585,16 +600,28 @@ pub(super) fn forecast(
             "predicted anchors, receipts and reserve samples are discarded and confer no evidence or authority"
         ],
     });
-    if projects.is_some() {
+    if let Some(projects) = &projects {
         report["method"] =
             json!("joint_complete_original_projects_on_one_discarded_laboratory_fork");
         report["forecast_scope"] = json!("complete_project");
         report["future_stage_plans_are_executable"] = json!(false);
         report["requires_review_between_stages"] = json!(true);
         report["completion_rule"] = json!(
-            "all selected original semantic goals true, exact reserves true, original and hypothetical actions Verified, and all their physical work quiet at one shared frontier"
+            "all selected original semantic goals true, every original and retained-stage exact reserve true, committed and hypothetical actions Verified, and all their physical work quiet at one shared frontier"
         );
         report["forecast_work"]["hypothetical_stages"] = json!(modeled_stages);
+        report["forecast_work"]["retained_continuation_stages"] = json!(
+            projects
+                .iter()
+                .map(Project::retained_stage_count)
+                .sum::<usize>()
+        );
+        report["forecast_work"]["retained_continuation_actions"] = json!(
+            projects
+                .iter()
+                .map(|project| project.retained_actions().count())
+                .sum::<usize>()
+        );
         report["forecast_work"]["stage_reviews_deferred"] = json!(stage_reviews_deferred);
         report["forecast_work"]["hypothetical_action_steps"] = json!(modeled_actions);
         report["forecast_work"]["hypothetical_plan_bytes"] = json!(modeled_plan_bytes);
@@ -604,7 +631,7 @@ pub(super) fn forecast(
             "ready original actual digest ascending; existing action polls retain commit order"
         );
         report["assumptions"][3] = json!(
-            "each eligible selected root receives a separately reviewed hypothetical continuation without delay; unselected roots receive no new stages"
+            "already committed continuations retain their actual receipts and deadlines; each eligible selected root receives a separately reviewed hypothetical continuation only after its admitted chain is Verified and quiet; unselected roots receive no new stages"
         );
     }
     Ok(report)

@@ -8,8 +8,9 @@ finish when they share the same finite workforce, materials and consumption?
 The query uses one discarded copy of the current laboratory adapter, including
 its existing action receipts and obligation runtimes. The default scope never
 recommits an original or prepares another project stage. An explicit
-complete-project scope can model separately reviewed future stages on that
-same discarded copy. The default laboratory remains
+complete-project scope includes an admitted chain of already committed
+continuations and can model separately reviewed future stages on that same
+discarded copy. The default laboratory remains
 separate from native Dwarf Fortress and DFHack execution.
 
 ## Request
@@ -91,21 +92,51 @@ exact reserve endpoint is sampled before any hypothetical successor changes the
 world at that same tick. A False, Unknown or missed endpoint cannot be rescued
 by later production.
 
-This scope accepts ordinary roots only. Continuation wrappers, roots with any
-retained continuation custody, raw action/pause plans and stand-alone resource
-acquisition requests refuse before the fork; use `current_stage` to inspect
-them. The exact original snapshot must still be retained. Its qualified stock
-ledger identity and generation are checked against every predicted descendant.
-No original snapshot is fetched from disk or reconstructed during the query.
+Select the ordinary root even after separately committing continuations. The
+query discovers its complete retained chain by exact parent and root identities;
+request order and goal-book order cannot reorder its stages. Up to eight
+already committed stages, including the root, are admitted per project. Every
+predecessor must already have Verified, physically quiet actions; the final
+committed stage can still have prepared or active work. Its real receipts,
+remaining work, prior stability observations and absolute deadlines are copied
+into the shared model. No committed stage is prepared or committed again.
+
+Each stage must belong to this live session and retain the unchanged typed
+production, room or connected-room request, its exact sealed plan and source
+snapshot, and complete action custody. The root's qualified stock-ledger
+identity and generation must remain the same in every stage source and the
+current world; each stage's own source-bound ledger validates its own plan.
+Parent sources must stay within the same fortress and restore epoch and cannot
+run backward in tick or cursor sequence. Gaps, cycles, branches, duplicate
+identities, changed requests, withdrawn or restore-abandoned pursuits, recovered
+handles, missing sources, failed or cancelled stages and unknown physical work
+refuse before the fork. No source is fetched from disk or reconstructed.
+
+Selecting a continuation wrapper directly remains unsupported in
+`complete_project`; select its ordinary root instead. Raw action/pause plans and
+stand-alone resource acquisition requests also refuse. `current_stage` retains
+its existing behavior for inspecting one exact original, including a committed
+continuation, without expanding its lineage.
 
 Each original keeps its initial `steps`, `predicted_actions_complete` and
-`predicted_stage_truth`. Additional `future_stages` contain clearly labeled
-model plan/action identities, stage names, required capabilities/risk,
+`predicted_stage_truth`. `retained_stages` lists actual committed descendants in
+parent order, including their real plan/action identities, original source
+anchors, independent reserve samples, unchanged obligation deadlines and
+predicted outcomes. These rows state `custody: "already_committed_original"`
+and `recommitted_by_forecast: false`. They describe predicted states of actual
+handles; they do not report new observations.
+
+Additional `future_stages` contain clearly labeled model plan/action
+identities, stage names, required capabilities/risk,
 checkpoint burden, stage deadlines/cadence and current action/work
-outcomes. `predicted_project_actions_complete` covers both initial and modeled
-work; `predicted_original_physical_quiescent` preserves initial work separately.
+outcomes. Stage indices start at two for the first retained descendant, and
+hypothetical indices continue after the last committed stage.
+`predicted_committed_actions_complete` covers the root and its retained
+descendants; `predicted_project_actions_complete` includes those actions and
+modeled future work. `predicted_original_physical_quiescent` preserves initial
+work separately.
 Overall completion requires all selected full goals, every required exact
-reserve endpoint, Verified initial and future actions, and quiet physical work
+reserve endpoint, Verified initial, retained and future actions, and quiet physical work
 at the same shared frontier.
 
 There are at most three hypothetical successors per root. They share the
@@ -200,6 +231,14 @@ inspects every such frontier exactly. A retained original endpoint remains
 immutable, including False or Unknown. If an earlier endpoint was never retained,
 a later stock count cannot reconstruct it.
 
+A root and its retained continuations each keep their own endpoint custody,
+even though their unchanged request has the same absolute reserve tick. A
+retained sample from one pursuit cannot fill a missing sample in another.
+Every admitted pursuit lacking a sample is evaluated at that exact shared
+frontier before any hypothetical successor changes the world. Once the tick
+has passed, a missing child or root sample yields `reserve_unobserved` and
+prevents complete-project success or invented repair stages.
+
 A newly predicted endpoint exists only inside this result. It is never installed
 in the original goal book, snapshot retention or durable reserve journal. An
 earlier true endpoint also does not establish current stock at a later group
@@ -231,6 +270,7 @@ Hard ceilings include:
 | --- | ---: |
 | Original request bytes | 2,048 |
 | Selected originals | 8 |
+| Already committed stages (complete-project scope) | 8 per selected root, including that root |
 | Original steps | Existing 64-step custody ceiling per original |
 | Tracked action identities | 1,024 and current negotiated allowances |
 | Hypothetical successors (complete-project scope) | 3 per selected root |
@@ -259,8 +299,14 @@ continuity partial and predictions ineligible as mutation evidence.
 
 To obtain actual laboratory progress and proof, explicitly call the existing
 selected-plan `fortress.wait` with the original digests and a chosen tick
-allowance. The forecast's next-step link identifies those originals; it does
-not imply an automatic wait or authorize the predicted horizon.
+allowance. The default forecast's next-step link identifies those originals.
+Complete-project advice identifies the latest already committed stage of each
+selected root, so waiting can progress an active continuation. It also lists
+each root or descendant with reserve endpoint custody. Waiting for a tip does
+not retain its predecessors' samples: at the original absolute tick, explicitly
+capture every required pursuit with zero-tick selected waits, in groups of at
+most eight, before advancing time again. No advice implies an automatic wait
+or authorizes the predicted horizon.
 
 ## Implementation and verification
 
@@ -269,9 +315,10 @@ custody, shared source accounting and read-only query projection.
 `original_forecast_model.rs` drives the real cloned `MemoryAdapter`;
 `Objective::forecast_truth_at` preserves original semantic room/output and
 stock-ledger identity during pure private evaluation.
-`original_project_forecast.rs` reuses the existing complete-project compilers
-for explicitly hypothetical successor stages and separates their receipts from
-the selected original.
+`original_project_lineage.rs` validates the bounded exact retained chain.
+`original_project_forecast.rs` preserves already committed descendants and
+reuses the existing complete-project compilers for explicitly hypothetical
+successor stages, separating their receipts from live originals.
 
 The model regression file exercises real finite worker and wood contention,
 retained stability at a deadline, unselected ready deferred pause, pause/resume
@@ -279,7 +326,12 @@ rounds, zero horizon, authority, reserve invalidation by consumption, retained
 false/unknown/missed endpoints and live-adapter isolation. The facade regression
 file covers original/alias custody, pending review and history preservation,
 source/output bounds, semantic project truth and nonpublication of predicted
-reserve endpoints. Execution results and environment limitations are recorded
+reserve endpoints. Retained-chain regressions cover an active child without
+recommit, complete action-union limits, independent historical endpoints, and
+real furniture allocation that consumes a previously produced bed and requires
+further private harvest/production stages. Lineage regressions exercise missing
+parents, cycles, branches, owner and restore-epoch mismatches, changed requests,
+lost handles and the committed-stage bound. Execution results and environment limitations are recorded
 in the implementation status; source presence alone is not a test result.
 
 Machine-readable contract:

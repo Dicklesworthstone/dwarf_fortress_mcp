@@ -35,7 +35,7 @@
         "ordinary provisioned_room root",
         "ordinary connected_room root"
       ],
-      "retained_continuation_custody": "complete_project refuses before model fork"
+      "retained_continuation_custody": "select the ordinary root; expand its exact owned live linear continuation chain, at most eight committed stages including root; wrappers cannot be selected separately"
     }
   },
   "source": {
@@ -43,7 +43,7 @@
     "model": "one discarded MemoryAdapter clone with existing original obligation runtimes",
     "admission": "current world plus complete retained original source union, reserve snapshots and owned competing receipts before clone; repeat derived-source admission",
     "source_heap_bytes_measured": false,
-    "complete_project_originals": "exact retained sealed snapshots and original qualified stock-ledger identity; added to complete union before cloning"
+    "complete_project_originals": "every root and retained descendant requires its exact retained sealed source; root stock-ledger identity/generation stays stable while each child ledger validates its own source-bound plan; sources, archives, receipts, reserve snapshots and predicates join the complete union before cloning"
   },
   "progression": {
     "tracked": "all current-session open actions in original commit order",
@@ -65,7 +65,8 @@
     "stability_reset": false,
     "hypothetical_stage_order": "ready actual original digests ascending; defer qualified tracked active-output conflicts while other ready originals proceed; existing and modeled action polls retain commit order",
     "active_output_conflicts": "only the exact compiler-qualified canonical producer with matching tracked Active physical work may defer; bounded ordinary polling and recompile from observed stock; no future-output credit or new stage/action charge; untracked, unknown and other errors refuse",
-    "new_stage_deadlines": "own separately reviewed compiler-derived obligations; no original obligation is renewed"
+    "new_stage_deadlines": "own separately reviewed compiler-derived obligations; no original obligation is renewed",
+    "retained_stages": "reuse original action receipts and obligation runtimes without preparing or recommitting; predecessors already Verified and physically quiet; final stage may have prepared or active work"
   },
   "outcome": {
     "group_completion": "all selected original goals true, required exact reserve samples true, original actions Verified and physical work quiet at one same modeled frontier",
@@ -80,8 +81,11 @@
       "horizon_reached",
       "paused"
     ],
-    "complete_project": "all selected semantic original goals and exact reserves true; original and hypothetical actions Verified and physically quiet at the same frontier",
-    "initial_actions_distinct_from_future_stages": true
+    "complete_project": "all selected semantic goals and each root/retained pursuit exact reserve true; root, retained and hypothetical actions Verified and physically quiet at the same frontier",
+    "initial_actions_distinct_from_future_stages": true,
+    "retained_stages": "parent-ordered real plan/action identities with exact source anchors, unchanged obligations, independent reserve samples and predicted outcomes; custody already_committed_original; recommitted_by_forecast false",
+    "committed_actions_distinct_from_future_stages": true,
+    "reserve_samples_shared_between_pursuits": false
   },
   "authority": {
     "current": [
@@ -95,7 +99,16 @@
     "deferred_effects": "original current grants and scope checked at modeled dispatch; no new grants",
     "recovery_only": "refuse before fork",
     "withdrawn_or_abandoned": "refuse before fork",
-    "future_stages": "modeled Observe, Query, Plan, every effect scope/risk and checkpoint checked before charging or preparing the model stage"
+    "future_stages": "modeled Observe, Query, Plan, every effect scope/risk and checkpoint checked before charging or preparing the model stage",
+    "continued_project_refusals": [
+      "gapped, cyclic, branched or duplicate lineage",
+      "changed typed root request or source family",
+      "foreign, recovered, withdrawn or restore-abandoned custody",
+      "missing exact stage source, plan, commit or action custody",
+      "failed, cancelled, indeterminate or unknown physical stage work",
+      "unverified or nonquiescent predecessor",
+      "cross-fortress, cross-epoch or backward source lineage"
+    ]
   },
   "bounds": {
     "max_rounds": 4096,
@@ -112,8 +125,9 @@
     ],
     "output": "lossless full or compact Agent Turn; otherwise explicit refusal",
     "max_future_stages_per_original": 3,
-    "hypothetical_costs": "original and model action union shares negotiated action/entity ceiling; modeled plan archives share complete source byte allowance",
-    "additional_semantic_nodes_per_project_evaluation": 130
+    "hypothetical_costs": "root, retained, competing and model actions share negotiated action/entity ceiling; all original archives and modeled plan archives share complete source byte allowance",
+    "additional_semantic_nodes_per_project_evaluation": 130,
+    "max_committed_stages_per_project_including_root": 8
   },
   "publication": {
     "current_anchor_preserved": true,
@@ -130,7 +144,8 @@
     "observation_acknowledgment_published": false,
     "request_and_replay_metadata": "ordinary query metadata remains",
     "continuity": "partial",
-    "eligible_as_mutation_evidence": false
+    "eligible_as_mutation_evidence": false,
+    "complete_project_next_step": "explicit selected wait targets the latest admitted committed tip per root; reserve_endpoint_pursuits lists each independent exact sample obligation; capture remaining samples by zero-tick selected waits of at most eight pursuits at the original endpoint before advancing again"
   },
   "qualification": {
     "laboratory_only": true,
@@ -140,6 +155,9 @@
   "regression_sources": [
     "crates/dfmcp-mcp/src/original_forecast_model_tests.rs",
     "crates/dfmcp-mcp/src/lab_original_forecast_tests.rs",
-    "crates/dfmcp-mcp/src/original_project_forecast_tests.rs"
+    "crates/dfmcp-mcp/src/original_project_forecast_tests.rs",
+    "crates/dfmcp-mcp/src/original_retained_project_forecast_tests.rs",
+    "crates/dfmcp-mcp/src/original_project_lineage_mcp_tests.rs",
+    "crates/dfmcp-mcp/src/original_project_lineage_tests.rs"
   ]
 }

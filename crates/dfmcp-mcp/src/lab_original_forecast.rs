@@ -4,7 +4,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::{Duration, Instant};
 
-use dfmcp_core::{Capability, DfmcpError, Digest32, ErrorCode, OperationContext, Result, RiskTier};
+use dfmcp_core::{
+    ActionId, Capability, CommitState, DfmcpError, Digest32, ErrorCode, OperationContext, Result,
+    RiskTier,
+};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -100,6 +103,53 @@ fn remaining(context: &OperationContext, started: Instant) -> Result<OperationCo
     Ok(result)
 }
 
+fn admit_live_actions(
+    session: &LabSession,
+    selected: &super::plan_cancellation::Selection,
+    action_union: &mut BTreeSet<ActionId>,
+    in_continued_project: bool,
+    predecessor: bool,
+) -> Result<()> {
+    for action in &selected.actions {
+        let receipt = session
+            .adapter
+            .action_receipt(*action)
+            .ok_or_else(|| invalid("forecast original action disappeared"))?;
+        if (!receipt.state.is_terminal()
+            || !session.adapter.action_work_state(*action)?.is_quiescent())
+            && !session.open_actions.contains(action)
+        {
+            return Err(DfmcpError::new(
+                ErrorCode::Conflict,
+                "unfinished forecast original is absent from the owning progression set",
+            ));
+        }
+        if in_continued_project {
+            let work = session.adapter.action_work_state(*action)?;
+            if !matches!(
+                receipt.state,
+                CommitState::Prepared
+                    | CommitState::AppliedAwaitingVerification
+                    | CommitState::Verified
+            ) || matches!(work, dfmcp_intent::EffectWorkState::Unknown { .. })
+            {
+                return Err(DfmcpError::new(
+                    ErrorCode::Conflict,
+                    "complete-project continuation requires uninterrupted, known original action custody",
+                ));
+            }
+            if predecessor && (receipt.state != CommitState::Verified || !work.is_quiescent()) {
+                return Err(DfmcpError::new(
+                    ErrorCode::Conflict,
+                    "complete-project predecessors must already have Verified, physically quiet actions",
+                ));
+            }
+        }
+        action_union.insert(*action);
+    }
+    Ok(())
+}
+
 pub(super) fn execute(
     session: &LabSession,
     context: &OperationContext,
@@ -126,14 +176,37 @@ pub(super) fn execute(
         .map(|digest| super::selected_plan_wait::parse_digest(digest))
         .collect::<Result<_>>()?;
     let members = SelectedPlanWait::set_members(session, &digests, started)?;
-    let source = SelectedPlanWait::admit_retained_set_source(&members, session)?;
+    let mut source = SelectedPlanWait::admit_retained_set_source(&members, session)?;
+    let mut project_lineages = BTreeMap::new();
+    let mut complete_custody = None;
+    if request.forecast_scope == Scope::CompleteProject {
+        let mut custody_digests = digests.clone();
+        for member in &members {
+            remaining(context, started)?;
+            let original = session
+                .objectives
+                .iter()
+                .find(|original| original.plan_digest == member.actual_digest())
+                .ok_or_else(|| invalid("forecast original goal disappeared"))?;
+            let lineage = original.forecast_project_source(session)?;
+            custody_digests.extend(lineage.1.iter().map(|(digest, _)| *digest));
+            project_lineages.insert(member.actual_digest(), lineage);
+        }
+        if custody_digests.len() > digests.len() {
+            let admitted = SelectedPlanWait::set_members(session, &custody_digests, started)?;
+            source = SelectedPlanWait::admit_retained_set_source(&admitted, session)?;
+            complete_custody = Some(admitted);
+        }
+    }
     let mut originals = Vec::with_capacity(members.len());
     let mut goals = BTreeMap::new();
     let mut action_union = BTreeSet::new();
     let mut projects = Vec::new();
     let mut project_snapshots = Vec::new();
+    let mut next_wait_digests = Vec::new();
+    let mut reserve_endpoint_pursuits = Vec::new();
     let mut admitted_snapshots = BTreeSet::from([context.anchor.state_hash]);
-    for member in &members {
+    for member in complete_custody.as_deref().unwrap_or(&members) {
         if let Some(original) = session
             .objectives
             .iter()
@@ -153,26 +226,16 @@ pub(super) fn execute(
             .iter()
             .find(|original| original.plan_digest == selected.actual)
             .ok_or_else(|| invalid("forecast original goal disappeared"))?;
-        for action in &selected.actions {
-            let receipt = session
-                .adapter
-                .action_receipt(*action)
-                .ok_or_else(|| invalid("forecast original action disappeared"))?;
-            if (!receipt.state.is_terminal()
-                || !session.adapter.action_work_state(*action)?.is_quiescent())
-                && !session.open_actions.contains(action)
-            {
-                return Err(DfmcpError::new(
-                    ErrorCode::Conflict,
-                    "unfinished forecast original is absent from the owning progression set",
-                ));
-            }
-            action_union.insert(*action);
-        }
+        let continued = project_lineages
+            .get(&selected.actual)
+            .is_some_and(|(_, descendants)| !descendants.is_empty());
+        admit_live_actions(session, &selected, &mut action_union, continued, continued)?;
         original.selected_wait_truth(session)?;
         original.selected_wait_stage_truth(session)?;
         if request.forecast_scope == Scope::CompleteProject {
-            let project = original.forecast_project_source(session)?;
+            let (project_source, descendants) = project_lineages
+                .remove(&selected.actual)
+                .ok_or_else(|| invalid("complete-project lineage disappeared"))?;
             let plan = original
                 .resource_plan()
                 .ok_or_else(|| invalid("project original seal disappeared"))?;
@@ -192,7 +255,85 @@ pub(super) fn execute(
             let ledger = crate::lab_world::ProductionGoalLedger::capture(sealed)?;
             ledger.validate_plan(plan)?;
             ledger.validate_current(session.adapter.snapshot())?;
-            projects.push(model::Project::new(selected.actual, project, ledger));
+            let mut project = model::Project::new(selected.actual, project_source, ledger);
+            let root_reserve = original.selected_wait_reserve_horizon()?;
+            next_wait_digests.push(descendants.last().map_or_else(
+                || member.requested_digest().to_hex(),
+                |(digest, _)| digest.to_hex(),
+            ));
+            if let Some(until) = root_reserve {
+                reserve_endpoint_pursuits.push(json!({
+                    "plan_digest":selected.actual.to_hex(),"reserve_until_tick":until,
+                    "sample_retained":original.selected_wait_reserve_observation.is_some(),
+                }));
+            }
+            for (index, (digest, parent)) in descendants.iter().enumerate() {
+                remaining(context, started)?;
+                let retained = super::plan_cancellation::select(session, *digest)?;
+                if retained.actual != *digest {
+                    return Err(invalid(
+                        "continuation custody cannot alias another sealed stage",
+                    ));
+                }
+                admit_live_actions(
+                    session,
+                    &retained,
+                    &mut action_union,
+                    true,
+                    index + 1 < descendants.len(),
+                )?;
+                let objective = session
+                    .objectives
+                    .iter()
+                    .find(|objective| objective.plan_digest == *digest)
+                    .ok_or_else(|| invalid("retained project stage disappeared"))?;
+                objective.selected_wait_truth(session)?;
+                objective.selected_wait_stage_truth(session)?;
+                let reserve_until = objective.selected_wait_reserve_horizon()?;
+                if reserve_until != root_reserve {
+                    return Err(invalid(
+                        "continuation changed the original absolute reserve horizon",
+                    ));
+                }
+                if let Some(until) = reserve_until {
+                    reserve_endpoint_pursuits.push(json!({
+                        "plan_digest":digest.to_hex(),"reserve_until_tick":until,
+                        "sample_retained":objective.selected_wait_reserve_observation.is_some(),
+                    }));
+                }
+                let plan = objective
+                    .resource_plan()
+                    .ok_or_else(|| invalid("retained continuation seal disappeared"))?;
+                let sealed = session
+                    .history
+                    .get(&plan.anchor.state_hash)
+                    .filter(|snapshot| snapshot.anchor() == plan.anchor)
+                    .ok_or_else(|| {
+                        invalid("complete_project requires each exact retained stage source")
+                    })?;
+                super::query_budget::admit_sources(&[sealed], &remaining(context, started)?)?;
+                ledger.validate_current(sealed)?;
+                crate::lab_world::ProductionGoalLedger::capture(sealed)?.validate_plan(plan)?;
+                if admitted_snapshots.insert(sealed.state_hash) {
+                    project_snapshots.push(sealed);
+                }
+                project.retain_stage(
+                    plan.clone(),
+                    *parent,
+                    model::Original {
+                        requested: *digest,
+                        actual: *digest,
+                        actions: retained.actions,
+                        reserve_until,
+                        reserve_observation: objective
+                            .selected_wait_reserve_observation
+                            .map(|(_, truth)| truth),
+                        can_continue: true,
+                    },
+                    sealed,
+                )?;
+            }
+            projects.push(project);
         }
         goals.insert(selected.actual, original);
         originals.push(model::Original {
@@ -366,7 +507,12 @@ pub(super) fn execute(
         response["source_work"]["additional_original_records"] = json!(project_records);
         response["source_work"]["additional_original_bytes"] = json!(project_bytes);
         response["next_step"]["reason"] = json!(
-            "observe actual original progress and separately review any continuation; hypothetical stages are not commit permits"
+            "observe the latest committed stages and separately review any continuation; hypothetical stages are not commit permits"
+        );
+        response["next_step"]["arguments"]["plan_digests"] = json!(next_wait_digests);
+        response["next_step"]["reserve_endpoint_pursuits"] = json!(reserve_endpoint_pursuits);
+        response["next_step"]["reserve_capture_rule"] = json!(
+            "each pursuit retains its own exact endpoint; a tip wait does not retain predecessor samples; use explicit zero-tick selected waits in groups of at most eight at that absolute tick before advancing again"
         );
     }
     Ok(response)
