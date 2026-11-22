@@ -327,6 +327,15 @@ pub(crate) fn cancel(
     mode: CancelMode,
     requested: Vec<Digest32>,
 ) -> String {
+    // Live custody remains authoritative even when malformed. Only an absent
+    // receipt enters the complete mixed live/recovered admission path; that
+    // path still validates every named live receipt before any effect.
+    if requested
+        .iter()
+        .any(|digest| !session.commit_receipts.contains_key(&digest.to_hex()))
+    {
+        return super::recovered_plan_cancellation::cancel_set(session, mode, requested);
+    }
     let started = Instant::now();
     let scope = format!(
         "plans:{}",

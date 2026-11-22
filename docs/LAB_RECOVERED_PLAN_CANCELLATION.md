@@ -3,7 +3,8 @@
 A durable laboratory restart retains original plans, anchored action receipts,
 and physical work, while discarding the old process's action handles and grants.
 Original work can be stopped through the ordinary cancellation tool under
-freshly negotiated authority. Select one exact original, discover the oldest
+freshly negotiated authority. Select one exact original, a set of up to eight
+live or recovered originals, discover the oldest
 unfinished original, or drain the complete current session selection.
 
 ```json
@@ -59,6 +60,14 @@ This is deterministic laboratory functionality under
 production admission are separate boundaries.
 
 ## Drain recovered and newly committed work together
+
+For only a chosen group, use `scope: "plans:<digest>,<digest>"`. The complete
+set is admitted before any stop or pause, including every recovered archive and
+current effect grant. Its final certificate covers those exact originals while
+unselected recovered and live work continue. The response preserves each
+original's source of custody and never restores dispatch handles. See
+[selected original sets](LAB_PLAN_SET_CANCELLATION.md) for complete identities,
+output bounds, repeat requests and failure semantics.
 
 Use session scope to stop every eligible recovered original and every original
 currently owned by the requesting live session:

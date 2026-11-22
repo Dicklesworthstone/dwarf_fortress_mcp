@@ -1,5 +1,38 @@
 # Implementation Status
 
+## Unreleased — Cancel selected projects across durable recovery
+
+The existing `plans:<digest>,<digest>` cancellation scope now accepts a chosen
+mixture of current-session commits and exact durable recovered originals.
+The complete selection is admitted before any stop or emergency pause: original
+archives, accepted lineage, every step disposition, current authority, physical
+identity, ownership and shared action/source/output/time bounds. Existing live
+custody remains authoritative even when malformed. Recovered compensation
+refuses the whole set before effects.
+
+The shared recovery drain now supports an explicit selected census without
+adopting unrelated originals. Newer live work drains before authenticated older
+recovered work; each changed frontier is published before another stop. Every
+named original, including already-quiet work, remains in the complete identity
+object and final census. A selected-only certificate requires current physical
+quiet and confirmed publication; unrelated live/recovered work and pending
+reviews remain intact. No old dispatch handle, alias or grant is reconstructed.
+Mixed/recovered identities and certificates use additive `/2` schemas; existing
+live-only `/1` behavior remains available.
+
+Regression source covers mixed and recovered-only cleanup, authenticated order,
+repeat requests and another restart, unrelated work/pending preservation,
+whole-set authority and budget refusal before pause, malformed live custody,
+duplicate aliases, progressive publication failure/retry and complete recovered
+identities under output pressure. Independent source review, scoped latest-nightly
+formatting and whitespace checks passed. Full MCP checking was SIGKILLed in
+unchanged Asupersync before reaching MCP source. The new facade regressions
+remain unexecuted; no new full Rust, modern-stdio, native-game or admission
+qualification is claimed.
+
+Owner: `df-cancellation-progress-certificates-vvw`.
+See `docs/LAB_PLAN_SET_CANCELLATION.md`.
+
 ## Unreleased — Forecast whole original projects through shared future stages
 
 `forecast_originals` now accepts the explicit `forecast_scope: "complete_project"`

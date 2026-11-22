@@ -537,6 +537,7 @@ fn cancellation_outcome(payload: &Value) -> Option<Map<String, Value>> {
         "requested_plan_digests",
         "selection_resolved",
         "unselected_plans_included",
+        "untracked_work_included",
         "foreign_live_work_included",
         "original_owner_session_id",
         "dispatch_handles_restored",
@@ -1211,19 +1212,33 @@ mod tests {
         for succeeded in [true, false] {
             let (mut raw, mut response) =
                 cancellation_with_oversized_orientation("continuous", succeeded, succeeded);
-            let originals = (1..=8u64).map(|index| json!({
-                "requested_plan_digest":format!("{index:064x}"),
-                "plan_digest":format!("{:064x}", index + 100),
-                "plan_id":format!("{index:032x}"),
-                "actions":[format!("{:032x}", index + 200)],
-            })).collect::<Vec<_>>();
-            let requested = originals.iter().map(|row| row["requested_plan_digest"].clone())
+            let originals = (1..=8u64)
+                .map(|index| {
+                    json!({
+                        "requested_plan_digest":format!("{index:064x}"),
+                        "plan_digest":format!("{:064x}", index + 100),
+                        "plan_id":format!("{index:032x}"),
+                        "actions":[format!("{:032x}", index + 200)],
+                    })
+                })
+                .collect::<Vec<_>>();
+            let requested = originals
+                .iter()
+                .map(|row| row["requested_plan_digest"].clone())
                 .collect::<Vec<_>>();
             let identities = json!({"schema":"dfmcp-selected-originals-cancellation-selection/1",
                 "session_id":raw["session_id"],"originals":originals});
             for (key, value) in [
-                ("scope", json!(format!("plans:{}", (1..=8u64)
-                    .map(|index| format!("{index:064x}")).collect::<Vec<_>>().join(",")))),
+                (
+                    "scope",
+                    json!(format!(
+                        "plans:{}",
+                        (1..=8u64)
+                            .map(|index| format!("{index:064x}"))
+                            .collect::<Vec<_>>()
+                            .join(",")
+                    )),
+                ),
                 ("selection_scope", json!("exact_original_set")),
                 ("selection_resolved", json!(true)),
                 ("requested_plan_digests", json!(requested)),
@@ -1241,13 +1256,106 @@ mod tests {
             let budget = (raw.to_string().len() as u64 + 2_048).div_ceil(4);
             let fitted = fit(&response.to_string(), budget);
             let output: Value = serde_json::from_str(&fitted)?;
-            assert_eq!(output["output_budget"]["tier"], "cancellation_receipt", "{output}");
+            assert_eq!(
+                output["output_budget"]["tier"], "cancellation_receipt",
+                "{output}"
+            );
             assert_eq!(output["selected_plans"], raw["selected_plans"]);
-            assert_eq!(output["requested_plan_digests"], raw["requested_plan_digests"]);
-            assert_eq!(output["selected_plans_digest"], raw["selected_plans_digest"]);
+            assert_eq!(
+                output["requested_plan_digests"],
+                raw["requested_plan_digests"]
+            );
+            assert_eq!(
+                output["selected_plans_digest"],
+                raw["selected_plans_digest"]
+            );
             assert_eq!(output["finalize_certificate"], raw["finalize_certificate"]);
             assert_eq!(output["error"], raw["error"]);
             assert_eq!(output["unselected_plans_included"], false);
+            assert!(estimate_tokens(&fitted) <= budget);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn bounded_recovered_set_keeps_archive_custody_and_selected_only_proof()
+    -> Result<(), serde_json::Error> {
+        for succeeded in [true, false] {
+            let (mut raw, mut response) =
+                cancellation_with_oversized_orientation("continuous", succeeded, succeeded);
+            let originals = (1..=8u64)
+                .map(|index| {
+                    json!({
+                        "requested_plan_digest":format!("{index:064x}"),
+                        "plan_digest":format!("{index:064x}"),
+                        "plan_id":format!("{index:032x}"),
+                        "selection_origin":"durable_recovery",
+                        "original_owner_session_id":"historic-owner",
+                        "plan_object_digest":format!("{:064x}", index + 100),
+                        "custody_digest":format!("{:064x}", index + 200),
+                        "steps":[0, 1, 2],
+                    })
+                })
+                .collect::<Vec<_>>();
+            let identities = json!({"schema":"dfmcp-selected-originals-cancellation-selection/2",
+                "session_id":raw["session_id"],"originals":originals,
+                "dispatch_handles_restored":false});
+            for (key, value) in [
+                (
+                    "scope",
+                    json!(format!(
+                        "plans:{}",
+                        (1..=8u64)
+                            .map(|index| format!("{index:064x}"))
+                            .collect::<Vec<_>>()
+                            .join(",")
+                    )),
+                ),
+                ("selection_scope", json!("exact_original_set")),
+                ("selection_resolved", json!(true)),
+                (
+                    "requested_plan_digests",
+                    json!(
+                        (1..=8u64)
+                            .map(|index| format!("{index:064x}"))
+                            .collect::<Vec<_>>()
+                    ),
+                ),
+                ("selected_plans", identities.clone()),
+                ("selected_plans_digest", json!("c".repeat(64))),
+                ("unselected_plans_included", json!(false)),
+                ("untracked_work_included", json!(false)),
+                ("dispatch_handles_restored", json!(false)),
+            ] {
+                raw[key] = value.clone();
+                response[key] = value;
+            }
+            if succeeded {
+                raw["finalize_certificate"]["schema"] =
+                    json!("dfmcp-selected-originals-drain-certificate/2");
+                raw["finalize_certificate"]["selected_plans"] = identities;
+                raw["finalize_certificate"]["untracked_work_included"] = json!(false);
+                response["finalize_certificate"] = raw["finalize_certificate"].clone();
+            }
+            let budget = (raw.to_string().len() as u64 + 2_048).div_ceil(4);
+            let fitted = fit(&response.to_string(), budget);
+            let output: Value = serde_json::from_str(&fitted)?;
+            assert_eq!(
+                output["output_budget"]["tier"], "cancellation_receipt",
+                "{output}"
+            );
+            for key in [
+                "selected_plans",
+                "requested_plan_digests",
+                "selected_plans_digest",
+                "finalize_certificate",
+                "error",
+                "unselected_plans_included",
+                "untracked_work_included",
+                "dispatch_handles_restored",
+            ] {
+                assert_eq!(output[key], raw[key], "lost {key}: {output}");
+            }
             assert!(estimate_tokens(&fitted) <= budget);
         }
         Ok(())

@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased — Stop a chosen project group after recovery
+
+- Extend the existing selected-set cancellation scope to exact durable recovered
+  originals alongside current-session commits.
+- Admit every selected archive, receipt, current grant and shared allowance
+  before any effect; reject recovered compensation and conflicting live aliases.
+- Reuse progressive durable drainage and an exact selected final census while
+  preserving unrelated originals, pending reviews and historical proof.
+- Retain recovered owner/archive/custody/step identities in complete output and
+  additive `/2` certificates without restoring dispatch handles.
+- Add mixed/recovered lifetime, admission, ordering, failure/retry and compact
+  output regressions. Full execution evidence remains separate from source.
+
 ## Unreleased — Forecast whole original projects on one shared world
 
 - Add opt-in `forecast_scope: "complete_project"` to `forecast_originals`, with
