@@ -295,10 +295,12 @@ pub(super) struct ProjectRecovery {
     pub(super) clock: Option<ProjectClockRecovery>,
     pub(super) inventory_clock: Option<ProjectClockRecovery>,
     pub(super) manager_origin: Option<Digest32>,
+    pub(super) publication_pending: bool,
 }
 
 #[path = "project_recovery.rs"]
 mod project_recovery;
+pub(crate) use project_recovery::ProjectProductionIntent;
 
 /// Closed child configuration facts needed before the staged parent opens either owner.
 pub(crate) struct ParentMetadata {
@@ -311,7 +313,6 @@ pub(crate) struct ParentMetadata {
     pub(crate) workshop_checkpoint: bool,
     pub(crate) authority_tick_floor: u64,
 }
-
 
 fn family_environment() -> Result<[String; 3]> {
     if std::env::var(OPT_IN).ok().as_deref() != Some("1")
@@ -460,6 +461,92 @@ fn decode_input(raw: &str) -> Result<Input> {
     Ok(input)
 }
 
+fn decode_recovery(
+    r: RecoveryInput,
+    has_clock: bool,
+    has_inventory_clock: bool,
+) -> Result<Recovery> {
+    let fortress = r
+        .anchor
+        .fortress_id
+        .parse::<u64>()
+        .map_err(|_| invalid("invalid recovery fortress"))?;
+    if fortress == 0
+        || fortress.to_string() != r.anchor.fortress_id
+        || r.anchor.epoch >= u64::from(u32::MAX)
+    {
+        return Err(invalid("invalid combined recovery anchor"));
+    }
+    let frontier = durable::Recovery {
+        journal_id: digest(&r.frontier.journal_id)?,
+        head: digest(&r.frontier.head)?,
+        authority_tick_floor: r.frontier.authority_tick_floor,
+    };
+    frontier.validate()?;
+    let portfolio = r.portfolio.map(|entries| {
+        if entries.is_empty() || entries.len() > 4 {
+            return Err(invalid("portfolio recovery requires one to four complete original order slots"));
+        }
+        let mut result = [None; 4];
+        let first = entries[0].step_id;
+        if first > 1 {
+            return Err(invalid("portfolio recovery must start with its original order step zero or one"));
+        }
+        for (index, entry) in entries.into_iter().enumerate() {
+            if entry.step_id != first + index as u32 {
+                return Err(invalid("portfolio recovery slots must name each original order in order"));
+            }
+            let value = PortfolioRecovery { step_id: entry.step_id, goal_history_present: entry.goal_history_present,
+                clock_journal_id: entry.clock_journal_id.as_deref().map(digest).transpose()?,
+                inventory_clock_journal_id: entry.inventory_clock_journal_id.as_deref().map(digest).transpose()? };
+            if value.clock_journal_id.is_some() != has_clock
+                || value.inventory_clock_journal_id.is_some() != has_inventory_clock {
+                return Err(denied("every portfolio slot must retain its independently configured clock custody"));
+            }
+            result[index] = Some(value);
+        }
+        Ok(result)
+    }).transpose()?;
+    Ok(Recovery {
+        seal: PlanArchiveSeal {
+            plan_digest: digest(&r.plan_digest)?,
+            object_digest: digest(&r.object_digest)?,
+        },
+        identity_digest: digest(&r.identity_digest)?,
+        anchor: StateAnchor {
+            fortress_id: FortressId::new(fortress),
+            cursor: ObservationCursor {
+                epoch: r.anchor.epoch,
+                sequence: r.anchor.sequence,
+            },
+            tick: GameTick(r.anchor.tick),
+            state_hash: digest(&r.anchor.state_hash)?,
+        },
+        frontier,
+        goal_history_present: r.goal_history_present,
+        clock_journal_id: r.clock_journal_id.as_deref().map(digest).transpose()?,
+        inventory_clock_journal_id: r
+            .inventory_clock_journal_id
+            .as_deref()
+            .map(digest)
+            .transpose()?,
+        portfolio,
+        workshop_prerequisite_digest: r
+            .workshop_prerequisite_digest
+            .as_deref()
+            .map(digest)
+            .transpose()?,
+        workshop_prerequisite_floor: r.workshop_prerequisite_floor,
+        manager_prerequisite_digest: r
+            .manager_prerequisite_digest
+            .as_deref()
+            .map(digest)
+            .transpose()?,
+        manager_prerequisite_floor: r.manager_prerequisite_floor,
+        input_supply_digest: r.input_supply_digest.as_deref().map(digest).transpose()?,
+        input_supply_floor: r.input_supply_floor,
+    })
+}
 
 fn parse_with_workshop(
     raw: &str,
@@ -570,88 +657,7 @@ fn parse_with_workshop(
     }
     let recovery = input
         .recovery
-        .map(|r| {
-            let fortress = r
-                .anchor
-                .fortress_id
-                .parse::<u64>()
-                .map_err(|_| invalid("invalid recovery fortress"))?;
-            if fortress == 0
-                || fortress.to_string() != r.anchor.fortress_id
-                || r.anchor.epoch >= u64::from(u32::MAX)
-            {
-                return Err(invalid("invalid combined recovery anchor"));
-            }
-            let frontier = durable::Recovery {
-                journal_id: digest(&r.frontier.journal_id)?,
-                head: digest(&r.frontier.head)?,
-                authority_tick_floor: r.frontier.authority_tick_floor,
-            };
-            frontier.validate()?;
-            let portfolio = r.portfolio.map(|entries| {
-                if entries.is_empty() || entries.len() > 4 {
-                    return Err(invalid("portfolio recovery requires one to four complete original order slots"));
-                }
-                let mut result = [None; 4];
-                let first = entries[0].step_id;
-                if first > 1 {
-                    return Err(invalid("portfolio recovery must start with its original order step zero or one"));
-                }
-                for (index, entry) in entries.into_iter().enumerate() {
-                    if entry.step_id != first + index as u32 {
-                        return Err(invalid("portfolio recovery slots must name each original order in order"));
-                    }
-                    let value = PortfolioRecovery { step_id: entry.step_id, goal_history_present: entry.goal_history_present,
-                        clock_journal_id: entry.clock_journal_id.as_deref().map(digest).transpose()?,
-                        inventory_clock_journal_id: entry.inventory_clock_journal_id.as_deref().map(digest).transpose()? };
-                    if value.clock_journal_id.is_some() != clock.is_some()
-                        || value.inventory_clock_journal_id.is_some() != inventory_clock.is_some() {
-                        return Err(denied("every portfolio slot must retain its independently configured clock custody"));
-                    }
-                    result[index] = Some(value);
-                }
-                Ok(result)
-            }).transpose()?;
-            Ok(Recovery {
-                seal: PlanArchiveSeal {
-                    plan_digest: digest(&r.plan_digest)?,
-                    object_digest: digest(&r.object_digest)?,
-                },
-                identity_digest: digest(&r.identity_digest)?,
-                anchor: StateAnchor {
-                    fortress_id: FortressId::new(fortress),
-                    cursor: ObservationCursor {
-                        epoch: r.anchor.epoch,
-                        sequence: r.anchor.sequence,
-                    },
-                    tick: GameTick(r.anchor.tick),
-                    state_hash: digest(&r.anchor.state_hash)?,
-                },
-                frontier,
-                goal_history_present: r.goal_history_present,
-                clock_journal_id: r.clock_journal_id.as_deref().map(digest).transpose()?,
-                inventory_clock_journal_id: r
-                    .inventory_clock_journal_id
-                    .as_deref()
-                    .map(digest)
-                    .transpose()?,
-                portfolio,
-                workshop_prerequisite_digest: r
-                    .workshop_prerequisite_digest
-                    .as_deref()
-                    .map(digest)
-                    .transpose()?,
-                workshop_prerequisite_floor: r.workshop_prerequisite_floor,
-                manager_prerequisite_digest: r
-                    .manager_prerequisite_digest
-                    .as_deref()
-                    .map(digest)
-                    .transpose()?,
-                manager_prerequisite_floor: r.manager_prerequisite_floor,
-                input_supply_digest: r.input_supply_digest.as_deref().map(digest).transpose()?,
-                input_supply_floor: r.input_supply_floor,
-            })
-        })
+        .map(|r| decode_recovery(r, clock.is_some(), inventory_clock.is_some()))
         .transpose()?;
     if let Some(recovery) = recovery {
         if recovery.input_supply_digest.is_some() != input_supply.is_some()

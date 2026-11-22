@@ -55,6 +55,13 @@ mod portfolio;
 mod portfolio_request;
 mod prerequisite_binding;
 mod project;
+#[cfg(all(
+    test,
+    target_os = "linux",
+    any(target_arch = "x86_64", target_arch = "aarch64")
+))]
+#[path = "live_production_runtime/project_publication_runtime_tests.rs"]
+mod project_publication_runtime_tests;
 mod request;
 mod review;
 mod stock_target;
@@ -90,7 +97,7 @@ mod workshop_prerequisite;
 mod workshop_prerequisite_tests;
 pub(crate) use choices::ObserveRequest;
 use clock::ProductionClock;
-pub(crate) use config::Config;
+pub(crate) use config::{Config, ProjectProductionIntent};
 use custody::{GuardedEvidence, SharedCustody};
 pub(crate) use existing_labor_portfolio_request::ExistingLaborPortfolioRequest;
 pub(crate) use existing_labor_request::ExistingLaborRequest;
@@ -426,7 +433,11 @@ impl Runtime {
                     anchor.tick.get().max(r.frontier.authority_tick_floor)
                 })
                 .max(authority_tick_floor)
-                .max(config.project_recovery.map_or(0, |r| r.observation_tick_floor)),
+                .max(
+                    config
+                        .project_recovery
+                        .map_or(0, |r| r.observation_tick_floor),
+                ),
         );
         let mut out = Self {
             config,
@@ -517,10 +528,16 @@ impl Runtime {
             .transpose()?;
         if let Some(recovery) = out.config.project_recovery
             && let Some(witness) = recovery.manager_origin
-            && out.manager.as_ref().ok_or_else(|| denied("project Manager donor is absent"))?
-                .witness()? != witness
+            && out
+                .manager
+                .as_ref()
+                .ok_or_else(|| denied("project Manager donor is absent"))?
+                .witness()?
+                != witness
         {
-            return Err(denied("project Manager donor changed its retained original witness"));
+            return Err(denied(
+                "project Manager donor changed its retained original witness",
+            ));
         }
         if let Some(checkpoint) = out.config.input_supply_checkpoint {
             out.input_supply
@@ -578,7 +595,9 @@ impl Runtime {
         if let Some(recovery) = out.config.project_recovery
             && (wid != recovery.workforce_journal || oid != recovery.order_journal)
         {
-            return Err(denied("project child journals differ from parent-retained custody"));
+            return Err(denied(
+                "project child journals differ from parent-retained custody",
+            ));
         }
         out.workforce_journal = wid;
         out.order_journal = oid;
@@ -1059,8 +1078,36 @@ impl Runtime {
             .iter()
             .map(|r| r.plan().key().to_owned())
             .collect::<std::collections::BTreeSet<_>>();
+        let publication_pending = self
+            .config
+            .project_recovery
+            .is_some_and(|pin| pin.publication_pending);
+        if publication_pending && (!labor_keys.is_empty() || !order_keys.is_empty()) {
+            return Err(denied(
+                "unacknowledged project publication cannot adopt native effect records",
+            ));
+        }
         if let Some(frontier) = &mut self.frontier {
             let retained = frontier.inspect(&work.take(8 * MIB)?)?;
+            if publication_pending {
+                let expected = self
+                    .config
+                    .recovery
+                    .ok_or_else(|| denied("project publication lost its original frontier pin"))?;
+                if retained.recovery.journal_id != expected.frontier.journal_id
+                    || retained.recovery.head != expected.frontier.head
+                    || retained.entries.iter().any(|entry| {
+                        entry.phase != Phase::Pending
+                            || entry.preparation.is_some()
+                            || entry.receipt.is_some()
+                            || entry.dispatch_attempted
+                    })
+                {
+                    return Err(denied(
+                        "unacknowledged project publication must retain its untouched initial execution frontier",
+                    ));
+                }
+            }
             self.parent_frontier_uncertain = retained.needs_reconciliation();
             for entry in retained.entries {
                 if entry.preparation.is_some()
@@ -1563,6 +1610,34 @@ impl Runtime {
             Origins,
         ) -> Result<PreparedPlan>,
     ) -> Result<View> {
+        self.plan_existing_workers_recorded(
+            observation,
+            selection,
+            portfolio,
+            objectives,
+            inputs,
+            c,
+            None,
+            compile,
+        )
+    }
+    fn plan_existing_workers_recorded(
+        &mut self,
+        observation: Digest32,
+        selection: (Vec<dfmcp_core::EntityId>, String),
+        portfolio: bool,
+        objectives: &[&orders::request::Objective],
+        inputs: PlanInputs,
+        c: &OperationContext,
+        publication: Option<project::ProjectPublication<'_>>,
+        compile: impl FnOnce(
+            &PredicateEvidence<'_>,
+            &ExistingLaborRequirement,
+            &InventoryBaselines,
+            &OperationContext,
+            Origins,
+        ) -> Result<PreparedPlan>,
+    ) -> Result<View> {
         let (selected, labor) = selection;
         let basis = self
             .basis
@@ -1574,12 +1649,13 @@ impl Runtime {
             denied("existing-labor planning requires a fresh selected workforce capture")
         })?;
         let scope = self.config.workforce.acceptance().clone();
-        self.plan_compiled(
+        self.plan_compiled_recorded(
             observation,
             portfolio,
             objectives,
             inputs,
             c,
+            publication,
             |evidence, baselines, current, origin| {
                 let identity =
                     LiveRoutingEvidence::citizens_v1(evidence.clone(), &projection, &capsule)?;
@@ -1627,6 +1703,23 @@ impl Runtime {
         objectives: &[&orders::request::Objective],
         inputs: PlanInputs,
         c: &OperationContext,
+        compile: impl FnOnce(
+            &PredicateEvidence<'_>,
+            &InventoryBaselines,
+            &OperationContext,
+            Origins,
+        ) -> Result<PreparedPlan>,
+    ) -> Result<View> {
+        self.plan_compiled_recorded(observation, portfolio, objectives, inputs, c, None, compile)
+    }
+    fn plan_compiled_recorded(
+        &mut self,
+        observation: Digest32,
+        portfolio: bool,
+        objectives: &[&orders::request::Objective],
+        inputs: PlanInputs,
+        c: &OperationContext,
+        publication: Option<project::ProjectPublication<'_>>,
         compile: impl FnOnce(
             &PredicateEvidence<'_>,
             &InventoryBaselines,
@@ -1716,6 +1809,26 @@ impl Runtime {
         )?;
         let layout = host_plan(&plan)?;
         let expected = layout.archive_seal();
+        // Header identity includes the exact compiling session and request.
+        // Derive it once before the parent ACK and reuse it for publication.
+        let recovery = durable::initial_recovery(&plan, &work.take(2 * MIB)?)?;
+        let publication_intent = if let Some(publication) = publication {
+            let intent = self.project_production_intent(
+                publication.goal,
+                &plan,
+                expected,
+                basis.capsule.content_digest,
+                recovery,
+                origins,
+                &work.take(4 * MIB)?,
+            )?;
+            (publication.acknowledge)(&intent, &work.current()?)?;
+            self.config.current()?;
+            work.current()?;
+            Some(intent)
+        } else {
+            None
+        };
         // From this point failures preserve partial publication and forbid another
         // plan in this owner. No native prepare/commit has been reached.
         self.initialization_failed = true;
@@ -1748,7 +1861,6 @@ impl Runtime {
                 &work.take(64 * MIB)?,
             )?;
         }
-        let recovery = durable::initial_recovery(&plan, &work.take(2 * MIB)?)?;
         self.seal = Some(expected);
         self.identity_digest = Some(identity_digest);
         self.original = Some(plan.clone());
@@ -1778,6 +1890,11 @@ impl Runtime {
             recovery,
             true,
         )?);
+        if let Some(intent) = &publication_intent {
+            // Compare the actual retained seals with the pre-write descriptor,
+            // including native associations, before installing an executor.
+            intent.validate_checkpoint(&self.project_recovery_reference())?;
+        }
         self.create_executor(&mut work)?;
         if let Some(basis) = &mut self.basis {
             basis.choices = None;

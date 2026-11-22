@@ -85,6 +85,27 @@
     "silent_repair": false,
     "automatic_redispatch": false
   },
+  "production_publication": {
+    "intent_schema": "dfmcp.project-production-intent/1",
+    "checkpoint_field": "production_intent",
+    "exact_compiled_original_required": true,
+    "control_and_plan_authority_required": true,
+    "intent_ack_before_any_original_child_write": true,
+    "intent_immutable_through_cancellation_and_replay": true,
+    "unchanged_preplan_child_checkpoint_at_intent_ack": true,
+    "prepaid_intent_and_final_checkpoint": true,
+    "lost_selectors_derived_from_acknowledged_intent": true,
+    "complete_existing_child_custody_required": true,
+    "pending_adoption_requires_initial_execution_frontier": true,
+    "pending_adoption_requires_empty_native_effect_journals": true,
+    "pending_adoption_allows_goal_history_or_clock_runs": false,
+    "source_rejection_floors_and_fences_joined_monotonically": true,
+    "no_work_creates_intent": false,
+    "legacy_journal_canonical_encoding_preserved": true,
+    "unrecorded_original_adoption": false,
+    "partial_publication_repaired": false,
+    "native_preparation_restored": false
+  },
   "bounds": {
     "max_wall_millis": 60000,
     "default_byte_work": 17179869184,
@@ -102,7 +123,8 @@
     "ledger_operation_byte_work": 134217728,
     "original_bytes": 65536,
     "handoff_bytes": 65536,
-    "child_checkpoint_bytes": 32768
+    "child_checkpoint_bytes": 32768,
+    "production_intent_bytes": 32768
   },
   "output": {
     "agent_turn_schema": "dfmcp.agent_turn/1",
@@ -118,14 +140,16 @@
     "final_publication_rechecks_original_wall_bound": true,
     "canonical_cross_family_anchor": false,
     "no_work_census_is_current_stability_proof": false,
-    "close_retains_owner_until_complete_recovery_encoded": true
+    "close_retains_owner_until_complete_recovery_encoded": true,
+    "pending_production_publication_explicit": true,
+    "pending_publication_offers_native_confirmation": false
   },
   "unsupported": [
     "automatic_tree_designation",
     "automatic_manager_appointment",
     "generic_mixed_family_plan",
     "world_checkpoint_restore",
-    "automatic_adoption_of_unacknowledged_production_original",
+    "adoption_of_production_original_without_acknowledged_prior_intent",
     "production_admission"
   ],
   "production_admitted": false,
@@ -162,6 +186,10 @@
     "tests/stdio/gameplay_cli.py",
     "crates/dfmcp-mcp/src/live_production_runtime/project_recovery.rs",
     "crates/dfmcp-mcp/src/live_production_runtime/project_recovery_tests.rs",
+    "crates/dfmcp-mcp/src/live_production_runtime/project_publication_runtime_tests.rs",
+    "tests/stdio/project_publication_runtime_peer.py",
+    "crates/dfmcp-mcp/src/live_production_runtime/workshop_prerequisite.rs",
+    "crates/dfmcp-mcp/src/live_production_runtime/manager_prerequisite.rs",
     "crates/dfmcp-mcp/src/live_production_runtime/clock.rs",
     "crates/dfmcp-mcp/src/live_production_runtime/inventory_clock.rs",
     "crates/dfmcp-mcp/src/semantic_work_order_runtime/clock.rs",
@@ -173,7 +201,13 @@
   "qualification": {
     "pre_outage_ledger_component_cases_passed": 17,
     "private_linux_storage_cases_included": 2,
-    "reconstructed_source_replay": false,
+    "reconstructed_source_replay": true,
+    "complete_actual_adapter_library_metadata_checked": true,
+    "exact_source_component_library_and_test_metadata_checked": true,
+    "exact_source_component_executable_regressions_passed": true,
+    "exact_source_component_cases_passed": 82,
+    "exact_source_component_source_hashes": 2282,
+    "exact_source_component_proof_sha256": "f195c238253e6dc8acbfb7bbdf6b81aa88ef0ae96ebb91a031f911d5c966354e",
     "integrated_rust_qualified": false,
     "modern_stdio_qualified": false,
     "live_dfhack_qualified": false

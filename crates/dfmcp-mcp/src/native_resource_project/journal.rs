@@ -89,6 +89,10 @@ pub(crate) struct Checkpoint {
     pub(crate) workshop: Option<Value>,
     pub(crate) handoff: Option<Value>,
     pub(crate) production: Option<Value>,
+    /// A child-minted exact original publication intent, acknowledged before
+    /// the child can write that original. Absence keeps v1 canonical bytes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) production_intent: Option<Value>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -214,6 +218,9 @@ fn validate_snapshot(snapshot: &Snapshot) -> Result<()> {
     if let Some(value) = &c.production {
         value_bytes(value, MAX_CHECKPOINT)?;
     }
+    if let Some(value) = &c.production_intent {
+        value_bytes(value, MAX_CHECKPOINT)?;
+    }
     let phase = if snapshot.stage == Stage::Cancelled {
         snapshot.cancelled_from.ok_or_else(conflict)?
     } else {
@@ -222,18 +229,26 @@ fn validate_snapshot(snapshot: &Snapshot) -> Result<()> {
         }
         snapshot.stage
     };
+    if c.production_intent.is_some() && phase != Stage::Production {
+        return Err(conflict());
+    }
     let valid = match phase {
         Stage::WorkshopOpening => c == &Checkpoint::default(),
         Stage::Workshop => c.workshop.is_some() && c.handoff.is_none() && c.production.is_none(),
         Stage::Transition | Stage::ProductionOpening => {
             c.workshop.is_some() && c.handoff.is_some() && c.production.is_none()
         }
-        Stage::Production => {
-            c.workshop.is_some() && c.handoff.is_some() && c.production.is_some()
-        }
+        Stage::Production => c.workshop.is_some() && c.handoff.is_some() && c.production.is_some(),
         Stage::Cancelled => false,
     };
-    if valid { Ok(()) } else { Err(conflict()) }
+    if !valid {
+        return Err(conflict());
+    }
+    if let Some(value) = &c.production_intent {
+        let intent = crate::live_production_runtime::ProjectProductionIntent::from_json(value)?;
+        intent.validate_checkpoint(c.production.as_ref().ok_or_else(conflict)?)?;
+    }
+    Ok(())
 }
 
 fn transition(old: &Snapshot, new: &Snapshot) -> Result<()> {
@@ -245,6 +260,34 @@ fn transition(old: &Snapshot, new: &Snapshot) -> Result<()> {
     }
     if before.handoff.is_some() && before.workshop != after.workshop {
         return Err(conflict());
+    }
+    if before.production_intent.is_some() && before.production_intent != after.production_intent {
+        return Err(conflict());
+    }
+    if before.production_intent.is_some() {
+        // The child owns descriptor semantics. Reuse the parent's ordinary
+        // original/floor continuity check so even a checksummed replay cannot
+        // erase a published original or newer sticky rejection evidence.
+        super::continuity::same_original(
+            before.production.as_ref().ok_or_else(conflict)?,
+            after.production.as_ref().ok_or_else(conflict)?,
+        )?;
+    }
+    if before.production_intent.is_none() && after.production_intent.is_some() {
+        // The intent itself must be independently acknowledged while the
+        // existing child still has no original. It cannot be combined with
+        // child publication, stage opening, cancellation or a replay update.
+        if old.stage != Stage::Production
+            || new.stage != Stage::Production
+            || before.production != after.production
+            || before
+                .production
+                .as_ref()
+                .and_then(|value| value.get("recovery"))
+                != Some(&Value::Null)
+        {
+            return Err(conflict());
+        }
     }
     if new.stage == Stage::Cancelled && old.stage != Stage::Cancelled {
         return if new.cancelled_from == Some(old.stage) && before == after {
@@ -562,8 +605,7 @@ impl<S: EffectJournalStorage, A: EffectJournalStorage> Journal<S, A> {
                 .get(expected.frames as usize - 1)
                 .ok_or_else(corrupt)?;
             require(
-                expected.head == head.digest.to_hex()
-                    && expected.authority_tick_floor >= head.tick,
+                expected.head == head.digest.to_hex() && expected.authority_tick_floor >= head.tick,
             )?;
             high_tick = high_tick.max(expected.authority_tick_floor);
         }
@@ -591,13 +633,7 @@ impl<S: EffectJournalStorage, A: EffectJournalStorage> Journal<S, A> {
                 );
                 let mut next = ack_raw.clone();
                 next.extend_from_slice(&record);
-                publish(
-                    &mut acknowledgements,
-                    &ack_raw,
-                    &next,
-                    MAX_ACK_BYTES,
-                    &work,
-                )?;
+                publish(&mut acknowledgements, &ack_raw, &next, MAX_ACK_BYTES, &work)?;
                 ack_raw = next;
                 (acknowledged_frames, ack_chain) = replay_ack(&ack_raw, &decoded, &work)?;
             }
@@ -690,12 +726,7 @@ impl<S: EffectJournalStorage, A: EffectJournalStorage> Journal<S, A> {
     fn capacity(&self, added: usize, stopping: bool) -> Result<()> {
         let reserve = if stopping { 0 } else { MAX_FRAME };
         let frames = if stopping { 1 } else { 2 };
-        if self
-            .raw
-            .len()
-            .saturating_add(added)
-            .saturating_add(reserve)
-            > MAX_BYTES
+        if self.raw.len().saturating_add(added).saturating_add(reserve) > MAX_BYTES
             || self.pin.frames.saturating_add(frames) > MAX_FRAMES
             || self
                 .ack_raw
@@ -732,9 +763,13 @@ impl<S: EffectJournalStorage, A: EffectJournalStorage> Journal<S, A> {
     fn append(&mut self, context: &OperationContext, snapshot: Snapshot) -> Result<Pin> {
         let starts_stage = self.snapshot.stage != snapshot.stage
             && matches!(snapshot.stage, Stage::Transition | Stage::ProductionOpening);
-        self.access(context, starts_stage)?;
+        let starts_intent = self.snapshot.checkpoint.production_intent.is_none()
+            && snapshot.checkpoint.production_intent.is_some();
+        self.access(context, starts_stage || starts_intent)?;
         let work = Work::new(context)?;
-        if self.mode == Mode::Offline || (starts_stage && self.mode != Mode::Control) {
+        if self.mode == Mode::Offline
+            || ((starts_stage || starts_intent) && self.mode != Mode::Control)
+        {
             return Err(conflict());
         }
         transition(&self.snapshot, &snapshot)?;
@@ -753,7 +788,9 @@ impl<S: EffectJournalStorage, A: EffectJournalStorage> Journal<S, A> {
         next_raw.extend_from_slice(&record);
         let head = Head {
             digest: Digest32::from_bytes(
-                record[record.len() - 32..].try_into().map_err(|_| corrupt())?,
+                record[record.len() - 32..]
+                    .try_into()
+                    .map_err(|_| corrupt())?,
             ),
             tick: self.high_tick,
         };
@@ -801,9 +838,14 @@ fn publish<S: EffectJournalStorage>(
     require(next.starts_with(old) && next.len() > old.len() && next.len() <= maximum)?;
     storage.validate_identity().map_err(|_| corrupt())?;
     require(storage.seek(SeekFrom::End(0)).map_err(|_| corrupt())? == old.len() as u64)?;
-    storage.write_all(&next[old.len()..]).map_err(|_| corrupt())?;
+    storage
+        .write_all(&next[old.len()..])
+        .map_err(|_| corrupt())?;
     work.check()?;
-    storage.flush().and_then(|_| storage.sync()).map_err(|_| corrupt())?;
+    storage
+        .flush()
+        .and_then(|_| storage.sync())
+        .map_err(|_| corrupt())?;
     require(read(storage, maximum, work)? == next)?;
     Ok(())
 }

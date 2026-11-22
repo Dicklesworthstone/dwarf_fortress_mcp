@@ -1,5 +1,65 @@
 # Implementation Status
 
+## Unreleased — Recover the exact original after interrupted production publication
+
+The native resource project now acknowledges a closed
+`dfmcp.project-production-intent/1` descriptor before its production child writes
+the original plan archive, citizen capsule, prerequisite associations or
+execution journal. The descriptor fixes the compiled plan and archive digests,
+canonical citizen identity, initial execution frontier, exact Workshop/Manager
+donors, input binding and policy, native custodians and original root goal.
+Separate parent intent and final-checkpoint work are reserved before child
+source reads. The no-work census path creates neither an intent nor an order.
+
+After a crash or lost parent checkpoint, the parent can derive the exact child
+selectors from its acknowledged intent and reopen the existing complete files.
+Ordinary child byte, association, custody and ancestry checks still apply. A
+pending publication additionally requires its initial untouched frontier, empty
+native effect journals and no goal history or clock runs. Acknowledged originals
+continue through their ordinary authenticated descendants. Newer rejection
+floors and sticky source fences survive both paths. Missing, partial, foreign
+or unexpected advanced publication refuses; initialization, replacement,
+resizing, dispatch and native review restoration are never recovery actions.
+
+Intent introduction requires Control mode and current Plan authority while the
+prior child checkpoint still has no original. Replay enforces the same stage
+and identity rules; later checkpoints and cancellation cannot clear or replace
+the intent. The optional field preserves old canonical journal bytes. Agent
+Turns explicitly retain pending publication, its exact digest and recovery
+pointer while withholding stale reviews and replacement-plan recommendations.
+
+The complete actual adapter passes latest-nightly library metadata checking.
+The full MCP dependency build was killed while checking unchanged Asupersync
+0.5.0 before repository diagnostics, even with one frontend and backend job.
+An exact-source component passes locked/offline library and test-target
+metadata checking, including the parent and child recovery owners, their new
+tests and the actual native-peer campaign. It retains the complete real core,
+world, intent, adapter and laboratory crates and the selected MCP owner bodies;
+eleven dependency identities match the repository lockfile. FastMCP transport
+and codec functions, unrelated modules and actual Asupersync scheduling are
+excluded; explicit synchronous I/O-capable context glue is used. Toolchain:
+`rustc 1.102.0-nightly (bdf712ee8 2026-11-21)`. All 82 distinct selected tests
+pass: 41 native parent tests, eight child recovery tests, five project
+configuration tests, four ordinary stock-target runtime campaigns, nineteen
+combined-configuration compatibility cases, four fixed-goal tests and the new
+actual Runtime/native-TCP/private-file publication campaign. The latter covers
+no-work and refused-ACK zero writes, exact lost-selector recovery, absent and
+corrupt original files, foreign seals, partial publication and advanced native
+Prepare refusal. Recovery makes no native calls and changes no custody bytes.
+Two fixtures were corrected: consistent Carpenter bytes at observation and
+native Prepare, and the assigned-plan test's two-action budget. No owner behavior
+was weakened. The frozen component proof covers 2,282 source hashes; all seventy
+selected recovery paths match. Proof SHA-256:
+`f195c238253e6dc8acbfb7bbdf6b81aa88ef0ae96ebb91a031f911d5c966354e`.
+Agent, dependency, implementation
+status and Workshop source gates plus all eleven Workshop inventory negatives
+pass. Mandatory verification reaches missing `br`; release qualification
+refuses the changing worktree. No full MCP transport, full qualification,
+live-game or production-admission claim follows from this component evidence.
+
+Owner: `dfmcp-reality-wiring-proof-4bf.14.8`, under the still-open native
+dispatcher and gameplay owners. See `docs/NATIVE_RESOURCE_PROJECT_MCP.md`.
+
 ## Unreleased — Own Workshop construction and a fixed stock target in one native session
 
 The new explicitly unadmitted `dfmcp-native-resource-project-dev-server`
@@ -40,8 +100,9 @@ Additional parent, child-goal, handoff, recovery and output regressions are
 authored. No full current-source execution or admission claim is made.
 
 An already completed Tree donor can provide Workshop material. Automatic Tree
-designation, Manager appointment, generic mixed-family planning and adoption of
-a child original whose parent checkpoint was never acknowledged remain open.
+designation, Manager appointment and generic mixed-family planning remain open.
+The original publication recovery gap at this checkpoint is addressed by the
+later acknowledged-intent increment above; unrecorded originals still refuse.
 The registry and production runner map are unchanged. Owners
 `df-dfhack-bridge-plane-c-pic.4` and `dfmcp-reality-wiring-proof-4bf.14`
 remain in progress. See `docs/NATIVE_RESOURCE_PROJECT_MCP.md`.

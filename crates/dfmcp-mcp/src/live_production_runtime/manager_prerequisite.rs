@@ -443,6 +443,41 @@ impl SharedManager {
             .map_err(|_| denied("manager prerequisite owner is unavailable"))?
             .qualify(c)
     }
+    /// Predict the exact original association after qualification, without
+    /// creating or repairing any private publication file.
+    pub(super) fn publication_seal(
+        &self,
+        plan: &PreparedPlan,
+        c: &OperationContext,
+    ) -> Result<Digest32> {
+        c.authorize(Capability::Plan, RiskTier::Guarded, &[], None)?;
+        let work = Work::new(c)?;
+        if work.bytes < MIB {
+            return Err(exhausted(
+                "project prerequisite publication allowance exhausted",
+            ));
+        }
+        let owner = self
+            .0
+            .try_lock()
+            .map_err(|_| denied("manager prerequisite owner is unavailable"))?;
+        (owner.guard)()?;
+        if owner.association.is_some()
+            || owner.origin.is_fenced()
+            || owner.last.as_ref().is_none_or(|current| {
+                current.anchor() != plan.anchor
+                    || current.origin_witness() != owner.origin.witness()
+            })
+        {
+            return Err(denied(
+                "project publication requires its freshly qualified original prerequisite",
+            ));
+        }
+        let seal = Digest32::of_bytes(&association_bytes(plan, &owner.config, &owner.origin)?);
+        (owner.guard)()?;
+        work.current()?;
+        Ok(seal)
+    }
     pub(super) fn bind(
         &self,
         path: &Path,

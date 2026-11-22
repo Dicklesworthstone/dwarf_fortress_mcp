@@ -4,14 +4,22 @@
 //! native family, replace an original, renew its deadline, or promote an order
 //! receipt into proof of the complete labor and inventory goal.
 use super::{
-    ProductionClock, ProductionInventoryClock, Runtime, StockTargetRequest, View, request,
-    stock_target_binding, workshop_binding,
+    ProductionClock, ProductionInventoryClock, ProjectProductionIntent, Runtime,
+    StockTargetRequest, View, request, stock_target_binding, workshop_binding,
 };
 use crate::semantic_workforce_runtime::{denied, invalid};
 use dfmcp_adapter::live_production::ProductionLayout;
 use dfmcp_core::{Digest32, OperationContext, Result, StateAnchor};
 use dfmcp_intent::{Action, PreparedPlan, effects::MAX_DEFAULT_OBLIGATION_TICKS};
 use serde::{Deserialize, Serialize};
+
+/// The parent owns the durable ACK; this borrowed callback cannot outlive the
+/// single planning call or become a preparation/dispatch permit.
+pub(super) struct ProjectPublication<'a> {
+    pub(super) goal: &'a ProjectStockGoal,
+    pub(super) acknowledge:
+        &'a mut dyn FnMut(&ProjectProductionIntent, &OperationContext) -> Result<()>,
+}
 
 /// Complete caller-selected goal retained by the parent before either child
 /// opens. Worker identities are chosen from a fresh production observation;
@@ -232,10 +240,17 @@ impl Runtime {
     /// from initialize to reopen. This deliberately carries no current goal
     /// proof, review, or permit and is available after a failed child call.
     pub(crate) fn project_recovery_reference(&self) -> serde_json::Value {
-        let clock = self.clock.as_ref().map(ProductionClock::project_recovery_checkpoint);
-        let inventory_clock = self.inventory_clock.as_ref()
+        let clock = self
+            .clock
+            .as_ref()
+            .map(ProductionClock::project_recovery_checkpoint);
+        let inventory_clock = self
+            .inventory_clock
+            .as_ref()
             .map(ProductionInventoryClock::project_recovery_checkpoint);
-        let floor = self.authority_tick_floor().get()
+        let floor = self
+            .authority_tick_floor()
+            .get()
             .max(clock.map_or(0, |pin| pin.authority_tick_floor))
             .max(inventory_clock.map_or(0, |pin| pin.authority_tick_floor));
         let mut recovery = self.recovery_json();
@@ -247,15 +262,16 @@ impl Runtime {
             recovery["inventory_clock_journal_id"] =
                 serde_json::json!(inventory_clock.map(|pin| pin.journal_id.to_hex()));
             let frontier_floor = recovery["frontier"]["authority_tick_floor"]
-                .as_u64().unwrap_or(0).max(floor);
+                .as_u64()
+                .unwrap_or(0)
+                .max(floor);
             recovery["frontier"]["authority_tick_floor"] = serde_json::json!(frontier_floor);
         }
         // Keep identities and monotone rejection floors only. Whole original
         // worker predicates, proof diagnostics and source censuses belong to
         // their existing child stores, not the parent's compact checkpoint.
-        let checkpoint = |status: serde_json::Value| {
-            serde_json::json!({"checkpoint": status["checkpoint"]})
-        };
+        let checkpoint =
+            |status: serde_json::Value| serde_json::json!({"checkpoint": status["checkpoint"]});
         serde_json::json!({
             "schema": "dfmcp.project-production-recovery/1",
             "recovery": recovery,
@@ -286,6 +302,137 @@ impl Runtime {
         goal.validate_request(&request)?;
         self.project_workshop_origin(goal)?;
         self.plan_stock_target(request, c)
+    }
+
+    pub(crate) fn project_plan_stock_target_recorded(
+        &mut self,
+        goal: &ProjectStockGoal,
+        request: StockTargetRequest,
+        c: &OperationContext,
+        acknowledge: &mut dyn FnMut(&ProjectProductionIntent, &OperationContext) -> Result<()>,
+    ) -> Result<View> {
+        goal.validate_request(&request)?;
+        self.project_workshop_origin(goal)?;
+        self.plan_stock_target_recorded(request, c, Some(ProjectPublication { goal, acknowledge }))
+    }
+
+    /// All values below come from the completed compiler and retained source
+    /// owners. The future archive, capsule and associations have not been
+    /// created. The exact header identity is reused by their later publication.
+    pub(super) fn project_production_intent(
+        &self,
+        goal: &ProjectStockGoal,
+        plan: &PreparedPlan,
+        seal: dfmcp_intent::plan_archive::PlanArchiveSeal,
+        identity: Digest32,
+        frontier: dfmcp_adapter::live_dispatch::durable::Recovery,
+        origins: super::Origins,
+        c: &OperationContext,
+    ) -> Result<ProjectProductionIntent> {
+        goal.validate_original(plan, self.project_workshop_origin(goal)?)?;
+        if self.original.is_some() || self.frontier.is_some() || self.initialization_failed {
+            return Err(denied(
+                "project publication cannot replace an existing original",
+            ));
+        }
+        let mut work = super::Work::new(c)?;
+        let mut reference = self.project_recovery_reference();
+        let floor = reference["observation_tick_floor"]
+            .as_u64()
+            .ok_or_else(|| invalid("project publication lost its authority floor"))?
+            .max(frontier.authority_tick_floor);
+        let mut recovery = serde_json::json!({
+            "plan_digest": seal.plan_digest.to_hex(),
+            "object_digest": seal.object_digest.to_hex(),
+            "identity_digest": identity.to_hex(),
+            "anchor": super::anchor_json(plan.anchor),
+            "frontier": {
+                "journal_id": frontier.journal_id.to_hex(),
+                "head": frontier.head.to_hex(),
+                "authority_tick_floor": floor,
+            },
+            "goal_history_present": false,
+            "clock_journal_id": reference["clock"]["journal_id"],
+            "inventory_clock_journal_id": reference["inventory_clock"]["journal_id"],
+        });
+        if let Some(owner) = &self.workshop {
+            recovery["workshop_prerequisite_digest"] = serde_json::json!(
+                owner
+                    .publication_seal(plan, &work.take(super::MIB)?)?
+                    .to_hex()
+            );
+            recovery["workshop_prerequisite_floor"] = owner.recovery_floor();
+        }
+        if let Some(owner) = &self.manager {
+            recovery["manager_prerequisite_digest"] = serde_json::json!(
+                owner
+                    .publication_seal(plan, &work.take(super::MIB)?)?
+                    .to_hex()
+            );
+            recovery["manager_prerequisite_floor"] = owner.recovery_floor();
+        }
+        let input_policy_witness = match (&self.input_supply, origins.input_supply) {
+            (Some(owner), Some(binding)) => {
+                let policy = reference["input_supply"]["checkpoint"]["origin_witness"]
+                    .as_str()
+                    .ok_or_else(|| denied("project input policy checkpoint is absent"))?
+                    .to_owned();
+                recovery["input_supply_digest"] = serde_json::json!(binding.witness().to_hex());
+                recovery["input_supply_floor"] = owner.recovery_floor();
+                reference["input_supply"]["checkpoint"]["origin_witness"] =
+                    serde_json::json!(binding.witness().to_hex());
+                Some(policy)
+            }
+            (None, None) => None,
+            _ => return Err(denied("project publication changed its input source owner")),
+        };
+        reference["recovery"] = recovery;
+        reference["observation_tick_floor"] = serde_json::json!(floor);
+        self.config.current()?;
+        work.current()?;
+        ProjectProductionIntent::new(goal.clone(), reference, input_policy_witness)
+    }
+
+    /// Actual child opening has already authenticated every original byte and
+    /// donor association and verified coordinator ancestry. A pending parent
+    /// publication additionally requires the untouched initial frontier.
+    pub(crate) fn validate_project_publication(
+        &self,
+        goal: &ProjectStockGoal,
+        intent: &ProjectProductionIntent,
+    ) -> Result<()> {
+        intent.validate_goal(goal)?;
+        let plan = self
+            .original
+            .as_ref()
+            .ok_or_else(|| denied("project publication has no complete durable original"))?;
+        goal.validate_original(plan, self.project_workshop_origin(goal)?)?;
+        intent.validate_checkpoint(&self.project_recovery_reference())?;
+        if self
+            .config
+            .project_recovery
+            .is_some_and(|pin| pin.publication_pending)
+        {
+            let frontier = self
+                .frontier
+                .as_ref()
+                .ok_or_else(|| denied("project publication lost its exact initial frontier"))?;
+            intent.validate_initial_frontier(frontier.recovery())?;
+            if self.goal_history_present
+                || self.portfolio.is_some()
+                || self.stock_targets.is_some()
+                || self.clock.as_ref().is_some_and(ProductionClock::has_runs)
+                || self
+                    .inventory_clock
+                    .as_ref()
+                    .is_some_and(ProductionInventoryClock::has_runs)
+            {
+                return Err(denied(
+                    "unacknowledged project publication cannot contain execution history",
+                ));
+            }
+        }
+        self.config.current()
     }
 
     /// Read typed retained proof after a successful ordinary child operation.

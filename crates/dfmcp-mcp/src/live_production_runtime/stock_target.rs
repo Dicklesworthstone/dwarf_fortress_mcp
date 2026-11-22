@@ -348,6 +348,15 @@ impl Runtime {
         request: StockTargetRequest,
         c: &OperationContext,
     ) -> Result<View> {
+        self.plan_stock_target_recorded(request, c, None)
+    }
+
+    pub(super) fn plan_stock_target_recorded(
+        &mut self,
+        request: StockTargetRequest,
+        c: &OperationContext,
+        publication: Option<project::ProjectPublication<'_>>,
+    ) -> Result<View> {
         request.validate()?;
         self.check(c, true)?;
         self.stock_target_no_work = None;
@@ -440,24 +449,26 @@ impl Runtime {
             // The qualified assessment already owns the one inventory baseline.
             // Reuse the ordinary assignment compiler and durable two-step owner;
             // neither acquire a second baseline nor bypass native labor review.
-            return self.plan_compiled(
+            return self.plan_compiled_recorded(
                 request.observation()?,
                 false,
                 &[],
                 PlanInputs::captured(std::slice::from_ref(&assessment))?,
                 &work.current()?,
+                publication,
                 |evidence, _, current, origin| {
                     request.compile_with_labor_assignment(&assessment, evidence, current, origin)
                 },
             );
         }
-        self.plan_existing_workers(
+        self.plan_existing_workers_recorded(
             request.observation()?,
             (request.unit_ids()?, request.labor.clone()),
             false,
             &[],
             PlanInputs::captured(std::slice::from_ref(&assessment))?,
             &work.current()?,
+            publication,
             |evidence, requirement, _, current, origin| {
                 request.compile(&assessment, evidence, requirement, current, origin)
             },

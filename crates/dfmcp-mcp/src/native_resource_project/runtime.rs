@@ -2,10 +2,10 @@
 //! Child custody remains effect authority; the parent owns stage order and stop policy.
 use super::config::{Config, runtime_io};
 use super::continuity;
-use super::journal::{self, Checkpoint, Mode, Stage};
 use super::error;
+use super::journal::{self, Checkpoint, Mode, Stage};
 use crate::live_production_runtime::{
-    Config as ProductionConfig, Mode as ProductionMode, ObserveRequest,
+    Config as ProductionConfig, Mode as ProductionMode, ObserveRequest, ProjectProductionIntent,
     Runtime as ProductionRuntime, StockTargetRequest,
 };
 use crate::semantic_work_order_runtime::clock::RunRequest;
@@ -16,8 +16,8 @@ use crate::workshop_construction_server::{
 };
 use dfmcp_adapter::workshop_construction::journal::WorkshopMode;
 use dfmcp_core::{
-    Capability, Digest32, ErrorCode, GameTick, OperationContext, RequestId, Result,
-    RiskTier, SessionId, WorkBudget,
+    Capability, Digest32, ErrorCode, GameTick, OperationContext, RequestId, Result, RiskTier,
+    SessionId, WorkBudget,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -34,13 +34,23 @@ fn denied(message: &str) -> dfmcp_core::DfmcpError {
     error(ErrorCode::CapabilityDenied, message)
 }
 fn exhausted() -> dfmcp_core::DfmcpError {
-    error(ErrorCode::BudgetExceeded, "resource project work or output bound exhausted")
+    error(
+        ErrorCode::BudgetExceeded,
+        "resource project work or output bound exhausted",
+    )
 }
 fn digest(raw: &str) -> Result<Digest32> {
-    if raw.len() != 64 || !raw.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
-        return Err(invalid("project digest requires 64 lowercase hexadecimal characters"));
+    if raw.len() != 64
+        || !raw
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    {
+        return Err(invalid(
+            "project digest requires 64 lowercase hexadecimal characters",
+        ));
     }
-    Digest32::from_hex(raw).filter(|d| *d != Digest32::ZERO)
+    Digest32::from_hex(raw)
+        .filter(|d| *d != Digest32::ZERO)
         .ok_or_else(|| invalid("invalid project digest"))
 }
 fn workshop_mode(mode: Mode) -> WorkshopMode {
@@ -62,7 +72,11 @@ pub(super) enum Action {
     Observe(Option<String>),
     Inspect,
     Plan(String),
-    Commit { seal: String, confirmed: bool, scope: Option<String> },
+    Commit {
+        seal: String,
+        confirmed: bool,
+        scope: Option<String>,
+    },
     Wait(Option<String>),
     Cancel(Option<String>),
 }
@@ -76,16 +90,23 @@ impl Work {
     fn new(ceiling: WorkBudget, start: Instant) -> Result<Self> {
         ceiling.validate()?;
         Ok(Self {
-            start, ceiling,
-            bytes: ceiling.max_bytes.checked_sub(RESPONSE_BYTES).ok_or_else(exhausted)?,
+            start,
+            ceiling,
+            bytes: ceiling
+                .max_bytes
+                .checked_sub(RESPONSE_BYTES)
+                .ok_or_else(exhausted)?,
         })
     }
     fn remaining(&self) -> Result<WorkBudget> {
         runtime_io()?;
         let elapsed = u64::try_from(self.start.elapsed().as_millis()).map_err(|_| exhausted())?;
         let mut budget = self.ceiling;
-        budget.max_wall_millis = budget.max_wall_millis.checked_sub(elapsed)
-            .filter(|millis| *millis > 0).ok_or_else(exhausted)?;
+        budget.max_wall_millis = budget
+            .max_wall_millis
+            .checked_sub(elapsed)
+            .filter(|millis| *millis > 0)
+            .ok_or_else(exhausted)?;
         budget.max_bytes = self.bytes;
         Ok(budget)
     }
@@ -97,8 +118,12 @@ impl Work {
         Ok(context)
     }
     fn child(&mut self, maximum: u64, reserve_after: u64) -> Result<WorkBudget> {
-        let bytes = self.bytes.checked_sub(reserve_after).filter(|n| *n > 0)
-            .ok_or_else(exhausted)?.min(maximum);
+        let bytes = self
+            .bytes
+            .checked_sub(reserve_after)
+            .filter(|n| *n > 0)
+            .ok_or_else(exhausted)?
+            .min(maximum);
         let mut budget = self.remaining()?;
         self.bytes -= bytes;
         budget.max_bytes = bytes;
@@ -164,25 +189,49 @@ impl Runtime {
         start: Instant,
     ) -> Result<(Self, Result<Value>)> {
         if config.initialize && mode != Mode::Control {
-            return Err(denied("initializing a resource project requires explicit control mode"));
+            return Err(denied(
+                "initializing a resource project requires explicit control mode",
+            ));
         }
         let mut work = Work::new(budget, start)?;
         let mut context = workshop_config.project_context(
-            workshop_mode(mode), session, RequestId::new(1), work.remaining()?,
+            workshop_mode(mode),
+            session,
+            RequestId::new(1),
+            work.remaining()?,
         )?;
-        context.anchor.tick = GameTick(config.acknowledged.as_ref()
-            .map_or(0, |pin| pin.authority_tick_floor));
+        context.anchor.tick = GameTick(
+            config
+                .acknowledged
+                .as_ref()
+                .map_or(0, |pin| pin.authority_tick_floor),
+        );
         let ledger_context = work.reserve(&context, journal::WORK_BYTES)?;
         // The durable opening marker precedes even the first child open.
         let journal = journal::open_private(
-            &config.directory, &ledger_context, mode, config.initialize,
-            config.original.clone(), config.acknowledged.clone(),
+            &config.directory,
+            &ledger_context,
+            mode,
+            config.initialize,
+            config.original.clone(),
+            config.acknowledged.clone(),
         )?;
         let high_tick = journal.pin().authority_tick_floor;
         let mut runtime = Self {
-            config, workshop_config, journal, child: None, mode, session, budget,
-            request: 1, high_tick, fenced: false, last_child_reference: Value::Null,
-            current_goal: Value::Null, accounting: Value::Null, publication_started: start,
+            config,
+            workshop_config,
+            journal,
+            child: None,
+            mode,
+            session,
+            budget,
+            request: 1,
+            high_tick,
+            fenced: false,
+            last_child_reference: Value::Null,
+            current_goal: Value::Null,
+            accounting: Value::Null,
+            publication_started: start,
         };
         let opened = runtime.open_current(&mut work);
         runtime.accounting = work.accounting();
@@ -211,7 +260,8 @@ impl Runtime {
 
     pub(super) fn publication_current(&self) -> Result<()> {
         self.config.current()?;
-        if self.publication_started.elapsed().as_millis() >= u128::from(self.budget.max_wall_millis) {
+        if self.publication_started.elapsed().as_millis() >= u128::from(self.budget.max_wall_millis)
+        {
             return Err(exhausted());
         }
         Ok(())
@@ -220,7 +270,10 @@ impl Runtime {
     fn context(&self, work: &Work) -> Result<OperationContext> {
         self.config.current()?;
         let mut context = self.workshop_config.project_context(
-            workshop_mode(self.mode), self.session, self.last_request_id(), work.remaining()?,
+            workshop_mode(self.mode),
+            self.session,
+            self.last_request_id(),
+            work.remaining()?,
         )?;
         context.anchor.tick = GameTick(self.high_tick.max(self.journal.pin().authority_tick_floor));
         Ok(context)
@@ -246,7 +299,8 @@ impl Runtime {
     }
 
     fn authorize_forward(&self, work: &Work) -> Result<()> {
-        if self.mode != Mode::Control || self.cancelled() || self.fenced || self.journal.is_fenced() {
+        if self.mode != Mode::Control || self.cancelled() || self.fenced || self.journal.is_fenced()
+        {
             return Err(denied("project is stopped, fenced or not in control mode"));
         }
         let current = self.context(work)?;
@@ -257,14 +311,27 @@ impl Runtime {
     }
 
     fn handoff(&self) -> Result<WorkshopProjectHandoff> {
-        let value = self.journal.snapshot().checkpoint.handoff.as_ref()
+        let value = self
+            .journal
+            .snapshot()
+            .checkpoint
+            .handoff
+            .as_ref()
             .ok_or_else(|| denied("project has no acknowledged Workshop handoff"))?;
         let handoff = WorkshopProjectHandoff::from_json(value)?;
         if handoff.project_deadline_tick() != self.config.goal.deadline_tick
-            || handoff.clock_deadline_tick().is_some_and(|deadline| deadline != self.config.goal.deadline_tick)
-            || self.config.handoff.as_ref().is_some_and(|configured| configured.to_json() != *value)
+            || handoff
+                .clock_deadline_tick()
+                .is_some_and(|deadline| deadline != self.config.goal.deadline_tick)
+            || self
+                .config
+                .handoff
+                .as_ref()
+                .is_some_and(|configured| configured.to_json() != *value)
         {
-            return Err(denied("project handoff or original deadline changed on recovery"));
+            return Err(denied(
+                "project handoff or original deadline changed on recovery",
+            ));
         }
         Ok(handoff)
     }
@@ -277,7 +344,9 @@ impl Runtime {
     }
 
     fn save_child(&mut self, work: &mut Work, activation: Option<Stage>) -> Result<()> {
-        let Some(child) = &self.child else { return Ok(()); };
+        let Some(child) = &self.child else {
+            return Ok(());
+        };
         let reference = child.reference();
         self.high_tick = self.high_tick.max(continuity::tick(&reference));
         self.last_child_reference = reference.clone();
@@ -299,7 +368,8 @@ impl Runtime {
             activation.unwrap_or(self.journal.snapshot().stage)
         };
         if self.mode != Mode::Offline
-            && (checkpoint != self.journal.snapshot().checkpoint || stage != self.journal.snapshot().stage)
+            && (checkpoint != self.journal.snapshot().checkpoint
+                || stage != self.journal.snapshot().stage)
         {
             self.append(work, stage, checkpoint)?;
         }
@@ -320,7 +390,10 @@ impl Runtime {
     fn open_current(&mut self, work: &mut Work) -> Result<Value> {
         self.preflight(work, self.cancelled())?;
         if self.cancelled()
-            && matches!(self.effective_stage(), Stage::WorkshopOpening | Stage::ProductionOpening)
+            && matches!(
+                self.effective_stage(),
+                Stage::WorkshopOpening | Stage::ProductionOpening
+            )
         {
             // Opening never dispatches a native effect. A cancelled opening is
             // a terminal local marker; recovery must not activate that child.
@@ -332,7 +405,9 @@ impl Runtime {
                 if (!self.config.initialize && self.workshop_config.project_initializing())
                     || self.config.handoff.is_some()
                 {
-                    return Err(denied("recovery cannot initialize or substitute the original Workshop child"));
+                    return Err(denied(
+                        "recovery cannot initialize or substitute the original Workshop child",
+                    ));
                 }
                 let prior = self.journal.snapshot().checkpoint.workshop.clone();
                 if let Some(reference) = &prior {
@@ -340,7 +415,10 @@ impl Runtime {
                 }
                 let budget = self.workshop_budget(work, journal::WORK_BYTES)?;
                 let child = WorkshopRuntime::open(
-                    self.workshop_config.clone(), workshop_mode(self.mode), self.session, budget,
+                    self.workshop_config.clone(),
+                    workshop_mode(self.mode),
+                    self.session,
+                    budget,
                 )?;
                 self.child = Some(Child::Workshop(Box::new(child)));
                 if let Some(reference) = &prior
@@ -360,14 +438,20 @@ impl Runtime {
             Stage::ProductionOpening | Stage::Production => {
                 let handoff = self.handoff()?;
                 let config = ProductionConfig::from_project_environment(
-                    self.config.guard(), runtime_io, &handoff,
+                    self.config.guard(),
+                    runtime_io,
+                    &handoff,
                 )?;
                 if config.initialize {
-                    return Err(denied("a retained production opening requires existing custody; initialization is never replayed"));
+                    return Err(denied(
+                        "a retained production opening requires existing custody; initialization is never replayed",
+                    ));
                 }
                 self.open_production(config, work)?;
             }
-            Stage::Cancelled => return Err(denied("cancelled project lost its original active stage")),
+            Stage::Cancelled => {
+                return Err(denied("cancelled project lost its original active stage"));
+            }
         }
         Ok(json!({
             "opened":true, "native_effect_dispatched":false,
@@ -377,37 +461,161 @@ impl Runtime {
     }
 
     fn open_production(&mut self, mut config: ProductionConfig, work: &mut Work) -> Result<()> {
+        let intent = self
+            .journal
+            .snapshot()
+            .checkpoint
+            .production_intent
+            .as_ref()
+            .map(ProjectProductionIntent::from_json)
+            .transpose()?;
+        if let Some(intent) = &intent {
+            intent.validate_goal(&self.config.goal)?;
+        }
         if let Some(reference) = self.journal.snapshot().checkpoint.production.as_ref() {
-            config.validate_project_recovery(reference)?;
-        } else if config.recovery.is_some() {
-            return Err(denied("an unacknowledged production opening cannot adopt a selected preexisting original"));
+            if let Some(intent) = &intent {
+                // The independently acknowledged intent supplies the exact
+                // original selectors when a child write outlived its parent
+                // checkpoint. Missing or partial files still refuse to open.
+                config.recover_project_publication(reference, intent)?;
+            } else {
+                config.validate_project_recovery(reference)?;
+            }
+        } else if config.recovery.is_some() || intent.is_some() {
+            return Err(denied(
+                "an unacknowledged production opening cannot adopt a selected preexisting original",
+            ));
         }
         let mut budget = work.child(MAX_BYTES, journal::WORK_BYTES)?;
         budget.max_output_tokens = budget.max_output_tokens.min(32_768);
         if config.clock.is_none() && config.inventory_clock.is_none() {
             budget.max_game_ticks = 0;
         }
-        let child = ProductionRuntime::open(config, production_mode(self.mode), self.session, budget)?;
+        let child =
+            ProductionRuntime::open(config, production_mode(self.mode), self.session, budget)?;
         // Retain the real owner before any parent comparison can fail.
         self.child = Some(Child::Production(Box::new(child)));
-        self.save_child(work, Some(Stage::Production))?;
         let Some(Child::Production(child)) = &self.child else {
-            return Err(error(ErrorCode::InternalInvariantViolation, "production owner not retained"));
+            return Err(error(
+                ErrorCode::InternalInvariantViolation,
+                "production owner not retained",
+            ));
         };
-        self.current_goal = child.project_status(&self.config.goal)?.to_json();
+        // Authenticate the actual recovered original and fixed parent goal
+        // before acknowledging its adoption, including legacy checkpoints.
+        let status = child.project_status(&self.config.goal)?;
+        if let Some(intent) = &intent {
+            child.validate_project_publication(&self.config.goal, intent)?;
+        }
+        self.save_child(work, Some(Stage::Production))?;
+        self.current_goal = status.to_json();
         Ok(())
+    }
+
+    fn plan_production_target(&mut self, raw: &str, work: &mut Work) -> Result<Value> {
+        let request = StockTargetRequest::parse(raw)?;
+        self.config.goal.validate_request(&request)?;
+        if self.journal.snapshot().stage != Stage::Production
+            || self
+                .journal
+                .snapshot()
+                .checkpoint
+                .production_intent
+                .is_some()
+        {
+            return Err(denied(
+                "retain or recover the recorded production original; never compile a replacement",
+            ));
+        }
+        let prior = self
+            .journal
+            .snapshot()
+            .checkpoint
+            .production
+            .as_ref()
+            .ok_or_else(|| denied("production planning requires acknowledged native custody"))?;
+        if !prior["recovery"].is_null() {
+            return Err(denied(
+                "the project already owns its original production plan",
+            ));
+        }
+        let prior = prior.clone();
+        let base = self.context(work)?;
+        // Both parent publications are prepaid before any child source read.
+        // The first reservation cannot be reused by the child or final save.
+        let reserved = work.reserve(&base, journal::WORK_BYTES)?;
+        let mut budget = work.child(MAX_BYTES, journal::WORK_BYTES)?;
+        let Some(Child::Production(child)) = &mut self.child else {
+            return Err(denied("original production owner is unavailable"));
+        };
+        let ceiling = child.budget();
+        budget.max_wall_millis = budget.max_wall_millis.min(ceiling.max_wall_millis);
+        budget.max_bytes = budget.max_bytes.min(ceiling.max_bytes);
+        budget.max_entities = budget.max_entities.min(ceiling.max_entities);
+        budget.max_actions = budget.max_actions.min(ceiling.max_actions);
+        budget.max_output_tokens = budget.max_output_tokens.min(ceiling.max_output_tokens);
+        budget.max_game_ticks = budget.max_game_ticks.min(ceiling.max_game_ticks);
+        let mut current = child.context(false)?;
+        current.budget = budget;
+        let config = &self.config;
+        let journal = &mut self.journal;
+        let high_tick = &mut self.high_tick;
+        let expected_head = journal.pin().head;
+        let mut record = |intent: &ProjectProductionIntent, consumed: &OperationContext| {
+            *high_tick = (*high_tick)
+                .max(intent.authority_tick_floor())
+                .max(consumed.anchor.tick.get());
+            config.current()?;
+            intent.validate_goal(&config.goal)?;
+            intent.validate_checkpoint(&prior)?;
+            if journal.pin().head != expected_head
+                || journal.snapshot().stage != Stage::Production
+                || journal.snapshot().checkpoint.production_intent.is_some()
+                || *high_tick >= config.goal.deadline_tick
+            {
+                return Err(denied(
+                    "production publication lost its exact parent head, original deadline or opening slot",
+                ));
+            }
+            let mut context = reserved.clone();
+            context.budget.max_wall_millis = context
+                .budget
+                .max_wall_millis
+                .min(work.remaining()?.max_wall_millis);
+            context.anchor.tick = context.anchor.tick.max(GameTick(*high_tick));
+            context.authorize(Capability::Plan, RiskTier::Guarded, &[], None)?;
+            let mut checkpoint = journal.snapshot().checkpoint.clone();
+            checkpoint.production_intent = Some(intent.to_json());
+            journal.advance(&context, Stage::Production, checkpoint)?;
+            config.current()?;
+            work.remaining()?;
+            Ok(())
+        };
+        let view = child.project_plan_stock_target_recorded(
+            &config.goal,
+            request,
+            &current,
+            &mut record,
+        )?;
+        self.current_goal = child.project_status(&config.goal)?.to_json();
+        Ok(view.to_json())
     }
 
     fn advance_to_production(&mut self, raw: &str, work: &mut Work) -> Result<Value> {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
-        struct Advance { kind: String, expected_head: String }
+        struct Advance {
+            kind: String,
+            expected_head: String,
+        }
         let request: Advance = serde_json::from_str(raw)
             .map_err(|_| invalid("invalid closed project transition request"))?;
         if request.kind != "advance_to_production"
             || request.expected_head != self.journal.pin().head
         {
-            return Err(denied("project transition requires the exact current parent head"));
+            return Err(denied(
+                "project transition requires the exact current parent head",
+            ));
         }
         self.authorize_forward(work)?;
         if self.effective_stage() == Stage::Workshop {
@@ -425,21 +633,30 @@ impl Runtime {
             self.append(work, Stage::Transition, checkpoint)?;
             // The acknowledged transition is durable before dropping the
             // exclusive writer. Production reopens that exact donor Offline.
-            if let Some(child) = &mut self.child { child.withdraw(); }
+            if let Some(child) = &mut self.child {
+                child.withdraw();
+            }
             self.child = None;
         }
         if self.effective_stage() != Stage::Transition {
-            return Err(denied("project cannot skip, repeat or replace a child stage"));
+            return Err(denied(
+                "project cannot skip, repeat or replace a child stage",
+            ));
         }
         let handoff = self.handoff()?;
-        let config = ProductionConfig::from_project_environment(
-            self.config.guard(), runtime_io, &handoff,
-        )?;
+        let config =
+            ProductionConfig::from_project_environment(self.config.guard(), runtime_io, &handoff)?;
         if !config.initialize {
-            return Err(denied("first production entry requires explicit fresh custody; an opening marker is recovered separately"));
+            return Err(denied(
+                "first production entry requires explicit fresh custody; an opening marker is recovered separately",
+            ));
         }
         self.authorize_forward(work)?;
-        self.append(work, Stage::ProductionOpening, self.journal.snapshot().checkpoint.clone())?;
+        self.append(
+            work,
+            Stage::ProductionOpening,
+            self.journal.snapshot().checkpoint.clone(),
+        )?;
         // A lost opening reply leaves this marker. It never authorizes another
         // initialization attempt, even if no native effect was requested.
         self.open_production(config, work)?;
@@ -451,22 +668,30 @@ impl Runtime {
     }
 
     fn child_call(&mut self, action: Action, work: &mut Work) -> Result<Value> {
+        let mut stock_target = false;
         if let Action::Plan(raw) = &action {
-            if raw.len() > 4096 { return Err(exhausted()); }
-            let value: Value = serde_json::from_str(raw)
-                .map_err(|_| invalid("invalid project plan request"))?;
+            if raw.len() > 4096 {
+                return Err(exhausted());
+            }
+            let value: Value =
+                serde_json::from_str(raw).map_err(|_| invalid("invalid project plan request"))?;
             if value["kind"] == "advance_to_production" {
                 return self.advance_to_production(raw, work);
             }
+            stock_target = value["kind"] == "stock_target";
         }
         if matches!(&action, Action::Plan(_) | Action::Commit { .. }) {
             self.authorize_forward(work)?;
         }
         if self.fenced {
             if matches!(&action, Action::Inspect) {
-                return Ok(json!({"local_parent_only":true,"child_custody_currently_verified":false}));
+                return Ok(
+                    json!({"local_parent_only":true,"child_custody_currently_verified":false}),
+                );
             }
-            return Err(denied("project owner is fenced; preserve exact custody and reopen recovery"));
+            return Err(denied(
+                "project owner is fenced; preserve exact custody and reopen recovery",
+            ));
         }
         if self.child.is_none() {
             return match action {
@@ -474,11 +699,31 @@ impl Runtime {
                     "local_parent_only":true, "child_opening_may_be_incomplete":self.effective_stage() != Stage::Transition,
                     "native_effects_cancelled":false,
                 })),
-                _ => Err(denied("project has no active child; inspect its acknowledged stage")),
+                _ => Err(denied(
+                    "project has no active child; inspect its acknowledged stage",
+                )),
             };
         }
+        if stock_target && matches!(&self.child, Some(Child::Production(_))) {
+            return self.plan_production_target(
+                match &action {
+                    Action::Plan(raw) => raw,
+                    _ => {
+                        return Err(error(
+                            ErrorCode::InternalInvariantViolation,
+                            "production plan selector lost its request",
+                        ));
+                    }
+                },
+                work,
+            );
+        }
         let mut budget = work.child(
-            if matches!(&self.child, Some(Child::Workshop(_))) { WORKSHOP_BYTES } else { MAX_BYTES },
+            if matches!(&self.child, Some(Child::Workshop(_))) {
+                WORKSHOP_BYTES
+            } else {
+                MAX_BYTES
+            },
             journal::WORK_BYTES,
         )?;
         budget.max_output_tokens = budget.max_output_tokens.min(32_768);
@@ -487,13 +732,23 @@ impl Runtime {
         match self.child.as_mut() {
             Some(Child::Workshop(child)) => {
                 budget.max_actions = 1;
-                if !self.workshop_config.project_clock_configured() { budget.max_game_ticks = 0; }
+                if !self.workshop_config.project_clock_configured() {
+                    budget.max_game_ticks = 0;
+                }
                 let action = match action {
                     Action::Observe(None) => WorkshopAction::Observe,
-                    Action::Observe(Some(_)) => return Err(invalid("Workshop observation has no caller-selected source")),
+                    Action::Observe(Some(_)) => {
+                        return Err(invalid(
+                            "Workshop observation has no caller-selected source",
+                        ));
+                    }
                     Action::Inspect => WorkshopAction::Inspect,
                     Action::Plan(raw) => WorkshopAction::Plan(raw),
-                    Action::Commit { seal, confirmed, scope } => {
+                    Action::Commit {
+                        seal,
+                        confirmed,
+                        scope,
+                    } => {
                         if !matches!(scope.as_deref().unwrap_or("goal"), "goal" | "clock") {
                             return Err(invalid("unknown Workshop commit scope"));
                         }
@@ -525,29 +780,41 @@ impl Runtime {
                 current.budget = budget;
                 let view = match action {
                     Action::Observe(raw) => child.observe(
-                        raw.as_deref().map(ObserveRequest::parse).transpose()?.unwrap_or_default(), &current,
+                        raw.as_deref()
+                            .map(ObserveRequest::parse)
+                            .transpose()?
+                            .unwrap_or_default(),
+                        &current,
                     ),
                     Action::Inspect => child.inspect(&current),
                     Action::Plan(raw) => {
                         let value: Value = serde_json::from_str(&raw)
                             .map_err(|_| invalid("invalid production project request"))?;
                         match value["kind"].as_str() {
-                            Some("stock_target") => child.project_plan_stock_target(
-                                &goal, StockTargetRequest::parse(&raw)?, &current,
-                            ),
+                            Some("stock_target") => {
+                                return Err(denied(
+                                    "stock targets require their parent publication intent",
+                                ));
+                            }
                             Some("run") => child.plan_run(RunRequest::parse(&raw)?, &current),
-                            Some("inventory_run") => child.plan_inventory_run(
-                                InventoryRunRequest::parse(&raw)?, &current,
-                            ),
+                            Some("inventory_run") => child
+                                .plan_inventory_run(InventoryRunRequest::parse(&raw)?, &current),
                             Some("step" | "review_prepared") => {
                                 #[derive(Deserialize)]
                                 #[serde(deny_unknown_fields)]
-                                struct Step { kind: String, original_plan_digest: String }
+                                struct Step {
+                                    kind: String,
+                                    original_plan_digest: String,
+                                }
                                 let request: Step = serde_json::from_str(&raw)
                                     .map_err(|_| invalid("invalid closed original-step request"))?;
                                 let original = digest(&request.original_plan_digest)?;
-                                if child.project_status(&goal)?.original_plan_digest != Some(original) {
-                                    return Err(denied("project request names another original production goal"));
+                                if child.project_status(&goal)?.original_plan_digest
+                                    != Some(original)
+                                {
+                                    return Err(denied(
+                                        "project request names another original production goal",
+                                    ));
                                 }
                                 if request.kind == "step" {
                                     child.prepare_next(original, &current)
@@ -555,23 +822,40 @@ impl Runtime {
                                     child.review_prepared(original, &current)
                                 }
                             }
-                            _ => return Err(invalid("project permits only its fixed stock target, original steps and independently reviewed clocks")),
+                            _ => {
+                                return Err(invalid(
+                                    "project permits only its fixed stock target, original steps and independently reviewed clocks",
+                                ));
+                            }
                         }
                     }
-                    Action::Commit { seal, confirmed, scope } => {
+                    Action::Commit {
+                        seal,
+                        confirmed,
+                        scope,
+                    } => {
                         let seal = digest(&seal)?;
                         match scope.as_deref().unwrap_or("goal") {
                             "goal" => child.commit(seal, confirmed, &current),
                             "clock" => child.commit_run(seal, confirmed, &current),
-                            "inventory_clock" => child.commit_inventory_run(seal, confirmed, &current),
+                            "inventory_clock" => {
+                                child.commit_inventory_run(seal, confirmed, &current)
+                            }
                             _ => return Err(invalid("unknown production commit scope")),
                         }
                     }
                     Action::Wait(scope) => {
-                        if !matches!(scope.as_deref().unwrap_or("goal"), "goal" | "project" | "clock" | "inventory_clock") {
+                        if !matches!(
+                            scope.as_deref().unwrap_or("goal"),
+                            "goal" | "project" | "clock" | "inventory_clock"
+                        ) {
                             return Err(invalid("unknown production wait scope"));
                         }
-                        if offline { child.inspect(&current) } else { child.wait(&current) }
+                        if offline {
+                            child.inspect(&current)
+                        } else {
+                            child.wait(&current)
+                        }
                     }
                     Action::Cancel(scope) => match scope.as_deref().unwrap_or("project") {
                         "goal" | "project" => child.cancel(&current),
@@ -607,7 +891,9 @@ impl Runtime {
             }
             self.child_call(action, &mut work)
         })();
-        if outcome.is_err() { self.withdraw(); }
+        if outcome.is_err() {
+            self.withdraw();
+        }
         let retained = self.save_child(&mut work, None);
         self.accounting = work.accounting();
         if let Err(e) = retained {
@@ -627,7 +913,9 @@ impl Runtime {
         if let Some(child) = &mut self.child {
             child.withdraw();
             self.last_child_reference = child.reference();
-            self.high_tick = self.high_tick.max(continuity::tick(&self.last_child_reference));
+            self.high_tick = self
+                .high_tick
+                .max(continuity::tick(&self.last_child_reference));
         }
     }
 
@@ -676,11 +964,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn shared_work_reserves_final_custody_before_child_io() -> std::result::Result<(), Box<dyn std::error::Error>> {
+    fn shared_work_reserves_final_custody_before_child_io()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
         crate::run_with_runtime_cx(|_| async {
             let ceiling = WorkBudget {
-                max_bytes: 1024 * 1024 * 1024, max_wall_millis: 60_000,
-                max_entities: 4096, max_actions: 5, max_output_tokens: 65_536, max_game_ticks: 100,
+                max_bytes: 1024 * 1024 * 1024,
+                max_wall_millis: 60_000,
+                max_entities: 4096,
+                max_actions: 5,
+                max_output_tokens: 65_536,
+                max_game_ticks: 100,
             };
             let mut work = Work::new(ceiling, Instant::now())?;
             let child = work.child(WORKSHOP_BYTES, journal::WORK_BYTES)?;
@@ -688,7 +981,10 @@ mod tests {
             assert_eq!(child.max_game_ticks, ceiling.max_game_ticks);
             assert!(child.max_wall_millis <= ceiling.max_wall_millis);
             let remaining = work.remaining()?;
-            assert_eq!(remaining.max_bytes, ceiling.max_bytes - RESPONSE_BYTES - WORKSHOP_BYTES);
+            assert_eq!(
+                remaining.max_bytes,
+                ceiling.max_bytes - RESPONSE_BYTES - WORKSHOP_BYTES
+            );
             let last = work.child(MAX_BYTES, journal::WORK_BYTES)?;
             assert_eq!(last.max_bytes + journal::WORK_BYTES, remaining.max_bytes);
             assert!(work.child(1, journal::WORK_BYTES).is_err());

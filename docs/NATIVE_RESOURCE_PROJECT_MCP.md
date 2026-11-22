@@ -237,6 +237,16 @@ order. That result explicitly retains `fresh_for_current_call: false`,
 `current_inventory_proven: false` and `stability_proven: false`. It is not a
 current temporal completion proof or a causal production claim.
 
+For a positive deficit, the compiler fixes the complete original before any
+child publication. The parent then writes and independently acknowledges a
+`dfmcp.project-production-intent/1` record containing the exact goal, plan and
+archive digests, citizen capsule identity, initial execution-journal identity,
+Workshop/Manager associations, input binding and native custody identities.
+Only after that acknowledgement succeeds can the child create its original
+archive, capsule, associations and execution journal. This publication creates
+no native review, preparation, order or labor effect. The no-work census path
+creates neither this intent nor an order.
+
 For a positive deficit, plan each dependency-ready original step with:
 
 ```json
@@ -288,6 +298,8 @@ Retain the complete recovery reference after every successful or failed call:
   `parent_acknowledged` pin.
 - Exact child custody, ACKs, original archive/frontier identities and clock pins.
 - The immutable handoff from the parent checkpoint.
+- Any immutable `production_intent` from the parent checkpoint, including when
+  the child original was not yet acknowledged in the next parent checkpoint.
 - Consumed authority/source floors and sticky discontinuity fences, including
   newer in-memory rejection evidence returned after a failed append.
 
@@ -305,11 +317,31 @@ selectors must match the parent's retained originals before opening, and
 subsequent child validation accepts only authenticated descendants. A
 cancelled opening remains a local terminal marker and never activates a child.
 
-The first increment deliberately refuses to select an unacknowledged
-production original. If planning produced a child original but its parent
-checkpoint was never acknowledged, retain the returned child reference and
-reconcile the discrepancy explicitly; do not initialize a replacement. This
-remaining recovery workflow and full multi-family orchestration stay open.
+If the exact production intent was acknowledged but the child reply or next
+parent checkpoint was lost, retain the intent and reopen the existing files.
+The parent can derive the original recovery selectors from that intent, so a
+missing child reply does not require guessing a plan digest or journal head.
+Leave the combined configuration's `recovery` absent when those selectors were
+lost; supplied selectors must match the parent-held original. Keep the native
+workforce/order custody identities and configured clock journal identities.
+Their files still undergo the ordinary child validation.
+
+This pending-publication recovery requires the exact original archive, citizen
+capsule, prerequisite associations and initial execution journal. Native effect
+journals must remain empty; goal history, execution progress or clock runs
+cannot be adopted through the pending intent. If the child checkpoint was
+already acknowledged, ordinary authenticated descendant recovery applies.
+Both paths retain newer rejection floors and sticky source fences. The intent
+is immutable after publication and remains present through later checkpoints
+and cancellation; it never supplies a replacement key or resets a deadline.
+
+The Agent Turn exposes a pending publication under `active_work.publications`
+and withholds plan/commit recommendations until the original has been verified.
+An intent alone does not prove that the child publication finished. Missing,
+partial, foreign or changed files refuse without repair or initialization.
+Legacy parent journals remain readable, but an original created without any
+prior acknowledged intent cannot be automatically adopted. Automatic Tree and
+Manager stages and full multi-family orchestration remain open.
 
 A parent append/readback/synchronization failure fences the owner. Partial or
 rolled-back journal/ACK data is not repaired in place. A failed response fit or
@@ -329,11 +361,14 @@ is released. Recovery data never restores a native permit or current goal proof.
 | Parent journal | 8 MiB, at most 4,096 frames |
 | Immutable original/handoff | 64 KiB each |
 | Child checkpoint | 32 KiB each |
+| Exact production publication intent | 32 KiB |
 
 Byte-work is a conservative bound on repeated reads, replay, hashing and
 verification; it is not resident memory or output size. Ledger operations
 prepay 128 MiB each. Child work is prepaid at a narrowed ceiling, and unused
-reservations are not recycled into another stage. A closing checkpoint and
+reservations are not recycled into another stage. Positive stock-target
+planning prepays separate intent and closing-checkpoint reservations before
+child source reads. A closing checkpoint and
 complete output reserve remain available before child I/O. Final publication
 rechecks the same original wall interval.
 
@@ -353,19 +388,48 @@ separate.
 
 ## Validation record
 
+The current recovery increment passes exact-source component library and
+test-target metadata checking with locked dependencies on
+`rustc 1.102.0-nightly (bdf712ee8 2026-11-21)`. The component retains the complete
+actual core, world, intent, adapter and laboratory crates and selected MCP
+owner/test bodies. Its eleven external dependency identities match the original
+lockfile. FastMCP transport/codec, unrelated module surfaces and real Asupersync
+scheduling are excluded; explicit synchronous I/O-capable context glue is used.
+All 82 selected tests pass: 41 parent, eight child recovery, five project
+configuration, nineteen combined configuration, four fixed-goal, four ordinary
+stock-target runtime campaigns and one new publication campaign. The new actual
+Runtime/native-TCP/private-file campaign checks no original writes before the
+parent ACK, zero writes on no-work or refused ACK, exact lost-selector recovery,
+missing/corrupt/foreign custody, incomplete publication and advanced native
+Prepare refusal. Recovery performs no native calls or custody writes. The
+component's 2,282 source hashes and seventy selected recovery paths match;
+proof SHA-256 is
+`f195c238253e6dc8acbfb7bbdf6b81aa88ef0ae96ebb91a031f911d5c966354e`.
+
+The complete actual adapter library also passes metadata checking. Full MCP
+checking was killed in unchanged Asupersync 0.5.0 before repository diagnostics,
+despite serial frontend/backend compilation. Current agent/dependency/status
+and Workshop source gates, eleven Workshop inventory negatives and scoped
+formatting pass. Mandatory verification reaches missing `br`; release
+qualification refuses the changing worktree. These are development checks,
+not a full MCP transport, live-game or production-admission qualification.
+
+### Earlier parent implementation evidence
+
 Before the execution host disconnected, a focused ledger harness passed
 17/17 tests, including two cases using the actual Linux private-file storage.
 It used the actual core crate, complete new ledger/test logic, exact journal
 trait/mode excerpts and the real private-file/locking implementation; unrelated
 adapter decoding factories were excluded.
 
-The host became unavailable before the integrated controller could compile.
+That host became unavailable before the integrated controller could compile.
 Source was reconstructed through GitHub against the then-current main,
 preserving the concurrent completed-Workshop export. The reconstructed
-formatted bytes have not been replayed. Parent facade/output/budget tests,
-Workshop handoff/recovery tests and production goal/custody tests are present
-but their new integrated execution, formatting, Clippy, full verification,
-modern stdio and live DFHack qualification remain pending.
+formatted bytes had not been replayed at that checkpoint. Parent facade/output/
+budget tests, Workshop handoff/recovery tests and production goal/custody tests
+were authored then. The component checks above supersede the earlier
+uncompiled-source status; execution, full verification, modern stdio and live
+DFHack qualification remain separately recorded.
 
 The independent source reviews and GitHub blob readbacks are not Rust,
 native, live-campaign or admission evidence. Existing registry and production

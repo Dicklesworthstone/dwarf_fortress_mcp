@@ -92,7 +92,10 @@ fn production_child_cannot_retarget_or_renew_original_project_request() -> Resul
 
 #[test]
 fn recovered_project_stock_target_keeps_exact_original_goal_keys_and_workshop() -> Result<()> {
-    let (projection, c) = stock_fixture()?;
+    let (projection, mut c) = stock_fixture()?;
+    // This test covers both the existing-worker order and the two-action
+    // labor-assignment plus finite-order original.
+    c.budget.max_actions = 2;
     let evidence =
         PredicateEvidence::scoped(&projection.snapshot, stock_policy(&projection.snapshot))?;
     let assessment = stock_assessment(&c, 7, 100, 5, 99)?;

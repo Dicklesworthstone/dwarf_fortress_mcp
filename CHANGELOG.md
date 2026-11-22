@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased — Recover interrupted original production publication
+
+- Acknowledge the exact compiled stock-target original in the native resource
+  project's durable parent journal before creating any child original file.
+- Recover a completed child publication after a lost reply or parent checkpoint
+  using those recorded selectors, with all ordinary archive, citizen, native
+  custody and prerequisite checks. Preserve newer source floors and fences.
+- Require the untouched initial frontier and empty native effect journals when
+  the child checkpoint was never acknowledged; reject missing, partial, foreign
+  or already-executed publications without replacement or repair.
+- Retain the immutable intent through restart and cancellation, preserve legacy
+  journal encoding, and expose pending publication without a commit offer.
+- Pass all 82 selected exact-source component tests, including durable append/ACK
+  failures and real Runtime/native-TCP/private-file recovery. Correct two fixture
+  assumptions; full MCP transport, live-game and admission qualification remain
+  outside this component evidence.
+
 ## Unreleased — Connect native Workshop construction to stock-target production
 
 - Add one explicitly unadmitted MCP project owner over the real Workshop and
