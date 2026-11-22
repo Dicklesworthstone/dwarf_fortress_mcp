@@ -13,6 +13,7 @@ pub struct TreeMaterialOrigin {
     high_tick: u64,
     high_sequence: u64,
     high_item: u32,
+    achieved_tick: Option<u64>,
     witness: Digest32,
 }
 
@@ -35,6 +36,11 @@ impl TreeMaterialOrigin {
     pub const fn high_item(&self) -> u32 {
         self.high_item
     }
+    /// Historical, credited completion under the immutable original deadline.
+    /// It is not current supply or causal provenance.
+    pub const fn achieved_tick(&self) -> Option<u64> {
+        self.achieved_tick
+    }
     pub const fn witness(&self) -> Digest32 {
         self.witness
     }
@@ -49,33 +55,69 @@ impl<S: EffectJournalStorage> Journal<S> {
         acknowledgement: &mut WorkshopAcknowledgements<A>,
         context: &OperationContext,
     ) -> Result<TreeMaterialOrigin> {
+        check(self.mode == Mode::Offline)?;
+        self.material_checkpoint(acknowledgement, context)
+    }
+
+    /// Export only immutable, fully verified historical data while the original
+    /// owner still holds its files. This changes no mode, permit or journal.
+    /// An importing owner must independently reopen through `material_origin`
+    /// in Offline mode after the exporter releases exclusive custody.
+    pub fn material_checkpoint<A: EffectJournalStorage>(
+        &mut self,
+        acknowledgement: &mut WorkshopAcknowledgements<A>,
+        context: &OperationContext,
+    ) -> Result<TreeMaterialOrigin> {
         let result: Result<TreeMaterialOrigin> = (|| {
-            check(self.mode == Mode::Offline && !self.fenced && self.owner == context.session_id)?;
+            check(!self.fenced && self.owner == context.session_id)?;
             let mut work = Work::new(context)?;
-            Self::authorize(&work.current()?, &self.binding, false, false, context.anchor.tick.get())?;
+            Self::authorize(
+                &work.current()?,
+                &self.binding,
+                false,
+                false,
+                context.anchor.tick.get(),
+            )?;
             // The retained chain was validated on open. Recover its actual
             // source floor before any new I/O, even if public view fields were
             // changed by an embedding after that open.
             let origin = self.material_projection(&self.raw, &mut work)?;
             work.context.anchor.tick = GameTick(origin.high_tick.max(context.anchor.tick.get()));
-            Self::authorize(&work.current()?, &self.binding, false, false, origin.high_tick)?;
+            Self::authorize(
+                &work.current()?,
+                &self.binding,
+                false,
+                false,
+                origin.high_tick,
+            )?;
             let scope = self.binding.read_scope()?;
             acknowledgement.verify_tree(
-                &work.reserve(crate::workshop_construction::acknowledgement::WORK_BYTES as usize)?,
+                &work
+                    .reserve(crate::workshop_construction::acknowledgement::WORK_BYTES as usize)?,
                 scope,
             )?;
             check(acknowledgement.latest() == Some(self.pin()))?;
             let raw = read(&mut self.storage, &mut work)?;
             check(raw == self.raw)?;
             acknowledgement.verify_tree(
-                &work.reserve(crate::workshop_construction::acknowledgement::WORK_BYTES as usize)?,
+                &work
+                    .reserve(crate::workshop_construction::acknowledgement::WORK_BYTES as usize)?,
                 scope,
             )?;
             check(acknowledgement.latest() == Some(origin.pin))?;
-            Self::authorize(&work.current()?, &self.binding, false, false, origin.high_tick)?;
+            Self::authorize(
+                &work.current()?,
+                &self.binding,
+                false,
+                false,
+                origin.high_tick,
+            )?;
             Ok(origin)
         })();
-        if result.as_ref().is_err_and(|e| e.code == ErrorCode::CorruptLedger) {
+        if result
+            .as_ref()
+            .is_err_and(|e| e.code == ErrorCode::CorruptLedger)
+        {
             self.fenced = true;
             self.permit = false;
             self.sample_permit = false;
@@ -130,7 +172,7 @@ impl<S: EffectJournalStorage> Journal<S> {
             if !sample.is_empty() {
                 check(pending_sample && samples.len() < MAX_SAMPLES as usize)?;
                 pending_sample = false;
-                samples.push(sample);
+                samples.push((sample, credit));
             }
             head = Digest32::from_bytes(reader.array()?);
             check(reader.take(8)? == b"DFMTEND1")?;
@@ -147,12 +189,16 @@ impl<S: EffectJournalStorage> Journal<S> {
         self.binding.capture(&original.plan.before)?;
         check(original.plan.before.root == self.root)?;
         let record = Record::decode(last_record, &original.plan)?;
-        require(record.phase == 2, "Tree material import requires the original designation receipt")?;
+        require(
+            record.phase == 2,
+            "Tree material import requires the original designation receipt",
+        )?;
         let after = record.after.as_ref().ok_or_else(corrupt)?;
         let mut high_tick = after.tick.max(original.plan.before.tick);
         let mut high_sequence = after.sequence.max(original.plan.before.sequence);
         let mut high_item = after.next_item.max(original.plan.before.next_item);
-        for raw_sample in samples {
+        let mut achieved_tick = None;
+        for (raw_sample, credit) in samples {
             work.current()?;
             let sample = Progress::decode(raw_sample, &original.plan)?;
             require(
@@ -162,6 +208,13 @@ impl<S: EffectJournalStorage> Journal<S> {
             high_tick = high_tick.max(sample.tick);
             high_sequence = high_sequence.max(sample.sequence);
             high_item = high_item.max(sample.next_item);
+            if achieved_tick.is_none()
+                && credit
+                && sample.tick <= original.deadline_tick
+                && sample.supply_observed()
+            {
+                achieved_tick = Some(sample.tick);
+            }
         }
         let pin = self.pin();
         let mut identity = b"dfmcp-tree-material-origin/1\0".to_vec();
@@ -181,6 +234,7 @@ impl<S: EffectJournalStorage> Journal<S> {
             high_tick,
             high_sequence,
             high_item,
+            achieved_tick,
             witness: Digest32::of_bytes(&identity),
         })
     }

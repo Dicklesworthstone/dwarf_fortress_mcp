@@ -23,20 +23,32 @@ struct Fixture {
 fn open_fixture(phase: &str, sample: Option<Progress>, pending: bool) -> Result<Fixture> {
     let directory = tree_journal::journal_tests::Directory::new()?;
     let context = tree_journal::journal_tests::context()?;
-    let binding = tree_journal::journal_tests::binding(
-        "127.0.0.1:5000".parse().map_err(|_| invalid())?,
-    )?;
+    let binding =
+        tree_journal::journal_tests::binding("127.0.0.1:5000".parse().map_err(|_| invalid())?)?;
     let (mut journal, mut acknowledgement) = tree_journal::open_private(
-        &directory.0, &context, Mode::Control, &binding, [15, 15, 2], true, None, [9; 32],
+        &directory.0,
+        &context,
+        Mode::Control,
+        &binding,
+        [15, 15, 2],
+        true,
+        None,
+        [9; 32],
     )?;
-    let original = tree_journal::Original::new(
-        tree::tests::plan()?, tree::tests::capture()?.tick + 12000,
-    )?;
+    let original =
+        tree_journal::Original::new(tree::tests::plan()?, tree::tests::capture()?.tick + 12000)?;
     journal.intent(original.clone(), &context, &mut acknowledgement)?;
-    journal.prepared(tree::tests::record("prepared")?, &context, &mut acknowledgement)?;
+    journal.prepared(
+        tree::tests::record("prepared")?,
+        &context,
+        &mut acknowledgement,
+    )?;
     if phase != "prepared" {
         journal.dispatch(
-            original.seal(), &context, &mut acknowledgement, &mut |_| Ok(()),
+            original.seal(),
+            &context,
+            &mut acknowledgement,
+            &mut |_| Ok(()),
             |_, _| tree::tests::record(phase),
         )?;
     }
@@ -51,13 +63,28 @@ fn open_fixture(phase: &str, sample: Option<Progress>, pending: bool) -> Result<
     drop(journal);
     drop(acknowledgement);
     let (journal, acknowledgement) = tree_journal::open_private(
-        &directory.0, &context, Mode::Offline, &binding, [15, 15, 2], false, Some(pin), [0; 32],
+        &directory.0,
+        &context,
+        Mode::Offline,
+        &binding,
+        [15, 15, 2],
+        false,
+        Some(pin),
+        [0; 32],
     )?;
-    Ok(Fixture { journal, acknowledgement, context, binding, directory })
+    Ok(Fixture {
+        journal,
+        acknowledgement,
+        context,
+        binding,
+        directory,
+    })
 }
 
 fn origin(fixture: &mut Fixture) -> Result<TreeMaterialOrigin> {
-    fixture.journal.material_origin(&mut fixture.acknowledgement, &fixture.context)
+    fixture
+        .journal
+        .material_origin(&mut fixture.acknowledgement, &fixture.context)
 }
 
 fn supply() -> Result<Progress> {
@@ -115,14 +142,13 @@ fn workshop(discovery: &WorkshopMaterialDiscovery, index: usize) -> Result<Works
 }
 
 fn custody_bytes(fixture: &Fixture) -> Result<(Vec<u8>, Vec<u8>)> {
-    let read = |name: &str| {
-        std::fs::read(fixture.directory.0.join(name)).map_err(|_| invalid())
-    };
+    let read = |name: &str| std::fs::read(fixture.directory.0.join(name)).map_err(|_| invalid());
     Ok((read("tree-harvest.journal")?, read("tree-harvest.ack")?))
 }
 
 #[test]
-fn tree_material_discovery_uses_readonly_original_custody_and_fresh_workshop_material() -> Result<()> {
+fn tree_material_discovery_uses_readonly_original_custody_and_fresh_workshop_material() -> Result<()>
+{
     let mut fixture = open_fixture("designated", None, false)?;
     let before = custody_bytes(&fixture)?;
     let pin = fixture.journal.pin();
@@ -132,20 +158,26 @@ fn tree_material_discovery_uses_readonly_original_custody_and_fresh_workshop_mat
     assert_eq!(origin.binding(), &fixture.binding);
     assert_eq!(fixture.journal.samples, 0);
     assert_eq!(fixture.journal.achieved_tick, None);
-    let observed = WorkshopMaterialDiscovery::new(
-        &origin, supply()?, [25, 25, 2], &fixture.context,
-    )?;
+    let observed =
+        WorkshopMaterialDiscovery::new(&origin, supply()?, [25, 25, 2], &fixture.context)?;
     assert_eq!(observed.tree_pin(), pin);
     assert_eq!(observed.offers().len(), 2);
     assert_eq!(
-        observed.offers().iter().map(|offer| offer.selection().item_id()).collect::<Vec<_>>(),
+        observed
+            .offers()
+            .iter()
+            .map(|offer| offer.selection().item_id())
+            .collect::<Vec<_>>(),
         [1000, 1001],
     );
     for index in 0..2 {
         let offer = &observed.offers()[index];
         let capture = workshop(&observed, index)?;
         assert_eq!(observed.resolve(offer.handle())?, capture.selection());
-        assert_eq!(observed.qualify(offer.handle(), &capture, &fixture.context)?, capture.selection());
+        assert_eq!(
+            observed.qualify(offer.handle(), &capture, &fixture.context)?,
+            capture.selection()
+        );
         let plan = WorkshopPlan::new("one-original-workshop", capture)?;
         let restored = WorkshopPlan::decode(&plan.canonical_bytes())?;
         assert_eq!(restored, plan);
@@ -166,9 +198,8 @@ fn tree_material_discovery_does_not_renew_or_claim_original_tree_goal() -> Resul
     let before = custody_bytes(&fixture)?;
     let mut now = supply()?;
     now.tick = deadline + 1;
-    let observed = WorkshopMaterialDiscovery::new(
-        &origin, canonical(&now)?, [25, 25, 2], &fixture.context,
-    )?;
+    let observed =
+        WorkshopMaterialDiscovery::new(&origin, canonical(&now)?, [25, 25, 2], &fixture.context)?;
     assert_eq!(observed.progress().tick, deadline + 1);
     assert!(!observed.offers().is_empty());
     assert_eq!(origin.original().deadline_tick, deadline);
@@ -200,30 +231,58 @@ fn tree_material_origin_refuses_unresolved_pending_or_broken_original_lineage() 
     // floor. Its already durable sample-start marker remains pending on reopen.
     let mut sampled = supply()?;
     sampled.sequence = 8;
-    let Fixture { journal, acknowledgement, context, binding, directory } =
-        open_fixture("designated", Some(canonical(&sampled)?), false)?;
+    let Fixture {
+        journal,
+        acknowledgement,
+        context,
+        binding,
+        directory,
+    } = open_fixture("designated", Some(canonical(&sampled)?), false)?;
     let pin = journal.pin();
     drop(journal);
     drop(acknowledgement);
     let (mut journal, mut acknowledgement) = tree_journal::open_private(
-        &directory.0, &context, Mode::Recover, &binding, [15, 15, 2], false, Some(pin), [0; 32],
+        &directory.0,
+        &context,
+        Mode::Recover,
+        &binding,
+        [15, 15, 2],
+        false,
+        Some(pin),
+        [0; 32],
     )?;
     journal.begin_sample(&context, &mut acknowledgement)?;
     let mut regressed = sampled;
     regressed.tick -= 1;
-    assert!(journal.sample(canonical(&regressed)?, &context, &mut acknowledgement).is_err());
+    assert!(
+        journal
+            .sample(canonical(&regressed)?, &context, &mut acknowledgement)
+            .is_err()
+    );
     let pin = journal.pin();
     drop(journal);
     drop(acknowledgement);
     let (mut journal, mut acknowledgement) = tree_journal::open_private(
-        &directory.0, &context, Mode::Offline, &binding, [15, 15, 2], false, Some(pin), [0; 32],
+        &directory.0,
+        &context,
+        Mode::Offline,
+        &binding,
+        [15, 15, 2],
+        false,
+        Some(pin),
+        [0; 32],
     )?;
-    assert!(journal.material_origin(&mut acknowledgement, &context).is_err());
+    assert!(
+        journal
+            .material_origin(&mut acknowledgement, &context)
+            .is_err()
+    );
     Ok(())
 }
 
 #[test]
-fn tree_material_origin_reconstructs_immutable_bytes_instead_of_mutable_view_fields() -> Result<()> {
+fn tree_material_origin_reconstructs_immutable_bytes_instead_of_mutable_view_fields() -> Result<()>
+{
     let mut sampled = supply()?;
     sampled.sequence = 8;
     let mut fixture = open_fixture("designated", Some(canonical(&sampled)?), false)?;
@@ -240,12 +299,73 @@ fn tree_material_origin_reconstructs_immutable_bytes_instead_of_mutable_view_fie
     assert_eq!(restored.high_tick(), sampled.tick);
     assert_eq!(restored.high_sequence(), 8);
     assert_eq!(restored.high_item(), sampled.next_item);
+    assert_eq!(restored.achieved_tick(), Some(sampled.tick));
 
     let mut unresolved = open_fixture("indeterminate", None, false)?;
     unresolved.journal.native = Some(tree::tests::record("designated")?);
     unresolved.journal.state = tree_journal::State::Terminal;
     unresolved.journal.effect_uncertain = false;
     assert!(origin(&mut unresolved).is_err());
+    Ok(())
+}
+
+#[test]
+fn tree_material_checkpoint_preserves_active_owner_without_granting_offline_import() -> Result<()> {
+    let Fixture {
+        journal,
+        acknowledgement,
+        context,
+        binding,
+        directory,
+    } = open_fixture("designated", Some(supply()?), false)?;
+    let pin = journal.pin();
+    drop(journal);
+    drop(acknowledgement);
+    let (mut journal, mut acknowledgement) = tree_journal::open_private(
+        &directory.0,
+        &context,
+        Mode::Recover,
+        &binding,
+        [15, 15, 2],
+        false,
+        Some(pin),
+        [0; 32],
+    )?;
+    let before = std::fs::read(directory.0.join("tree-harvest.journal")).map_err(|_| invalid())?;
+    let checkpoint = journal.material_checkpoint(&mut acknowledgement, &context)?;
+    assert_eq!(checkpoint.pin(), pin);
+    assert_eq!(checkpoint.achieved_tick(), Some(supply()?.tick));
+    assert!(
+        journal
+            .material_origin(&mut acknowledgement, &context)
+            .is_err()
+    );
+    assert!(!journal.dispatchable());
+    assert_eq!(
+        std::fs::read(directory.0.join("tree-harvest.journal")).map_err(|_| invalid())?,
+        before
+    );
+    Ok(())
+}
+
+#[test]
+fn tree_material_checkpoint_cannot_invent_achievement_from_public_completion_fields() -> Result<()>
+{
+    let mut fixture = open_fixture("designated", None, false)?;
+    fixture.journal.achieved_tick = Some(supply()?.tick);
+    fixture.journal.latest = Some(supply()?);
+    let checkpoint = fixture
+        .journal
+        .material_checkpoint(&mut fixture.acknowledgement, &fixture.context)?;
+    assert_eq!(checkpoint.achieved_tick(), None);
+    let mut pending = open_fixture("designated", Some(supply()?), true)?;
+    pending.journal.sample_pending = false;
+    assert!(
+        pending
+            .journal
+            .material_checkpoint(&mut pending.acknowledgement, &pending.context)
+            .is_err()
+    );
     Ok(())
 }
 
@@ -258,28 +378,56 @@ fn tree_material_origin_requires_its_independent_tree_ack_and_fences_substitutio
         let mut changed = before.clone();
         let last = changed.last_mut().ok_or_else(invalid)?;
         *last ^= 1;
-        std::fs::OpenOptions::new().write(true).open(&path)
-            .and_then(|mut file| file.write_all(&changed)).map_err(|_| invalid())?;
-        assert_eq!(origin(&mut fixture).err().ok_or_else(invalid)?.code, ErrorCode::CorruptLedger);
-        std::fs::OpenOptions::new().write(true).open(&path)
-            .and_then(|mut file| file.write_all(&before)).map_err(|_| invalid())?;
-        assert!(origin(&mut fixture).is_err(), "restoring bytes cannot revive a fenced importer");
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .and_then(|mut file| file.write_all(&changed))
+            .map_err(|_| invalid())?;
+        assert_eq!(
+            origin(&mut fixture).err().ok_or_else(invalid)?.code,
+            ErrorCode::CorruptLedger
+        );
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .and_then(|mut file| file.write_all(&before))
+            .map_err(|_| invalid())?;
+        assert!(
+            origin(&mut fixture).is_err(),
+            "restoring bytes cannot revive a fenced importer"
+        );
     }
 
     let mut fixture = open_fixture("designated", None, false)?;
     let directory = tree_journal::journal_tests::Directory::new()?;
     let mut context = fixture.context.clone();
-    for grant in &mut context.grants { grant.scope.map_area = None; }
+    for grant in &mut context.grants {
+        grant.scope.map_area = None;
+    }
     let mut wrong_profile = open_private_acknowledgements(
-        &directory.0.join("workshop.ack"), &context, Mode::Control, true, None,
+        &directory.0.join("workshop.ack"),
+        &context,
+        Mode::Control,
+        true,
+        None,
     )?;
     let pin = fixture.journal.pin();
-    wrong_profile.acknowledge(WorkshopPin {
-        journal_id: pin.journal_id, head: pin.journal_id, frames: 0,
-    }, &context)?;
+    wrong_profile.acknowledge(
+        WorkshopPin {
+            journal_id: pin.journal_id,
+            head: pin.journal_id,
+            frames: 0,
+        },
+        &context,
+    )?;
     wrong_profile.acknowledge(pin, &context)?;
     assert_eq!(wrong_profile.latest(), Some(pin));
-    assert!(fixture.journal.material_origin(&mut wrong_profile, &context).is_err());
+    assert!(
+        fixture
+            .journal
+            .material_origin(&mut wrong_profile, &context)
+            .is_err()
+    );
     Ok(())
 }
 
@@ -303,15 +451,22 @@ fn tree_material_discovery_preserves_all_consumed_floors_and_canonical_progress(
             5 => progress.root_predicate = 1,
             _ => progress.nearby_felling_jobs = 1,
         }
-        assert!(WorkshopMaterialDiscovery::new(
-            &origin, canonical(&progress)?, [25, 25, 2], &fixture.context,
-        ).is_err(), "case {case}");
+        assert!(
+            WorkshopMaterialDiscovery::new(
+                &origin,
+                canonical(&progress)?,
+                [25, 25, 2],
+                &fixture.context,
+            )
+            .is_err(),
+            "case {case}"
+        );
     }
     let mut forged = canonical(&sampled)?;
     forged.wood[0].material_index += 1;
-    assert!(WorkshopMaterialDiscovery::new(
-        &origin, forged, [25, 25, 2], &fixture.context,
-    ).is_err());
+    assert!(
+        WorkshopMaterialDiscovery::new(&origin, forged, [25, 25, 2], &fixture.context,).is_err()
+    );
     Ok(())
 }
 
@@ -323,32 +478,31 @@ fn tree_material_handles_bind_complete_discovery_session_and_host_footprint() ->
     let original_handle = observed.offers()[0].handle();
     assert_ne!(original_handle, observed.offers()[1].handle());
     assert!(observed.resolve(Digest32::ZERO).is_err());
-    let same = WorkshopMaterialDiscovery::new(
-        &origin, supply()?, [25, 25, 2], &fixture.context,
-    )?;
+    let same = WorkshopMaterialDiscovery::new(&origin, supply()?, [25, 25, 2], &fixture.context)?;
     assert_eq!(observed, same);
-    let different_center = WorkshopMaterialDiscovery::new(
-        &origin, supply()?, [30, 25, 2], &fixture.context,
-    )?;
+    let different_center =
+        WorkshopMaterialDiscovery::new(&origin, supply()?, [30, 25, 2], &fixture.context)?;
     assert!(different_center.resolve(original_handle).is_err());
     let mut context = fixture.context.clone();
     context.session_id = SessionId::new(2);
-    let other_session = WorkshopMaterialDiscovery::new(
-        &origin, supply()?, [25, 25, 2], &context,
-    )?;
+    let other_session = WorkshopMaterialDiscovery::new(&origin, supply()?, [25, 25, 2], &context)?;
     assert!(other_session.resolve(original_handle).is_err());
-    assert!(observed.qualify(original_handle, &workshop(&observed, 0)?, &context).is_err());
+    assert!(
+        observed
+            .qualify(original_handle, &workshop(&observed, 0)?, &context)
+            .is_err()
+    );
     let mut later = supply()?;
     later.sequence += 1;
-    let later = WorkshopMaterialDiscovery::new(
-        &origin, canonical(&later)?, [25, 25, 2], &fixture.context,
-    )?;
+    let later =
+        WorkshopMaterialDiscovery::new(&origin, canonical(&later)?, [25, 25, 2], &fixture.context)?;
     assert!(later.resolve(original_handle).is_err());
     Ok(())
 }
 
 #[test]
-fn tree_material_workshop_join_refuses_changed_item_source_footprint_and_eligibility() -> Result<()> {
+fn tree_material_workshop_join_refuses_changed_item_source_footprint_and_eligibility() -> Result<()>
+{
     let mut fixture = open_fixture("designated", None, false)?;
     let observed = discovery(&mut fixture)?;
     let handle = observed.offers()[0].handle();
@@ -366,7 +520,9 @@ fn tree_material_workshop_join_refuses_changed_item_source_footprint_and_eligibi
             7 => capture.free_footprint = false,
             8 => capture.workers[0].labor = false,
             _ => {
-                let WorkshopItem::Visible(item) = &mut capture.item else { return Err(invalid()); };
+                let WorkshopItem::Visible(item) = &mut capture.item else {
+                    return Err(invalid());
+                };
                 match case {
                     9 => item.position[0] += 1,
                     10 => item.material += 1,
@@ -376,7 +532,12 @@ fn tree_material_workshop_join_refuses_changed_item_source_footprint_and_eligibi
             }
         }
         let capture = WorkshopCapture::decode(&capture.encode())?;
-        assert!(observed.qualify(handle, &capture, &fixture.context).is_err(), "case {case}");
+        assert!(
+            observed
+                .qualify(handle, &capture, &fixture.context)
+                .is_err(),
+            "case {case}"
+        );
     }
     // Each family has its own accepted native incarnation; the cross-family
     // join must not compare the numeric generation values as one shared epoch.
@@ -394,30 +555,44 @@ fn tree_material_authority_and_work_bounds_cover_retained_and_fresh_ticks() -> R
     let mut fixture = open_fixture("designated", Some(canonical(&sampled)?), false)?;
     let before = custody_bytes(&fixture)?;
     let mut expired = fixture.context.clone();
-    for grant in &mut expired.grants { grant.expires_at_tick = Some(GameTick(sampled.tick - 1)); }
+    for grant in &mut expired.grants {
+        grant.expires_at_tick = Some(GameTick(sampled.tick - 1));
+    }
     assert_eq!(
-        fixture.journal.material_origin(&mut fixture.acknowledgement, &expired)
-            .err().ok_or_else(invalid)?.code,
+        fixture
+            .journal
+            .material_origin(&mut fixture.acknowledgement, &expired)
+            .err()
+            .ok_or_else(invalid)?
+            .code,
         ErrorCode::CapabilityDenied,
     );
     let origin = origin(&mut fixture)?;
     let mut context = fixture.context.clone();
     context.budget.max_bytes = 20 * 1024 * 1024;
     assert_eq!(
-        fixture.journal.material_origin(&mut fixture.acknowledgement, &context)?,
+        fixture
+            .journal
+            .material_origin(&mut fixture.acknowledgement, &context)?,
         origin,
     );
     context.budget.max_bytes = 1024;
     assert_eq!(
-        fixture.journal.material_origin(&mut fixture.acknowledgement, &context)
-            .err().ok_or_else(invalid)?.code,
+        fixture
+            .journal
+            .material_origin(&mut fixture.acknowledgement, &context)
+            .err()
+            .ok_or_else(invalid)?
+            .code,
         ErrorCode::BudgetExceeded,
     );
     for case in 0..4 {
         let mut context = fixture.context.clone();
         match case {
             0 => context.cancellation_requested = true,
-            1 => context.grants.retain(|grant| grant.capability != Capability::Observe),
+            1 => context
+                .grants
+                .retain(|grant| grant.capability != Capability::Observe),
             2 => {
                 for grant in &mut context.grants {
                     grant.expires_at_tick = Some(GameTick(sampled.tick - 1));
@@ -425,9 +600,11 @@ fn tree_material_authority_and_work_bounds_cover_retained_and_fresh_ticks() -> R
             }
             _ => context.budget.max_bytes = 1024,
         }
-        assert!(WorkshopMaterialDiscovery::new(
-            &origin, canonical(&sampled)?, [25, 25, 2], &context,
-        ).is_err(), "case {case}");
+        assert!(
+            WorkshopMaterialDiscovery::new(&origin, canonical(&sampled)?, [25, 25, 2], &context,)
+                .is_err(),
+            "case {case}"
+        );
     }
     assert_eq!(custody_bytes(&fixture)?, before);
     Ok(())
@@ -439,19 +616,47 @@ fn tree_material_offer_bound_is_complete_and_never_truncates_native_supply() -> 
     let origin = origin(&mut fixture)?;
     let mut progress = supply()?;
     let template = progress.wood[0].clone();
-    progress.wood = (1000..1064).map(|id| tree::Wood { id, ..template.clone() }).collect();
+    progress.wood = (1000..1064)
+        .map(|id| tree::Wood {
+            id,
+            ..template.clone()
+        })
+        .collect();
     progress.next_item = 1064;
     let observed = WorkshopMaterialDiscovery::new(
-        &origin, canonical(&progress)?, [25, 25, 2], &fixture.context,
+        &origin,
+        canonical(&progress)?,
+        [25, 25, 2],
+        &fixture.context,
     )?;
-    assert_eq!(observed.offers().len(), WorkshopMaterialDiscovery::MAX_OFFERS);
-    assert_eq!(observed.offers().last().ok_or_else(invalid)?.selection().item_id(), 1063);
-    progress.wood.push(tree::Wood { id: 1064, ..template });
+    assert_eq!(
+        observed.offers().len(),
+        WorkshopMaterialDiscovery::MAX_OFFERS
+    );
+    assert_eq!(
+        observed
+            .offers()
+            .last()
+            .ok_or_else(invalid)?
+            .selection()
+            .item_id(),
+        1063
+    );
+    progress.wood.push(tree::Wood {
+        id: 1064,
+        ..template
+    });
     progress.next_item = 1065;
     assert!(canonical(&progress).is_err());
     progress.wood.clear();
-    assert!(WorkshopMaterialDiscovery::new(
-        &origin, canonical(&progress)?, [25, 25, 2], &fixture.context,
-    ).is_err());
+    assert!(
+        WorkshopMaterialDiscovery::new(
+            &origin,
+            canonical(&progress)?,
+            [25, 25, 2],
+            &fixture.context,
+        )
+        .is_err()
+    );
     Ok(())
 }

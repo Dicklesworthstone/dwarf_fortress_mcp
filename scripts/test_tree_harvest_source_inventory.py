@@ -54,6 +54,9 @@ class TreeSourceInventoryTests(unittest.TestCase):
             ("crates/dfmcp-mcp/src/tree_harvest_server/clock_presentation_tests.rs", "#[test]\nfn tree_clock_confirmation_requires_a_live_prepared_review", "fn tree_clock_confirmation_requires_a_live_prepared_review"),
             ("crates/dfmcp-mcp/src/tree_harvest_server.rs", "Action::ClockCommit(review_seal, confirmed)", "Action::Commit(review_seal, confirmed)"),
             ("tests/stdio/tree_clock_runtime_peer.py", None, None),
+            ("crates/dfmcp-mcp/src/tree_harvest_server/project_handoff.rs", None, None),
+            ("crates/dfmcp-mcp/src/tree_harvest_server/project.rs", "pub(crate) fn validate_project_recovery(", "fn skipped_project_recovery("),
+            ("crates/dfmcp-adapter/src/tree_harvest/material_origin.rs", "check(self.mode == Mode::Offline)?;", "check(true)?;"),
             ("architecture/tree_harvest_v1_21.json", '"clock_control": true', '"clock_control": false'),
             ("scripts/verify.sh", " tests/stdio/tree_clock_runtime_peer.py", ""),
         ]

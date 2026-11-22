@@ -2,24 +2,27 @@
 
 ## Scope and evidence posture
 
-`dfmcp-native-resource-project-dev-server` owns one original Carpenter
-Workshop construction followed by one fixed wooden-furniture stock target.
-It composes the actual Workshop and combined-production runtimes inside one
-modern MCP session. The public surface retains the eleven existing tool names.
+`dfmcp-native-resource-project-dev-server` owns an optional original Tree
+harvest, one original Carpenter Workshop construction and one fixed
+wooden-furniture stock target. It composes the actual Tree, Workshop and
+combined-production runtimes inside one modern MCP session. The public surface
+retains the eleven existing tool names.
 
 This is explicitly **unadmitted development source**. It adds no bridge method,
 production runner, registry entry, canonical cross-family world adapter, or
-automatic native effect. Every construction, labor assignment, finite order and
-clock interval still requires its child's own current review and confirmation.
+automatic native effect. Every designation, construction, labor assignment,
+finite order and clock interval still requires its child's own current review
+and confirmation.
 
-An already completed Tree harvest can supply material through the existing
-Workshop Tree-material importer. Tree designation and Manager appointment are
-not automatic project stages. An existing configured Manager prerequisite and
-input-supply policy remain the combined child's independent guards.
+Set `harvest_tree: true` to start with the existing one-tree controller and
+transfer its freshly verified supply to the Workshop Tree-material importer.
+The default still starts with Workshop and can use an already completed Tree
+donor. Manager appointment remains outside this project. Existing configured
+Manager and input-supply policies remain the combined child's independent guards.
 
 Owning work: `df-dfhack-bridge-plane-c-pic.4` and
 `dfmcp-reality-wiring-proof-4bf.14`. Both remain in progress. This increment
-implements a concrete two-stage consumer; it does not complete generic
+implements a concrete resource consumer; it does not complete generic
 mixed-family planning or the full live acceptance campaign.
 
 ## What the parent owns
@@ -30,13 +33,22 @@ and independent acknowledgement retain:
 
 `WorkshopOpening → Workshop → Transition → ProductionOpening → Production`
 
+With `harvest_tree: true`, the original prefix is:
+
+`TreeOpening → Tree → TreeTransition → WorkshopOpening`
+
+The original first child is part of the journal identity. Recovery cannot add,
+remove, repeat or substitute the Tree prefix. Older Workshop-first journals
+retain their exact serialized header, checkpoint and frame bytes.
+
 `Cancelled` records its prior stage and retains all existing child references.
 It cannot transition forward again.
 
-The parent writes and acknowledges an opening marker before initializing either
-child. It writes and acknowledges the Workshop-to-production transition before
-releasing the Workshop writer. Production then opens the exact Workshop donor
-Offline using its existing importer. The parent does not bypass either child's
+The parent writes and acknowledges an opening marker before initializing each
+child. It acknowledges each transition before releasing the donor writer.
+Workshop opens the exact Tree donor Offline, and production similarly opens
+the exact Workshop donor Offline using their existing importers. The parent
+does not bypass any child's
 journal, independently acknowledged origin, native permissions, source checks,
 lease, current review or effect confirmation.
 
@@ -69,13 +81,13 @@ The dedicated profile requires:
 | --- | --- |
 | `DFMCP_ALLOW_UNADMITTED_NATIVE_RESOURCE_PROJECT=1` | Explicit parent development opt-in |
 | `DFMCP_NATIVE_RESOURCE_PROJECT_CONFIG` | Closed parent configuration described below |
-| `DFMCP_WORKSHOP_MCP_CONFIG` | Existing Workshop source, footprint, material, authority and custody configuration |
+| `DFMCP_WORKSHOP_MCP_CONFIG` | Workshop source, footprint, material/template, authority and custody configuration |
 | `DFMCP_COMBINED_PRODUCTION_CONFIG` | Existing production configuration without a caller-selected `workshop_prerequisite` |
 | `DFMCP_SEMANTIC_WORKFORCE_CONFIG` | Existing workforce source and custody configuration |
 | `DFMCP_SEMANTIC_WORK_ORDER_CONFIG` | Existing finite-order source and custody configuration |
 
 All existing independent family opt-ins and permission flags remain required.
-Configured Tree material, Workshop clock, production clock, inventory clock and
+Configured Tree ownership/material, Tree clock, Workshop clock, production clock, inventory clock and
 Manager credentials are accepted only for the corresponding configured feature.
 Production launch/admission variables and unrelated `DFMCP_` profiles refuse.
 
@@ -86,7 +98,7 @@ are omitted from the stable policy identities; their actual journal identities,
 acknowledgements, original archive references and floors are bound separately
 to the retained parent checkpoint.
 
-The parent, Workshop, production, workforce and order directories must be
+The parent, optional Tree, Workshop, production, workforce and order directories must be
 distinct canonical absolute paths, without ancestor/descendant overlap.
 Existing private-file ownership, exact modes, no-follow checks, exclusive locks,
 file synchronization and directory synchronization remain in force.
@@ -112,7 +124,8 @@ A fresh parent configuration has this shape:
 
 The tick above is illustrative. Choose an absolute future deadline within the
 original Workshop host authority and the production child's existing goal
-horizon. If a Workshop clock is configured, its fixed deadline must equal the
+horizon. A Tree-first project also fixes this same deadline inside Tree host
+authority and the Tree original's 12,000-tick horizon. If a Workshop clock is configured, its fixed deadline must equal the
 parent deadline. Future review, restart, handoff or source progress cannot
 extend it. Query, original reconciliation and separately authorized clock safety
 stops retain the original host authority expiry, so the parent goal deadline
@@ -131,10 +144,77 @@ come from the later production observation; labor remains `CARPENTER`.
 The production template must not contain `workshop_prerequisite`: the parent
 supplies the typed, independently verified original donor at the transition.
 All three production configuration strings are validated before the first
-Workshop operation. Fresh initialization requires both existing native family
+child operation. Fresh initialization requires both existing production native family
 authorities even when the selected later plan will not assign labor.
 
+### Optional Tree stage
+
+Add `"harvest_tree": true` to the parent configuration and supply the existing
+closed `DFMCP_TREE_HARVEST_MCP_CONFIG`, including the fixed root, source binding,
+visible/protected domain, authority and private directory. Require the existing
+`DFMCP_ALLOW_UNADMITTED_TREE_HARVEST_V1_21=1` opt-in, Tree token and designation
+permission. The optional Tree clock retains its own configuration and
+`DFMCP_ALLOW_UNADMITTED_TREE_CLOCK=1` opt-in. Shared Run credentials are accepted
+only if a Tree or Workshop clock is selected; the other clock receives no
+authority just because those credentials exist.
+
+For this mode, Workshop uses the closed schema
+`dfmcp.workshop-project-tree-material-mcp-development/1`. Keep the existing
+Workshop source, footprint, safety, authority, clock and custody fields, and
+omit `item_id` and `tree_material_source`. The template deliberately has no log
+or donor acknowledgement until the parent transfers its actual original Tree.
+`DFMCP_ALLOW_UNADMITTED_WORKSHOP_TREE_MATERIAL=1` remains required. A standalone
+Workshop owner cannot activate this unresolved template. The completed typed
+handoff supplies the original donor; the importer independently reopens its
+exact files and freshly qualifies available wood before construction planning.
+
+All selected child configurations are validated before initializing Tree.
+Recovery retains the same root, source policy and deadline. This mode harvests
+one configured visible tree; it does not infer additional trees, assert that
+one harvest is sufficient for every stock target, or appoint a Manager.
+
 ## One-session workflow
+
+### Optional first step: harvest the original Tree
+
+For a Tree-first project, opening starts the real Tree owner. Observe its
+current eligible offer and plan:
+
+```json
+{
+  "kind": "fell_one_visible_tree",
+  "expected_observation": "<published Tree witness>",
+  "deadline_tick": 13000
+}
+```
+
+The deadline must equal the parent original. Review and explicitly confirm its
+designation seal with `scope: "goal"`. Reconcile the original with
+`fortress_wait`. If the independently configured Tree clock is needed, plan
+`run_tree` using its published target, review and confirm with `scope: "clock"`,
+then reconcile that clock. Historical designation or a clock receipt is not
+proof that the Tree supply predicate has been observed.
+
+Once the original has timely historical supply evidence and its clock is
+settled without preparation, uncertainty or advancement fence, request:
+
+```json
+{
+  "kind": "advance_to_workshop",
+  "expected_head": "<exact current parent head>"
+}
+```
+
+The parent verifies the original Tree journal and independent ACK and obtains
+a **fresh paused, same-incarnation supply read**. A cached achieved tick cannot
+satisfy this transfer. Source tick, sequence, generation and item allocator
+floors are retained even when a later check refuses. The parent acknowledges
+the updated Tree checkpoint and immutable handoff, releases the Tree writer,
+then acknowledges `WorkshopOpening` before constructing the real Workshop
+owner. This performs no designation, construction or clock effect. Continue
+with the normal Workshop workflow below using its freshly published Tree
+material choices. Neither Tree supply nor completed Workshop alone proves the
+final furniture stock goal.
 
 ### 1. Open and inspect the Workshop offer
 
@@ -284,7 +364,7 @@ Neither changes the parent deadline or grants another native mutation.
 
 Default `fortress_cancel` uses `scope: "project"`; `goal` is an alias.
 It first acknowledges the terminal parent stop, then retires the child's
-undispatched preparation. It cannot undo construction or remove an already
+undispatched preparation. It cannot undo a designation or construction or remove an already
 inserted order. Explicit `clock`/`inventory_clock` cancellation delegates to
 the existing independently authorized safety-stop owner. Continue original
 reconciliation until the relevant child state is known.
@@ -297,7 +377,7 @@ Retain the complete recovery reference after every successful or failed call:
 - Parent `resource-project.journal`, `resource-project.ack` and the external
   `parent_acknowledged` pin.
 - Exact child custody, ACKs, original archive/frontier identities and clock pins.
-- The immutable handoff from the parent checkpoint.
+- Each immutable handoff from the parent checkpoint.
 - Any immutable `production_intent` from the parent checkpoint, including when
   the child original was not yet acknowledged in the next parent checkpoint.
 - Consumed authority/source floors and sticky discontinuity fences, including
@@ -309,6 +389,19 @@ active child with its existing custody selectors. Production recovery also
 repeats the exact retained handoff in the parent configuration's `handoff`
 field so configuration can be preflighted before custody I/O. The runtime then
 compares that value against the actual parent journal.
+
+A Tree-first restart also keeps `harvest_tree: true` and the original Tree
+policy. Its retained Tree checkpoint binds the exact journal/ACK, original
+plan, deadline and clock recovery. An optional `tree_handoff` configuration
+must equal the actual handoff in the parent journal; it cannot select a donor.
+An authenticated newer child original must still match the fixed parent
+deadline, including when the older checkpoint had no original. Neither opening
+nor later inspection can acknowledge a rejected original. A newer externally
+retained parent authority tick also raises the child's rejection floor before
+any fresh progress read; it does not become an observation or canonical anchor.
+After Tree transfer the frozen checkpoint remains in every later frame, and
+the parent does not reopen Tree as an active writer. A cancelled Tree opening
+stays local; it does not initialize or activate Tree custody.
 
 Recover mode cannot start a new stage. Explicit parent Control can continue
 from an acknowledged transition under current host permissions; recovering a
@@ -340,8 +433,8 @@ and withholds plan/commit recommendations until the original has been verified.
 An intent alone does not prove that the child publication finished. Missing,
 partial, foreign or changed files refuse without repair or initialization.
 Legacy parent journals remain readable, but an original created without any
-prior acknowledged intent cannot be automatically adopted. Automatic Tree and
-Manager stages and full multi-family orchestration remain open.
+prior acknowledged intent cannot be automatically adopted. A Manager stage and
+full multi-family orchestration remain open.
 
 A parent append/readback/synchronization failure fences the owner. Partial or
 rolled-back journal/ACK data is not repaired in place. A failed response fit or
@@ -356,10 +449,12 @@ is released. Recovery data never restores a native permit or current goal proof.
 | Parent logical byte-work | Default 16 GiB, selectable 4–32 GiB |
 | Output | Exactly 65,536 admitted tokens under the existing four-byte convention; complete encoded response capped at 256 KiB |
 | Entities | 4,096 ceiling, narrowed by the child |
-| Actions | Five ceiling; Workshop child narrowed to one |
+| Actions | Five ceiling; Tree and Workshop children narrowed to one |
 | Game-time allowance | Default zero, maximum 1,200 per explicitly reviewed interval |
 | Parent journal | 8 MiB, at most 4,096 frames |
+| Complete parent frame | 224 KiB, including all retained child checkpoints, handoffs and production intent |
 | Immutable original/handoff | 64 KiB each |
+| Tree handoff | 16 KiB |
 | Child checkpoint | 32 KiB each |
 | Exact production publication intent | 32 KiB |
 
@@ -382,11 +477,64 @@ Descriptors can refer to evidence descriptors inside that subtree. Reassemble
 all referenced data before reviewing a native confirmation or retaining restart
 configuration. No review is published as a truncated prefix.
 
+Project Tree views publish the full semantic approval information, including
+root, species, dimensions, computed designation, effects/protected domain,
+visible coverage, eligible worker/tool offers, lease, checkpoint and original
+deadline. The raw native capture is represented by an explicitly named
+`native_capture_commitment` with byte length and SHA-256; its exact bytes remain
+in the current Tree owner or original Tree journal. This commitment is **not**
+an inline evidence chunk and does not claim to reproduce raw capsule bytes.
+The standalone Tree profile retains its existing forensic rendering.
+
 There is no synthesized cross-family canonical anchor. Native child anchors,
 historical custody and current production goal anchors remain explicit and
 separate.
 
 ## Validation record
+
+### Current Tree integration evidence
+
+The merged Tree and interrupted-production publication ledger passes 41 exact
+component tests: 38 ledger cases and three child-continuity cases. This includes
+three actual Linux private-storage tests, independent pre-Tree canonical replay,
+every Tree/Workshop/production cancellation stage, and a Tree-prefixed project
+that recovers the existing exact production intent without changing either donor.
+The component uses the complete actual core/world/intent/adapter storage graph
+and the actual production-intent parsing/validation closure without replacement
+behavior.
+
+The complete selected Tree, Workshop, combined-production, semantic workforce/
+order and parent owner bodies pass library and selected-test metadata checking
+with the real core/world/intent/adapter/laboratory dependencies. The three
+unavailable Asupersync context wrappers are declaration-only external hooks in
+the scratch component: they supply no implementation or fabricated authority.
+Thirty actual policy, custody, deadline, template, routing and floor tests pass;
+none of those executed cases calls an excluded hook. They include real private
+journal/ACK descendant recovery with both an exact and a conflicting deadline.
+
+All 26 presentation tests pass: 12 Tree cases, eight preserved parent cases and
+six actual AgentTurn cases. All six encoding cases execute the actual modern
+`tools/call` content types, raw admission, result codec and final encoder, with
+unrelated dispatch variants excluded. Complete Unicode recovery chunks, semantic
+Tree reviews, oversized-review refusal and retained recovery are checked without
+substitute serialization.
+
+All 12 Tree-material adapter tests also pass, including two new original
+checkpoint cases. That component retains the entire actual adapter production
+source and the exact native-vector and private-file helpers; only unrelated
+tests are excluded. The three continuity cases also appear in the owner suite,
+so the four Rust components together cover **106 distinct passing tests**.
+
+The Tree and Workshop source-inventory suites pass 3/3 and 11/11 respectively.
+The full MCP dependency build still ends with SIGKILL in unchanged Asupersync
+before repository diagnostics, including a serial frontend/backend attempt.
+Mandatory verification reaches the missing `br` executable, and release
+qualification refuses the changing worktree. Full MCP/stdio, real Asupersync
+scheduling and live DFHack qualification remain separate and unclaimed. The
+complete adapter test binary also exceeded the host limit before execution;
+its selected material tests passed in the component described above.
+
+### Preserved production-publication evidence at `5643fa5`
 
 The current recovery increment passes exact-source component library and
 test-target metadata checking with locked dependencies on

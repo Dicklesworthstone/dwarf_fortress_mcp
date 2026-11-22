@@ -12,6 +12,10 @@ use fastmcp_rust::modern::ServerBuilder;
 use fastmcp_rust::prelude::*;
 use fastmcp_rust::{CompleteResult, FinalCallToolResult};
 use runtime::{Action, Config, RESPONSE_BYTES, Runtime, error};
+pub(crate) use runtime::{
+    Action as ProjectTreeAction, Config as ProjectTreeConfig, Runtime as ProjectTreeRuntime,
+    TreeProjectHandoff,
+};
 use serde_json::{Value, json};
 use std::sync::{
     Mutex,

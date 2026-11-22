@@ -27,6 +27,9 @@ struct FrontierInput {
     fenced: bool,
 }
 impl State {
+    pub(super) fn fence(&mut self) {
+        self.fenced = true;
+    }
     pub(super) fn reference(&self, high_tick: u64) -> Value {
         json!({"high_tick":high_tick,"high_generation":self.high_generation,
             "high_next_building_id":self.high_building,"fenced":self.fenced})
@@ -91,7 +94,10 @@ impl Config {
     }
 
     pub(super) fn project_effect_deadline(&self, tick: u64) -> Result<()> {
-        if self.project_deadline.is_some_and(|deadline| tick >= deadline) {
+        if self
+            .project_deadline
+            .is_some_and(|deadline| tick >= deadline)
+        {
             return Err(denied("original project deadline has elapsed"));
         }
         Ok(())
@@ -139,34 +145,48 @@ impl Config {
     }
 
     fn project_recovery_pins(&self, reference: &Value) -> Result<()> {
-        if self.parent_check.is_none()
-            || self.project_deadline.is_none()
-            || self.input.initialize
-        {
-            return Err(denied("project recovery requires an existing original Workshop child"));
+        if self.parent_check.is_none() || self.project_deadline.is_none() || self.input.initialize {
+            return Err(denied(
+                "project recovery requires an existing original Workshop child",
+            ));
         }
-        let retained: PinInput = serde_json::from_value(
-            reference.get("acknowledged").cloned()
-                .ok_or_else(|| denied("parent checkpoint has no independent Workshop acknowledgement"))?,
-        ).map_err(|_| denied("parent Workshop acknowledgement is missing or invalid"))?;
+        let retained: PinInput =
+            serde_json::from_value(reference.get("acknowledged").cloned().ok_or_else(|| {
+                denied("parent checkpoint has no independent Workshop acknowledgement")
+            })?)
+            .map_err(|_| denied("parent Workshop acknowledgement is missing or invalid"))?;
         if self.pin != Some(retained.decode()?) {
-            return Err(denied("Workshop restart acknowledgement differs from the parent checkpoint"));
+            return Err(denied(
+                "Workshop restart acknowledgement differs from the parent checkpoint",
+            ));
         }
-        match (self.clock.is_some(), reference.get("clock").filter(|clock| !clock.is_null())) {
+        match (
+            self.clock.is_some(),
+            reference.get("clock").filter(|clock| !clock.is_null()),
+        ) {
             (false, None) => {}
             (true, Some(clock)) => {
                 let configured = &self.policy["clock"];
-                let retained = clock.get("recovery")
+                let retained = clock
+                    .get("recovery")
                     .filter(|pin| pin.is_object())
-                    .ok_or_else(|| denied("parent checkpoint lost the original Workshop clock pin"))?;
+                    .ok_or_else(|| {
+                        denied("parent checkpoint lost the original Workshop clock pin")
+                    })?;
                 if configured["initialize"] != false
                     || configured["recovery"].is_null()
                     || &configured["recovery"] != retained
                 {
-                    return Err(denied("Workshop clock restart pin differs from the parent checkpoint"));
+                    return Err(denied(
+                        "Workshop clock restart pin differs from the parent checkpoint",
+                    ));
                 }
             }
-            _ => return Err(denied("Workshop clock custody differs from the parent checkpoint")),
+            _ => {
+                return Err(denied(
+                    "Workshop clock custody differs from the parent checkpoint",
+                ));
+            }
         }
         Ok(())
     }
@@ -207,7 +227,9 @@ impl Config {
         // recovered child session. This context is never used for child native
         // dispatch, and recovering the child still cannot restore Construct.
         if mode == WorkshopMode::Control
-            && !grants.iter().any(|grant| grant.capability == Capability::Plan)
+            && !grants
+                .iter()
+                .any(|grant| grant.capability == Capability::Plan)
         {
             grants.push(CapabilityGrant {
                 capability: Capability::Plan,
@@ -255,7 +277,8 @@ fn narrow_current(
     started: Instant,
 ) -> Result<WorkBudget> {
     let mut budget = narrow(ceiling, remaining)?;
-    budget.max_wall_millis = budget.max_wall_millis
+    budget.max_wall_millis = budget
+        .max_wall_millis
         .checked_sub(started.elapsed().as_millis() as u64)
         .filter(|left| *left > 0)
         .ok_or_else(exhausted)?;
@@ -399,29 +422,39 @@ impl WorkshopProjectHandoff {
     }
 
     fn validate(&self) -> Result<()> {
-        let path = self.directory.to_str()
+        let path = self
+            .directory
+            .to_str()
             .ok_or_else(|| invalid("handoff path is not UTF-8"))?;
         if !self.directory.is_absolute()
             || !(2..=3800).contains(&path.len())
-            || path[1..].split('/').any(|p| {
-                p.is_empty() || p == "." || p == ".." || p.chars().any(char::is_control)
-            })
+            || path[1..]
+                .split('/')
+                .any(|p| p.is_empty() || p == "." || p == ".." || p.chars().any(char::is_control))
             || self.acknowledged.frames == 0
             || self.acknowledged.frames > dfmcp_adapter::workshop_construction::journal::MAX_FRAMES
             || !self.binding.capture_matches(self.record.plan().before())
             || WorkshopGoal::evaluate(&self.record, &self.progress) != WorkshopGoal::Complete
             || self.origin_high_tick < self.record.after().map_or(u64::MAX, WorkshopCapture::tick)
-            || self.origin_high_building < self.record.after()
-                .map_or(u32::MAX, WorkshopCapture::next_building_id)
+            || self.origin_high_building
+                < self
+                    .record
+                    .after()
+                    .map_or(u32::MAX, WorkshopCapture::next_building_id)
             || self.high_tick < self.origin_high_tick.max(self.progress.tick())
             || self.high_tick > dfmcp_adapter::bounded_run::MAX_NATIVE_TICK
             || self.high_generation != self.binding.generation()
-            || self.high_building < self.origin_high_building.max(self.progress.next_building_id())
+            || self.high_building
+                < self
+                    .origin_high_building
+                    .max(self.progress.next_building_id())
             || self.high_building > i32::MAX as u32
             || self.project_deadline_tick <= self.high_tick
             || self.project_deadline_tick > self.authority_expires_tick
             || self.project_deadline_tick > dfmcp_adapter::bounded_run::MAX_NATIVE_TICK
-            || self.clock_deadline_tick.is_some_and(|clock| clock != self.project_deadline_tick)
+            || self
+                .clock_deadline_tick
+                .is_some_and(|clock| clock != self.project_deadline_tick)
         {
             return Err(invalid(
                 "workshop project handoff lost original source, completion, deadline or floors",
@@ -451,15 +484,29 @@ impl WorkshopProjectHandoff {
 }
 
 impl Runtime {
+    pub(crate) fn project_has_original_history(&self) -> bool {
+        self.journal.pin().frames != 0
+            || self
+                .clock
+                .as_ref()
+                .is_some_and(clock::Owner::project_has_history)
+    }
     /// Historical recovery selectors even after the final independent ACK
     /// write or authority check failed. No field here certifies current custody.
     pub(crate) fn project_recovery_reference(&self) -> Value {
         let mut reference = self.failure_reference();
-        reference["acknowledged"] = self.guard.acks.try_lock().ok()
+        reference["acknowledged"] = self
+            .guard
+            .acks
+            .try_lock()
+            .ok()
             .and_then(|acknowledgement| acknowledgement.latest())
-            .map(pin_json).unwrap_or(Value::Null);
+            .map(pin_json)
+            .unwrap_or(Value::Null);
         reference["acknowledgement_currently_verified"] = json!(false);
-        let high_tick = self.authority_tick.max(self.journal.high_tick())
+        let high_tick = self
+            .authority_tick
+            .max(self.journal.high_tick())
             .max(self.clock.as_ref().map_or(0, clock::Owner::high_tick));
         reference["project_source_frontier"] = self.project.reference(high_tick);
         if let Some(original) = reference.get_mut("original").and_then(Value::as_object_mut) {
@@ -473,11 +520,13 @@ impl Runtime {
     pub(crate) fn retain_project_recovery(&mut self, reference: &Value) -> Result<()> {
         self.config.validate_project_recovery(reference)?;
         self.retain_project_frontier(
-            reference.get("project_source_frontier")
+            reference
+                .get("project_source_frontier")
                 .ok_or_else(|| denied("parent checkpoint lost the Workshop source frontier"))?,
         )?;
         if let Some(owner) = &mut self.clock {
-            let fenced = reference["clock"]["advancement_fenced"].as_bool()
+            let fenced = reference["clock"]["advancement_fenced"]
+                .as_bool()
                 .ok_or_else(|| denied("parent checkpoint lost the Workshop clock fence"))?;
             if fenced {
                 owner.fence_advancement();
@@ -493,20 +542,22 @@ impl Runtime {
     pub(crate) fn retain_project_frontier(&mut self, value: &Value) -> Result<()> {
         self.config.current()?;
         if self.config.parent_check.is_none() || self.config.project_deadline.is_none() {
-            return Err(denied("workshop frontier requires its original parent policy"));
+            return Err(denied(
+                "workshop frontier requires its original parent policy",
+            ));
         }
         if value.to_string().len() > 512 {
             return Err(invalid("workshop project frontier exceeds its bound"));
         }
         let frontier: FrontierInput = serde_json::from_value(value.clone())
             .map_err(|_| invalid("invalid closed workshop project frontier"))?;
-        let current_tick = self.authority_tick.max(self.journal.high_tick())
+        let current_tick = self
+            .authority_tick
+            .max(self.journal.high_tick())
             .max(self.clock.as_ref().map_or(0, clock::Owner::high_tick));
-        self.authority_tick = self.project.retain(
-            current_tick,
-            frontier,
-            self.config.input.generation,
-        )?;
+        self.authority_tick =
+            self.project
+                .retain(current_tick, frontier, self.config.input.generation)?;
         self.withdraw();
         Ok(())
     }
@@ -524,7 +575,10 @@ impl Runtime {
             }
             self.budget = narrow_current(ceiling, remaining, started)?;
             if self.project.fenced
-                && matches!(&action, Action::Observe | Action::Plan(_) | Action::Commit { .. })
+                && matches!(
+                    &action,
+                    Action::Observe | Action::Plan(_) | Action::Commit { .. }
+                )
             {
                 return Err(denied(
                     "workshop project source is fenced; preserve original recovery custody",
@@ -550,9 +604,13 @@ impl Runtime {
     ) -> Result<WorkshopHandoffCheckpoint> {
         self.config.current()?;
         let current = work.reserve(IMPORT_WORK_BYTES)?;
-        let mut acknowledgement = self.guard.acks.try_lock()
+        let mut acknowledgement = self
+            .guard
+            .acks
+            .try_lock()
             .map_err(|_| denied("independent workshop acknowledgement busy or poisoned"))?;
-        self.journal.handoff_checkpoint(&mut *acknowledgement, key, digest, &current)
+        self.journal
+            .handoff_checkpoint(&mut *acknowledgement, key, digest, &current)
     }
 
     /// Reuse the same typed settled-clock export as the public historical
@@ -564,7 +622,9 @@ impl Runtime {
         }
         let inventory = self.journal.inventory(&work.reserve(INSPECT_BYTES)?)?;
         let current = work.reserve(clock::HANDOFF_BYTES)?;
-        let owner = self.clock.as_mut()
+        let owner = self
+            .clock
+            .as_mut()
             .ok_or_else(|| denied("original project clock owner is unavailable"))?;
         let result = owner.production_handoff(self.journal.binding(), &inventory, &current);
         self.authority_tick = self.authority_tick.max(owner.high_tick());
@@ -580,20 +640,27 @@ impl Runtime {
         let ceiling = self.budget;
         let result = (|| {
             self.config.current()?;
-            let deadline = self.config.project_deadline
+            let deadline = self
+                .config
+                .project_deadline
                 .filter(|_| self.config.parent_check.is_some())
                 .ok_or_else(|| denied("workshop handoff requires its original parent policy"))?;
             if self.mode == WorkshopMode::Offline || self.project.fenced {
-                return Err(denied("workshop handoff requires an unfenced live original owner"));
+                return Err(denied(
+                    "workshop handoff requires an unfenced live original owner",
+                ));
             }
             self.budget = narrow_current(ceiling, remaining, started)?;
             let context = self.context()?;
             let mut work = Work::new(&context, self.config.view_bytes())?;
-            self.config.project_effect_deadline(work.context.anchor.tick.get())?;
+            self.config
+                .project_effect_deadline(work.context.anchor.tick.get())?;
             self.project_clock_settled(&mut work)?;
             let inventory = self.journal.inventory(&work.reserve(INSPECT_BYTES)?)?;
             if inventory.entries().len() != 1 {
-                return Err(denied("workshop handoff needs exactly one retained original"));
+                return Err(denied(
+                    "workshop handoff needs exactly one retained original",
+                ));
             }
             let entry = &inventory.entries()[0];
             let key = entry.plan().key().to_owned();
@@ -603,9 +670,13 @@ impl Runtime {
             }
             let checkpoint = self.project_checkpoint(&mut work, &key, digest)?;
             self.authority_tick = self.authority_tick.max(checkpoint.high_tick());
-            self.project.high_generation = self.project.high_generation
+            self.project.high_generation = self
+                .project
+                .high_generation
                 .max(checkpoint.high_generation());
-            self.project.high_building = self.project.high_building
+            self.project.high_building = self
+                .project
+                .high_building
                 .max(checkpoint.high_next_building_id());
             work.advance_authorization_tick(self.authority_tick);
             self.config.binding(checkpoint.binding())?;
@@ -625,10 +696,14 @@ impl Runtime {
             if manifest.generation != checkpoint.binding().generation() {
                 self.project.fenced = true;
                 source.fence();
-                return Err(denied("workshop handoff lost its original native incarnation"));
+                return Err(denied(
+                    "workshop handoff lost its original native incarnation",
+                ));
             }
             source.require_progress_at_or_after(self.authority_tick);
-            let insertion = checkpoint.record().insertion()
+            let insertion = checkpoint
+                .record()
+                .insertion()
                 .ok_or_else(|| denied("original workshop insertion is absent"))?;
             let current = work.reserve(CONNECT_BYTES)?;
             let progress = source.progress(
@@ -661,30 +736,44 @@ impl Runtime {
                 || progress.next_building_id() < self.project.high_building;
             self.authority_tick = self.authority_tick.max(progress.tick());
             self.project.high_generation = self.project.high_generation.max(progress.generation());
-            self.project.high_building = self.project.high_building.max(progress.next_building_id());
+            self.project.high_building =
+                self.project.high_building.max(progress.next_building_id());
             work.advance_authorization_tick(self.authority_tick);
             let goal = WorkshopGoal::evaluate(checkpoint.record(), &progress);
             if source_changed
                 || regressed
-                || !matches!(goal, WorkshopGoal::Complete | WorkshopGoal::InProgress { .. })
+                || !matches!(
+                    goal,
+                    WorkshopGoal::Complete | WorkshopGoal::InProgress { .. }
+                )
             {
                 self.project.fenced = true;
-                return Err(denied("workshop handoff source, allocation or original identity changed"));
+                return Err(denied(
+                    "workshop handoff source, allocation or original identity changed",
+                ));
             }
             let after = self.project_checkpoint(&mut work, &key, digest)?;
             if checkpoint.canonical_bytes() != after.canonical_bytes() {
                 self.project.fenced = true;
-                return Err(denied("workshop handoff custody changed during its native read"));
+                return Err(denied(
+                    "workshop handoff custody changed during its native read",
+                ));
             }
             self.project_clock_settled(&mut work)?;
             self.config.current()?;
             if progress.tick() != self.authority_tick {
-                return Err(denied("workshop completion precedes the settled source floor"));
+                return Err(denied(
+                    "workshop completion precedes the settled source floor",
+                ));
             }
             self.config.project_effect_deadline(self.authority_tick)?;
-            work.current(1)?.authorize(Capability::Observe, RiskTier::ReadOnly, &[], None)?;
+            work.current(1)?
+                .authorize(Capability::Observe, RiskTier::ReadOnly, &[], None)?;
             if goal != WorkshopGoal::Complete {
-                return Err(error(ErrorCode::Conflict, "original workshop construction is incomplete"));
+                return Err(error(
+                    ErrorCode::Conflict,
+                    "original workshop construction is incomplete",
+                ));
             }
             let handoff = WorkshopProjectHandoff {
                 directory: self.config.input.directory.clone(),
@@ -707,7 +796,9 @@ impl Runtime {
         })();
         self.budget = ceiling;
         if result.is_err() {
-            if self.project.fenced && let Some(clock) = &mut self.clock {
+            if self.project.fenced
+                && let Some(clock) = &mut self.clock
+            {
                 clock.fence_advancement();
             }
             self.withdraw();

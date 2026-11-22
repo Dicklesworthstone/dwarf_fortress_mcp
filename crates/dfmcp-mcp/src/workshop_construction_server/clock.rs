@@ -206,8 +206,11 @@ impl Owner {
         // Clock::new may consume that history and then refuse current authority;
         // losing its temporary owner must not erase the observed high-water.
         let retained_tick_floor = journal.cached_records().fold(0u64, |floor, run| {
-            floor.max(run.plan().before().tick().unwrap_or(0))
-                .max(run.native().and_then(|record| record.observed_tick()).unwrap_or(0))
+            floor.max(run.plan().before().tick().unwrap_or(0)).max(
+                run.native()
+                    .and_then(|record| record.observed_tick())
+                    .unwrap_or(0),
+            )
         });
         let unbound_active = journal
             .cached_records()
@@ -233,7 +236,8 @@ impl Owner {
         (current, native)
     }
     pub(super) fn high_tick(&self) -> u64 {
-        self.retained_tick_floor.max(self.clock.as_ref().map_or(0, Clock::high_tick))
+        self.retained_tick_floor
+            .max(self.clock.as_ref().map_or(0, Clock::high_tick))
     }
     pub(super) fn withdraw(&mut self) {
         self.verified = false;
@@ -247,6 +251,16 @@ impl Owner {
     }
     pub(super) fn prepared_seal(&self) -> Option<Digest32> {
         self.clock.as_ref().and_then(Clock::prepared_seal)
+    }
+    pub(super) fn project_has_history(&self) -> bool {
+        self.clock
+            .as_ref()
+            .is_some_and(|clock| !clock.cached_view().runs.is_empty())
+            || self
+                .journal
+                .as_ref()
+                .is_some_and(|journal| journal.cached_records().next().is_some())
+            || (self.clock.is_none() && self.journal.is_none())
     }
     fn retain(&mut self) {
         if let Some(clock) = &self.clock {
@@ -341,7 +355,6 @@ impl Owner {
     }
 }
 
-
 /// Immutable settled clock custody, separate from its moving authority floor.
 #[derive(Clone, Debug)]
 pub(super) struct ProductionHandoff {
@@ -389,14 +402,18 @@ impl Owner {
         inventory: &WorkshopInventory,
         c: &OperationContext,
     ) -> Result<ProductionHandoff> {
-        let view = self.inspect(binding, inventory, c)?
+        let view = self
+            .inspect(binding, inventory, c)?
             .ok_or_else(|| denied("production handoff has no original workshop clock target"))?;
         if !view.verified
             || view.pending
             || view.unresolved
             || self.advancement_fenced
             || self.prepared_seal().is_some()
-            || view.runs.iter().any(|run| !run.entry.terminal() || run.entry.unresolved())
+            || view
+                .runs
+                .iter()
+                .any(|run| !run.entry.terminal() || run.entry.unresolved())
         {
             return Err(error(
                 ErrorCode::EffectIndeterminate,

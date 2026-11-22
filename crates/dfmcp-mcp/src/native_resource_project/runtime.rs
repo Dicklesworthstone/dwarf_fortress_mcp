@@ -1,4 +1,4 @@
-//! One foreground owner for the real Workshop and combined-production runtimes.
+//! One foreground owner for real Tree, Workshop and combined-production runtimes.
 //! Child custody remains effect authority; the parent owns stage order and stop policy.
 use super::config::{Config, runtime_io};
 use super::continuity;
@@ -10,10 +10,14 @@ use crate::live_production_runtime::{
 };
 use crate::semantic_work_order_runtime::clock::RunRequest;
 use crate::semantic_work_order_runtime::inventory_clock::RunRequest as InventoryRunRequest;
-use crate::workshop_construction_server::{
-    ProjectWorkshopAction as WorkshopAction, ProjectWorkshopConfig,
-    ProjectWorkshopRuntime as WorkshopRuntime, WorkshopProjectHandoff,
+use crate::tree_harvest_server::{
+    ProjectTreeAction as TreeAction, ProjectTreeRuntime as TreeRuntime, TreeProjectHandoff,
 };
+use crate::workshop_construction_server::{
+    ProjectWorkshopAction as WorkshopAction, ProjectWorkshopRuntime as WorkshopRuntime,
+    ProjectWorkshopTemplate, WorkshopProjectHandoff,
+};
+use dfmcp_adapter::tree_harvest::journal::Mode as TreeMode;
 use dfmcp_adapter::workshop_construction::journal::WorkshopMode;
 use dfmcp_core::{
     Capability, Digest32, ErrorCode, GameTick, OperationContext, RequestId, Result, RiskTier,
@@ -26,6 +30,9 @@ use std::time::Instant;
 pub(super) const RESPONSE_BYTES: u64 = 256 * 1024;
 pub(super) const MAX_BYTES: u64 = 32 * 1024 * 1024 * 1024;
 const WORKSHOP_BYTES: u64 = 512 * 1024 * 1024;
+
+#[path = "tree.rs"]
+mod tree;
 
 fn invalid(message: &str) -> dfmcp_core::DfmcpError {
     error(ErrorCode::InvalidRequest, message)
@@ -58,6 +65,13 @@ fn workshop_mode(mode: Mode) -> WorkshopMode {
         Mode::Control => WorkshopMode::Control,
         Mode::Recover => WorkshopMode::Recover,
         Mode::Offline => WorkshopMode::Offline,
+    }
+}
+fn tree_mode(mode: Mode) -> TreeMode {
+    match mode {
+        Mode::Control => TreeMode::Control,
+        Mode::Recover => TreeMode::Recover,
+        Mode::Offline => TreeMode::Offline,
     }
 }
 fn production_mode(mode: Mode) -> ProductionMode {
@@ -144,18 +158,21 @@ impl Work {
 }
 
 enum Child {
+    Tree(Box<TreeRuntime>),
     Workshop(Box<WorkshopRuntime>),
     Production(Box<ProductionRuntime>),
 }
 impl Child {
     fn reference(&self) -> Value {
         match self {
+            Self::Tree(child) => child.project_recovery_reference(),
             Self::Workshop(child) => child.project_recovery_reference(),
             Self::Production(child) => child.project_recovery_reference(),
         }
     }
     fn withdraw(&mut self) {
         match self {
+            Self::Tree(child) => child.withdraw_permission(),
             Self::Workshop(child) => child.withdraw(),
             Self::Production(child) => child.abandon_preparation(),
         }
@@ -164,7 +181,7 @@ impl Child {
 
 pub(super) struct Runtime {
     config: Config,
-    workshop_config: ProjectWorkshopConfig,
+    workshop_config: ProjectWorkshopTemplate,
     journal: journal::PrivateJournal,
     child: Option<Child>,
     mode: Mode,
@@ -182,7 +199,7 @@ pub(super) struct Runtime {
 impl Runtime {
     pub(super) fn open(
         config: Config,
-        workshop_config: ProjectWorkshopConfig,
+        workshop_config: ProjectWorkshopTemplate,
         mode: Mode,
         session: SessionId,
         budget: WorkBudget,
@@ -215,7 +232,11 @@ impl Runtime {
             config.initialize,
             config.original.clone(),
             config.acknowledged.clone(),
-            Stage::WorkshopOpening,
+            if config.tree.is_some() {
+                Stage::TreeOpening
+            } else {
+                Stage::WorkshopOpening
+            },
         )?;
         let high_tick = journal.pin().authority_tick_floor;
         let mut runtime = Self {
@@ -351,8 +372,15 @@ impl Runtime {
         let reference = child.reference();
         self.high_tick = self.high_tick.max(continuity::tick(&reference));
         self.last_child_reference = reference.clone();
+        // Inspection after a refused recovery still reaches this method. Keep
+        // rejection floors in memory, but never acknowledge a foreign Tree
+        // original whose deadline was absent from the earlier checkpoint.
+        if let Child::Tree(child) = child {
+            child.validate_project_original_policy()?;
+        }
         let mut checkpoint = self.journal.snapshot().checkpoint.clone();
         let slot = match child {
+            Child::Tree(_) => &mut checkpoint.tree,
             Child::Workshop(_) => &mut checkpoint.workshop,
             Child::Production(_) => &mut checkpoint.production,
         };
@@ -393,7 +421,7 @@ impl Runtime {
         if self.cancelled()
             && matches!(
                 self.effective_stage(),
-                Stage::WorkshopOpening | Stage::ProductionOpening
+                Stage::TreeOpening | Stage::WorkshopOpening | Stage::ProductionOpening
             )
         {
             // Opening never dispatches a native effect. A cancelled opening is
@@ -401,14 +429,27 @@ impl Runtime {
             return Ok(json!({"opened":true,"local_parent_only":true,
                 "project_cancelled":true,"child_initialization_not_replayed":true}));
         }
+        // An optional Tree prefix is part of the immutable original, including
+        // when reopening a later child. Validate its retained handoff before
+        // touching Workshop or production custody.
+        if self.config.tree.is_some()
+            && !matches!(self.effective_stage(), Stage::TreeOpening | Stage::Tree)
+        {
+            self.tree_handoff()?;
+        }
         match self.effective_stage() {
-            Stage::TreeOpening | Stage::Tree | Stage::TreeTransition => {
-                return Err(denied(
-                    "Tree stages require the optional Tree project controller",
-                ));
+            Stage::TreeOpening | Stage::Tree => self.open_tree(work)?,
+            Stage::TreeTransition => {
+                self.tree_handoff()?;
             }
             Stage::WorkshopOpening | Stage::Workshop => {
-                if (!self.config.initialize && self.workshop_config.project_initializing())
+                let tree_handoff = if self.config.tree.is_some() {
+                    Some(self.tree_handoff()?)
+                } else {
+                    None
+                };
+                let config = self.workshop_config.activate(tree_handoff.as_ref())?;
+                if (!self.config.initialize && config.project_initializing())
                     || self.config.handoff.is_some()
                 {
                     return Err(denied(
@@ -417,16 +458,20 @@ impl Runtime {
                 }
                 let prior = self.journal.snapshot().checkpoint.workshop.clone();
                 if let Some(reference) = &prior {
-                    self.workshop_config.validate_project_recovery(reference)?;
+                    config.validate_project_recovery(reference)?;
                 }
                 let budget = self.workshop_budget(work, journal::WORK_BYTES)?;
-                let child = WorkshopRuntime::open(
-                    self.workshop_config.clone(),
-                    workshop_mode(self.mode),
-                    self.session,
-                    budget,
-                )?;
+                let child =
+                    WorkshopRuntime::open(config, workshop_mode(self.mode), self.session, budget)?;
                 self.child = Some(Child::Workshop(Box::new(child)));
+                if prior.is_none()
+                    && let Some(Child::Workshop(child)) = &self.child
+                    && child.project_has_original_history()
+                {
+                    return Err(denied(
+                        "an unacknowledged Workshop opening cannot adopt preexisting original or clock history",
+                    ));
+                }
                 if let Some(reference) = &prior
                     && let Some(Child::Workshop(child)) = &mut self.child
                 {
@@ -684,6 +729,9 @@ impl Runtime {
             if value["kind"] == "advance_to_production" {
                 return self.advance_to_production(raw, work);
             }
+            if value["kind"] == "advance_to_workshop" {
+                return self.advance_to_workshop(raw, work);
+            }
             stock_target = value["kind"] == "stock_target";
         }
         if matches!(&action, Action::Plan(_) | Action::Commit { .. }) {
@@ -702,7 +750,7 @@ impl Runtime {
         if self.child.is_none() {
             return match action {
                 Action::Inspect | Action::Wait(_) | Action::Cancel(_) => Ok(json!({
-                    "local_parent_only":true, "child_opening_may_be_incomplete":self.effective_stage() != Stage::Transition,
+                    "local_parent_only":true, "child_opening_may_be_incomplete":!matches!(self.effective_stage(), Stage::TreeTransition | Stage::Transition),
                     "native_effects_cancelled":false,
                 })),
                 _ => Err(denied(
@@ -725,7 +773,7 @@ impl Runtime {
             );
         }
         let mut budget = work.child(
-            if matches!(&self.child, Some(Child::Workshop(_))) {
+            if matches!(&self.child, Some(Child::Tree(_) | Child::Workshop(_))) {
                 WORKSHOP_BYTES
             } else {
                 MAX_BYTES
@@ -736,6 +784,19 @@ impl Runtime {
         let goal = self.config.goal.clone();
         let offline = self.mode == Mode::Offline;
         match self.child.as_mut() {
+            Some(Child::Tree(child)) => {
+                budget.max_actions = 1;
+                budget.max_entities = budget.max_entities.min(4096);
+                if !self
+                    .config
+                    .tree
+                    .as_ref()
+                    .is_some_and(|config| config.project_clock_configured())
+                {
+                    budget.max_game_ticks = 0;
+                }
+                child.perform_project(tree::action(action, offline)?, budget)
+            }
             Some(Child::Workshop(child)) => {
                 budget.max_actions = 1;
                 if !self.workshop_config.project_clock_configured() {
@@ -941,7 +1002,7 @@ impl Runtime {
             "current_goal_available":false,
             "preparation_restored":false,
             "automatic_redispatch":false,
-            "recovery":"Retain parent journal and ACK, both child custody families and the exact handoff. Reopen existing files only; an opening marker never grants initialization.",
+            "recovery":"Retain parent journal and ACK, every selected child custody family and each exact handoff. Reopen existing files only; an opening marker never grants initialization.",
         })
     }
 
@@ -1002,6 +1063,8 @@ mod tests {
 
     #[test]
     fn parent_modes_preserve_child_recovery_semantics() {
+        assert_eq!(tree_mode(Mode::Recover), TreeMode::Recover);
+        assert_eq!(tree_mode(Mode::Offline), TreeMode::Offline);
         assert_eq!(workshop_mode(Mode::Recover), WorkshopMode::Recover);
         assert_eq!(production_mode(Mode::Recover), ProductionMode::Reconcile);
         assert_eq!(production_mode(Mode::Offline), ProductionMode::Offline);

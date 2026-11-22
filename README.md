@@ -33,9 +33,11 @@ independent clocks; source availability does not establish live qualification.
 
 For a fixed stock objective with durable parent stage and cancellation custody,
 use [`serve-gameplay-dev native-resource-project`](docs/NATIVE_RESOURCE_PROJECT_MCP.md).
-It owns Workshop construction and finite furniture production under one original
-goal and absolute deadline. This development source still requires integrated
-Rust and live-game qualification.
+It can own Tree harvesting, Workshop construction and finite furniture
+production under one original goal and absolute deadline. Each native effect
+keeps its own review, and each material handoff verifies current original
+evidence. Component-tested development source still requires full MCP/stdio
+and live-game qualification.
 
 The motivating problem is not merely “let a model press keys.” Dwarf Fortress is an unusually rich
 long-horizon environment, but a naive automation layer would expose incomplete observations,

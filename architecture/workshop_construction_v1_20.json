@@ -272,6 +272,8 @@
     "crates/dfmcp-mcp/src/workshop_construction_server/runtime.rs",
     "crates/dfmcp-mcp/src/workshop_construction_server/project.rs",
     "crates/dfmcp-mcp/src/workshop_construction_server/project_tests.rs",
+    "crates/dfmcp-mcp/src/workshop_construction_server/project_template.rs",
+    "crates/dfmcp-mcp/src/workshop_construction_server/project_template_tests.rs",
     "crates/dfmcp-mcp/src/workshop_construction_server/production_handoff.rs",
     "crates/dfmcp-mcp/src/workshop_construction_server/production_handoff_tests.rs",
     "crates/dfmcp-mcp/src/workshop_construction_server/presentation.rs",
@@ -282,6 +284,12 @@
     "crates/dfmcp-mcp/src/workshop_construction_server/material_selection.rs",
     "crates/dfmcp-mcp/src/workshop_construction_server/tree_material.rs",
     "crates/dfmcp-mcp/src/workshop_construction_server/tree_material_tests.rs",
+    "crates/dfmcp-mcp/src/tree_harvest_server.rs",
+    "crates/dfmcp-mcp/src/tree_harvest_server/runtime.rs",
+    "crates/dfmcp-mcp/src/tree_harvest_server/clock.rs",
+    "crates/dfmcp-mcp/src/tree_harvest_server/project.rs",
+    "crates/dfmcp-mcp/src/tree_harvest_server/project_handoff.rs",
+    "crates/dfmcp-mcp/src/tree_harvest_server/project_tests.rs",
     "crates/dfmcp-mcp/src/bin/dfmcp-workshop-v1-20-dev-server.rs",
     "crates/dfmcp-mcp/tests/workshop_construction_stdio.rs",
     "tests/native/workshop/stubs.h",
@@ -418,7 +426,7 @@
       "scripts/qualify_local.sh"
     ],
     "full_qualification_requires_reviewed_frozen_clean_source": true,
-    "tree_material_adapter_rust_cases": 10,
+    "tree_material_adapter_rust_cases": 12,
     "tree_material_mcp_unit_cases": 3,
     "tree_material_python_stdio_cases": 5,
     "production_origin_adapter_rust_cases": 21,
@@ -432,7 +440,8 @@
     "staged_runtime_cases": 4,
     "staged_server_cases": 7,
     "gameplay_cli_python_cases": 3,
-    "project_mcp_cases": 7
+    "project_mcp_cases": 7,
+    "project_template_mcp_cases": 5
   },
   "shared_native_engine": {
     "source": "bridge/common/one_attempt_native.h",
@@ -716,5 +725,21 @@
     "handoff_grants_mutation_authority": false,
     "native_protocols_unchanged": true,
     "public_tools_added": false
+  },
+  "project_tree_material_template": {
+    "schema": "dfmcp.workshop-project-tree-material-mcp-development/1",
+    "module": "workshop_construction_server::runtime::project_template",
+    "standalone_schema_accepted": false,
+    "item_id_or_preexisting_donor_selector": false,
+    "pending_template_can_open_child": false,
+    "source_scope_clock_and_deadline_preflight_before_tree": true,
+    "parent_child_and_clock_initialization_policy_must_match": true,
+    "activation_requires_exact_typed_tree_handoff": true,
+    "activation_changes_original_policy_identity": false,
+    "independent_offline_origin_verification_before_native_contact": true,
+    "carried_tick_sequence_item_floors_seeded_before_native_contact": true,
+    "parent_injected_donor_connection_or_progress_failure_stickily_fences": true,
+    "workshop_material_qualification_and_selection_latch_unchanged": true,
+    "original_tree_descriptor_is_current_supply_or_permission": false
   }
 }

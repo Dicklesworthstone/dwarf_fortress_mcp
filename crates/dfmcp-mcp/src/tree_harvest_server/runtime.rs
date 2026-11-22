@@ -23,6 +23,9 @@ use std::sync::Arc;
 use std::time::Instant;
 #[path = "clock.rs"]
 mod clock;
+#[path = "project.rs"]
+mod project;
+pub(crate) use project::TreeProjectHandoff;
 pub(super) const RESPONSE_BYTES: u64 = 512 * 1024;
 const CONFIG: &str = "DFMCP_TREE_HARVEST_MCP_CONFIG";
 const OPT: &str = "DFMCP_ALLOW_UNADMITTED_TREE_HARVEST_V1_21";
@@ -45,7 +48,7 @@ pub(super) fn digest(s: &str) -> Result<Digest32> {
     }
     Digest32::from_hex(s).ok_or_else(|| error(ErrorCode::InvalidRequest, "invalid tree digest"))
 }
-pub(super) fn environment() -> Result<()> {
+fn family_environment() -> Result<()> {
     if std::env::var(OPT).ok().as_deref() != Some("1")
         || std::env::var_os("DFMCP_ADMITTED_BRIDGE_PROTOCOL").is_some()
         || crate::current_admission_provenance().is_some()
@@ -57,10 +60,14 @@ pub(super) fn environment() -> Result<()> {
     if std::env::var_os(WRITE).is_some_and(|v| v.to_str() != Some("1")) {
         return Err(denied("tree designation gate must be absent or exactly 1"));
     }
-    let clock = std::env::var(clock::OPT_IN).ok().as_deref() == Some("1");
     if std::env::var_os(clock::ALLOW).is_some_and(|v| v.to_str() != Some("1")) {
         return Err(denied("tree clock permission must be absent or exactly 1"));
     }
+    Ok(())
+}
+pub(super) fn environment() -> Result<()> {
+    family_environment()?;
+    let clock = std::env::var(clock::OPT_IN).ok().as_deref() == Some("1");
     for (name, _) in std::env::vars_os() {
         let name = name.to_string_lossy();
         if name.starts_with("DFMCP_")
@@ -116,7 +123,7 @@ struct Input {
     clock: Option<clock::Input>,
 }
 #[derive(Clone)]
-pub(super) struct Config {
+pub(crate) struct Config {
     input: Input,
     binding: Binding,
     external: Option<WorkshopPin>,
@@ -124,6 +131,9 @@ pub(super) struct Config {
     scope: MapCuboid,
     protected: Vec<MapCuboid>,
     clock: Option<clock::Config>,
+    parent_check: Option<Arc<dyn Fn() -> Result<()> + Send + Sync>>,
+    project_deadline: Option<u64>,
+    policy: Value,
 }
 fn area(raw: [u32; 6], d: [u32; 3]) -> Result<MapCuboid> {
     if (0..3).any(|i| raw[i] > raw[i + 3] || raw[i + 3] >= d[i]) {
@@ -147,6 +157,8 @@ impl Config {
                 "invalid closed tree configuration",
             )
         })?;
+        let policy: Value =
+            serde_json::from_str(raw).map_err(|_| denied("invalid tree policy identity"))?;
         let path = i
             .directory
             .to_str()
@@ -218,6 +230,9 @@ impl Config {
             scope,
             protected,
             clock,
+            parent_check: None,
+            project_deadline: None,
+            policy,
         })
     }
     pub(super) fn load() -> Result<Self> {
@@ -235,6 +250,7 @@ impl Config {
         let opted_in = std::env::var(clock::OPT_IN).ok().as_deref() == Some("1");
         if opted_in != self.clock.is_some()
             || (self.clock.is_none()
+                && self.parent_check.is_none()
                 && [clock::TOKEN, clock::ALLOW]
                     .iter()
                     .any(|key| std::env::var_os(key).is_some()))
@@ -247,7 +263,12 @@ impl Config {
     }
     fn current(&self) -> Result<()> {
         runtime_io()?;
-        environment()?;
+        if let Some(parent_check) = &self.parent_check {
+            parent_check()?;
+            family_environment()?;
+        } else {
+            environment()?;
+        }
         self.clock_environment()?;
         let raw = std::env::var(CONFIG).map_err(|_| denied("tree configuration withdrawn"))?;
         if Digest32::of_bytes(raw.as_bytes()) != self.hash {
@@ -346,7 +367,13 @@ fn context(
             },
             max_risk: RiskTier::Irreversible,
             expires_at_tick: if matches!(capability, Capability::Plan | Capability::Designate) {
-                Some(GameTick(config.input.authority_expires_tick))
+                Some(GameTick(if capability == Capability::Designate {
+                    config
+                        .project_deadline
+                        .unwrap_or(config.input.authority_expires_tick)
+                } else {
+                    config.input.authority_expires_tick
+                }))
             } else {
                 None
             },
@@ -389,7 +416,7 @@ fn context(
         cancellation_requested: false,
     }
 }
-pub(super) enum Action {
+pub(crate) enum Action {
     Observe,
     Plan(String),
     Commit(String, bool),
@@ -444,7 +471,7 @@ struct PlanInput {
     expected_observation: String,
     deadline_tick: u64,
 }
-pub(super) struct Runtime {
+pub(crate) struct Runtime {
     config: Config,
     pub(super) session: SessionId,
     pub(super) mode: Mode,
@@ -459,9 +486,10 @@ pub(super) struct Runtime {
     high_tick: u64,
     high_sequence: u64,
     clock: Option<clock::Owner>,
+    project: project::State,
 }
 impl Runtime {
-    pub(super) fn open(
+    pub(crate) fn open(
         config: Config,
         mode: Mode,
         session: SessionId,
@@ -526,6 +554,7 @@ impl Runtime {
         } else {
             None
         };
+        let project = project::State::from_observation(observation.as_ref());
         let mut runtime = Self {
             config,
             session,
@@ -541,6 +570,7 @@ impl Runtime {
             high_tick,
             high_sequence,
             clock: None,
+            project,
         };
         // Initial publication belongs to the same opening operation, not a renewed Query budget.
         let mut current = current;
@@ -569,7 +599,7 @@ impl Runtime {
             clock.withdraw();
         }
     }
-    pub(super) fn withdraw_permission(&mut self) {
+    pub(crate) fn withdraw_permission(&mut self) {
         self.withdraw();
     }
     pub(super) fn last_request_id(&self) -> RequestId {
@@ -602,6 +632,7 @@ impl Runtime {
         self.journal.verify(c)?;
         self.acks.verify(c)?;
         if write {
+            self.config.project_effect_deadline(c.anchor.tick.get())?;
             if self.mode != Mode::Control
                 || !self.config.input.initialize
                 || std::env::var(WRITE).ok().as_deref() != Some("1")
@@ -645,6 +676,7 @@ impl Runtime {
         Ok(())
     }
     fn consume(&mut self, cap: &Capture) -> Result<()> {
+        self.retain_project_capture(cap);
         self.config.binding.capture(cap)?;
         if cap.root != self.config.input.root
             || cap.tick < self.high_tick
@@ -670,13 +702,16 @@ impl Runtime {
         current.anchor.tick = GameTick(self.high_tick.max(self.journal.high_tick));
         self.journal
             .begin_sample(&work.reserve(&current, 32 * 1024 * 1024)?, &mut self.acks)?;
+        let mut source_entered = false;
         let result = (|| {
+            source_entered = true;
             let mut source = self
                 .config
                 .connect(&work.reserve(&current, CONNECT_BYTES)?, self.mode)?;
             source.require_progress_at_or_after(self.high_tick.max(self.journal.high_tick));
             match source.progress(&original.plan, &work.reserve(&current, CONNECT_BYTES)?) {
                 Ok(progress) => {
+                    self.retain_project_progress(&progress);
                     self.high_tick = self.high_tick.max(progress.tick);
                     self.high_sequence = self.high_sequence.max(progress.sequence);
                     current.anchor.tick = GameTick(self.high_tick);
@@ -689,6 +724,7 @@ impl Runtime {
                 }
                 Err(cause) => {
                     if let Some(progress) = source.consumed_progress.take() {
+                        self.retain_project_progress(&progress);
                         self.high_tick = self.high_tick.max(progress.tick);
                         self.high_sequence = self.high_sequence.max(progress.sequence);
                         current.anchor.tick = GameTick(self.high_tick);
@@ -702,10 +738,13 @@ impl Runtime {
                 }
             }
         })();
-        if result.is_err()
-            && let Some(clock) = &mut self.clock
-        {
-            clock.fence_advancement();
+        if result.is_err() {
+            if self.config.parent_check.is_some() && source_entered {
+                self.project.fenced = true;
+            }
+            if let Some(clock) = &mut self.clock {
+                clock.fence_advancement();
+            }
         }
         result
     }
@@ -744,6 +783,15 @@ impl Runtime {
                         .map_err(|_| denied("invalid closed tree plan request"))?;
                     if request.kind != "fell_one_visible_tree" {
                         return Err(denied("tree profile has one root-predicate intent"));
+                    }
+                    if self
+                        .config
+                        .project_deadline
+                        .is_some_and(|deadline| request.deadline_tick != deadline)
+                    {
+                        return Err(denied(
+                            "Tree intent must retain the exact original project deadline",
+                        ));
                     }
                     if let Some(original) = &self.journal.original {
                         if original.plan.before.witness() != digest(&request.expected_observation)?
@@ -938,6 +986,9 @@ impl Runtime {
             if tree_source_entered && let Some(clock) = &mut self.clock {
                 clock.fence_advancement();
             }
+            if tree_source_entered && self.config.parent_check.is_some() {
+                self.project.fenced = true;
+            }
             self.withdraw();
         }
         result
@@ -959,13 +1010,13 @@ impl Runtime {
         let original=self.journal.original.as_ref().map(|o|json!({"key":o.plan.key(),"plan_digest":o.plan.digest.to_hex(),"review_seal":o.seal().to_hex(),
             "goal":"root_coordinate_predicate_absent_and_new_eligible_ground_wood_observed","stable_plant_id":null,"causal_item_provenance":"unknown",
             "root":o.plan.before.root,"species":o.plan.before.species,"deadline_tick":o.deadline_tick,"poll_interval_ticks":10,"stable_samples":1,
-            "original_source":capture_json(&o.plan.before),"state":format!("{:?}",self.journal.state),"native_phase":self.journal.native.as_ref().map(|n|n.phase),
+            "original_source":self.capture_view(&o.plan.before,true),"state":format!("{:?}",self.journal.state),"native_phase":self.journal.native.as_ref().map(|n|n.phase),
             "native_receipt":self.journal.native.as_ref().map(|n|n.receipt.to_hex()),"prepared_in_this_connection":self.journal.dispatchable()&&self.source.is_some(),
             "unresolved":matches!(self.journal.state,State::Intent|State::Dispatched|State::Tracking)||self.journal.sample_pending,"sample_publication_pending":self.journal.sample_pending,"designation_acknowledged":self.journal.native.as_ref().is_some_and(|n|n.phase==2),
             "historical_supply_observed_tick":self.journal.achieved_tick,"fresh_supply_observed":fresh&&self.journal.achieved_tick.is_some(),
             "continuity_lost":self.journal.continuity_lost,"samples":self.journal.samples,"latest_progress":self.journal.latest.as_ref().map(progress_json)}));
         json!({"ok":true,"source_profile":"tree-harvest/1.21","mode":self.mode.as_str(),"retained_state_currently_verified":true,"original":original,
-            "observation":if self.journal.original.is_none(){self.observation.as_ref().map(capture_json)}else{None},"recommended_deadline_tick":self.observation.as_ref().map(|c|(c.tick+journal::MAX_HORIZON_TICKS).min(self.config.input.authority_expires_tick)),"custody":self.reference(),"canonical_world_anchor":null,"canonical_world_continuity":"unestablished",
+            "observation":if self.journal.original.is_none(){self.observation.as_ref().map(|capture|self.capture_view(capture,false))}else{None},"recommended_deadline_tick":self.observation.as_ref().map(|c|self.config.project_deadline.unwrap_or(u64::MAX).min(c.tick+journal::MAX_HORIZON_TICKS).min(self.config.input.authority_expires_tick)),"custody":if self.config.parent_check.is_some(){self.project_recovery_reference()}else{self.reference()},"canonical_world_anchor":null,"canonical_world_continuity":"unestablished",
             "direct_effect_scope":"observed tree/halo plus complete designation scheduling block","deferred_clock_exposure":"separately authorized; fallout unproved","local_lease_global_fence":false,"visibility_policy":"complete_tree_body_and_horizontal_halo_visible; belowground roots unobserved",
             "tool_assignment_proven":false,"clock_advanced":if self.config.has_clock(){Value::Null}else{json!(false)},"max_game_ticks":self.budget.max_game_ticks,
             "automatic_redispatch":false,"runtime_admitted":false})

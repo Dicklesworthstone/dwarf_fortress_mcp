@@ -7,6 +7,9 @@ mod material_selection;
 #[path = "project.rs"]
 mod project;
 pub(crate) use project::WorkshopProjectHandoff;
+#[path = "project_template.rs"]
+mod project_template;
+pub(crate) use project_template::ProjectWorkshopTemplate;
 #[path = "parent_config.rs"]
 mod parent_config;
 #[path = "parent_owner.rs"]
@@ -185,6 +188,7 @@ pub(crate) struct Config {
     endpoint: SocketAddr,
     selection: Option<WorkshopSelection>,
     tree_material: Option<tree_material::Config>,
+    project_tree_pending: bool,
     clock: Option<clock::Config>,
     scope: MapCuboid,
     protected: Vec<MapCuboid>,
@@ -206,6 +210,14 @@ fn area(raw: [u32; 6], dimensions: [u32; 3]) -> Result<MapCuboid> {
     )
 }
 impl Config {
+    fn require_resolved_project_material(&self) -> Result<()> {
+        if self.project_tree_pending {
+            return Err(denied(
+                "project Workshop requires the exact completed Tree handoff before opening",
+            ));
+        }
+        Ok(())
+    }
     fn view_bytes(&self) -> u64 {
         if self.clock.is_some() {
             VIEW_BYTES
@@ -214,18 +226,31 @@ impl Config {
         }
     }
     pub(super) fn parse(raw: &str) -> Result<Self> {
+        Self::parse_project_template(raw, false)
+    }
+    fn parse_project_template(raw: &str, allow_project_tree: bool) -> Result<Self> {
         if raw.is_empty() || raw.len() > 16 * 1024 {
             return Err(invalid("workshop operator configuration exceeds 16 KiB"));
         }
         let i: Input = serde_json::from_str(raw)
             .map_err(|_| invalid("invalid closed workshop operator configuration"))?;
-        let policy: Value = serde_json::from_str(raw)
-            .map_err(|_| invalid("invalid workshop policy identity"))?;
+        let policy: Value =
+            serde_json::from_str(raw).map_err(|_| invalid("invalid workshop policy identity"))?;
         let path = i
             .directory
             .to_str()
             .ok_or_else(|| invalid("custody path must be UTF-8"))?;
-        if !["dfmcp.workshop-mcp-development/1", tree_material::SCHEMA].contains(&i.schema.as_str())
+        let project_tree_pending = allow_project_tree && i.schema == project_template::SCHEMA;
+        if project_tree_pending
+            && (policy.get("item_id").is_some() || policy.get("tree_material_source").is_some())
+        {
+            return Err(invalid(
+                "deferred project Tree material accepts neither item_id nor a preexisting donor selector",
+            ));
+        }
+        if (!project_tree_pending
+            && !["dfmcp.workshop-mcp-development/1", tree_material::SCHEMA]
+                .contains(&i.schema.as_str()))
             || !i.directory.is_absolute()
             || path.len() < 2
             || path.len() > 3800
@@ -265,6 +290,7 @@ impl Config {
             (tree_material::SCHEMA, Some(source), None) => {
                 Some(tree_material::Config::parse(source.clone(), &i)?)
             }
+            (project_template::SCHEMA, None, None) if project_tree_pending => None,
             _ => {
                 return Err(invalid(
                     "workshop schema must select exactly one material policy",
@@ -295,6 +321,7 @@ impl Config {
             endpoint,
             selection,
             tree_material,
+            project_tree_pending,
             clock,
             scope,
             protected,
@@ -319,8 +346,9 @@ impl Config {
     }
     fn material_environment(&self) -> Result<()> {
         let opted_in = std::env::var(tree_material::OPT_IN).ok().as_deref() == Some("1");
-        if opted_in != self.tree_material.is_some()
-            || (self.tree_material.is_none() && std::env::var_os(tree_material::TOKEN).is_some())
+        let configured = self.tree_material.is_some() || self.project_tree_pending;
+        if opted_in != configured
+            || (!configured && std::env::var_os(tree_material::TOKEN).is_some())
         {
             return Err(denied(
                 "Tree material import requires its exact independent development opt-in and configuration",
@@ -353,6 +381,7 @@ impl Config {
         let opted_in = std::env::var(clock::OPT_IN).ok().as_deref() == Some("1");
         if opted_in != self.clock.is_some()
             || (self.clock.is_none()
+                && self.parent_check.is_none()
                 && [clock::TOKEN, clock::ALLOW]
                     .iter()
                     .any(|key| std::env::var_os(key).is_some()))
@@ -678,7 +707,9 @@ impl Runtime {
                 },
                 max_risk: RiskTier::Guarded,
                 expires_at_tick: Some(GameTick(if capability == Capability::Construct {
-                    config.project_deadline.unwrap_or(config.input.authority_expires_tick)
+                    config
+                        .project_deadline
+                        .unwrap_or(config.input.authority_expires_tick)
                 } else {
                     config.input.authority_expires_tick
                 })),
@@ -715,6 +746,7 @@ impl Runtime {
         budget: WorkBudget,
         authority_tick_floor: u64,
     ) -> Result<Self> {
+        config.require_resolved_project_material()?;
         config.current()?;
         let control = mode == WorkshopMode::Control
             && config.input.initialize
@@ -1236,6 +1268,9 @@ impl Runtime {
         })();
         if let Some(donor) = &self.tree_material {
             self.authority_tick = self.authority_tick.max(donor.high_tick());
+            if self.config.parent_check.is_some() && donor.is_fenced() {
+                self.project.fence();
+            }
         }
         self.authority_tick = self.authority_tick.max(self.journal.high_tick());
         if let Some(clock) = &self.clock {

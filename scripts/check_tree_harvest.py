@@ -28,6 +28,7 @@ SOURCES = [
     *[A + "tree_harvest/" + n for n in ("mod.rs", "rpc.rs", "journal.rs", "material_origin.rs", "tests.rs", "rpc_tests.rs", "journal_tests.rs")],
     *[A + "tree_harvest/" + n for n in ("clock.rs", "clock/tests.rs", "journal/clock_origin.rs", "journal/clock_origin_tests.rs")],
     M + "src/lib.rs", M + "src/tree_harvest_server.rs", M + "src/tree_harvest_server/runtime.rs",
+    *[M + "src/tree_harvest_server/" + n for n in ("project.rs", "project_handoff.rs", "project_tests.rs")],
     M + "src/tree_harvest_server/presentation.rs",
     M + "src/tree_harvest_server/server_tests.rs",
     *[M + "src/tree_harvest_server/" + n for n in ("clock.rs", "clock_config_tests.rs", "clock_presentation.rs", "clock_presentation_tests.rs", "clock_runtime_tests.rs")],
@@ -63,7 +64,7 @@ def check(root: Path = ROOT) -> dict:
         M + "src/lib.rs": ["pubmodtree_harvest_server;"],
         A + "tree_harvest/mod.rs": ["pubmodclock;", "pubmodjournal;", "pubmodrpc;", "pub(crate)modtests;"],
         A + "tree_harvest/journal.rs": ["pub(crate)modjournal_tests;", "modclock_origin;", "pubuseclock_origin::{CLOCK_ORIGIN_BYTES,TreeClockOrigin};", "ack.acknowledge(self.pin(),&w.reserve(crate::workshop_construction::acknowledgement::WORK_BYTESasusize)?,)?;", "letpermitted=self.dispatchable();self.permit=false;"],
-        A + "tree_harvest/material_origin.rs": ["self.mode==Mode::Offline", "work.charge(raw.len())?;", "acknowledgement.verify_tree(", "check(raw==self.raw)?;", "sample.generation==self.binding.generation", "last_state==State::Terminalasu8&&!pending_sample", "require(record.phase==2,"],
+        A + "tree_harvest/material_origin.rs": ["check(self.mode==Mode::Offline)?;self.material_checkpoint(acknowledgement,context)", "pubfnmaterial_checkpoint<", "work.charge(raw.len())?;", "acknowledgement.verify_tree(", "check(raw==self.raw)?;", "sample.generation==self.binding.generation", "last_state==State::Terminalasu8&&!pending_sample", "require(record.phase==2,", "pubconstfnachieved_tick(&self)->Option<u64>", "&&credit&&sample.tick<=original.deadline_tick&&sample.supply_observed()"],
         A + "tree_harvest/rpc.rs": ["modrpc_tests;", "self.prepared.take().as_ref()==Some(p)", "progress.generation==self.binding.generation", "consumed_tree_tick", "pubfnrequire_progress_at_or_after(", "self.progress_tick_floor=self.progress_tick_floor.max(tick);", "self.consumed_progress=Some(progress.clone());ifprogress.tick<self.progress_tick_floor"],
         A + "tree_harvest/clock.rs": ["modtests;", "pubfnnew(origin:TreeClockOrigin)", "self.original.deadline_tick", "self.journal.prepare_guarded(", "self.journal.commit_guarded(", "letreview=self.review.take();", "checked.supply_observed()", "target.authorize(&canonical_check", "self.binding.read_scope()"],
         A + "tree_harvest/journal/clock_origin.rs": ["pubfnclock_origin<", "pubfnrequire_capacity(", "self.samples.checked_add(count)", "self.pin.frames.checked_add(frames)", "self.retained_bytes.checked_add(bytes)", "acknowledgement.verify_tree(", "check(raw==self.raw)?;", "letorigin=self.clock_projection(&mutwork)?;", "modtests;"],
@@ -81,6 +82,8 @@ def check(root: Path = ROOT) -> dict:
             "ifreconcilable&&clock[\"unresolved\"]==true",
         ],
         M + "src/tree_harvest_server/clock_runtime_tests.rs": ["tree_clock_runtime_peer.py", "Command::new(\"python3\")"],
+        M + "src/tree_harvest_server/project.rs": ["pub(crate)fnfrom_resource_project_environment(", "parent_check()?;", "pub(crate)fnvalidate_project_recovery(", "self.external!=Some(pin(&reference[\"acknowledged\"])?", "pub(crate)fnretain_project_recovery(", "pub(crate)fnvalidate_project_original_policy(", "Some(original.deadline_tick)!=self.config.project_deadline", "self.withdraw();self.validate_project_original_policy()", "self.project.fenced|=frontier.fenced", "original_review_seal", "native_capture_commitment", "\"raw_bytes_inline\":false", "\"current_tree_owner\"", "\"original_tree_journal\"", "pub(crate)fnperform_project("],
+        M + "src/tree_harvest_server/project_handoff.rs": ["pub(crate)structTreeProjectHandoff", "serde(deny_unknown_fields)", "pub(crate)fnverify_origin(", "pub(crate)fnproject_handoff(", "source.require_progress_at_or_after(self.high_tick)", "self.retain_project_progress(&progress)", "self.project.fenced=true", "origin.achieved_tick()!=Some(self.achieved_tick)", "handoff.verify_origin(&origin)?", "TreeProjectHandoff::from_json(&handoff.to_json())?"],
         M + "src/bin/dfmcp-tree-harvest-v1-21-dev-server.rs": ["dfmcp_mcp::tree_harvest_server::run_stdio();", "std::process::ExitCode::FAILURE"],
     }
     for name, tokens in required.items():
@@ -129,7 +132,7 @@ def check(root: Path = ROOT) -> dict:
     if hashlib.sha256(texts["tests/native/tree_harvest/vectors.json"].encode()).hexdigest() != contract["native_vectors_sha256"]:
         raise ValueError("original tree vectors changed")
     rust = [A + "tree_harvest/" + n for n in ("tests.rs", "journal_tests.rs", "rpc_tests.rs", "clock/tests.rs", "journal/clock_origin_tests.rs")]
-    unit = [M + "src/tree_harvest_server/" + n for n in ("server_tests.rs", "clock_config_tests.rs", "clock_presentation_tests.rs", "clock_runtime_tests.rs")]
+    unit = [M + "src/tree_harvest_server/" + n for n in ("server_tests.rs", "clock_config_tests.rs", "clock_presentation_tests.rs", "clock_runtime_tests.rs", "project_tests.rs")]
     integration = [M + "tests/tree_harvest_stdio.rs"]
     actual = {
         "adapter_rust_cases": [name for p in rust for name in re.findall(r"#\[test\]\s*fn (\w+)", texts[p])],
@@ -185,6 +188,28 @@ def check(root: Path = ROOT) -> dict:
     }
     if contract.get("read_only_material_import") != expected_material_import:
         raise ValueError("Tree read-only material import contract differs")
+    expected_project = {
+        "module": "tree_harvest_server::runtime::project",
+        "handoff_schema": "dfmcp.tree-project-handoff/1", "handoff_max_bytes": 16384,
+        "parent_guard_required": True, "standalone_isolation_unchanged": True,
+        "original_deadline_renewed": False, "native_horizon_ticks_max": 12000,
+        "historical_credited_completion_required": True, "fresh_continuous_supply_required": True,
+        "custody_verified_before_and_after_fresh_read": True,
+        "clock_settled_without_preparation_or_uncertainty": True,
+        "entered_source_failure_stickily_fences": True,
+        "exact_parent_ack_and_clock_recovery_pins_required": True,
+        "recovered_original_deadline_matches_immutable_parent_before_checkpoint": True,
+        "recovery_restores_permission": False, "unacknowledged_opening_adopts_old_history": False,
+        "compact_review_capsule": "SHA256 and byte length; current owner or original journal identified; raw bytes not inline",
+        "import": "parent freezes handoff, releases Tree owner, Workshop independently reopens exact original Offline and freshly qualifies material",
+        "handoff_is_current_supply_or_mutation_authority": False,
+        "new_native_protocol": False, "new_public_tool": False,
+    }
+    if contract.get("project_parent_seam") != expected_project:
+        raise ValueError("Tree parent transfer or compact review contract differs")
+    handoff = compact[M + "src/tree_harvest_server/project_handoff.rs"]
+    if handoff.count(".material_checkpoint(") != 2 or handoff.count("clock.project_handoff(") != 2:
+        raise ValueError("Tree handoff requires both exact custody and settled-clock brackets")
     expected_review_budget = {
         "bead": "dfmcp-reality-wiring-proof-4bf.14.3",
         "default_wall_millis": 60000, "maximum_wall_millis": 60000,

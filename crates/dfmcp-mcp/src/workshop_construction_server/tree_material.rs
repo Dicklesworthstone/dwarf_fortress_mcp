@@ -1,6 +1,9 @@
 //! Read-only import of one exact Tree original into workshop material selection.
 //! Native source IDs, endpoints, paths and credentials remain operator inputs.
-use super::{Config as WorkshopConfig, Work, area, denied, digest, exhausted, invalid, nonce, runtime_io};
+use super::{
+    Config as WorkshopConfig, Work, area, denied, digest, exhausted, invalid, nonce, runtime_io,
+};
+use crate::tree_harvest_server::TreeProjectHandoff;
 use dfmcp_adapter::build_placement::journal::private_file::PrivateBuildFile;
 use dfmcp_adapter::build_placement::rpc::BuildCancellation;
 use dfmcp_adapter::tree_harvest::{
@@ -43,6 +46,7 @@ pub(super) struct Config {
     binding: Binding,
     root: [u32; 3],
     pin: WorkshopPin,
+    project_handoff: Option<TreeProjectHandoff>,
 }
 
 impl Config {
@@ -64,11 +68,15 @@ impl Config {
             || input.directory == workshop.directory
             || (0..3).any(|i| input.root[i] >= workshop.map_dimensions[i])
         {
-            return Err(invalid("Tree donor requires a distinct absolute custody directory and an in-map root"));
+            return Err(invalid(
+                "Tree donor requires a distinct absolute custody directory and an in-map root",
+            ));
         }
         let endpoint = dfmcp_adapter::parse_loopback_endpoint(&input.endpoint)?;
         if !endpoint.is_ipv4() || endpoint.port() == 0 || endpoint.to_string() != input.endpoint {
-            return Err(invalid("Tree donor requires a canonical IPv4 loopback endpoint"));
+            return Err(invalid(
+                "Tree donor requires a canonical IPv4 loopback endpoint",
+            ));
         }
         let binding = Binding {
             endpoint,
@@ -81,17 +89,48 @@ impl Config {
         };
         binding.validate()?;
         if area(input.read_scope, workshop.map_dimensions)? != binding.read_scope()? {
-            return Err(invalid("Tree material discovery requires explicit complete loaded-map read scope"));
+            return Err(invalid(
+                "Tree material discovery requires explicit complete loaded-map read scope",
+            ));
         }
         let pin = input.acknowledged.decode()?;
         if pin.frames == 0 {
-            return Err(invalid("Tree material donor requires an acknowledged original operation"));
+            return Err(invalid(
+                "Tree material donor requires an acknowledged original operation",
+            ));
         }
         Ok(Self {
             directory: input.directory,
             binding,
             root: input.root,
             pin,
+            project_handoff: None,
+        })
+    }
+
+    pub(super) fn from_project_handoff(
+        handoff: &TreeProjectHandoff,
+        workshop: &super::Input,
+    ) -> Result<Self> {
+        let binding = handoff.binding();
+        if binding.source != FortressIdentity::new(&workshop.world_folder, workshop.site_id)?
+            || binding.dimensions != workshop.map_dimensions
+            || binding.df_version != workshop.df_version
+            || binding.dfhack_version != workshop.dfhack_version
+            || handoff.directory() == workshop.directory
+            || (0..3).any(|i| handoff.root()[i] >= workshop.map_dimensions[i])
+        {
+            return Err(invalid(
+                "completed project Tree donor differs from Workshop source policy",
+            ));
+        }
+        binding.validate()?;
+        Ok(Self {
+            directory: handoff.directory().to_owned(),
+            binding: binding.clone(),
+            root: handoff.root(),
+            pin: handoff.acknowledged(),
+            project_handoff: Some(handoff.clone()),
         })
     }
 
@@ -111,7 +150,9 @@ impl Config {
             Box::new(move |write| {
                 workshop.current()?;
                 if write {
-                    return Err(denied("workshop material discovery never grants Tree mutation authority"));
+                    return Err(denied(
+                        "workshop material discovery never grants Tree mutation authority",
+                    ));
                 }
                 if std::env::var(TOKEN).ok().map(String::into_bytes).as_ref() != Some(&pinned) {
                     return Err(denied("read-only Tree material credential changed"));
@@ -137,9 +178,10 @@ fn host_candidate(
     workshop.scope.contains(material)
         && workshop.scope.contains_cuboid(footprint)
         && !selection.contains(position)
-        && !workshop.protected.iter().any(|region| {
-            region.contains(material) || cuboids_intersect(region, &footprint)
-        })
+        && !workshop
+            .protected
+            .iter()
+            .any(|region| region.contains(material) || cuboids_intersect(region, &footprint))
 }
 
 pub(super) struct Owner {
@@ -166,17 +208,39 @@ impl Owner {
             Some(config.pin),
             [0; 32],
         )?;
-        let origin = journal.material_origin(
-            &mut acknowledgements,
-            &work.reserve(CUSTODY_BYTES)?,
-        )?;
+        let origin =
+            journal.material_origin(&mut acknowledgements, &work.reserve(CUSTODY_BYTES)?)?;
+        // The descriptor contains no custody authority. Reconstruct the exact
+        // original and ACK independently before using any carried source floor
+        // or making the first native material read.
+        if let Some(handoff) = &config.project_handoff {
+            handoff.verify_origin(&origin)?;
+        }
+        let high_tick = origin.high_tick().max(
+            config
+                .project_handoff
+                .as_ref()
+                .map_or(0, TreeProjectHandoff::high_tick),
+        );
+        let high_sequence = origin.high_sequence().max(
+            config
+                .project_handoff
+                .as_ref()
+                .map_or(0, TreeProjectHandoff::high_sequence),
+        );
+        let high_item = origin.high_item().max(
+            config
+                .project_handoff
+                .as_ref()
+                .map_or(0, TreeProjectHandoff::high_next_item_id),
+        );
         Ok(Self {
             config,
             journal,
             acknowledgements,
-            high_tick: origin.high_tick(),
-            high_sequence: origin.high_sequence(),
-            high_item: origin.high_item(),
+            high_tick,
+            high_sequence,
+            high_item,
             origin,
             discovery: None,
             fenced: false,
@@ -186,16 +250,20 @@ impl Owner {
     pub(super) fn high_tick(&self) -> u64 {
         self.high_tick
     }
+    pub(super) fn is_fenced(&self) -> bool {
+        self.fenced
+    }
 
     pub(super) fn verify(&mut self, work: &mut Work) -> Result<()> {
         work.advance_authorization_tick(self.high_tick);
         if self.fenced {
-            return Err(denied("Tree material donor continuity was lost; close this session"));
+            return Err(denied(
+                "Tree material donor continuity was lost; close this session",
+            ));
         }
-        let origin = self.journal.material_origin(
-            &mut self.acknowledgements,
-            &work.reserve(CUSTODY_BYTES)?,
-        )?;
+        let origin = self
+            .journal
+            .material_origin(&mut self.acknowledgements, &work.reserve(CUSTODY_BYTES)?)?;
         if origin.pin() != self.origin.pin()
             || origin.binding() != self.origin.binding()
             || origin.original() != self.origin.original()
@@ -213,10 +281,18 @@ impl Owner {
     ) -> Result<WorkshopSelection> {
         self.discovery = None;
         self.verify(work)?;
-        let mut source = self.config.source(
+        let source = self.config.source(
             workshop,
             &work.reserve(dfmcp_adapter::tree_harvest::rpc::CONNECT_BYTES)?,
-        )?;
+        );
+        let mut source = match source {
+            Ok(source) => source,
+            Err(cause) => {
+                self.fenced |= self.config.project_handoff.is_some();
+                return Err(cause);
+            }
+        };
+        source.require_progress_at_or_after(self.high_tick);
         let result = source.progress(
             &self.origin.original().plan,
             &work.reserve(dfmcp_adapter::tree_harvest::rpc::CONNECT_BYTES)?,
@@ -234,10 +310,25 @@ impl Owner {
             work.advance_authorization_tick(self.high_tick);
             if regressed {
                 self.fenced = true;
-                return Err(denied("Tree material source clock, sequence or item horizon regressed"));
+                return Err(denied(
+                    "Tree material source clock, sequence or item horizon regressed",
+                ));
             }
         }
-        let progress = result?;
+        if self.fenced {
+            source.fence();
+            return Err(denied("project Tree material source continuity changed"));
+        }
+        let progress = match result {
+            Ok(progress) => progress,
+            Err(cause) => {
+                // TreeRpc already validates the reply envelope. If rejection
+                // precedes decoding, no precise floor is available to retain.
+                self.fenced |= self.config.project_handoff.is_some();
+                source.fence();
+                return Err(cause);
+            }
+        };
         self.verify(work)?;
         let discovery = WorkshopMaterialDiscovery::new(
             &self.origin,
@@ -266,14 +357,18 @@ impl Owner {
         if material.len() != HANDLE_PREFIX.len() + 64 {
             return Err(invalid("choose an exact observed Tree material handle"));
         }
-        let handle = digest(material.strip_prefix(HANDLE_PREFIX).ok_or_else(|| {
-            invalid("choose an exact observed Tree material handle")
-        })?)?;
+        let handle = digest(
+            material
+                .strip_prefix(HANDLE_PREFIX)
+                .ok_or_else(|| invalid("choose an exact observed Tree material handle"))?,
+        )?;
         let observed = self.discovery.as_ref().ok_or_else(|| {
             denied("observe the original Tree material offers before selecting one")
         })?;
         if digest(expected)? != observed.witness() {
-            return Err(denied("Tree material discovery witness differs from the observed offer"));
+            return Err(denied(
+                "Tree material discovery witness differs from the observed offer",
+            ));
         }
         let selection = observed.resolve(handle)?;
         let previous = observed
@@ -281,16 +376,29 @@ impl Owner {
             .iter()
             .find(|offer| offer.handle() == handle)
             .ok_or_else(exhausted)?;
-        let identity = (previous.position(), previous.material(), previous.material_index());
+        let identity = (
+            previous.position(),
+            previous.material(),
+            previous.material_index(),
+        );
         self.refresh(workshop, work)?;
         let fresh = self.discovery.as_ref().ok_or_else(exhausted)?;
         let selected = fresh
             .offers()
             .iter()
             .find(|offer| offer.selection() == selection)
-            .ok_or_else(|| denied("selected Tree material is absent from the fresh ground-wood offers"))?;
-        if (selected.position(), selected.material(), selected.material_index()) != identity {
-            return Err(denied("selected Tree material identity changed after observation"));
+            .ok_or_else(|| {
+                denied("selected Tree material is absent from the fresh ground-wood offers")
+            })?;
+        if (
+            selected.position(),
+            selected.material(),
+            selected.material_index(),
+        ) != identity
+        {
+            return Err(denied(
+                "selected Tree material identity changed after observation",
+            ));
         }
         Ok((selection, selected.handle()))
     }
@@ -309,7 +417,9 @@ impl Owner {
 
     pub(super) fn check_capture_clock(&self, capture: &WorkshopCapture) -> Result<()> {
         if capture.tick() < self.high_tick {
-            return Err(denied("workshop capture predates consumed Tree material evidence"));
+            return Err(denied(
+                "workshop capture predates consumed Tree material evidence",
+            ));
         }
         Ok(())
     }

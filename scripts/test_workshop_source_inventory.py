@@ -115,6 +115,8 @@ class WorkshopSourceInventoryTests(unittest.TestCase):
             ("tree_material_adapter", "causal_provenance_known", True),
             ("tree_material_consumer", "recovery_tree_native_calls", True),
             ("tree_material_consumer", "maximum_offers", 65),
+            ("project_tree_material_template", "pending_template_can_open_child", True),
+            ("project_tree_material_template", "independent_offline_origin_verification_before_native_contact", False),
         )
         for section, field, value in mutations:
             with self.subTest(field=field), tempfile.TemporaryDirectory() as folder:
@@ -155,6 +157,9 @@ class WorkshopSourceInventoryTests(unittest.TestCase):
             "workshop_construction_server/production_handoff_tests.rs",
             "workshop_construction_server/parent_config.rs",
             "workshop_construction_server/parent_owner.rs",
+            "workshop_construction_server/project_template.rs",
+            "workshop_construction_server/project_template_tests.rs",
+            "tree_harvest_server/project_handoff.rs",
             "workshop_production_config.rs", "workshop_production_config_tests.rs",
             "workshop_production_runtime.rs", "workshop_production_runtime_tests.rs",
             "workshop_production_server.rs", "workshop_production_server_tests.rs",

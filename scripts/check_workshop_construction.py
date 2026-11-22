@@ -29,7 +29,9 @@ SOURCES = [
     *[TREE + name for name in ("mod.rs", "journal.rs", "material_origin.rs", "rpc.rs", "tests.rs", "journal_tests.rs")],
     "tests/native/tree_harvest/vectors.json",
     MCP + "lib.rs", MCP + "workshop_construction_server.rs",
-    *[MCP + "workshop_construction_server/" + name for name in ("runtime.rs", "project.rs", "project_tests.rs", "production_handoff.rs", "production_handoff_tests.rs", "presentation.rs", "tests.rs", "clock.rs", "clock_config_tests.rs", "clock_presentation_tests.rs", "material_selection.rs", "tree_material.rs", "tree_material_tests.rs")],
+    *[MCP + "workshop_construction_server/" + name for name in ("runtime.rs", "project.rs", "project_tests.rs", "project_template.rs", "project_template_tests.rs", "production_handoff.rs", "production_handoff_tests.rs", "presentation.rs", "tests.rs", "clock.rs", "clock_config_tests.rs", "clock_presentation_tests.rs", "material_selection.rs", "tree_material.rs", "tree_material_tests.rs")],
+    MCP + "tree_harvest_server.rs",
+    *[MCP + "tree_harvest_server/" + name for name in ("runtime.rs", "clock.rs", "project.rs", "project_handoff.rs", "project_tests.rs")],
     MCP + "bin/dfmcp-workshop-v1-20-dev-server.rs", "crates/dfmcp-mcp/tests/workshop_construction_stdio.rs",
     *["tests/native/workshop/" + name for name in ("stubs.h", "handler.cpp", "vectors.json", "continuity_vectors.json")],
     "tests/stdio/workshop.py", "tests/stdio/workshop_tree_material.py", "tests/stdio/workshop_clock.py", "tests/stdio/tree_harvest.py",
@@ -85,14 +87,15 @@ def check(root: Path = ROOT) -> dict:
         ADAPTER + "acknowledgement.rs": ["fnverify_workshop_offline(&mutself,context:&OperationContext)->Result<()>{check(self.offline)?;self.verify_workshop(context)}", "fnverify_workshop(&mutself,context:&OperationContext)->Result<()>{check(matches!(self.protocol,Protocol::Workshop)&&self.scope.is_none())?;self.verify(context)}"],
         ADAPTER + "production_origin.rs": ["pubfnproduction_origin<", "ifself.mode!=WorkshopMode::Offline", "pubfnhandoff_checkpoint<", "acknowledgement.verify_workshop(", "origin_bytes(&self.binding,self.pin(),&record,high_tick,high_building)", "self.production_floors(key,&mutwork)?", "acknowledgement.verify_workshop_offline(", "pubfnretain_recovery_floor(", "pubfnfence(&mutself)", "pubfnretain_source_manifest(", "self.high_tick=self.high_tick.max(progress.tick());", "ifgoal!=WorkshopGoal::Complete"],
         TREE + "journal.rs": ["modmaterial_origin;", "pubusematerial_origin::TreeMaterialOrigin;"],
-        TREE + "material_origin.rs": ["pubfnmaterial_origin<", "acknowledgement.verify_tree(", "self.material_projection(&self.raw"],
+        TREE + "material_origin.rs": ["pubfnmaterial_origin<", "check(self.mode==Mode::Offline)?;self.material_checkpoint(acknowledgement,context)", "pubfnmaterial_checkpoint<", "acknowledgement.verify_tree(", "self.material_projection(&self.raw"],
         ADAPTER + "tree_material.rs": ["pubconstMAX_OFFERS:usize=64;", "Progress::decode(progress.bytes(),&origin.original().plan)?!=progress", "capture.tick()!=self.progress.tick"],
         ADAPTER + "rpc.rs": ["self.prepared.take().as_ref()==Some(permit.plan())"],
         MCP + "workshop_construction_server/runtime.rs": ["open_private_acknowledgements(", "acks.latest()", "self.withdraw();", "modtree_material;", "modmaterial_selection;", "self.tree_material=None;", "advance_authorization_tick", "modproduction_handoff;", "Action::ProductionHandoff", "modproject;", "parent_check()?;", "validate_family_environment()?;", "self.config.project_effect_deadline(c.anchor.tick.get())?;", "capability==Capability::Construct"],
         MCP + "workshop_construction_server/project.rs": ["pub(crate)fnfrom_resource_project_environment(","pub(crate)fnvalidate_project_recovery(","self.pin!=Some(retained.decode()?)","&configured[\"recovery\"]!=retained","pub(crate)fnretain_project_recovery(","owner.fence_advancement();","self.high_generation=self.high_generation.max(frontier.high_generation)","self.high_building=self.high_building.max(frontier.high_next_building_id)",".max(self.clock.as_ref().map_or(0,clock::Owner::high_tick))","original.remove(\"review_seal\")","pub(crate)fnperform_project(","narrow_current(ceiling,remaining,started)?","pub(crate)fnproject_handoff(","owner.production_handoff(self.journal.binding(),&inventory,&current)","letsource_changed=manifest.endpoint!=binding.endpoint()","self.config.capture(checkpoint.record().plan().before())?;","ifgoal!=WorkshopGoal::Complete","self.withdraw();"],
+        MCP + "workshop_construction_server/project_template.rs": ["pub(crate)structProjectWorkshopTemplate", "config.policy[\"clock\"][\"initialize\"]!=json!(config.input.initialize)", "pub(crate)fnactivate(", "self.config.current()?", "handoff.binding()!=&expected.binding", "handoff.project_deadline_tick()!=expected.deadline", "tree_material::Config::from_project_handoff(handoff,&config.input,)?", "config.project_tree_pending=false"],
         MCP + "workshop_construction_server/production_handoff.rs": ["pub(crate)structProductionHandoff", "fncomplete_original(", "entry.goal_complete()", "entry.needs_reconciliation()", "acknowledgements.latest()!=Some(pin)", "self.handoff_ack(pin,", "pub(crate)fnproduction_handoff(", "pub(crate)fnproduction_handoff_view(", "\"current_completion_proven\":false", "\"production_ready\":false", "\"native_calls\":0", "self.withdraw();"],
         MCP + "workshop_construction_server/clock.rs": ["retained_tick_floor", "journal.cached_records().fold(", "pub(super)fnproduction_handoff(", "self.prepared_seal().is_some()", "view.pending", "view.unresolved", "self.advancement_fenced"],
-        MCP + "workshop_construction_server/tree_material.rs": ["WorkshopMode::Offline", "self.journal.material_origin(", "source.progress(", "self.high_tick=self.high_tick.max(progress.tick)", "self.verify(work)?;"],
+        MCP + "workshop_construction_server/tree_material.rs": ["WorkshopMode::Offline", "self.journal.material_origin(", "source.progress(", "self.high_tick=self.high_tick.max(progress.tick)", "self.verify(work)?;", "handoff.verify_origin(&origin)?", "source.require_progress_at_or_after(self.high_tick)", "self.fenced|=self.config.project_handoff.is_some()"],
         MCP + "workshop_construction_server/material_selection.rs": ["donor.qualify(handle,&capture,work)?;", "donor.verify(work)?;", "self.guard.selection=Some(selection);"],
         MCP + "workshop_construction_server/presentation.rs": ["spine(operation,session,request)", "canonical_world_anchor_available", "\"fortress_commit\"", "\"fortress_plan\"", "\"fortress_observe\""],
     }
@@ -146,6 +149,7 @@ def check(root: Path = ROOT) -> dict:
         "mcp_unit_cases": text[MCP + "workshop_construction_server/tests.rs"].count("#[test]"),
         "production_handoff_mcp_cases": text[MCP + "workshop_construction_server/production_handoff_tests.rs"].count("#[test]"),
         "project_mcp_cases": text[MCP + "workshop_construction_server/project_tests.rs"].count("#[test]"),
+        "project_template_mcp_cases": text[MCP + "workshop_construction_server/project_template_tests.rs"].count("#[test]"),
         "staged_config_cases": text[MCP + "workshop_production_config_tests.rs"].count("#[test]"),
         "staged_production_child_config_cases": text[MCP + "live_production_runtime/parent_config_tests.rs"].count("#[test]"),
         "staged_runtime_cases": text[MCP + "workshop_production_runtime_tests.rs"].count("#[test]"),
@@ -260,6 +264,23 @@ def check(root: Path = ROOT) -> dict:
     }
     if contract.get("project_parent_seam") != expected_project_parent_seam:
         raise ValueError("Workshop project parent seam contract differs")
+    expected_template = {
+        "schema": "dfmcp.workshop-project-tree-material-mcp-development/1",
+        "module": "workshop_construction_server::runtime::project_template",
+        "standalone_schema_accepted": False, "item_id_or_preexisting_donor_selector": False,
+        "pending_template_can_open_child": False,
+        "source_scope_clock_and_deadline_preflight_before_tree": True,
+        "parent_child_and_clock_initialization_policy_must_match": True,
+        "activation_requires_exact_typed_tree_handoff": True,
+        "activation_changes_original_policy_identity": False,
+        "independent_offline_origin_verification_before_native_contact": True,
+        "carried_tick_sequence_item_floors_seeded_before_native_contact": True,
+        "parent_injected_donor_connection_or_progress_failure_stickily_fences": True,
+        "workshop_material_qualification_and_selection_latch_unchanged": True,
+        "original_tree_descriptor_is_current_supply_or_permission": False,
+    }
+    if contract.get("project_tree_material_template") != expected_template:
+        raise ValueError("deferred project Tree material template contract differs")
     project = compact[MCP + "workshop_construction_server/project.rs"]
     if project.count("self.project_checkpoint(&mutwork,&key,digest)?") != 2:
         raise ValueError("Workshop project handoff requires both complete custody verification brackets")

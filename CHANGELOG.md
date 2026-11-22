@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased — Connect Tree harvesting to the durable stock project
+
+- Add an optional original Tree stage to `native-resource-project`, keeping the
+  existing eleven-tool surface, fixed root objective and absolute deadline.
+- Preflight a deferred Workshop material template and activate it only from the
+  exact acknowledged Tree handoff; independently reopen that donor Offline and
+  refresh current supply before construction planning.
+- Require fresh paused Tree supply and settled independently reviewed clocks;
+  acknowledge the handoff before writer release and the next opening before
+  initialization. Preserve concurrent interrupted-production publication recovery.
+- Refuse foreign work at an unacknowledged opening, mixed child/clock
+  initialization, recovered originals with a different deadline, and fresh reads
+  below externally retained parent tick floors. Preserve consumed rejection state.
+- Publish complete semantic Tree reviews and scoped next actions with explicit
+  capsule commitments, complete recovery chunks and bounded output refusal.
+- Pass 106 distinct exact Rust component tests and 14 source-inventory cases,
+  including real private-custody and actual tools-call encoding checks. Full
+  MCP/runtime/stdio and live DFHack qualification remain outside this evidence
+  after dependency/test compiler SIGKILLs; production admission is unchanged.
+
 ## Unreleased — Preserve optional Tree stages in the original project ledger
 
 - Bind the first child in durable parent custody and add Tree opening, active
@@ -10,8 +30,8 @@
 - Retain original Tree/clock identities, consumed sequence and item allocator
   floors, deadlines and sticky discontinuity fences across recovery.
 - Preserve the concurrent exact production-publication intent and all its
-  recovery tests; compose the complete retained frame within224KiB.
-- Pass29 ledger/continuity component tests before the concurrent merge, including
+  recovery tests; compose the complete retained frame within 224 KiB.
+- Pass 29 ledger/continuity component tests before the concurrent merge, including
   three real Linux private-file cases. Merged-source integration validation
   follows separately; full MCP remains blocked by dependency compilation.
 

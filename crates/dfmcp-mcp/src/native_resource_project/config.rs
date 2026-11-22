@@ -1,7 +1,8 @@
-//! Closed operator policy for one Workshop -> stock-target development project.
+//! Closed operator policy for one optional Tree -> Workshop -> stock project.
 use super::{error, journal};
 use crate::live_production_runtime::{Config as ProductionConfig, ProjectStockGoal};
-use crate::workshop_construction_server::{ProjectWorkshopConfig, WorkshopProjectHandoff};
+use crate::tree_harvest_server::{ProjectTreeConfig, TreeProjectHandoff};
+use crate::workshop_construction_server::{ProjectWorkshopTemplate, WorkshopProjectHandoff};
 use dfmcp_core::{Digest32, ErrorCode, Result};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -10,6 +11,7 @@ use std::sync::Arc;
 
 pub(super) const OPT_IN: &str = "DFMCP_ALLOW_UNADMITTED_NATIVE_RESOURCE_PROJECT";
 pub(super) const CONFIG: &str = "DFMCP_NATIVE_RESOURCE_PROJECT_CONFIG";
+const TREE_CONFIG: &str = "DFMCP_TREE_HARVEST_MCP_CONFIG";
 const CONFIGURATIONS: [&str; 5] = [
     CONFIG,
     "DFMCP_WORKSHOP_MCP_CONFIG",
@@ -51,8 +53,12 @@ fn invalid(message: &str) -> dfmcp_core::DfmcpError {
 pub(super) fn runtime_io() -> Result<()> {
     let cx = asupersync::Cx::current()
         .ok_or_else(|| denied("resource project requires an owned runtime context"))?;
-    cx.checkpoint()
-        .map_err(|_| error(ErrorCode::CancellationRequested, "resource project cancelled"))?;
+    cx.checkpoint().map_err(|_| {
+        error(
+            ErrorCode::CancellationRequested,
+            "resource project cancelled",
+        )
+    })?;
     if !cx.capabilities().io {
         return Err(denied("inherited context denies resource project I/O"));
     }
@@ -64,27 +70,56 @@ fn read(name: &str) -> Result<String> {
         .map_err(|_| denied("required resource project operator configuration is missing"))?;
     let maximum = if name == CONFIG { 96 * 1024 } else { 16 * 1024 };
     if raw.is_empty() || raw.len() > maximum {
-        return Err(invalid("resource project operator configuration exceeds its bound"));
+        return Err(invalid(
+            "resource project operator configuration exceeds its bound",
+        ));
     }
     Ok(raw)
 }
 
 #[derive(Clone, Copy)]
 struct Features {
+    harvest_tree: bool,
     tree_material: bool,
+    tree_clock: bool,
     workshop_clock: bool,
     production_clock: bool,
     inventory_clock: bool,
     manager: bool,
 }
 impl Features {
-    fn from_raw(workshop: &str, production: &str) -> Result<Self> {
+    fn from_raw(
+        workshop: &str,
+        production: &str,
+        parent: Option<&str>,
+        tree: Option<&str>,
+    ) -> Result<Self> {
         let w: Value = serde_json::from_str(workshop)
             .map_err(|_| invalid("invalid Workshop configuration"))?;
         let p: Value = serde_json::from_str(production)
             .map_err(|_| invalid("invalid production configuration"))?;
+        let parent: Option<Value> = parent
+            .map(serde_json::from_str)
+            .transpose()
+            .map_err(|_| invalid("invalid resource project feature configuration"))?;
+        let harvest_tree = match parent.as_ref().and_then(|value| value.get("harvest_tree")) {
+            None => false,
+            Some(Value::Bool(value)) => *value,
+            Some(_) => return Err(invalid("harvest_tree must be a boolean")),
+        };
+        let tree_clock = if harvest_tree {
+            let tree: Value = serde_json::from_str(tree.ok_or_else(|| {
+                denied("a harvesting project requires its exact Tree configuration")
+            })?)
+            .map_err(|_| invalid("invalid project Tree configuration"))?;
+            !tree["clock"].is_null()
+        } else {
+            false
+        };
         Ok(Self {
-            tree_material: !w["tree_material_source"].is_null(),
+            harvest_tree,
+            tree_material: harvest_tree || !w["tree_material_source"].is_null(),
+            tree_clock,
             workshop_clock: !w["clock"].is_null(),
             production_clock: !p["clock"].is_null(),
             inventory_clock: !p["inventory_clock"].is_null(),
@@ -93,14 +128,18 @@ impl Features {
     }
     fn allows(self, key: &str) -> bool {
         match key {
+            TREE_CONFIG
+            | "DFMCP_ALLOW_UNADMITTED_TREE_HARVEST_V1_21"
+            | "DFMCP_TREE_HARVEST_ALLOW_DESIGNATE" => self.harvest_tree,
+            "DFMCP_ALLOW_UNADMITTED_TREE_CLOCK" => self.tree_clock,
             "DFMCP_ALLOW_UNADMITTED_WORKSHOP_TREE_MATERIAL" | "DFMCP_TREE_HARVEST_TOKEN" => {
                 self.tree_material
             }
-            "DFMCP_ALLOW_UNADMITTED_WORKSHOP_CLOCK"
-            | "DFMCP_RUN_TOKEN"
-            | "DFMCP_RUN_ALLOW_CLOCK" => self.workshop_clock,
-            "DFMCP_SEMANTIC_WORK_ORDER_ALLOW_CLOCK"
-            | "DFMCP_SEMANTIC_WORK_ORDER_CLOCK_TOKEN" => self.production_clock,
+            "DFMCP_ALLOW_UNADMITTED_WORKSHOP_CLOCK" => self.workshop_clock,
+            "DFMCP_RUN_TOKEN" | "DFMCP_RUN_ALLOW_CLOCK" => self.tree_clock || self.workshop_clock,
+            "DFMCP_SEMANTIC_WORK_ORDER_ALLOW_CLOCK" | "DFMCP_SEMANTIC_WORK_ORDER_CLOCK_TOKEN" => {
+                self.production_clock
+            }
             "DFMCP_SEMANTIC_WORK_ORDER_ALLOW_INVENTORY_CLOCK"
             | "DFMCP_SEMANTIC_WORK_ORDER_INVENTORY_CLOCK_TOKEN" => self.inventory_clock,
             "DFMCP_COMBINED_PRODUCTION_MANAGER_TOKEN" => self.manager,
@@ -114,12 +153,33 @@ pub(super) fn environment() -> Result<()> {
         || std::env::var_os("DFMCP_ADMITTED_BRIDGE_PROTOCOL").is_some()
         || crate::current_admission_provenance().is_some()
     {
-        return Err(denied("resource project requires its development opt-in and refuses production admission"));
+        return Err(denied(
+            "resource project requires its development opt-in and refuses production admission",
+        ));
     }
-    let features = Features::from_raw(&read(CONFIGURATIONS[1])?, &read(CONFIGURATIONS[2])?)?;
+    // Discovery can precede complete operator configuration. Optional feature
+    // selectors still determine the closed environment union before startup;
+    // opening later validates every required configuration and identity.
+    let parent = std::env::var(CONFIG).ok();
+    let tree = std::env::var(TREE_CONFIG).ok();
+    if parent.as_ref().is_some_and(|raw| raw.len() > 96 * 1024)
+        || tree.as_ref().is_some_and(|raw| raw.len() > 16 * 1024)
+    {
+        return Err(invalid(
+            "resource project feature configuration exceeds its bound",
+        ));
+    }
+    let features = Features::from_raw(
+        &read(CONFIGURATIONS[1])?,
+        &read(CONFIGURATIONS[2])?,
+        parent.as_deref(),
+        tree.as_deref(),
+    )?;
     for (key, _) in std::env::vars_os() {
         if !features.allows(&key.to_string_lossy()) {
-            return Err(denied("resource project refuses other DFMCP profiles and unconfigured credentials"));
+            return Err(denied(
+                "resource project refuses other DFMCP profiles and unconfigured credentials",
+            ));
         }
     }
     Ok(())
@@ -134,6 +194,9 @@ struct Input {
     acknowledged: Option<journal::Pin>,
     goal: ProjectStockGoal,
     handoff: Option<Value>,
+    #[serde(default)]
+    harvest_tree: bool,
+    tree_handoff: Option<Value>,
 }
 
 pub(super) struct Config {
@@ -143,11 +206,15 @@ pub(super) struct Config {
     pub(super) goal: ProjectStockGoal,
     pub(super) original: Value,
     pub(super) handoff: Option<WorkshopProjectHandoff>,
+    pub(super) tree: Option<ProjectTreeConfig>,
+    pub(super) tree_handoff: Option<TreeProjectHandoff>,
     guard: Arc<dyn Fn() -> Result<()> + Send + Sync>,
 }
 
 fn directory(path: &Path) -> Result<()> {
-    let raw = path.to_str().ok_or_else(|| invalid("project directory must be UTF-8"))?;
+    let raw = path
+        .to_str()
+        .ok_or_else(|| invalid("project directory must be UTF-8"))?;
     if !path.is_absolute()
         || raw.len() < 2
         || raw.len() > 3800
@@ -155,7 +222,9 @@ fn directory(path: &Path) -> Result<()> {
             part.is_empty() || part == "." || part == ".." || part.chars().any(char::is_control)
         })
     {
-        return Err(invalid("project requires a canonical absolute custody directory"));
+        return Err(invalid(
+            "project requires a canonical absolute custody directory",
+        ));
     }
     Ok(())
 }
@@ -163,72 +232,137 @@ fn directory(path: &Path) -> Result<()> {
 fn disjoint(paths: &[&Path]) -> Result<()> {
     for (index, path) in paths.iter().enumerate() {
         directory(path)?;
-        if paths[..index].iter().any(|other| path.starts_with(other) || other.starts_with(path)) {
-            return Err(invalid("parent, Workshop, production, workforce and order custody directories must be disjoint"));
+        if paths[..index]
+            .iter()
+            .any(|other| path.starts_with(other) || other.starts_with(path))
+        {
+            return Err(invalid(
+                "parent and all native child custody directories must be disjoint",
+            ));
         }
     }
     Ok(())
 }
 
 impl Config {
-    pub(super) fn load() -> Result<(Self, ProjectWorkshopConfig)> {
+    pub(super) fn load() -> Result<(Self, ProjectWorkshopTemplate)> {
         runtime_io()?;
         environment()?;
-        let raw = CONFIGURATIONS.map(read).into_iter().collect::<Result<Vec<_>>>()?;
+        let mut raw = CONFIGURATIONS
+            .map(read)
+            .into_iter()
+            .collect::<Result<Vec<_>>>()?;
         let input: Input = serde_json::from_str(&raw[0])
             .map_err(|_| invalid("invalid closed resource project configuration"))?;
         input.goal.validate()?;
         directory(&input.directory)?;
         if input.schema != "dfmcp.native-resource-project-development/1"
             || input.initialize == input.acknowledged.is_some()
-            || (input.initialize && input.handoff.is_some())
+            || (input.initialize && (input.handoff.is_some() || input.tree_handoff.is_some()))
+            || (!input.harvest_tree && input.tree_handoff.is_some())
         {
-            return Err(invalid("invalid project schema, initialization or retained acknowledgement"));
+            return Err(invalid(
+                "invalid project schema, initialization or retained acknowledgement",
+            ));
         }
-        let hashes: Vec<Digest32> = raw.iter().map(|value| Digest32::of_bytes(value.as_bytes())).collect();
+        let mut names = CONFIGURATIONS.to_vec();
+        if input.harvest_tree {
+            names.push(TREE_CONFIG);
+            raw.push(read(TREE_CONFIG)?);
+        }
+        let hashes: Vec<Digest32> = raw
+            .iter()
+            .map(|value| Digest32::of_bytes(value.as_bytes()))
+            .collect();
         let guard: Arc<dyn Fn() -> Result<()> + Send + Sync> = Arc::new(move || {
             runtime_io()?;
             environment()?;
-            for (name, expected) in CONFIGURATIONS.iter().zip(&hashes) {
+            for (name, expected) in names.iter().zip(&hashes) {
                 if Digest32::of_bytes(read(name)?.as_bytes()) != *expected {
-                    return Err(denied("resource project configuration changed; preserve original custody and close"));
+                    return Err(denied(
+                        "resource project configuration changed; preserve original custody and close",
+                    ));
                 }
             }
             Ok(())
         });
-        let handoff = input.handoff.as_ref().map(WorkshopProjectHandoff::from_json).transpose()?;
-        let workshop = ProjectWorkshopConfig::from_resource_project_environment(guard.clone())?
-            .with_project_deadline(input.goal.deadline_tick)?;
+        let handoff = input
+            .handoff
+            .as_ref()
+            .map(WorkshopProjectHandoff::from_json)
+            .transpose()?;
+        let tree_handoff = input
+            .tree_handoff
+            .as_ref()
+            .map(TreeProjectHandoff::from_json)
+            .transpose()?;
+        let tree = if input.harvest_tree {
+            Some(
+                ProjectTreeConfig::from_resource_project_environment(guard.clone())?
+                    .with_project_deadline(input.goal.deadline_tick)?,
+            )
+        } else {
+            None
+        };
+        let workshop = ProjectWorkshopTemplate::from_resource_project_environment(
+            guard.clone(),
+            tree.as_ref(),
+        )?
+        .with_project_deadline(input.goal.deadline_tick)?;
         let production = ProductionConfig::validate_project_environment(
-            guard.clone(), runtime_io, handoff.as_ref(),
+            guard.clone(),
+            runtime_io,
+            handoff.as_ref(),
         )?;
         production.matches_workshop(&workshop.project_binding()?)?;
-        disjoint(&[
-            &input.directory,
+        let mut directories = vec![
+            input.directory.as_path(),
             workshop.project_directory(),
             production.directory(),
             production.workforce_directory(),
             production.order_directory(),
-        ])?;
-        if input.initialize && (!workshop.project_initializing() || !production.initializing()) {
-            return Err(invalid("a new resource project requires new Workshop and production custodians"));
+        ];
+        if let Some(tree) = &tree {
+            directories.push(tree.project_directory());
         }
-        let original = json!({
+        disjoint(&directories)?;
+        if input.initialize
+            && (!workshop.project_initializing()
+                || !production.initializing()
+                || tree
+                    .as_ref()
+                    .is_some_and(|tree| !tree.project_initializing()))
+        {
+            return Err(invalid(
+                "a new resource project requires new custody for every native child",
+            ));
+        }
+        let mut original = json!({
             "schema":"dfmcp.native-resource-project-original/1",
             "goal":input.goal,
             "directory":input.directory,
             "workshop_policy":workshop.project_identity().to_hex(),
             "production_policy":production.identity().to_hex(),
         });
-        Ok((Self {
-            directory: input.directory,
-            initialize: input.initialize,
-            acknowledged: input.acknowledged,
-            goal: input.goal,
-            original,
-            handoff,
-            guard,
-        }, workshop))
+        // Preserve the exact original bytes/identity of existing two-stage
+        // projects. A Tree prefix is an explicit additional immutable policy.
+        if let Some(tree) = &tree {
+            original["tree_policy"] = json!(tree.project_identity().to_hex());
+        }
+        Ok((
+            Self {
+                directory: input.directory,
+                initialize: input.initialize,
+                acknowledged: input.acknowledged,
+                goal: input.goal,
+                original,
+                handoff,
+                tree,
+                tree_handoff,
+                guard,
+            },
+            workshop,
+        ))
     }
 
     pub(super) fn current(&self) -> Result<()> {
@@ -246,8 +380,19 @@ mod tests {
 
     #[test]
     fn custody_directories_cannot_alias_or_nest() {
-        assert!(disjoint(&[Path::new("/custody/project"), Path::new("/custody/workshop")]).is_ok());
-        for other in ["/custody/project", "/custody", "/custody/project/orders", "/custody/../orders"] {
+        assert!(
+            disjoint(&[
+                Path::new("/custody/project"),
+                Path::new("/custody/workshop")
+            ])
+            .is_ok()
+        );
+        for other in [
+            "/custody/project",
+            "/custody",
+            "/custody/project/orders",
+            "/custody/../orders",
+        ] {
             assert!(disjoint(&[Path::new("/custody/project"), Path::new(other)]).is_err());
         }
     }
@@ -255,16 +400,57 @@ mod tests {
     #[test]
     fn credentials_follow_configured_child_features() {
         let features = Features {
-            tree_material: false, workshop_clock: false, production_clock: false,
-            inventory_clock: false, manager: false,
+            harvest_tree: false,
+            tree_material: false,
+            tree_clock: false,
+            workshop_clock: false,
+            production_clock: false,
+            inventory_clock: false,
+            manager: false,
         };
         assert!(features.allows(CONFIG));
         assert!(features.allows("DFMCP_COMBINED_PRODUCTION_WORKSHOP_TOKEN"));
-        for key in ["DFMCP_RUN_TOKEN", "DFMCP_TREE_HARVEST_TOKEN",
+        for key in [
+            "DFMCP_RUN_TOKEN",
+            "DFMCP_TREE_HARVEST_TOKEN",
             "DFMCP_SEMANTIC_WORK_ORDER_CLOCK_TOKEN",
             "DFMCP_SEMANTIC_WORK_ORDER_INVENTORY_CLOCK_TOKEN",
-            "DFMCP_COMBINED_PRODUCTION_MANAGER_TOKEN", "DFMCP_ADMITTED_BRIDGE_PROTOCOL"] {
+            "DFMCP_COMBINED_PRODUCTION_MANAGER_TOKEN",
+            "DFMCP_ADMITTED_BRIDGE_PROTOCOL",
+        ] {
             assert!(!features.allows(key));
         }
+    }
+
+    #[test]
+    fn tree_owner_and_shared_clock_credentials_require_the_configured_stage() -> Result<()> {
+        let parent = r#"{"harvest_tree":true}"#;
+        let features = Features::from_raw("{}", "{}", Some(parent), Some(r#"{"clock":{}}"#))?;
+        for key in [
+            TREE_CONFIG,
+            "DFMCP_ALLOW_UNADMITTED_TREE_HARVEST_V1_21",
+            "DFMCP_TREE_HARVEST_ALLOW_DESIGNATE",
+            "DFMCP_TREE_HARVEST_TOKEN",
+            "DFMCP_ALLOW_UNADMITTED_TREE_CLOCK",
+            "DFMCP_RUN_TOKEN",
+            "DFMCP_RUN_ALLOW_CLOCK",
+            "DFMCP_ALLOW_UNADMITTED_WORKSHOP_TREE_MATERIAL",
+        ] {
+            assert!(features.allows(key), "{key}");
+        }
+        assert!(!features.allows("DFMCP_ALLOW_UNADMITTED_WORKSHOP_CLOCK"));
+        let no_clock = Features::from_raw("{}", "{}", Some(parent), Some("{}"))?;
+        assert!(!no_clock.allows("DFMCP_RUN_TOKEN"));
+        assert!(!no_clock.allows("DFMCP_ALLOW_UNADMITTED_TREE_CLOCK"));
+        let external_donor =
+            Features::from_raw(r#"{"tree_material_source":{}}"#, "{}", None, None)?;
+        assert!(external_donor.allows("DFMCP_TREE_HARVEST_TOKEN"));
+        assert!(!external_donor.allows(TREE_CONFIG));
+        assert!(!external_donor.allows("DFMCP_TREE_HARVEST_ALLOW_DESIGNATE"));
+        assert!(Features::from_raw("{}", "{}", Some(parent), None).is_err());
+        assert!(
+            Features::from_raw("{}", "{}", Some(r#"{"harvest_tree":"true"}"#), Some("{}")).is_err()
+        );
+        Ok(())
     }
 }

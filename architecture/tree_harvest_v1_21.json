@@ -129,6 +129,9 @@
     "crates/dfmcp-mcp/src/lib.rs",
     "crates/dfmcp-mcp/src/tree_harvest_server.rs",
     "crates/dfmcp-mcp/src/tree_harvest_server/runtime.rs",
+    "crates/dfmcp-mcp/src/tree_harvest_server/project.rs",
+    "crates/dfmcp-mcp/src/tree_harvest_server/project_handoff.rs",
+    "crates/dfmcp-mcp/src/tree_harvest_server/project_tests.rs",
     "crates/dfmcp-mcp/src/tree_harvest_server/presentation.rs",
     "crates/dfmcp-mcp/src/tree_harvest_server/server_tests.rs",
     "crates/dfmcp-mcp/src/tree_harvest_server/clock.rs",
@@ -286,7 +289,15 @@
       "tree_clock_failure_offline_and_close_cannot_restore_confirmation_or_current_proof",
       "tree_clock_overflow_keeps_recovery_without_a_dispatch_recommendation",
       "native_tree_clock_preserves_original_deadline_and_requires_fresh_wood",
-      "native_tree_clock_rechecks_durable_edges_and_recovers_without_redispatch"
+      "native_tree_clock_rechecks_durable_edges_and_recovers_without_redispatch",
+      "project_tree_policy_keeps_root_source_deadline_and_excludes_only_recovery_pins",
+      "project_tree_checkpoint_exports_real_completed_custody_without_offline_authority",
+      "project_tree_handoff_rejects_custody_substitution_and_noncanonical_progress",
+      "project_tree_recovery_checks_exact_ack_and_retains_descendant_floors",
+      "project_tree_empty_parent_checkpoint_binds_recovered_descendant_deadline",
+      "project_tree_compact_review_preserves_action_semantics_and_honest_custody",
+      "project_tree_unacknowledged_opening_cannot_adopt_original_history",
+      "project_tree_budget_narrows_every_allowance_without_renewal"
     ],
     "rust_stdio_cases": [
       "tree_harvest_server_actual_modern_stdio_positive_negative_and_crash_recovery"
@@ -350,5 +361,28 @@
     "restores_preparation_or_dispatch_permission": false,
     "current_material_or_causal_provenance_proved": false
   },
-  "native_clock_implementation_added": false
+  "native_clock_implementation_added": false,
+  "project_parent_seam": {
+    "module": "tree_harvest_server::runtime::project",
+    "handoff_schema": "dfmcp.tree-project-handoff/1",
+    "handoff_max_bytes": 16384,
+    "parent_guard_required": true,
+    "standalone_isolation_unchanged": true,
+    "original_deadline_renewed": false,
+    "native_horizon_ticks_max": 12000,
+    "historical_credited_completion_required": true,
+    "fresh_continuous_supply_required": true,
+    "custody_verified_before_and_after_fresh_read": true,
+    "clock_settled_without_preparation_or_uncertainty": true,
+    "entered_source_failure_stickily_fences": true,
+    "exact_parent_ack_and_clock_recovery_pins_required": true,
+    "recovered_original_deadline_matches_immutable_parent_before_checkpoint": true,
+    "recovery_restores_permission": false,
+    "unacknowledged_opening_adopts_old_history": false,
+    "compact_review_capsule": "SHA256 and byte length; current owner or original journal identified; raw bytes not inline",
+    "import": "parent freezes handoff, releases Tree owner, Workshop independently reopens exact original Offline and freshly qualifies material",
+    "handoff_is_current_supply_or_mutation_authority": false,
+    "new_native_protocol": false,
+    "new_public_tool": false
+  }
 }

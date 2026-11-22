@@ -259,6 +259,16 @@ impl Owner {
     pub(super) fn prepared_seal(&self) -> Option<Digest32> {
         self.clock.as_ref().and_then(Clock::prepared_seal)
     }
+    pub(super) fn project_has_history(&self) -> bool {
+        self.clock
+            .as_ref()
+            .is_some_and(|clock| !clock.cached_view().runs.is_empty())
+            || self
+                .journal
+                .as_ref()
+                .is_some_and(|journal| journal.cached_records().next().is_some())
+            || (self.clock.is_none() && self.journal.is_none())
+    }
     fn retain(&mut self) {
         self.retained_tick = self.high_tick();
         if let Some(clock) = &self.clock {
@@ -345,6 +355,36 @@ impl Owner {
             "active_run":view.as_ref().and_then(|view|view.active()).or(unbound_run.as_ref()).map(|run|run_json(run,false)),
             "consumed_tick_floor":self.high_tick(),"current_pause_proven":false,
             "harvest_goal_proven":false,"automatic_redispatch":false})
+    }
+
+    /// Typed, read-only settlement for parent transfer. A JSON reference is not
+    /// authority and a live preparation, unknown interval or source fence may
+    /// never be erased by releasing this owner.
+    pub(super) fn project_handoff(
+        &mut self,
+        binding: &Binding,
+        tree: &Journal<PrivateBuildFile>,
+        origin: TreeClockOrigin,
+        c: &OperationContext,
+    ) -> Result<Recovery> {
+        let result = (|| {
+            if self.advancement_fenced || self.prepared_seal().is_some() {
+                return Err(denied(
+                    "settle the original Tree clock before project transfer",
+                ));
+            }
+            let view = self
+                .inspect(binding, tree, Some(origin), c)?
+                .ok_or_else(|| denied("original Tree clock target is unavailable"))?;
+            if !view.can_sample_goal() || self.prepared_seal().is_some() {
+                return Err(denied(
+                    "Tree clock retains pending, unresolved or prepared work",
+                ));
+            }
+            Ok(view.recovery)
+        })();
+        self.retain();
+        result
     }
 }
 

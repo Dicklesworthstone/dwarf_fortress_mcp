@@ -1,5 +1,62 @@
 # Implementation Status
 
+## Unreleased — Own Tree harvesting, Workshop construction and stock production
+
+The existing `native-resource-project` profile now accepts `harvest_tree: true`
+and owns the actual Tree, Workshop and combined-production runtimes in one
+session. The original root, stock target and absolute deadline remain fixed.
+Designation, construction, labor, order and finite clock effects each retain
+their independent native authority, current review and explicit confirmation.
+
+A deferred Workshop material template validates all source, footprint, custody
+and clock policy before Tree initialization. It contains no guessed item or
+invented donor acknowledgement. `advance_to_workshop` requires the exact parent
+head, original Tree journal/ACK, timely historical completion, settled clock
+custody and a fresh paused supply read. The parent retains consumed floors,
+acknowledges the immutable handoff, releases the Tree writer, then acknowledges
+Workshop opening. The existing Offline importer independently reconstructs that
+exact donor and freshly qualifies current wood before construction planning.
+
+Interrupted openings cannot adopt existing designation or clock history. Parent
+child/clock initialization selectors must agree. A valid recovered Tree
+descendant must still match the fixed root deadline, including when its older
+checkpoint had no original; local inspection cannot acknowledge a rejected
+original. A later externally retained parent authority tick raises the Tree
+rejection floor before fresh progress reads. Source failures remain sticky and
+all original custody stays inspectable. The concurrent exact interrupted
+production-publication recovery is preserved through the new Tree prefix.
+
+Agent Turns guide the current Tree offer, designation, independently reviewed
+clock, reconciliation and exact-head handoff. Semantic reviews retain the
+complete action terms and explicitly identify the capsule commitment and its
+private custody; they do not claim raw bytes are inline. Whole encoded output,
+Unicode recovery chunks and oversized-review refusal are exercised. Historical
+Tree supply never becomes proof of the final stock goal.
+
+Validation: 106 distinct Rust component tests pass: 38 ledger, 30 owner/policy
+(including the three continuity tests), 26 presentation/actual tools-call codec,
+and 12 material-adapter cases. The separately run 41-case ledger suite includes
+the same three continuity cases and is not double-counted. Actual Linux private
+storage, original journal/ACK descendants, immutable material reconstruction,
+legacy journal bytes, interrupted publication and clock/deadline/floor refusals
+are covered. Tree and Workshop inventory suites pass 3/3 and 11/11.
+
+The complete selected Tree/Workshop/production/parent bodies pass library and
+test metadata checks with the full real core/world/intent/adapter/lab graph.
+Three unavailable Asupersync context wrappers are declaration-only hooks with
+no implementation; executed cases do not call them. The wire component uses the
+actual modern content types and tools-call encoder, excluding unrelated
+protocol dispatch. All 840 owner and 368 material source hashes match. Full MCP
+checking is still SIGKILLed in unchanged Asupersync before MCP diagnostics, and
+the entire adapter test binary exceeds the host limit. Mandatory verification
+reaches missing `br`; no full runtime/stdio/live-game/admission qualification is
+claimed. See `docs/NATIVE_RESOURCE_PROJECT_MCP.md` for the exact scope.
+
+Manager appointment as a project stage, generic multi-family planning and
+stable current proof for an initially satisfied no-work stock target remain
+open. Broad owners `df-dfhack-bridge-plane-c-pic.4` and
+`dfmcp-reality-wiring-proof-4bf.14` remain in progress.
+
 ## Unreleased — Retain original Tree stages and material handoff custody
 
 The native resource project's parent ledger now supports an immutable optional
@@ -10,11 +67,11 @@ permits only its existing drain updates. The original first child is bound in
 the header. Existing Workshop-first headers, frames and ACKs retain their exact
 serialized bytes, including complete histories opened by the extended replay.
 The concurrent exact production-publication intent and recovery checks remain
-intact. The224KiB frame limit composes all bounded child checkpoints, handoffs
-and production intent; the8MiB total,4096-frame and128MiB operation work limits
+intact. The 224 KiB frame limit composes all bounded child checkpoints, handoffs
+and production intent; the 8 MiB total, 4096-frame and 128 MiB operation work limits
 remain unchanged.
 
-Before merging the concurrent production-publication increment, all26 ledger
+Before merging the concurrent production-publication increment, all 26 ledger
 tests and three child-continuity tests passed, including three actual Linux
 private-file cases. The component used the complete actual core/world/intent/
 adapter crates and exact pinned serde versions. The merged source retains all
@@ -23,7 +80,7 @@ case; current merged-source execution is recorded in the following integration
 increment. This is ledger and continuity evidence only. The existing selectable
 profile still starts with Workshop at this source checkpoint.
 
-A full baseline MCP check on nightly2026-11-22 was killed while compiling the
+A full baseline MCP check on nightly 2026-11-22 was killed while compiling the
 unchanged Asupersync dependency before reaching MCP. No full Rust, modern stdio,
 live-game or admission qualification is claimed. Work remains under
 `df-dfhack-bridge-plane-c-pic.4` and `dfmcp-reality-wiring-proof-4bf.14`.

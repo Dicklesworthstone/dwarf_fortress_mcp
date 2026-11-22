@@ -7,6 +7,9 @@ use fastmcp_rust::{
 };
 use serde_json::{Value, json};
 
+#[path = "tree_presentation.rs"]
+mod tree;
+
 const CHUNK_BYTES: usize = 24_000;
 const FIRST_TEXT_BYTES: usize = 60_000;
 // The modern codec permits a 4096-byte numeric request ID. Reserve its full
@@ -31,8 +34,14 @@ fn publication_pending(reference: &Value) -> bool {
 }
 
 fn review(result: &Value) -> Option<(&str, Value)> {
-    if result["ok"] != true || result["project_cancelled"] == true {
+    if result["ok"] != true
+        || result["project_cancelled"] == true
+        || result["session_closed"] == true
+    {
         return None;
+    }
+    if tree::active(result) {
+        return tree::review(result);
     }
     let child = &result["child"];
     // Clock confirmation requires the actual child's current review flag,
@@ -63,6 +72,9 @@ fn review(result: &Value) -> Option<(&str, Value)> {
 fn observed_plan(result: &Value) -> Option<Value> {
     if result["mode"] != "control" {
         return None;
+    }
+    if tree::active(result) {
+        return tree::observed_plan(result);
     }
     let child = &result["child"];
     let observation = &child["observation"];
@@ -117,6 +129,11 @@ fn observed_plan(result: &Value) -> Option<Value> {
 fn next_step(result: &Value, reference: &Value, session: SessionId) -> Vec<Value> {
     if result["session_closed"] == true {
         return Vec::new();
+    }
+    if !publication_pending(reference)
+        && let Some(next) = tree::next_step(result, reference, session)
+    {
+        return next;
     }
     let mut arguments = json!({"session_id":session.to_string()});
     let mut confirmation = false;
@@ -301,20 +318,65 @@ pub(super) fn packet(
         .get("stage")
         .unwrap_or(&reference["retained_stage"]["stage"]);
     let cancelled = *stage == "cancelled";
-    let child = result.get("child").unwrap_or(&reference["child_reference"]);
+    let child = result
+        .get("child")
+        .filter(|value| value.is_object())
+        .unwrap_or(&reference["child_reference"]);
+    let child_path = if result.get("child").is_some_and(Value::is_object) {
+        "/result/child"
+    } else {
+        "/retained_reference/child_reference"
+    };
+    let tree_active = tree::active(&result)
+        || matches!(
+            stage.as_str(),
+            Some("tree_opening" | "tree" | "tree_transition")
+        )
+        || (cancelled
+            && matches!(
+                reference["retained_stage"]["cancelled_from"].as_str(),
+                Some("tree_opening" | "tree" | "tree_transition")
+            ));
+    let tree_visible = tree_active || original["tree"].is_object();
+    let tree_state = if tree_active {
+        child
+    } else {
+        &original["tree"]
+    };
+    let tree_path = if tree_active {
+        child_path
+    } else {
+        "/retained_reference/retained_stage/checkpoint/tree"
+    };
     let clocks = ["clock", "inventory_clock"].into_iter().filter_map(|scope| {
         let clock = &child[scope];
         clock.is_object().then(|| json!({
             "scope":scope, "pending":clock["pending"], "unresolved":clock["unresolved"],
             "may_be_running":clock["may_be_running"], "advancement_fenced":clock["advancement_fenced"],
+            "target_id":clock["target_id"], "original_key":clock["active_run"]["key"],
+            "native_unpause_attempted":clock["active_run"]["native_unpause_attempted"],
             "current_pause_proven":false, "complete_custody_pointer":"/retained_reference",
-            "complete_evidence_pointer":format!("/result/child/{scope}"),
+            "complete_evidence_pointer":format!("{child_path}/{scope}"),
         }))
     }).collect::<Vec<_>>();
+    let mut indeterminate = if result["ok"] != true && reference.is_object() {
+        vec![json!({"custody_pointer":"/retained_reference","automatic_redispatch":false})]
+    } else {
+        Vec::new()
+    };
+    if tree_active && child["clock"]["unresolved"] == true {
+        indeterminate.push(json!({"scope":"clock", "current_pause_proven":false,
+            "complete_custody_pointer":"/retained_reference",
+            "complete_evidence_pointer":format!("{child_path}/clock"),
+            "automatic_redispatch":false}));
+    }
     let obligation = reference.is_object().then(|| {
         json!({
             "stage":reference["retained_stage"]["stage"],
             "project_goal":goal["goal"],
+            "tree_original":original["tree"]["original"],
+            "tree_handoff_pointer":original["tree_handoff"].is_object()
+                .then_some("/retained_reference/retained_stage/checkpoint/tree_handoff"),
             "workshop_original":original["workshop"]["original"],
             "production_original":original["production"]["recovery"],
             "project_cancelled":reference["retained_stage"]["stage"] == "cancelled",
@@ -333,12 +395,16 @@ pub(super) fn packet(
     })).into_iter().collect::<Vec<_>>();
     let mut uncertainty = vec![
         json!({"uncertainty_id":"native_project_scope","epistemic_state":"unknown",
-            "statement":"This explicitly unadmitted development owner composes original Workshop construction and one fixed furniture stock target. A completed Tree donor may supply material; automatic Tree designation and Manager appointment are not stages of this project."}),
+            "statement":"This explicitly unadmitted development owner can retain one original Tree designation and supply handoff before original Workshop construction and one fixed furniture stock target. Each native effect and clock interval has its own review. Manager appointment is not a stage of this project."}),
         json!({"uncertainty_id":"receipt_and_goal","epistemic_state":"unknown",
             "statement":"Placement, order insertion and clock receipts are historical custody. Only the existing production monitor can prove the original labor and stock goal at its exact observation anchor. An already-satisfied census proves only the count at its recorded anchor, without stability or causal-output proof."}),
         json!({"uncertainty_id":"stop_and_recovery","epistemic_state":"indeterminate",
             "statement":"A project stop prevents new stages and new reviews. It does not undo construction, cancel an already inserted order or prove a clock paused. Preserve all recovery references; independently reconcile or cancel the active clock. Opening markers never grant replayed initialization."}),
     ];
+    if tree_visible {
+        uncertainty.push(json!({"uncertainty_id":"tree_supply_and_capture","epistemic_state":"unknown",
+            "statement":"Tree completion observes a coordinate predicate and eligible ground wood; no stable plant identity, causal wood provenance or final stock proof follows. Workshop independently qualifies current material. The bounded Tree review exposes semantic fields and a capsule commitment; raw capsule bytes remain with their indicated owner or custody and are not delivered in this packet."}));
+    }
     if publication_pending {
         uncertainty.push(json!({
             "uncertainty_id":"production_original_publication",
@@ -361,8 +427,19 @@ pub(super) fn packet(
             "runtime_admitted":false, "mutation_admissible":false,
             "stage":stage, "project_cancelled":cancelled,
             "original_goal":goal["goal"],
-            "original_goal_proven":result["ok"] == true && result["original_goal_proven"] == true,
-            "current_goal_anchor":result["current_stock_goal"]["current_goal_anchor"],
+            "original_goal_proven":result["ok"] == true && *stage == "production"
+                && !cancelled && result["original_goal_proven"] == true,
+            "current_goal_anchor":if result["ok"] == true && *stage == "production" && !cancelled {
+                result["current_stock_goal"]["current_goal_anchor"].clone()
+            } else { Value::Null },
+            "tree_supply":if tree_visible { json!({
+                "historical_supply_observed_tick":tree_state["original"]["historical_supply_observed_tick"],
+                "fresh_supply_observed_this_call":tree_active && result["ok"] == true
+                    && tree_state["retained_state_currently_verified"] == true
+                    && tree_state["original"]["fresh_supply_observed"] == true,
+                "project_goal_proven":false,"causal_item_provenance":"unknown",
+                "complete_evidence_pointer":tree_path,
+            }) } else { Value::Null },
             "canonical_cross_family_anchor_available":false,
             "development_review_available":pending.is_some(),
             "production_publication_pending":publication_pending,
@@ -375,9 +452,7 @@ pub(super) fn packet(
                 vec![json!({"scope":"original_child","native_effects_cancelled":false,
                     "custody_pointer":"/retained_reference"})]
             } else { Vec::new() },
-            "indeterminate_effects":if result["ok"] != true && reference.is_object() {
-                vec![json!({"custody_pointer":"/retained_reference","automatic_redispatch":false})]
-            } else { Vec::new() },
+            "indeterminate_effects":indeterminate,
             "publications":publications,
             "confirmations":pending.into_iter().collect::<Vec<_>>(),
         }))
@@ -388,8 +463,8 @@ pub(super) fn packet(
             "complete_domains":if result["project_custody_currently_verified"] == true {
                 vec!["parent_stage_custody"]
             } else { Vec::<&str>::new() },
-            "partial_domains":["original_workshop","selected_production_goal"],
-            "omitted_domains":["canonical_cross_family_world","automatic_tree_stage","manager_appointment"],
+            "partial_domains":["original_tree","original_workshop","selected_production_goal"],
+            "omitted_domains":["canonical_cross_family_world","manager_appointment"],
             "parent_custody_verified_this_call":result["project_custody_currently_verified"] == true,
             "recovery_references_are_current_proof":false,
         }))

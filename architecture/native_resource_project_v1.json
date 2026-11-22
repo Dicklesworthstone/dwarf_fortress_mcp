@@ -24,6 +24,9 @@
     "fortress_doctor"
   ],
   "stages": [
+    "tree_opening",
+    "tree",
+    "tree_transition",
     "workshop_opening",
     "workshop",
     "transition",
@@ -32,6 +35,7 @@
     "cancelled"
   ],
   "children": [
+    "tree_harvest_server::ProjectTreeRuntime",
     "workshop_construction_server::ProjectWorkshopRuntime",
     "live_production_runtime::Runtime"
   ],
@@ -83,7 +87,11 @@
     "cancelled_opening_does_not_activate_child": true,
     "restored_native_review": false,
     "silent_repair": false,
-    "automatic_redispatch": false
+    "automatic_redispatch": false,
+    "unacknowledged_opening_adopts_original_or_clock_history": false,
+    "tree_original_deadline_checked_before_parent_ack": true,
+    "parent_rejection_tick_seeded_into_tree_before_fresh_read": true,
+    "project_child_and_clock_initialization_must_agree": true
   },
   "production_publication": {
     "intent_schema": "dfmcp.project-production-intent/1",
@@ -124,7 +132,10 @@
     "original_bytes": 65536,
     "handoff_bytes": 65536,
     "child_checkpoint_bytes": 32768,
-    "production_intent_bytes": 32768
+    "tree_actions": 1,
+    "tree_handoff_bytes": 16384,
+    "production_intent_bytes": 32768,
+    "ledger_frame_bytes": 229376
   },
   "output": {
     "agent_turn_schema": "dfmcp.agent_turn/1",
@@ -141,11 +152,17 @@
     "canonical_cross_family_anchor": false,
     "no_work_census_is_current_stability_proof": false,
     "close_retains_owner_until_complete_recovery_encoded": true,
+    "tree_capture_commitment": {
+      "schema": "dfmcp.tree-project-capture-commitment/1",
+      "raw_bytes_inline": false,
+      "exact_capsule_retained_in_native_owner_or_journal": true,
+      "complete_semantic_approval_projection": true
+    },
     "pending_production_publication_explicit": true,
     "pending_publication_offers_native_confirmation": false
   },
   "unsupported": [
-    "automatic_tree_designation",
+    "automatic_native_effect_without_current_review",
     "automatic_manager_appointment",
     "generic_mixed_family_plan",
     "world_checkpoint_restore",
@@ -196,7 +213,22 @@
     "crates/dfmcp-mcp/src/semantic_work_order_runtime/bounded_goal_clock.rs",
     "crates/dfmcp-adapter/src/order_run/journal.rs",
     "crates/dfmcp-adapter/src/order_run/journal/tests.rs",
-    "crates/dfmcp-adapter/src/bounded_run/journal/tests.rs"
+    "crates/dfmcp-adapter/src/bounded_run/journal/tests.rs",
+    "crates/dfmcp-mcp/src/native_resource_project/tree.rs",
+    "crates/dfmcp-mcp/src/native_resource_project/tree_presentation.rs",
+    "crates/dfmcp-mcp/src/native_resource_project/tree_presentation_tests.rs",
+    "crates/dfmcp-mcp/src/tree_harvest_server.rs",
+    "crates/dfmcp-mcp/src/tree_harvest_server/runtime.rs",
+    "crates/dfmcp-mcp/src/tree_harvest_server/clock.rs",
+    "crates/dfmcp-mcp/src/tree_harvest_server/project.rs",
+    "crates/dfmcp-mcp/src/tree_harvest_server/project_handoff.rs",
+    "crates/dfmcp-adapter/src/tree_harvest/material_origin.rs",
+    "crates/dfmcp-mcp/src/tree_harvest_server/project_tests.rs",
+    "crates/dfmcp-mcp/src/workshop_construction_server/project_template.rs",
+    "crates/dfmcp-mcp/src/workshop_construction_server/project_template_tests.rs",
+    "crates/dfmcp-mcp/src/workshop_construction_server/tree_material.rs",
+    "crates/dfmcp-mcp/src/workshop_construction_server/clock.rs",
+    "crates/dfmcp-adapter/src/workshop_construction/tree_material_tests.rs"
   ],
   "qualification": {
     "pre_outage_ledger_component_cases_passed": 17,
@@ -210,10 +242,56 @@
     "exact_source_component_proof_sha256": "f195c238253e6dc8acbfb7bbdf6b81aa88ef0ae96ebb91a031f911d5c966354e",
     "integrated_rust_qualified": false,
     "modern_stdio_qualified": false,
-    "live_dfhack_qualified": false
+    "live_dfhack_qualified": false,
+    "current_ledger_component_cases_passed": 38,
+    "current_private_linux_storage_cases_included": 3,
+    "current_component_uses_complete_actual_adapter": true,
+    "baseline_full_mcp_build": "SIGKILL compiling unchanged asupersync before MCP crate",
+    "current_child_continuity_cases_passed": 3,
+    "current_owner_component_cases_passed": 30,
+    "current_presentation_codec_component_cases_passed": 26,
+    "current_tree_material_adapter_component_cases_passed": 12,
+    "current_distinct_rust_component_cases_passed": 106,
+    "current_source_inventory_cases_passed": 14,
+    "selected_owner_library_and_test_metadata_checked": true,
+    "owner_source_hashes_verified": 840,
+    "material_source_hashes_verified": 368,
+    "owner_runtime_context_wrappers": "three declaration-only external hooks; no implementation; executed tests do not call them",
+    "wire_component_scope": "actual modern content types, raw admission, result codec and tools/call encoder; unrelated dispatch excluded",
+    "full_mcp_check": "SIGKILL in unchanged Asupersync before MCP diagnostics, including serial frontend/backend attempt",
+    "full_adapter_test_binary": "SIGKILL before execution; selected exact material tests pass",
+    "mandatory_verify": "preceding gates pass; stops at missing br"
   },
   "cli_profile": [
     "serve-gameplay-dev",
     "native-resource-project"
-  ]
+  ],
+  "optional_tree": {
+    "selector": "harvest_tree: true",
+    "configuration": "DFMCP_TREE_HARVEST_MCP_CONFIG",
+    "workshop_template_schema": "dfmcp.workshop-project-tree-material-mcp-development/1",
+    "initial_stage_bound_in_original": true,
+    "legacy_workshop_journal_bytes_preserved": true,
+    "fixed_original_root_and_deadline": true,
+    "separate_designation_and_clock_reviews": true,
+    "caller_selected_donor_or_item": false,
+    "unresolved_template_opens_runtime": false
+  },
+  "tree_handoff": {
+    "schema": "dfmcp.tree-project-handoff/1",
+    "request_kind": "advance_to_workshop",
+    "expected_parent_head_required": true,
+    "fresh_paused_same_incarnation_supply_required": true,
+    "historical_achieved_tick_alone_sufficient": false,
+    "original_journal_and_independent_ack_verified": true,
+    "settled_unprepared_unfenced_tree_clock_required": true,
+    "consumed_floors_retained_before_rejection": true,
+    "transition_ack_before_writer_release": true,
+    "workshop_opening_ack_before_child_initialization": true,
+    "workshop_import_mode": "Offline",
+    "independent_workshop_supply_refresh": true,
+    "native_effect_dispatched": false,
+    "tree_custody_frozen_in_later_stages": true,
+    "final_stock_goal_proven": false
+  }
 }
