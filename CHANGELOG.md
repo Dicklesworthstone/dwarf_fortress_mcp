@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased — Preserve optional Tree stages in the original project ledger
+
+- Bind the first child in durable parent custody and add Tree opening, active
+  and handoff stages before the existing Workshop-to-production sequence.
+- Freeze the exact Tree checkpoint and material handoff throughout later stages;
+  preserve terminal cancellation and reject skips, rewinds or donor substitution.
+- Keep existing Workshop-first journal and acknowledgement bytes unchanged.
+- Retain original Tree/clock identities, consumed sequence and item allocator
+  floors, deadlines and sticky discontinuity fences across recovery.
+- Preserve the concurrent exact production-publication intent and all its
+  recovery tests; compose the complete retained frame within224KiB.
+- Pass29 ledger/continuity component tests before the concurrent merge, including
+  three real Linux private-file cases. Merged-source integration validation
+  follows separately; full MCP remains blocked by dependency compilation.
+
 ## Unreleased — Recover interrupted original production publication
 
 - Acknowledge the exact compiled stock-target original in the native resource

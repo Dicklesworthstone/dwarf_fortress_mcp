@@ -1,5 +1,33 @@
 # Implementation Status
 
+## Unreleased — Retain original Tree stages and material handoff custody
+
+The native resource project's parent ledger now supports an immutable optional
+Tree prefix before Workshop and production. Separate opening, active and
+handoff stages prevent skipped or repeated children. The Tree checkpoint and
+handoff freeze after transfer; cancellation retains the active original and
+permits only its existing drain updates. The original first child is bound in
+the header. Existing Workshop-first headers, frames and ACKs retain their exact
+serialized bytes, including complete histories opened by the extended replay.
+The concurrent exact production-publication intent and recovery checks remain
+intact. The224KiB frame limit composes all bounded child checkpoints, handoffs
+and production intent; the8MiB total,4096-frame and128MiB operation work limits
+remain unchanged.
+
+Before merging the concurrent production-publication increment, all26 ledger
+tests and three child-continuity tests passed, including three actual Linux
+private-file cases. The component used the complete actual core/world/intent/
+adapter crates and exact pinned serde versions. The merged source retains all
+incoming publication tests and adds an explicit Tree-plus-production-intent
+case; current merged-source execution is recorded in the following integration
+increment. This is ledger and continuity evidence only. The existing selectable
+profile still starts with Workshop at this source checkpoint.
+
+A full baseline MCP check on nightly2026-11-22 was killed while compiling the
+unchanged Asupersync dependency before reaching MCP. No full Rust, modern stdio,
+live-game or admission qualification is claimed. Work remains under
+`df-dfhack-bridge-plane-c-pic.4` and `dfmcp-reality-wiring-proof-4bf.14`.
+
 ## Unreleased — Recover the exact original after interrupted production publication
 
 The native resource project now acknowledges a closed

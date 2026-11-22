@@ -172,6 +172,26 @@ fn production() -> Checkpoint {
     );
     checkpoint
 }
+fn tree_original() -> Value {
+    let mut original = original();
+    original["tree_policy"] = json!("original-tree-policy");
+    original
+}
+fn tree() -> Checkpoint {
+    Checkpoint {
+        tree: Some(
+            json!({"acknowledged": "original-tree-ack", "key": "original-tree", "high_tick": 105}),
+        ),
+        ..Checkpoint::default()
+    }
+}
+fn tree_handoff() -> Checkpoint {
+    let mut checkpoint = tree();
+    checkpoint.tree_handoff = Some(
+        json!({"original_key": "original-tree", "original_digest": "original-tree-digest", "acknowledged": "original-tree-ack", "high_tick": 108}),
+    );
+    checkpoint
+}
 fn production_publication() -> Value {
     let identity = |label: &str| Digest32::of_bytes(label.as_bytes()).to_hex();
     let workshop = identity("original verified workshop");
@@ -244,6 +264,23 @@ fn published_production() -> Checkpoint {
     checkpoint.production = Some(production_publication());
     checkpoint
 }
+fn with_tree(mut checkpoint: Checkpoint) -> Checkpoint {
+    let donor = tree_handoff();
+    checkpoint.tree = donor.tree;
+    checkpoint.tree_handoff = donor.tree_handoff;
+    checkpoint
+}
+fn tree_stages() -> [(Stage, Checkpoint); 7] {
+    [
+        (Stage::Tree, tree()),
+        (Stage::TreeTransition, tree_handoff()),
+        (Stage::WorkshopOpening, tree_handoff()),
+        (Stage::Workshop, with_tree(workshop())),
+        (Stage::Transition, with_tree(handoff())),
+        (Stage::ProductionOpening, with_tree(handoff())),
+        (Stage::Production, with_tree(production())),
+    ]
+}
 fn seeded() -> TestResult<(Journal<Memory, Memory>, Memory, Memory)> {
     let storage = Memory::default();
     let acknowledgements = Memory::default();
@@ -255,6 +292,21 @@ fn seeded() -> TestResult<(Journal<Memory, Memory>, Memory, Memory)> {
         true,
         original(),
         None,
+    )?;
+    Ok((journal, storage, acknowledgements))
+}
+fn seeded_tree() -> TestResult<(Journal<Memory, Memory>, Memory, Memory)> {
+    let storage = Memory::default();
+    let acknowledgements = Memory::default();
+    let journal = Journal::open_with_initial(
+        storage.clone(),
+        acknowledgements.clone(),
+        &context(),
+        Mode::Control,
+        true,
+        tree_original(),
+        None,
+        Stage::TreeOpening,
     )?;
     Ok((journal, storage, acknowledgements))
 }
@@ -284,6 +336,559 @@ fn reopen(
         original(),
         Some(pin),
     )
+}
+fn reopen_tree(
+    storage: &Memory,
+    acknowledgements: &Memory,
+    pin: Pin,
+    mode: Mode,
+) -> Result<Journal<Memory, Memory>> {
+    let mut c = context();
+    c.session_id = SessionId::new(7002);
+    Journal::open_with_initial(
+        storage.clone(),
+        acknowledgements.clone(),
+        &c,
+        mode,
+        false,
+        tree_original(),
+        Some(pin),
+        Stage::TreeOpening,
+    )
+}
+
+/// The pre-Tree canonical schema, kept independently of the new optional fields.
+#[derive(serde::Serialize)]
+struct LegacyHeader {
+    schema: String,
+    incarnation: String,
+    fortress: String,
+    initial_tick: u64,
+    original: Value,
+}
+#[derive(serde::Serialize)]
+struct LegacyCheckpoint {
+    workshop: Option<Value>,
+    handoff: Option<Value>,
+    production: Option<Value>,
+}
+#[derive(serde::Serialize)]
+struct LegacySnapshot {
+    stage: Stage,
+    checkpoint: LegacyCheckpoint,
+    cancelled_from: Option<Stage>,
+}
+#[derive(serde::Serialize)]
+struct LegacyBody {
+    high_tick: u64,
+    snapshot: LegacySnapshot,
+}
+fn legacy_stores(snapshots: &[Snapshot]) -> TestResult<(Vec<u8>, Vec<u8>, Pin)> {
+    let c = context();
+    let header = serde_json::to_vec(&LegacyHeader {
+        schema: "dfmcp.native-resource-project/1".to_owned(),
+        incarnation: format!("{}:{}", c.session_id, c.request_id),
+        fortress: c.anchor.fortress_id.to_string(),
+        initial_tick: c.anchor.tick.get(),
+        original: original(),
+    })?;
+    let id = hash(b"dfmcp-resource-project-original/1", &header);
+    let mut raw = MAGIC.to_vec();
+    raw.extend_from_slice(&(header.len() as u32).to_be_bytes());
+    raw.extend_from_slice(&header);
+    raw.extend_from_slice(id.as_bytes());
+    let mut acknowledgements = Vec::new();
+    let mut previous = id;
+    let mut ack_chain = Digest32::ZERO;
+    for (offset, snapshot) in snapshots.iter().enumerate() {
+        assert!(snapshot.checkpoint.tree.is_none());
+        assert!(snapshot.checkpoint.tree_handoff.is_none());
+        let body = serde_json::to_vec(&LegacyBody {
+            high_tick: c.anchor.tick.get(),
+            snapshot: LegacySnapshot {
+                stage: snapshot.stage,
+                checkpoint: LegacyCheckpoint {
+                    workshop: snapshot.checkpoint.workshop.clone(),
+                    handoff: snapshot.checkpoint.handoff.clone(),
+                    production: snapshot.checkpoint.production.clone(),
+                },
+                cancelled_from: snapshot.cancelled_from,
+            },
+        })?;
+        let mut record = FRAME.to_vec();
+        record.extend_from_slice(&(body.len() as u32).to_be_bytes());
+        record.extend_from_slice(&(offset as u32 + 1).to_be_bytes());
+        record.extend_from_slice(previous.as_bytes());
+        record.extend_from_slice(&body);
+        previous = hash(b"dfmcp-resource-project-frame/1", &record);
+        record.extend_from_slice(previous.as_bytes());
+        raw.extend_from_slice(&record);
+        let record = acknowledgement(
+            id,
+            Head {
+                digest: previous,
+                tick: c.anchor.tick.get(),
+            },
+            offset as u32 + 1,
+            ack_chain,
+        );
+        ack_chain = Digest32::from_bytes(record[108..].try_into()?);
+        acknowledgements.extend_from_slice(&record);
+    }
+    Ok((
+        raw,
+        acknowledgements,
+        Pin {
+            journal_id: id.to_hex(),
+            head: previous.to_hex(),
+            frames: snapshots.len() as u32,
+            authority_tick_floor: c.anchor.tick.get(),
+        },
+    ))
+}
+
+#[test]
+fn legacy_workshop_canonical_bytes_and_complete_history_remain_unchanged() -> TestResult {
+    let mut snapshots = vec![Snapshot::initial(Stage::WorkshopOpening)];
+    let (journal, storage, acknowledgements) = seeded()?;
+    let (raw, ack, pin) = legacy_stores(&snapshots)?;
+    assert_eq!(storage.raw(), raw);
+    assert_eq!(acknowledgements.raw(), ack);
+    assert_eq!(journal.pin(), pin);
+    drop(journal);
+    for (stage, checkpoint) in [
+        (Stage::Workshop, workshop()),
+        (Stage::Transition, handoff()),
+        (Stage::ProductionOpening, handoff()),
+        (Stage::Production, production()),
+    ] {
+        snapshots.push(Snapshot {
+            stage,
+            checkpoint,
+            cancelled_from: None,
+        });
+    }
+    snapshots.push(Snapshot {
+        stage: Stage::Cancelled,
+        checkpoint: production(),
+        cancelled_from: Some(Stage::Production),
+    });
+    let (raw, ack, pin) = legacy_stores(&snapshots)?;
+    storage.replace(raw.clone());
+    acknowledgements.replace(ack.clone());
+    let recovered = reopen(&storage, &acknowledgements, pin, Mode::Offline)?;
+    assert_eq!(
+        recovered.snapshot(),
+        snapshots.last().ok_or("missing legacy snapshot")?
+    );
+    assert_eq!((storage.raw(), acknowledgements.raw()), (raw, ack));
+    Ok(())
+}
+
+#[test]
+fn complete_tree_workshop_production_history_retains_both_original_handoffs() -> TestResult {
+    let (mut journal, storage, acknowledgements) = seeded_tree()?;
+    let first = journal.pin();
+    assert_eq!(journal.snapshot().stage, Stage::TreeOpening);
+    for (stage, checkpoint) in tree_stages() {
+        journal.preflight_append(&context())?;
+        journal.advance(&context(), stage, checkpoint.clone())?;
+        assert_eq!(journal.snapshot().checkpoint, checkpoint);
+    }
+    assert_eq!(journal.pin().frames, 8);
+    let retained = journal.snapshot().clone();
+    let bytes = (storage.raw(), acknowledgements.raw());
+    drop(journal);
+    let recovered = reopen_tree(&storage, &acknowledgements, first, Mode::Offline)?;
+    assert_eq!(recovered.original(), &tree_original());
+    assert_eq!(recovered.snapshot(), &retained);
+    assert_eq!(
+        recovered.snapshot().checkpoint.tree_handoff,
+        tree_handoff().tree_handoff
+    );
+    assert_eq!(recovered.snapshot().checkpoint.handoff, handoff().handoff);
+    assert_eq!((storage.raw(), acknowledgements.raw()), bytes);
+    Ok(())
+}
+
+#[test]
+fn tree_project_recovers_its_acknowledged_production_intent_with_both_donors_frozen() -> TestResult
+{
+    let (mut journal, storage, acknowledgements) = seeded_tree()?;
+    for (stage, checkpoint) in tree_stages() {
+        let checkpoint = if stage == Stage::Production {
+            with_tree(preplan_production())
+        } else {
+            checkpoint
+        };
+        journal.advance(&context(), stage, checkpoint)?;
+    }
+    let intended = with_tree(intended_production());
+    journal.advance(&context(), Stage::Production, intended.clone())?;
+    let pin = journal.pin();
+    drop(journal);
+    let mut recovered = reopen_tree(&storage, &acknowledgements, pin.clone(), Mode::Recover)?;
+    assert_eq!(recovered.snapshot().checkpoint, intended);
+    let mut c = context();
+    c.session_id = SessionId::new(7002);
+    c.anchor.tick = GameTick(130);
+    let published = with_tree(published_production());
+    recovered.advance(&c, Stage::Production, published.clone())?;
+    recovered.cancel(&c)?;
+    for remove_tree in [false, true] {
+        let mut changed = published.clone();
+        if remove_tree {
+            changed.tree_handoff = None;
+        } else {
+            changed.production_intent = None;
+        }
+        assert!(recovered.advance(&c, Stage::Cancelled, changed).is_err());
+    }
+    drop(recovered);
+    let final_owner = reopen_tree(&storage, &acknowledgements, pin, Mode::Offline)?;
+    assert_eq!(final_owner.snapshot().stage, Stage::Cancelled);
+    assert_eq!(
+        final_owner.snapshot().cancelled_from,
+        Some(Stage::Production)
+    );
+    assert_eq!(final_owner.snapshot().checkpoint, published);
+    assert_eq!(
+        final_owner.snapshot().checkpoint.tree_handoff,
+        tree_handoff().tree_handoff
+    );
+    assert_eq!(final_owner.snapshot().checkpoint.handoff, handoff().handoff);
+    Ok(())
+}
+
+#[test]
+fn first_child_selection_cannot_change_on_reopen_or_be_injected_into_legacy_history() -> TestResult
+{
+    let (journal, storage, acknowledgements) = seeded_tree()?;
+    let pin = journal.pin();
+    drop(journal);
+    let writes = (
+        storage.state.borrow().writes,
+        acknowledgements.state.borrow().writes,
+    );
+    assert!(
+        Journal::open_with_initial(
+            storage.clone(),
+            acknowledgements.clone(),
+            &context(),
+            Mode::Recover,
+            false,
+            tree_original(),
+            Some(pin),
+            Stage::WorkshopOpening,
+        )
+        .is_err()
+    );
+    assert_eq!(
+        (
+            storage.state.borrow().writes,
+            acknowledgements.state.borrow().writes
+        ),
+        writes
+    );
+
+    let (mut legacy, storage, acknowledgements) = seeded()?;
+    assert!(legacy.advance(&context(), Stage::Tree, tree()).is_err());
+    assert!(
+        legacy
+            .advance(&context(), Stage::Workshop, with_tree(workshop()))
+            .is_err()
+    );
+    legacy.advance(&context(), Stage::Workshop, workshop())?;
+    assert!(
+        legacy
+            .advance(&context(), Stage::Transition, with_tree(handoff()))
+            .is_err()
+    );
+    let pin = legacy.pin();
+    drop(legacy);
+    let writes = (
+        storage.state.borrow().writes,
+        acknowledgements.state.borrow().writes,
+    );
+    assert!(
+        Journal::open_with_initial(
+            storage.clone(),
+            acknowledgements.clone(),
+            &context(),
+            Mode::Recover,
+            false,
+            original(),
+            Some(pin),
+            Stage::TreeOpening,
+        )
+        .is_err()
+    );
+    assert_eq!(
+        (
+            storage.state.borrow().writes,
+            acknowledgements.state.borrow().writes
+        ),
+        writes
+    );
+    Ok(())
+}
+
+#[test]
+fn tree_cannot_skip_handoff_rewind_replace_donor_or_start_later_stage_in_recover() -> TestResult {
+    let (mut journal, storage, acknowledgements) = seeded_tree()?;
+    let c = context();
+    assert!(
+        journal
+            .advance(&c, Stage::WorkshopOpening, Checkpoint::default())
+            .is_err()
+    );
+    assert!(
+        journal
+            .advance(&c, Stage::TreeTransition, tree_handoff())
+            .is_err()
+    );
+    journal.advance(&c, Stage::Tree, tree())?;
+    assert!(
+        journal
+            .advance(&c, Stage::WorkshopOpening, tree_handoff())
+            .is_err()
+    );
+    let mut replacement = tree_handoff();
+    replacement.tree = Some(json!({"key": "replacement"}));
+    assert!(
+        journal
+            .advance(&c, Stage::TreeTransition, replacement)
+            .is_err()
+    );
+    let pin = journal.pin();
+    drop(journal);
+    let mut recovered = reopen_tree(&storage, &acknowledgements, pin, Mode::Recover)?;
+    let mut c = c;
+    c.session_id = SessionId::new(7002);
+    recovered.advance(&c, Stage::Tree, tree())?;
+    assert!(
+        recovered
+            .advance(&c, Stage::TreeTransition, tree_handoff())
+            .is_err()
+    );
+    let pin = recovered.pin();
+    drop(recovered);
+    let mut journal = reopen_tree(&storage, &acknowledgements, pin, Mode::Control)?;
+    journal.advance(&c, Stage::TreeTransition, tree_handoff())?;
+    for field in ["tree", "tree_handoff"] {
+        let mut changed = tree_handoff();
+        if field == "tree" {
+            changed.tree = Some(json!({"key": "replacement"}));
+        } else {
+            changed.tree_handoff = Some(json!({"original_key": "replacement"}));
+        }
+        assert!(
+            journal
+                .advance(&c, Stage::WorkshopOpening, changed)
+                .is_err()
+        );
+    }
+    let pin = journal.pin();
+    drop(journal);
+    let mut recovered = reopen_tree(&storage, &acknowledgements, pin, Mode::Recover)?;
+    assert!(
+        recovered
+            .advance(&c, Stage::WorkshopOpening, tree_handoff())
+            .is_err()
+    );
+    let pin = recovered.pin();
+    drop(recovered);
+    let mut journal = reopen_tree(&storage, &acknowledgements, pin, Mode::Control)?;
+    journal.advance(&c, Stage::WorkshopOpening, tree_handoff())?;
+    assert!(journal.advance(&c, Stage::Tree, tree()).is_err());
+    assert!(journal.advance(&c, Stage::Workshop, workshop()).is_err());
+    journal.advance(&c, Stage::Workshop, with_tree(workshop()))?;
+    Ok(())
+}
+
+#[test]
+fn cancellation_retains_tree_and_all_downstream_donors_without_starting_another_child() -> TestResult
+{
+    let phases = std::iter::once(Stage::TreeOpening)
+        .chain(tree_stages().into_iter().map(|(stage, _)| stage));
+    for phase in phases {
+        let (mut journal, storage, acknowledgements) = seeded_tree()?;
+        if phase != Stage::TreeOpening {
+            for (stage, checkpoint) in tree_stages() {
+                journal.advance(&context(), stage, checkpoint)?;
+                if stage == phase {
+                    break;
+                }
+            }
+        }
+        let before = journal.snapshot().checkpoint.clone();
+        journal.cancel(&context())?;
+        assert_eq!(journal.snapshot().cancelled_from, Some(phase));
+        assert_eq!(journal.snapshot().checkpoint, before);
+        for (stage, checkpoint) in tree_stages() {
+            assert!(journal.advance(&context(), stage, checkpoint).is_err());
+        }
+        let mut drained = before.clone();
+        match phase {
+            Stage::Tree => {
+                drained.tree = Some(json!({"key": "original-tree", "drain_requested": true}))
+            }
+            Stage::Workshop => {
+                drained.workshop =
+                    Some(json!({"key": "original-workshop", "drain_requested": true}))
+            }
+            Stage::Production => {
+                drained.production =
+                    Some(json!({"journal_id": "original-production", "drain_requested": true}))
+            }
+            _ => {}
+        }
+        journal.advance(&context(), Stage::Cancelled, drained.clone())?;
+        let mut changed = drained.clone();
+        if phase == Stage::Tree {
+            changed.tree_handoff = tree_handoff().tree_handoff;
+        } else {
+            changed.tree = Some(json!({"key": "replacement"}));
+        }
+        assert!(
+            journal
+                .advance(&context(), Stage::Cancelled, changed)
+                .is_err()
+        );
+        let pin = journal.pin();
+        drop(journal);
+        let recovered = reopen_tree(&storage, &acknowledgements, pin, Mode::Offline)?;
+        assert_eq!(recovered.snapshot().stage, Stage::Cancelled);
+        assert_eq!(recovered.snapshot().cancelled_from, Some(phase));
+        assert_eq!(recovered.snapshot().checkpoint, drained);
+    }
+    Ok(())
+}
+
+#[test]
+fn lost_tree_transition_ack_keeps_exact_handoff_and_never_authorizes_workshop_reinitialization()
+-> TestResult {
+    let (mut journal, storage, acknowledgements) = seeded_tree()?;
+    journal.advance(&context(), Stage::Tree, tree())?;
+    let pin = journal.pin();
+    acknowledgements.state.borrow_mut().fail_sync = true;
+    assert!(
+        journal
+            .advance(&context(), Stage::TreeTransition, tree_handoff())
+            .is_err()
+    );
+    assert!(journal.is_fenced());
+    assert_eq!(journal.pin(), pin);
+    acknowledgements.state.borrow_mut().fail_sync = false;
+    drop(journal);
+    let mut recovered = reopen_tree(&storage, &acknowledgements, pin, Mode::Recover)?;
+    assert_eq!(recovered.snapshot().stage, Stage::TreeTransition);
+    assert_eq!(recovered.snapshot().checkpoint, tree_handoff());
+    let mut c = context();
+    c.session_id = SessionId::new(7002);
+    assert!(
+        recovered
+            .advance(&c, Stage::WorkshopOpening, tree_handoff())
+            .is_err()
+    );
+    let pin = recovered.pin();
+    drop(recovered);
+    let mut owner = reopen_tree(&storage, &acknowledgements, pin, Mode::Control)?;
+    storage.state.borrow_mut().fail_sync = true;
+    assert!(
+        owner
+            .advance(&c, Stage::WorkshopOpening, tree_handoff())
+            .is_err()
+    );
+    assert!(owner.is_fenced());
+    let pin = owner.pin();
+    drop(owner);
+    storage.state.borrow_mut().fail_sync = false;
+    assert!(reopen_tree(&storage, &acknowledgements, pin.clone(), Mode::Offline).is_err());
+    let recovered = reopen_tree(&storage, &acknowledgements, pin, Mode::Recover)?;
+    assert_eq!(recovered.snapshot().stage, Stage::WorkshopOpening);
+    assert_eq!(recovered.snapshot().checkpoint, tree_handoff());
+    assert!(recovered.snapshot().checkpoint.workshop.is_none());
+    assert_eq!(
+        storage.state.borrow().truncates + acknowledgements.state.borrow().truncates,
+        0
+    );
+    Ok(())
+}
+
+#[test]
+fn tree_handoff_rollback_is_rejected_by_ack_even_from_a_pre_handoff_external_pin() -> TestResult {
+    let (mut journal, storage, acknowledgements) = seeded_tree()?;
+    journal.advance(&context(), Stage::Tree, tree())?;
+    let prefix = storage.raw();
+    let pin = journal.pin();
+    journal.advance(&context(), Stage::TreeTransition, tree_handoff())?;
+    journal.advance(&context(), Stage::WorkshopOpening, tree_handoff())?;
+    drop(journal);
+    storage.replace(prefix);
+    assert!(reopen_tree(&storage, &acknowledgements, pin, Mode::Recover).is_err());
+    assert_eq!(
+        storage.state.borrow().truncates + acknowledgements.state.borrow().truncates,
+        0
+    );
+    Ok(())
+}
+
+#[test]
+fn tree_initial_stage_and_handoff_bounds_fail_before_publication() -> TestResult {
+    let storage = Memory::default();
+    let acknowledgements = Memory::default();
+    for phase in [
+        Stage::Tree,
+        Stage::TreeTransition,
+        Stage::Workshop,
+        Stage::Production,
+        Stage::Cancelled,
+    ] {
+        assert!(
+            Journal::open_with_initial(
+                storage.clone(),
+                acknowledgements.clone(),
+                &context(),
+                Mode::Control,
+                true,
+                tree_original(),
+                None,
+                phase,
+            )
+            .is_err()
+        );
+    }
+    assert_eq!(
+        storage.state.borrow().reads + storage.state.borrow().writes,
+        0
+    );
+    assert_eq!(
+        acknowledgements.state.borrow().reads + acknowledgements.state.borrow().writes,
+        0
+    );
+    let (mut journal, storage, acknowledgements) = seeded_tree()?;
+    journal.advance(&context(), Stage::Tree, tree())?;
+    let bytes = (storage.raw(), acknowledgements.raw());
+    let mut oversized = tree_handoff();
+    oversized.tree_handoff = Some(json!({"value": "x".repeat(MAX_TREE_HANDOFF)}));
+    assert!(
+        journal
+            .advance(&context(), Stage::TreeTransition, oversized)
+            .is_err()
+    );
+    assert_eq!((storage.raw(), acknowledgements.raw()), bytes);
+    let mut unpaired = with_tree(workshop());
+    unpaired.tree_handoff = None;
+    assert!(
+        validate_snapshot(&Snapshot {
+            stage: Stage::Workshop,
+            checkpoint: unpaired,
+            cancelled_from: None,
+        })
+        .is_err()
+    );
+    Ok(())
 }
 
 #[test]
@@ -1264,7 +1869,15 @@ mod private_files {
     fn real_private_files_lock_sync_reopen_and_reject_prefix_rollback() -> TestResult {
         let directory = Directory::new()?;
         let c = context();
-        let mut journal = open_private(&directory.0, &c, Mode::Control, true, original(), None)?;
+        let mut journal = open_private(
+            &directory.0,
+            &c,
+            Mode::Control,
+            true,
+            original(),
+            None,
+            Stage::WorkshopOpening,
+        )?;
         let old_pin = journal.pin();
         let initial = std::fs::read(directory.0.join("resource-project.journal"))?;
         assert_eq!(
@@ -1282,6 +1895,7 @@ mod private_files {
                 false,
                 original(),
                 Some(old_pin.clone()),
+                Stage::WorkshopOpening,
             )
             .is_err()
         );
@@ -1295,10 +1909,22 @@ mod private_files {
             false,
             original(),
             Some(pin.clone()),
+            Stage::WorkshopOpening,
         )?;
         assert_eq!(recovered.snapshot().stage, Stage::Workshop);
         drop(recovered);
-        assert!(open_private(&directory.0, &c, Mode::Control, true, original(), None).is_err());
+        assert!(
+            open_private(
+                &directory.0,
+                &c,
+                Mode::Control,
+                true,
+                original(),
+                None,
+                Stage::WorkshopOpening,
+            )
+            .is_err()
+        );
         std::fs::write(directory.0.join("resource-project.journal"), initial)?;
         assert!(
             open_private(
@@ -1308,8 +1934,65 @@ mod private_files {
                 false,
                 original(),
                 Some(old_pin),
+                Stage::WorkshopOpening,
             )
             .is_err()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn real_private_tree_chain_preserves_frozen_donors_and_rejects_first_child_substitution()
+    -> TestResult {
+        let directory = Directory::new()?;
+        let c = context();
+        let mut journal = open_private(
+            &directory.0,
+            &c,
+            Mode::Control,
+            true,
+            tree_original(),
+            None,
+            Stage::TreeOpening,
+        )?;
+        let first = journal.pin();
+        for (stage, checkpoint) in tree_stages() {
+            journal.advance(&c, stage, checkpoint)?;
+        }
+        let retained = journal.snapshot().clone();
+        drop(journal);
+        let before = (
+            std::fs::read(directory.0.join("resource-project.journal"))?,
+            std::fs::read(directory.0.join("resource-project.ack"))?,
+        );
+        assert!(
+            open_private(
+                &directory.0,
+                &c,
+                Mode::Recover,
+                false,
+                tree_original(),
+                Some(first.clone()),
+                Stage::WorkshopOpening,
+            )
+            .is_err()
+        );
+        let recovered = open_private(
+            &directory.0,
+            &c,
+            Mode::Offline,
+            false,
+            tree_original(),
+            Some(first),
+            Stage::TreeOpening,
+        )?;
+        assert_eq!(recovered.snapshot(), &retained);
+        assert_eq!(
+            before,
+            (
+                std::fs::read(directory.0.join("resource-project.journal"))?,
+                std::fs::read(directory.0.join("resource-project.ack"))?,
+            )
         );
         Ok(())
     }

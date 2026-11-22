@@ -215,6 +215,7 @@ impl Runtime {
             config.initialize,
             config.original.clone(),
             config.acknowledged.clone(),
+            Stage::WorkshopOpening,
         )?;
         let high_tick = journal.pin().authority_tick_floor;
         let mut runtime = Self {
@@ -401,6 +402,11 @@ impl Runtime {
                 "project_cancelled":true,"child_initialization_not_replayed":true}));
         }
         match self.effective_stage() {
+            Stage::TreeOpening | Stage::Tree | Stage::TreeTransition => {
+                return Err(denied(
+                    "Tree stages require the optional Tree project controller",
+                ));
+            }
             Stage::WorkshopOpening | Stage::Workshop => {
                 if (!self.config.initialize && self.workshop_config.project_initializing())
                     || self.config.handoff.is_some()

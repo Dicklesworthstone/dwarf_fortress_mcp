@@ -1,6 +1,6 @@
 //! Original resource-project custody; child owners remain effect authority.
 //!
-//! An opening marker is acknowledged before constructing either child. Replay
+//! An opening marker is acknowledged before constructing each child. Replay
 //! never grants initialization, restores a review, or proves a current goal.
 //! The independent ACK refuses valid-prefix rollback even after a lost reply.
 use std::io::SeekFrom;
@@ -24,8 +24,9 @@ pub(crate) const WORK_BYTES: u64 = 16 * MAX_BYTES as u64;
 const MAX_FRAMES: u32 = 4096;
 const MAX_ORIGINAL: usize = 64 * 1024;
 const MAX_HANDOFF: usize = 64 * 1024;
+const MAX_TREE_HANDOFF: usize = 16 * 1024;
 const MAX_CHECKPOINT: usize = 32 * 1024;
-const MAX_FRAME: usize = 192 * 1024;
+const MAX_FRAME: usize = 224 * 1024;
 const MAX_NODES: usize = 4096;
 const ACK_RECORD: usize = 140;
 const MAX_ACK_BYTES: usize = MAX_FRAMES as usize * ACK_RECORD;
@@ -73,6 +74,9 @@ fn parsed_digest(value: &str) -> Result<Digest32> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum Stage {
+    TreeOpening,
+    Tree,
+    TreeTransition,
     WorkshopOpening,
     Workshop,
     Transition,
@@ -93,6 +97,11 @@ pub(crate) struct Checkpoint {
     /// the child can write that original. Absence keeps v1 canonical bytes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) production_intent: Option<Value>,
+    /// Omitted fields preserve the exact canonical bytes of earlier journals.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) tree: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) tree_handoff: Option<Value>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -103,9 +112,9 @@ pub(crate) struct Snapshot {
     pub(crate) cancelled_from: Option<Stage>,
 }
 impl Snapshot {
-    fn initial() -> Self {
+    fn initial(stage: Stage) -> Self {
         Self {
-            stage: Stage::WorkshopOpening,
+            stage,
             checkpoint: Checkpoint::default(),
             cancelled_from: None,
         }
@@ -139,6 +148,18 @@ struct Header {
     fortress: String,
     initial_tick: u64,
     original: Value,
+    /// Earlier Workshop-first originals have no field here and remain canonical.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    initial_stage: Option<Stage>,
+}
+impl Header {
+    fn initial_stage(&self) -> Result<Stage> {
+        match self.initial_stage {
+            None => Ok(Stage::WorkshopOpening),
+            Some(Stage::TreeOpening) => Ok(Stage::TreeOpening),
+            _ => Err(corrupt()),
+        }
+    }
 }
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -209,6 +230,12 @@ fn value_bytes(value: &Value, limit: usize) -> Result<Vec<u8>> {
 
 fn validate_snapshot(snapshot: &Snapshot) -> Result<()> {
     let c = &snapshot.checkpoint;
+    if let Some(value) = &c.tree {
+        value_bytes(value, MAX_CHECKPOINT)?;
+    }
+    if let Some(value) = &c.tree_handoff {
+        value_bytes(value, MAX_TREE_HANDOFF)?;
+    }
     if let Some(value) = &c.workshop {
         value_bytes(value, MAX_CHECKPOINT)?;
     }
@@ -232,8 +259,16 @@ fn validate_snapshot(snapshot: &Snapshot) -> Result<()> {
     if c.production_intent.is_some() && phase != Stage::Production {
         return Err(conflict());
     }
+    let tree_pair = c.tree.is_some() == c.tree_handoff.is_some();
+    let later_children_absent =
+        c.workshop.is_none() && c.handoff.is_none() && c.production.is_none();
     let valid = match phase {
-        Stage::WorkshopOpening => c == &Checkpoint::default(),
+        Stage::TreeOpening => c == &Checkpoint::default(),
+        Stage::Tree => c.tree.is_some() && c.tree_handoff.is_none() && later_children_absent,
+        Stage::TreeTransition => {
+            c.tree.is_some() && c.tree_handoff.is_some() && later_children_absent
+        }
+        Stage::WorkshopOpening => tree_pair && later_children_absent,
         Stage::Workshop => c.workshop.is_some() && c.handoff.is_none() && c.production.is_none(),
         Stage::Transition | Stage::ProductionOpening => {
             c.workshop.is_some() && c.handoff.is_some() && c.production.is_none()
@@ -241,7 +276,11 @@ fn validate_snapshot(snapshot: &Snapshot) -> Result<()> {
         Stage::Production => c.workshop.is_some() && c.handoff.is_some() && c.production.is_some(),
         Stage::Cancelled => false,
     };
-    if !valid {
+    let tree_phase = matches!(
+        phase,
+        Stage::TreeOpening | Stage::Tree | Stage::TreeTransition
+    );
+    if !valid || (!tree_phase && !tree_pair) {
         return Err(conflict());
     }
     if let Some(value) = &c.production_intent {
@@ -255,6 +294,16 @@ fn transition(old: &Snapshot, new: &Snapshot) -> Result<()> {
     validate_snapshot(new)?;
     let before = &old.checkpoint;
     let after = &new.checkpoint;
+    if before.tree_handoff.is_some()
+        && (before.tree_handoff != after.tree_handoff || before.tree != after.tree)
+    {
+        return Err(conflict());
+    }
+    let tree_active = matches!(old.stage, Stage::TreeOpening | Stage::Tree)
+        || (old.stage == Stage::Cancelled && old.cancelled_from == Some(Stage::Tree));
+    if !tree_active && (before.tree != after.tree || before.tree_handoff != after.tree_handoff) {
+        return Err(conflict());
+    }
     if before.handoff.is_some() && before.handoff != after.handoff {
         return Err(conflict());
     }
@@ -301,6 +350,13 @@ fn transition(old: &Snapshot, new: &Snapshot) -> Result<()> {
             return Err(conflict());
         }
         return match old.cancelled_from {
+            Some(Stage::Tree)
+                if before.workshop == after.workshop
+                    && before.handoff == after.handoff
+                    && before.production == after.production =>
+            {
+                Ok(())
+            }
             Some(Stage::Workshop) if before.production == after.production => Ok(()),
             Some(Stage::Production) if before.workshop == after.workshop => Ok(()),
             _ if before == after => Ok(()),
@@ -308,10 +364,14 @@ fn transition(old: &Snapshot, new: &Snapshot) -> Result<()> {
         };
     }
     let allowed = match (old.stage, new.stage) {
-        (Stage::WorkshopOpening, Stage::Workshop)
+        (Stage::TreeOpening, Stage::Tree)
+        | (Stage::Tree, Stage::Tree)
+        | (Stage::WorkshopOpening, Stage::Workshop)
         | (Stage::Workshop, Stage::Workshop)
         | (Stage::ProductionOpening, Stage::Production)
         | (Stage::Production, Stage::Production) => true,
+        (Stage::Tree, Stage::TreeTransition) => before.tree == after.tree,
+        (Stage::TreeTransition, Stage::WorkshopOpening) => before == after,
         (Stage::Workshop, Stage::Transition) => before.workshop == after.workshop,
         (Stage::Transition, Stage::ProductionOpening) => before == after,
         (a, b) if a == b => before == after,
@@ -413,7 +473,8 @@ fn replay(bytes: &[u8], work: &Work) -> Result<Replay> {
     require(journal_id == hash(b"dfmcp-resource-project-original/1", raw))?;
     let mut previous = journal_id;
     let mut high_tick = header.initial_tick;
-    let mut snapshot = Snapshot::initial();
+    let initial_stage = header.initial_stage()?;
+    let mut snapshot = Snapshot::initial(initial_stage);
     let mut heads = Vec::new();
     while !r.0.is_empty() {
         work.check()?;
@@ -429,7 +490,7 @@ fn replay(bytes: &[u8], work: &Work) -> Result<Replay> {
         require(serde_json::to_vec(&body).map_err(|_| corrupt())? == raw)?;
         require(body.high_tick >= high_tick)?;
         if heads.is_empty() {
-            require(body.snapshot == Snapshot::initial())?;
+            require(body.snapshot == Snapshot::initial(initial_stage))?;
         } else {
             transition(&snapshot, &body.snapshot).map_err(|_| corrupt())?;
         }
@@ -506,9 +567,14 @@ pub(crate) fn open_private(
     initialize: bool,
     original: Value,
     expected_pin: Option<Pin>,
+    initial_stage: Stage,
 ) -> Result<PrivateJournal> {
     Work::new(context)?;
     value_bytes(&original, MAX_ORIGINAL)?;
+    require(matches!(
+        initial_stage,
+        Stage::WorkshopOpening | Stage::TreeOpening
+    ))?;
     if initialize {
         require(mode == Mode::Control && expected_pin.is_none())?;
         context.authorize(Capability::Plan, RiskTier::Guarded, &[], None)?;
@@ -530,7 +596,7 @@ pub(crate) fn open_private(
         initialize,
         MAX_ACK_BYTES,
     )?;
-    Journal::open(
+    Journal::open_with_initial(
         storage,
         acknowledgements,
         &remaining,
@@ -538,11 +604,38 @@ pub(crate) fn open_private(
         initialize,
         original,
         expected_pin,
+        initial_stage,
     )
 }
 
 impl<S: EffectJournalStorage, A: EffectJournalStorage> Journal<S, A> {
+    #[cfg(test)]
     pub(crate) fn open(
+        storage: S,
+        acknowledgements: A,
+        context: &OperationContext,
+        mode: Mode,
+        initialize: bool,
+        original: Value,
+        expected_pin: Option<Pin>,
+    ) -> Result<Self> {
+        Self::open_with_initial(
+            storage,
+            acknowledgements,
+            context,
+            mode,
+            initialize,
+            original,
+            expected_pin,
+            Stage::WorkshopOpening,
+        )
+    }
+
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "separate journal/ACK custody and an explicit first child prevent implicit stage adoption"
+    )]
+    pub(crate) fn open_with_initial(
         mut storage: S,
         mut acknowledgements: A,
         context: &OperationContext,
@@ -550,9 +643,14 @@ impl<S: EffectJournalStorage, A: EffectJournalStorage> Journal<S, A> {
         initialize: bool,
         original: Value,
         expected_pin: Option<Pin>,
+        initial_stage: Stage,
     ) -> Result<Self> {
         let work = Work::new(context)?;
         value_bytes(&original, MAX_ORIGINAL)?;
+        require(matches!(
+            initial_stage,
+            Stage::WorkshopOpening | Stage::TreeOpening
+        ))?;
         if initialize {
             require(mode == Mode::Control && expected_pin.is_none())?;
             context.authorize(Capability::Plan, RiskTier::Guarded, &[], None)?;
@@ -569,6 +667,7 @@ impl<S: EffectJournalStorage, A: EffectJournalStorage> Journal<S, A> {
                 fortress: context.anchor.fortress_id.to_string(),
                 initial_tick: context.anchor.tick.get(),
                 original: original.clone(),
+                initial_stage: (initial_stage == Stage::TreeOpening).then_some(initial_stage),
             })
             .map_err(|_| conflict())?;
             let id = hash(b"dfmcp-resource-project-original/1", &header);
@@ -579,7 +678,7 @@ impl<S: EffectJournalStorage, A: EffectJournalStorage> Journal<S, A> {
             raw.extend_from_slice(&frame(
                 id,
                 1,
-                &Snapshot::initial(),
+                &Snapshot::initial(initial_stage),
                 context.anchor.tick.get(),
             )?);
             publish(&mut storage, &[], &raw, MAX_BYTES, &work)?;
@@ -588,6 +687,7 @@ impl<S: EffectJournalStorage, A: EffectJournalStorage> Journal<S, A> {
             publish(&mut acknowledgements, &[], &ack_raw, MAX_ACK_BYTES, &work)?;
         }
         let decoded = replay(&raw, &work)?;
+        require(decoded.header.initial_stage()? == initial_stage)?;
         require(decoded.header.original == original)?;
         require(decoded.header.fortress == context.anchor.fortress_id.to_string())?;
         let (mut acknowledged_frames, mut ack_chain) = replay_ack(&ack_raw, &decoded, &work)?;
@@ -762,7 +862,13 @@ impl<S: EffectJournalStorage, A: EffectJournalStorage> Journal<S, A> {
     }
     fn append(&mut self, context: &OperationContext, snapshot: Snapshot) -> Result<Pin> {
         let starts_stage = self.snapshot.stage != snapshot.stage
-            && matches!(snapshot.stage, Stage::Transition | Stage::ProductionOpening);
+            && matches!(
+                snapshot.stage,
+                Stage::TreeTransition
+                    | Stage::WorkshopOpening
+                    | Stage::Transition
+                    | Stage::ProductionOpening
+            );
         let starts_intent = self.snapshot.checkpoint.production_intent.is_none()
             && snapshot.checkpoint.production_intent.is_some();
         self.access(context, starts_stage || starts_intent)?;

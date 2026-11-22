@@ -7,9 +7,11 @@ pub(super) fn tick(reference: &Value) -> u64 {
     [
         "/project_source_frontier/high_tick",
         "/observation_tick_floor",
+        "/consumed_tick_floor",
         "/recovery/frontier/authority_tick_floor",
         "/clock/authority_tick_floor",
         "/clock/authority_tick",
+        "/clock/consumed_tick_floor",
         "/inventory_clock/authority_tick_floor",
     ]
     .iter()
@@ -28,6 +30,8 @@ pub(super) fn same_original(before: &Value, after: &Value) -> Result<()> {
         "/journal_pin_unverified/journal_id",
         "/original/key",
         "/original/plan_digest",
+        "/original/deadline_tick",
+        "/original_key",
         "/recovery/plan_digest",
         "/recovery/object_digest",
         "/recovery/identity_digest",
@@ -40,16 +44,24 @@ pub(super) fn same_original(before: &Value, after: &Value) -> Result<()> {
         "/recovery/input_supply_digest",
         "/clock/journal_id",
         "/clock/recovery/journal_id",
+        "/clock/deadline_tick",
+        "/clock/target_id",
         "/inventory_clock/journal_id",
     ] {
         if let Some(retained) = before.pointer(path).filter(|value| !value.is_null())
             && after.pointer(path) != Some(retained)
         {
-            return Err(error(ErrorCode::Conflict, "project child changed its retained original identity"));
+            return Err(error(
+                ErrorCode::Conflict,
+                "project child changed its retained original identity",
+            ));
         }
     }
     if tick(after) < tick(before) {
-        return Err(error(ErrorCode::Conflict, "project child consumed tick floor regressed"));
+        return Err(error(
+            ErrorCode::Conflict,
+            "project child consumed tick floor regressed",
+        ));
     }
     for path in [
         "/project_source_frontier",
@@ -64,28 +76,67 @@ pub(super) fn same_original(before: &Value, after: &Value) -> Result<()> {
     ] {
         if let Some(retained) = before.pointer(path).filter(|value| value.is_object()) {
             let current = after.pointer(path).ok_or_else(|| {
-                error(ErrorCode::Conflict, "project child erased a retained source frontier")
+                error(
+                    ErrorCode::Conflict,
+                    "project child erased a retained source frontier",
+                )
             })?;
-            for key in ["tick", "high_tick", "generation", "high_generation",
-                "next_building_id", "high_next_building_id", "next_order_id", "next_item_id",
-                "next_job_id", "sequence", "next_event", "history_count", "group_next_position",
-                "group_next_assignment", "civ_next_position", "civ_next_assignment", "authority_tick_floor", "high_source_sequence"] {
+            for key in [
+                "tick",
+                "high_tick",
+                "generation",
+                "high_generation",
+                "next_building_id",
+                "high_next_building_id",
+                "next_order_id",
+                "next_item_id",
+                "next_job_id",
+                "sequence",
+                "high_sequence",
+                "high_next_item_id",
+                "next_event",
+                "history_count",
+                "group_next_position",
+                "group_next_assignment",
+                "civ_next_position",
+                "civ_next_assignment",
+                "authority_tick_floor",
+                "consumed_tick_floor",
+                "high_source_sequence",
+            ] {
                 if let Some(floor) = retained.get(key).and_then(Value::as_u64)
-                    && current.get(key).and_then(Value::as_u64).is_none_or(|now| now < floor)
+                    && current
+                        .get(key)
+                        .and_then(Value::as_u64)
+                        .is_none_or(|now| now < floor)
                 {
-                    return Err(error(ErrorCode::Conflict, "project child source frontier regressed"));
+                    return Err(error(
+                        ErrorCode::Conflict,
+                        "project child source frontier regressed",
+                    ));
                 }
             }
-            if retained["fenced"] == true && current["fenced"] != true {
-                return Err(error(ErrorCode::Conflict, "project child erased sticky source discontinuity"));
+            for field in ["fenced", "advancement_fenced"] {
+                if retained[field] == true && current[field] != true {
+                    return Err(error(
+                        ErrorCode::Conflict,
+                        "project child erased sticky source discontinuity",
+                    ));
+                }
             }
         }
     }
-    for path in ["/recovery/goal_history_present", "/original/dispatch_started"] {
+    for path in [
+        "/recovery/goal_history_present",
+        "/original/dispatch_started",
+    ] {
         if before.pointer(path) == Some(&Value::Bool(true))
             && after.pointer(path) != Some(&Value::Bool(true))
         {
-            return Err(error(ErrorCode::Conflict, "project child erased original dispatch or goal history"));
+            return Err(error(
+                ErrorCode::Conflict,
+                "project child erased original dispatch or goal history",
+            ));
         }
     }
     Ok(())
@@ -108,10 +159,18 @@ mod tests {
         after["observation_tick_floor"] = json!(42);
         after["recovery"]["frontier"]["head"] = json!("descendant");
         assert!(same_original(&before, &after).is_ok());
-        for path in ["/native_custody/order_journal_id", "/recovery/plan_digest",
-            "/recovery/frontier/journal_id"] {
+        for path in [
+            "/native_custody/order_journal_id",
+            "/recovery/plan_digest",
+            "/recovery/frontier/journal_id",
+        ] {
             let mut changed = after.clone();
-            *changed.pointer_mut(path).ok_or_else(|| error(ErrorCode::InternalInvariantViolation, "test pointer missing"))? = json!("replacement");
+            *changed.pointer_mut(path).ok_or_else(|| {
+                error(
+                    ErrorCode::InternalInvariantViolation,
+                    "test pointer missing",
+                )
+            })? = json!("replacement");
             assert!(same_original(&before, &changed).is_err());
         }
         after["recovery"]["workshop_prerequisite_floor"]["fenced"] = json!(false);
@@ -133,5 +192,43 @@ mod tests {
         let mut after = before.clone();
         after["original"]["dispatch_started"] = json!(false);
         assert!(same_original(&before, &after).is_err());
+    }
+
+    #[test]
+    fn tree_original_clock_and_consumed_supply_floors_survive_recovery() -> Result<()> {
+        let before = json!({"acknowledged":{"journal_id":"tree"},
+            "journal_pin_unverified":{"journal_id":"tree"},"original_key":"tree-key",
+            "original":{"key":"tree-key","plan_digest":"plan","deadline_tick":200,"dispatch_started":true},
+            "consumed_tick_floor":90,
+            "project_source_frontier":{"high_tick":90,"high_generation":2,"high_sequence":8,"high_next_item_id":44,"fenced":true},
+            "clock":{"recovery":{"journal_id":"clock","head":"ancestor"},"authority_tick_floor":90,"advancement_fenced":true}});
+        let mut descendant = before.clone();
+        descendant["clock"]["recovery"]["head"] = json!("descendant");
+        descendant["project_source_frontier"]["high_sequence"] = json!(9);
+        same_original(&before, &descendant)?;
+        for path in [
+            "/original/deadline_tick",
+            "/original_key",
+            "/clock/recovery/journal_id",
+            "/project_source_frontier/high_sequence",
+            "/project_source_frontier/high_next_item_id",
+            "/project_source_frontier/fenced",
+            "/clock/advancement_fenced",
+        ] {
+            let mut changed = descendant.clone();
+            *changed.pointer_mut(path).ok_or_else(|| {
+                error(
+                    ErrorCode::InternalInvariantViolation,
+                    "missing Tree test pointer",
+                )
+            })? = Value::Null;
+            assert!(same_original(&before, &changed).is_err(), "{path}");
+        }
+        let mut regressed = descendant;
+        regressed["consumed_tick_floor"] = json!(0);
+        regressed["project_source_frontier"]["high_tick"] = json!(0);
+        regressed["clock"]["authority_tick_floor"] = json!(0);
+        assert!(same_original(&before, &regressed).is_err());
+        Ok(())
     }
 }
