@@ -387,6 +387,33 @@ impl<J: EffectJournalStorage> Clock<J> {
             observed_sequence_floor: 0,
         }
     }
+    /// Exact inner custody and consumed source floors, including a failed
+    /// operation whose last published ClockView predates its durable marker.
+    pub(crate) fn recovery_checkpoint(&self) -> (Digest32, Digest32, u64, u64) {
+        let (journal_id, head) = self.journal.recovery_pin();
+        (journal_id, head, self.observed_tick_floor, self.observed_sequence_floor)
+    }
+
+    pub(crate) fn verify_recovery(
+        &mut self,
+        journal_id: Digest32,
+        head: Digest32,
+        high_tick: u64,
+        high_sequence: u64,
+        c: &OperationContext,
+    ) -> Result<()> {
+        if high_tick > dfmcp_adapter::bounded_run::MAX_NATIVE_TICK {
+            return Err(invalid("retained order-clock authority floor is invalid"));
+        }
+        let mut current = c.clone();
+        current.anchor.tick = current.anchor.tick.max(GameTick(high_tick));
+        current.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
+        self.journal.verify_recovery(journal_id, head, &current)?;
+        self.observed_tick_floor = self.observed_tick_floor.max(high_tick);
+        self.observed_sequence_floor = self.observed_sequence_floor.max(high_sequence);
+        Ok(())
+    }
+
     pub fn mode(&self) -> OrderRunMode {
         self.journal.mode()
     }

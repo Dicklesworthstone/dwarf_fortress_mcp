@@ -248,6 +248,40 @@ impl<J: EffectJournalStorage, T: GoalClockTarget> Clock<J, T> {
             target: PhantomData,
         }
     }
+    /// Recovery metadata comes from the actual journal, never a retained view.
+    pub(crate) fn recovery_checkpoint(&self) -> (Digest32, Digest32, u64, u64) {
+        (
+            self.journal.id(),
+            self.journal.head(),
+            self.observed_tick_floor,
+            self.observed_sequence_floor,
+        )
+    }
+
+    pub(crate) fn verify_recovery(
+        &mut self,
+        journal_id: Digest32,
+        head: Digest32,
+        high_tick: u64,
+        high_sequence: u64,
+        c: &OperationContext,
+        n: &OperationContext,
+    ) -> Result<()> {
+        if high_tick > dfmcp_adapter::bounded_run::MAX_NATIVE_TICK {
+            return Err(invalid("retained inventory-clock authority floor is invalid"));
+        }
+        let mut current = c.clone();
+        current.anchor.tick = current.anchor.tick.max(GameTick(high_tick));
+        let native = native_context(n, &current, None)?;
+        // Both original authority scopes are checked at the retained time.
+        // Neither grants nor a current observation are reconstructed.
+        contexts(&current, &native)?;
+        self.journal.verify_recovery(journal_id, head, &native)?;
+        self.observed_tick_floor = self.observed_tick_floor.max(high_tick);
+        self.observed_sequence_floor = self.observed_sequence_floor.max(high_sequence);
+        Ok(())
+    }
+
     pub fn high_tick(&self) -> u64 {
         self.observed_tick_floor
     }

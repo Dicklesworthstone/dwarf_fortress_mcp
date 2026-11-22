@@ -1,0 +1,341 @@
+#![forbid(unsafe_code)]
+//! Isolated, explicitly unadmitted Workshop -> stock-target project consumer.
+//! All native effects stay inside the existing independently reviewed children.
+mod config;
+mod continuity;
+mod journal;
+mod presentation;
+mod runtime;
+
+use dfmcp_core::{DfmcpError, ErrorCode, RequestId, Result, SessionId, WorkBudget};
+use fastmcp_rust::modern::ServerBuilder;
+use fastmcp_rust::prelude::*;
+use fastmcp_rust::{CompleteResult, FinalCallToolResult};
+use journal::Mode;
+use runtime::{Action, Runtime};
+use serde_json::{Value, json};
+use std::sync::{
+    Mutex,
+    atomic::{AtomicU64, Ordering},
+};
+use std::time::Instant;
+
+// The family-31 development profiles are mutually exclusive by their closed
+// process environment. Each owner additionally requires its exact live handle.
+const FAMILY: u128 = 31u128 << 57;
+static NEXT: AtomicU64 = AtomicU64::new(1);
+static SESSION: Mutex<Option<Runtime>> = Mutex::new(None);
+
+fn error(code: ErrorCode, message: &str) -> DfmcpError {
+    DfmcpError::new(code, message)
+}
+
+fn parse_id(raw: &str) -> Result<SessionId> {
+    if raw.len() != 32 || !raw.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
+        return Err(error(ErrorCode::InvalidRequest, "invalid resource project session ID"));
+    }
+    let value = u128::from_str_radix(raw, 16)
+        .map_err(|_| error(ErrorCode::InvalidRequest, "invalid resource project session ID"))?;
+    let id = SessionId::new(value);
+    if id.get() != value || !id.is_process_scoped_live()
+        || (value & ((1u128 << 62) - 1)) >> 57 != 31
+    {
+        return Err(error(ErrorCode::SessionNotFound, "foreign resource project session handle"));
+    }
+    Ok(id)
+}
+
+fn publish(
+    operation: &str,
+    session: Option<SessionId>,
+    request: Option<RequestId>,
+    outcome: Result<Value>,
+    reference: Value,
+    mut runtime: Option<&mut Runtime>,
+) -> McpResult<CompleteResult<FinalCallToolResult>> {
+    let successful = outcome.is_ok();
+    let packet = match outcome {
+        Ok(value) => presentation::packet(operation, session, request, value, reference.clone()),
+        Err(cause) => presentation::failure(operation, session, request, cause, reference.clone()),
+    };
+    if let Some(result) = presentation::render(packet) {
+        if successful
+            && let Some(owner) = runtime.as_deref_mut()
+            && let Err(cause) = owner.publication_current()
+        {
+            owner.withdraw();
+            return presentation::render(presentation::failure(
+                operation, session, request, cause, owner.reference(),
+            )).ok_or_else(|| McpError::internal_error("resource project recovery reference exceeds output bound"));
+        }
+        return Ok(result);
+    }
+    // The caller still holds the session lock. No concurrent Commit can use a
+    // review whose complete evidence failed the exact modern codec boundary.
+    let reference = if let Some(runtime) = runtime {
+        runtime.withdraw();
+        runtime.reference()
+    } else {
+        reference
+    };
+    presentation::render(presentation::failure(
+        operation, session, request,
+        error(ErrorCode::BudgetExceeded, "complete project evidence exceeds output bound; reviews withdrawn"),
+        reference,
+    )).ok_or_else(|| McpError::internal_error("resource project recovery reference exceeds output bound"))
+}
+
+fn call(operation: &str, raw: String, action: Action) -> McpResult<CompleteResult<FinalCallToolResult>> {
+    let session = match parse_id(&raw) {
+        Ok(session) => session,
+        Err(cause) => return publish(operation, None, None, Err(cause), Value::Null, None),
+    };
+    let mut guard = match SESSION.try_lock() {
+        Ok(guard) => guard,
+        Err(_) => return publish(operation, Some(session), None,
+            Err(error(ErrorCode::BudgetExceeded, "resource project session busy or poisoned")), Value::Null, None),
+    };
+    let Some(runtime) = guard.as_mut().filter(|runtime| runtime.session == session) else {
+        return publish(operation, Some(session), None,
+            Err(error(ErrorCode::SessionNotFound, "original resource project session unavailable")), Value::Null, None);
+    };
+    let outcome = runtime.perform(action);
+    let request = Some(runtime.last_request_id());
+    let reference = runtime.reference();
+    publish(operation, Some(session), request, outcome, reference, Some(runtime))
+}
+
+fn rejected(operation: &str, raw: String, cause: DfmcpError) -> McpResult<CompleteResult<FinalCallToolResult>> {
+    let session = parse_id(&raw).ok();
+    if let Ok(mut guard) = SESSION.try_lock()
+        && let Some(runtime) = guard.as_mut().filter(|runtime| Some(runtime.session) == session)
+    {
+        runtime.withdraw();
+        let reference = runtime.reference();
+        return publish(operation, session, Some(runtime.last_request_id()),
+            Err(cause), reference, Some(runtime));
+    }
+    publish(operation, session, None, Err(cause), Value::Null, None)
+}
+
+fn budget(
+    wall: Option<u64>, bytes: Option<u64>, output: Option<u32>, ticks: Option<u64>,
+) -> Result<WorkBudget> {
+    let budget = WorkBudget {
+        max_wall_millis: wall.unwrap_or(60_000),
+        max_bytes: bytes.unwrap_or(16 * 1024 * 1024 * 1024),
+        max_output_tokens: output.unwrap_or(65_536),
+        max_game_ticks: ticks.unwrap_or(0),
+        max_entities: 4096,
+        max_actions: 5,
+    };
+    budget.validate()?;
+    if budget.max_wall_millis > 60_000
+        || !(4 * 1024 * 1024 * 1024..=runtime::MAX_BYTES).contains(&budget.max_bytes)
+        || budget.max_output_tokens != 65_536
+        || budget.max_game_ticks > 1200
+    {
+        return Err(error(ErrorCode::BudgetExceeded,
+            "project requires 4..32GiB bounded byte-work, at most60000ms, exactly65536 output tokens and at most1200 explicit clock ticks"));
+    }
+    Ok(budget)
+}
+
+#[tool(
+    name = "fortress_open_session",
+    description = "Open one explicitly unadmitted native resource project: construct the fixed Carpenter Workshop, then pursue the fixed furniture stock goal. mode defaults offline; control requires independent host family permissions and new parent/child custody. Recovery opens existing custody only and restores no review. Defaults:60000ms,16GiB logical byte-work,65536 output tokens,zero game ticks. Every clock remains separately configured and confirmed."
+)]
+pub fn fortress_open_session(
+    mode: Option<String>,
+    max_wall_millis: Option<u64>,
+    max_bytes: Option<u64>,
+    max_output_tokens: Option<u32>,
+    max_game_ticks: Option<u64>,
+) -> McpResult<CompleteResult<FinalCallToolResult>> {
+    let start = Instant::now();
+    let opened = (|| -> Result<_> {
+        config::runtime_io()?;
+        let mode = match mode.as_deref().unwrap_or("offline") {
+            "control" => Mode::Control,
+            "recover" => Mode::Recover,
+            "offline" => Mode::Offline,
+            _ => return Err(error(ErrorCode::InvalidRequest, "project mode must be control, recover or offline")),
+        };
+        let budget = budget(max_wall_millis, max_bytes, max_output_tokens, max_game_ticks)?;
+        let (config, workshop) = config::Config::load()?;
+        let mut guard = SESSION.try_lock()
+            .map_err(|_| error(ErrorCode::Conflict, "resource project session busy"))?;
+        if guard.is_some() {
+            return Err(error(ErrorCode::Conflict, "close the original project session before opening another"));
+        }
+        let sequence = NEXT.try_update(Ordering::AcqRel, Ordering::Acquire, |sequence| {
+            (sequence < (1u64 << 57)).then_some(sequence + 1)
+        }).map_err(|_| error(ErrorCode::BudgetExceeded, "resource project identities exhausted"))?;
+        let session = SessionId::new((1u128 << 127) | FAMILY | u128::from(sequence));
+        let (runtime, outcome) = Runtime::open(config, workshop, mode, session, budget, start)?;
+        *guard = Some(runtime);
+        let runtime = guard.as_mut().ok_or_else(|| {
+            error(ErrorCode::InternalInvariantViolation, "project owner not retained")
+        })?;
+        let request = Some(runtime.last_request_id());
+        let reference = runtime.reference();
+        Ok(publish("fortress.open_session", Some(session), request, outcome, reference, Some(runtime)))
+    })();
+    match opened {
+        Ok(result) => result,
+        Err(cause) => publish("fortress.open_session", None, None, Err(cause), Value::Null, None),
+    }
+}
+
+#[tool(
+    name = "fortress_observe",
+    description = "Read the active child's bounded native evidence. Workshop accepts no request selector. Production accepts its existing closed workforce-selection/production-inspection request. Observation never prepares a new stage or native effect."
+)]
+pub fn fortress_observe(
+    session_id: String, request: Option<String>,
+) -> McpResult<CompleteResult<FinalCallToolResult>> {
+    call("fortress.observe", session_id, Action::Observe(request))
+}
+
+#[tool(
+    name = "fortress_query",
+    description = "Verify local parent and active-child custody and expose original goals, stage, reviews, source floors, clock uncertainty and exact recovery references. Does not renew a native observation or prove inventory is still unchanged."
+)]
+pub fn fortress_query(session_id: String) -> McpResult<CompleteResult<FinalCallToolResult>> {
+    call("fortress.query", session_id, Action::Inspect)
+}
+
+#[tool(
+    name = "fortress_plan",
+    description = "Plan within the active original child. Workshop uses its existing observed material request or separately configured run_workshop clock. kind=advance_to_production with exact expected_head freshly verifies original completed Workshop and durably transfers ownership, without native mutation. Production accepts stock_target matching every fixed root goal term, step/review_prepared with original_plan_digest, run or inventory_run. Each native effect needs its own current review and explicit Commit; no automatic dispatch."
+)]
+pub fn fortress_plan(
+    session_id: String, request: String,
+) -> McpResult<CompleteResult<FinalCallToolResult>> {
+    call("fortress.plan", session_id, Action::Plan(request))
+}
+
+#[tool(
+    name = "fortress_commit",
+    description = "Confirm one complete current child review. scope=goal for Workshop construction or original labor/order step; scope=clock for a separately reviewed Workshop/order clock; scope=inventory_clock for production stability. The project never renews the original deadline or restores confirmation after restart."
+)]
+pub fn fortress_commit(
+    session_id: String, review_seal: String, confirmed: bool, scope: Option<String>,
+) -> McpResult<CompleteResult<FinalCallToolResult>> {
+    call("fortress.commit", session_id, Action::Commit { seal: review_seal, confirmed, scope })
+}
+
+#[tool(
+    name = "fortress_wait",
+    description = "Perform one foreground reconciliation or goal sample for the active original child. Workshop scope=clock reconciles its independently retained clock. Production reconciles its existing original goals and clocks. No background polling, redispatch, new stage or implicit unpause. Completion remains tied to exact source evidence and settled clocks."
+)]
+pub fn fortress_wait(
+    session_id: String, scope: Option<String>,
+) -> McpResult<CompleteResult<FinalCallToolResult>> {
+    call("fortress.wait", session_id, Action::Wait(scope))
+}
+
+#[tool(
+    name = "fortress_cancel",
+    description = "Default scope=project (goal is an alias) durably stops future stages/reviews, then retires the current undispatched preparation. It does not undo construction or cancel an inserted order. scope=clock or inventory_clock requests the active child's separately authorized safety stop. scope=session releases local ownership while preserving all custody; it does not claim a native pause or effect cancellation."
+)]
+pub fn fortress_cancel(
+    session_id: String, scope: Option<String>,
+) -> McpResult<CompleteResult<FinalCallToolResult>> {
+    if scope.as_deref() != Some("session") {
+        return call("fortress.cancel", session_id, Action::Cancel(scope));
+    }
+    let closed = (|| -> Result<_> {
+        let session = parse_id(&session_id)?;
+        let mut guard = SESSION.try_lock()
+            .map_err(|_| error(ErrorCode::Conflict, "resource project session busy"))?;
+        let runtime = guard.as_mut().filter(|runtime| runtime.session == session)
+            .ok_or_else(|| error(ErrorCode::SessionNotFound, "resource project session unavailable"))?;
+        runtime.withdraw();
+        let reference = runtime.reference();
+        let request = Some(runtime.last_request_id());
+        // Closing creates no new native authority and remains possible after
+        // the preceding operation expires. Keep ownership until the complete
+        // retained reference passes the exact publication bound.
+        let result = presentation::render(presentation::packet(
+            "fortress.cancel", Some(session), request,
+            json!({"ok":true,"session_closed":true,"native_effects_cancelled":false,
+                "current_pause_proven":false,"automatic_redispatch":false}), reference,
+        )).ok_or_else(|| error(ErrorCode::BudgetExceeded,
+            "complete close recovery exceeds output bound; original session retained"))?;
+        *guard = None;
+        Ok(result)
+    })();
+    match closed {
+        Ok(result) => Ok(result),
+        Err(cause) => rejected("fortress.cancel", session_id, cause),
+    }
+}
+
+#[tool(
+    name = "fortress_explain",
+    description = "Inspect the immutable root objective, current stage and complete original child custody. Historical receipts, qualified stock census, current monitor proof and clock exposure remain separate."
+)]
+pub fn fortress_explain(session_id: String) -> McpResult<CompleteResult<FinalCallToolResult>> {
+    call("fortress.explain", session_id, Action::Inspect)
+}
+
+#[tool(
+    name = "fortress_doctor",
+    description = "Inspect exact local parent/child custody and development limitations. This is diagnosis; it grants no runtime admission, native authority, new key or recovered review."
+)]
+pub fn fortress_doctor(session_id: String) -> McpResult<CompleteResult<FinalCallToolResult>> {
+    call("fortress.doctor", session_id, Action::Inspect)
+}
+
+#[tool(
+    name = "fortress_checkpoint",
+    description = "This native resource profile has no world checkpoint provider. Parent stage custody and native effect journals are not save-game checkpoints."
+)]
+pub fn fortress_checkpoint(session_id: String) -> McpResult<CompleteResult<FinalCallToolResult>> {
+    rejected("fortress.checkpoint", session_id,
+        error(ErrorCode::CapabilityDenied, "native resource project has no world checkpoint provider"))
+}
+
+#[tool(
+    name = "fortress_restore",
+    description = "This profile cannot restore the world or carry original native identities across epochs. Preserve and reconcile existing custody."
+)]
+pub fn fortress_restore(session_id: String) -> McpResult<CompleteResult<FinalCallToolResult>> {
+    rejected("fortress.restore", session_id,
+        error(ErrorCode::CapabilityDenied, "native resource project has no world restore provider"))
+}
+
+pub fn run_stdio() {
+    if let Err(cause) = config::environment() {
+        eprintln!("{}: {}", cause.code.as_str(), cause.message);
+        return;
+    }
+    let server = ServerBuilder::new("dfmcp-native-resource-project-dev", env!("CARGO_PKG_VERSION"))
+        .tool(FortressOpenSession).tool(FortressObserve).tool(FortressQuery)
+        .tool(FortressPlan).tool(FortressCommit).tool(FortressWait)
+        .tool(FortressCancel).tool(FortressExplain).tool(FortressDoctor)
+        .tool(FortressCheckpoint).tool(FortressRestore)
+        .instructions("One explicitly unadmitted Workshop-to-stock project with a fixed host goal and deadline. The parent owns one actual child at a time. Review and confirm every native effect separately. Advance to production only with the current parent head; this acquires fresh original Workshop evidence, acknowledges the transition before releasing its writer, and independently imports that donor Offline. Every positive production review still requalifies its prerequisites. Defaults forbid game-time advancement. Project cancellation durably stops new work but does not undo existing native effects; explicitly reconcile/cancel active clocks. Retain every returned parent/child recovery reference, including after errors. Never initialize an existing opening marker again. Complete evidence may use numbered text blocks with byte counts, SHA-256 and exact JSON field paths; reassemble and review all blocks before confirming. No automatic Tree designation, Manager appointment, world restore or production admission.")
+        .build();
+    crate::run_modern_stdio(server);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn project_handle_and_budget_boundaries_reject_foreign_or_widened_requests() -> Result<()> {
+        assert!(parse_id("0").is_err());
+        assert!(parse_id(&format!("{:032x}", 1u128 << 127)).is_err());
+        let default = budget(None, None, None, None)?;
+        assert_eq!(default.max_game_ticks, 0);
+        assert_eq!(default.max_entities, 4096);
+        assert!(budget(Some(60_001), None, None, None).is_err());
+        assert!(budget(None, Some(runtime::MAX_BYTES + 1), None, None).is_err());
+        assert!(budget(None, None, Some(32_768), None).is_err());
+        assert!(budget(None, None, None, Some(1201)).is_err());
+        Ok(())
+    }
+}

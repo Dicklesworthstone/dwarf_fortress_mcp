@@ -177,6 +177,15 @@ impl Fixture {
             &self.context,
         )
     }
+    fn checkpoint(&mut self) -> Result<WorkshopHandoffCheckpoint> {
+        let original = plan()?;
+        self.journal.handoff_checkpoint(
+            &mut self.ack,
+            original.key(),
+            original.digest(),
+            &self.context,
+        )
+    }
     fn bytes(&self) -> (Vec<u8>, Vec<u8>) {
         (
             self.journal_disk.borrow().bytes.clone(),
@@ -878,5 +887,101 @@ fn production_origin_operator_binding_pins_roundtrip_and_refuse_invalid_sources(
         )
         .is_err()
     );
+    Ok(())
+}
+
+#[test]
+fn handoff_checkpoint_matches_offline_origin_without_changing_writer_mode() -> Result<()> {
+    let mut fixture = Fixture::new("placed", &[sample("progress_complete", 13000, 100)?])?;
+    let origin = fixture.origin()?;
+    let expected = origin.canonical_bytes().to_vec();
+    let pin = fixture.journal.pin();
+    let binding = fixture.journal.binding().clone();
+    fixture.journal = WorkshopJournal::open(
+        Memory {
+            disk: fixture.journal_disk.clone(),
+            position: 0,
+        },
+        &fixture.context,
+        WorkshopMode::Recover,
+        Some(binding),
+        None,
+        Some(pin),
+    )?;
+    fixture.ack = WorkshopAcknowledgements::open(
+        Memory {
+            disk: fixture.ack_disk.clone(),
+            position: 0,
+        },
+        &fixture.context,
+        WorkshopMode::Recover,
+        false,
+        Some(pin),
+    )?;
+    let before = (fixture.bytes(), fixture.writes());
+    let checkpoint = fixture.checkpoint()?;
+    assert_eq!(checkpoint.canonical_bytes(), expected);
+    assert_eq!(checkpoint.origin_witness(), origin.witness());
+    assert_eq!(checkpoint.pin(), pin);
+    assert_eq!(checkpoint.record(), &record("placed")?);
+    assert_eq!(
+        (checkpoint.high_tick(), checkpoint.high_next_building_id()),
+        (13000, 100)
+    );
+    assert_eq!(checkpoint.high_generation(), capture()?.generation());
+    assert_eq!(fixture.journal.mode, WorkshopMode::Recover);
+    assert!(
+        fixture.origin().is_err(),
+        "historical export must not grant Offline import custody"
+    );
+    assert_eq!((fixture.bytes(), fixture.writes()), before);
+    assert!(!fixture.journal.has_permit(plan()?.key()));
+    Ok(())
+}
+
+#[test]
+fn handoff_checkpoint_replays_every_allocator_floor_and_refuses_uncertain_history() -> Result<()> {
+    for samples in [
+        vec![
+            sample("progress_stage0", 13000, 100)?,
+            sample("progress_complete", 13001, 99)?,
+        ],
+        vec![
+            sample("progress_absent_continuous", 13000, 100)?,
+            sample("progress_complete", 13001, 100)?,
+        ],
+    ] {
+        let mut fixture = Fixture::new("placed", &samples)?;
+        assert!(fixture.checkpoint().is_err());
+    }
+    for phase in ["prepared", "indeterminate", "cancelled"] {
+        let mut fixture = Fixture::new(phase, &[])?;
+        assert!(fixture.checkpoint().is_err(), "{phase}");
+    }
+    Ok(())
+}
+
+#[test]
+fn handoff_checkpoint_cannot_ignore_independent_ack_substitution() -> Result<()> {
+    let mut fixture = Fixture::new("placed", &[])?;
+    fixture.ack_disk.borrow_mut().bytes[0] ^= 1;
+    assert!(fixture.checkpoint().is_err());
+    let mut fixture = Fixture::new("placed", &[])?;
+    fixture.journal_disk.borrow_mut().bytes[0] ^= 1;
+    assert!(fixture.checkpoint().is_err());
+    Ok(())
+}
+
+#[test]
+fn handoff_checkpoint_requires_full_replay_budget_and_current_query() -> Result<()> {
+    let mut fixture = Fixture::new("placed", &[])?;
+    fixture.context.budget.max_bytes = IMPORT_WORK_BYTES - 1;
+    let reads = fixture.reads();
+    assert!(fixture.checkpoint().is_err());
+    assert_eq!(fixture.reads(), reads);
+    fixture.context.budget.max_bytes = IMPORT_WORK_BYTES;
+    fixture.context.grants.clear();
+    assert!(fixture.checkpoint().is_err());
+    assert_eq!(fixture.reads(), reads);
     Ok(())
 }

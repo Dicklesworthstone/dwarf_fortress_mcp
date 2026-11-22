@@ -20,6 +20,46 @@ pub const REFRESH_WORK_BYTES: u64 = 64 * 1024 * 1024;
 /// Maximum bytes in the importing host's separate immutable plan association.
 pub const ASSOCIATION_MAX_BYTES: usize = 64 * 1024;
 
+/// Verified historical data for a host-owned transition. Unlike
+/// `WorkshopProductionOrigin`, this descriptor cannot refresh a prerequisite or
+/// authorize an import. The receiving owner must reopen exact Offline custody.
+#[derive(Clone, Debug)]
+pub struct WorkshopHandoffCheckpoint {
+    binding: WorkshopBinding,
+    pin: WorkshopPin,
+    record: WorkshopRecord,
+    high_tick: u64,
+    high_building: u32,
+    canonical: Vec<u8>,
+}
+impl WorkshopHandoffCheckpoint {
+    pub fn binding(&self) -> &WorkshopBinding {
+        &self.binding
+    }
+    pub fn pin(&self) -> WorkshopPin {
+        self.pin
+    }
+    pub fn record(&self) -> &WorkshopRecord {
+        &self.record
+    }
+    pub fn high_tick(&self) -> u64 {
+        self.high_tick
+    }
+    pub fn high_generation(&self) -> u64 {
+        self.binding.generation()
+    }
+    pub fn high_next_building_id(&self) -> u32 {
+        self.high_building
+    }
+    pub fn canonical_bytes(&self) -> &[u8] {
+        &self.canonical
+    }
+    pub fn origin_witness(&self) -> Digest32 {
+        Digest32::of_bytes(&self.canonical)
+    }
+}
+
+
 fn denied(message: &str) -> dfmcp_core::DfmcpError {
     error(ErrorCode::CapabilityDenied, message)
 }
@@ -392,6 +432,48 @@ impl WorkshopProductionOrigin {
 }
 
 impl<S: EffectJournalStorage> WorkshopJournal<S> {
+    /// Read the complete original history and independent ACK without changing
+    /// this writer's mode, minting an import owner, or claiming current readiness.
+    /// The resulting witness is exactly the one a later Offline import must
+    /// reconstruct from the same immutable files and pin.
+    pub fn handoff_checkpoint<A: EffectJournalStorage>(
+        &mut self,
+        acknowledgement: &mut WorkshopAcknowledgements<A>,
+        key: &str,
+        digest: Digest32,
+        context: &OperationContext,
+    ) -> Result<WorkshopHandoffCheckpoint> {
+        let mut work = prepaid(context, IMPORT_WORK_BYTES)?;
+        work.context = self.access(&work.current()?)?;
+        acknowledgement.verify_workshop(&work.reserve(ACK_WORK_BYTES)?)?;
+        check(acknowledgement.latest() == Some(self.pin()))?;
+        self.verify(&mut work)?;
+        work.charge(MAX_BODY_BYTES)?;
+        let entry = self.known(key, digest)?;
+        if !entry.placed() || entry.needs_reconciliation() || entry.continuity_lost {
+            return Err(stale(
+                "workshop handoff needs the resolved continuous original Placed receipt",
+            ));
+        }
+        let (high_tick, high_building) = self.production_floors(key, &mut work)?;
+        work.context.anchor.tick = GameTick(high_tick.max(context.anchor.tick.get()));
+        self.access(&work.current()?)?;
+        acknowledgement.verify_workshop(&work.reserve(ACK_WORK_BYTES)?)?;
+        check(acknowledgement.latest() == Some(self.pin()))?;
+        let record = entry.native.ok_or_else(corrupt)?;
+        work.charge(2 * MAX_BODY_BYTES + MAX_BINDING_BYTES)?;
+        let canonical = origin_bytes(&self.binding, self.pin(), &record, high_tick, high_building);
+        self.access(&work.current()?)?;
+        Ok(WorkshopHandoffCheckpoint {
+            binding: self.binding.clone(),
+            pin: self.pin(),
+            record,
+            high_tick,
+            high_building,
+            canonical,
+        })
+    }
+
     /// Mint one source selector from exact independently acknowledged Offline
     /// custody. A Placed receipt is required; its historical completion is not.
     /// The caller must retain this owner, not repeatedly remint it after reads.
@@ -427,14 +509,7 @@ impl<S: EffectJournalStorage> WorkshopJournal<S> {
         let record = entry.native.ok_or_else(corrupt)?;
         work.charge(2 * MAX_BODY_BYTES + MAX_BINDING_BYTES)?;
         let pin = self.pin();
-        let mut canonical = b"dfmcp-workshop-production-origin/1\0".to_vec();
-        field(&mut canonical, &self.binding.encode());
-        canonical.extend_from_slice(pin.journal_id.as_bytes());
-        canonical.extend_from_slice(pin.head.as_bytes());
-        canonical.extend_from_slice(&pin.frames.to_be_bytes());
-        field(&mut canonical, record.canonical_bytes());
-        canonical.extend_from_slice(&high_tick.to_be_bytes());
-        canonical.extend_from_slice(&high_building.to_be_bytes());
+        let canonical = origin_bytes(&self.binding, pin, &record, high_tick, high_building);
         self.access(&work.current()?)?;
         Ok(WorkshopProductionOrigin {
             binding: self.binding.clone(),
@@ -534,6 +609,24 @@ impl<S: EffectJournalStorage> WorkshopJournal<S> {
         check(frames == self.frames)?;
         Ok((high_tick, high_building))
     }
+}
+
+fn origin_bytes(
+    binding: &WorkshopBinding,
+    pin: WorkshopPin,
+    record: &WorkshopRecord,
+    high_tick: u64,
+    high_building: u32,
+) -> Vec<u8> {
+    let mut canonical = b"dfmcp-workshop-production-origin/1\0".to_vec();
+    field(&mut canonical, &binding.encode());
+    canonical.extend_from_slice(pin.journal_id.as_bytes());
+    canonical.extend_from_slice(pin.head.as_bytes());
+    canonical.extend_from_slice(&pin.frames.to_be_bytes());
+    field(&mut canonical, record.canonical_bytes());
+    canonical.extend_from_slice(&high_tick.to_be_bytes());
+    canonical.extend_from_slice(&high_building.to_be_bytes());
+    canonical
 }
 
 #[cfg(test)]

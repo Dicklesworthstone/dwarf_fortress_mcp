@@ -270,6 +270,8 @@
     "crates/dfmcp-mcp/src/lib.rs",
     "crates/dfmcp-mcp/src/workshop_construction_server.rs",
     "crates/dfmcp-mcp/src/workshop_construction_server/runtime.rs",
+    "crates/dfmcp-mcp/src/workshop_construction_server/project.rs",
+    "crates/dfmcp-mcp/src/workshop_construction_server/project_tests.rs",
     "crates/dfmcp-mcp/src/workshop_construction_server/production_handoff.rs",
     "crates/dfmcp-mcp/src/workshop_construction_server/production_handoff_tests.rs",
     "crates/dfmcp-mcp/src/workshop_construction_server/presentation.rs",
@@ -419,7 +421,7 @@
     "tree_material_adapter_rust_cases": 10,
     "tree_material_mcp_unit_cases": 3,
     "tree_material_python_stdio_cases": 5,
-    "production_origin_adapter_rust_cases": 17,
+    "production_origin_adapter_rust_cases": 21,
     "clock_adapter_rust_cases": 20,
     "clock_mcp_config_cases": 7,
     "clock_mcp_presentation_cases": 12,
@@ -429,7 +431,8 @@
     "staged_production_child_config_cases": 4,
     "staged_runtime_cases": 4,
     "staged_server_cases": 7,
-    "gameplay_cli_python_cases": 3
+    "gameplay_cli_python_cases": 3,
+    "project_mcp_cases": 7
   },
   "shared_native_engine": {
     "source": "bridge/common/one_attempt_native.h",
@@ -692,5 +695,26 @@
     "transition_request": {
       "kind": "begin_production"
     }
+  },
+  "project_parent_seam": {
+    "module": "workshop_construction_server::runtime::project",
+    "handoff_schema": "dfmcp.workshop-project-handoff/1",
+    "handoff_max_bytes": 32768,
+    "parent_configuration_guard_required": true,
+    "standalone_environment_isolation_unchanged": true,
+    "original_project_deadline_renewed": false,
+    "query_and_clock_safety_host_expiry_preserved": true,
+    "parent_budget_only_narrows": true,
+    "handoff_fresh_complete_required": true,
+    "handoff_replays_full_original_and_ack_history": true,
+    "decoded_source_floors_retained_before_later_refusal": true,
+    "source_manifest_rechecked_after_progress": true,
+    "configured_clock": "typed settled handoff with no unresolved history, live preparation or advancement fence",
+    "recovery_pins": "exact parent Workshop ACK journal_id/head/frames and clock journal_id/head before child open",
+    "recovery_frontier": "maximum with verified child descendants; sticky source and clock fences are never cleared",
+    "import_requirement": "persist parent transition, release Workshop owner, reopen exact donor Offline and independently refresh before production effects",
+    "handoff_grants_mutation_authority": false,
+    "native_protocols_unchanged": true,
+    "public_tools_added": false
   }
 }

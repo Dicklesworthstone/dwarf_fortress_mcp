@@ -1,5 +1,51 @@
 # Implementation Status
 
+## Unreleased — Own Workshop construction and a fixed stock target in one native session
+
+The new explicitly unadmitted `dfmcp-native-resource-project-dev-server`
+composes the actual Workshop and combined-production runtimes behind the same
+eleven modern MCP tools. One immutable root fixes recipe, stock minimum, finite
+order bound, labor mode, absolute deadline, cadence and stability. The parent
+owns one child at a time; construction, labor, order and clock effects still
+require their independent native permissions, current reviews and confirmation.
+
+A private hash-chained parent journal and independent ACK retain each opening,
+active stage, original child checkpoint, completed-Workshop handoff and terminal
+stop. Opening markers precede child initialization. A fresh exact original
+Workshop completion read, full journal/ACK checks and settled clock custody
+precede the acknowledged transition; the writer is released only afterward.
+Production independently reopens that donor Offline and keeps its existing
+fresh prerequisite gates. Source floors and sticky discontinuity fences survive
+refusals; restart selectors are bound to the parent's exact retained custody.
+
+Default cancellation durably prevents new stages/reviews while preserving the
+active original. Separately authorized clock cancellation and reconciliation
+remain explicit. Recovery restores no review and never replays initialization
+or selects an unacknowledged replacement original. All child work shares the
+original foreground wall/byte allowance. Complete Agent Turns preserve root and
+child recovery data, qualified no-work census semantics and exact review
+evidence; bounded content blocks carry large evidence without truncation.
+Output failure or final publication expiry withdraws reviews under the owner
+lock. Observed material/worker offers guide the next fixed-goal plan.
+
+A pre-outage focused ledger harness passed 17/17 tests, including two actual
+Linux private-file cases, using the real core and storage/locking implementation
+with unrelated adapter decoding factories excluded. The executor then became
+unavailable. Source was reconstructed through GitHub, preserving the concurrent
+completed-Workshop export and separate staged production profile. Reconstructed-byte replay, integrated Rust tests,
+formatting, Clippy, mandatory full verification, modern stdio, native SDK and
+live-game qualification remain pending. Paired Workshop source inventories
+were compared in JavaScript; that is source consistency, not Python execution.
+Additional parent, child-goal, handoff, recovery and output regressions are
+authored. No full current-source execution or admission claim is made.
+
+An already completed Tree donor can provide Workshop material. Automatic Tree
+designation, Manager appointment, generic mixed-family planning and adoption of
+a child original whose parent checkpoint was never acknowledged remain open.
+The registry and production runner map are unchanged. Owners
+`df-dfhack-bridge-plane-c-pic.4` and `dfmcp-reality-wiring-proof-4bf.14`
+remain in progress. See `docs/NATIVE_RESOURCE_PROJECT_MCP.md`.
+
 ## Unreleased — Continue an original workshop into production in one session
 
 The standard CLI now selects `serve-gameplay-dev workshop-production`. This

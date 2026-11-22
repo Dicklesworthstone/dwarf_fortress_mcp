@@ -716,3 +716,93 @@ fn exact_private_open_never_recreates_recovery_or_adopts_existing_custody() -> R
     assert!(fs::read(&empty).map_err(storage_error)?.is_empty());
     Ok(())
 }
+
+#[test]
+fn parent_recovery_pin_accepts_real_descendants_and_rejects_valid_prefix_rollback() -> Result<()> {
+    let memory = Memory::default();
+    let mut native = Native::new(memory.clone())?;
+    let context = context()?;
+    let plan = plan()?;
+    let mut journal = open(memory.clone(), &native, &context, OrderRunMode::Control, true)?;
+    let header = journal.recovery_pin();
+    journal.prepare(&mut native, &plan, &context)?;
+    let prepared = journal.recovery_pin();
+    let valid_prefix = memory.data.borrow().clone();
+    journal.commit(&mut native, plan.key(), plan.digest(), &context)?;
+    let dispatched = journal.recovery_pin();
+    assert_ne!(prepared.1, dispatched.1);
+    journal.verify_recovery(header.0, header.1, &context)?;
+    journal.verify_recovery(prepared.0, prepared.1, &context)?;
+    journal.verify_recovery(dispatched.0, dispatched.1, &context)?;
+    let full = memory.data.borrow().clone();
+    drop(journal);
+
+    let mut query = context.clone();
+    query.grants.retain(|grant| grant.capability == Capability::Query);
+    let mut reopened = open(memory.clone(), &native, &query, OrderRunMode::Offline, false)?;
+    reopened.verify_recovery(prepared.0, prepared.1, &query)?;
+    reopened.verify_recovery(dispatched.0, dispatched.1, &query)?;
+    assert_eq!(*memory.data.borrow(), full, "ancestry inspection must be read-only");
+    drop(reopened);
+
+    // This is a complete earlier journal, not a torn/corrupt frame. Ordinary
+    // replay alone accepts it, but the acknowledged dispatch head must not.
+    *memory.data.borrow_mut() = valid_prefix.clone();
+    let mut rolled_back = open(memory.clone(), &native, &query, OrderRunMode::Offline, false)?;
+    assert_eq!(rolled_back.recovery_pin(), prepared);
+    assert!(rolled_back.verify_recovery(dispatched.0, dispatched.1, &query).is_err());
+    rolled_back.verify_recovery(prepared.0, prepared.1, &query)?;
+    assert_eq!(*memory.data.borrow(), valid_prefix);
+    assert_eq!(native.commits, 1, "recovery never redispatches");
+    Ok(())
+}
+
+#[test]
+fn parent_recovery_pin_requires_exact_identity_query_authority_and_budget() -> Result<()> {
+    let memory = Memory::default();
+    let native = Native::new(memory.clone())?;
+    let context = context()?;
+    let mut journal = open(memory, &native, &context, OrderRunMode::Control, true)?;
+    let (id, head) = journal.recovery_pin();
+    let other = Digest32::of_bytes(b"another historical clock identity");
+    for (expected_id, expected_head) in [
+        (Digest32::ZERO, head), (id, Digest32::ZERO), (other, head), (id, other),
+    ] {
+        assert!(journal.verify_recovery(expected_id, expected_head, &context).is_err());
+    }
+    let mut wrong_session = context.clone();
+    wrong_session.session_id = SessionId::new(context.session_id.get() + 1);
+    assert!(journal.verify_recovery(id, head, &wrong_session).is_err());
+    let mut denied = context.clone();
+    denied.grants.clear();
+    assert!(journal.verify_recovery(id, head, &denied).is_err());
+    let mut small = context.clone();
+    small.budget.max_bytes = 1;
+    assert!(journal.verify_recovery(id, head, &small).is_err());
+    journal.verify_recovery(id, head, &context)?;
+    assert_eq!((native.reads, native.prepares, native.commits, native.cancels), (0, 0, 0, 0));
+    Ok(())
+}
+
+#[test]
+fn failed_receipt_append_retains_actual_dispatch_pin_instead_of_old_view() -> Result<()> {
+    let memory = Memory::default();
+    let mut native = Native::new(memory.clone())?;
+    let context = context()?;
+    let plan = plan()?;
+    let mut journal = open(memory.clone(), &native, &context, OrderRunMode::Control, true)?;
+    journal.prepare(&mut native, &plan, &context)?;
+    let published = journal.view(&context)?;
+    native.fail_receipt_sync = true;
+    assert!(journal.commit(&mut native, plan.key(), plan.digest(), &context).is_err());
+    let (id, dispatched_head) = journal.recovery_pin();
+    assert_eq!(id, published.id);
+    assert_ne!(dispatched_head, published.head);
+    assert_eq!(journal.lookup(plan.key(), plan.digest())?.state(), OrderRunState::DispatchStarted);
+    drop(journal);
+    memory.fail_sync.set(false);
+    let mut reopened = open(memory, &native, &context, OrderRunMode::Offline, false)?;
+    reopened.verify_recovery(id, dispatched_head, &context)?;
+    assert_eq!(native.commits, 1);
+    Ok(())
+}

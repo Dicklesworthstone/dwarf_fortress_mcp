@@ -54,6 +54,7 @@ mod planning_inspection;
 mod portfolio;
 mod portfolio_request;
 mod prerequisite_binding;
+mod project;
 mod request;
 mod review;
 mod stock_target;
@@ -104,8 +105,9 @@ use planning_inspection::PlanningInspection;
 use portfolio::PortfolioState;
 pub(crate) use portfolio_request::PortfolioRequest;
 use prerequisite_binding::Origins;
+pub(crate) use project::ProjectStockGoal;
 pub(crate) use request::Request;
-use stock_target::SharedStockTarget;
+use stock_target::{SharedStockTarget, StockTargetNoWork};
 pub(crate) use stock_target_request::StockTargetRequest;
 use stock_targets::SharedStockTargets;
 pub(crate) use stock_targets_request::StockTargetsRequest;
@@ -274,7 +276,7 @@ pub(crate) struct Runtime {
     manager: Option<SharedManager>,
     input_supply: Option<SharedInputSupply>,
     stock_target: Option<SharedStockTarget>,
-    stock_target_no_work: Option<Value>,
+    stock_target_no_work: Option<StockTargetNoWork>,
     stock_targets: Option<SharedStockTargets>,
     stock_targets_no_work: Option<Value>,
     original: Option<PreparedPlan>,
@@ -423,7 +425,8 @@ impl Runtime {
                 .map_or(anchor.tick.get(), |r| {
                     anchor.tick.get().max(r.frontier.authority_tick_floor)
                 })
-                .max(authority_tick_floor),
+                .max(authority_tick_floor)
+                .max(config.project_recovery.map_or(0, |r| r.observation_tick_floor)),
         );
         let mut out = Self {
             config,
@@ -512,6 +515,13 @@ impl Runtime {
             .input_supply
             .map(|config| SharedInputSupply::new(config, out.config.orders.clone()))
             .transpose()?;
+        if let Some(recovery) = out.config.project_recovery
+            && let Some(witness) = recovery.manager_origin
+            && out.manager.as_ref().ok_or_else(|| denied("project Manager donor is absent"))?
+                .witness()? != witness
+        {
+            return Err(denied("project Manager donor changed its retained original witness"));
+        }
         if let Some(checkpoint) = out.config.input_supply_checkpoint {
             out.input_supply
                 .as_ref()
@@ -565,6 +575,11 @@ impl Runtime {
             .orders
             .open_control(order_mode(mode), &work.take(128 * MIB)?)?;
         let order = SemanticWorkOrderSession::new(o, oa, &work.take(64 * MIB)?)?;
+        if let Some(recovery) = out.config.project_recovery
+            && (wid != recovery.workforce_journal || oid != recovery.order_journal)
+        {
+            return Err(denied("project child journals differ from parent-retained custody"));
+        }
         out.workforce_journal = wid;
         out.order_journal = oid;
         out.parts = Some((labor, order));
@@ -580,6 +595,24 @@ impl Runtime {
             .orders
             .open_inventory_clock(order_mode(mode), &work.take(128 * MIB)?)?
             .map(ProductionInventoryClock::new);
+        if let Some(recovery) = out.config.project_recovery {
+            match (&mut out.clock, recovery.clock) {
+                (Some(clock), Some(pin)) => {
+                    clock.verify_project_recovery(pin, &work.take(8 * MIB)?)?;
+                }
+                (None, None) => {}
+                _ => return Err(denied("project recovery changed order-clock custody")),
+            }
+            match (&mut out.inventory_clock, recovery.inventory_clock) {
+                (Some(clock), Some(pin)) => {
+                    let context = work.take(8 * MIB)?;
+                    let native = out.config.orders.inventory_clock_context(&context, false)?;
+                    clock.verify_project_recovery(pin, &context, &native)?;
+                }
+                (None, None) => {}
+                _ => return Err(denied("project recovery changed inventory-clock custody")),
+            }
+        }
         if let Some(recovery) = out.config.recovery {
             let mut archive = open_private_plan_archive(
                 &out.config.path("original.plan"),

@@ -5,8 +5,10 @@ use super::manager_config::{
 };
 use super::workshop_config::{self, WorkshopConfig};
 use crate::semantic_workforce_runtime::{denied, digest, invalid};
+use crate::workshop_construction_server::WorkshopProjectHandoff;
 use crate::{semantic_work_order_runtime as orders, semantic_workforce_runtime as workforce};
 use dfmcp_adapter::live_dispatch::durable;
+use dfmcp_adapter::workshop_construction::WorkshopBinding;
 use dfmcp_core::{Digest32, FortressId, GameTick, ObservationCursor, Result, StateAnchor};
 use dfmcp_intent::plan_archive::PlanArchiveSeal;
 use serde::Deserialize;
@@ -251,10 +253,52 @@ pub(crate) struct Config {
     pub(super) input_supply_checkpoint: Option<InputCheckpoint>,
     pub(crate) workforce: workforce::native::NativeShell,
     pub(crate) orders: orders::native::NativeShell,
+    pub(super) project_binding: Option<ProjectProductionBinding>,
+    pub(super) project_recovery: Option<ProjectRecovery>,
     check: Arc<dyn Fn() -> Result<()> + Send + Sync>,
     runtime_check: fn() -> Result<()>,
     parent_configuration_digest: Option<Digest32>,
 }
+
+#[derive(Clone, Copy, Debug)]
+pub(super) struct ProjectProductionBinding {
+    pub(super) workshop_origin: Digest32,
+    pub(super) deadline_tick: u64,
+    pub(super) authority_expires_tick: u64,
+}
+
+/// A parent-retained historical pin. It never restores a review or source read.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct ProjectClockRecovery {
+    pub(super) journal_id: Digest32,
+    pub(super) head: Digest32,
+    pub(super) authority_tick_floor: u64,
+    pub(super) high_source_sequence: u64,
+}
+
+impl ProjectClockRecovery {
+    pub(super) fn to_json(self) -> serde_json::Value {
+        serde_json::json!({
+            "journal_id": self.journal_id.to_hex(),
+            "head": self.head.to_hex(),
+            "authority_tick_floor": self.authority_tick_floor,
+            "high_source_sequence": self.high_source_sequence,
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(super) struct ProjectRecovery {
+    pub(super) workforce_journal: Digest32,
+    pub(super) order_journal: Digest32,
+    pub(super) observation_tick_floor: u64,
+    pub(super) clock: Option<ProjectClockRecovery>,
+    pub(super) inventory_clock: Option<ProjectClockRecovery>,
+    pub(super) manager_origin: Option<Digest32>,
+}
+
+#[path = "project_recovery.rs"]
+mod project_recovery;
 
 /// Closed child configuration facts needed before the staged parent opens either owner.
 pub(crate) struct ParentMetadata {
@@ -268,7 +312,8 @@ pub(crate) struct ParentMetadata {
     pub(crate) authority_tick_floor: u64,
 }
 
-fn environment() -> Result<[String; 3]> {
+
+fn family_environment() -> Result<[String; 3]> {
     if std::env::var(OPT_IN).ok().as_deref() != Some("1")
         || std::env::var("DFMCP_ALLOW_UNADMITTED_SEMANTIC_WORKFORCE")
             .ok()
@@ -283,7 +328,11 @@ fn environment() -> Result<[String; 3]> {
             "combined and both family development opt-ins are required",
         ));
     }
-    let raw = configuration_strings()?;
+    configuration_strings()
+}
+
+fn environment() -> Result<[String; 3]> {
+    let raw = family_environment()?;
     let (_, _, _, clock, inventory_clock, workshop, _, manager, _, _, _) = parse(&raw[0])?;
     for (key, _) in std::env::vars_os() {
         let key = key.to_string_lossy();
@@ -371,6 +420,24 @@ fn matches_digests(raw: &[String; 3], expected: [Digest32; 3]) -> bool {
         == expected
 }
 
+type Parsed = (
+    PathBuf,
+    bool,
+    Option<Recovery>,
+    Option<ClockConfig>,
+    Option<ClockConfig>,
+    Option<WorkshopConfig>,
+    Option<WorkshopPrerequisiteCheckpoint>,
+    Option<ManagerConfig>,
+    Option<ManagerPrerequisiteCheckpoint>,
+    Option<InputConfig>,
+    Option<InputCheckpoint>,
+);
+
+fn parse(raw: &str) -> Result<Parsed> {
+    parse_with_workshop(raw, None, false)
+}
+
 fn decode_input(raw: &str) -> Result<Input> {
     if raw.is_empty() || raw.len() > MAX_CONFIG_BYTES {
         return Err(invalid("combined operator configuration exceeds 16 KiB"));
@@ -393,21 +460,12 @@ fn decode_input(raw: &str) -> Result<Input> {
     Ok(input)
 }
 
-fn parse(
+
+fn parse_with_workshop(
     raw: &str,
-) -> Result<(
-    PathBuf,
-    bool,
-    Option<Recovery>,
-    Option<ClockConfig>,
-    Option<ClockConfig>,
-    Option<WorkshopConfig>,
-    Option<WorkshopPrerequisiteCheckpoint>,
-    Option<ManagerConfig>,
-    Option<ManagerPrerequisiteCheckpoint>,
-    Option<InputConfig>,
-    Option<InputCheckpoint>,
-)> {
+    handoff: Option<&WorkshopProjectHandoff>,
+    project: bool,
+) -> Result<Parsed> {
     let input = decode_input(raw)?;
     let clock = input
         .clock
@@ -417,11 +475,51 @@ fn parse(
         .inventory_clock
         .map(|clock| clock.validate(input.initialize))
         .transpose()?;
-    let workshop_prerequisite = input
-        .workshop_prerequisite
-        .map(|workshop| workshop.validate(&input.directory))
-        .transpose()?;
-    let workshop_prerequisite_checkpoint = input.workshop_prerequisite_checkpoint;
+    if project && input.workshop_prerequisite.is_some() {
+        return Err(denied(
+            "project Workshop donor must come from the verified completed child handoff",
+        ));
+    }
+    let workshop_prerequisite = match handoff {
+        Some(handoff) => Some(WorkshopConfig::from_project_handoff(
+            handoff,
+            &input.directory,
+        )?),
+        None => input
+            .workshop_prerequisite
+            .map(|workshop| workshop.validate(&input.directory))
+            .transpose()?,
+    };
+    let mut workshop_prerequisite_checkpoint = input.workshop_prerequisite_checkpoint;
+    if let Some(handoff) = handoff {
+        let seed = WorkshopPrerequisiteCheckpoint {
+            origin_witness: handoff.origin_witness(),
+            floor: WorkshopRecoveryFloor {
+                tick: handoff.high_tick(),
+                generation: handoff.high_generation(),
+                next_building_id: handoff.high_next_building_id(),
+                fenced: false,
+            },
+        };
+        if let Some(recovery) = &input.recovery {
+            let retained = recovery
+                .workshop_prerequisite_floor
+                .ok_or_else(|| denied("project recovery lost its Workshop source floors"))?;
+            require_project_floor(retained, seed.floor)?;
+        } else if let Some(retained) = workshop_prerequisite_checkpoint {
+            if retained.origin_witness != seed.origin_witness {
+                return Err(denied(
+                    "project checkpoint belongs to another Workshop origin",
+                ));
+            }
+            require_project_floor(retained.floor, seed.floor)?;
+        } else {
+            // The completed child has already consumed these source facts.
+            // Restore them before the production owner can contact any native
+            // source, even on its first opening and before an original exists.
+            workshop_prerequisite_checkpoint = Some(seed);
+        }
+    }
     let manager_prerequisite = input
         .manager_prerequisite
         .map(|manager| manager.validate(&input.directory))
@@ -635,6 +733,21 @@ fn parse(
     ))
 }
 
+fn require_project_floor(
+    retained: WorkshopRecoveryFloor,
+    seed: WorkshopRecoveryFloor,
+) -> Result<()> {
+    if retained.tick < seed.tick
+        || retained.generation < seed.generation
+        || retained.next_building_id < seed.next_building_id
+    {
+        return Err(denied(
+            "project recovery rolled back a consumed Workshop source floor",
+        ));
+    }
+    Ok(())
+}
+
 fn distinct_directories<const N: usize>(paths: [&Path; N]) -> bool {
     (0..paths.len()).all(|i| {
         ((i + 1)..paths.len())
@@ -654,6 +767,146 @@ fn matching_sources(
         && wa.citizen_generation == oa.citizen_generation
 }
 
+/// Configuration-only description for the parent ledger. It contains no
+/// credentials, live handles, authority grants, or current source evidence.
+#[derive(Clone, Debug)]
+pub(crate) struct ProjectProductionPolicy {
+    identity: Digest32,
+    directory: PathBuf,
+    workforce_directory: PathBuf,
+    order_directory: PathBuf,
+    initialize: bool,
+    workforce: workforce::policy::SourceAcceptance,
+    orders: orders::policy::SourceAcceptance,
+}
+
+impl ProjectProductionPolicy {
+    pub(crate) fn identity(&self) -> Digest32 {
+        self.identity
+    }
+    pub(crate) fn directory(&self) -> &Path {
+        &self.directory
+    }
+    pub(crate) fn workforce_directory(&self) -> &Path {
+        &self.workforce_directory
+    }
+    pub(crate) fn order_directory(&self) -> &Path {
+        &self.order_directory
+    }
+    pub(crate) fn initializing(&self) -> bool {
+        self.initialize
+    }
+    pub(crate) fn matches_workshop(&self, workshop: &WorkshopBinding) -> Result<()> {
+        if !WorkshopConfig::binding_matches_sources(workshop, &self.workforce, &self.orders) {
+            return Err(denied(
+                "project Workshop and production fortress or software pins differ",
+            ));
+        }
+        Ok(())
+    }
+}
+
+fn project_credentials(clock: bool, inventory_clock: bool, manager: bool) -> Result<()> {
+    for (key, _) in std::env::vars_os() {
+        let key = key.to_string_lossy();
+        let own = key.starts_with("DFMCP_COMBINED_PRODUCTION_")
+            || key.starts_with("DFMCP_SEMANTIC_WORKFORCE_")
+            || key.starts_with("DFMCP_SEMANTIC_WORK_ORDER_");
+        if own && !allowed_key(&key, clock, inventory_clock, true, manager) {
+            return Err(denied(
+                "project production rejects unconfigured native credentials and child state",
+            ));
+        }
+    }
+    for flag in [
+        "DFMCP_SEMANTIC_WORKFORCE_ALLOW_LABOR",
+        "DFMCP_SEMANTIC_WORK_ORDER_ALLOW_PRODUCTION",
+        "DFMCP_SEMANTIC_WORK_ORDER_ALLOW_CLOCK",
+        "DFMCP_SEMANTIC_WORK_ORDER_ALLOW_INVENTORY_CLOCK",
+    ] {
+        if std::env::var_os(flag).is_some_and(|value| value.to_str() != Some("1")) {
+            return Err(denied(
+                "project effect enablement must be absent or exactly 1",
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Only the externally retained restart custody changes between openings.
+/// The parent must compare every omitted identity with its checkpoint before
+/// opening the child; this digest is never a substitute for that comparison.
+fn project_policy_identity(raw: &[String; 3]) -> Result<Digest32> {
+    let mut bytes = b"dfmcp-workshop-stock-project-production-policy/1\0".to_vec();
+    for (index, source) in raw.iter().enumerate() {
+        let mut value: serde_json::Value = serde_json::from_str(source)
+            .map_err(|_| invalid("invalid checked project source policy"))?;
+        let object = value
+            .as_object_mut()
+            .ok_or_else(|| invalid("project source policy must be an object"))?;
+        object.remove("initialize");
+        object.remove("recovery");
+        if index == 0 {
+            for field in [
+                "workshop_prerequisite_checkpoint",
+                "manager_prerequisite_checkpoint",
+                "input_supply_checkpoint",
+            ] {
+                object.remove(field);
+            }
+        } else if index == 1 {
+            object.remove("journal_id");
+        }
+        for clock in ["clock", "inventory_clock"] {
+            if let Some(fields) = object
+                .get_mut(clock)
+                .and_then(serde_json::Value::as_object_mut)
+            {
+                fields.remove("journal_id");
+            }
+        }
+        // serde_json's checked values retain every source pin and scope. Sort
+        // object members explicitly so harmless JSON key order on a restart
+        // cannot change this policy identity, even with preserve_order enabled.
+        fn ordered(value: &serde_json::Value, output: &mut Vec<u8>) -> Result<()> {
+            match value {
+                serde_json::Value::Object(object) => {
+                    output.push(b'{');
+                    let sorted: std::collections::BTreeMap<_, _> = object.iter().collect();
+                    for (index, (key, value)) in sorted.into_iter().enumerate() {
+                        if index != 0 {
+                            output.push(b',');
+                        }
+                        serde_json::to_writer(&mut *output, key)
+                            .map_err(|_| invalid("project policy key encoding failed"))?;
+                        output.push(b':');
+                        ordered(value, output)?;
+                    }
+                    output.push(b'}');
+                }
+                serde_json::Value::Array(values) => {
+                    output.push(b'[');
+                    for (index, value) in values.iter().enumerate() {
+                        if index != 0 {
+                            output.push(b',');
+                        }
+                        ordered(value, output)?;
+                    }
+                    output.push(b']');
+                }
+                _ => serde_json::to_writer(output, value)
+                    .map_err(|_| invalid("project policy value encoding failed"))?,
+            }
+            Ok(())
+        }
+        let mut encoded = Vec::new();
+        ordered(&value, &mut encoded)?;
+        bytes.extend_from_slice(&(encoded.len() as u32).to_be_bytes());
+        bytes.extend_from_slice(&encoded);
+    }
+    Ok(Digest32::of_bytes(&bytes))
+}
+
 impl Config {
     pub(crate) fn from_environment(runtime_check: fn() -> Result<()>) -> Result<Self> {
         runtime_check()?;
@@ -661,6 +914,7 @@ impl Config {
         let digests = raw
             .each_ref()
             .map(|value| Digest32::of_bytes(value.as_bytes()));
+        let parsed = parse(&raw[0])?;
         let check: Arc<dyn Fn() -> Result<()> + Send + Sync> = Arc::new(move || {
             let current = environment()?;
             if !matches_digests(&current, digests) {
@@ -670,7 +924,98 @@ impl Config {
             }
             Ok(())
         });
-        Self::from_configuration(&raw[0], check, runtime_check, None)
+        Self::from_checked_inputs(parsed, check, runtime_check)
+    }
+
+    /// Parse and cross-check every future production pin without opening a
+    /// custody file, credential, or native connection. The parent uses this
+    /// before starting Workshop work and retains the stable policy identity.
+    pub(crate) fn validate_project_environment(
+        parent_guard: Arc<dyn Fn() -> Result<()> + Send + Sync>,
+        runtime_check: fn() -> Result<()>,
+        handoff: Option<&WorkshopProjectHandoff>,
+    ) -> Result<ProjectProductionPolicy> {
+        let (config, raw) = Self::project_configuration(parent_guard, runtime_check, handoff)?;
+        let directory = |raw: &str| -> Result<PathBuf> {
+            let value: serde_json::Value = serde_json::from_str(raw)
+                .map_err(|_| invalid("invalid checked production policy"))?;
+            value["directory"]
+                .as_str()
+                .map(PathBuf::from)
+                .ok_or_else(|| invalid("checked child policy lacks its custody directory"))
+        };
+        let policy = ProjectProductionPolicy {
+            identity: project_policy_identity(&raw)?,
+            directory: config.directory.clone(),
+            workforce_directory: directory(&raw[1])?,
+            order_directory: directory(&raw[2])?,
+            initialize: config.initialize,
+            workforce: workforce::Shell::acceptance(&config.workforce).clone(),
+            orders: orders::Shell::acceptance(&config.orders).clone(),
+        };
+        config.current()?;
+        Ok(policy)
+    }
+
+    /// Only the typed completed Workshop handoff can supply this donor. The
+    /// parent owns the closed union of environment keys; this owner still pins
+    /// every byte of its own three source configurations and all child guards.
+    pub(crate) fn from_project_environment(
+        parent_guard: Arc<dyn Fn() -> Result<()> + Send + Sync>,
+        runtime_check: fn() -> Result<()>,
+        handoff: &WorkshopProjectHandoff,
+    ) -> Result<Self> {
+        Self::project_configuration(parent_guard, runtime_check, Some(handoff))
+            .map(|(config, _)| config)
+    }
+
+    fn project_configuration(
+        parent_guard: Arc<dyn Fn() -> Result<()> + Send + Sync>,
+        runtime_check: fn() -> Result<()>,
+        handoff: Option<&WorkshopProjectHandoff>,
+    ) -> Result<(Self, [String; 3])> {
+        runtime_check()?;
+        parent_guard()?;
+        let raw = family_environment()?;
+        let parsed = parse_with_workshop(&raw[0], handoff, true)?;
+        if parsed
+            .2
+            .is_some_and(|recovery| recovery.portfolio.is_some())
+        {
+            return Err(denied(
+                "project production recovery cannot adopt a portfolio original",
+            ));
+        }
+        let conditional = (parsed.3.is_some(), parsed.4.is_some(), parsed.7.is_some());
+        let digests = raw
+            .each_ref()
+            .map(|value| Digest32::of_bytes(value.as_bytes()));
+        let check: Arc<dyn Fn() -> Result<()> + Send + Sync> = Arc::new(move || {
+            parent_guard()?;
+            let current = family_environment()?;
+            if !matches_digests(&current, digests) {
+                return Err(denied(
+                    "project production source configuration changed; close this session",
+                ));
+            }
+            project_credentials(conditional.0, conditional.1, conditional.2)
+        });
+        check()?;
+        let mut config = Self::from_checked_inputs(parsed, check, runtime_check)?;
+        if config.initialize
+            && (!workforce::Shell::labor_enabled(&config.workforce)
+                || !orders::Shell::production_enabled(&config.orders))
+        {
+            return Err(denied(
+                "project production initialization requires both explicit family authorities",
+            ));
+        }
+        config.project_binding = handoff.map(|handoff| ProjectProductionBinding {
+            workshop_origin: handoff.origin_witness(),
+            deadline_tick: handoff.project_deadline_tick(),
+            authority_expires_tick: handoff.authority_expires_tick(),
+        });
+        Ok((config, raw))
     }
 
     /// The fixed staged parent owns the union allowlist and pins all five raw
@@ -777,6 +1122,16 @@ impl Config {
         runtime_check: fn() -> Result<()>,
         parent_configuration_digest: Option<Digest32>,
     ) -> Result<Self> {
+        let mut config = Self::from_checked_inputs(parse(raw)?, check, runtime_check)?;
+        config.parent_configuration_digest = parent_configuration_digest;
+        Ok(config)
+    }
+
+    fn from_checked_inputs(
+        parsed: Parsed,
+        check: Arc<dyn Fn() -> Result<()> + Send + Sync>,
+        runtime_check: fn() -> Result<()>,
+    ) -> Result<Self> {
         let (
             directory,
             initialize,
@@ -789,7 +1144,7 @@ impl Config {
             manager_prerequisite_checkpoint,
             input_supply,
             input_supply_checkpoint,
-        ) = parse(raw)?;
+        ) = parsed;
         let w = workforce::native::Config::from_combined_environment(
             Arc::clone(&check),
             runtime_check,
@@ -870,9 +1225,11 @@ impl Config {
             input_supply_checkpoint,
             workforce,
             orders,
+            project_binding: None,
+            project_recovery: None,
+            parent_configuration_digest: None,
             check,
             runtime_check,
-            parent_configuration_digest,
         })
     }
     pub(crate) fn current(&self) -> Result<()> {
@@ -899,6 +1256,10 @@ mod tests;
 #[cfg(test)]
 #[path = "manager_config_tests.rs"]
 mod manager_tests;
+
+#[cfg(test)]
+#[path = "project_config_tests.rs"]
+mod project_tests;
 
 #[cfg(test)]
 #[path = "parent_config_tests.rs"]

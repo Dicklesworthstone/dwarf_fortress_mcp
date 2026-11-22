@@ -28,6 +28,34 @@ impl ProductionInventoryClock {
             inspection_required: false,
         }
     }
+    pub(super) fn project_recovery_checkpoint(&self) -> config::ProjectClockRecovery {
+        let (journal_id, head, high_tick, high_source_sequence) =
+            self.inner.recovery_checkpoint();
+        config::ProjectClockRecovery {
+            journal_id,
+            head,
+            authority_tick_floor: high_tick.max(self.high_tick()),
+            high_source_sequence,
+        }
+    }
+
+    pub(super) fn verify_project_recovery(
+        &mut self,
+        retained: config::ProjectClockRecovery,
+        c: &OperationContext,
+        n: &OperationContext,
+    ) -> Result<()> {
+        self.inspection_required = true;
+        self.inner.verify_recovery(
+            retained.journal_id,
+            retained.head,
+            retained.authority_tick_floor,
+            retained.high_source_sequence,
+            c,
+            n,
+        )
+    }
+
     pub(super) fn needs_target(&self) -> bool {
         self.target.is_none()
     }

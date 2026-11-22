@@ -1,5 +1,6 @@
 //! Read-only operator pins for one independently acknowledged Workshop original.
 use crate::semantic_workforce_runtime::{denied, digest, invalid};
+use crate::workshop_construction_server::WorkshopProjectHandoff;
 use crate::{semantic_work_order_runtime as orders, semantic_workforce_runtime as workforce};
 use dfmcp_adapter::workshop_construction::journal::{MAX_FRAMES, WorkshopPin};
 use dfmcp_adapter::workshop_construction::{FortressIdentity, WorkshopBinding};
@@ -97,6 +98,35 @@ impl Input {
 }
 
 impl WorkshopConfig {
+    pub(super) fn from_project_handoff(
+        handoff: &WorkshopProjectHandoff,
+        parent: &Path,
+    ) -> Result<Self> {
+        let binding = handoff.binding();
+        let acknowledged = handoff.acknowledged();
+        // Reuse the complete standalone pin validator. The private handoff
+        // supplies immutable data; the production owner still reopens the
+        // exact journal and ACK Offline and freshly qualifies native Complete.
+        Input {
+            directory: handoff.directory().to_path_buf(),
+            endpoint: binding.endpoint().to_string(),
+            world_folder: binding.fortress().folder().to_owned(),
+            site_id: binding.fortress().site(),
+            df_version: binding.df_version().to_owned(),
+            dfhack_version: binding.dfhack_version().to_owned(),
+            generation: binding.generation(),
+            map_dimensions: binding.dimensions(),
+            acknowledged: PinInput {
+                journal_id: acknowledged.journal_id.to_hex(),
+                head: acknowledged.head.to_hex(),
+                frames: acknowledged.frames,
+            },
+            original_key: handoff.original_key().to_owned(),
+            original_plan_digest: handoff.original_plan_digest().to_hex(),
+        }
+        .validate(parent)
+    }
+
     /// Native family incarnation numbers are independent. Only their common
     /// fortress and software facts are joined here; the donor retains its own
     /// endpoint, exact generation and map dimensions for native qualification.
@@ -105,15 +135,23 @@ impl WorkshopConfig {
         workforce: &workforce::policy::SourceAcceptance,
         orders: &orders::policy::SourceAcceptance,
     ) -> bool {
-        let fortress = self.binding.fortress();
+        Self::binding_matches_sources(&self.binding, workforce, orders)
+    }
+
+    pub(super) fn binding_matches_sources(
+        binding: &WorkshopBinding,
+        workforce: &workforce::policy::SourceAcceptance,
+        orders: &orders::policy::SourceAcceptance,
+    ) -> bool {
+        let fortress = binding.fortress();
         fortress.folder() == workforce.world_folder
             && fortress.folder() == orders.world_folder
             && fortress.site() == workforce.site_id
             && fortress.site() == orders.site_id
-            && self.binding.df_version() == workforce.df_version
-            && self.binding.df_version() == orders.df_version
-            && self.binding.dfhack_version() == workforce.dfhack_version
-            && self.binding.dfhack_version() == orders.dfhack_version
+            && binding.df_version() == workforce.df_version
+            && binding.df_version() == orders.df_version
+            && binding.dfhack_version() == workforce.dfhack_version
+            && binding.dfhack_version() == orders.dfhack_version
     }
 
     /// Offline custody verification does not call this accessor. The native

@@ -369,3 +369,35 @@ fn illegal_durable_and_native_regressions_are_rejected() -> Result<()> {
     assert!(transition(Some(&old), &next).is_err());
     Ok(())
 }
+
+#[test]
+fn parent_inventory_clock_pin_rejects_rolled_back_valid_prefix() -> Result<()> {
+    let (mut journal, storage, mut source, context) = setup()?;
+    let plan = plan()?;
+    let header = (journal.id(), journal.head());
+    journal.prepare(&mut source, plan.clone(), &context)?;
+    let prepared = (journal.id(), journal.head());
+    let prefix = storage.bytes.lock().map_err(|_| corrupt("test lock"))?
+        .get_ref().clone();
+    journal.commit(&mut source, plan.key(), plan.digest(), &context)?;
+    let dispatched = (journal.id(), journal.head());
+    journal.verify_recovery(header.0, header.1, &context)?;
+    journal.verify_recovery(prepared.0, prepared.1, &context)?;
+    journal.verify_recovery(dispatched.0, dispatched.1, &context)?;
+    assert_ne!(prepared.1, dispatched.1);
+    drop(journal);
+
+    let mut query = context.clone();
+    query.grants.retain(|grant| grant.capability == dfmcp_core::Capability::Query);
+    let mut recovered = reopen(storage.clone(), &query, RunMode::Offline)?;
+    recovered.verify_recovery(dispatched.0, dispatched.1, &query)?;
+    drop(recovered);
+    *storage.bytes.lock().map_err(|_| corrupt("test lock"))? = Cursor::new(prefix.clone());
+    let mut earlier = reopen(storage.clone(), &query, RunMode::Offline)?;
+    assert_eq!((earlier.id(), earlier.head()), prepared);
+    assert!(earlier.verify_recovery(dispatched.0, dispatched.1, &query).is_err());
+    earlier.verify_recovery(prepared.0, prepared.1, &query)?;
+    assert_eq!(*storage.bytes.lock().map_err(|_| corrupt("test lock"))?.get_ref(), prefix);
+    assert_eq!(source.commits, 1);
+    Ok(())
+}

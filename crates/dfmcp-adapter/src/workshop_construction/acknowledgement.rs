@@ -294,7 +294,13 @@ impl<S: EffectJournalStorage> WorkshopAcknowledgements<S> {
     /// A production importer holds the independent Workshop acknowledgement
     /// read-only. An equal-looking Tree/Manager pin cannot stand in for it.
     pub(crate) fn verify_workshop_offline(&mut self, context: &OperationContext) -> Result<()> {
-        check(matches!(self.protocol, Protocol::Workshop) && self.scope.is_none() && self.offline)?;
+        check(self.offline)?;
+        self.verify_workshop(context)
+    }
+    /// Verify the exact Workshop protocol and independent retained bytes without
+    /// changing custody mode. This grants no production-import authority.
+    pub(crate) fn verify_workshop(&mut self, context: &OperationContext) -> Result<()> {
+        check(matches!(self.protocol, Protocol::Workshop) && self.scope.is_none())?;
         self.verify(context)
     }
     /// A production Manager import needs its exact cache-bearing generation,

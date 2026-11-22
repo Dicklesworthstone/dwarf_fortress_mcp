@@ -29,7 +29,7 @@ SOURCES = [
     *[TREE + name for name in ("mod.rs", "journal.rs", "material_origin.rs", "rpc.rs", "tests.rs", "journal_tests.rs")],
     "tests/native/tree_harvest/vectors.json",
     MCP + "lib.rs", MCP + "workshop_construction_server.rs",
-    *[MCP + "workshop_construction_server/" + name for name in ("runtime.rs", "production_handoff.rs", "production_handoff_tests.rs", "presentation.rs", "tests.rs", "clock.rs", "clock_config_tests.rs", "clock_presentation_tests.rs", "material_selection.rs", "tree_material.rs", "tree_material_tests.rs")],
+    *[MCP + "workshop_construction_server/" + name for name in ("runtime.rs", "project.rs", "project_tests.rs", "production_handoff.rs", "production_handoff_tests.rs", "presentation.rs", "tests.rs", "clock.rs", "clock_config_tests.rs", "clock_presentation_tests.rs", "material_selection.rs", "tree_material.rs", "tree_material_tests.rs")],
     MCP + "bin/dfmcp-workshop-v1-20-dev-server.rs", "crates/dfmcp-mcp/tests/workshop_construction_stdio.rs",
     *["tests/native/workshop/" + name for name in ("stubs.h", "handler.cpp", "vectors.json", "continuity_vectors.json")],
     "tests/stdio/workshop.py", "tests/stdio/workshop_tree_material.py", "tests/stdio/workshop_clock.py", "tests/stdio/tree_harvest.py",
@@ -82,13 +82,14 @@ def check(root: Path = ROOT) -> dict:
         MCP + "bin/dfmcp-workshop-v1-20-dev-server.rs": ["dfmcp_mcp::workshop_construction_server::run_stdio();"],
         ADAPTER + "mod.rs": ["pubmodacknowledgement;", "pubmodjournal;", "pubmodrpc;", "modtree_material;", "WorkshopMaterialDiscovery,WorkshopMaterialOffer", "pubusejournal::production_origin;", "pubfnfrom_source_pins("],
         ADAPTER + "journal.rs": ["pubmodproduction_origin;"],
-        ADAPTER + "acknowledgement.rs": ["fnverify_workshop_offline(", "matches!(self.protocol,Protocol::Workshop)&&self.scope.is_none()&&self.offline"],
-        ADAPTER + "production_origin.rs": ["pubfnproduction_origin<", "self.production_floors(key,&mutwork)?", "acknowledgement.verify_workshop_offline(", "pubfnretain_recovery_floor(", "pubfnfence(&mutself)", "pubfnretain_source_manifest(", "self.high_tick=self.high_tick.max(progress.tick());", "ifgoal!=WorkshopGoal::Complete"],
+        ADAPTER + "acknowledgement.rs": ["fnverify_workshop_offline(&mutself,context:&OperationContext)->Result<()>{check(self.offline)?;self.verify_workshop(context)}", "fnverify_workshop(&mutself,context:&OperationContext)->Result<()>{check(matches!(self.protocol,Protocol::Workshop)&&self.scope.is_none())?;self.verify(context)}"],
+        ADAPTER + "production_origin.rs": ["pubfnproduction_origin<", "ifself.mode!=WorkshopMode::Offline", "pubfnhandoff_checkpoint<", "acknowledgement.verify_workshop(", "origin_bytes(&self.binding,self.pin(),&record,high_tick,high_building)", "self.production_floors(key,&mutwork)?", "acknowledgement.verify_workshop_offline(", "pubfnretain_recovery_floor(", "pubfnfence(&mutself)", "pubfnretain_source_manifest(", "self.high_tick=self.high_tick.max(progress.tick());", "ifgoal!=WorkshopGoal::Complete"],
         TREE + "journal.rs": ["modmaterial_origin;", "pubusematerial_origin::TreeMaterialOrigin;"],
         TREE + "material_origin.rs": ["pubfnmaterial_origin<", "acknowledgement.verify_tree(", "self.material_projection(&self.raw"],
         ADAPTER + "tree_material.rs": ["pubconstMAX_OFFERS:usize=64;", "Progress::decode(progress.bytes(),&origin.original().plan)?!=progress", "capture.tick()!=self.progress.tick"],
         ADAPTER + "rpc.rs": ["self.prepared.take().as_ref()==Some(permit.plan())"],
-        MCP + "workshop_construction_server/runtime.rs": ["open_private_acknowledgements(", "acks.latest()", "self.withdraw();", "modtree_material;", "modmaterial_selection;", "self.tree_material=None;", "advance_authorization_tick", "modproduction_handoff;", "Action::ProductionHandoff"],
+        MCP + "workshop_construction_server/runtime.rs": ["open_private_acknowledgements(", "acks.latest()", "self.withdraw();", "modtree_material;", "modmaterial_selection;", "self.tree_material=None;", "advance_authorization_tick", "modproduction_handoff;", "Action::ProductionHandoff", "modproject;", "parent_check()?;", "validate_family_environment()?;", "self.config.project_effect_deadline(c.anchor.tick.get())?;", "capability==Capability::Construct"],
+        MCP + "workshop_construction_server/project.rs": ["pub(crate)fnfrom_resource_project_environment(","pub(crate)fnvalidate_project_recovery(","self.pin!=Some(retained.decode()?)","&configured[\"recovery\"]!=retained","pub(crate)fnretain_project_recovery(","owner.fence_advancement();","self.high_generation=self.high_generation.max(frontier.high_generation)","self.high_building=self.high_building.max(frontier.high_next_building_id)",".max(self.clock.as_ref().map_or(0,clock::Owner::high_tick))","original.remove(\"review_seal\")","pub(crate)fnperform_project(","narrow_current(ceiling,remaining,started)?","pub(crate)fnproject_handoff(","owner.production_handoff(self.journal.binding(),&inventory,&current)","letsource_changed=manifest.endpoint!=binding.endpoint()","self.config.capture(checkpoint.record().plan().before())?;","ifgoal!=WorkshopGoal::Complete","self.withdraw();"],
         MCP + "workshop_construction_server/production_handoff.rs": ["pub(crate)structProductionHandoff", "fncomplete_original(", "entry.goal_complete()", "entry.needs_reconciliation()", "acknowledgements.latest()!=Some(pin)", "self.handoff_ack(pin,", "pub(crate)fnproduction_handoff(", "pub(crate)fnproduction_handoff_view(", "\"current_completion_proven\":false", "\"production_ready\":false", "\"native_calls\":0", "self.withdraw();"],
         MCP + "workshop_construction_server/clock.rs": ["retained_tick_floor", "journal.cached_records().fold(", "pub(super)fnproduction_handoff(", "self.prepared_seal().is_some()", "view.pending", "view.unresolved", "self.advancement_fenced"],
         MCP + "workshop_construction_server/tree_material.rs": ["WorkshopMode::Offline", "self.journal.material_origin(", "source.progress(", "self.high_tick=self.high_tick.max(progress.tick)", "self.verify(work)?;"],
@@ -144,6 +145,7 @@ def check(root: Path = ROOT) -> dict:
         "production_origin_adapter_rust_cases": text[ADAPTER + "production_origin_tests.rs"].count("#[test]"),
         "mcp_unit_cases": text[MCP + "workshop_construction_server/tests.rs"].count("#[test]"),
         "production_handoff_mcp_cases": text[MCP + "workshop_construction_server/production_handoff_tests.rs"].count("#[test]"),
+        "project_mcp_cases": text[MCP + "workshop_construction_server/project_tests.rs"].count("#[test]"),
         "staged_config_cases": text[MCP + "workshop_production_config_tests.rs"].count("#[test]"),
         "staged_production_child_config_cases": text[MCP + "live_production_runtime/parent_config_tests.rs"].count("#[test]"),
         "staged_runtime_cases": text[MCP + "workshop_production_runtime_tests.rs"].count("#[test]"),
@@ -235,6 +237,42 @@ def check(root: Path = ROOT) -> dict:
         raise ValueError("staged parent must register the same eleven public handlers")
     if "\"workshop-production\"" not in text["crates/dwarf-fortress-mcp/src/main.rs"]:
         raise ValueError("staged parent startup profile is not wired into the CLI")
+    expected_project_parent_seam = {
+        "module": "workshop_construction_server::runtime::project",
+        "handoff_schema": "dfmcp.workshop-project-handoff/1",
+        "handoff_max_bytes": 32768,
+        "parent_configuration_guard_required": True,
+        "standalone_environment_isolation_unchanged": True,
+        "original_project_deadline_renewed": False,
+        "query_and_clock_safety_host_expiry_preserved": True,
+        "parent_budget_only_narrows": True,
+        "handoff_fresh_complete_required": True,
+        "handoff_replays_full_original_and_ack_history": True,
+        "decoded_source_floors_retained_before_later_refusal": True,
+        "source_manifest_rechecked_after_progress": True,
+        "configured_clock": "typed settled handoff with no unresolved history, live preparation or advancement fence",
+        "recovery_pins": "exact parent Workshop ACK journal_id/head/frames and clock journal_id/head before child open",
+        "recovery_frontier": "maximum with verified child descendants; sticky source and clock fences are never cleared",
+        "import_requirement": "persist parent transition, release Workshop owner, reopen exact donor Offline and independently refresh before production effects",
+        "handoff_grants_mutation_authority": False,
+        "native_protocols_unchanged": True,
+        "public_tools_added": False,
+    }
+    if contract.get("project_parent_seam") != expected_project_parent_seam:
+        raise ValueError("Workshop project parent seam contract differs")
+    project = compact[MCP + "workshop_construction_server/project.rs"]
+    if project.count("self.project_checkpoint(&mutwork,&key,digest)?") != 2:
+        raise ValueError("Workshop project handoff requires both complete custody verification brackets")
+    if project.count("self.project_clock_settled(&mutwork)?") != 2:
+        raise ValueError("Workshop project handoff requires both settled-clock checks")
+    progress = project.index("letprogress=source.progress(")
+    manifest = project.index("letmanifest=source.manifest();", progress)
+    generation = project.index("self.project.high_generation=self.project.high_generation.max(manifest.generation);", manifest)
+    fence = project.index("source.fence();", manifest)
+    floor = project.index("self.authority_tick=self.authority_tick.max(progress.tick());", fence)
+    refusal = project.index("ifsource_changed", floor)
+    if not progress < manifest < generation < fence < floor < refusal:
+        raise ValueError("Workshop project handoff must consume decoded source frontiers before later refusal")
     expected_handoff = {
         "api": "workshop_construction_server::runtime::Runtime::production_handoff",
         "schema": "dfmcp.workshop-production-handoff/1",

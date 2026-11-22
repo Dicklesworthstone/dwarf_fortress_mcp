@@ -8,6 +8,10 @@ use dfmcp_core::{ErrorCode, RequestId, Result, SessionId, WorkBudget};
 use fastmcp_rust::modern::ServerBuilder;
 use fastmcp_rust::prelude::*;
 use runtime::{Action, Config, RESPONSE_BYTES, Runtime, error, runtime_io, validate_environment};
+pub(crate) use runtime::{
+    Action as ProjectWorkshopAction, Config as ProjectWorkshopConfig,
+    Runtime as ProjectWorkshopRuntime, WorkshopProjectHandoff,
+};
 use serde_json::{Value, json};
 use std::sync::{
     Mutex, MutexGuard, TryLockError,

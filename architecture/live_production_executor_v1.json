@@ -419,7 +419,16 @@
       "architecture/workshop_construction_v1_20.json",
       "scripts/check_workshop_construction.py",
       "scripts/test_workshop_source_inventory.py",
-      "docs/WORKSHOP_CONSTRUCTION_MCP.md"
+      "docs/WORKSHOP_CONSTRUCTION_MCP.md",
+      "crates/dfmcp-mcp/src/live_production_runtime/project.rs",
+      "crates/dfmcp-mcp/src/live_production_runtime/project_tests.rs",
+      "crates/dfmcp-mcp/src/live_production_runtime/project_config_tests.rs",
+      "crates/dfmcp-adapter/src/order_run/journal.rs",
+      "crates/dfmcp-adapter/src/order_run/journal/tests.rs",
+      "crates/dfmcp-adapter/src/bounded_run/journal/tests.rs",
+      "crates/dfmcp-mcp/src/live_production_runtime/project_recovery.rs",
+      "crates/dfmcp-mcp/src/live_production_runtime/project_recovery_tests.rs",
+      "crates/dfmcp-adapter/src/bounded_run/journal.rs"
     ],
     "private_custody_platforms": [
       "linux-x86_64",

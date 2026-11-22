@@ -230,6 +230,49 @@ fn validate_open(context: &OperationContext) -> Result<()> {
     Ok(())
 }
 
+/// Bounded raw custody for the operator-configured resource-project parent.
+/// The caller authenticates its own original definition, transition chain and
+/// independent acknowledgement. This grants no child or native authority.
+/// Existing files are never initialized, repaired or silently replaced.
+pub fn open_private_resource_project_storage(
+    path: &Path,
+    context: &OperationContext,
+    mode: BuildMode,
+    initialize: bool,
+    maximum_bytes: usize,
+) -> Result<(PrivateBuildFile, OperationContext)> {
+    use dfmcp_core::{Capability, RiskTier};
+    context.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
+    if maximum_bytes == 0 || maximum_bytes > 8 * 1024 * 1024 {
+        return Err(error(
+            ErrorCode::BudgetExceeded,
+            "resource-project private custody exceeds its fixed 8 MiB bound",
+        ));
+    }
+    if initialize {
+        if mode != BuildMode::Control {
+            return Err(error(
+                ErrorCode::CapabilityDenied,
+                "resource-project initialization requires Control mode",
+            ));
+        }
+        context.authorize(Capability::Plan, RiskTier::Guarded, &[], None)?;
+    }
+    let (storage, created, remaining) =
+        open_private_storage(path, context, mode, initialize, maximum_bytes)?;
+    if created != initialize {
+        return Err(error(
+            ErrorCode::Conflict,
+            "resource-project initialization differs from existing private custody",
+        ));
+    }
+    remaining.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
+    if initialize {
+        remaining.authorize(Capability::Plan, RiskTier::Guarded, &[], None)?;
+    }
+    Ok((storage, remaining))
+}
+
 /// Reuse the same descriptor-pinned custody for another bounded furniture
 /// journal. The caller authenticates its own header and publication; this only
 /// creates an empty file when explicitly allowed in Control mode. The returned

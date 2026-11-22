@@ -16,6 +16,13 @@ pub(super) const CENSUS_BYTES: u64 =
     33 * MIB + INVENTORY_BASELINE_PROJECTION_BYTES + INVENTORY_BASELINE_QUALIFY_BYTES;
 pub(super) const CHECK_BYTES: u64 = CENSUS_BYTES + orders::native::STOCK_TARGET_QUEUE_BYTES;
 
+/// Retain the actual qualified no-work census instead of recovering truth from
+/// presentation JSON. The ordinary runtime withdrawal paths clear this value.
+pub(super) struct StockTargetNoWork {
+    pub(super) assessment: StockTargetAssessment,
+    pub(super) request: StockTargetRequest,
+}
+
 fn stale(message: &str) -> DfmcpError {
     DfmcpError::new(ErrorCode::StaleAnchor, message)
 }
@@ -407,7 +414,10 @@ impl Runtime {
             )?,
         )?;
         if assessment.amount().is_none() {
-            self.stock_target_no_work = Some(no_work(&assessment, request.assign_labor));
+            self.stock_target_no_work = Some(StockTargetNoWork {
+                assessment,
+                request,
+            });
             return self.view(&mut work);
         }
         if request.assign_labor {
@@ -456,7 +466,13 @@ impl Runtime {
 
     pub(super) fn stock_target_json(&self) -> Value {
         self.stock_target.as_ref().map_or_else(
-            || self.stock_target_no_work.clone().unwrap_or(Value::Null),
+            || {
+                self.stock_target_no_work
+                    .as_ref()
+                    .map_or(Value::Null, |retained| {
+                        no_work(&retained.assessment, retained.request.assign_labor)
+                    })
+            },
             SharedStockTarget::status,
         )
     }

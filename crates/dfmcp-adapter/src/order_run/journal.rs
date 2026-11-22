@@ -501,6 +501,54 @@ impl<S: EffectJournalStorage> OrderRunJournal<S> {
     pub fn binding(&self) -> &OrderRunBinding {
         &self.binding
     }
+    /// Historical custody only. This never supplies a current native sample or
+    /// authorizes an effect; it also remains available after a failed append.
+    pub fn recovery_pin(&self) -> (Digest32, Digest32) {
+        (self.id, self.head)
+    }
+
+    /// Require an externally retained head in this exact, fully replayed chain.
+    /// A valid earlier file prefix cannot erase a parent's dispatch checkpoint.
+    pub fn verify_recovery(
+        &mut self,
+        journal_id: Digest32,
+        head: Digest32,
+        c: &OperationContext,
+    ) -> Result<()> {
+        let mut budget = Allowance::new(c)?;
+        self.verify(c, &mut budget)?;
+        require(
+            journal_id != Digest32::ZERO && head != Digest32::ZERO && journal_id == self.id,
+            "conditional-run recovery names another original journal",
+        )?;
+        // Opening validated every frame's checksum, sequence and transition;
+        // verify just compared the complete current private file to those bytes.
+        budget.charge(self.bytes.len() as u64)?;
+        let mut reader = Reader(&self.bytes);
+        require(reader.take(8)? == b"DFMOJ014", "wrong retained order-run header")?;
+        field(&mut reader, MAX_BINDING)?;
+        reader.take(32)?;
+        require(
+            reader.take(32)? == self.id.as_bytes(),
+            "retained order-run identity changed",
+        )?;
+        let mut found = head == self.id;
+        while !reader.0.is_empty() {
+            budget.remaining()?;
+            require(reader.take(8)? == b"DFMOF014", "wrong retained order-run frame")?;
+            let n = reader.u32()? as usize;
+            require(n <= MAX_BODY, "oversized retained order-run frame")?;
+            reader.take(8 + 32 + n)?;
+            let proof = Digest32::from_bytes(reader.array()?);
+            require(reader.take(8)? == b"DFMOEND1", "incomplete retained order-run frame")?;
+            found |= proof == head;
+        }
+        require(
+            found,
+            "conditional-run recovery head is absent; rollback is not recovery",
+        )
+    }
+
     fn access(&self, c: &OperationContext, clock: bool) -> Result<()> {
         if self.fenced {
             return Err(corrupt());

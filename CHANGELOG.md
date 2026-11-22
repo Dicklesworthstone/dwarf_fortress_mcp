@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased — Connect native Workshop construction to stock-target production
+
+- Add one explicitly unadmitted MCP project owner over the real Workshop and
+  combined-production runtimes, preserving the frozen eleven-tool surface.
+- Fix the original recipe, stock target, finite-order bound, labor mode,
+  deadline, cadence and stability before child initialization.
+- Acknowledge parent opening/transition records before child creation or writer
+  release; freshly verify the completed original Workshop and import its exact
+  custody Offline for independently reviewed production.
+- Bind restart selectors and clock/source floors to parent custody; retain
+  sticky failures, prohibit initialization replay and make project cancellation
+  a durable stop while leaving original native reconciliation explicit.
+- Publish complete bounded Agent Turns and evidence chunks, withdrawing any
+  unpublished review under the session lock. Suggest fixed-goal plans from
+  actual child offers and distinguish no-work census from stable goal proof.
+- Preserve concurrent Workshop export, staged-production and checked native-summary
+  fixture changes.
+- Record 17 passing pre-outage ledger component tests, including real private
+  storage. Integrated/reconstructed source execution, formatting and full
+  native/live qualification remain pending after execution-host loss.
+
 ## Unreleased — Join original workshop construction and finite production
 
 - Add the fixed `workshop-production` CLI profile and closed staged session,

@@ -4,6 +4,9 @@
 mod clock;
 #[path = "material_selection.rs"]
 mod material_selection;
+#[path = "project.rs"]
+mod project;
+pub(crate) use project::WorkshopProjectHandoff;
 #[path = "parent_config.rs"]
 mod parent_config;
 #[path = "parent_owner.rs"]
@@ -76,7 +79,7 @@ pub(super) fn digest(raw: &str) -> Result<Digest32> {
         .filter(|d| *d != Digest32::ZERO)
         .ok_or_else(|| invalid("invalid digest"))
 }
-pub(super) fn validate_environment() -> Result<()> {
+fn validate_family_environment() -> Result<()> {
     if std::env::var_os("DFMCP_ADMITTED_BRIDGE_PROTOCOL").is_some()
         || crate::current_admission_provenance().is_some()
     {
@@ -94,13 +97,17 @@ pub(super) fn validate_environment() -> Result<()> {
             "workshop build permission must be absent or exactly 1",
         ));
     }
-    let tree_material = std::env::var(tree_material::OPT_IN).ok().as_deref() == Some("1");
-    let clock = std::env::var(clock::OPT_IN).ok().as_deref() == Some("1");
     if std::env::var_os(clock::ALLOW).is_some_and(|v| v.to_str() != Some("1")) {
         return Err(denied(
             "workshop clock permission must be absent or exactly 1",
         ));
     }
+    Ok(())
+}
+pub(super) fn validate_environment() -> Result<()> {
+    validate_family_environment()?;
+    let tree_material = std::env::var(tree_material::OPT_IN).ok().as_deref() == Some("1");
+    let clock = std::env::var(clock::OPT_IN).ok().as_deref() == Some("1");
     for (key, _) in std::env::vars_os() {
         let key = key.to_string_lossy();
         if key.starts_with("DFMCP_")
@@ -185,6 +192,9 @@ pub(crate) struct Config {
     pin: Option<WorkshopPin>,
     hash: Digest32,
     parent_guard: Option<Arc<dyn Fn() -> Result<()> + Send + Sync>>,
+    parent_check: Option<Arc<dyn Fn() -> Result<()> + Send + Sync>>,
+    project_deadline: Option<u64>,
+    policy: Value,
 }
 fn area(raw: [u32; 6], dimensions: [u32; 3]) -> Result<MapCuboid> {
     if (0..3).any(|i| raw[i] > raw[i + 3] || raw[i + 3] >= dimensions[i]) {
@@ -209,6 +219,8 @@ impl Config {
         }
         let i: Input = serde_json::from_str(raw)
             .map_err(|_| invalid("invalid closed workshop operator configuration"))?;
+        let policy: Value = serde_json::from_str(raw)
+            .map_err(|_| invalid("invalid workshop policy identity"))?;
         let path = i
             .directory
             .to_str()
@@ -289,6 +301,9 @@ impl Config {
             identity,
             pin,
             hash: Digest32::of_bytes(raw.as_bytes()),
+            parent_check: None,
+            project_deadline: None,
+            policy,
             parent_guard: None,
         })
     }
@@ -315,7 +330,10 @@ impl Config {
     }
     fn current(&self) -> Result<()> {
         runtime_io()?;
-        if let Some(guard) = &self.parent_guard {
+        if let Some(parent_check) = &self.parent_check {
+            parent_check()?;
+            validate_family_environment()?;
+        } else if let Some(guard) = &self.parent_guard {
             guard()?;
         } else {
             validate_environment()?;
@@ -522,6 +540,7 @@ impl WorkshopGuard for Guard {
             )?;
         }
         if matches!(stage, WorkshopStage::Prepare | WorkshopStage::Commit) {
+            self.config.project_effect_deadline(c.anchor.tick.get())?;
             if self.config.input.checkpoint != "disposable-fortress-no-checkpoint" {
                 return Err(denied(
                     "checkpoint required; this profile has no checkpoint provider",
@@ -605,6 +624,7 @@ pub(crate) struct Runtime {
     pub(super) anchor: Option<StateAnchor>,
     authority_tick: u64,
     next_request: u64,
+    project: project::State,
 }
 fn pin_json(pin: WorkshopPin) -> Value {
     json!({"journal_id":pin.journal_id.to_hex(),"head":pin.head.to_hex(),"frames":pin.frames})
@@ -657,7 +677,11 @@ impl Runtime {
                     ..CapabilityScope::default()
                 },
                 max_risk: RiskTier::Guarded,
-                expires_at_tick: Some(GameTick(config.input.authority_expires_tick)),
+                expires_at_tick: Some(GameTick(if capability == Capability::Construct {
+                    config.project_deadline.unwrap_or(config.input.authority_expires_tick)
+                } else {
+                    config.input.authority_expires_tick
+                })),
                 remaining_uses: None,
             })
             .collect()
@@ -854,6 +878,7 @@ impl Runtime {
             anchor: current_anchor,
             authority_tick,
             next_request: 2,
+            project: project::State::default(),
         })
     }
     pub(crate) fn context(&mut self) -> Result<OperationContext> {
@@ -1237,14 +1262,18 @@ impl Runtime {
         self.journal.abandon();
     }
     pub(crate) fn failure_reference(&self) -> Value {
-        json!({"journal_pin_unverified":pin_json(self.journal.pin()),"original_custody_currently_verified":false,
+        let mut reference = json!({"journal_pin_unverified":pin_json(self.journal.pin()),"original_custody_currently_verified":false,
             "original":self.journal.unverified_original_reference().map(|e|json!({"key":e.plan().key(),
                 "plan_digest":e.plan().digest().to_hex(),"review_seal":seal(self.journal.pin().journal_id,e.plan()).to_hex(),
                 "state":e.state().as_str(),"dispatch_started":e.dispatch_started(),"unresolved":e.unresolved(),
                 "native_receipt":e.native().map(|r|r.receipt().to_hex()),"current_goal":null,"currently_verified":false})),
             "current_goal_available":false,"automatic_redispatch":false,
             "clock":self.clock.as_ref().map(clock::Owner::reference),
-            "recovery":"Keep both original workshop.journal and independent workshop.ack, plus the externally retained acknowledgement. Reopen recover/offline; never construct a replacement key."})
+            "recovery":"Keep both original workshop.journal and independent workshop.ack, plus the externally retained acknowledgement. Reopen recover/offline; never construct a replacement key."});
+        if self.config.parent_check.is_some() {
+            reference["project_source_frontier"] = self.project.reference(self.authority_tick);
+        }
+        reference
     }
 }
 pub(super) fn source_json(c: &WorkshopCapture) -> Value {
