@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased — Bound exact inspection and graph analysis before hashing
+
+- Apply complete canonical source-byte, record, nesting and work admission to
+  `inspect`, `traverse` and `dependencies`, including unselected backing values.
+- Preserve the original source allowance while reserving complete publication
+  and active-watch bytes separately; bound inspected values before rendering.
+- Keep current authority on retained reads and refuse without publication or
+  watch-state changes when any source, output or authority limit fails.
+- Add five production-executor/shared-publisher regressions. Independent source
+  review completed; Rust compilation, test execution and formatting remain
+  blocked by the unavailable execution host. No qualification is inferred.
+
 ## Unreleased — Include committed continuations in whole-project forecasts
 
 - Expand each selected ordinary root into its exact live linear continuation

@@ -1,5 +1,35 @@
 # Implementation Status
 
+## Unreleased — Bound inspection and graph queries by their complete source
+
+Exact `inspect` reads and `traverse`/`dependencies` analysis now share the
+entity executor's whole-source admission. All retained records, unselected
+backing values, nesting and value frontiers are checked before canonical
+serialization or hashing. The conservative structural ceiling stays separate
+from the exact canonical-byte allowance, including its inclusive boundary.
+Existing source-hash validation remains required. Inspection also bounds its
+selected nested values before building their JSON representation.
+
+The shared publisher preserves the original authorized source context while
+reserving output separately for the complete response and active watches.
+Small inspection and graph results therefore remain eligible against larger
+admitted worlds. Historical execution still authorizes at the current tick;
+source, output or authority refusal does not call the publisher or change
+retained watch evidence.
+
+Five new actual-executor/shared-publisher regression sources cover all three
+modes, exact byte and record boundaries, large unselected redacted values,
+depth refusal before hashing, retained current authority, active-watch output
+reservation and zero publication on refusal. Independent source review completed.
+These tests, Rust compilation and formatting remain unexecuted because the
+execution host became unavailable. Three baseline repository checks passed
+before these edits; they do not qualify the changed source. No new full Rust,
+native-game or admission evidence is claimed.
+
+Owners: `df-lab-structured-query-f7q` and
+`df-cx-authority-budget-threading-lmu`. See
+`docs/LAB_STRUCTURED_QUERY.md#bounds-and-complete-publication`.
+
 ## Unreleased — Forecast projects through already committed continuations
 
 `forecast_originals` with `forecast_scope: "complete_project"` now accepts an

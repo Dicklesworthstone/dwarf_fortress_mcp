@@ -663,6 +663,15 @@ work before canonical serialization. Its conservative estimate is distinct from
 the exact negotiated canonical-byte allowance. A one-row page cannot bypass
 source verification costs, including fields omitted from the response.
 
+The same complete-source admission applies to exact `inspect` lookups and
+`traverse`/`dependencies` analysis. Unselected, redacted and deeply nested
+backing values remain part of the source even when the result is small.
+Inspection checks its selected-value rendering bound before constructing that
+JSON. Source authorization uses the original session allowance; reserving bytes
+for the response and active watches only narrows output, so a small answer can
+still inspect a larger admitted world. Retained reads use the current grant
+expiry and keep the historical source anchor separate.
+
 For structured `entities`, `spatial_entities`, `related_entities`,
 `ranked_entities` and `events`, the complete laboratory wrapper and captured
 Agent Turn participate while the page is chosen. `returned` can be smaller

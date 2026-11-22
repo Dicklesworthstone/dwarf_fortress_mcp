@@ -442,3 +442,106 @@ fn independent_output_budget_cannot_expand_sources_grants_or_publish_partial_agg
     }
     Ok(())
 }
+
+
+fn inspection_and_graph_requests() -> [Value; 3] {
+    [
+        json!({"schema":"dfmcp.query/1","query":{"kind":"inspect",
+            "entity_id":"1","generation":1,"fields":["rank"]}}),
+        json!({"schema":"dfmcp.query/1","query":{"kind":"traverse",
+            "roots":["1"],"edge_kinds":["assigned_to"],"max_depth":2,"target":"100"}}),
+        json!({"schema":"dfmcp.query/1","query":{"kind":"dependencies",
+            "edge_kinds":["assigned_to"]}}),
+    ]
+}
+
+#[test]
+fn inspection_and_graph_publication_preserve_source_under_active_work_reservations() -> TestResult {
+    let (snapshot, context) = fixture();
+    assert!(snapshot.canonical_bytes().len() > 65_536);
+    let watch = publish(
+        &snapshot,
+        &context,
+        &json!({"schema":"dfmcp.query/1","query":{
+            "kind":"watch","key":"inspection-source-watch",
+            "condition":{"op":"paused","value":false},"deadline_tick":100}}),
+    )?;
+    for input in inspection_and_graph_requests() {
+        let expected = execute(&snapshot, &context, &input)?;
+        let called = Cell::new(0);
+        let raw = execute_with_publisher_budget(&snapshot, &context, &input, 8192, |value| {
+            called.set(called.get() + 1);
+            Ok(value.to_string())
+        })?;
+        assert_eq!(called.get(), 1);
+        assert!(raw.len() <= 8192);
+        let actual: Value = serde_json::from_str(&raw)?;
+        for field in ["kind", "anchor", "coverage", "row", "visits", "components", "witness"] {
+            assert_eq!(actual[field], expected[field]);
+        }
+        assert_eq!(
+            actual["_condition_watch_work"],
+            watch["_condition_watch_work"]
+        );
+    }
+    release_session_resources(context.session_id, true, |value| Ok(value.to_string()))?;
+    Ok(())
+}
+
+#[test]
+fn inspection_and_graph_budget_refusals_do_not_publish_or_lose_watch_evidence() -> TestResult {
+    let (snapshot, context) = fixture();
+    let watch = publish(
+        &snapshot,
+        &context,
+        &json!({"schema":"dfmcp.query/1","query":{
+            "kind":"watch","key":"inspection-refusal-watch",
+            "condition":{"op":"paused","value":false},"deadline_tick":100}}),
+    )?;
+    for input in inspection_and_graph_requests() {
+        let called = Cell::new(false);
+        let publisher = |value: Value| {
+            called.set(true);
+            Ok(value.to_string())
+        };
+        let mut source_limited = context.clone();
+        source_limited.budget.max_bytes = snapshot.canonical_bytes().len() as u64 - 1;
+        assert!(
+            matches!(execute_with_publisher_budget(&snapshot, &source_limited, &input,
+                u64::MAX, publisher), Err(error) if error.code == ErrorCode::BudgetExceeded)
+        );
+        assert!(!called.get());
+        let mut record_limited = context.clone();
+        record_limited.budget.max_entities = snapshot.graph.entities.len() as u32;
+        assert!(
+            matches!(execute_with_publisher_budget(&snapshot, &record_limited, &input,
+                u64::MAX, publisher), Err(error) if error.code == ErrorCode::BudgetExceeded)
+        );
+        assert!(!called.get());
+        for output_bytes in [0, 1, 128] {
+            assert!(
+                matches!(execute_with_publisher_budget(&snapshot, &context, &input,
+                    output_bytes, publisher), Err(error) if error.code == ErrorCode::BudgetExceeded)
+            );
+            assert!(!called.get());
+        }
+        let mut expired = context.clone();
+        expired.grants[0].expires_at_tick = Some(GameTick(9));
+        assert!(
+            matches!(execute_with_publisher_budget(&snapshot, &expired, &input,
+                8192, publisher), Err(error) if error.code == ErrorCode::CapabilityDenied)
+        );
+        assert!(!called.get());
+    }
+    let after = publish(
+        &snapshot,
+        &context,
+        &json!({"schema":"dfmcp.query/1","query":{"kind":"watches"}}),
+    )?;
+    assert_eq!(
+        after["_condition_watch_work"],
+        watch["_condition_watch_work"]
+    );
+    release_session_resources(context.session_id, true, |value| Ok(value.to_string()))?;
+    Ok(())
+}

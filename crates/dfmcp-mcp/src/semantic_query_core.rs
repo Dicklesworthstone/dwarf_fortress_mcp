@@ -726,23 +726,21 @@ fn execute_at_source(
             "expected_anchor does not match the complete current anchor",
         ));
     }
-    let mut source_work = if matches!(&request.query, Query::Entities { .. }) {
-        // The conservative structural ceiling protects allocation and nesting;
-        // the negotiated source-byte measure is the exact canonical encoding.
-        // Keep them independent so a source admitted at its exact byte boundary
-        // is not rejected merely because the structural estimate is larger.
-        let mut structural_context = context.clone();
-        structural_context.budget.max_bytes = MAX_SOURCE_STRUCTURE_BYTES;
-        let work = source::preflight(snapshot, &structural_context, started)?;
-        if snapshot.canonical_bytes().len() as u64 > context.budget.max_bytes {
-            return Err(budget("query exceeds its canonical source byte budget"));
-        }
-        work.check()?;
-        Some(work)
-    } else {
-        None
-    };
-    if source_work.is_none() && !snapshot.hash_is_valid() {
+    // Every mode authenticates the complete canonical snapshot, including an
+    // exact entity lookup or a graph query that does not render field values.
+    // Admit all records and nested backing values before canonical hashing.
+    // The conservative structural ceiling is separate from the negotiated
+    // canonical-byte allowance so exact byte-boundary reads remain eligible.
+    let mut structural_context = context.clone();
+    structural_context.budget.max_bytes = MAX_SOURCE_STRUCTURE_BYTES;
+    let mut source_work = source::preflight(snapshot, &structural_context, started)?;
+    if snapshot.canonical_bytes().len() as u64 > context.budget.max_bytes {
+        return Err(budget("query exceeds its canonical source byte budget"));
+    }
+    source_work.check()?;
+    // Entity candidate selection verifies its source hash itself. Other modes
+    // retain this independent validation after the shared source admission.
+    if !matches!(&request.query, Query::Entities { .. }) && !snapshot.hash_is_valid() {
         return Err(DfmcpError::new(
             ErrorCode::InternalInvariantViolation,
             "query snapshot hash is invalid",
@@ -796,14 +794,14 @@ fn execute_at_source(
                 limit: limit.map_or(hard_limit.min(4), |value| value),
                 continuation: unwrap_continuation(continuation, identity)?,
             };
-            let work = source_work.as_mut().ok_or_else(|| {
-                DfmcpError::new(
-                    ErrorCode::InternalInvariantViolation,
-                    "projected entity query is missing source admission",
-                )
-            })?;
             projected_entities(
-                snapshot, &query, hard_limit, &fields, identity, &output, work,
+                snapshot,
+                &query,
+                hard_limit,
+                &fields,
+                identity,
+                &output,
+                &mut source_work,
             )?
         }
         Query::Inspect {
@@ -822,6 +820,18 @@ fn execute_at_source(
                 return Err(DfmcpError::new(
                     ErrorCode::Conflict,
                     "entity generation changed; refresh its handle before inspection",
+                ));
+            }
+            if !source::render_fits(
+                entity,
+                &fields,
+                &[],
+                snapshot.tick,
+                output.maximum_bytes,
+                &mut source_work,
+            )? {
+                return Err(budget(
+                    "one complete inspected entity exceeds the output budget; select fewer fields or increase the output allowance",
                 ));
             }
             json!({"kind":"inspect", "truncated":false, "continuation":null,
@@ -900,9 +910,7 @@ fn execute_at_source(
             "rendered query result exceeds the output budget; reduce limit, selected fields, roots, or graph depth",
         ));
     }
-    if let Some(work) = source_work {
-        work.check()?;
-    }
+    source_work.check()?;
     check()?;
     Ok(payload)
 }
@@ -1452,6 +1460,161 @@ mod tests {
             matches!(execute_with_output_budget(&snapshot, &ctx, &input, 2048),
             Err(error) if error.code == ErrorCode::BudgetExceeded)
         );
+        Ok(())
+    }
+
+    fn inspection_and_graph_requests() -> [Value; 3] {
+        [
+            envelope(
+                json!({"kind":"inspect","entity_id":"1","generation":1,"fields":["sane"]}),
+            ),
+            envelope(json!({"kind":"traverse","roots":["4"],"edge_kinds":["requires"],
+                "max_depth":4,"target":"3"})),
+            envelope(json!({"kind":"dependencies","edge_kinds":["requires"]})),
+        ]
+    }
+
+    #[test]
+    fn inspection_and_graph_queries_charge_complete_source_bytes_and_records() -> Result<()> {
+        let (mut snapshot, mut ctx) = fixture();
+        let mut hidden = Fact::known(
+            WorldValue::Text("unselected source bytes".repeat(4096)),
+            snapshot.tick,
+            FactSource::Replay,
+            Digest32::ZERO,
+        );
+        hidden.presence = Some(FactPresence::Redacted("not selected".to_owned()));
+        snapshot
+            .graph
+            .entities
+            .get_mut(&EntityId::new(4))
+            .ok_or_else(|| invalid("fixture"))?
+            .fields
+            .insert("unselected".to_owned(), hidden);
+        snapshot.refresh_hash();
+        ctx.anchor = snapshot.anchor();
+        let source_bytes = snapshot.canonical_bytes().len() as u64;
+        assert!(source_bytes > 8192);
+        let records = snapshot.graph.entities.len() + snapshot.graph.edges.len();
+        ctx.budget.max_bytes = source_bytes;
+        ctx.budget.max_entities = records as u32;
+
+        for input in inspection_and_graph_requests() {
+            // Structural estimates can exceed canonical bytes; exact source
+            // equality is still eligible independently of the small response.
+            let result = execute_with_output_budget(&snapshot, &ctx, &input, 8192)?;
+            assert_eq!(result["kind"], input["query"]["kind"]);
+            assert!(result.to_string().len() <= 8192);
+            assert!(!result.to_string().contains("unselected source bytes"));
+
+            let mut too_small = ctx.clone();
+            too_small.budget.max_bytes = source_bytes - 1;
+            assert!(
+                matches!(execute_with_output_budget(&snapshot, &too_small, &input, 8192),
+                    Err(error) if error.code == ErrorCode::BudgetExceeded)
+            );
+
+            // The whole source includes relation records even for one entity
+            // inspection, and even when only a few graph vertices are visited.
+            too_small = ctx.clone();
+            too_small.budget.max_entities = records as u32 - 1;
+            assert!(
+                matches!(execute_with_output_budget(&snapshot, &too_small, &input, 8192),
+                    Err(error) if error.code == ErrorCode::BudgetExceeded)
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn inspection_and_graph_queries_reject_nested_sources_before_hashing() -> Result<()> {
+        let (mut snapshot, ctx) = fixture();
+        let mut nested = WorldValue::Null;
+        for _ in 0..66 {
+            nested = WorldValue::List(vec![nested]);
+        }
+        snapshot
+            .graph
+            .entities
+            .get_mut(&EntityId::new(4))
+            .ok_or_else(|| invalid("fixture"))?
+            .fields
+            .insert(
+                "unselected".to_owned(),
+                Fact::known(nested, snapshot.tick, FactSource::Replay, Digest32::ZERO),
+            );
+        // Deliberately leave the hash invalid. The depth refusal must precede
+        // recursive canonical serialization/hash validation of the full world.
+        for input in inspection_and_graph_requests() {
+            assert!(
+                matches!(execute(&snapshot, &ctx, &input),
+                    Err(error) if error.code == ErrorCode::BudgetExceeded
+                        && error.message.contains("nesting"))
+            );
+            let mut denied = ctx.clone();
+            denied.grants.clear();
+            assert!(
+                matches!(execute(&snapshot, &denied, &input),
+                    Err(error) if error.code == ErrorCode::CapabilityDenied)
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn retained_inspection_and_graph_queries_keep_current_authority_and_source_limits() -> Result<()> {
+        let (mut snapshot, mut ctx) = fixture();
+        snapshot
+            .graph
+            .entities
+            .get_mut(&EntityId::new(4))
+            .ok_or_else(|| invalid("fixture"))?
+            .fields
+            .insert(
+                "unselected".to_owned(),
+                Fact::known(
+                    WorldValue::Text("retained source bytes".repeat(4096)),
+                    snapshot.tick,
+                    FactSource::Replay,
+                    Digest32::ZERO,
+                ),
+            );
+        snapshot.refresh_hash();
+        let mut current = snapshot.clone();
+        current.tick = GameTick(100);
+        current.cursor.sequence += 1;
+        current.refresh_hash();
+        ctx.anchor = current.anchor();
+        ctx.budget.max_bytes = snapshot.canonical_bytes().len() as u64;
+        for mut input in inspection_and_graph_requests() {
+            input["expected_anchor"] = anchor_json(snapshot.anchor());
+            let result = execute_retained_with_output_budget(
+                &snapshot,
+                &ctx,
+                &input,
+                8192,
+                Instant::now(),
+            )?;
+            assert_eq!(result["anchor"], anchor_json(snapshot.anchor()));
+            assert!(
+                matches!(execute(&snapshot, &ctx, &input),
+                    Err(error) if error.code == ErrorCode::StaleAnchor)
+            );
+            let mut too_small = ctx.clone();
+            too_small.budget.max_bytes -= 1;
+            assert!(
+                matches!(execute_retained_with_output_budget(
+                    &snapshot, &too_small, &input, 8192, Instant::now()),
+                    Err(error) if error.code == ErrorCode::BudgetExceeded)
+            );
+            let mut expired = ctx.clone();
+            expired.grants[0].expires_at_tick = Some(GameTick(50));
+            assert!(
+                matches!(execute_retained_with_output_budget(
+                    &snapshot, &expired, &input, 8192, Instant::now()),
+                    Err(error) if error.code == ErrorCode::CapabilityDenied)
+            );
+        }
         Ok(())
     }
 }
