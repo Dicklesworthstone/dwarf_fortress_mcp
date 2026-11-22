@@ -84,6 +84,8 @@ EXPECTED_SOURCE_DIGESTS = {
     "mcp_admission": "crates/dfmcp-mcp/src/admission.rs",
     "mcp_agent_turn": "crates/dfmcp-mcp/src/agent_turn.rs",
     "mcp_live_server": "crates/dfmcp-mcp/src/live_server.rs",
+    "mcp_live_query": "crates/dfmcp-mcp/src/live_query_v1_0.rs",
+    "mcp_live_query_tests": "crates/dfmcp-mcp/src/live_query_v1_0_tests.rs",
     "adapter_live_connect": "crates/dfmcp-adapter/src/live_connect.rs",
     "adapter_live_bootstrap": "crates/dfmcp-adapter/src/live_bootstrap.rs",
     "adapter_live_observation": "crates/dfmcp-adapter/src/live_observation.rs",

@@ -1,5 +1,38 @@
 # Implementation Status
 
+## Unreleased — Page the complete published protocol-1.0 citizen roster
+
+The existing `fortress_query` tool now accepts optional `limit` and
+`continuation` for summary, citizens and combined selections. Agents can reach
+every canonical row from one published snapshot without another bridge capture.
+Continuations bind the session, full state anchor, mode, ordering, projection
+and actual returned offset. Every page rechecks current Query grants and source
+health. Whole-prefix fitting advances only past rows actually returned, keeps
+partial coverage explicit, and includes complete escaped modern result bytes in
+the output allowance. The closed argument object preserves optional null values.
+The tool count remains eleven.
+
+Compact tactical context retains query/observe affordances, full anchor,
+admitted budget, provenance, coverage and mutation warnings. One uncertainty
+lists all seven omitted domains while their individual reasons remain in source
+coverage. This keeps ordinary one-row queries usable at the unchanged
+1,500-token default. Larger immutable context still returns a bounded refusal.
+
+Ten focused Python regressions, both live MCP/read-stack source checks, scoped
+latest-nightly formatting and whitespace checks pass. An exact-source Rust
+presentation component with the real protocol-1.0 adapter and scripted admitted
+provenance passes summary/citizens/all default-budget cases; it excludes the
+ToolHandler, modern wire codec and real admission startup. Nine full runtime
+query regressions are authored and source-reviewed but remain unexecuted.
+The repository verify script passes its first 20 check groups, then stops at
+bead coverage because `br` is unavailable. A locked offline full MCP test-build
+check was killed by the host while compiling dependencies before MCP sources.
+Full workspace/transport/native execution and admission are not claimed.
+
+Owner: `dfmcp-reality-wiring-proof-4bf.4`, which remains in progress for wider
+observation cost, transport and qualification evidence. See
+`docs/LIVE_DFHACK_READ_PATH.md#page-the-published-citizen-roster`.
+
 ## Unreleased — Forecast complete original projects after durable recovery
 
 The existing `forecast_originals` query now accepts exact durable recovered

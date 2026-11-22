@@ -380,6 +380,19 @@ class LiveServerBinaryReceiptTests(unittest.TestCase):
             with self.assertRaises(verifier.VerificationError):
                 fixture.verify()
 
+    def test_live_query_implementation_and_regressions_are_source_bound(self) -> None:
+        for relative in (
+            "crates/dfmcp-mcp/src/live_query_v1_0.rs",
+            "crates/dfmcp-mcp/src/live_query_v1_0_tests.rs",
+        ):
+            with self.subTest(path=relative):
+                temporary, fixture = self.fixture()
+                with temporary:
+                    self.assertIn(relative, fixture.contract["source_binding"]["required_source_digests"].values())
+                    (fixture.source_root / relative).write_text("changed query source\n", encoding="utf-8")
+                    with self.assertRaises(verifier.VerificationError):
+                        fixture.verify()
+
     def test_assume_unchanged_cannot_hide_source_drift_after_local_qualification(self) -> None:
         temporary, fixture = self.fixture()
         with temporary:

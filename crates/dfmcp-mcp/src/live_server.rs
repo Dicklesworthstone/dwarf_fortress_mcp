@@ -34,6 +34,10 @@ use fastmcp_rust::modern::ServerBuilder;
 use fastmcp_rust::prelude::*;
 use serde_json::{Map as JsonMap, Value as JsonValue, json};
 
+#[path = "live_query_v1_0.rs"]
+mod paged_query;
+use paged_query::FortressPagedQuery;
+
 const MAX_LIVE_MCP_SESSIONS: usize = 32;
 const MAX_CAPABILITY_REQUESTS: usize = 8;
 const MAX_CAPABILITY_NAME_BYTES: usize = 64;
@@ -91,15 +95,42 @@ type LiveMcpAdapter = LiveReadAdapter<LiveMcpSource>;
 type LiveSessionHandle = SessionHandle<LiveSession>;
 type LiveSessionRegistry = SessionRegistry<LiveSession>;
 
-struct LiveSession {
+// The presentation seam keeps query tests on the real canonical adapter while
+// supplying an explicitly scripted source instead of opening a game process.
+trait LiveSessionAdapter: GameAdapter {
+    fn query_projection(&self) -> Option<&dfmcp_adapter::LiveWorldProjection>;
+    fn query_capsule(&self) -> Option<&dfmcp_adapter::LiveObservationCapsule>;
+    fn query_source_poisoned(&self) -> bool;
+    fn query_source_poison_reason(&self) -> Option<&str>;
+}
+
+impl LiveSessionAdapter for LiveMcpAdapter {
+    fn query_projection(&self) -> Option<&dfmcp_adapter::LiveWorldProjection> {
+        self.current_projection()
+    }
+
+    fn query_capsule(&self) -> Option<&dfmcp_adapter::LiveObservationCapsule> {
+        self.last_capsule()
+    }
+
+    fn query_source_poisoned(&self) -> bool {
+        self.source().source().is_poisoned()
+    }
+
+    fn query_source_poison_reason(&self) -> Option<&str> {
+        self.source().source().poisoned_reason()
+    }
+}
+
+struct LiveSession<A = LiveMcpAdapter> {
     session_id: SessionId,
-    adapter: LiveMcpAdapter,
+    adapter: A,
     grants: Vec<CapabilityGrant>,
     budget: WorkBudget,
     next_request_id: u128,
 }
 
-impl LiveSession {
+impl<A: LiveSessionAdapter> LiveSession<A> {
     fn current_anchor(&self) -> Result<StateAnchor> {
         self.adapter.current_anchor().ok_or_else(|| {
             DfmcpError::new(
@@ -138,11 +169,11 @@ impl LiveSession {
     }
 
     fn source_poisoned(&self) -> bool {
-        self.adapter.source().source().is_poisoned()
+        self.adapter.query_source_poisoned()
     }
 
     fn source_poison_reason(&self) -> Option<&str> {
-        self.adapter.source().source().poisoned_reason()
+        self.adapter.query_source_poison_reason()
     }
 }
 
@@ -536,8 +567,8 @@ fn budget_json(budget: WorkBudget) -> JsonValue {
     })
 }
 
-fn coverage_json(session: &LiveSession) -> JsonValue {
-    let Some(projection) = session.adapter.current_projection() else {
+fn coverage_json(session: &LiveSession<impl LiveSessionAdapter>) -> JsonValue {
+    let Some(projection) = session.adapter.query_projection() else {
         return json!({
             "status": "unknown",
             "complete_domains": [],
@@ -575,8 +606,8 @@ fn coverage_json(session: &LiveSession) -> JsonValue {
     })
 }
 
-fn briefing_json(session: &LiveSession) -> JsonValue {
-    let capsule = session.adapter.last_capsule();
+fn briefing_json(session: &LiveSession<impl LiveSessionAdapter>) -> JsonValue {
+    let capsule = session.adapter.query_capsule();
     let identity = session.adapter.identity();
     json!({
         "implementation_phase": LIVE_IMPLEMENTATION_PHASE,
@@ -599,7 +630,7 @@ fn briefing_json(session: &LiveSession) -> JsonValue {
     })
 }
 
-fn affordances_json(session: &LiveSession) -> Vec<JsonValue> {
+fn affordances_json(session: &LiveSession<impl LiveSessionAdapter>) -> Vec<JsonValue> {
     [
         (
             Capability::Observe,
@@ -655,7 +686,7 @@ fn affordances_json(session: &LiveSession) -> Vec<JsonValue> {
     .collect()
 }
 
-fn uncertainties_json(session: &LiveSession) -> Vec<JsonValue> {
+fn uncertainties_json(session: &LiveSession<impl LiveSessionAdapter>) -> Vec<JsonValue> {
     let mut values = OMITTED_LIVE_DOMAINS
         .iter()
         .map(|(domain, reason)| {
@@ -697,13 +728,13 @@ fn uncertainties_json(session: &LiveSession) -> Vec<JsonValue> {
 /// The live server registers no MCP resources, so its Agent Turn names none:
 /// a reference an agent cannot resolve is worse than no reference. The
 /// laboratory's `df://session/...` views exist only on the laboratory server.
-fn references_json(_session: &LiveSession) -> Vec<JsonValue> {
+fn references_json(_session: &LiveSession<impl LiveSessionAdapter>) -> Vec<JsonValue> {
     Vec::new()
 }
 
 #[allow(clippy::too_many_arguments)]
 fn attach_turn(
-    session: &LiveSession,
+    session: &LiveSession<impl LiveSessionAdapter>,
     operation: &str,
     phase: AgentPhase,
     profile: ObservationProfile,
@@ -822,7 +853,7 @@ fn unbound_error(operation: &str, phase: AgentPhase, failure: &DfmcpError) -> St
 
 #[allow(clippy::too_many_arguments)]
 fn session_error(
-    session: &LiveSession,
+    session: &LiveSession<impl LiveSessionAdapter>,
     operation: &str,
     phase: AgentPhase,
     profile: ObservationProfile,
@@ -1412,24 +1443,16 @@ pub fn fortress_observe(session_id: Option<String>) -> String {
 }
 
 #[tool(
-    description = "Query the current canonical live snapshot. mode is summary, citizens, or all. Querying never refreshes state; call fortress_observe first when freshness matters."
+    description = "Query the current protocol-1.0 snapshot without refreshing. mode is summary, citizens, or all. Optional limit is 1..256 (default 32 within the session budget). Copy continuation unchanged into the next call using the same session and mode; a fresh observation invalidates pages when the complete anchor changes. Whole rows and required Agent Turn context remain within output bounds."
 )]
-pub fn fortress_query(session_id: Option<String>, mode: Option<String>) -> String {
+pub fn fortress_query(
+    session_id: Option<String>,
+    mode: Option<String>,
+    limit: Option<u32>,
+    continuation: Option<String>,
+) -> String {
     let operation = "fortress.query";
-    let mode = match mode {
-        Some(value) => value,
-        None => "summary".to_owned(),
-    };
-    if mode.is_empty() || mode.len() > MAX_MODE_BYTES {
-        return unbound_error(
-            operation,
-            AgentPhase::Inspect,
-            &error(
-                ErrorCode::InvalidRequest,
-                "query mode violates its byte bound",
-            ),
-        );
-    }
+    let started = std::time::Instant::now();
     let session = match resolve_session(session_id) {
         Ok(value) => value,
         Err(failure) => return unbound_error(operation, AgentPhase::Inspect, &failure),
@@ -1442,106 +1465,7 @@ pub fn fortress_query(session_id: Option<String>, mode: Option<String>) -> Strin
         Ok(value) => value,
         Err(failure) => return unbound_error(operation, AgentPhase::Inspect, &failure),
     };
-    let anchor = match guard.current_anchor() {
-        Ok(value) => value,
-        Err(failure) => return unbound_error(operation, AgentPhase::Inspect, &failure),
-    };
-    let (request_id, context) = match guard.next_context() {
-        Ok(value) => value,
-        Err(failure) => {
-            return session_error(
-                guard,
-                operation,
-                AgentPhase::Inspect,
-                ObservationProfile::Tactical,
-                RequestId::NIL,
-                anchor,
-                ContinuityStatus::Continuous,
-                &failure,
-            );
-        }
-    };
-    let kinds = match mode.as_str() {
-        "summary" => vec![EntityKind::Fortress],
-        "citizens" => vec![EntityKind::Unit],
-        "all" => Vec::new(),
-        _ => {
-            return session_error(
-                guard,
-                operation,
-                AgentPhase::Inspect,
-                ObservationProfile::Tactical,
-                request_id,
-                anchor,
-                ContinuityStatus::Continuous,
-                &error(
-                    ErrorCode::InvalidRequest,
-                    "query mode must be summary, citizens, or all",
-                ),
-            );
-        }
-    };
-    let budget = guard.budget;
-    let response = match guard.adapter.query(
-        &QueryRequest {
-            anchor,
-            query: WorldQuery {
-                kinds,
-                predicate: None,
-                order: QueryOrder::EntityIdAscending,
-                limit: budget.max_entities,
-                continuation: None,
-            },
-            max_output_tokens: budget.max_output_tokens,
-            continuation: None,
-        },
-        &context,
-    ) {
-        Ok(value) => value,
-        Err(failure) => {
-            return session_error(
-                guard,
-                operation,
-                AgentPhase::Inspect,
-                ObservationProfile::Tactical,
-                request_id,
-                anchor,
-                ContinuityStatus::Continuous,
-                &failure,
-            );
-        }
-    };
-    attach_turn(
-        guard,
-        operation,
-        AgentPhase::Inspect,
-        ObservationProfile::Tactical,
-        request_id,
-        ContinuityStatus::Continuous,
-        Some(anchor),
-        None,
-        Vec::new(),
-        Vec::new(),
-        Vec::new(),
-        json!({
-            "ok": true,
-            "session_id": guard.session_id.to_string(),
-            "request_id": request_id.to_string(),
-            "mode": mode,
-            "anchor": anchor_json(response.anchor),
-            "matched": response.matched,
-            "returned": response.rows.len(),
-            "truncated": response.truncated,
-            "continuation": response.continuation,
-            "rows": response.rows.iter().map(|row| json!({
-                "entity_id": row.entity_id.to_string(),
-                "revision": row.revision,
-                "fields": row.fields,
-                "evidence": row.evidence.iter().map(|value| value.digest.to_string()).collect::<Vec<_>>(),
-            })).collect::<Vec<_>>(),
-            "score_ledger": response.score_ledger,
-        }),
-    )
+    paged_query::query_session(guard, mode, limit, continuation, started)
 }
 
 fn read_only_tool_error(session_id: Option<String>, operation: &str, phase: AgentPhase) -> String {
@@ -2040,7 +1964,7 @@ pub fn run_live_stdio() {
     let server = ServerBuilder::new("dwarf-fortress-mcp-live", env!("CARGO_PKG_VERSION"))
         .tool(FortressOpenSession)
         .tool(FortressObserve)
-        .tool(FortressQuery)
+        .tool(FortressPagedQuery)
         .tool(FortressPlan)
         .tool(FortressCommit)
         .tool(FortressWait)
@@ -2208,7 +2132,7 @@ mod tests {
         let handle = || Some(fixture.0.to_string());
         for encoded in [
             fortress_observe(handle()),
-            fortress_query(handle(), None),
+            fortress_query(handle(), None, None, None),
             fortress_plan(handle(), None, None),
             fortress_commit(handle(), String::new()),
             fortress_wait(handle()),
@@ -2258,7 +2182,13 @@ mod tests {
     #[test]
     fn cancel_schema_exposes_resource_scope_consent_and_both_mode_spellings() {
         let definition = FortressCancel.definition();
-        for field in ["session_id", "_mode", "mode", "scope", "discard_process_local_work"] {
+        for field in [
+            "session_id",
+            "_mode",
+            "mode",
+            "scope",
+            "discard_process_local_work",
+        ] {
             assert!(definition.input_schema["properties"].get(field).is_some());
         }
     }
@@ -2277,18 +2207,31 @@ mod tests {
         )?;
         CLOSED_LIVE_SESSIONS
             .lock()
-            .map_err(|_| error(ErrorCode::InternalInvariantViolation, "test receipts poisoned"))?
+            .map_err(|_| {
+                error(
+                    ErrorCode::InternalInvariantViolation,
+                    "test receipts poisoned",
+                )
+            })?
             .push_back((fixture.0, expected.clone()));
         for discard in [None, Some(true)] {
             assert_eq!(
                 fortress_cancel(
-                    Some(fixture.0.to_string()), None, None, Some("session".to_owned()), discard,
+                    Some(fixture.0.to_string()),
+                    None,
+                    None,
+                    Some("session".to_owned()),
+                    discard,
                 ),
                 expected
             );
         }
         let ordinary = decode_release_test(&fortress_cancel(
-            Some(fixture.0.to_string()), None, None, None, None,
+            Some(fixture.0.to_string()),
+            None,
+            None,
+            None,
+            None,
         ))?;
         assert_eq!(ordinary["error"]["code"], "session_not_found");
         Ok(())

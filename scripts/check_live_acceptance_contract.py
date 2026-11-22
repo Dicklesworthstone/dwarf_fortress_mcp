@@ -92,6 +92,8 @@ EXPECTED_SOURCE_BINDINGS = {
     "live_projection": "crates/dfmcp-adapter/src/live_projection.rs",
     "live_adapter": "crates/dfmcp-adapter/src/live_adapter.rs",
     "live_mcp_server": "crates/dfmcp-mcp/src/live_server.rs",
+    "live_mcp_query": "crates/dfmcp-mcp/src/live_query_v1_0.rs",
+    "live_mcp_query_tests": "crates/dfmcp-mcp/src/live_query_v1_0_tests.rs",
     "acceptance_probe_binary": "crates/dwarf-fortress-mcp/src/bin/dfmcp-live-probe.rs",
     "acceptance_probe_manifest": "crates/dwarf-fortress-mcp/Cargo.toml",
     "acceptance_contract": "architecture/live_read_acceptance_v1.json",

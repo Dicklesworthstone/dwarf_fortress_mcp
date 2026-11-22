@@ -55,6 +55,7 @@ PRODUCTION_RUST = [
     "crates/dfmcp-adapter/src/live_projection.rs",
     "crates/dfmcp-adapter/src/live_session.rs",
     "crates/dfmcp-mcp/src/live_server.rs",
+    "crates/dfmcp-mcp/src/live_query_v1_0.rs",
 ]
 FORBIDDEN_PRODUCTION_TOKENS = ["unsafe {", ".unwrap()", ".expect(", "todo!", "unimplemented!"]
 FORBIDDEN_NATIVE = [

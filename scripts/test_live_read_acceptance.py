@@ -374,6 +374,17 @@ class LiveReadAcceptanceTests(unittest.TestCase):
             with self.assertRaises(verifier.VerificationError):
                 fixture.verify(events)
 
+    def test_query_page_sources_cannot_be_dropped_from_acceptance_evidence(self) -> None:
+        for key in ("live_mcp_query", "live_mcp_query_tests"):
+            with self.subTest(source=key):
+                temporary, fixture = self.fixture()
+                with temporary:
+                    events = copy.deepcopy(fixture.events)
+                    self.assertIn(key, events[0]["source_digests"])
+                    del events[0]["source_digests"][key]
+                    with self.assertRaises(verifier.VerificationError):
+                        fixture.verify(events)
+
     def test_pagination_digest_drift_is_rejected(self) -> None:
         temporary, fixture = self.fixture()
         with temporary:

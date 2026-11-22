@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased — Traverse complete protocol-1.0 query results
+
+- Add bounded source-bound continuation pages to the existing `fortress_query`
+  tool for summary, citizen and combined selections without another capture.
+- Bind cursors to the full source/session/mode and recheck current authority;
+  preserve exact row progress while fitting whole rows and complete wire output.
+- Compact repeated tactical context while retaining coverage, uncertainties,
+  provenance and warnings so the unchanged 1,500-token default remains useful.
+- Pass ten focused Python regressions and an exact-source real-adapter
+  presentation component; add nine full query regressions. Full MCP tests remain
+  unexecuted after the host killed dependency compilation. Repository static
+  verification reaches bead coverage and stops on missing `br`; no native or
+  admission qualification is inferred.
+
 ## Unreleased — Forecast recovered original projects through later stages
 
 - Extend explicit complete-project forecasts to Verified, physically quiet

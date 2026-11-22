@@ -268,6 +268,55 @@ Only after R1–R5 pass for named versions may the read-only live adapter become
 `Supported` requires the wider compatibility, recovery, security, and release gates in the master
 plan.
 
+## Page the published citizen roster
+
+The protocol-1.0 `fortress_query` tool accepts `mode: "summary"`, `"citizens"`
+or `"all"`, with optional `limit` and `continuation`. The default page limit is
+32, bounded by the session entity allowance; an explicit limit is 1–256 within
+that allowance. Querying reads the current published capsule and does not take
+another native observation.
+
+```json
+{"session_id":"<opened-session>","mode":"citizens","limit":20}
+```
+
+Copy a non-null `continuation` into the next call with the same session and mode,
+or follow the returned complete `next_query.arguments`. The page size may change.
+The continuation binds the session, complete source anchor (including state hash
+and game tick), selection, fixed row projection and exact next offset. A changed
+observation, session or mode requires restarting the query; raw adapter offsets
+are not accepted. Current Query authority is checked for every page.
+
+Rows remain in canonical entity-ID order and include generation, revision,
+label/kind fields and source evidence. `matched` is the complete selected count;
+`returned` and `offset` identify this page. `complete_domain` is true only when
+one response contains the entire selection. Partial pages retain their source
+coverage and mark `query.result` partial in the Agent Turn. A final continuation
+is null even when that last page alone is only a suffix of the full result.
+
+The server first runs one bounded canonical adapter query, then fits whole rows
+with the complete Agent Turn. If presentation needs fewer rows than the adapter
+returned, the next continuation starts after the last row actually published.
+It never skips an unreturned row or emits an empty advancing page. Successful
+packets fit the negotiated output-token allowance, the modern text-block ceiling
+and the escaped wire-byte allowance, including room for a maximum-size request
+ID. If one complete row and required context cannot fit, the request returns a
+budget error. A larger response allowance can be requested on a new session.
+
+Tactical pages retain the relevant query/observe affordances in compact form.
+One explicit unknown-domain uncertainty lists all seven omitted domains; their
+individual reasons remain complete in source coverage, and mutation
+unavailability remains a separate warning. The full admitted budget is retained
+with `requested_equals_admitted: true`. This removes repetitive metadata so a
+normal citizen page or summary fits the existing 1,500-token default, including
+the admission provenance; immutable context that is itself too large still
+returns an explicit budget error.
+
+This is a Rust query/presentation capability over protocol 1.0. It changes no
+native method, bridge observation field, production runner or admission status.
+The scripted-source regression tests exercise the real canonical adapter and
+page renderer; they are not disposable-fort or native compatibility evidence.
+
 ## Release a process session
 
 `fortress_cancel` accepts the explicit selector `scope: "session"` to release
