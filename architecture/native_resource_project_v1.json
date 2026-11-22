@@ -157,6 +157,9 @@
     "crates/dfmcp-mcp/src/live_production_runtime/project.rs",
     "crates/dfmcp-mcp/src/live_production_runtime/project_tests.rs",
     "crates/dfmcp-mcp/src/live_production_runtime/project_config_tests.rs",
+    "README.md",
+    "crates/dwarf-fortress-mcp/src/main.rs",
+    "tests/stdio/gameplay_cli.py",
     "crates/dfmcp-mcp/src/live_production_runtime/project_recovery.rs",
     "crates/dfmcp-mcp/src/live_production_runtime/project_recovery_tests.rs",
     "crates/dfmcp-mcp/src/live_production_runtime/clock.rs",
@@ -174,5 +177,9 @@
     "integrated_rust_qualified": false,
     "modern_stdio_qualified": false,
     "live_dfhack_qualified": false
-  }
+  },
+  "cli_profile": [
+    "serve-gameplay-dev",
+    "native-resource-project"
+  ]
 }

@@ -44,6 +44,20 @@ A marker left by an incomplete open is **not initialization permission**. Reopen
 existing custody only. The controller does not recreate missing files, choose a
 replacement key, silently repair a journal, or dispatch an effect from replay.
 
+## Start the profile
+
+Select the fixed profile with the standard executable:
+
+```text
+dwarf-fortress-mcp serve-gameplay-dev native-resource-project
+```
+
+The dedicated `dfmcp-native-resource-project-dev-server` binary selects the
+same owner. Supply the operator configuration below before startup. The
+separate `workshop-production` profile retains its broader staged production
+requests and externally held parent checkpoint; this profile adds a fixed
+root goal, absolute deadline and independently acknowledged parent journal.
+
 ## Operator configuration
 
 Configuration, source endpoints, credentials, private paths, footprints and

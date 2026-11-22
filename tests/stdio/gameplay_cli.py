@@ -15,6 +15,7 @@ PROFILES = {
     "tree": ("DFMCP_ALLOW_UNADMITTED_TREE_HARVEST_V1_21", "dfmcp-tree-harvest-v1-21-dev"),
     "workshop": ("DFMCP_ALLOW_UNADMITTED_WORKSHOP_V1_20", "dfmcp-workshop-v1-20-dev"),
     "workshop-production": ("DFMCP_ALLOW_UNADMITTED_WORKSHOP_PRODUCTION", "dfmcp-workshop-production-dev"),
+    "native-resource-project": ("DFMCP_ALLOW_UNADMITTED_NATIVE_RESOURCE_PROJECT", "dfmcp-native-resource-project-dev"),
     "bounded-clock": ("DFMCP_ALLOW_UNADMITTED_RUN_V1_13", "dfmcp-live-run-dev"),
     "finite-bed": ("DFMCP_ALLOW_UNADMITTED_SEMANTIC_WORK_ORDERS", "dfmcp-live-semantic-work-orders-dev"),
 }
@@ -27,6 +28,11 @@ def environment(profile):
     env = {k: v for k, v in os.environ.items() if not k.startswith("DFMCP_")}
     if profile is not None:
         env[PROFILES[profile][0]] = "1"
+        if profile == "native-resource-project":
+            # Discovery needs the closed feature union; opening still refuses
+            # these incomplete operator configurations before creating custody.
+            env["DFMCP_WORKSHOP_MCP_CONFIG"] = "{}"
+            env["DFMCP_COMBINED_PRODUCTION_CONFIG"] = "{}"
     return env
 
 
