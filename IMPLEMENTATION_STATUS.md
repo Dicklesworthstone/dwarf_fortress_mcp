@@ -29,19 +29,40 @@ remain distinct; cross-stage canonical continuity and causal output are not
 invented. Complete output, refusal and close paths retain recovery and withdraw
 reviews, with bounded diagnostic text and explicit whole-checkpoint omission.
 
-Validation: 25 new configuration, staged-runtime and frontend regression sources
-join the first increment's six actual Workshop custody cases and one public
-routing case. Actual Workshop source/inventory checks pass on 81 inputs with
-all 11 negative cases; agent-contract, dependency-policy, implementation-status
-and whitespace checks pass. All ten new Rust modules and the two previously
-format-clean production owner/config files pass scoped formatting; unrelated
-existing formatting is preserved. Exact locked dependencies, including FastMCP
-revision `13461caf`, were fetched successfully. A single-job, locked/offline
-actual `dfmcp-mcp --lib` check was killed with exit 137 while compiling unchanged
-Asupersync 0.5.0, before repository source diagnostics. Toolchain:
-`rustc 1.100.0-nightly (bba531001 2026-09-20)`.
-The 32 new Rust cases and modern CLI route remain unexecuted at this commit.
-Full MCP, native-game and production admission qualification remain open.
+Validation: all 32 new focused Rust component tests pass: six actual Workshop
+custody cases, four staged owner lifecycle/recovery/failure cases, ten parent
+configuration cases, four combined configuration cases, seven frontend cases
+and one public Workshop Query routing case. All 19 existing combined
+configuration compatibility tests also pass: 51 distinct tests, zero failures
+or ignored tests. The private-custody cases exercise actual journal, ACK and
+Run owners and verify unchanged original IDs and file bytes through handoff,
+recovery and an interrupted import. Compiler checking caught a fixture using
+private native-summary fields; it now uses the checked public constructor with
+the same behavior and assertions.
+
+Metadata checking passes against the complete actual adapter and selected MCP
+owner, facade and test bodies. Executed tests retain the actual core/world/intent
+crates, 43 of 84 adapter module roots, original schemas and laboratory helpers,
+and all selected owner/facade function bodies. All eleven external dependency
+version/source/checksum tuples match the original lockfile. The component
+excludes FastMCP macro expansion, registration and stdio, unrelated modules and
+tests, and admission startup. Explicit synchronous I/O-capable context glue
+replaces Asupersync scheduling, driver behavior and inherited runtime
+cancellation; the real operation contexts, grants and custody checks remain.
+Post-execution correspondence has zero mismatches across 1,304 source hashes;
+the canonical source-manifest SHA-256 is
+`6e51fc032dca8fb434ac9e3f9ee493853022dfb5c070313f88dea4b704e81b92`.
+
+Actual Workshop source/inventory checks pass on 81 inputs with all 11 negative
+cases; agent-contract, dependency-policy, implementation-status and whitespace
+checks pass. New Rust modules and the corrected fixture pass scoped formatting;
+unrelated existing formatting is preserved. Toolchain:
+`rustc 1.100.0-nightly (bba531001 2026-09-20)`. Exact locked dependencies,
+including FastMCP revision `13461caf`, were fetched successfully, but the
+single-job locked/offline actual `dfmcp-mcp --lib` check was killed with exit 137
+while compiling unchanged Asupersync 0.5.0, before repository diagnostics.
+The modern CLI/stdio route, full MCP, native-game and production admission
+qualification remain unexecuted or open; component results do not establish them.
 
 Owners: `dfmcp-reality-wiring-proof-4bf.14.7`,
 `dfmcp-reality-wiring-proof-4bf.14.4` and
@@ -69,13 +90,14 @@ Workshop clock recovery now retains the greatest validated tick from all
 recovered Run records before binding the target. A later failure or expired
 authority cannot erase that floor when a temporary clock owner is consumed.
 
-Six actual-runtime/private-custody regression sources and one public Query
-routing case cover exact export, recovery, incomplete originals, acknowledgement
-damage, unresolved clocks and consumed-floor retention. Source inventory checks
-include the new files and two additional negative cases. Independent source/API
-review is complete; the execution host is unavailable, so these new Rust and
-Python tests, formatting and final static gates have not been run. This source
-increment does not establish modern MCP, real-game or admission qualification.
+All six actual-runtime/private-custody regressions and the public Query routing
+case pass within the actual-source component described above. They cover exact
+export, recovery, incomplete originals, acknowledgement damage, unresolved
+clocks and consumed-floor retention. Workshop source inventory checks and all
+11 negative cases pass, including the two additions for this increment. The
+executed component retains real custody behavior while excluding actual runtime
+scheduling and transport; modern MCP, real-game and admission qualification
+remain separate work.
 
 Owners: `dfmcp-reality-wiring-proof-4bf.14.4` and
 `dfmcp-reality-wiring-proof-4bf.14.6`, both still in progress. See

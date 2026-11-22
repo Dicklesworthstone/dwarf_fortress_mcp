@@ -28,7 +28,10 @@ const CASE: &str = "WORKSHOP_HANDOFF_TEST_CASE";
 const SETTLED_TICK: u64 = 15000;
 
 fn fixture_error() -> DfmcpError {
-    error(ErrorCode::InternalInvariantViolation, "handoff fixture failure")
+    error(
+        ErrorCode::InternalInvariantViolation,
+        "handoff fixture failure",
+    )
 }
 
 fn vector(name: &str) -> Result<Vec<u8>> {
@@ -45,11 +48,8 @@ fn vector(name: &str) -> Result<Vec<u8>> {
         .0
         .iter()
         .map(|pair| {
-            u8::from_str_radix(
-                std::str::from_utf8(pair).map_err(|_| fixture_error())?,
-                16,
-            )
-            .map_err(|_| fixture_error())
+            u8::from_str_radix(std::str::from_utf8(pair).map_err(|_| fixture_error())?, 16)
+                .map_err(|_| fixture_error())
         })
         .collect()
 }
@@ -130,6 +130,8 @@ struct WorkshopNative {
     outcome: &'static str,
     current: Option<WorkshopRecord>,
     sample: Option<WorkshopProgress>,
+    empty_summary: WorkshopNativeSummary,
+    retained_summary: WorkshopNativeSummary,
 }
 
 impl WorkshopSource for WorkshopNative {
@@ -137,9 +139,10 @@ impl WorkshopSource for WorkshopNative {
         &self.manifest
     }
     fn native_summary(&self) -> WorkshopNativeSummary {
-        WorkshopNativeSummary {
-            unresolved: false,
-            retained_records: u16::from(self.current.is_some()),
+        if self.current.is_some() {
+            self.retained_summary
+        } else {
+            self.empty_summary
         }
     }
     fn fence(&mut self) {}
@@ -324,19 +327,23 @@ fn seed_clock(
     };
     let mut native = c.clone();
     native.anchor.fortress_id = FortressId::NIL;
-    native.grants = [Capability::Query, Capability::Plan, Capability::ControlClock]
-        .into_iter()
-        .map(|capability| CapabilityGrant {
-            capability,
-            scope: CapabilityScope {
-                fortress_id: Some(FortressId::NIL),
-                ..CapabilityScope::default()
-            },
-            max_risk: RiskTier::Guarded,
-            expires_at_tick: None,
-            remaining_uses: None,
-        })
-        .collect();
+    native.grants = [
+        Capability::Query,
+        Capability::Plan,
+        Capability::ControlClock,
+    ]
+    .into_iter()
+    .map(|capability| CapabilityGrant {
+        capability,
+        scope: CapabilityScope {
+            fortress_id: Some(FortressId::NIL),
+            ..CapabilityScope::default()
+        },
+        max_risk: RiskTier::Guarded,
+        expires_at_tick: None,
+        remaining_uses: None,
+    })
+    .collect();
     let journal = open_private_run_journal_exact(
         &directory.join("workshop.clock.journal"),
         &native,
@@ -371,7 +378,12 @@ fn seed_clock(
                 progress("progress_stage0")
             })?;
             if matches!(seed, ClockSeed::Settled | ClockSeed::Unknown) {
-                let plan = source.current.as_ref().ok_or_else(fixture_error)?.plan().clone();
+                let plan = source
+                    .current
+                    .as_ref()
+                    .ok_or_else(fixture_error)?
+                    .plan()
+                    .clone();
                 source.current = Some(if seed == ClockSeed::Settled {
                     source.tick = SETTLED_TICK;
                     source.paused = true;
@@ -448,6 +460,8 @@ fn fixture(original: Original, clock_seed: ClockSeed) -> Result<Fixture> {
             },
             current: None,
             sample: None,
+            empty_summary: WorkshopNativeSummary::new(false, 0)?,
+            retained_summary: WorkshopNativeSummary::new(false, 1)?,
         };
         journal.prepare(&mut source, &plan, &c, &mut guard)?;
         guard.acknowledge(journal.pin(), &c)?;
@@ -456,7 +470,9 @@ fn fixture(original: Original, clock_seed: ClockSeed) -> Result<Fixture> {
             guard.acknowledge(journal.pin(), &c)?;
             if matches!(
                 original,
-                Original::Incomplete | Original::Complete | Original::UnacknowledgedComplete
+                Original::Incomplete
+                    | Original::Complete
+                    | Original::UnacknowledgedComplete
                     | Original::Discontinuous
             ) {
                 let mut sample = vector(if original == Original::Incomplete {
@@ -513,7 +529,8 @@ fn isolated(
             assert!(std::env::var_os(BUILD).is_none());
             assert!(std::env::var_os(clock::ALLOW).is_none());
             let config = Config::environment()?;
-            let mut runtime = Runtime::open(config, mode, SessionId::new(902), fixture_context()?.budget)?;
+            let mut runtime =
+                Runtime::open(config, mode, SessionId::new(902), fixture_context()?.budget)?;
             check(&mut runtime)
         })
         .map_err(|_| fixture_error())?;
@@ -558,46 +575,88 @@ fn custody(runtime: &Runtime) -> Result<Vec<Vec<u8>>> {
     if runtime.clock.is_some() {
         files.push("workshop.clock.journal");
     }
-    files.into_iter()
-        .map(|name| fs::read(runtime.config.input.directory.join(name)).map_err(|_| fixture_error()))
+    files
+        .into_iter()
+        .map(|name| {
+            fs::read(runtime.config.input.directory.join(name)).map_err(|_| fixture_error())
+        })
         .collect()
 }
 
 #[test]
 fn handoff_exports_exact_original_without_native_credentials_or_custody_writes() -> Result<()> {
-    for mode in [WorkshopMode::Control, WorkshopMode::Recover, WorkshopMode::Offline] {
+    for mode in [
+        WorkshopMode::Control,
+        WorkshopMode::Recover,
+        WorkshopMode::Offline,
+    ] {
         isolated(
             "handoff_exports_exact_original_without_native_credentials_or_custody_writes",
-            mode.as_str(), Original::Complete, ClockSeed::Absent, mode,
+            mode.as_str(),
+            Original::Complete,
+            ClockSeed::Absent,
+            mode,
             |runtime| {
                 let before = custody(runtime)?;
                 let c = runtime.context()?;
                 let exported = runtime.production_handoff(&c)?;
-                assert_eq!(exported.directory(), runtime.config.input.directory.as_path());
+                assert_eq!(
+                    exported.directory(),
+                    runtime.config.input.directory.as_path()
+                );
                 assert_eq!(exported.binding(), runtime.journal.binding());
                 assert_eq!(exported.pin(), runtime.journal.pin());
                 assert_eq!(exported.original_key(), "workshop-001");
-                assert_eq!(exported.original_plan_digest(), record("placed")?.plan().digest());
+                assert_eq!(
+                    exported.original_plan_digest(),
+                    record("placed")?.plan().digest()
+                );
                 assert_ne!(exported.digest(), Digest32::ZERO);
                 let metadata = exported.to_json();
-                assert_eq!(metadata["original_receipt"], record("placed")?.receipt().to_hex());
+                assert_eq!(
+                    metadata["original_receipt"],
+                    record("placed")?.receipt().to_hex()
+                );
                 assert_eq!(metadata["building_id"], 70);
                 assert_eq!(metadata["material_item_id"], 42);
-                assert_eq!(metadata["historical_completion"]["witness"], progress("progress_complete")?.witness().to_hex());
+                assert_eq!(
+                    metadata["historical_completion"]["witness"],
+                    progress("progress_complete")?.witness().to_hex()
+                );
                 assert_eq!(metadata["historical_completion_proven"], true);
-                for key in ["current_completion_proven", "current_pause_proven", "production_ready", "mutation_authority"] {
+                for key in [
+                    "current_completion_proven",
+                    "current_pause_proven",
+                    "production_ready",
+                    "mutation_authority",
+                ] {
                     assert_eq!(metadata[key], false, "{key}");
                 }
-                assert_eq!(metadata["historical_completion"]["fresh_for_current_call"], false);
+                assert_eq!(
+                    metadata["historical_completion"]["fresh_for_current_call"],
+                    false
+                );
                 assert_eq!(metadata["native_calls"], 0);
-                assert_eq!(metadata["workshop_prerequisite"]["acknowledged"], pin_json(exported.pin()));
+                assert_eq!(
+                    metadata["workshop_prerequisite"]["acknowledged"],
+                    pin_json(exported.pin())
+                );
                 let view = runtime.production_handoff_view(&c)?;
                 assert_eq!(view["production_handoff"], metadata);
                 assert_eq!(view["current_goal_available"], false);
                 assert_eq!(view["original"]["fresh_completion_proven"], false);
-                assert_eq!(view["original"]["native_record_hex"], hex(record("placed")?.canonical_bytes()));
-                assert_eq!(view["original"]["source"]["canonical_capture_hex"], hex(capture()?.canonical_bytes()));
-                assert_eq!(view["original"]["sample_hex"], hex(progress("progress_complete")?.canonical_bytes()));
+                assert_eq!(
+                    view["original"]["native_record_hex"],
+                    hex(record("placed")?.canonical_bytes())
+                );
+                assert_eq!(
+                    view["original"]["source"]["canonical_capture_hex"],
+                    hex(capture()?.canonical_bytes())
+                );
+                assert_eq!(
+                    view["original"]["sample_hex"],
+                    hex(progress("progress_complete")?.canonical_bytes())
+                );
                 assert!(runtime.source.is_none());
                 assert!(!runtime.journal.has_permit("workshop-001"));
                 assert_eq!(custody(runtime)?, before);
@@ -605,7 +664,10 @@ fn handoff_exports_exact_original_without_native_credentials_or_custody_writes()
                 later.anchor.tick = GameTick(exported.authority_tick_floor() + 7);
                 let later = runtime.production_handoff(&later)?;
                 assert_eq!(later.digest(), exported.digest());
-                assert_eq!(later.authority_tick_floor(), exported.authority_tick_floor() + 7);
+                assert_eq!(
+                    later.authority_tick_floor(),
+                    exported.authority_tick_floor() + 7
+                );
                 assert_eq!(custody(runtime)?, before);
                 Ok(())
             },
@@ -617,13 +679,19 @@ fn handoff_exports_exact_original_without_native_credentials_or_custody_writes()
 #[test]
 fn handoff_refuses_unfinished_uncertain_or_discontinuous_originals() -> Result<()> {
     for (name, original) in [
-        ("empty", Original::Empty), ("prepared", Original::Prepared),
-        ("placed", Original::Placed), ("incomplete", Original::Incomplete),
-        ("indeterminate", Original::Indeterminate), ("discontinuous", Original::Discontinuous),
+        ("empty", Original::Empty),
+        ("prepared", Original::Prepared),
+        ("placed", Original::Placed),
+        ("incomplete", Original::Incomplete),
+        ("indeterminate", Original::Indeterminate),
+        ("discontinuous", Original::Discontinuous),
     ] {
         isolated(
             "handoff_refuses_unfinished_uncertain_or_discontinuous_originals",
-            name, original, ClockSeed::Absent, WorkshopMode::Offline,
+            name,
+            original,
+            ClockSeed::Absent,
+            WorkshopMode::Offline,
             |runtime| {
                 let before = custody(runtime)?;
                 let c = runtime.context()?;
@@ -643,11 +711,16 @@ fn handoff_refuses_unfinished_uncertain_or_discontinuous_originals() -> Result<(
 fn handoff_requires_current_query_owner_scope_expiry_and_complete_work_budget() -> Result<()> {
     isolated(
         "handoff_requires_current_query_owner_scope_expiry_and_complete_work_budget",
-        "authority", Original::Complete, ClockSeed::Absent, WorkshopMode::Offline,
+        "authority",
+        Original::Complete,
+        ClockSeed::Absent,
+        WorkshopMode::Offline,
         |runtime| {
             let before = custody(runtime)?;
             let mut query = runtime.context()?;
-            query.grants.retain(|grant| grant.capability == Capability::Query);
+            query
+                .grants
+                .retain(|grant| grant.capability == Capability::Query);
             runtime.production_handoff(&query)?;
             for changed in 0..6 {
                 let mut invalid = query.clone();
@@ -667,7 +740,10 @@ fn handoff_requires_current_query_owner_scope_expiry_and_complete_work_budget() 
             }
             let mut small = query.clone();
             small.budget.max_bytes = 1;
-            assert_eq!(runtime.production_handoff(&small).err().map(|e| e.code), Some(ErrorCode::BudgetExceeded));
+            assert_eq!(
+                runtime.production_handoff(&small).err().map(|e| e.code),
+                Some(ErrorCode::BudgetExceeded)
+            );
             runtime.production_handoff(&query)?;
             assert_eq!(custody(runtime)?, before);
             Ok(())
@@ -679,18 +755,27 @@ fn handoff_requires_current_query_owner_scope_expiry_and_complete_work_budget() 
 fn handoff_requires_the_exact_ack_and_never_repairs_changed_custody() -> Result<()> {
     isolated(
         "handoff_requires_the_exact_ack_and_never_repairs_changed_custody",
-        "unacknowledged", Original::UnacknowledgedComplete, ClockSeed::Absent, WorkshopMode::Offline,
+        "unacknowledged",
+        Original::UnacknowledgedComplete,
+        ClockSeed::Absent,
+        WorkshopMode::Offline,
         |runtime| {
             let before = custody(runtime)?;
             let c = runtime.context()?;
-            assert_eq!(runtime.production_handoff(&c).err().map(|e| e.code), Some(ErrorCode::CorruptLedger));
+            assert_eq!(
+                runtime.production_handoff(&c).err().map(|e| e.code),
+                Some(ErrorCode::CorruptLedger)
+            );
             assert_eq!(custody(runtime)?, before);
             Ok(())
         },
     )?;
     isolated(
         "handoff_requires_the_exact_ack_and_never_repairs_changed_custody",
-        "changed", Original::Complete, ClockSeed::Absent, WorkshopMode::Offline,
+        "changed",
+        Original::Complete,
+        ClockSeed::Absent,
+        WorkshopMode::Offline,
         |runtime| {
             let before = custody(runtime)?;
             let path = runtime.config.input.directory.join("workshop.ack");
@@ -698,7 +783,10 @@ fn handoff_requires_the_exact_ack_and_never_repairs_changed_custody() -> Result<
             changed[0] ^= 1;
             fs::write(&path, &changed).map_err(|_| fixture_error())?;
             let c = runtime.context()?;
-            assert_eq!(runtime.production_handoff(&c).err().map(|e| e.code), Some(ErrorCode::CorruptLedger));
+            assert_eq!(
+                runtime.production_handoff(&c).err().map(|e| e.code),
+                Some(ErrorCode::CorruptLedger)
+            );
             assert_eq!(custody(runtime)?[1], changed);
             fs::write(&path, &before[1]).map_err(|_| fixture_error())?;
             assert!(runtime.production_handoff(&c).is_err());
@@ -713,10 +801,17 @@ fn handoff_retains_settled_clock_identity_and_recovered_authority_floor() -> Res
     for (name, seed) in [("empty", ClockSeed::Empty), ("settled", ClockSeed::Settled)] {
         isolated(
             "handoff_retains_settled_clock_identity_and_recovered_authority_floor",
-            name, Original::Complete, seed, WorkshopMode::Offline,
+            name,
+            Original::Complete,
+            seed,
+            WorkshopMode::Offline,
             move |runtime| {
                 let before = custody(runtime)?;
-                let reference = runtime.clock.as_ref().ok_or_else(fixture_error)?.reference();
+                let reference = runtime
+                    .clock
+                    .as_ref()
+                    .ok_or_else(fixture_error)?
+                    .reference();
                 let c = runtime.context()?;
                 if seed == ClockSeed::Settled {
                     assert!(c.anchor.tick.get() >= SETTLED_TICK);
@@ -738,12 +833,18 @@ fn handoff_retains_settled_clock_identity_and_recovered_authority_floor() -> Res
                 assert_eq!(exported["clock"]["current_pause_proven"], false);
                 if seed == ClockSeed::Settled {
                     assert!(handoff.authority_tick_floor() >= SETTLED_TICK);
-                    assert_eq!(exported["historical_completion"]["tick"], progress("progress_complete")?.tick());
+                    assert_eq!(
+                        exported["historical_completion"]["tick"],
+                        progress("progress_complete")?.tick()
+                    );
                     assert!(progress("progress_complete")?.tick() < SETTLED_TICK);
                 }
                 assert_eq!(custody(runtime)?, before);
                 let view = runtime.production_handoff_view(&c)?;
-                assert_eq!(view["production_handoff"]["clock"]["recovery"], reference["recovery"]);
+                assert_eq!(
+                    view["production_handoff"]["clock"]["recovery"],
+                    reference["recovery"]
+                );
                 assert_eq!(view["current_goal_available"], false);
                 assert_eq!(custody(runtime)?, before);
                 Ok(())
@@ -756,19 +857,31 @@ fn handoff_retains_settled_clock_identity_and_recovered_authority_floor() -> Res
 #[test]
 fn handoff_refuses_pending_unknown_and_fenced_clocks_without_changing_files() -> Result<()> {
     for (name, seed) in [
-        ("prepared", ClockSeed::Prepared), ("running", ClockSeed::Running),
-        ("unknown", ClockSeed::Unknown), ("fenced", ClockSeed::Empty),
+        ("prepared", ClockSeed::Prepared),
+        ("running", ClockSeed::Running),
+        ("unknown", ClockSeed::Unknown),
+        ("fenced", ClockSeed::Empty),
     ] {
         isolated(
             "handoff_refuses_pending_unknown_and_fenced_clocks_without_changing_files",
-            name, Original::Complete, seed, WorkshopMode::Offline,
+            name,
+            Original::Complete,
+            seed,
+            WorkshopMode::Offline,
             move |runtime| {
                 if name == "fenced" {
-                    runtime.clock.as_mut().ok_or_else(fixture_error)?.fence_advancement();
+                    runtime
+                        .clock
+                        .as_mut()
+                        .ok_or_else(fixture_error)?
+                        .fence_advancement();
                 }
                 let before = custody(runtime)?;
                 let c = runtime.context()?;
-                assert_eq!(runtime.production_handoff(&c).err().map(|e| e.code), Some(ErrorCode::EffectIndeterminate));
+                assert_eq!(
+                    runtime.production_handoff(&c).err().map(|e| e.code),
+                    Some(ErrorCode::EffectIndeterminate)
+                );
                 assert_eq!(custody(runtime)?, before);
                 let retained = runtime.failure_reference();
                 assert_eq!(retained["clock"]["verified"], false);

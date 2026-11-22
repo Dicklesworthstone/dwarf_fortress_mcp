@@ -14,9 +14,12 @@
 - Publish complete child recovery, honest historical evidence and bounded
   refusal/close responses. Require fresh production observation and existing
   current workshop/prerequisite checks before effects.
-- Add 25 configuration, actual-owner and frontend regressions plus standard CLI
-  route coverage. Existing source contracts and all 11 Workshop inventory
-  negatives pass; see Implementation Status for final Rust execution evidence.
+- Pass all 32 new focused component regressions across both increments plus 19
+  existing combined-configuration cases (51 total, zero failures), using actual
+  owner/facade bodies, real private custody and exact locked dependencies.
+  Correct the fixture's opaque native-summary construction through its public
+  API. Full-adapter metadata checking and source contracts pass; real runtime
+  scheduling, modern CLI/stdio and live-game qualification remain excluded.
 
 ## Unreleased — Export completed original workshop custody
 
@@ -28,9 +31,9 @@
   separately from the moving authority floor; require fresh production checks.
 - Preserve every validated recovered clock tick before target binding so an
   expired or failed reopen cannot lower subsequent authority checks.
-- Add actual-runtime custody and public routing regression sources plus source
-  inventory negatives. Execution and formatting remain pending because the
-  execution host is unavailable; no native or admission qualification is claimed.
+- Execute all six new actual-runtime custody cases and the public Query routing
+  case within the documented component boundary. Source inventory and all 11
+  refusal checks pass; no real-game, full MCP or admission qualification is claimed.
 
 ## Unreleased — Verify the original construction and work order
 
