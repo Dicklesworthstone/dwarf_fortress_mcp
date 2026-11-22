@@ -1,5 +1,42 @@
 # Implementation Status
 
+## Unreleased — Discover and inspect retained checkpoints after recovery
+
+Laboratory sessions now expose `checkpoint_catalog`, and checkpoint creation
+links its exact detail. The existing session resource template serves bounded
+`checkpoints` discovery, catalog-pinned continuation pages and
+`checkpoint-{id}` inspection. A cold agent can recover the IDs and exact retained
+labels needed to inspect and choose a restore point without the old transcript.
+
+The adapter retains labels at checkpoint creation and imports exact durable
+labels during reopening. Known in-memory labels cannot be changed by re-adopting
+an ID. Older unlabeled imports remain unknown; existing exact empty durable
+labels retain their original representation. Borrowed ordered metadata avoids
+copying saved worlds. Exact state resources can read recovered checkpoint worlds
+that predate this session's history, under a bounded checkpoint-index lookup.
+
+Current whole-fortress Observe authority and durable ownership precede existence
+lookup. Complete metadata work, elapsed time and escaped output are bounded;
+pages keep whole rows and bind the full catalog plus current anchor. Historical
+source anchors, metadata-only absence scope and unknown storage durability stay
+explicit. Inspection never restores, advances the clock, consumes request IDs,
+changes objective/replay history or publishes durable state. The detail's
+structured restore request still needs the ordinary guarded Restore authority
+and new-epoch checks.
+
+Six adapter and seven actual resource/handler regression sources cover ordering,
+label custody and conflict atomicity, source validation and capacity, passive
+inspection, pagination and catalog gaps, current authority, work/output/deadline
+bounds and real durable create/reopen/discover/preview/restore paths. The existing
+resource-discovery expectation now includes the new view. Independent source
+review completed. Compilation, Rust tests, formatting and full modern-stdio
+qualification remain unexecuted after loss of the execution host; no native
+checkpoint, live compatibility or admission claim is added.
+
+Owner: `dfmcp-reality-wiring-proof-4bf.11`, which remains open for its wider
+resource scope and execution evidence. See
+`docs/RESOURCE_URIS.md#discovering-and-inspecting-recovery-points`.
+
 ## Unreleased — Bound inspection and graph queries by their complete source
 
 Exact `inspect` reads and `traverse`/`dependencies` analysis now share the

@@ -34,6 +34,7 @@ use crate::server::{
 };
 use dfmcp_core::{Capability, Digest32, EntityId, RiskTier, SessionId, StateAnchor};
 
+pub(crate) mod checkpoints;
 pub(crate) mod goals;
 pub(crate) mod plans;
 pub(crate) mod state;
@@ -44,7 +45,7 @@ pub(crate) mod state;
 /// `view` capture keeps the documented URIs exactly.
 const SESSION_VIEW_TEMPLATE: &str = "df://session/{session_id}/{view}";
 /// Views served under `df://session/{session_id}/{view}`.
-pub const SESSION_VIEWS: [&str; 8] = [
+pub const SESSION_VIEWS: [&str; 9] = [
     "summary",
     "capabilities",
     "handoff",
@@ -53,6 +54,7 @@ pub const SESSION_VIEWS: [&str; 8] = [
     "tasks",
     "state",
     "plans",
+    "checkpoints",
 ];
 const DOCTOR_BUNDLE_TEMPLATE: &str = "df://doctor/{session_id}";
 
@@ -791,7 +793,9 @@ const SESSION_VIEW_DESCRIPTION: &str = "Session views: summary (bounded snapshot
      plan-{plan_digest}~{object_digest}~archive~{offset} (lossless typed archive byte page; \
      plan views require current whole-fortress observe and query), goal-{plan_digest} \
      (retained original goal source and historical custody, with exact source pages; \
-     requires current whole-fortress observe and query)";
+     requires current whole-fortress observe and query), checkpoints (retained laboratory recovery metadata), \
+     checkpoints-{catalog_digest}~{offset} (exact catalog continuation), checkpoint-{checkpoint_id} \
+     (one retained checkpoint and its original state; current whole-fortress observe required; no restore authority)";
 
 impl ResourceHandler for SessionViewResource {
     fn definition(&self) -> Resource {
@@ -844,6 +848,12 @@ impl ResourceHandler for SessionViewResource {
             "tasks" => session_tasks(raw, uri, 0),
             "state" => state::read(raw, uri, view),
             page if page.starts_with("state-") => state::read(raw, uri, page),
+            "checkpoints" => checkpoints::read(raw, uri, view),
+            checkpoint
+                if checkpoint.starts_with("checkpoint-") || checkpoint.starts_with("checkpoints-") =>
+            {
+                checkpoints::read(raw, uri, checkpoint)
+            }
             "plans" => plans::read(raw, uri, view),
             plan if plan.starts_with("plan-") || plan.starts_with("plans-") => {
                 plans::read(raw, uri, plan)
@@ -1188,7 +1198,8 @@ mod tests {
                 "anchor",
                 "tasks",
                 "state",
-                "plans"
+                "plans",
+                "checkpoints"
             ]
         );
         let doctor = DoctorBundleResource.template().expect("doctor template");

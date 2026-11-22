@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased — Discover retained checkpoint IDs and saved worlds
+
+- Add bounded session checkpoint catalogs, exact checkpoint detail and discovery
+  links from session opening and checkpoint creation.
+- Preserve exact retained labels through durable reopening, keep unknown
+  historical labels explicit, and reject in-memory label/content conflicts.
+- Resolve exact saved-world resource links after recovery without copying
+  checkpoints into recent history or granting current observation authority.
+- Gate existence by current Observe authority and durable ownership; bind
+  pagination to the whole catalog and current anchor, preserve complete metadata
+  and separate restore authorization from passive inspection.
+- Add six adapter and seven resource/handler regressions, including durable
+  reopen/discover/preview/restore. Source review completed; Rust execution and
+  formatting remain unavailable. Storage durability and live admission are
+  explicitly not certified by these resources.
+
 ## Unreleased — Bound exact inspection and graph analysis before hashing
 
 - Apply complete canonical source-byte, record, nesting and work admission to

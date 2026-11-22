@@ -997,6 +997,9 @@ df://session/{id}/entity-{entity_id}~{generation}~{anchor_digest}
 df://session/{id}/state
 df://session/{id}/state-{state_hash}
 df://session/{id}/state-{state_hash}~{section}~{offset}
+df://session/{id}/checkpoints
+df://session/{id}/checkpoints-{catalog_digest}~{offset}
+df://session/{id}/checkpoint-{checkpoint_id}
 df://session/{id}/plans
 df://session/{id}/plans-{catalog_digest}~{offset}
 df://session/{id}/plan-{plan_digest}~{object_digest}
@@ -1034,6 +1037,15 @@ fallback. The resource enforces the negotiated byte and token bounds including
 the resource wrapper; an oversized record is refused without silent field loss.
 Inspection preserves semantic request IDs and does not certify objectives,
 retain versions or run the durable-persistence postlude, including after denial.
+
+Retained laboratory checkpoints are discoverable through `checkpoints` and its
+catalog-pinned pages. Exact detail preserves retained labels, checkpoint IDs,
+source anchors and saved-world links after durable reopening. Current
+whole-fortress Observe authority and the durable-owner fence gate every read;
+complete metadata work, page output and elapsed time are bounded. A detail's
+structured restore request grants no authority, and persistence remains
+unverified by metadata inspection. The ordinary Restore tool still enforces its
+separate guarded authority and new-epoch semantics.
 
 Normal prepared plans also have a session-bound catalog, original-plan manifest,
 readable step pages and lossless DFMPAR01 archive pages, independently of MCP Tasks. Current

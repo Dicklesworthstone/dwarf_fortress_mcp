@@ -459,13 +459,37 @@ pub(crate) fn retained_resource_snapshot<'a>(
     match hash {
         None => Ok(current),
         Some(hash) if current.state_hash.to_hex() == hash => Ok(current),
-        Some(hash) => session
-            .history
-            .find_hex(hash)
-            .and_then(|digest| session.history.get(&digest))
-            .ok_or_else(|| {
-                DfmcpError::new(ErrorCode::StaleAnchor, not_retained_reason(session, hash))
-            }),
+        Some(hash) => {
+            if let Some(snapshot) = session
+                .history
+                .find_hex(hash)
+                .and_then(|digest| session.history.get(&digest))
+            {
+                return Ok(snapshot);
+            }
+            // Recovered checkpoints retain exact worlds even when this session
+            // never observed their old epoch. Do not clone them into history or
+            // reinterpret their historical facts as current observations.
+            if session.adapter.checkpoint_count() as u64 > u64::from(session.budget.max_entities) {
+                return Err(DfmcpError::new(
+                    ErrorCode::BudgetExceeded,
+                    "checkpoint version lookup exceeds the negotiated source record budget",
+                ));
+            }
+            let requested = Digest32::from_hex(hash)
+                .filter(|digest| digest.to_hex() == hash);
+            session
+                .adapter
+                .checkpoint_entries()
+                .find_map(|(_, snapshot, _)| {
+                    (Some(snapshot.state_hash) == requested
+                        && snapshot.fortress_id == current.fortress_id)
+                        .then_some(snapshot)
+                })
+                .ok_or_else(|| {
+                    DfmcpError::new(ErrorCode::StaleAnchor, not_retained_reason(session, hash))
+                })
+        }
     }
 }
 
@@ -1740,9 +1764,10 @@ fn load_durable_fortress(
         drop(snapshot);
         let mut checkpoints = 0;
         for checkpoint in store.checkpoints(fortress_id).cloned().collect::<Vec<_>>() {
-            adapter.adopt_checkpoint(
+            adapter.adopt_checkpoint_labeled(
                 checkpoint.checkpoint_id,
                 store.load_snapshot(checkpoint.state_hash)?,
+                &checkpoint.label,
             )?;
             checkpoints += 1;
         }
@@ -3285,6 +3310,7 @@ pub(crate) fn open_session_in_scenario(
         "fortress_loaded": true,
         "fortress_id": format!("{fortress_id}"),
         "granted_capabilities": granted_strings,
+        "checkpoint_catalog": format!("df://session/{session_id}/checkpoints"),
         "untracked_work": untracked,
         "objectives": goal_status,
         "negotiation": negotiation.to_json(),
@@ -7297,6 +7323,8 @@ pub fn fortress_checkpoint(session_id: Option<String>, label: Option<String>) ->
                         "ok": true,
                         "session_id": format!("{}", guard.session_id),
                         "checkpoint_id": format!("{}", receipt.checkpoint_id),
+                        "resource_uri": format!("df://session/{}/checkpoint-{}", guard.session_id, receipt.checkpoint_id),
+                        "checkpoint_catalog": format!("df://session/{}/checkpoints", guard.session_id),
                         "label": receipt.label,
                         "content_digest": receipt.content_digest.to_string(),
                         "durable": durable,

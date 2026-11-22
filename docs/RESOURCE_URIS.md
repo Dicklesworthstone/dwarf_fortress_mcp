@@ -54,6 +54,9 @@ continuity metadata immutable.
 | `state` | Current immutable-world manifest, including section counts and exact-version page URIs |
 | `state-{state_hash}` | Manifest of precisely that retained world version |
 | `state-{state_hash}~{section}~{offset}` | Bounded canonical records from precisely that retained version |
+| `checkpoints` | Retained checkpoint IDs, exact retained labels, source anchors and inspection links |
+| `checkpoints-{catalog_digest}~{offset}` | Bounded continuation of the exact checkpoint catalog |
+| `checkpoint-{checkpoint_id}` | One exact retained checkpoint and a separately authorized restore request |
 | `plans` | Pending and retained original prepared-plan catalog |
 | `plans-{catalog_digest}~{offset}` | Continuation bound to the same complete catalog and current anchor |
 | `plan-{plan_digest}~{object_digest}` | Exact original prepared-plan manifest |
@@ -116,6 +119,63 @@ they are not fresh action preconditions. Re-read current state before planning
 an effect. Active-work coverage is explicitly omitted from a state page; use
 the handoff reference to inspect it. Neither an empty active-work collection
 nor a state page constitutes proof that no work is pending.
+
+## Discovering and inspecting recovery points
+
+A new or resumed laboratory session returns `checkpoint_catalog`, pointing to
+`df://session/{session_id}/checkpoints`. Checkpoint creation also returns its
+exact `resource_uri`. A fresh agent can therefore discover old checkpoint IDs
+and retained labels without recovering them from the previous conversation.
+
+The `dfmcp.lab-checkpoint-catalog/1` result lists retained checkpoints in
+identifier order. Each row contains the exact 32-digit lowercase hexadecimal
+`checkpoint_id`, original `label` when known, `content_digest`, original
+`source_anchor` and complete source version tuple, detail `uri`, and immutable
+`state` URI. An older unlabeled import reports a null label and
+`label_status: "unavailable"`; it does not invent a historical name. An exact
+empty label in the existing durable format remains a known empty label.
+Imported labels describe the exact retained durable record; resource inspection
+does not establish an independent history of metadata changes.
+
+Follow `next` until it is null. Pages contain at most 25 intact rows and shrink
+to the complete escaped response allowance. Their digest binds all checkpoint
+metadata, the inspecting session and the current complete anchor. Creating
+another checkpoint or changing the current world invalidates a continuation
+with `cursor_gap`; restart from `checkpoints` instead of joining generations.
+The complete catalog record and metadata-byte work must fit the source
+allowance even when the returned page is small. Snapshot contents are not
+scanned or copied by catalog discovery.
+
+Read a row's detail URI for `dfmcp.lab-checkpoint/1`. It reports the checkpoint's
+original world anchor separately from the current authorized anchor and marks
+historical continuity explicitly. The `state` link uses the existing immutable
+state manifest and pages, including when durable reopening restored checkpoint
+custody without ever observing its old epoch in this session. Exact checkpoint
+lookup does not clone old worlds into recent history or turn historical facts
+into current mutation preconditions. Resolving a saved-world hash that is absent
+from recent history bounds the checkpoint-index scan by the session's record
+allowance; existing state-page source and output limits still apply.
+
+Both catalog and detail require current whole-fortress Observe authority and a
+valid durable-owner fence before disclosing even checkpoint existence. Reads
+are passive: no clock, restore, request identity, action, objective history,
+replay or persistence changes. References retain the existing private zero-TTL
+cache behavior. Catalog completeness and empty-catalog absence apply only to
+the current fortress's retained **laboratory checkpoint metadata**, never to
+native game saves, unfinished work or complete world coverage.
+
+The detail includes a structured `restore` request with the exact session and
+checkpoint ID. This is navigation, not authorization. Calling the existing
+`fortress.restore` still requires current guarded Restore authority and all
+ordinary ownership, shared-member and recovery checks. Restoration creates a
+new observation epoch and invalidates prior live handles. Inspect the source
+world and current handoff before making that explicit choice.
+
+`durability.durable` remains null with
+`status: "not_verified_by_resource"`. Retained adapter metadata alone cannot
+prove that a particular checkpoint publication reached durable storage. This
+resource does not open, repair or certify the persistent store. Original
+checkpoint receipts and durable recovery remain separate evidence.
 
 ## Inspecting an original prepared plan
 
@@ -377,8 +437,9 @@ consumer path. Session `plans` now supplies exact original prepared-plan discove
 retrieval. Session `goal` detail/source pages provide independently bounded
 original requests and historical custody. Session `anchor`, `handoff`, and task evidence provide useful views of
 identity and active work, but do not claim implementation of
-every planned independently addressable receipt, checkpoint or cognition
-resource. Knowledge and memory URIs still have no registered resource consumer.
+every planned independently addressable receipt or cognition resource.
+Session checkpoint catalog/detail now supplies passive recovery-point discovery;
+fortress-only checkpoint URIs remain unregistered. Knowledge and memory URIs still have no registered resource consumer.
 The `.11` roadmap bead consequently remains open.
 
 ## Verification

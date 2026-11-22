@@ -267,6 +267,13 @@ dwarf-fortress-mcp evaluate <scenario> <policy> <ticks>  # score idle | follow_r
 
 Laboratory results are semantics and calibration, never Dwarf Fortress evidence.
 
+A resumed agent can [discover and inspect retained checkpoints](docs/RESOURCE_URIS.md#discovering-and-inspecting-recovery-points)
+through the session's `checkpoint_catalog` link. Checkpoint IDs, retained labels and
+saved-world anchors survive durable reopening, and exact state links let the
+agent inspect a recovery point before explicitly requesting restore. Resource
+inspection is read-only and requires current Observe authority; it does not
+certify storage durability or grant Restore authority.
+
 Structured queries can now model [dependency schedules with shared capacity](docs/DEPENDENCY_SCHEDULING.md)
 and [weighted routes over observed relations](docs/WEIGHTED_ROUTES.md). Schedules
 report contention delays and slot assignments alongside their dependency-only

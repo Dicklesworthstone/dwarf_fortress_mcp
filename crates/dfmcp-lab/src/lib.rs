@@ -31,6 +31,8 @@ pub use recovered_effect_drain::{RecoveredWorkDrainReceipt, RecoveredWorkRef};
 #[path = "civilian_release_tests.rs"]
 mod civilian_release_tests;
 #[cfg(test)]
+mod checkpoint_catalog_tests;
+#[cfg(test)]
 mod compensation_tests;
 #[cfg(test)]
 mod effect_drain_tests;
@@ -140,6 +142,9 @@ pub struct MemoryAdapter {
     actions: BTreeMap<ActionId, LabAction>,
     action_by_step: BTreeMap<(PlanId, StepId), ActionId>,
     checkpoints: BTreeMap<CheckpointId, WorldSnapshot>,
+    /// Original labels are inspection metadata; they never grant restore authority.
+    /// Older unlabeled adoption leaves absence explicit instead of inventing a label.
+    checkpoint_labels: BTreeMap<CheckpointId, String>,
     commits: BTreeMap<PlanId, CommitReceipt>,
     transcript: VecDeque<LabEvent>,
     transcript_truncated: bool,
@@ -189,6 +194,7 @@ impl MemoryAdapter {
             actions: BTreeMap::new(),
             action_by_step: BTreeMap::new(),
             checkpoints: BTreeMap::new(),
+            checkpoint_labels: BTreeMap::new(),
             commits: BTreeMap::new(),
             transcript: VecDeque::new(),
             transcript_truncated: false,
@@ -236,6 +242,60 @@ impl MemoryAdapter {
     #[must_use]
     pub fn checkpoint_snapshot(&self, checkpoint_id: CheckpointId) -> Option<&WorldSnapshot> {
         self.checkpoints.get(&checkpoint_id)
+    }
+
+    /// Number of exact retained checkpoints, without scanning or copying worlds.
+    #[must_use]
+    pub fn checkpoint_count(&self) -> usize {
+        self.checkpoints.len()
+    }
+
+    /// Original label when it was retained. Unlabeled historical adoption stays unknown.
+    #[must_use]
+    pub fn checkpoint_label(&self, checkpoint_id: CheckpointId) -> Option<&str> {
+        self.checkpoint_labels.get(&checkpoint_id).map(String::as_str)
+    }
+
+    /// Borrow exact checkpoint identities, worlds and known labels in identifier order.
+    /// Inspection does not restore, poll work, record observations or clone snapshots.
+    pub fn checkpoint_entries(
+        &self,
+    ) -> impl Iterator<Item = (CheckpointId, &WorldSnapshot, Option<&str>)> + '_ {
+        self.checkpoints
+            .iter()
+            .map(|(id, snapshot)| (*id, snapshot, self.checkpoint_label(*id)))
+    }
+
+    /// Adopt a durable checkpoint and its exact recorded label atomically.
+    /// Empty historical labels are valid in the existing durable format. A known
+    /// label is immutable; importing the same world cannot rename a checkpoint.
+    pub fn adopt_checkpoint_labeled(
+        &mut self,
+        checkpoint_id: CheckpointId,
+        snapshot: WorldSnapshot,
+        label: &str,
+    ) -> Result<()> {
+        if label.len() > 256 || label.chars().any(char::is_control) {
+            return Err(DfmcpError::new(
+                ErrorCode::InvalidRequest,
+                "adopted checkpoint label exceeds its bound or contains control characters",
+            ));
+        }
+        if self
+            .checkpoint_labels
+            .get(&checkpoint_id)
+            .is_some_and(|known| known != label)
+        {
+            return Err(DfmcpError::new(
+                ErrorCode::Conflict,
+                "checkpoint identifier already names a different label",
+            ));
+        }
+        // The existing admission checks identity, fortress, seal, collision and
+        // capacity before any new metadata becomes visible.
+        self.adopt_checkpoint(checkpoint_id, snapshot)?;
+        self.checkpoint_labels.insert(checkpoint_id, label.to_owned());
+        Ok(())
     }
 
     /// State hashes of every checkpoint this adapter can restore.
@@ -686,6 +746,7 @@ impl MemoryAdapter {
         }
         self.checkpoints
             .insert(checkpoint_id, self.snapshot.clone());
+        self.checkpoint_labels.insert(checkpoint_id, label.to_owned());
         let evidence = evidence(
             self.snapshot.anchor(),
             EvidenceKind::Checkpoint,
