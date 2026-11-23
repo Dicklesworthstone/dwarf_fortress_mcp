@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased — Clockless portfolio planning after reopening
+
+- Allow the first multi-order stock portfolio after reopening native insertion
+  custody when its production and inventory clocks are unconfigured.
+- Preserve configured-clock initialization/identity guards and reject every
+  existing unconfigured clock file without mutation.
+- Add subprocess coverage for new/reopened owners, all additional order slots,
+  Query-only absence checks and zero native contact. Source-reviewed and
+  latest-nightly formatted; execution remains pending.
+
 ## Unreleased — Complete already-satisfied stock portfolios through MCP
 
 A wholly satisfied `stock_targets` request now retains a typed no-work portfolio

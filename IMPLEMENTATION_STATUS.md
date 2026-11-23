@@ -1,5 +1,24 @@
 # Implementation Status
 
+## Unreleased — Resume clockless portfolios after reopening native custody
+
+A combined production owner reopened before its first original can now publish
+a stock portfolio with multiple finite orders when neither production clock is
+configured. Checking an absent clock no longer incorrectly requires the
+insertion owner's initialization mode to match the new portfolio's mode.
+
+Configured clock creation and recovery retain the exact initialization and
+external-journal identity checks. Unconfigured clocks still require no retained
+identity, and every fixed clock path must be absent. Existing unknown clock
+files refuse without alteration; this change creates no clock authority.
+
+A subprocess regression covers fresh and reopened clockless owners, both
+configured clock modes, all three additional slots, omitted existing custody,
+Query-only scope and absence of native contact. Source review, latest-nightly
+rustfmt parsing/formatting and patch-whitespace checks pass. The new Rust test
+has not yet executed; full MCP and live-game qualification are not claimed.
+The broader stock-target bead remains in progress: `df-native-stock-target-3m9`.
+
 ## Unreleased — Complete already-satisfied stock portfolios through MCP
 
 A wholly satisfied `stock_targets` request now retains a typed no-work portfolio

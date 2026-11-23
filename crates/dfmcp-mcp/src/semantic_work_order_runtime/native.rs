@@ -631,9 +631,13 @@ impl NativeShell {
         configured: bool,
     ) -> Result<()> {
         self.config.current()?;
+        // Without a configured clock, this is only an absence check; a
+        // portfolio can publish its first original after the native insertion
+        // owner reopened. Actual clock creation/recovery still requires the
+        // original opening mode and its exact externally retained identity.
         if !(2..=4).contains(&step)
-            || initialize != self.config.initialize
-            || (configured && initialize == expected.is_some())
+            || (configured
+                && (initialize != self.config.initialize || initialize == expected.is_some()))
             || (!configured && expected.is_some())
         {
             return Err(denied(
@@ -1221,6 +1225,243 @@ mod runtime_checkpoint_tests {
                 .is_err(),
             "a combined parent cannot import standalone goal recovery"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn first_clockless_portfolio_after_reopen_checks_absence_without_clock_authority() -> Result<()>
+    {
+        use dfmcp_core::{CapabilityGrant, CapabilityScope};
+        const CHILD: &str = "SEMANTIC_PORTFOLIO_ABSENCE_TEST_CASE";
+        const CHECKED: &str = "portfolio-clock-absence-child-checked";
+        let fixture_error = |_| invalid("portfolio clock absence fixture failed");
+        if let Ok(case) = std::env::var(CHILD) {
+            let config = Config::from_environment()?;
+            let directory = config.directory.clone();
+            assert!(!directory.exists());
+            let c = OperationContext {
+                session_id: SessionId::new(907),
+                request_id: RequestId::new(908),
+                anchor: StateAnchor {
+                    fortress_id: config.sources.fortress(),
+                    cursor: ObservationCursor::ORIGIN,
+                    tick: GameTick(0),
+                    state_hash: Digest32::ZERO,
+                },
+                budget: WorkBudget {
+                    max_bytes: 16 * MIB,
+                    max_entities: 4096,
+                    max_wall_millis: 5000,
+                    max_game_ticks: 0,
+                    ..WorkBudget::default()
+                },
+                grants: vec![CapabilityGrant {
+                    capability: Capability::Query,
+                    scope: CapabilityScope {
+                        fortress_id: Some(config.sources.fortress()),
+                        ..CapabilityScope::default()
+                    },
+                    max_risk: RiskTier::ReadOnly,
+                    expires_at_tick: None,
+                    remaining_uses: None,
+                }],
+                cancellation_requested: false,
+            };
+            let configured = config.clock.is_some();
+            let initializing = config.initialize;
+            let shell = NativeShell {
+                config: Arc::new(config),
+            };
+            let retained = Digest32::of_bytes(b"retained original portfolio clock");
+            if !configured {
+                // In particular, reopened native owners have initialize=false
+                // while the first newly compiled portfolio requests true.
+                for slot in 2..=4 {
+                    for initialize in [false, true] {
+                        assert!(
+                            shell
+                                .open_portfolio_clock(slot, Mode::Offline, initialize, None, &c)?
+                                .is_none()
+                        );
+                        assert!(
+                            shell
+                                .open_portfolio_inventory_clock(
+                                    slot,
+                                    Mode::Offline,
+                                    initialize,
+                                    None,
+                                    &c
+                                )?
+                                .is_none()
+                        );
+                        assert!(
+                            shell
+                                .open_portfolio_clock(
+                                    slot,
+                                    Mode::Offline,
+                                    initialize,
+                                    Some(retained),
+                                    &c
+                                )
+                                .is_err()
+                        );
+                        assert!(
+                            shell
+                                .open_portfolio_inventory_clock(
+                                    slot,
+                                    Mode::Offline,
+                                    initialize,
+                                    Some(retained),
+                                    &c
+                                )
+                                .is_err()
+                        );
+                    }
+                }
+                assert!(!directory.exists(), "absence checks created custody");
+                std::fs::create_dir(&directory).map_err(fixture_error)?;
+                for slot in 2..=4 {
+                    for suffix in ["clock.journal", "inventory-clock.journal"] {
+                        let path = directory.join(format!("portfolio-{slot}-{suffix}"));
+                        let bytes = b"unknown retained clock bytes must never be overwritten";
+                        std::fs::write(&path, bytes).map_err(fixture_error)?;
+                        for initialize in [false, true] {
+                            let rejected = if suffix == "clock.journal" {
+                                shell
+                                    .open_portfolio_clock(slot, Mode::Offline, initialize, None, &c)
+                                    .is_err()
+                            } else {
+                                shell
+                                    .open_portfolio_inventory_clock(
+                                        slot,
+                                        Mode::Offline,
+                                        initialize,
+                                        None,
+                                        &c,
+                                    )
+                                    .is_err()
+                            };
+                            assert!(rejected, "{case}/{slot}/{suffix}/{initialize}");
+                            assert_eq!(std::fs::read(&path).map_err(fixture_error)?, bytes);
+                        }
+                        assert!(shell.require_absent_portfolio_clocks(2).is_err());
+                        std::fs::remove_file(path).map_err(fixture_error)?;
+                    }
+                }
+                shell.require_absent_portfolio_clocks(2)?;
+                assert_eq!(
+                    std::fs::read_dir(&directory)
+                        .map_err(fixture_error)?
+                        .count(),
+                    0
+                );
+                std::fs::remove_dir(&directory).map_err(fixture_error)?;
+            } else {
+                // Configured clocks retain all original initialization and
+                // external identity guards, independently for both families.
+                for slot in 2..=4 {
+                    shell.portfolio_slot(
+                        slot,
+                        initializing,
+                        (!initializing).then_some(retained),
+                        true,
+                    )?;
+                    for (initialize, expected) in [
+                        (!initializing, None),
+                        (!initializing, Some(retained)),
+                        (initializing, initializing.then_some(retained)),
+                    ] {
+                        assert!(
+                            shell
+                                .open_portfolio_clock(slot, Mode::Offline, initialize, expected, &c)
+                                .is_err()
+                        );
+                        assert!(
+                            shell
+                                .open_portfolio_inventory_clock(
+                                    slot,
+                                    Mode::Offline,
+                                    initialize,
+                                    expected,
+                                    &c
+                                )
+                                .is_err()
+                        );
+                    }
+                }
+            }
+            for invalid_slot in [0, 1, 5, u32::MAX] {
+                assert!(
+                    shell
+                        .open_portfolio_clock(invalid_slot, Mode::Offline, true, None, &c)
+                        .is_err()
+                );
+                assert!(
+                    shell
+                        .open_portfolio_inventory_clock(invalid_slot, Mode::Offline, true, None, &c)
+                        .is_err()
+                );
+            }
+            assert!(
+                !directory.exists(),
+                "invalid or absent clocks created custody"
+            );
+            println!("{CHECKED}");
+            return Ok(());
+        }
+
+        let listener = TcpListener::bind("127.0.0.1:0").map_err(fixture_error)?;
+        listener.set_nonblocking(true).map_err(fixture_error)?;
+        let endpoint = listener.local_addr().map_err(fixture_error)?;
+        let root = std::env::temp_dir().join(format!(
+            "dfmcp-portfolio-clock-absence-{}-{}",
+            std::process::id(),
+            endpoint.port()
+        ));
+        let full_name = format!(
+            "{}::first_clockless_portfolio_after_reopen_checks_absence_without_clock_authority",
+            module_path!()
+        );
+        let (_, test_name) = full_name
+            .split_once("::")
+            .ok_or_else(|| invalid("portfolio clock absence test name"))?;
+        for (case, initialize, configured) in [
+            ("clockless-reopen", false, false),
+            ("clockless-new", true, false),
+            ("configured-reopen", false, true),
+            ("configured-new", true, true),
+        ] {
+            let mut raw = combined_clocks_config();
+            raw["directory"] = json!(root.with_extension(case));
+            raw["endpoint"] = json!(endpoint.to_string());
+            raw["initialize"] = json!(initialize);
+            if !configured {
+                raw["clock"] = Value::Null;
+                raw["inventory_clock"] = Value::Null;
+            } else if !initialize {
+                let retained = Digest32::of_bytes(b"retained original portfolio clock").to_hex();
+                raw["clock"]["journal_id"] = json!(retained);
+                raw["inventory_clock"]["journal_id"] = json!(retained);
+            }
+            let output =
+                std::process::Command::new(std::env::current_exe().map_err(fixture_error)?)
+                    .args(["--exact", test_name, "--nocapture"])
+                    .env_clear()
+                    .env(OPT_IN, "1")
+                    .env(CONFIG, raw.to_string())
+                    .env(CHILD, case)
+                    .output()
+                    .map_err(fixture_error)?;
+            assert!(
+                output.status.success(),
+                "portfolio absence case {case}: {}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(String::from_utf8_lossy(&output.stdout).contains(CHECKED));
+            assert!(matches!(listener.accept(),
+                Err(cause) if cause.kind() == std::io::ErrorKind::WouldBlock));
+        }
         Ok(())
     }
 
