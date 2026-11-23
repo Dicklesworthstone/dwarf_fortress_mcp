@@ -10,6 +10,7 @@ const PHASE: &str = "PROJECT_PUBLICATION_RUNTIME_PHASE";
 const CASE: &str = "PROJECT_PUBLICATION_RUNTIME_CASE";
 const INPUT: &str = "PROJECT_PUBLICATION_RUNTIME_INPUT";
 const OUTPUT: &str = "PROJECT_PUBLICATION_RUNTIME_OUTPUT";
+const STAGE: &str = "PROJECT_PUBLICATION_RUNTIME_STAGE";
 const ORIGINAL_FILES: &[&str] = &[
     "original.plan",
     "original.citizens",
@@ -34,6 +35,157 @@ fn output(value: &Value) -> TestResult {
     Ok(())
 }
 
+fn custody_bytes() -> TestResult<std::collections::BTreeMap<std::path::PathBuf, Vec<u8>>> {
+    let mut files = std::collections::BTreeMap::new();
+    for name in [
+        "DFMCP_COMBINED_PRODUCTION_CONFIG",
+        "DFMCP_SEMANTIC_WORKFORCE_CONFIG",
+        "DFMCP_SEMANTIC_WORK_ORDER_CONFIG",
+    ] {
+        let config: Value = serde_json::from_str(&std::env::var(name)?)?;
+        let directory = config["directory"]
+            .as_str()
+            .ok_or("missing test custody directory")?;
+        for entry in std::fs::read_dir(directory)? {
+            let entry = entry?;
+            if entry.file_type()?.is_file() {
+                files.insert(entry.path(), std::fs::read(entry.path())?);
+            }
+        }
+    }
+    Ok(files)
+}
+
+fn stage(name: &str) -> TestResult {
+    std::fs::write(std::env::var(STAGE)?, name)?;
+    Ok(())
+}
+
+fn no_work_parent_floor(runtime: &mut Runtime, goal: &ProjectStockGoal) -> TestResult {
+    let start_tick = runtime.anchor.tick.get();
+    let original = runtime
+        .stock_target_no_work
+        .as_ref()
+        .ok_or("missing stock watch")?
+        .request
+        .clone();
+    let witness = runtime
+        .stock_target_no_work
+        .as_ref()
+        .ok_or("missing stock watch")?
+        .monitor
+        .witness();
+    for (phase, proved) in [("first_sample", false), ("second_sample", true)] {
+        stage(phase)?;
+        let c = runtime.context(false)?;
+        let sample = runtime.wait(&c)?.value;
+        assert_eq!(sample["original_goal_proven"], proved);
+        assert_eq!(runtime.project_status(goal)?.original_goal_proven, proved);
+    }
+    let anchor = runtime.anchor;
+    let files = custody_bytes()?;
+    let floor = start_tick + 20;
+    runtime.retain_project_authority_tick(floor)?;
+    assert_eq!(
+        runtime.anchor, anchor,
+        "a rejection floor is not an observation"
+    );
+    assert_eq!(runtime.authority_tick_floor().get(), floor);
+    assert!(!runtime.project_status(goal)?.original_goal_proven);
+    let retained = runtime
+        .stock_target_no_work
+        .as_ref()
+        .ok_or("lost original stock watch")?;
+    assert_eq!(retained.request, original);
+    assert_eq!(retained.monitor.witness(), witness);
+    assert!(retained.monitor.latest().is_none());
+    assert!(runtime.basis.is_none());
+    assert_eq!(
+        files,
+        custody_bytes()?,
+        "raising a floor wrote private custody"
+    );
+    assert!(runtime.retain_project_authority_tick(u64::MAX).is_err());
+    assert_eq!(runtime.authority_tick_floor().get(), floor);
+
+    // The peer remains at the last successful tick. It must not be accepted
+    // beneath the newer parent floor even though its stock is still sufficient.
+    let c = runtime.context(false)?;
+    assert!(runtime.wait(&c).is_err());
+    assert_eq!(runtime.anchor, anchor);
+    assert_eq!(runtime.authority_tick_floor().get(), floor);
+    assert!(!runtime.project_status(goal)?.original_goal_proven);
+    assert_eq!(files, custody_bytes()?);
+
+    stage("at_parent_floor")?;
+    let c = runtime.context(false)?;
+    let current = runtime.wait(&c)?.value;
+    assert_eq!(current["original_goal_proven"], true);
+    assert_eq!(runtime.anchor.tick.get(), floor);
+    assert_eq!(
+        current["no_work_stock_goal"]["sample"]["achieved_at_tick"],
+        start_tick + 10
+    );
+    assert_eq!(
+        current["no_work_stock_goal"]["deadline_tick"],
+        goal.deadline_tick
+    );
+    let sample = runtime.no_work_goal_json();
+    runtime.retain_project_authority_tick(floor)?;
+    runtime.retain_project_authority_tick(start_tick)?;
+    assert_eq!(
+        runtime.no_work_goal_json(),
+        sample,
+        "an equal or older floor interrupted current proof"
+    );
+    assert_eq!(runtime.authority_tick_floor().get(), floor);
+    assert_eq!(files, custody_bytes()?);
+    assert!(runtime.original.is_none());
+    assert!(runtime.frontier.is_none());
+    Ok(())
+}
+
+fn prepared_parent_floor(runtime: &mut Runtime) -> TestResult {
+    let original = runtime.original.clone().ok_or("missing original")?;
+    let c = runtime.context(false)?;
+    let prepared = runtime.prepare_next(original.digest, &c)?.value;
+    let seal = workforce::digest(
+        prepared["review"]["paired_seal"]
+            .as_str()
+            .ok_or("missing review")?,
+    )?;
+    let floor = runtime.parent_authority_tick_floor();
+    let anchor = runtime.anchor;
+    let files = custody_bytes()?;
+    runtime.retain_project_authority_tick(floor)?;
+    runtime.retain_project_authority_tick(floor.saturating_sub(1))?;
+    let c = runtime.context(false)?;
+    assert_eq!(runtime.inspect(&c)?.value["review"], prepared["review"]);
+    runtime.retain_project_authority_tick(floor + 1)?;
+    assert_eq!(runtime.anchor, anchor);
+    assert_eq!(runtime.original.as_ref(), Some(&original));
+    assert!(
+        runtime.basis.is_some(),
+        "original citizen identity must remain available"
+    );
+    assert_eq!(files, custody_bytes()?);
+    let c = runtime.context(false)?;
+    let inspected = runtime.inspect(&c)?.value;
+    assert!(inspected["review"].is_null());
+    assert_eq!(inspected["original_goal_proven"], false);
+    let c = runtime.context(false)?;
+    assert!(runtime.commit(seal, true, &c).is_err());
+    assert_eq!(runtime.original.as_ref(), Some(&original));
+    assert_eq!(runtime.anchor, anchor);
+    assert_eq!(runtime.authority_tick_floor().get(), floor + 1);
+    assert_eq!(
+        files,
+        custody_bytes()?,
+        "floor withdrawal or stale confirmation changed custody"
+    );
+    Ok(())
+}
+
 fn bind_project(config: &mut Config, goal: &ProjectStockGoal, origin: Digest32) {
     config.project_binding = Some(config::ProjectProductionBinding {
         workshop_origin: origin,
@@ -43,6 +195,19 @@ fn bind_project(config: &mut Config, goal: &ProjectStockGoal, origin: Digest32) 
 }
 
 fn control(case: &str) -> TestResult {
+    let unopened = custody_bytes()?;
+    assert!(
+        Runtime::open_for_resource_project(
+            Config::from_environment(|| Ok(()))?,
+            Mode::Control,
+            SessionId::new(30_000),
+            budget(),
+            0,
+        )
+        .is_err(),
+        "a standalone owner cannot use the resource-project opening"
+    );
+    assert_eq!(custody_bytes()?, unopened);
     let mut runtime = Runtime::open(
         Config::from_environment(|| Ok(()))?,
         Mode::Control,
@@ -65,6 +230,13 @@ fn control(case: &str) -> TestResult {
         .as_ref()
         .ok_or("missing Workshop fixture")?
         .witness()?;
+    let before_binding = runtime.project_recovery_reference();
+    assert!(
+        runtime
+            .retain_project_authority_tick(runtime.anchor.tick.get() + 1)
+            .is_err()
+    );
+    assert_eq!(runtime.project_recovery_reference(), before_binding);
     bind_project(&mut runtime.config, &goal, origin);
     let request = StockTargetRequest::parse(
         &json!({
@@ -110,7 +282,7 @@ fn control(case: &str) -> TestResult {
     let c = runtime.context(false)?;
     let result = runtime.project_plan_stock_target_recorded(&goal, request, &c, &mut record);
     match case {
-        "no_work" => {
+        "no_work" | "no_work_floor" => {
             let view = result?.value;
             assert_eq!(calls, 0);
             assert!(recorded.is_none());
@@ -118,6 +290,9 @@ fn control(case: &str) -> TestResult {
             assert_eq!(view["stock_target"]["work_required"], false);
             for name in ORIGINAL_FILES {
                 assert!(!directory.join(name).exists());
+            }
+            if case == "no_work_floor" {
+                no_work_parent_floor(&mut runtime, &goal)?;
             }
         }
         "ack_refusal" => {
@@ -135,7 +310,7 @@ fn control(case: &str) -> TestResult {
             assert!(directory.join("original.plan").is_file());
             assert!(!directory.join("execution.journal").exists());
         }
-        "published" | "advanced" => {
+        "published" | "advanced" | "prepared_floor" => {
             result?;
             assert_eq!(calls, 1);
             let intent =
@@ -149,6 +324,9 @@ fn control(case: &str) -> TestResult {
                 let plan = runtime.original.as_ref().ok_or("missing original")?.digest;
                 let c = runtime.context(false)?;
                 runtime.prepare_next(plan, &c)?;
+            }
+            if case == "prepared_floor" {
+                prepared_parent_floor(&mut runtime)?;
             }
         }
         _ => return Err("unknown project publication case".into()),
@@ -173,11 +351,27 @@ fn recover(case: &str) -> TestResult {
         "fixture must exercise lost selector derivation"
     );
     bind_project(&mut config, &goal, origin);
-    let expected = intent.to_json()["recovery_reference"].clone();
+    let mut expected = intent.to_json()["recovery_reference"].clone();
+    let parent_floor = if case == "published_floor" {
+        expected["observation_tick_floor"]
+            .as_u64()
+            .ok_or("missing original floor")?
+            + 20
+    } else {
+        0
+    };
     let recovered = config
         .recover_project_publication(&retained["prior"], &intent)
-        .and_then(|()| Runtime::open(config, Mode::Offline, SessionId::new(30_002), budget()));
-    if case != "published" {
+        .and_then(|()| {
+            Runtime::open_for_resource_project(
+                config,
+                Mode::Offline,
+                SessionId::new(30_002),
+                budget(),
+                parent_floor,
+            )
+        });
+    if !matches!(case, "published" | "published_floor") {
         assert!(
             recovered.is_err(),
             "unrecoverable {case} publication was accepted"
@@ -187,6 +381,21 @@ fn recover(case: &str) -> TestResult {
     let mut runtime = recovered?;
     runtime.validate_project_publication(&goal, &intent)?;
     let reference = runtime.project_recovery_reference();
+    if case == "published_floor" {
+        expected["recovery"]["frontier"]["authority_tick_floor"] = json!(parent_floor);
+        assert_eq!(reference["observation_tick_floor"], parent_floor);
+        assert_eq!(runtime.authority_tick_floor().get(), parent_floor);
+        assert_eq!(
+            anchor_json(runtime.anchor),
+            retained["intent"]["recovery_reference"]["recovery"]["anchor"]
+        );
+        assert!(runtime.anchor.tick.get() < parent_floor);
+        let files = custody_bytes()?;
+        assert!(runtime.retain_project_authority_tick(u64::MAX).is_err());
+        runtime.retain_project_authority_tick(parent_floor.saturating_sub(1))?;
+        assert_eq!(runtime.project_recovery_reference(), reference);
+        assert_eq!(custody_bytes()?, files);
+    }
     assert_eq!(reference["recovery"], expected["recovery"]);
     assert_eq!(reference["native_custody"], expected["native_custody"]);
     assert!(!runtime.project_status(&goal)?.original_goal_proven);

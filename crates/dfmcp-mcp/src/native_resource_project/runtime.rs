@@ -595,8 +595,13 @@ impl Runtime {
         if config.clock.is_none() && config.inventory_clock.is_none() {
             budget.max_game_ticks = 0;
         }
-        let child =
-            ProductionRuntime::open(config, production_mode(self.mode), self.session, budget)?;
+        let child = ProductionRuntime::open_for_resource_project(
+            config,
+            production_mode(self.mode),
+            self.session,
+            budget,
+            self.high_tick,
+        )?;
         // Retain the real owner before any parent comparison can fail.
         self.child = Some(Child::Production(Box::new(child)));
         let Some(Child::Production(child)) = &self.child else {
@@ -652,6 +657,7 @@ impl Runtime {
         let Some(Child::Production(child)) = &mut self.child else {
             return Err(denied("original production owner is unavailable"));
         };
+        child.retain_project_authority_tick(self.high_tick)?;
         let ceiling = child.budget();
         budget.max_wall_millis = budget.max_wall_millis.min(ceiling.max_wall_millis);
         budget.max_bytes = budget.max_bytes.min(ceiling.max_bytes);
@@ -913,6 +919,7 @@ impl Runtime {
                 child.perform_project(action, budget)
             }
             Some(Child::Production(child)) => {
+                child.retain_project_authority_tick(self.high_tick)?;
                 let ceiling = child.budget();
                 budget.max_wall_millis = budget.max_wall_millis.min(ceiling.max_wall_millis);
                 budget.max_bytes = budget.max_bytes.min(ceiling.max_bytes);

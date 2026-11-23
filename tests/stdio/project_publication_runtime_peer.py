@@ -49,6 +49,7 @@ def run_case(executable, test, case):
         workshop, custody, donor_before, donor_calls, prerequisite, helper = donor
         production = directory / "production"
         production.mkdir(mode=0o700)
+        stage = directory / "stage.txt"
         original_capture = combined.workforce_capture
 
         def carpenter_capture(ids=(42,), option_count=0):
@@ -59,10 +60,23 @@ def run_case(executable, test, case):
             return combined.wf.encode_capture(capture)
 
         combined.workforce_capture = carpenter_capture
-        peer = combined.Peer(production)
+        class ProjectPeer(combined.Peer):
+            def reply(self, plugin, operation, request):
+                phase = stage.read_text() if stage.exists() else ""
+                offset = {"first_sample": 5, "second_sample": 10, "at_parent_floor": 20}.get(phase)
+                if offset is not None:
+                    assert not self.order_created and not self.workforce_applied
+                    self.order_tick = self.workforce_tick = combined.TICK + offset
+                if plugin == "dfmcp_bridge":
+                    return combined.citizen_reply(
+                        operation, request, self.citizen_ids, tick=self.order_tick)
+                return super().reply(plugin, operation, request)
+
+        peer = ProjectPeer(production)
         try:
-            peer.inventory_stack = 6 if case == "no_work" else 2
+            peer.inventory_stack = 6 if case in ("no_work", "no_work_floor") else 2
             environment = combined.environment(production, peer.endpoint)
+            environment["PROJECT_PUBLICATION_RUNTIME_STAGE"] = str(stage)
             parent = json.loads(environment["DFMCP_COMBINED_PRODUCTION_CONFIG"])
             parent["workshop_prerequisite"] = prerequisite
             environment["DFMCP_COMBINED_PRODUCTION_CONFIG"] = json.dumps(parent)
@@ -71,7 +85,7 @@ def run_case(executable, test, case):
             child(executable, test, "control", case, environment, retained_path, retained_path)
             retained = json.loads(retained_path.read_text())
             calls = [operation for _, operation in peer.calls]
-            assert calls.count("PrepareAssignment") == int(case == "advanced")
+            assert calls.count("PrepareAssignment") == int(case in ("advanced", "prepared_floor"))
             assert not any(operation.startswith("Commit") for operation in calls)
             assert "PrepareOrder" not in calls
             assert not peer.workforce_applied and not peer.order_created
@@ -89,6 +103,10 @@ def run_case(executable, test, case):
                 assert calls_before == (peer.calls, workshop.calls), "recovery contacted a native source"
                 assert files_before == combined.custody_files(production), "recovery repaired or rewrote custody"
                 if case == "published":
+                    child(executable, test, "recover", "published_floor", offline,
+                          retained_path, directory / "floor-recovered.json")
+                    assert calls_before == (peer.calls, workshop.calls), "parent-floor recovery contacted a source"
+                    assert files_before == combined.custody_files(production), "parent-floor recovery rewrote custody"
                     for name in ("original.plan", "original.citizens", "original.workshop", "execution.journal"):
                         path = production / "parent" / name
                         hidden = directory / f"saved-{name}"
@@ -133,7 +151,7 @@ def run_case(executable, test, case):
 
 def main():
     executable, test = sys.argv[1:]
-    for case in ("no_work", "ack_refusal", "published", "partial", "advanced"):
+    for case in ("no_work", "no_work_floor", "ack_refusal", "published", "partial", "advanced", "prepared_floor"):
         run_case(executable, test, case)
     print("project-publication-campaign:checked")
 

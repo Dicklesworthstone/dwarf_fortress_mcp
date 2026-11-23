@@ -216,6 +216,51 @@ fn satisfied_census(
 }
 
 impl Runtime {
+    /// The resource-project parent may have consumed newer game time than its
+    /// retained child checkpoint. Carry that rejection floor into opening,
+    /// before any original or native custody is inspected or initialized.
+    pub(crate) fn open_for_resource_project(
+        config: super::Config,
+        mode: super::Mode,
+        session: dfmcp_core::SessionId,
+        budget: dfmcp_core::WorkBudget,
+        parent_tick_floor: u64,
+    ) -> Result<Self> {
+        if config.project_binding.is_none()
+            || parent_tick_floor > dfmcp_adapter::bounded_run::MAX_NATIVE_TICK
+        {
+            return Err(denied(
+                "invalid resource project production owner or authority floor",
+            ));
+        }
+        Self::open_reserved(config, mode, session, budget, budget, parent_tick_floor)
+    }
+
+    /// A parent's newer rejection floor cannot become a canonical observation
+    /// or preserve a stale approval. Retire process-local offers and proof but
+    /// keep every original plan, receipt, deadline and journal byte unchanged.
+    pub(crate) fn retain_project_authority_tick(&mut self, parent_tick_floor: u64) -> Result<()> {
+        if self.config.project_binding.is_none() {
+            return Err(denied(
+                "production authority floor requires its original resource project",
+            ));
+        }
+        if parent_tick_floor > dfmcp_adapter::bounded_run::MAX_NATIVE_TICK {
+            return Err(invalid(
+                "invalid resource project production authority floor",
+            ));
+        }
+        let current = self.parent_authority_tick_floor();
+        self.retain_parent_authority_floor(parent_tick_floor);
+        if parent_tick_floor > current {
+            self.abandon_preparation();
+            if self.original.is_none() {
+                self.basis = None;
+            }
+        }
+        Ok(())
+    }
+
     fn project_workshop_origin(&self, goal: &ProjectStockGoal) -> Result<Digest32> {
         goal.validate()?;
         self.config.current()?;

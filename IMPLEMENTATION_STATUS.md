@@ -1,5 +1,22 @@
 # Implementation Status
 
+## Unreleased — Carry project authority into the production owner
+
+The native resource-project parent now carries its highest consumed game tick
+into Production initialization, later production calls and stock-goal planning.
+Production rejects observations older than that inherited floor. Advancing the
+parent floor withdraws stale preparation and planning basis while preserving
+the original production identity, custody, deadline and dispatch history.
+
+The actual-owner/native-TCP regression campaign now covers retained original
+custody, stale no-work samples, fresh requalification at the inherited floor,
+withdrawn prepared reviews, and rejection of unbound or out-of-range floors.
+Scoped latest-nightly formatting, patch whitespace checks, Python fixture
+parsing and the existing Tree/Workshop source gates pass. Full Rust execution
+and live-game qualification are not claimed. The existing resource-project and mutation-dispatch owners
+remain in progress: `dfmcp-reality-wiring-proof-4bf.14` and
+`df-dfhack-bridge-plane-c-pic.4`.
+
 ## Unreleased — Manager appointment inside the native resource project
 
 The fixed native resource project now accepts `appoint_manager: true` and owns
