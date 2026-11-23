@@ -24,6 +24,9 @@
     "fortress_doctor"
   ],
   "stages": [
+    "manager_opening",
+    "manager",
+    "manager_transition",
     "tree_opening",
     "tree",
     "tree_transition",
@@ -35,6 +38,7 @@
     "cancelled"
   ],
   "children": [
+    "manager_appointment_server::ProjectManagerRuntime",
     "tree_harvest_server::ProjectTreeRuntime",
     "workshop_construction_server::ProjectWorkshopRuntime",
     "live_production_runtime::Runtime"
@@ -96,7 +100,9 @@
     "stale_initial_capture_rejected_before_child_custody": true,
     "parent_rejection_tick_retained_before_each_child_operation": true,
     "higher_parent_tick_withdraws_stale_offers_and_preparations": true,
-    "native_capture_tick_and_witness_preserved": true
+    "native_capture_tick_and_witness_preserved": true,
+    "manager_original_deadline_checked_before_parent_ack": true,
+    "manager_rejection_floors_and_fences_retained": true
   },
   "production_publication": {
     "intent_schema": "dfmcp.project-production-intent/1",
@@ -140,7 +146,10 @@
     "tree_actions": 1,
     "tree_handoff_bytes": 16384,
     "production_intent_bytes": 32768,
-    "ledger_frame_bytes": 229376
+    "ledger_frame_bytes": 278528,
+    "manager_actions": 1,
+    "manager_handoff_bytes": 16384,
+    "parent_configuration_bytes": 131072
   },
   "output": {
     "agent_turn_schema": "dfmcp.agent_turn/1",
@@ -164,7 +173,13 @@
       "complete_semantic_approval_projection": true
     },
     "pending_production_publication_explicit": true,
-    "pending_publication_offers_native_confirmation": false
+    "pending_publication_offers_native_confirmation": false,
+    "manager_capture_commitment": {
+      "schema": "dfmcp.manager-project-capture-commitment/1",
+      "raw_bytes_inline": false,
+      "exact_capsule_retained_in_native_owner_or_journal": true,
+      "complete_semantic_approval_projection": true
+    }
   },
   "unsupported": [
     "automatic_native_effect_without_current_review",
@@ -237,7 +252,20 @@
     "crates/dfmcp-mcp/src/live_production_runtime/stock_target_watch.rs",
     "crates/dfmcp-mcp/src/live_production_presentation_stock_watch.rs",
     "crates/dfmcp-adapter/src/semantic_work_orders/stock_target_watch.rs",
-    "crates/dfmcp-adapter/src/semantic_work_orders/stock_target_watch_tests.rs"
+    "crates/dfmcp-adapter/src/semantic_work_orders/stock_target_watch_tests.rs",
+    "crates/dfmcp-mcp/src/native_resource_project/manager.rs",
+    "crates/dfmcp-mcp/src/native_resource_project/manager_presentation.rs",
+    "crates/dfmcp-mcp/src/native_resource_project/manager_presentation_tests.rs",
+    "crates/dfmcp-mcp/src/native_resource_project/manager_runtime_tests.rs",
+    "crates/dfmcp-mcp/src/manager_appointment_server.rs",
+    "crates/dfmcp-mcp/src/manager_appointment_server/runtime.rs",
+    "crates/dfmcp-mcp/src/manager_appointment_server/production_handoff.rs",
+    "crates/dfmcp-mcp/src/manager_appointment_server/project.rs",
+    "crates/dfmcp-mcp/src/manager_appointment_server/project_tests.rs",
+    "crates/dfmcp-mcp/src/live_production_runtime/project_manager_config.rs",
+    "crates/dfmcp-mcp/src/workshop_construction_server/material_selection.rs",
+    "tests/stdio/resource_project_manager_runtime_peer.py",
+    "docs/MANAGER_APPOINTMENT_V1_23.md"
   ],
   "qualification": {
     "pre_outage_ledger_component_cases_passed": 17,
@@ -325,5 +353,41 @@
     "rust_typecheck_completed": false,
     "rust_tests_executed": false,
     "execution_blocker": "dependency build exhausted disk; execution environment became unavailable during relocated retry"
+  },
+  "optional_manager": {
+    "selector": "appoint_manager: true",
+    "protocol": "1.23",
+    "configuration": "DFMCP_MANAGER_V1_23_MCP_CONFIG",
+    "initial_stage_and_successor_bound_in_original": true,
+    "legacy_journal_bytes_preserved": true,
+    "fixed_original_candidate_and_deadline": true,
+    "independent_current_review_and_confirmation": true,
+    "caller_selected_production_donor": false,
+    "configuration_preflight_invents_original_or_ack": false,
+    "default_manager_1_22_profile_changed": false
+  },
+  "manager_handoff": {
+    "schema": "dfmcp.manager-project-handoff/1",
+    "request_kind": "advance_from_manager",
+    "expected_parent_head_required": true,
+    "fresh_paused_same_original_and_cache_proof_required": true,
+    "original_journal_and_independent_ack_verified": true,
+    "consumed_floors_retained_before_rejection": true,
+    "transition_ack_before_writer_release": true,
+    "next_opening_ack_before_initialization": true,
+    "production_import_mode": "Offline",
+    "full_original_descriptor_checked_against_imported_donor": true,
+    "independent_production_readiness_refresh": true,
+    "native_effect_dispatched": false,
+    "manager_custody_frozen_in_later_stages": true,
+    "historical_appointment_is_current_readiness": false
+  },
+  "manager_prefix_validation": {
+    "source_reviewed": true,
+    "new_tests_authored": true,
+    "integrated_rust_qualified": false,
+    "modern_stdio_qualified": false,
+    "live_dfhack_qualified": false,
+    "execution_status": "integrated compilation and focused tests pending; historical qualification receipts do not cover this increment"
   }
 }

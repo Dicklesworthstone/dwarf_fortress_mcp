@@ -424,6 +424,37 @@ fn floor_json(floor: ManagerProductionFloor) -> Value {
 #[derive(Clone)]
 pub(super) struct SharedManager(Arc<Mutex<Owner>>);
 impl SharedManager {
+    /// Compare the parent-held descriptor against the actual independently
+    /// imported donor, including on full original recovery where the pre-plan
+    /// checkpoint has been superseded by the execution journal.
+    pub(super) fn verify_project_handoff(
+        &self,
+        handoff: &crate::manager_appointment_server::ManagerProjectHandoff,
+        c: &OperationContext,
+    ) -> Result<()> {
+        c.authorize(Capability::Query, RiskTier::ReadOnly, &[], None)?;
+        let work = Work::new(c)?;
+        if work.bytes < MIB {
+            return Err(exhausted(
+                "Manager handoff verification allowance exhausted",
+            ));
+        }
+        let owner = self
+            .0
+            .try_lock()
+            .map_err(|_| denied("manager prerequisite owner is unavailable"))?;
+        (owner.guard)()?;
+        if owner.config.directory != handoff.directory() {
+            return Err(denied(
+                "project Manager donor changed its original custody directory",
+            ));
+        }
+        handoff.verify_origin(&owner.origin)?;
+        (owner.guard)()?;
+        work.current()?;
+        Ok(())
+    }
+
     pub(super) fn open(
         config: ManagerConfig,
         guard: ReadGuard,

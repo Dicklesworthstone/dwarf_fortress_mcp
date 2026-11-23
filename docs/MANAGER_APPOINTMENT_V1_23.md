@@ -104,6 +104,14 @@ appointment protocols and their historical evidence remain unchanged.
 
 ### Export a current handoff from the Manager owner
 
+The [native resource project](NATIVE_RESOURCE_PROJECT_MCP.md) can also own this
+appointment directly with `appoint_manager: true`. It uses the same typed
+exporter after completion and fresh cache proof, acknowledges the frozen donor
+before releasing its writer, and starts the originally selected Tree or Workshop
+child. Production later imports and requalifies the exact appointment through
+the ordinary Manager prerequisite. The parent fixes one deadline for all stages;
+it never restores a review or repeats an appointment from recovery.
+
 After the exact Manager 1.23 appointment completes, call `fortress_query` with
 `query:"production_handoff"`. Control and Recover sessions independently verify
 the original private journal and profile-specific ACK before opening one

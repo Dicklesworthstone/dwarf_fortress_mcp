@@ -4,6 +4,7 @@ use super::manager_config::{
     self, ManagerConfig, ManagerPrerequisiteCheckpoint, ManagerRecoveryFloor,
 };
 use super::workshop_config::{self, WorkshopConfig};
+use crate::manager_appointment_server::{ManagerProjectHandoff, ProjectManagerConfig};
 use crate::semantic_workforce_runtime::{denied, digest, invalid};
 use crate::workshop_construction_server::WorkshopProjectHandoff;
 use crate::{semantic_work_order_runtime as orders, semantic_workforce_runtime as workforce};
@@ -254,6 +255,7 @@ pub(crate) struct Config {
     pub(crate) workforce: workforce::native::NativeShell,
     pub(crate) orders: orders::native::NativeShell,
     pub(super) project_binding: Option<ProjectProductionBinding>,
+    pub(super) project_manager_handoff: Option<ManagerProjectHandoff>,
     pub(super) project_recovery: Option<ProjectRecovery>,
     check: Arc<dyn Fn() -> Result<()> + Send + Sync>,
     runtime_check: fn() -> Result<()>,
@@ -301,6 +303,9 @@ pub(super) struct ProjectRecovery {
 #[path = "project_recovery.rs"]
 mod project_recovery;
 pub(crate) use project_recovery::ProjectProductionIntent;
+
+#[path = "project_manager_config.rs"]
+mod project_manager;
 
 /// Closed child configuration facts needed before the staged parent opens either owner.
 pub(crate) struct ParentMetadata {
@@ -553,6 +558,16 @@ fn parse_with_workshop(
     handoff: Option<&WorkshopProjectHandoff>,
     project: bool,
 ) -> Result<Parsed> {
+    parse_with_project_sources(raw, handoff, None, false, project)
+}
+
+fn parse_with_project_sources(
+    raw: &str,
+    handoff: Option<&WorkshopProjectHandoff>,
+    manager_handoff: Option<&ManagerProjectHandoff>,
+    owns_manager: bool,
+    project: bool,
+) -> Result<Parsed> {
     let input = decode_input(raw)?;
     let clock = input
         .clock
@@ -607,11 +622,14 @@ fn parse_with_workshop(
             workshop_prerequisite_checkpoint = Some(seed);
         }
     }
-    let manager_prerequisite = input
-        .manager_prerequisite
-        .map(|manager| manager.validate(&input.directory))
-        .transpose()?;
-    let manager_prerequisite_checkpoint = input.manager_prerequisite_checkpoint;
+    let (manager_prerequisite, manager_prerequisite_checkpoint) = project_manager::resolve(
+        input.manager_prerequisite,
+        input.manager_prerequisite_checkpoint,
+        input.recovery.as_ref(),
+        &input.directory,
+        manager_handoff,
+        owns_manager,
+    )?;
     let input_supply = input.input_supply;
     let input_supply_checkpoint = input.input_supply_checkpoint;
     if let Some(checkpoint) = input_supply_checkpoint {
@@ -941,7 +959,36 @@ impl Config {
         runtime_check: fn() -> Result<()>,
         handoff: Option<&WorkshopProjectHandoff>,
     ) -> Result<ProjectProductionPolicy> {
-        let (config, raw) = Self::project_configuration(parent_guard, runtime_check, handoff)?;
+        Self::validate_resource_project_environment(
+            parent_guard,
+            runtime_check,
+            handoff,
+            None,
+            None,
+        )
+    }
+
+    /// Validate the optional Manager prefix without inventing its future
+    /// appointment, ACK or donor. The actual handoff is required on activation.
+    pub(crate) fn validate_resource_project_environment(
+        parent_guard: Arc<dyn Fn() -> Result<()> + Send + Sync>,
+        runtime_check: fn() -> Result<()>,
+        handoff: Option<&WorkshopProjectHandoff>,
+        manager: Option<&ProjectManagerConfig>,
+        manager_handoff: Option<&ManagerProjectHandoff>,
+    ) -> Result<ProjectProductionPolicy> {
+        if manager_handoff.is_some() && manager.is_none() {
+            return Err(denied(
+                "a project Manager donor requires its original Manager policy",
+            ));
+        }
+        let (config, raw) = Self::project_configuration(
+            parent_guard,
+            runtime_check,
+            handoff,
+            manager_handoff,
+            manager.is_some(),
+        )?;
         let directory = |raw: &str| -> Result<PathBuf> {
             let value: serde_json::Value = serde_json::from_str(raw)
                 .map_err(|_| invalid("invalid checked production policy"))?;
@@ -959,6 +1006,9 @@ impl Config {
             workforce: workforce::Shell::acceptance(&config.workforce).clone(),
             orders: orders::Shell::acceptance(&config.orders).clone(),
         };
+        if let Some(manager) = manager {
+            policy.matches_manager(manager.project_binding())?;
+        }
         config.current()?;
         Ok(policy)
     }
@@ -971,19 +1021,47 @@ impl Config {
         runtime_check: fn() -> Result<()>,
         handoff: &WorkshopProjectHandoff,
     ) -> Result<Self> {
-        Self::project_configuration(parent_guard, runtime_check, Some(handoff))
-            .map(|(config, _)| config)
+        Self::from_resource_project_environment(parent_guard, runtime_check, handoff, None)
+    }
+
+    /// Import only the original Manager descriptor retained by the parent.
+    /// The existing production owner reopens its donor Offline and independently
+    /// qualifies current readiness at every protected production boundary.
+    pub(crate) fn from_resource_project_environment(
+        parent_guard: Arc<dyn Fn() -> Result<()> + Send + Sync>,
+        runtime_check: fn() -> Result<()>,
+        handoff: &WorkshopProjectHandoff,
+        manager_handoff: Option<&ManagerProjectHandoff>,
+    ) -> Result<Self> {
+        if manager_handoff.is_some_and(|manager| {
+            manager.project_deadline_tick() != handoff.project_deadline_tick()
+        }) {
+            return Err(denied(
+                "project Manager and Workshop original deadlines differ",
+            ));
+        }
+        Self::project_configuration(
+            parent_guard,
+            runtime_check,
+            Some(handoff),
+            manager_handoff,
+            manager_handoff.is_some(),
+        )
+        .map(|(config, _)| config)
     }
 
     fn project_configuration(
         parent_guard: Arc<dyn Fn() -> Result<()> + Send + Sync>,
         runtime_check: fn() -> Result<()>,
         handoff: Option<&WorkshopProjectHandoff>,
+        manager_handoff: Option<&ManagerProjectHandoff>,
+        owns_manager: bool,
     ) -> Result<(Self, [String; 3])> {
         runtime_check()?;
         parent_guard()?;
         let raw = family_environment()?;
-        let parsed = parse_with_workshop(&raw[0], handoff, true)?;
+        let parsed =
+            parse_with_project_sources(&raw[0], handoff, manager_handoff, owns_manager, true)?;
         if parsed
             .2
             .is_some_and(|recovery| recovery.portfolio.is_some())
@@ -992,7 +1070,11 @@ impl Config {
                 "project production recovery cannot adopt a portfolio original",
             ));
         }
-        let conditional = (parsed.3.is_some(), parsed.4.is_some(), parsed.7.is_some());
+        let conditional = (
+            parsed.3.is_some(),
+            parsed.4.is_some(),
+            owns_manager || parsed.7.is_some(),
+        );
         let digests = raw
             .each_ref()
             .map(|value| Digest32::of_bytes(value.as_bytes()));
@@ -1021,6 +1103,7 @@ impl Config {
             deadline_tick: handoff.project_deadline_tick(),
             authority_expires_tick: handoff.authority_expires_tick(),
         });
+        config.project_manager_handoff = manager_handoff.cloned();
         Ok((config, raw))
     }
 
@@ -1232,6 +1315,7 @@ impl Config {
             workforce,
             orders,
             project_binding: None,
+            project_manager_handoff: None,
             project_recovery: None,
             parent_configuration_digest: None,
             check,

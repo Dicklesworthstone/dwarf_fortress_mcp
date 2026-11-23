@@ -440,7 +440,7 @@
     "staged_runtime_cases": 4,
     "staged_server_cases": 7,
     "gameplay_cli_python_cases": 3,
-    "project_mcp_cases": 7,
+    "project_mcp_cases": 9,
     "project_template_mcp_cases": 5
   },
   "shared_native_engine": {

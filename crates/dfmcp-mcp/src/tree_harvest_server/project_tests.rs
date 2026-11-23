@@ -526,8 +526,7 @@ fn parent_authority_floor_withdraws_tree_offer_and_rejects_older_native_capture(
     assert_eq!(runtime.high_tick, parent_tick);
     for (name, expected) in files.into_iter().zip(before) {
         assert_eq!(
-            std::fs::read(directory.0.join(name))
-                .map_err(|_| invalid("read retained custody"))?,
+            std::fs::read(directory.0.join(name)).map_err(|_| invalid("read retained custody"))?,
             expected
         );
     }

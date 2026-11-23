@@ -44,7 +44,7 @@ impl Runtime {
         Ok(handoff)
     }
 
-    fn tree_budget(&self, work: &mut Work, reserve_after: u64) -> Result<WorkBudget> {
+    pub(super) fn tree_budget(&self, work: &mut Work, reserve_after: u64) -> Result<WorkBudget> {
         let mut budget = work.child(WORKSHOP_BYTES, reserve_after)?;
         budget.max_actions = 1;
         budget.max_entities = budget.max_entities.min(4096);

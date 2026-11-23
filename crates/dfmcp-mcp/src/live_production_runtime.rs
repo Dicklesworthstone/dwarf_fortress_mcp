@@ -522,6 +522,12 @@ impl Runtime {
                 )
             })
             .transpose()?;
+        if let Some(handoff) = &out.config.project_manager_handoff {
+            out.manager
+                .as_ref()
+                .ok_or_else(|| denied("project Manager handoff lost its original donor"))?
+                .verify_project_handoff(handoff, &work.take(MIB)?)?;
+        }
         out.input_supply = out
             .config
             .input_supply

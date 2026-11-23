@@ -1836,6 +1836,828 @@ fn identity_loss_and_flush_failure_fence_without_rewriting_history() -> TestResu
     Ok(())
 }
 
+mod manager_prefix {
+    use super::*;
+
+    pub(super) fn manager_original(harvest_tree: bool) -> Value {
+        let mut value = if harvest_tree {
+            tree_original()
+        } else {
+            original()
+        };
+        value["manager_policy"] = json!("original-manager-policy");
+        value
+    }
+
+    fn manager() -> Checkpoint {
+        Checkpoint {
+            manager: Some(json!({
+                "acknowledged":{"journal_id":"original-manager-journal","head":"initial-head"},
+                "original":{"key":"original-manager","plan_digest":"original-manager-plan","deadline_tick":1000,"dispatch_started":true},
+                "original_plan_digest":"original-manager-plan",
+                "original_plan":{"key":"original-manager","history_prefix":"sealed-prefix"},
+                "dispatch_started":true,
+                "production_handoff_floor":{"tick":103,"generation":7,"sequence":5,"next_event":10,"history_count":10,
+                    "group_next_position":11,"group_next_assignment":12,"civ_next_position":13,"civ_next_assignment":14,"fenced":false},
+                "consumed_tick_floor":103,
+                "project_source_frontier":{"high_tick":103,"high_generation":7,"sequence":5,"next_event":10,"history_count":10,"fenced":false}
+            })),
+            ..Checkpoint::default()
+        }
+    }
+
+    fn manager_handoff() -> Checkpoint {
+        let mut checkpoint = manager();
+        checkpoint.manager_handoff = Some(json!({
+            "original_key":"original-manager","original_plan_digest":"original-manager-plan",
+            "acknowledged":{"journal_id":"original-manager-journal","head":"initial-head"},
+            "origin_witness":"original-manager-origin"
+        }));
+        checkpoint
+    }
+
+    fn with_manager(mut checkpoint: Checkpoint) -> Checkpoint {
+        let donor = manager_handoff();
+        checkpoint.manager = donor.manager;
+        checkpoint.manager_handoff = donor.manager_handoff;
+        checkpoint
+    }
+
+    pub(super) fn stages(harvest_tree: bool) -> Vec<(Stage, Checkpoint)> {
+        let mut stages = vec![
+            (Stage::Manager, manager()),
+            (Stage::ManagerTransition, manager_handoff()),
+        ];
+        if harvest_tree {
+            stages.push((Stage::TreeOpening, manager_handoff()));
+            stages
+                .extend(tree_stages().map(|(stage, checkpoint)| (stage, with_manager(checkpoint))));
+        } else {
+            stages.extend([
+                (Stage::WorkshopOpening, manager_handoff()),
+                (Stage::Workshop, with_manager(workshop())),
+                (Stage::Transition, with_manager(handoff())),
+                (Stage::ProductionOpening, with_manager(handoff())),
+                (Stage::Production, with_manager(production())),
+            ]);
+        }
+        stages
+    }
+
+    fn seeded_manager(harvest_tree: bool) -> TestResult<(Journal<Memory, Memory>, Memory, Memory)> {
+        let storage = Memory::default();
+        let acknowledgements = Memory::default();
+        let journal = Journal::open_with_initial(
+            storage.clone(),
+            acknowledgements.clone(),
+            &context(),
+            Mode::Control,
+            true,
+            manager_original(harvest_tree),
+            None,
+            Stage::ManagerOpening,
+        )?;
+        Ok((journal, storage, acknowledgements))
+    }
+
+    fn reopen_manager(
+        storage: &Memory,
+        acknowledgements: &Memory,
+        pin: Pin,
+        mode: Mode,
+        harvest_tree: bool,
+    ) -> Result<Journal<Memory, Memory>> {
+        let mut c = context();
+        c.session_id = SessionId::new(7002);
+        Journal::open_with_initial(
+            storage.clone(),
+            acknowledgements.clone(),
+            &c,
+            mode,
+            false,
+            manager_original(harvest_tree),
+            Some(pin),
+            Stage::ManagerOpening,
+        )
+    }
+
+    #[test]
+    fn complete_manager_projects_reopen_both_fixed_child_sequences_without_writes() -> TestResult {
+        for harvest_tree in [false, true] {
+            let (mut journal, storage, acknowledgements) = seeded_manager(harvest_tree)?;
+            assert_eq!(journal.snapshot().stage, Stage::ManagerOpening);
+            let first = journal.pin();
+            for (stage, checkpoint) in stages(harvest_tree) {
+                journal.advance(&context(), stage, checkpoint.clone())?;
+                let pin = journal.pin();
+                journal.advance(&context(), stage, checkpoint)?;
+                assert_eq!(journal.pin(), pin);
+            }
+            assert_eq!(journal.pin().frames, if harvest_tree { 11 } else { 8 });
+            let retained = journal.snapshot().clone();
+            let bytes = (storage.raw(), acknowledgements.raw());
+            drop(journal);
+            let recovered = reopen_manager(
+                &storage,
+                &acknowledgements,
+                first,
+                Mode::Offline,
+                harvest_tree,
+            )?;
+            assert_eq!(recovered.original(), &manager_original(harvest_tree));
+            assert_eq!(recovered.snapshot(), &retained);
+            assert_eq!(
+                retained.checkpoint.manager_handoff,
+                manager_handoff().manager_handoff
+            );
+            assert_eq!(retained.checkpoint.tree.is_some(), harvest_tree);
+            assert_eq!((storage.raw(), acknowledgements.raw()), bytes);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn original_manager_and_tree_selection_refuse_ambiguous_initialization_before_io() -> TestResult
+    {
+        let storage = Memory::default();
+        let acknowledgements = Memory::default();
+        let mut invalid = vec![
+            (original(), Stage::ManagerOpening),
+            (tree_original(), Stage::ManagerOpening),
+            (manager_original(false), Stage::WorkshopOpening),
+            (manager_original(true), Stage::TreeOpening),
+            (manager_original(false), Stage::Manager),
+            (manager_original(false), Stage::ManagerTransition),
+        ];
+        for value in [Value::Null, json!(false), json!(""), json!({})] {
+            let mut changed = manager_original(false);
+            changed["manager_policy"] = value.clone();
+            invalid.push((changed, Stage::ManagerOpening));
+            let mut changed = manager_original(true);
+            changed["tree_policy"] = value;
+            invalid.push((changed, Stage::ManagerOpening));
+        }
+        for (original, stage) in invalid {
+            assert!(
+                Journal::open_with_initial(
+                    storage.clone(),
+                    acknowledgements.clone(),
+                    &context(),
+                    Mode::Control,
+                    true,
+                    original,
+                    None,
+                    stage,
+                )
+                .is_err()
+            );
+        }
+        assert_eq!(
+            storage.state.borrow().reads + storage.state.borrow().writes,
+            0
+        );
+        assert_eq!(
+            acknowledgements.state.borrow().reads + acknowledgements.state.borrow().writes,
+            0
+        );
+
+        for harvest_tree in [false, true] {
+            let (journal, storage, acknowledgements) = seeded_manager(harvest_tree)?;
+            let pin = journal.pin();
+            drop(journal);
+            let bytes = (storage.raw(), acknowledgements.raw());
+            assert!(
+                reopen_manager(
+                    &storage,
+                    &acknowledgements,
+                    pin.clone(),
+                    Mode::Recover,
+                    !harvest_tree
+                )
+                .is_err()
+            );
+            for stage in [Stage::WorkshopOpening, Stage::TreeOpening] {
+                assert!(
+                    Journal::open_with_initial(
+                        storage.clone(),
+                        acknowledgements.clone(),
+                        &context(),
+                        Mode::Recover,
+                        false,
+                        manager_original(harvest_tree),
+                        Some(pin.clone()),
+                        stage,
+                    )
+                    .is_err()
+                );
+            }
+            assert_eq!((storage.raw(), acknowledgements.raw()), bytes);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn manager_cannot_skip_the_handoff_or_select_another_next_child() -> TestResult {
+        for harvest_tree in [false, true] {
+            let (mut journal, storage, acknowledgements) = seeded_manager(harvest_tree)?;
+            assert!(
+                journal
+                    .advance(&context(), Stage::ManagerTransition, manager_handoff())
+                    .is_err()
+            );
+            journal.advance(&context(), Stage::Manager, manager())?;
+            let expected = if harvest_tree {
+                Stage::TreeOpening
+            } else {
+                Stage::WorkshopOpening
+            };
+            let wrong = if harvest_tree {
+                Stage::WorkshopOpening
+            } else {
+                Stage::TreeOpening
+            };
+            assert!(
+                journal
+                    .advance(&context(), expected, manager_handoff())
+                    .is_err()
+            );
+            let mut replaced = manager_handoff();
+            replaced.manager.as_mut().ok_or("manager missing")?["original"]["key"] =
+                json!("replacement");
+            assert!(
+                journal
+                    .advance(&context(), Stage::ManagerTransition, replaced)
+                    .is_err()
+            );
+            journal.advance(&context(), Stage::ManagerTransition, manager_handoff())?;
+            assert!(
+                journal
+                    .advance(&context(), wrong, manager_handoff())
+                    .is_err()
+            );
+            assert!(
+                journal
+                    .advance(
+                        &context(),
+                        Stage::ProductionOpening,
+                        with_manager(handoff())
+                    )
+                    .is_err()
+            );
+            let bytes = (storage.raw(), acknowledgements.raw());
+            for remove_manager in [false, true] {
+                let mut incomplete = manager_handoff();
+                if remove_manager {
+                    incomplete.manager = None;
+                } else {
+                    incomplete.manager_handoff = None;
+                }
+                assert!(journal.advance(&context(), expected, incomplete).is_err());
+            }
+            assert_eq!((storage.raw(), acknowledgements.raw()), bytes);
+            journal.advance(&context(), expected, manager_handoff())?;
+            assert!(
+                journal
+                    .advance(&context(), Stage::Manager, manager())
+                    .is_err()
+            );
+        }
+        for tree_prefix in [false, true] {
+            let (mut journal, _, _) = if tree_prefix {
+                seeded_tree()?
+            } else {
+                seeded()?
+            };
+            let (stage, checkpoint) = if tree_prefix {
+                (Stage::Tree, tree())
+            } else {
+                (Stage::Workshop, workshop())
+            };
+            assert!(
+                journal
+                    .advance(&context(), Stage::Manager, manager())
+                    .is_err()
+            );
+            assert!(
+                journal
+                    .advance(&context(), stage, with_manager(checkpoint))
+                    .is_err()
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn manager_drain_retains_identity_and_monotone_source_floors() -> TestResult {
+        let (mut journal, storage, acknowledgements) = seeded_manager(false)?;
+        journal.advance(&context(), Stage::Manager, manager())?;
+        let mut descendant = manager();
+        let current = descendant.manager.as_mut().ok_or("manager missing")?;
+        current["acknowledged"]["head"] = json!("descendant-head");
+        current["consumed_tick_floor"] = json!(105);
+        current["project_source_frontier"]["high_tick"] = json!(105);
+        current["project_source_frontier"]["sequence"] = json!(6);
+        current["project_source_frontier"]["fenced"] = json!(true);
+        current["production_handoff_floor"]["tick"] = json!(105);
+        current["production_handoff_floor"]["fenced"] = json!(true);
+        journal.advance(&context(), Stage::Manager, descendant.clone())?;
+        journal.cancel(&context())?;
+        for (path, value) in [
+            ("/acknowledged/journal_id", json!("another-journal")),
+            ("/original/key", json!("another-original")),
+            ("/original/plan_digest", Value::Null),
+            ("/original/deadline_tick", json!(1001)),
+            ("/original/dispatch_started", json!(false)),
+            ("/original_plan_digest", Value::Null),
+            ("/original_plan/history_prefix", json!("replacement-prefix")),
+            ("/dispatch_started", json!(false)),
+            ("/production_handoff_floor/tick", json!(104)),
+            ("/production_handoff_floor/generation", json!(6)),
+            ("/production_handoff_floor/sequence", json!(4)),
+            ("/production_handoff_floor/next_event", json!(9)),
+            ("/production_handoff_floor/history_count", json!(9)),
+            ("/production_handoff_floor/group_next_position", json!(10)),
+            ("/production_handoff_floor/group_next_assignment", json!(11)),
+            ("/production_handoff_floor/civ_next_position", json!(12)),
+            ("/production_handoff_floor/civ_next_assignment", json!(13)),
+            ("/production_handoff_floor/fenced", json!(false)),
+            ("/project_source_frontier/sequence", json!(5)),
+            ("/project_source_frontier/next_event", json!(9)),
+            ("/project_source_frontier/fenced", json!(false)),
+        ] {
+            let mut changed = descendant.clone();
+            *changed
+                .manager
+                .as_mut()
+                .and_then(|value| value.pointer_mut(path))
+                .ok_or("missing manager field")? = value;
+            let bytes = (storage.raw(), acknowledgements.raw());
+            assert!(
+                journal
+                    .advance(&context(), Stage::Cancelled, changed)
+                    .is_err(),
+                "{path}"
+            );
+            assert_eq!((storage.raw(), acknowledgements.raw()), bytes);
+        }
+        descendant.manager.as_mut().ok_or("manager missing")?["drain_requested"] = json!(true);
+        journal.advance(&context(), Stage::Cancelled, descendant.clone())?;
+        let pin = journal.pin();
+        drop(journal);
+        let recovered = reopen_manager(&storage, &acknowledgements, pin, Mode::Offline, false)?;
+        assert_eq!(recovered.snapshot().cancelled_from, Some(Stage::Manager));
+        assert_eq!(recovered.snapshot().checkpoint, descendant);
+        Ok(())
+    }
+
+    #[test]
+    fn cancellation_in_every_manager_project_stage_preserves_all_prior_donors() -> TestResult {
+        for harvest_tree in [false, true] {
+            let phases = std::iter::once(Stage::ManagerOpening)
+                .chain(stages(harvest_tree).into_iter().map(|(stage, _)| stage));
+            for phase in phases {
+                let (mut journal, storage, acknowledgements) = seeded_manager(harvest_tree)?;
+                if phase != Stage::ManagerOpening {
+                    for (stage, checkpoint) in stages(harvest_tree) {
+                        journal.advance(&context(), stage, checkpoint)?;
+                        if stage == phase {
+                            break;
+                        }
+                    }
+                }
+                let before = journal.snapshot().checkpoint.clone();
+                journal.cancel(&context())?;
+                assert_eq!(journal.snapshot().checkpoint, before);
+                let mut drained = before.clone();
+                let child = match phase {
+                    Stage::Manager => drained.manager.as_mut(),
+                    Stage::Tree => drained.tree.as_mut(),
+                    Stage::Workshop => drained.workshop.as_mut(),
+                    Stage::Production => drained.production.as_mut(),
+                    _ => None,
+                };
+                if let Some(child) = child {
+                    child["drain_requested"] = json!(true);
+                }
+                journal.advance(&context(), Stage::Cancelled, drained.clone())?;
+                let mut changed = drained.clone();
+                if phase == Stage::Manager {
+                    changed.manager_handoff = manager_handoff().manager_handoff;
+                } else {
+                    changed.manager = Some(json!({"replacement":true}));
+                }
+                assert!(
+                    journal
+                        .advance(&context(), Stage::Cancelled, changed)
+                        .is_err()
+                );
+                for (stage, checkpoint) in stages(harvest_tree) {
+                    assert!(journal.advance(&context(), stage, checkpoint).is_err());
+                }
+                let pin = journal.pin();
+                drop(journal);
+                let recovered = reopen_manager(
+                    &storage,
+                    &acknowledgements,
+                    pin,
+                    Mode::Offline,
+                    harvest_tree,
+                )?;
+                assert_eq!(recovered.snapshot().cancelled_from, Some(phase));
+                assert_eq!(recovered.snapshot().checkpoint, drained);
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn manager_handoff_and_opening_require_control_and_survive_lost_acknowledgements() -> TestResult
+    {
+        let (mut journal, storage, acknowledgements) = seeded_manager(true)?;
+        journal.advance(&context(), Stage::Manager, manager())?;
+        let pin = journal.pin();
+        let mut read_only = context();
+        read_only
+            .grants
+            .retain(|grant| grant.capability != Capability::Plan);
+        assert!(
+            journal
+                .advance(&read_only, Stage::ManagerTransition, manager_handoff())
+                .is_err()
+        );
+        drop(journal);
+        let mut c = context();
+        c.session_id = SessionId::new(7002);
+        let mut recovering = reopen_manager(&storage, &acknowledgements, pin, Mode::Recover, true)?;
+        assert!(
+            recovering
+                .advance(&c, Stage::ManagerTransition, manager_handoff())
+                .is_err()
+        );
+        let pin = recovering.pin();
+        drop(recovering);
+        let mut journal = reopen_manager(
+            &storage,
+            &acknowledgements,
+            pin.clone(),
+            Mode::Control,
+            true,
+        )?;
+        acknowledgements.state.borrow_mut().fail_sync = true;
+        assert!(
+            journal
+                .advance(&c, Stage::ManagerTransition, manager_handoff())
+                .is_err()
+        );
+        assert!(journal.is_fenced());
+        assert_eq!(journal.pin(), pin);
+        acknowledgements.state.borrow_mut().fail_sync = false;
+        drop(journal);
+        let mut recovered = reopen_manager(&storage, &acknowledgements, pin, Mode::Recover, true)?;
+        assert_eq!(recovered.snapshot().stage, Stage::ManagerTransition);
+        assert_eq!(recovered.snapshot().checkpoint, manager_handoff());
+        assert!(
+            recovered
+                .advance(&c, Stage::TreeOpening, manager_handoff())
+                .is_err()
+        );
+        let pin = recovered.pin();
+        drop(recovered);
+        let mut journal = reopen_manager(
+            &storage,
+            &acknowledgements,
+            pin.clone(),
+            Mode::Control,
+            true,
+        )?;
+        storage.state.borrow_mut().fail_sync = true;
+        assert!(
+            journal
+                .advance(&c, Stage::TreeOpening, manager_handoff())
+                .is_err()
+        );
+        assert!(journal.is_fenced());
+        storage.state.borrow_mut().fail_sync = false;
+        drop(journal);
+        assert!(
+            reopen_manager(
+                &storage,
+                &acknowledgements,
+                pin.clone(),
+                Mode::Offline,
+                true
+            )
+            .is_err()
+        );
+        let recovered = reopen_manager(&storage, &acknowledgements, pin, Mode::Recover, true)?;
+        assert_eq!(recovered.snapshot().stage, Stage::TreeOpening);
+        assert_eq!(recovered.snapshot().checkpoint, manager_handoff());
+        assert!(recovered.snapshot().checkpoint.tree.is_none());
+        assert_eq!(
+            storage.state.borrow().truncates + acknowledgements.state.borrow().truncates,
+            0
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn manager_ack_rejects_valid_prefix_rollback_even_with_an_older_external_pin() -> TestResult {
+        let (mut journal, storage, acknowledgements) = seeded_manager(false)?;
+        journal.advance(&context(), Stage::Manager, manager())?;
+        let pin = journal.pin();
+        let prefix = storage.raw();
+        journal.advance(&context(), Stage::ManagerTransition, manager_handoff())?;
+        journal.advance(&context(), Stage::WorkshopOpening, manager_handoff())?;
+        drop(journal);
+        storage.replace(prefix.clone());
+        assert!(reopen_manager(&storage, &acknowledgements, pin, Mode::Recover, false).is_err());
+        assert_eq!(storage.raw(), prefix);
+        assert_eq!(
+            storage.state.borrow().truncates + acknowledgements.state.borrow().truncates,
+            0
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn manager_checkpoint_and_handoff_bounds_refuse_before_storage_reads() -> TestResult {
+        let (mut journal, storage, acknowledgements) = seeded_manager(false)?;
+        let mut oversized = manager();
+        oversized.manager =
+            Some(json!({"a":"x".repeat(12*1024),"b":"y".repeat(12*1024),"c":"z".repeat(12*1024)}));
+        let before = (
+            storage.state.borrow().reads,
+            acknowledgements.state.borrow().reads,
+        );
+        assert_eq!(
+            journal
+                .advance(&context(), Stage::Manager, oversized)
+                .map_err(|e| e.code),
+            Err(ErrorCode::BudgetExceeded)
+        );
+        assert_eq!(
+            before,
+            (
+                storage.state.borrow().reads,
+                acknowledgements.state.borrow().reads
+            )
+        );
+        journal.advance(&context(), Stage::Manager, manager())?;
+        let mut oversized = manager_handoff();
+        oversized.manager_handoff = Some(json!({"value":"x".repeat(MAX_MANAGER_HANDOFF)}));
+        let before = (
+            storage.state.borrow().reads,
+            acknowledgements.state.borrow().reads,
+        );
+        assert_eq!(
+            journal
+                .advance(&context(), Stage::ManagerTransition, oversized)
+                .map_err(|e| e.code),
+            Err(ErrorCode::BudgetExceeded)
+        );
+        assert_eq!(
+            before,
+            (
+                storage.state.borrow().reads,
+                acknowledgements.state.borrow().reads
+            )
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn checksummed_manager_history_cannot_change_successors_or_original_custody() -> TestResult {
+        for harvest_tree in [false, true] {
+            let (mut journal, storage, acknowledgements) = seeded_manager(harvest_tree)?;
+            journal.advance(&context(), Stage::Manager, manager())?;
+            journal.advance(&context(), Stage::ManagerTransition, manager_handoff())?;
+            let pin = journal.pin();
+            let ack_chain = journal.ack_chain;
+            let base = (storage.raw(), acknowledgements.raw());
+            drop(journal);
+            let expected = if harvest_tree {
+                Stage::TreeOpening
+            } else {
+                Stage::WorkshopOpening
+            };
+            let wrong = if harvest_tree {
+                Stage::WorkshopOpening
+            } else {
+                Stage::TreeOpening
+            };
+            let mut forged = vec![
+                (wrong, manager_handoff()),
+                (expected, Checkpoint::default()),
+            ];
+            let mut replaced = manager_handoff();
+            replaced.manager.as_mut().ok_or("manager missing")?["original"]["key"] =
+                json!("replacement");
+            forged.push((expected, replaced));
+            let mut replaced = manager_handoff();
+            replaced.manager_handoff.as_mut().ok_or("handoff missing")?["origin_witness"] =
+                json!("replacement");
+            forged.push((expected, replaced));
+            for (stage, checkpoint) in forged {
+                let snapshot = Snapshot {
+                    stage,
+                    checkpoint,
+                    cancelled_from: None,
+                };
+                let record = frame(
+                    parsed_digest(&pin.head)?,
+                    pin.frames + 1,
+                    &snapshot,
+                    pin.authority_tick_floor,
+                )?;
+                let head = Head {
+                    digest: Digest32::from_bytes(record[record.len() - 32..].try_into()?),
+                    tick: pin.authority_tick_floor,
+                };
+                let mut raw = base.0.clone();
+                raw.extend_from_slice(&record);
+                let mut ack = base.1.clone();
+                ack.extend_from_slice(&acknowledgement(
+                    parsed_digest(&pin.journal_id)?,
+                    head,
+                    pin.frames + 1,
+                    ack_chain,
+                ));
+                storage.replace(raw.clone());
+                acknowledgements.replace(ack.clone());
+                assert!(
+                    reopen_manager(
+                        &storage,
+                        &acknowledgements,
+                        pin.clone(),
+                        Mode::Recover,
+                        harvest_tree
+                    )
+                    .is_err()
+                );
+                assert_eq!((storage.raw(), acknowledgements.raw()), (raw, ack));
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn manager_and_tree_donors_survive_exact_production_publication_recovery() -> TestResult {
+        let (mut journal, storage, acknowledgements) = seeded_manager(true)?;
+        for (stage, checkpoint) in stages(true) {
+            let checkpoint = if stage == Stage::Production {
+                with_manager(with_tree(preplan_production()))
+            } else {
+                checkpoint
+            };
+            journal.advance(&context(), stage, checkpoint)?;
+        }
+        journal.advance(
+            &context(),
+            Stage::Production,
+            with_manager(with_tree(intended_production())),
+        )?;
+        let pin = journal.pin();
+        drop(journal);
+        let mut recovered = reopen_manager(&storage, &acknowledgements, pin, Mode::Recover, true)?;
+        let mut c = context();
+        c.session_id = SessionId::new(7002);
+        let published = with_manager(with_tree(published_production()));
+        recovered.advance(&c, Stage::Production, published.clone())?;
+        recovered.cancel(&c)?;
+        assert_eq!(recovered.snapshot().checkpoint, published);
+        for field in ["manager", "manager_handoff"] {
+            let mut changed = published.clone();
+            if field == "manager" {
+                changed.manager = None;
+            } else {
+                changed.manager_handoff = None;
+            }
+            assert!(recovered.advance(&c, Stage::Cancelled, changed).is_err());
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn tree_headers_and_intent_frames_keep_the_exact_pre_manager_encoding() -> TestResult {
+        #[derive(serde::Serialize)]
+        struct OldHeader {
+            schema: String,
+            incarnation: String,
+            fortress: String,
+            initial_tick: u64,
+            original: Value,
+            initial_stage: Stage,
+        }
+        #[derive(serde::Serialize)]
+        struct OldCheckpoint {
+            workshop: Option<Value>,
+            handoff: Option<Value>,
+            production: Option<Value>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            production_intent: Option<Value>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            tree: Option<Value>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            tree_handoff: Option<Value>,
+        }
+        #[derive(serde::Serialize)]
+        struct OldSnapshot {
+            stage: Stage,
+            checkpoint: OldCheckpoint,
+            cancelled_from: Option<Stage>,
+        }
+        #[derive(serde::Serialize)]
+        struct OldBody {
+            high_tick: u64,
+            snapshot: OldSnapshot,
+        }
+
+        let (mut journal, storage, acknowledgements) = seeded_tree()?;
+        let mut snapshots = vec![journal.snapshot().clone()];
+        for (stage, checkpoint) in tree_stages() {
+            let checkpoint = if stage == Stage::Production {
+                with_tree(preplan_production())
+            } else {
+                checkpoint
+            };
+            journal.advance(&context(), stage, checkpoint)?;
+            snapshots.push(journal.snapshot().clone());
+        }
+        for checkpoint in [
+            with_tree(intended_production()),
+            with_tree(published_production()),
+        ] {
+            journal.advance(&context(), Stage::Production, checkpoint)?;
+            snapshots.push(journal.snapshot().clone());
+        }
+        journal.cancel(&context())?;
+        snapshots.push(journal.snapshot().clone());
+        let c = context();
+        let header = serde_json::to_vec(&OldHeader {
+            schema: "dfmcp.native-resource-project/1".to_owned(),
+            incarnation: format!("{}:{}", c.session_id, c.request_id),
+            fortress: c.anchor.fortress_id.to_string(),
+            initial_tick: 100,
+            original: tree_original(),
+            initial_stage: Stage::TreeOpening,
+        })?;
+        let id = hash(b"dfmcp-resource-project-original/1", &header);
+        let mut raw = MAGIC.to_vec();
+        raw.extend_from_slice(&(header.len() as u32).to_be_bytes());
+        raw.extend_from_slice(&header);
+        raw.extend_from_slice(id.as_bytes());
+        let mut ack = Vec::new();
+        let mut previous = id;
+        let mut ack_chain = Digest32::ZERO;
+        for (index, snapshot) in snapshots.into_iter().enumerate() {
+            let checkpoint = snapshot.checkpoint;
+            assert!(checkpoint.manager.is_none() && checkpoint.manager_handoff.is_none());
+            let body = serde_json::to_vec(&OldBody {
+                high_tick: 100,
+                snapshot: OldSnapshot {
+                    stage: snapshot.stage,
+                    cancelled_from: snapshot.cancelled_from,
+                    checkpoint: OldCheckpoint {
+                        workshop: checkpoint.workshop,
+                        handoff: checkpoint.handoff,
+                        production: checkpoint.production,
+                        production_intent: checkpoint.production_intent,
+                        tree: checkpoint.tree,
+                        tree_handoff: checkpoint.tree_handoff,
+                    },
+                },
+            })?;
+            let mut record = FRAME.to_vec();
+            record.extend_from_slice(&(body.len() as u32).to_be_bytes());
+            record.extend_from_slice(&(index as u32 + 1).to_be_bytes());
+            record.extend_from_slice(previous.as_bytes());
+            record.extend_from_slice(&body);
+            previous = hash(b"dfmcp-resource-project-frame/1", &record);
+            record.extend_from_slice(previous.as_bytes());
+            raw.extend_from_slice(&record);
+            let record = acknowledgement(
+                id,
+                Head {
+                    digest: previous,
+                    tick: 100,
+                },
+                index as u32 + 1,
+                ack_chain,
+            );
+            ack_chain = Digest32::from_bytes(record[108..].try_into()?);
+            ack.extend_from_slice(&record);
+        }
+        assert_eq!(storage.raw(), raw);
+        assert_eq!(acknowledgements.raw(), ack);
+        let pin = journal.pin();
+        drop(journal);
+        let recovered = reopen_tree(&storage, &acknowledgements, pin, Mode::Offline)?;
+        assert_eq!(recovered.snapshot().stage, Stage::Cancelled);
+        assert_eq!((storage.raw(), acknowledgements.raw()), (raw, ack));
+        Ok(())
+    }
+}
+
 #[cfg(all(
     target_os = "linux",
     any(target_arch = "x86_64", target_arch = "aarch64")
@@ -1987,6 +2809,88 @@ mod private_files {
             Stage::TreeOpening,
         )?;
         assert_eq!(recovered.snapshot(), &retained);
+        assert_eq!(
+            before,
+            (
+                std::fs::read(directory.0.join("resource-project.journal"))?,
+                std::fs::read(directory.0.join("resource-project.ack"))?,
+            )
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn real_private_manager_chain_retains_all_originals_and_rejects_selection_changes() -> TestResult
+    {
+        let directory = Directory::new()?;
+        let c = context();
+        let original = manager_prefix::manager_original(true);
+        let mut journal = open_private(
+            &directory.0,
+            &c,
+            Mode::Control,
+            true,
+            original.clone(),
+            None,
+            Stage::ManagerOpening,
+        )?;
+        let initial_pin = journal.pin();
+        for (stage, checkpoint) in manager_prefix::stages(true) {
+            journal.advance(&c, stage, checkpoint)?;
+        }
+        let retained = journal.snapshot().clone();
+        let pin = journal.pin();
+        assert!(
+            open_private(
+                &directory.0,
+                &c,
+                Mode::Recover,
+                false,
+                original.clone(),
+                Some(pin),
+                Stage::ManagerOpening,
+            )
+            .is_err()
+        );
+        drop(journal);
+        let before = (
+            std::fs::read(directory.0.join("resource-project.journal"))?,
+            std::fs::read(directory.0.join("resource-project.ack"))?,
+        );
+        for (changed, initial) in [
+            (tree_original(), Stage::TreeOpening),
+            (
+                manager_prefix::manager_original(false),
+                Stage::ManagerOpening,
+            ),
+            (original.clone(), Stage::WorkshopOpening),
+        ] {
+            assert!(
+                open_private(
+                    &directory.0,
+                    &c,
+                    Mode::Recover,
+                    false,
+                    changed,
+                    Some(initial_pin.clone()),
+                    initial,
+                )
+                .is_err()
+            );
+        }
+        let recovered = open_private(
+            &directory.0,
+            &c,
+            Mode::Offline,
+            false,
+            original,
+            Some(initial_pin),
+            Stage::ManagerOpening,
+        )?;
+        assert_eq!(recovered.snapshot(), &retained);
+        assert!(retained.checkpoint.manager_handoff.is_some());
+        assert!(retained.checkpoint.tree_handoff.is_some());
+        assert!(retained.checkpoint.handoff.is_some());
         assert_eq!(
             before,
             (

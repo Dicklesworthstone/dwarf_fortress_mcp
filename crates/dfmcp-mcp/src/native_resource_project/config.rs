@@ -1,6 +1,7 @@
-//! Closed operator policy for one optional Tree -> Workshop -> stock project.
+//! Closed operator policy for optional Manager and Tree stages before Workshop and stock.
 use super::{error, journal};
 use crate::live_production_runtime::{Config as ProductionConfig, ProjectStockGoal};
+use crate::manager_appointment_server::{ManagerProjectHandoff, ProjectManagerConfig};
 use crate::tree_harvest_server::{ProjectTreeConfig, TreeProjectHandoff};
 use crate::workshop_construction_server::{ProjectWorkshopTemplate, WorkshopProjectHandoff};
 use dfmcp_core::{Digest32, ErrorCode, Result};
@@ -12,6 +13,8 @@ use std::sync::Arc;
 pub(super) const OPT_IN: &str = "DFMCP_ALLOW_UNADMITTED_NATIVE_RESOURCE_PROJECT";
 pub(super) const CONFIG: &str = "DFMCP_NATIVE_RESOURCE_PROJECT_CONFIG";
 const TREE_CONFIG: &str = "DFMCP_TREE_HARVEST_MCP_CONFIG";
+const MANAGER_CONFIG: &str = "DFMCP_MANAGER_V1_23_MCP_CONFIG";
+const PARENT_CONFIG_BYTES: usize = 128 * 1024;
 const CONFIGURATIONS: [&str; 5] = [
     CONFIG,
     "DFMCP_WORKSHOP_MCP_CONFIG",
@@ -68,7 +71,11 @@ pub(super) fn runtime_io() -> Result<()> {
 fn read(name: &str) -> Result<String> {
     let raw = std::env::var(name)
         .map_err(|_| denied("required resource project operator configuration is missing"))?;
-    let maximum = if name == CONFIG { 96 * 1024 } else { 16 * 1024 };
+    let maximum = if name == CONFIG {
+        PARENT_CONFIG_BYTES
+    } else {
+        16 * 1024
+    };
     if raw.is_empty() || raw.len() > maximum {
         return Err(invalid(
             "resource project operator configuration exceeds its bound",
@@ -79,6 +86,7 @@ fn read(name: &str) -> Result<String> {
 
 #[derive(Clone, Copy)]
 struct Features {
+    appoint_manager: bool,
     harvest_tree: bool,
     tree_material: bool,
     tree_clock: bool,
@@ -107,6 +115,14 @@ impl Features {
             Some(Value::Bool(value)) => *value,
             Some(_) => return Err(invalid("harvest_tree must be a boolean")),
         };
+        let appoint_manager = match parent
+            .as_ref()
+            .and_then(|value| value.get("appoint_manager"))
+        {
+            None => false,
+            Some(Value::Bool(value)) => *value,
+            Some(_) => return Err(invalid("appoint_manager must be a boolean")),
+        };
         let tree_clock = if harvest_tree {
             let tree: Value = serde_json::from_str(tree.ok_or_else(|| {
                 denied("a harvesting project requires its exact Tree configuration")
@@ -117,17 +133,22 @@ impl Features {
             false
         };
         Ok(Self {
+            appoint_manager,
             harvest_tree,
             tree_material: harvest_tree || !w["tree_material_source"].is_null(),
             tree_clock,
             workshop_clock: !w["clock"].is_null(),
             production_clock: !p["clock"].is_null(),
             inventory_clock: !p["inventory_clock"].is_null(),
-            manager: !p["manager_prerequisite"].is_null(),
+            manager: appoint_manager || !p["manager_prerequisite"].is_null(),
         })
     }
     fn allows(self, key: &str) -> bool {
         match key {
+            MANAGER_CONFIG
+            | "DFMCP_ALLOW_UNADMITTED_MANAGER_V1_23"
+            | "DFMCP_MANAGER_V1_23_TOKEN"
+            | "DFMCP_MANAGER_V1_23_ALLOW_APPOINT" => self.appoint_manager,
             TREE_CONFIG
             | "DFMCP_ALLOW_UNADMITTED_TREE_HARVEST_V1_21"
             | "DFMCP_TREE_HARVEST_ALLOW_DESIGNATE" => self.harvest_tree,
@@ -162,7 +183,9 @@ pub(super) fn environment() -> Result<()> {
     // opening later validates every required configuration and identity.
     let parent = std::env::var(CONFIG).ok();
     let tree = std::env::var(TREE_CONFIG).ok();
-    if parent.as_ref().is_some_and(|raw| raw.len() > 96 * 1024)
+    if parent
+        .as_ref()
+        .is_some_and(|raw| raw.len() > PARENT_CONFIG_BYTES)
         || tree.as_ref().is_some_and(|raw| raw.len() > 16 * 1024)
     {
         return Err(invalid(
@@ -197,6 +220,9 @@ struct Input {
     #[serde(default)]
     harvest_tree: bool,
     tree_handoff: Option<Value>,
+    #[serde(default)]
+    appoint_manager: bool,
+    manager_handoff: Option<Value>,
 }
 
 pub(super) struct Config {
@@ -208,6 +234,8 @@ pub(super) struct Config {
     pub(super) handoff: Option<WorkshopProjectHandoff>,
     pub(super) tree: Option<ProjectTreeConfig>,
     pub(super) tree_handoff: Option<TreeProjectHandoff>,
+    pub(super) manager: Option<ProjectManagerConfig>,
+    pub(super) manager_handoff: Option<ManagerProjectHandoff>,
     guard: Arc<dyn Fn() -> Result<()> + Send + Sync>,
 }
 
@@ -258,8 +286,12 @@ impl Config {
         directory(&input.directory)?;
         if input.schema != "dfmcp.native-resource-project-development/1"
             || input.initialize == input.acknowledged.is_some()
-            || (input.initialize && (input.handoff.is_some() || input.tree_handoff.is_some()))
+            || (input.initialize
+                && (input.handoff.is_some()
+                    || input.tree_handoff.is_some()
+                    || input.manager_handoff.is_some()))
             || (!input.harvest_tree && input.tree_handoff.is_some())
+            || (!input.appoint_manager && input.manager_handoff.is_some())
         {
             return Err(invalid(
                 "invalid project schema, initialization or retained acknowledgement",
@@ -269,6 +301,10 @@ impl Config {
         if input.harvest_tree {
             names.push(TREE_CONFIG);
             raw.push(read(TREE_CONFIG)?);
+        }
+        if input.appoint_manager {
+            names.push(MANAGER_CONFIG);
+            raw.push(read(MANAGER_CONFIG)?);
         }
         let hashes: Vec<Digest32> = raw
             .iter()
@@ -296,6 +332,22 @@ impl Config {
             .as_ref()
             .map(TreeProjectHandoff::from_json)
             .transpose()?;
+        let manager_handoff = input
+            .manager_handoff
+            .as_ref()
+            .map(ManagerProjectHandoff::from_json)
+            .transpose()?;
+        let manager = if input.appoint_manager {
+            Some(
+                ProjectManagerConfig::from_resource_project_environment(guard.clone())?
+                    .with_project_deadline(input.goal.deadline_tick)?,
+            )
+        } else {
+            None
+        };
+        if let (Some(manager), Some(handoff)) = (&manager, &manager_handoff) {
+            manager.validate_project_handoff(handoff)?;
+        }
         let tree = if input.harvest_tree {
             Some(
                 ProjectTreeConfig::from_resource_project_environment(guard.clone())?
@@ -309,12 +361,30 @@ impl Config {
             tree.as_ref(),
         )?
         .with_project_deadline(input.goal.deadline_tick)?;
-        let production = ProductionConfig::validate_project_environment(
+        let production = ProductionConfig::validate_resource_project_environment(
             guard.clone(),
             runtime_io,
             handoff.as_ref(),
+            manager.as_ref(),
+            manager_handoff.as_ref(),
         )?;
         production.matches_workshop(&workshop.project_binding()?)?;
+        if let Some(manager) = &manager {
+            production.matches_manager(manager.project_binding())?;
+            let m = manager.project_binding();
+            let w = workshop.project_binding()?;
+            if m.source.folder() != w.fortress().folder()
+                || m.source.site() != w.fortress().site()
+                || m.endpoint != w.endpoint()
+                || m.dimensions != w.dimensions()
+                || m.df_version != w.df_version()
+                || m.dfhack_version != w.dfhack_version()
+            {
+                return Err(denied(
+                    "Manager and Workshop project source policies differ",
+                ));
+            }
+        }
         let mut directories = vec![
             input.directory.as_path(),
             workshop.project_directory(),
@@ -325,13 +395,19 @@ impl Config {
         if let Some(tree) = &tree {
             directories.push(tree.project_directory());
         }
+        if let Some(manager) = &manager {
+            directories.push(manager.project_directory());
+        }
         disjoint(&directories)?;
         if input.initialize
             && (!workshop.project_initializing()
                 || !production.initializing()
                 || tree
                     .as_ref()
-                    .is_some_and(|tree| !tree.project_initializing()))
+                    .is_some_and(|tree| !tree.project_initializing())
+                || manager
+                    .as_ref()
+                    .is_some_and(|manager| !manager.project_initializing()))
         {
             return Err(invalid(
                 "a new resource project requires new custody for every native child",
@@ -349,6 +425,9 @@ impl Config {
         if let Some(tree) = &tree {
             original["tree_policy"] = json!(tree.project_identity().to_hex());
         }
+        if let Some(manager) = &manager {
+            original["manager_policy"] = json!(manager.project_identity().to_hex());
+        }
         Ok((
             Self {
                 directory: input.directory,
@@ -359,6 +438,8 @@ impl Config {
                 handoff,
                 tree,
                 tree_handoff,
+                manager,
+                manager_handoff,
                 guard,
             },
             workshop,
@@ -400,6 +481,7 @@ mod tests {
     #[test]
     fn credentials_follow_configured_child_features() {
         let features = Features {
+            appoint_manager: false,
             harvest_tree: false,
             tree_material: false,
             tree_clock: false,
@@ -451,6 +533,55 @@ mod tests {
         assert!(
             Features::from_raw("{}", "{}", Some(r#"{"harvest_tree":"true"}"#), Some("{}")).is_err()
         );
+        Ok(())
+    }
+
+    #[test]
+    fn manager_owner_requires_its_explicit_generation_and_read_only_production_guard() -> Result<()>
+    {
+        let features = Features::from_raw("{}", "{}", Some(r#"{"appoint_manager":true}"#), None)?;
+        for key in [
+            MANAGER_CONFIG,
+            "DFMCP_ALLOW_UNADMITTED_MANAGER_V1_23",
+            "DFMCP_MANAGER_V1_23_TOKEN",
+            "DFMCP_MANAGER_V1_23_ALLOW_APPOINT",
+            "DFMCP_COMBINED_PRODUCTION_MANAGER_TOKEN",
+        ] {
+            assert!(features.allows(key), "{key}");
+        }
+        for key in [
+            "DFMCP_MANAGER_MCP_CONFIG",
+            "DFMCP_ALLOW_UNADMITTED_MANAGER_V1_22",
+            "DFMCP_MANAGER_TOKEN",
+            "DFMCP_MANAGER_ALLOW_APPOINT",
+            TREE_CONFIG,
+            "DFMCP_RUN_TOKEN",
+            "DFMCP_ADMITTED_BRIDGE_PROTOCOL",
+        ] {
+            assert!(!features.allows(key), "{key}");
+        }
+        let donor = Features::from_raw("{}", r#"{"manager_prerequisite":{}}"#, None, None)?;
+        assert!(donor.allows("DFMCP_COMBINED_PRODUCTION_MANAGER_TOKEN"));
+        assert!(!donor.allows(MANAGER_CONFIG));
+        assert!(!donor.allows("DFMCP_MANAGER_V1_23_ALLOW_APPOINT"));
+        assert!(Features::from_raw("{}", "{}", Some(r#"{"appoint_manager":1}"#), None).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn manager_and_tree_opt_ins_compose_without_granting_unconfigured_clocks() -> Result<()> {
+        let features = Features::from_raw(
+            "{}",
+            "{}",
+            Some(r#"{"appoint_manager":true,"harvest_tree":true}"#),
+            Some("{}"),
+        )?;
+        assert!(features.allows(MANAGER_CONFIG));
+        assert!(features.allows(TREE_CONFIG));
+        assert!(features.allows("DFMCP_TREE_HARVEST_TOKEN"));
+        assert!(!features.allows("DFMCP_RUN_TOKEN"));
+        assert!(!features.allows("DFMCP_SEMANTIC_WORK_ORDER_ALLOW_CLOCK"));
+        assert!(!features.allows("DFMCP_SEMANTIC_WORK_ORDER_ALLOW_INVENTORY_CLOCK"));
         Ok(())
     }
 }

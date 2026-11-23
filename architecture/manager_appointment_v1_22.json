@@ -104,6 +104,8 @@
     "crates/dfmcp-mcp/src/manager_appointment_server.rs",
     "crates/dfmcp-mcp/src/manager_appointment_server/runtime.rs",
     "crates/dfmcp-mcp/src/manager_appointment_server/production_handoff.rs",
+    "crates/dfmcp-mcp/src/manager_appointment_server/project.rs",
+    "crates/dfmcp-mcp/src/manager_appointment_server/project_tests.rs",
     "crates/dfmcp-mcp/src/manager_appointment_server/presentation.rs",
     "crates/dfmcp-mcp/src/manager_appointment_server/server_tests.rs",
     "crates/dfmcp-mcp/src/bin/dfmcp-manager-v1-22-dev-server.rs",

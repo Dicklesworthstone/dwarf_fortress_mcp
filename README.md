@@ -234,6 +234,15 @@ finite interval, then acquire fresh original supply evidence. Each interval
 keeps the original deadline and remaining sample capacity; a clock receipt
 alone never establishes harvested wood.
 
+The native resource project can begin with `appoint_manager: true`, followed by
+an optional `harvest_tree: true`, Workshop construction and its fixed furniture
+stock goal. It retains one original deadline and independently acknowledged
+custody for every stage. Manager appointment proves the 1.23 production cache;
+later production independently rechecks that exact original. Each native effect
+still needs its own current review and explicit confirmation. This remains an
+unadmitted development workflow; see the [configuration and recovery
+contract](docs/NATIVE_RESOURCE_PROJECT_MCP.md).
+
 The legacy `manager` startup still selects [Manager 1.22](docs/MANAGER_APPOINTMENT_MCP.md).
 That generation proves its assignment/HF/history projection but omits the
 production-responsibility cache; a completed appointment can therefore leave

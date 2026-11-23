@@ -10,7 +10,12 @@ use dfmcp_core::{ErrorCode, RequestId, Result, SessionId, WorkBudget};
 use fastmcp_rust::modern::ServerBuilder;
 use fastmcp_rust::prelude::*;
 use fastmcp_rust::{CompleteResult, FinalCallToolResult};
+pub(crate) use runtime::project::ManagerProjectHandoff;
 use runtime::{Action, Config, RESPONSE_BYTES, Runtime, error};
+pub(crate) use runtime::{
+    Action as ProjectManagerAction, Config as ProjectManagerConfig,
+    Runtime as ProjectManagerRuntime,
+};
 use serde_json::{Value, json};
 use std::sync::{
     Mutex, OnceLock,

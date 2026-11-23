@@ -8,6 +8,7 @@ pub(super) fn tick(reference: &Value) -> u64 {
         "/project_source_frontier/high_tick",
         "/observation_tick_floor",
         "/consumed_tick_floor",
+        "/production_handoff_floor/tick",
         "/recovery/frontier/authority_tick_floor",
         "/clock/authority_tick_floor",
         "/clock/authority_tick",
@@ -32,6 +33,8 @@ pub(super) fn same_original(before: &Value, after: &Value) -> Result<()> {
         "/original/plan_digest",
         "/original/deadline_tick",
         "/original_key",
+        "/original_plan_digest",
+        "/original_plan",
         "/recovery/plan_digest",
         "/recovery/object_digest",
         "/recovery/identity_digest",
@@ -65,6 +68,7 @@ pub(super) fn same_original(before: &Value, after: &Value) -> Result<()> {
     }
     for path in [
         "/project_source_frontier",
+        "/production_handoff_floor",
         "/recovery/workshop_prerequisite_floor",
         "/recovery/manager_prerequisite_floor",
         "/recovery/input_supply_floor",
@@ -129,6 +133,7 @@ pub(super) fn same_original(before: &Value, after: &Value) -> Result<()> {
     for path in [
         "/recovery/goal_history_present",
         "/original/dispatch_started",
+        "/dispatch_started",
     ] {
         if before.pointer(path) == Some(&Value::Bool(true))
             && after.pointer(path) != Some(&Value::Bool(true))
@@ -229,6 +234,56 @@ mod tests {
         regressed["project_source_frontier"]["high_tick"] = json!(0);
         regressed["clock"]["authority_tick_floor"] = json!(0);
         assert!(same_original(&before, &regressed).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn manager_original_and_each_consumed_export_floor_survive_recovery() -> Result<()> {
+        let before = json!({
+            "acknowledged":{"journal_id":"manager","head":"ack"},
+            "journal_pin_unverified":{"journal_id":"manager","head":"ack"},
+            "original_key":"appointment","original_plan_digest":"plan","dispatch_started":true,
+            "original":{"key":"appointment","plan_digest":"plan","deadline_tick":200,"dispatch_started":true},
+            "consumed_tick_floor":90,
+            "production_handoff_floor":{"tick":90,"generation":7,"sequence":9,
+                "next_event":21,"history_count":19,"group_next_position":31,
+                "group_next_assignment":41,"civ_next_position":51,"civ_next_assignment":61,"fenced":true}
+        });
+        let mut after = before.clone();
+        after["acknowledged"]["head"] = json!("descendant");
+        after["production_handoff_floor"]["sequence"] = json!(10);
+        same_original(&before, &after)?;
+        for field in [
+            "tick",
+            "generation",
+            "sequence",
+            "next_event",
+            "history_count",
+            "group_next_position",
+            "group_next_assignment",
+            "civ_next_position",
+            "civ_next_assignment",
+        ] {
+            let mut changed = after.clone();
+            changed["production_handoff_floor"][field] = json!(0);
+            assert!(same_original(&before, &changed).is_err(), "{field}");
+        }
+        for path in [
+            "/original_key",
+            "/original_plan_digest",
+            "/original/deadline_tick",
+            "/dispatch_started",
+            "/production_handoff_floor/fenced",
+        ] {
+            let mut changed = after.clone();
+            *changed.pointer_mut(path).ok_or_else(|| {
+                error(
+                    ErrorCode::InternalInvariantViolation,
+                    "missing Manager continuity fixture",
+                )
+            })? = Value::Null;
+            assert!(same_original(&before, &changed).is_err(), "{path}");
+        }
         Ok(())
     }
 }

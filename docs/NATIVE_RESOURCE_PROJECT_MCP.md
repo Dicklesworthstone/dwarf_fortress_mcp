@@ -2,10 +2,11 @@
 
 ## Scope and evidence posture
 
-`dfmcp-native-resource-project-dev-server` owns an optional original Tree
-harvest, one original Carpenter Workshop construction and one fixed
-wooden-furniture stock target. It composes the actual Tree, Workshop and
-combined-production runtimes inside one modern MCP session. The public surface
+`dfmcp-native-resource-project-dev-server` owns an optional original Manager
+1.23 appointment, an optional original Tree harvest, one original Carpenter
+Workshop construction and one fixed wooden-furniture stock target. It composes
+the actual Manager, Tree, Workshop and combined-production runtimes inside one
+modern MCP session. The public surface
 retains the eleven existing tool names.
 
 This is explicitly **unadmitted development source**. It adds no bridge method,
@@ -17,8 +18,11 @@ and confirmation.
 Set `harvest_tree: true` to start with the existing one-tree controller and
 transfer its freshly verified supply to the Workshop Tree-material importer.
 The default still starts with Workshop and can use an already completed Tree
-donor. Manager appointment remains outside this project. Existing configured
-Manager and input-supply policies remain the combined child's independent guards.
+donor. Set `appoint_manager: true` to appoint the configured eligible candidate
+first, prove the Manager 1.23 production-responsibility cache, and retain that
+exact original as the later production prerequisite. Without this optional
+stage, configured external Manager and input-supply policies retain their
+existing independent checks.
 
 Owning work: `df-dfhack-bridge-plane-c-pic.4` and
 `dfmcp-reality-wiring-proof-4bf.14`. Both remain in progress. This increment
@@ -37,8 +41,17 @@ With `harvest_tree: true`, the original prefix is:
 
 `TreeOpening → Tree → TreeTransition → WorkshopOpening`
 
+With `appoint_manager: true`, the original prefix is:
+
+`ManagerOpening → Manager → ManagerTransition → TreeOpening or WorkshopOpening`
+
+The original `harvest_tree` selection fixes that successor. Manager appointment
+does not select a tree, build a workshop or publish a production order. Each
+later child still requires its own fresh review and explicit effect confirmation.
+
 The original first child is part of the journal identity. Recovery cannot add,
-remove, repeat or substitute the Tree prefix. Older Workshop-first journals
+remove, repeat or substitute either optional prefix. Older Workshop-first and
+Tree-first journals
 retain their exact serialized header, checkpoint and frame bytes.
 
 `Cancelled` records its prior stage and retains all existing child references.
@@ -108,7 +121,7 @@ are omitted from the stable policy identities; their actual journal identities,
 acknowledgements, original archive references and floors are bound separately
 to the retained parent checkpoint.
 
-The parent, optional Tree, Workshop, production, workforce and order directories must be
+The parent, optional Manager and Tree, Workshop, production, workforce and order directories must be
 distinct canonical absolute paths, without ancestor/descendant overlap.
 Existing private-file ownership, exact modes, no-follow checks, exclusive locks,
 file synchronization and directory synchronization remain in force.
@@ -157,6 +170,30 @@ All three production configuration strings are validated before the first
 child operation. Fresh initialization requires both existing production native family
 authorities even when the selected later plan will not assign labor.
 
+### Optional Manager stage
+
+Add `"appoint_manager": true` to the parent configuration and supply the existing
+closed `DFMCP_MANAGER_V1_23_MCP_CONFIG` with schema
+`dfmcp.manager-appointment-mcp-development/2`. Keep its exact candidate unit and
+historical figure, source binding, map dimensions, authority, checkpoint and
+private custody directory. Require `DFMCP_ALLOW_UNADMITTED_MANAGER_V1_23=1`,
+`DFMCP_MANAGER_V1_23_TOKEN` and `DFMCP_MANAGER_V1_23_ALLOW_APPOINT=1` for fresh
+control. The later independent production guard also requires its existing
+`DFMCP_COMBINED_PRODUCTION_MANAGER_TOKEN` credential. Legacy Manager 1.22
+configuration and credentials do not select this stage.
+
+Manager and Workshop must name the same fortress, software versions, endpoint
+and dimensions; independent native generations remain distinct. Every selected
+child policy and private directory is checked before the first child opens.
+The root deadline must fit inside the Manager host authority and its existing
+12,000-tick appointment horizon. It cannot be replaced with a new child deadline.
+
+With this stage selected, omit `manager_prerequisite` from the combined
+production template. The actual completed appointment supplies it later, along
+with its consumed source checkpoint. Configuration preflight creates no donor,
+placeholder original, acknowledgement or native authority. An external Manager
+donor remains supported when `appoint_manager` is absent or false.
+
 ### Optional Tree stage
 
 Add `"harvest_tree": true` to the parent configuration and supply the existing
@@ -181,9 +218,45 @@ exact files and freshly qualifies available wood before construction planning.
 All selected child configurations are validated before initializing Tree.
 Recovery retains the same root, source policy and deadline. This mode harvests
 one configured visible tree; it does not infer additional trees, assert that
-one harvest is sufficient for every stock target, or appoint a Manager.
+one harvest is sufficient for every stock target, or change Manager policy.
 
 ## One-session workflow
+
+### Optional first step: appoint the original Manager
+
+With `appoint_manager: true`, opening retains the real Manager 1.23 owner.
+Observe the configured candidate, then request `appoint_vacant_manager` through
+`fortress_plan` using the exact current observation witness and the parent
+`deadline_tick`. The closed request rejects changed deadlines, duplicate fields
+and caller-selected candidates. Review the displayed appointment terms and
+explicitly confirm the current seal through `fortress_commit` with `scope="goal"`.
+Use Wait to reconcile the original receipt after a lost reply; do not create a
+replacement appointment. Manager owns no clock action.
+
+After both the original appointment and production cache are proved, request:
+
+```json
+{"kind":"advance_from_manager","expected_head":"<current parent head>"}
+```
+
+The transition uses the typed existing Manager exporter to verify the original
+journal and independent acknowledgement and acquire a fresh paused cache-bearing
+observation. It retains all consumed source floors before acknowledging
+`ManagerTransition`. Only that acknowledgement permits releasing the original
+writer. The next child's opening marker is acknowledged before initialization.
+The frozen Manager checkpoint and handoff remain in every later parent frame.
+
+The later production owner imports this exact Manager donor Offline, verifies
+the complete original descriptor, and independently requalifies current Manager
+readiness before planning and native production boundaries. The historical
+appointment alone never proves current production readiness. A handoff itself
+dispatches no native effect and does not advance game time.
+
+The Agent Turn recommends only the current stage's legal next action. A current
+Manager review includes the exact semantic terms and a named commitment to its
+bounded native capsule. Stale, fenced, expired, stopped, uncertain or failed
+publication views withhold confirmation. Later stages retain Manager history
+without presenting its old review as a new approval.
 
 ### Optional first step: harvest the original Tree
 
@@ -415,6 +488,15 @@ repeats the exact retained handoff in the parent configuration's `handoff`
 field so configuration can be preflighted before custody I/O. The runtime then
 compares that value against the actual parent journal.
 
+A Manager-first restart keeps `appoint_manager: true`, the original Manager
+policy and its existing independent acknowledgement. After transfer, supply
+the exact parent-held `manager_handoff` for configuration preflight; it must
+equal the frozen journal value. The parent retains the original appointment key,
+plan, absolute deadline, native dispatch history, and every consumed source
+counter or sticky fence. A newer parent tick narrows rejection authority before
+native reads. A cancelled Manager opening stays local, and a recovered Manager
+never regains a preparation or automatically repeats the appointment.
+
 A Tree-first restart also keeps `harvest_tree: true` and the original Tree
 policy. Its retained Tree checkpoint binds the exact journal/ACK, original
 plan, deadline and clock recovery. An optional `tree_handoff` configuration
@@ -458,8 +540,8 @@ and withholds plan/commit recommendations until the original has been verified.
 An intent alone does not prove that the child publication finished. Missing,
 partial, foreign or changed files refuse without repair or initialization.
 Legacy parent journals remain readable, but an original created without any
-prior acknowledged intent cannot be automatically adopted. A Manager stage and
-full multi-family orchestration remain open.
+prior acknowledged intent cannot be automatically adopted. General multi-family
+planning and the complete live acceptance campaign remain open.
 
 A parent append/readback/synchronization failure fences the owner. Partial or
 rolled-back journal/ACK data is not repaired in place. A failed response fit or
@@ -474,14 +556,16 @@ is released. Recovery data never restores a native permit or current goal proof.
 | Parent logical byte-work | Default 16 GiB, selectable 4–32 GiB |
 | Output | Exactly 65,536 admitted tokens under the existing four-byte convention; complete encoded response capped at 256 KiB |
 | Entities | 4,096 ceiling, narrowed by the child |
-| Actions | Five ceiling; Tree and Workshop children narrowed to one |
+| Actions | Five ceiling; Manager, Tree and Workshop children narrowed to one |
 | Game-time allowance | Default zero, maximum 1,200 per explicitly reviewed interval |
 | Parent journal | 8 MiB, at most 4,096 frames |
-| Complete parent frame | 224 KiB, including all retained child checkpoints, handoffs and production intent |
+| Complete parent frame | 272 KiB, including all retained child checkpoints, handoffs and production intent |
 | Immutable original/handoff | 64 KiB each |
 | Tree handoff | 16 KiB |
+| Manager handoff | 16 KiB |
 | Child checkpoint | 32 KiB each |
 | Exact production publication intent | 32 KiB |
+| Parent configuration | 128 KiB |
 
 Byte-work is a conservative bound on repeated reads, replay, hashing and
 verification; it is not resident memory or output size. Ledger operations

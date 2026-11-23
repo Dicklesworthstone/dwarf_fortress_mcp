@@ -1,4 +1,4 @@
-//! One foreground owner for real Tree, Workshop and combined-production runtimes.
+//! One foreground owner for real Manager, Tree, Workshop and production runtimes.
 //! Child custody remains effect authority; the parent owns stage order and stop policy.
 use super::config::{Config, runtime_io};
 use super::continuity;
@@ -7,6 +7,10 @@ use super::journal::{self, Checkpoint, Mode, Stage};
 use crate::live_production_runtime::{
     Config as ProductionConfig, Mode as ProductionMode, ObserveRequest, ProjectProductionIntent,
     Runtime as ProductionRuntime, StockTargetRequest,
+};
+use crate::manager_appointment_server::{
+    ManagerProjectHandoff, ProjectManagerAction as ManagerAction,
+    ProjectManagerRuntime as ManagerRuntime,
 };
 use crate::semantic_work_order_runtime::clock::RunRequest;
 use crate::semantic_work_order_runtime::inventory_clock::RunRequest as InventoryRunRequest;
@@ -17,6 +21,7 @@ use crate::workshop_construction_server::{
     ProjectWorkshopAction as WorkshopAction, ProjectWorkshopRuntime as WorkshopRuntime,
     ProjectWorkshopTemplate, WorkshopProjectHandoff,
 };
+use dfmcp_adapter::manager_appointment::journal::Mode as ManagerMode;
 use dfmcp_adapter::tree_harvest::journal::Mode as TreeMode;
 use dfmcp_adapter::workshop_construction::journal::WorkshopMode;
 use dfmcp_core::{
@@ -33,6 +38,9 @@ const WORKSHOP_BYTES: u64 = 512 * 1024 * 1024;
 
 #[path = "tree.rs"]
 mod tree;
+
+#[path = "manager.rs"]
+mod manager;
 
 fn invalid(message: &str) -> dfmcp_core::DfmcpError {
     error(ErrorCode::InvalidRequest, message)
@@ -72,6 +80,13 @@ fn tree_mode(mode: Mode) -> TreeMode {
         Mode::Control => TreeMode::Control,
         Mode::Recover => TreeMode::Recover,
         Mode::Offline => TreeMode::Offline,
+    }
+}
+fn manager_mode(mode: Mode) -> ManagerMode {
+    match mode {
+        Mode::Control => ManagerMode::Control,
+        Mode::Recover => ManagerMode::Recover,
+        Mode::Offline => ManagerMode::Offline,
     }
 }
 fn production_mode(mode: Mode) -> ProductionMode {
@@ -158,6 +173,7 @@ impl Work {
 }
 
 enum Child {
+    Manager(Box<ManagerRuntime>),
     Tree(Box<TreeRuntime>),
     Workshop(Box<WorkshopRuntime>),
     Production(Box<ProductionRuntime>),
@@ -165,6 +181,7 @@ enum Child {
 impl Child {
     fn reference(&self) -> Value {
         match self {
+            Self::Manager(child) => child.project_recovery_reference(),
             Self::Tree(child) => child.project_recovery_reference(),
             Self::Workshop(child) => child.project_recovery_reference(),
             Self::Production(child) => child.project_recovery_reference(),
@@ -172,6 +189,7 @@ impl Child {
     }
     fn withdraw(&mut self) {
         match self {
+            Self::Manager(child) => child.withdraw_permission(),
             Self::Tree(child) => child.withdraw_permission(),
             Self::Workshop(child) => child.withdraw(),
             Self::Production(child) => child.abandon_preparation(),
@@ -232,7 +250,9 @@ impl Runtime {
             config.initialize,
             config.original.clone(),
             config.acknowledged.clone(),
-            if config.tree.is_some() {
+            if config.manager.is_some() {
+                Stage::ManagerOpening
+            } else if config.tree.is_some() {
                 Stage::TreeOpening
             } else {
                 Stage::WorkshopOpening
@@ -378,8 +398,12 @@ impl Runtime {
         if let Child::Tree(child) = child {
             child.validate_project_original_policy()?;
         }
+        if let Child::Manager(child) = child {
+            child.validate_project_original_policy()?;
+        }
         let mut checkpoint = self.journal.snapshot().checkpoint.clone();
         let slot = match child {
+            Child::Manager(_) => &mut checkpoint.manager,
             Child::Tree(_) => &mut checkpoint.tree,
             Child::Workshop(_) => &mut checkpoint.workshop,
             Child::Production(_) => &mut checkpoint.production,
@@ -421,7 +445,10 @@ impl Runtime {
         if self.cancelled()
             && matches!(
                 self.effective_stage(),
-                Stage::TreeOpening | Stage::WorkshopOpening | Stage::ProductionOpening
+                Stage::ManagerOpening
+                    | Stage::TreeOpening
+                    | Stage::WorkshopOpening
+                    | Stage::ProductionOpening
             )
         {
             // Opening never dispatches a native effect. A cancelled opening is
@@ -429,15 +456,34 @@ impl Runtime {
             return Ok(json!({"opened":true,"local_parent_only":true,
                 "project_cancelled":true,"child_initialization_not_replayed":true}));
         }
+        if self.config.manager.is_some()
+            && !matches!(
+                self.effective_stage(),
+                Stage::ManagerOpening | Stage::Manager
+            )
+        {
+            self.manager_handoff()?;
+        }
         // An optional Tree prefix is part of the immutable original, including
         // when reopening a later child. Validate its retained handoff before
         // touching Workshop or production custody.
         if self.config.tree.is_some()
-            && !matches!(self.effective_stage(), Stage::TreeOpening | Stage::Tree)
+            && !matches!(
+                self.effective_stage(),
+                Stage::ManagerOpening
+                    | Stage::Manager
+                    | Stage::ManagerTransition
+                    | Stage::TreeOpening
+                    | Stage::Tree
+            )
         {
             self.tree_handoff()?;
         }
         match self.effective_stage() {
+            Stage::ManagerOpening | Stage::Manager => self.open_manager(work)?,
+            Stage::ManagerTransition => {
+                self.manager_handoff()?;
+            }
             Stage::TreeOpening | Stage::Tree => self.open_tree(work)?,
             Stage::TreeTransition => {
                 self.tree_handoff()?;
@@ -493,10 +539,12 @@ impl Runtime {
             }
             Stage::ProductionOpening | Stage::Production => {
                 let handoff = self.handoff()?;
-                let config = ProductionConfig::from_project_environment(
+                let manager = self.production_manager_handoff()?;
+                let config = ProductionConfig::from_resource_project_environment(
                     self.config.guard(),
                     runtime_io,
                     &handoff,
+                    manager.as_ref(),
                 )?;
                 if config.initialize {
                     return Err(denied(
@@ -701,8 +749,13 @@ impl Runtime {
             ));
         }
         let handoff = self.handoff()?;
-        let config =
-            ProductionConfig::from_project_environment(self.config.guard(), runtime_io, &handoff)?;
+        let manager = self.production_manager_handoff()?;
+        let config = ProductionConfig::from_resource_project_environment(
+            self.config.guard(),
+            runtime_io,
+            &handoff,
+            manager.as_ref(),
+        )?;
         if !config.initialize {
             return Err(denied(
                 "first production entry requires explicit fresh custody; an opening marker is recovered separately",
@@ -738,6 +791,9 @@ impl Runtime {
             if value["kind"] == "advance_to_workshop" {
                 return self.advance_to_workshop(raw, work);
             }
+            if value["kind"] == "advance_from_manager" {
+                return self.advance_from_manager(raw, work);
+            }
             stock_target = value["kind"] == "stock_target";
         }
         if matches!(&action, Action::Plan(_) | Action::Commit { .. }) {
@@ -756,7 +812,7 @@ impl Runtime {
         if self.child.is_none() {
             return match action {
                 Action::Inspect | Action::Wait(_) | Action::Cancel(_) => Ok(json!({
-                    "local_parent_only":true, "child_opening_may_be_incomplete":!matches!(self.effective_stage(), Stage::TreeTransition | Stage::Transition),
+                    "local_parent_only":true, "child_opening_may_be_incomplete":!matches!(self.effective_stage(), Stage::ManagerTransition | Stage::TreeTransition | Stage::Transition),
                     "native_effects_cancelled":false,
                 })),
                 _ => Err(denied(
@@ -779,7 +835,10 @@ impl Runtime {
             );
         }
         let mut budget = work.child(
-            if matches!(&self.child, Some(Child::Tree(_) | Child::Workshop(_))) {
+            if matches!(
+                &self.child,
+                Some(Child::Manager(_) | Child::Tree(_) | Child::Workshop(_))
+            ) {
                 WORKSHOP_BYTES
             } else {
                 MAX_BYTES
@@ -790,6 +849,16 @@ impl Runtime {
         let goal = self.config.goal.clone();
         let offline = self.mode == Mode::Offline;
         match self.child.as_mut() {
+            Some(Child::Manager(child)) => {
+                budget.max_actions = 1;
+                budget.max_entities = budget.max_entities.min(4096);
+                budget.max_game_ticks = 0;
+                child.raise_project_tick_floor(self.high_tick)?;
+                child.perform_project(
+                    manager::action(action, offline, goal.deadline_tick)?,
+                    budget,
+                )
+            }
             Some(Child::Tree(child)) => {
                 child.retain_project_authority_tick(self.high_tick)?;
                 budget.max_actions = 1;
@@ -1035,6 +1104,10 @@ impl Runtime {
 }
 
 #[cfg(test)]
+#[path = "manager_runtime_tests.rs"]
+mod manager_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -1071,6 +1144,8 @@ mod tests {
 
     #[test]
     fn parent_modes_preserve_child_recovery_semantics() {
+        assert_eq!(manager_mode(Mode::Recover), ManagerMode::Recover);
+        assert_eq!(manager_mode(Mode::Offline), ManagerMode::Offline);
         assert_eq!(tree_mode(Mode::Recover), TreeMode::Recover);
         assert_eq!(tree_mode(Mode::Offline), TreeMode::Offline);
         assert_eq!(workshop_mode(Mode::Recover), WorkshopMode::Recover);

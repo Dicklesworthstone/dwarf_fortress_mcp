@@ -8,6 +8,8 @@ use fastmcp_rust::{
 };
 use serde_json::{Value, json};
 
+#[path = "manager_presentation.rs"]
+mod manager;
 #[path = "tree_presentation.rs"]
 mod tree;
 
@@ -41,6 +43,9 @@ fn review(result: &Value) -> Option<(&str, Value)> {
     {
         return None;
     }
+    if manager::active(result) {
+        return manager::review(result);
+    }
     if tree::active(result) {
         return tree::review(result);
     }
@@ -73,6 +78,9 @@ fn review(result: &Value) -> Option<(&str, Value)> {
 fn observed_plan(result: &Value) -> Option<Value> {
     if result["mode"] != "control" {
         return None;
+    }
+    if manager::active(result) {
+        return manager::observed_plan(result);
     }
     if tree::active(result) {
         return tree::observed_plan(result);
@@ -178,6 +186,9 @@ fn next_step(
 ) -> Vec<Value> {
     if result["session_closed"] == true {
         return Vec::new();
+    }
+    if let Some(next) = manager::next_step(result, reference, session) {
+        return next;
     }
     if !stock_watch_owned
         && !publication_pending(reference)
@@ -413,7 +424,7 @@ pub(super) fn packet(
         turn = turn.request_id(request.to_string());
     }
     let publication_pending = publication_pending(&reference);
-    let pending = (!publication_pending)
+    let pending = (!publication_pending && reference["controller_fenced"] != true)
         .then(|| review(&result))
         .flatten()
         .map(|(scope, seal)| {
@@ -458,7 +469,26 @@ pub(super) fn packet(
     } else {
         "/retained_reference/retained_stage/checkpoint/tree"
     };
-    let clocks = ["clock", "inventory_clock"].into_iter().filter_map(|scope| {
+    let manager_active = manager::in_stage(&result, &reference);
+    let manager_visible = manager_active || original["manager"].is_object();
+    let manager_child = manager_active
+        && (child["source_profile"] == "manager/1.23"
+            || manager::original(child).is_some()
+            || child["project_source_frontier"].is_object());
+    let manager_state = if manager_child {
+        child
+    } else {
+        &original["manager"]
+    };
+    let manager_path = if manager_child {
+        child_path
+    } else {
+        "/retained_reference/retained_stage/checkpoint/manager"
+    };
+    let manager_original = manager::original(manager_state);
+    let manager_verified =
+        manager_active && manager::verified(&result) && reference["controller_fenced"] != true;
+    let mut actions = ["clock", "inventory_clock"].into_iter().filter_map(|scope| {
         let clock = &child[scope];
         clock.is_object().then(|| json!({
             "scope":scope, "pending":clock["pending"], "unresolved":clock["unresolved"],
@@ -469,6 +499,15 @@ pub(super) fn packet(
             "complete_evidence_pointer":format!("{child_path}/{scope}"),
         }))
     }).collect::<Vec<_>>();
+    if let Some(original) = &manager_original {
+        actions.push(json!({
+            "scope":"manager", "original":original,
+            "current_production_readiness_proven":false,
+            "complete_custody_pointer":"/retained_reference",
+            "complete_evidence_pointer":manager_path,
+            "automatic_redispatch":false,
+        }));
+    }
     let mut indeterminate = if result["ok"] != true && reference.is_object() {
         vec![json!({"custody_pointer":"/retained_reference","automatic_redispatch":false})]
     } else {
@@ -480,10 +519,20 @@ pub(super) fn packet(
             "complete_evidence_pointer":format!("{child_path}/clock"),
             "automatic_redispatch":false}));
     }
+    if manager_visible && manager::uncertain(manager_state) {
+        indeterminate.push(json!({"scope":"manager",
+            "current_production_readiness_proven":false,
+            "complete_custody_pointer":"/retained_reference",
+            "complete_evidence_pointer":manager_path,
+            "automatic_redispatch":false}));
+    }
     let obligation = reference.is_object().then(|| {
         json!({
             "stage":reference["retained_stage"]["stage"],
             "project_goal":goal["goal"],
+            "manager_original":manager::original(&original["manager"]),
+            "manager_handoff_pointer":original["manager_handoff"].is_object()
+                .then_some("/retained_reference/retained_stage/checkpoint/manager_handoff"),
             "tree_original":original["tree"]["original"],
             "tree_handoff_pointer":original["tree_handoff"].is_object()
                 .then_some("/retained_reference/retained_stage/checkpoint/tree_handoff"),
@@ -505,12 +554,16 @@ pub(super) fn packet(
     })).into_iter().collect::<Vec<_>>();
     let mut uncertainty = vec![
         json!({"uncertainty_id":"native_project_scope","epistemic_state":"unknown",
-            "statement":"This explicitly unadmitted development owner can retain one original Tree designation and supply handoff before original Workshop construction and one fixed furniture stock target. Each native effect and clock interval has its own review. Manager appointment is not a stage of this project."}),
+            "statement":"This explicitly unadmitted development owner can retain an optional original Manager appointment, an optional original Tree designation and supply handoff, original Workshop construction and one fixed furniture stock target. Each native effect and clock interval has its own review."}),
         json!({"uncertainty_id":"receipt_and_goal","epistemic_state":"unknown",
             "statement":"Placement, order insertion and clock receipts are historical custody. Production with an order requires its current labor and stock monitor. An originally satisfied no-work target instead requires fresh qualified inventory samples at its fixed cadence and deadline; its planning census contributes no stability. Neither path proves causal output attribution."}),
         json!({"uncertainty_id":"stop_and_recovery","epistemic_state":"indeterminate",
-            "statement":"A project stop prevents new stages and new reviews. It does not undo construction, cancel an already inserted order or prove a clock paused. Preserve all recovery references; independently reconcile or cancel the active clock. Opening markers never grant replayed initialization."}),
+            "statement":"A project stop prevents new stages and new reviews. It does not remove an appointed Manager, undo construction, cancel an already inserted order or prove a clock paused. Preserve all recovery references; independently reconcile or cancel the active clock. Opening markers never grant replayed initialization."}),
     ];
+    if manager_visible {
+        uncertainty.push(json!({"uncertainty_id":"manager_appointment_and_readiness","epistemic_state":"unknown",
+            "statement":"A verified original Manager/1.23 receipt covers its historical assignment, HF link, history event and responsibility-cache transaction. A retained handoff cannot establish current Manager readiness, office sufficiency, recipe feasibility or final stock. Production independently reopens and freshly qualifies the exact donor. Native Manager projection anchors are not canonical world anchors; capsule commitments name retained raw bytes, not inline evidence chunks."}));
+    }
     if tree_visible {
         uncertainty.push(json!({"uncertainty_id":"tree_supply_and_capture","epistemic_state":"unknown",
             "statement":"Tree completion observes a coordinate predicate and eligible ground wood; no stable plant identity, causal wood provenance or final stock proof follows. Workshop independently qualifies current material. The bounded Tree review exposes semantic fields and a capsule commitment; raw capsule bytes remain with their indicated owner or custody and are not delivered in this packet."}));
@@ -531,6 +584,22 @@ pub(super) fn packet(
     } else {
         Vec::new()
     };
+    let mut partial_domains = vec![
+        "original_tree",
+        "original_workshop",
+        "selected_production_goal",
+    ];
+    let mut omitted_domains = vec!["canonical_cross_family_world"];
+    if manager_visible {
+        partial_domains.insert(0, "original_manager");
+    } else {
+        omitted_domains.push("manager_appointment");
+    }
+    let manager_offer = if reference["controller_fenced"] == true {
+        None
+    } else {
+        manager::observed_plan(&result)
+    };
     let mut built = turn
         .briefing(json!({
             "profile":"native-resource-project",
@@ -543,6 +612,21 @@ pub(super) fn packet(
             "current_goal_anchor":if result["ok"] == true && *stage == "production" && !cancelled {
                 result["current_stock_goal"]["current_goal_anchor"].clone()
             } else { Value::Null },
+            "manager_appointment":if manager_visible { json!({
+                "original":manager_original,
+                "historical_appointment_proved":manager_verified
+                    && manager_state["original"]["appointment_proved"] == true,
+                "historical_cache_transaction_proved":manager_verified
+                    && manager_state["original"]["production_manager_cache_proved"] == true,
+                "handoff_retained":original["manager_handoff"].is_object(),
+                "current_production_readiness_proven":false,
+                "project_goal_proven":false,
+                "source_fenced":manager::source_fenced(manager_state),
+                "native_projection_anchor":manager_state.get("native_anchor")
+                    .unwrap_or(&manager_state["custody"]["native_anchor"]),
+                "canonical_world_anchor":false,
+                "complete_evidence_pointer":manager_path,
+            }) } else { Value::Null },
             "tree_supply":if tree_visible { json!({
                 "historical_supply_observed_tick":tree_state["original"]["historical_supply_observed_tick"],
                 "fresh_supply_observed_this_call":tree_active && result["ok"] == true
@@ -557,7 +641,7 @@ pub(super) fn packet(
         }))
         .active_work(json!({
             "pending_plans":pending.clone().into_iter().collect::<Vec<_>>(),
-            "actions":clocks,
+            "actions":actions,
             "obligations":obligation.into_iter().collect::<Vec<_>>(),
             "no_work_stock_goal":no_work_stock_goal,
             "cancellation_drains":if cancelled {
@@ -568,6 +652,14 @@ pub(super) fn packet(
             "publications":publications,
             "confirmations":pending.into_iter().collect::<Vec<_>>(),
         }))
+        .affordances(manager_offer.map(|request| json!({
+            "intent":"appoint_vacant_manager", "request":request,
+            "unit_id":result["child"]["observation"]["unit_id"],
+            "histfig_id":result["child"]["observation"]["histfig_id"],
+            "capability":"configure_production", "risk":"irreversible",
+            "confirmation_required":true, "grants_authority":false,
+            "complete_evidence_pointer":"/result/child/observation",
+        })).into_iter().collect())
         .recommendations(session.map_or_else(Vec::new, |id| {
             next_step(&result, &reference, id, has_stock_watch)
         }))
@@ -577,8 +669,8 @@ pub(super) fn packet(
             "complete_domains":if result["project_custody_currently_verified"] == true {
                 vec!["parent_stage_custody"]
             } else { Vec::<&str>::new() },
-            "partial_domains":["original_tree","original_workshop","selected_production_goal"],
-            "omitted_domains":["canonical_cross_family_world","manager_appointment"],
+            "partial_domains":partial_domains,
+            "omitted_domains":omitted_domains,
             "parent_custody_verified_this_call":result["project_custody_currently_verified"] == true,
             "recovery_references_are_current_proof":false,
         }))

@@ -10,6 +10,8 @@ use dfmcp_adapter::manager_appointment::{
 };
 #[path = "production_handoff.rs"]
 mod production_handoff;
+#[path = "project.rs"]
+pub(crate) mod project;
 use dfmcp_adapter::workshop_construction::{
     acknowledgement::WorkshopAcknowledgements, journal::WorkshopPin,
 };
@@ -31,31 +33,43 @@ const OPT: &str = "DFMCP_ALLOW_UNADMITTED_MANAGER_V1_22";
 const TOKEN: &str = "DFMCP_MANAGER_TOKEN";
 const WRITE: &str = "DFMCP_MANAGER_ALLOW_APPOINT";
 fn config_name() -> &'static str {
-    match super::protocol() {
+    config_name_for(super::protocol())
+}
+fn config_name_for(protocol: ManagerProtocol) -> &'static str {
+    match protocol {
         ManagerProtocol::V1_22 => CONFIG,
         ManagerProtocol::V1_23 => "DFMCP_MANAGER_V1_23_MCP_CONFIG",
     }
 }
 fn opt_name() -> &'static str {
-    match super::protocol() {
+    opt_name_for(super::protocol())
+}
+fn opt_name_for(protocol: ManagerProtocol) -> &'static str {
+    match protocol {
         ManagerProtocol::V1_22 => OPT,
         ManagerProtocol::V1_23 => "DFMCP_ALLOW_UNADMITTED_MANAGER_V1_23",
     }
 }
 fn token_name() -> &'static str {
-    match super::protocol() {
+    token_name_for(super::protocol())
+}
+fn token_name_for(protocol: ManagerProtocol) -> &'static str {
+    match protocol {
         ManagerProtocol::V1_22 => TOKEN,
         ManagerProtocol::V1_23 => "DFMCP_MANAGER_V1_23_TOKEN",
     }
 }
 fn write_name() -> &'static str {
-    match super::protocol() {
+    write_name_for(super::protocol())
+}
+fn write_name_for(protocol: ManagerProtocol) -> &'static str {
+    match protocol {
         ManagerProtocol::V1_22 => WRITE,
         ManagerProtocol::V1_23 => "DFMCP_MANAGER_V1_23_ALLOW_APPOINT",
     }
 }
-fn config_schema() -> &'static str {
-    match super::protocol() {
+fn config_schema(protocol: ManagerProtocol) -> &'static str {
+    match protocol {
         ManagerProtocol::V1_22 => "dfmcp.manager-appointment-mcp-development/1",
         ManagerProtocol::V1_23 => "dfmcp.manager-appointment-mcp-development/2",
     }
@@ -81,19 +95,7 @@ pub(super) fn digest(s: &str) -> Result<Digest32> {
     Digest32::from_hex(s).ok_or_else(|| error(ErrorCode::InvalidRequest, "invalid manager digest"))
 }
 pub(super) fn environment() -> Result<()> {
-    if std::env::var(opt_name()).ok().as_deref() != Some("1")
-        || std::env::var_os("DFMCP_ADMITTED_BRIDGE_PROTOCOL").is_some()
-        || crate::current_admission_provenance().is_some()
-    {
-        return Err(denied(
-            "Manager development requires isolated exact-generation opt-in and refuses production provenance",
-        ));
-    }
-    if std::env::var_os(write_name()).is_some_and(|v| v.to_str() != Some("1")) {
-        return Err(denied(
-            "manager appointment gate must be absent or exactly 1",
-        ));
-    }
+    family_environment(super::protocol())?;
     for (name, _) in std::env::vars_os() {
         let name = name.to_string_lossy();
         if name.starts_with("DFMCP_")
@@ -103,6 +105,22 @@ pub(super) fn environment() -> Result<()> {
                 "manager profile refuses other DFMCP and production launch state",
             ));
         }
+    }
+    Ok(())
+}
+fn family_environment(protocol: ManagerProtocol) -> Result<()> {
+    if std::env::var(opt_name_for(protocol)).ok().as_deref() != Some("1")
+        || std::env::var_os("DFMCP_ADMITTED_BRIDGE_PROTOCOL").is_some()
+        || crate::current_admission_provenance().is_some()
+    {
+        return Err(denied(
+            "Manager development requires isolated exact-generation opt-in and refuses production provenance",
+        ));
+    }
+    if std::env::var_os(write_name_for(protocol)).is_some_and(|v| v.to_str() != Some("1")) {
+        return Err(denied(
+            "manager appointment gate must be absent or exactly 1",
+        ));
     }
     Ok(())
 }
@@ -152,12 +170,14 @@ struct Input {
     production_handoff_floor: Option<production_handoff::FloorInput>,
 }
 #[derive(Clone)]
-pub(super) struct Config {
+pub(crate) struct Config {
     input: Input,
     binding: Binding,
     external: Option<WorkshopPin>,
     hash: Digest32,
     scope: MapCuboid,
+    parent_check: Option<Arc<dyn Fn() -> Result<()> + Send + Sync>>,
+    project_deadline: Option<u64>,
 }
 fn area(raw: [u32; 6], d: [u32; 3]) -> Result<MapCuboid> {
     if (0..3).any(|i| raw[i] > raw[i + 3] || raw[i + 3] >= d[i]) {
@@ -172,6 +192,9 @@ fn area(raw: [u32; 6], d: [u32; 3]) -> Result<MapCuboid> {
 }
 impl Config {
     pub(super) fn parse(raw: &str) -> Result<Self> {
+        Self::parse_protocol(raw, super::protocol())
+    }
+    fn parse_protocol(raw: &str, protocol: ManagerProtocol) -> Result<Self> {
         if raw.is_empty() || raw.len() > 16384 {
             return Err(error(
                 ErrorCode::InvalidRequest,
@@ -189,7 +212,7 @@ impl Config {
             .to_str()
             .ok_or_else(|| denied("manager custody path must be UTF-8"))?;
         let d = i.map_dimensions;
-        if i.schema != config_schema()
+        if i.schema != config_schema(protocol)
             || !i.directory.is_absolute()
             || path.len() < 2
             || path.len() > 3800
@@ -216,7 +239,7 @@ impl Config {
         }
         let scope = area(i.scope, d)?;
         let binding = Binding {
-            protocol: super::protocol(),
+            protocol,
             endpoint,
             source: FortressIdentity::new(&i.world_folder, i.site_id)?,
             generation: i.generation,
@@ -252,6 +275,8 @@ impl Config {
             external,
             hash: Digest32::of_bytes(raw.as_bytes()),
             scope,
+            parent_check: None,
+            project_deadline: None,
         })
     }
     pub(super) fn load() -> Result<Self> {
@@ -263,12 +288,20 @@ impl Config {
     }
     fn current(&self) -> Result<()> {
         runtime_io()?;
-        environment()?;
-        if self.binding.protocol != super::protocol() {
-            return Err(denied("Manager process generation changed"));
+        if let Some(parent_check) = &self.parent_check {
+            parent_check()?;
+            family_environment(self.binding.protocol)?;
+            if self.binding.protocol != ManagerProtocol::V1_23 {
+                return Err(denied("resource projects require Manager 1.23"));
+            }
+        } else {
+            environment()?;
+            if self.binding.protocol != super::protocol() {
+                return Err(denied("Manager process generation changed"));
+            }
         }
-        let raw =
-            std::env::var(config_name()).map_err(|_| denied("manager configuration withdrawn"))?;
+        let raw = std::env::var(config_name_for(self.binding.protocol))
+            .map_err(|_| denied("manager configuration withdrawn"))?;
         if Digest32::of_bytes(raw.as_bytes()) != self.hash {
             return Err(denied(
                 "manager source or authority changed; original permission withdrawn",
@@ -278,7 +311,7 @@ impl Config {
     }
     fn connect(&self, c: &OperationContext, mode: Mode) -> Result<ManagerRpc> {
         self.current()?;
-        let token = std::env::var(token_name())
+        let token = std::env::var(token_name_for(self.binding.protocol))
             .map_err(|_| denied("manager credential unavailable"))?
             .into_bytes();
         let pinned = token.clone();
@@ -292,7 +325,7 @@ impl Config {
             BuildCancellation::with_check(Arc::new(runtime_io)),
             Box::new(move |write| {
                 config.current()?;
-                if std::env::var(token_name())
+                if std::env::var(token_name_for(config.binding.protocol))
                     .ok()
                     .map(String::into_bytes)
                     .as_ref()
@@ -303,7 +336,10 @@ impl Config {
                 if write
                     && (mode != Mode::Control
                         || !config.input.initialize
-                        || std::env::var(write_name()).ok().as_deref() != Some("1"))
+                        || std::env::var(write_name_for(config.binding.protocol))
+                            .ok()
+                            .as_deref()
+                            != Some("1"))
                 {
                     return Err(denied("manager appointment permission denied"));
                 }
@@ -391,7 +427,7 @@ fn context(
         cancellation_requested: false,
     }
 }
-pub(super) enum Action {
+pub(crate) enum Action {
     Observe,
     Plan(String),
     Commit(String, bool),
@@ -442,7 +478,7 @@ struct PlanInput {
     expected_observation: String,
     deadline_tick: u64,
 }
-pub(super) struct Runtime {
+pub(crate) struct Runtime {
     config: Config,
     pub(super) session: SessionId,
     pub(super) mode: Mode,
@@ -457,6 +493,7 @@ pub(super) struct Runtime {
     high_tick: u64,
     high_sequence: u64,
     handoff_floor: Option<ManagerProductionFloor>,
+    project_fenced: bool,
 }
 impl Runtime {
     pub(super) fn open(
@@ -466,7 +503,25 @@ impl Runtime {
         budget: WorkBudget,
         start: Instant,
     ) -> Result<(Self, Value)> {
-        let initial = context(&config, mode, session, budget, 1, 0, Digest32::ZERO);
+        Self::open_at(config, mode, session, budget, start, 0)
+    }
+    fn open_at(
+        config: Config,
+        mode: Mode,
+        session: SessionId,
+        budget: WorkBudget,
+        start: Instant,
+        tick_floor: u64,
+    ) -> Result<(Self, Value)> {
+        let initial = context(
+            &config,
+            mode,
+            session,
+            budget,
+            1,
+            tick_floor,
+            Digest32::ZERO,
+        );
         let mut work = TurnWork::new(&initial, start)?;
         config.current()?;
         let mut observation = None;
@@ -480,9 +535,10 @@ impl Runtime {
                 &work.reserve(&initial, CONNECT_BYTES)?,
             )?;
             config.binding.capture(&c)?;
-            if !c.paused {
+            if !c.paused || c.tick < tick_floor {
                 return Err(denied("manager initialization requires paused source"));
             }
+            config.project_effect_deadline(c.tick)?;
             observation = Some(c);
         }
         let current = context(
@@ -491,7 +547,9 @@ impl Runtime {
             session,
             budget,
             1,
-            observation.as_ref().map_or(0, |c| c.tick),
+            observation
+                .as_ref()
+                .map_or(tick_floor, |c| c.tick.max(tick_floor)),
             Digest32::ZERO,
         );
         let entropy = if config.input.initialize {
@@ -509,15 +567,21 @@ impl Runtime {
             config.external,
             entropy,
         )?;
-        let handoff_floor = config
+        let mut handoff_floor = config
             .input
             .production_handoff_floor
             .as_ref()
             .map(production_handoff::FloorInput::floor);
+        if config.parent_check.is_some()
+            && let Some(capture) = observation.as_ref()
+        {
+            project::retain_floor(&mut handoff_floor, project::capture_floor(capture));
+        }
         let high_tick = journal
             .high_tick
             .max(observation.as_ref().map_or(0, |c| c.tick))
-            .max(handoff_floor.map_or(0, |floor| floor.tick));
+            .max(handoff_floor.map_or(0, |floor| floor.tick))
+            .max(tick_floor);
         let high_sequence = journal
             .high_sequence
             .max(observation.as_ref().map_or(0, |c| c.sequence))
@@ -549,6 +613,7 @@ impl Runtime {
             high_tick,
             high_sequence,
             handoff_floor,
+            project_fenced: false,
         };
         // Initial publication belongs to the same opening operation, not a renewed Query budget.
         let mut current = current;
@@ -565,7 +630,7 @@ impl Runtime {
             source.fence();
         }
     }
-    pub(super) fn withdraw_permission(&mut self) {
+    pub(crate) fn withdraw_permission(&mut self) {
         self.withdraw();
     }
     pub(super) fn last_request_id(&self) -> RequestId {
@@ -596,9 +661,14 @@ impl Runtime {
         self.journal.verify(c)?;
         self.acks.verify(c)?;
         if write {
+            self.config.project_effect_deadline(c.anchor.tick.get())?;
             if self.mode != Mode::Control
                 || !self.config.input.initialize
-                || std::env::var(write_name()).ok().as_deref() != Some("1")
+                || std::env::var(write_name_for(self.config.binding.protocol))
+                    .ok()
+                    .as_deref()
+                    != Some("1")
+                || self.project_fenced
             {
                 return Err(denied("manager appointment authority unavailable"));
             }
@@ -621,6 +691,7 @@ impl Runtime {
         Ok(())
     }
     fn consume(&mut self, cap: &Capture) -> Result<()> {
+        self.retain_project_capture(cap)?;
         self.config.binding.capture(cap)?;
         if cap.selection != self.config.binding.selection
             || cap.tick < self.high_tick
@@ -663,10 +734,12 @@ impl Runtime {
                     let mut source = self
                         .config
                         .connect(&work.reserve(&c, CONNECT_BYTES)?, self.mode)?;
-                    let cap = source.observe(
+                    let result = source.observe(
                         self.config.binding.selection,
                         &work.reserve(&c, CONNECT_BYTES)?,
-                    )?;
+                    );
+                    self.retain_project_source(&source, result.is_err());
+                    let cap = result?;
                     self.consume(&cap)?;
                     self.observation = Some(cap);
                 }
@@ -679,6 +752,15 @@ impl Runtime {
                         .map_err(|_| denied("invalid closed manager plan request"))?;
                     if request.kind != "appoint_vacant_manager" {
                         return Err(denied("manager profile has one vacant MANAGER intent"));
+                    }
+                    if self
+                        .config
+                        .project_deadline
+                        .is_some_and(|deadline| request.deadline_tick != deadline)
+                    {
+                        return Err(denied(
+                            "Manager original deadline differs from its fixed project goal",
+                        ));
                     }
                     if let Some(original) = &self.journal.original {
                         if original.plan.before.witness() != digest(&request.expected_observation)?
@@ -704,10 +786,12 @@ impl Runtime {
                         let mut source = self
                             .config
                             .connect(&work.reserve(&c, CONNECT_BYTES)?, self.mode)?;
-                        let current = source.observe(
+                        let result = source.observe(
                             self.config.binding.selection,
                             &work.reserve(&c, CONNECT_BYTES)?,
-                        )?;
+                        );
+                        self.retain_project_source(&source, result.is_err());
+                        let current = result?;
                         self.consume(&current)?;
                         if current != observed {
                             return Err(denied(
@@ -767,6 +851,7 @@ impl Runtime {
                     let scope = self.config.scope;
                     let mut guard = |edge: &OperationContext| {
                         config.current()?;
+                        config.project_effect_deadline(edge.anchor.tick.get())?;
                         edge.authorize(
                             Capability::ConfigureProduction,
                             RiskTier::Irreversible,
@@ -774,7 +859,11 @@ impl Runtime {
                             Some(scope),
                         )?;
                         leases.verify_exclusive_spatial(lease, session, scope, edge.anchor.tick)?;
-                        if std::env::var(write_name()).ok().as_deref() != Some("1") {
+                        if std::env::var(write_name_for(config.binding.protocol))
+                            .ok()
+                            .as_deref()
+                            != Some("1")
+                        {
                             return Err(denied("manager appointment gate revoked"));
                         }
                         Ok(())
@@ -891,7 +980,7 @@ impl Runtime {
             "appointment_proved":self.journal.native.as_ref().is_some_and(|n|n.complete()),
             "production_manager_cache_proved":self.config.binding.protocol==ManagerProtocol::V1_23 && self.journal.native.as_ref().is_some_and(|n|n.complete()),
             "after":self.journal.native.as_ref().and_then(|n|n.after.as_ref()).map(capture_json),"fresh_observation":fresh}));
-        json!({"ok":true,"source_profile":super::profile_name(),"mode":self.mode.as_str(),"retained_state_currently_verified":true,"original":original,
+        json!({"ok":true,"source_profile":match self.config.binding.protocol { ManagerProtocol::V1_22 => "manager/1.22", ManagerProtocol::V1_23 => "manager/1.23" },"mode":self.mode.as_str(),"retained_state_currently_verified":true,"original":original,
             "production_handoff_available":self.config.binding.protocol==ManagerProtocol::V1_23
                 && self.mode!=Mode::Offline && self.journal.native.as_ref().is_some_and(|record|record.complete())
                 && !self.handoff_floor.is_some_and(|floor|floor.fenced),

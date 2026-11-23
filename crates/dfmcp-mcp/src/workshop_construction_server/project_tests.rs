@@ -22,7 +22,9 @@ fn vector(name: &str) -> Result<Vec<u8>> {
     ))
     .map_err(|_| invalid("native vector JSON"))?;
     bytes(
-        vectors[name].as_str().ok_or_else(|| invalid("native vector absent"))?,
+        vectors[name]
+            .as_str()
+            .ok_or_else(|| invalid("native vector absent"))?,
         6144,
     )
 }
@@ -42,7 +44,9 @@ fn handoff() -> Result<WorkshopProjectHandoff> {
         head: Digest32::of_bytes(b"component exact acknowledged head"),
         frames: 4,
     };
-    let after = record.after().ok_or_else(|| invalid("Placed after capture"))?;
+    let after = record
+        .after()
+        .ok_or_else(|| invalid("Placed after capture"))?;
     let origin_high_tick = after.tick();
     let origin_high_building = after.next_building_id();
     let mut canonical = b"dfmcp-workshop-production-origin/1\0".to_vec();
@@ -99,7 +103,10 @@ fn project_policy_keeps_original_material_source_authority_and_deadline() -> Res
         assert_ne!(identity, config(value)?.project_identity(), "{field}");
     }
     assert_eq!(original.project_binding()?.generation(), 7);
-    assert_eq!(original.project_directory(), Path::new("/tmp/dfmcp-project-workshop"));
+    assert_eq!(
+        original.project_directory(),
+        Path::new("/tmp/dfmcp-project-workshop")
+    );
     assert!(original.with_project_deadline(19001).is_err());
     Ok(())
 }
@@ -122,7 +129,11 @@ fn project_deadline_cannot_shorten_reconciliation_authority_or_renew_clock() -> 
             }))
         );
     }
-    assert!(grants.iter().any(|grant| grant.capability == Capability::ControlClock));
+    assert!(
+        grants
+            .iter()
+            .any(|grant| grant.capability == Capability::ControlClock)
+    );
     let mut value = configured();
     value["clock"] = json!({
         "initialize":true,"generation":9,"recovery_generation":null,
@@ -154,11 +165,36 @@ fn parent_remaining_budget_narrows_every_dimension_without_restarting_wall_time(
         max_actions: 8,
     };
     let actual = narrow(ceiling, remaining)?;
-    assert_eq!(actual, WorkBudget { max_actions: 1, ..remaining });
+    assert_eq!(
+        actual,
+        WorkBudget {
+            max_actions: 1,
+            ..remaining
+        }
+    );
     assert_eq!(narrow(remaining, ceiling)?, actual);
-    assert!(narrow(ceiling, WorkBudget { max_wall_millis: 0, ..remaining }).is_err());
-    assert!(narrow(ceiling, WorkBudget { max_actions: 0, ..remaining }).is_err());
-    let elapsed = Instant::now().checked_sub(Duration::from_millis(100))
+    assert!(
+        narrow(
+            ceiling,
+            WorkBudget {
+                max_wall_millis: 0,
+                ..remaining
+            }
+        )
+        .is_err()
+    );
+    assert!(
+        narrow(
+            ceiling,
+            WorkBudget {
+                max_actions: 0,
+                ..remaining
+            }
+        )
+        .is_err()
+    );
+    let elapsed = Instant::now()
+        .checked_sub(Duration::from_millis(100))
         .ok_or_else(|| invalid("component monotone clock"))?;
     assert!(narrow_current(ceiling, remaining, elapsed).is_err());
     Ok(())
@@ -173,11 +209,17 @@ fn project_handoff_roundtrip_retains_exact_original_and_consumed_floors() -> Res
     let restored = WorkshopProjectHandoff::from_json(&json)?;
     assert_eq!(restored.to_json(), json);
     assert_eq!(restored.original_key(), "workshop-001");
-    assert_eq!(restored.original_plan_digest(), original.record.plan().digest());
+    assert_eq!(
+        restored.original_plan_digest(),
+        original.record.plan().digest()
+    );
     assert_eq!(restored.origin_witness(), original.origin_witness());
     assert_eq!(restored.high_tick(), original.progress.tick());
     assert_eq!(restored.high_generation(), original.binding.generation());
-    assert_eq!(restored.high_next_building_id(), original.progress.next_building_id());
+    assert_eq!(
+        restored.high_next_building_id(),
+        original.progress.next_building_id()
+    );
     assert_eq!(restored.project_deadline_tick(), 19000);
     assert_eq!(restored.authority_expires_tick(), 20000);
     assert_eq!(restored.clock_deadline_tick(), None);
@@ -202,7 +244,10 @@ fn project_handoff_refuses_rebound_custody_source_and_unqualified_completion() -
     ] {
         let mut changed_value = original.clone();
         changed_value[field] = changed;
-        assert!(WorkshopProjectHandoff::from_json(&changed_value).is_err(), "{field}");
+        assert!(
+            WorkshopProjectHandoff::from_json(&changed_value).is_err(),
+            "{field}"
+        );
     }
     let mut rebound = original.clone();
     rebound["acknowledged"]["head"] = json!("a".repeat(64));
@@ -247,16 +292,20 @@ fn recovered_parent_frontier_merges_verified_descendants_without_erasing_fences(
     assert_eq!((state.high_generation, state.high_building), (8, 150));
     assert!(state.fenced);
     let before = state.reference(tick);
-    assert!(state.retain(
-        tick,
-        FrontierInput {
-            high_tick: u64::MAX,
-            high_generation: 9,
-            high_next_building_id: 151,
-            fenced: false,
-        },
-        7,
-    ).is_err());
+    assert!(
+        state
+            .retain(
+                tick,
+                FrontierInput {
+                    high_tick: u64::MAX,
+                    high_generation: 9,
+                    high_next_building_id: 151,
+                    fenced: false,
+                },
+                7,
+            )
+            .is_err()
+    );
     assert_eq!(state.reference(tick), before);
     Ok(())
 }
@@ -297,15 +346,17 @@ fn restart_selectors_must_match_parent_ack_and_clock_checkpoint() -> Result<()> 
     assert!(with_clock.project_recovery_pins(&older_clock).is_err());
     value["clock"]["initialize"] = json!(true);
     value["clock"]["recovery"] = Value::Null;
-    assert!(config(value)
-        .and_then(|configured| configured.project_recovery_pins(&clock_reference))
-        .is_err());
+    assert!(
+        config(value)
+            .and_then(|configured| configured.project_recovery_pins(&clock_reference))
+            .is_err()
+    );
     Ok(())
 }
 
 #[test]
-fn parent_floor_withdraws_workshop_offer_without_relabeling_native_anchor_or_custody()
--> Result<()> {
+fn parent_floor_withdraws_workshop_offer_without_relabeling_native_anchor_or_custody() -> Result<()>
+{
     let fixture = super::super::production_handoff_tests::completed_original_fixture()?;
     let config = config(fixture.configuration())?;
     let observed = WorkshopCapture::decode(&vector("capture")?)?;

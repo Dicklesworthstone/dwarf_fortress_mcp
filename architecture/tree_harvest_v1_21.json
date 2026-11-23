@@ -297,7 +297,10 @@
       "project_tree_empty_parent_checkpoint_binds_recovered_descendant_deadline",
       "project_tree_compact_review_preserves_action_semantics_and_honest_custody",
       "project_tree_unacknowledged_opening_cannot_adopt_original_history",
-      "project_tree_budget_narrows_every_allowance_without_renewal"
+      "project_tree_budget_narrows_every_allowance_without_renewal",
+      "parent_authority_floor_withdraws_tree_offer_and_rejects_older_native_capture",
+      "parent_authority_floor_preserves_tree_original_and_cannot_renew_expired_designation",
+      "resource_tree_open_rejects_unbound_policy_or_invalid_floor_before_io"
     ],
     "rust_stdio_cases": [
       "tree_harvest_server_actual_modern_stdio_positive_negative_and_crash_recovery"

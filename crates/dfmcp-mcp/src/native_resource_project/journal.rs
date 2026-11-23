@@ -25,8 +25,9 @@ const MAX_FRAMES: u32 = 4096;
 const MAX_ORIGINAL: usize = 64 * 1024;
 const MAX_HANDOFF: usize = 64 * 1024;
 const MAX_TREE_HANDOFF: usize = 16 * 1024;
+const MAX_MANAGER_HANDOFF: usize = 16 * 1024;
 const MAX_CHECKPOINT: usize = 32 * 1024;
-const MAX_FRAME: usize = 224 * 1024;
+const MAX_FRAME: usize = 272 * 1024;
 const MAX_NODES: usize = 4096;
 const ACK_RECORD: usize = 140;
 const MAX_ACK_BYTES: usize = MAX_FRAMES as usize * ACK_RECORD;
@@ -74,6 +75,9 @@ fn parsed_digest(value: &str) -> Result<Digest32> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum Stage {
+    ManagerOpening,
+    Manager,
+    ManagerTransition,
     TreeOpening,
     Tree,
     TreeTransition,
@@ -102,6 +106,10 @@ pub(crate) struct Checkpoint {
     pub(crate) tree: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) tree_handoff: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) manager: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) manager_handoff: Option<Value>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -157,8 +165,34 @@ impl Header {
         match self.initial_stage {
             None => Ok(Stage::WorkshopOpening),
             Some(Stage::TreeOpening) => Ok(Stage::TreeOpening),
+            Some(Stage::ManagerOpening) => Ok(Stage::ManagerOpening),
             _ => Err(corrupt()),
         }
+    }
+}
+
+/// The original policy fixes both the first child and the optional child after
+/// Manager. There is no caller-selected next stage, including during replay.
+/// Earlier originals have no Manager policy and keep their exact header bytes.
+fn manager_successor(original: &Value, initial_stage: Stage) -> Result<Option<Stage>> {
+    require(matches!(
+        initial_stage,
+        Stage::ManagerOpening | Stage::TreeOpening | Stage::WorkshopOpening
+    ))?;
+    match original.get("manager_policy") {
+        None => {
+            require(initial_stage != Stage::ManagerOpening)?;
+            Ok(None)
+        }
+        Some(Value::String(policy)) if !policy.is_empty() => {
+            require(initial_stage == Stage::ManagerOpening)?;
+            match original.get("tree_policy") {
+                None => Ok(Some(Stage::WorkshopOpening)),
+                Some(Value::String(policy)) if !policy.is_empty() => Ok(Some(Stage::TreeOpening)),
+                _ => Err(corrupt()),
+            }
+        }
+        Some(_) => Err(corrupt()),
     }
 }
 #[derive(Serialize, Deserialize)]
@@ -230,6 +264,12 @@ fn value_bytes(value: &Value, limit: usize) -> Result<Vec<u8>> {
 
 fn validate_snapshot(snapshot: &Snapshot) -> Result<()> {
     let c = &snapshot.checkpoint;
+    if let Some(value) = &c.manager {
+        value_bytes(value, MAX_CHECKPOINT)?;
+    }
+    if let Some(value) = &c.manager_handoff {
+        value_bytes(value, MAX_MANAGER_HANDOFF)?;
+    }
     if let Some(value) = &c.tree {
         value_bytes(value, MAX_CHECKPOINT)?;
     }
@@ -260,10 +300,20 @@ fn validate_snapshot(snapshot: &Snapshot) -> Result<()> {
         return Err(conflict());
     }
     let tree_pair = c.tree.is_some() == c.tree_handoff.is_some();
+    let manager_pair = c.manager.is_some() == c.manager_handoff.is_some();
     let later_children_absent =
         c.workshop.is_none() && c.handoff.is_none() && c.production.is_none();
+    let after_manager_absent =
+        c.tree.is_none() && c.tree_handoff.is_none() && later_children_absent;
     let valid = match phase {
-        Stage::TreeOpening => c == &Checkpoint::default(),
+        Stage::ManagerOpening => c == &Checkpoint::default(),
+        Stage::Manager => {
+            c.manager.is_some() && c.manager_handoff.is_none() && after_manager_absent
+        }
+        Stage::ManagerTransition => {
+            c.manager.is_some() && c.manager_handoff.is_some() && after_manager_absent
+        }
+        Stage::TreeOpening => manager_pair && after_manager_absent,
         Stage::Tree => c.tree.is_some() && c.tree_handoff.is_none() && later_children_absent,
         Stage::TreeTransition => {
             c.tree.is_some() && c.tree_handoff.is_some() && later_children_absent
@@ -280,7 +330,11 @@ fn validate_snapshot(snapshot: &Snapshot) -> Result<()> {
         phase,
         Stage::TreeOpening | Stage::Tree | Stage::TreeTransition
     );
-    if !valid || (!tree_phase && !tree_pair) {
+    let manager_phase = matches!(
+        phase,
+        Stage::ManagerOpening | Stage::Manager | Stage::ManagerTransition
+    );
+    if !valid || (!tree_phase && !tree_pair) || (!manager_phase && !manager_pair) {
         return Err(conflict());
     }
     if let Some(value) = &c.production_intent {
@@ -290,10 +344,25 @@ fn validate_snapshot(snapshot: &Snapshot) -> Result<()> {
     Ok(())
 }
 
-fn transition(old: &Snapshot, new: &Snapshot) -> Result<()> {
+fn transition(old: &Snapshot, new: &Snapshot, after_manager: Option<Stage>) -> Result<()> {
     validate_snapshot(new)?;
     let before = &old.checkpoint;
     let after = &new.checkpoint;
+    if before.manager_handoff.is_some()
+        && (before.manager_handoff != after.manager_handoff || before.manager != after.manager)
+    {
+        return Err(conflict());
+    }
+    let manager_active = matches!(old.stage, Stage::ManagerOpening | Stage::Manager)
+        || (old.stage == Stage::Cancelled && old.cancelled_from == Some(Stage::Manager));
+    if !manager_active
+        && (before.manager != after.manager || before.manager_handoff != after.manager_handoff)
+    {
+        return Err(conflict());
+    }
+    if let Some(manager) = &before.manager {
+        super::continuity::same_original(manager, after.manager.as_ref().ok_or_else(conflict)?)?;
+    }
     if before.tree_handoff.is_some()
         && (before.tree_handoff != after.tree_handoff || before.tree != after.tree)
     {
@@ -350,6 +419,15 @@ fn transition(old: &Snapshot, new: &Snapshot) -> Result<()> {
             return Err(conflict());
         }
         return match old.cancelled_from {
+            Some(Stage::Manager)
+                if before.tree == after.tree
+                    && before.tree_handoff == after.tree_handoff
+                    && before.workshop == after.workshop
+                    && before.handoff == after.handoff
+                    && before.production == after.production =>
+            {
+                Ok(())
+            }
             Some(Stage::Tree)
                 if before.workshop == after.workshop
                     && before.handoff == after.handoff
@@ -364,12 +442,16 @@ fn transition(old: &Snapshot, new: &Snapshot) -> Result<()> {
         };
     }
     let allowed = match (old.stage, new.stage) {
-        (Stage::TreeOpening, Stage::Tree)
+        (Stage::ManagerOpening, Stage::Manager)
+        | (Stage::Manager, Stage::Manager)
+        | (Stage::TreeOpening, Stage::Tree)
         | (Stage::Tree, Stage::Tree)
         | (Stage::WorkshopOpening, Stage::Workshop)
         | (Stage::Workshop, Stage::Workshop)
         | (Stage::ProductionOpening, Stage::Production)
         | (Stage::Production, Stage::Production) => true,
+        (Stage::Manager, Stage::ManagerTransition) => before.manager == after.manager,
+        (Stage::ManagerTransition, next) if Some(next) == after_manager => before == after,
         (Stage::Tree, Stage::TreeTransition) => before.tree == after.tree,
         (Stage::TreeTransition, Stage::WorkshopOpening) => before == after,
         (Stage::Workshop, Stage::Transition) => before.workshop == after.workshop,
@@ -474,6 +556,7 @@ fn replay(bytes: &[u8], work: &Work) -> Result<Replay> {
     let mut previous = journal_id;
     let mut high_tick = header.initial_tick;
     let initial_stage = header.initial_stage()?;
+    let after_manager = manager_successor(&header.original, initial_stage)?;
     let mut snapshot = Snapshot::initial(initial_stage);
     let mut heads = Vec::new();
     while !r.0.is_empty() {
@@ -492,7 +575,7 @@ fn replay(bytes: &[u8], work: &Work) -> Result<Replay> {
         if heads.is_empty() {
             require(body.snapshot == Snapshot::initial(initial_stage))?;
         } else {
-            transition(&snapshot, &body.snapshot).map_err(|_| corrupt())?;
+            transition(&snapshot, &body.snapshot, after_manager).map_err(|_| corrupt())?;
         }
         previous = r.digest()?;
         require(previous == hash(b"dfmcp-resource-project-frame/1", &start[..48 + length]))?;
@@ -550,6 +633,7 @@ pub(crate) struct Journal<S, A> {
     ack_raw: Vec<u8>,
     ack_chain: Digest32,
     original: Value,
+    after_manager: Option<Stage>,
     snapshot: Snapshot,
     pin: Pin,
     high_tick: u64,
@@ -571,10 +655,7 @@ pub(crate) fn open_private(
 ) -> Result<PrivateJournal> {
     Work::new(context)?;
     value_bytes(&original, MAX_ORIGINAL)?;
-    require(matches!(
-        initial_stage,
-        Stage::WorkshopOpening | Stage::TreeOpening
-    ))?;
+    manager_successor(&original, initial_stage)?;
     if initialize {
         require(mode == Mode::Control && expected_pin.is_none())?;
         context.authorize(Capability::Plan, RiskTier::Guarded, &[], None)?;
@@ -647,10 +728,7 @@ impl<S: EffectJournalStorage, A: EffectJournalStorage> Journal<S, A> {
     ) -> Result<Self> {
         let work = Work::new(context)?;
         value_bytes(&original, MAX_ORIGINAL)?;
-        require(matches!(
-            initial_stage,
-            Stage::WorkshopOpening | Stage::TreeOpening
-        ))?;
+        let after_manager = manager_successor(&original, initial_stage)?;
         if initialize {
             require(mode == Mode::Control && expected_pin.is_none())?;
             context.authorize(Capability::Plan, RiskTier::Guarded, &[], None)?;
@@ -667,7 +745,7 @@ impl<S: EffectJournalStorage, A: EffectJournalStorage> Journal<S, A> {
                 fortress: context.anchor.fortress_id.to_string(),
                 initial_tick: context.anchor.tick.get(),
                 original: original.clone(),
-                initial_stage: (initial_stage == Stage::TreeOpening).then_some(initial_stage),
+                initial_stage: (initial_stage != Stage::WorkshopOpening).then_some(initial_stage),
             })
             .map_err(|_| conflict())?;
             let id = hash(b"dfmcp-resource-project-original/1", &header);
@@ -746,6 +824,7 @@ impl<S: EffectJournalStorage, A: EffectJournalStorage> Journal<S, A> {
             ack_raw,
             ack_chain,
             original,
+            after_manager,
             snapshot: decoded.snapshot,
             pin: Pin {
                 journal_id: decoded.journal_id.to_hex(),
@@ -864,7 +943,9 @@ impl<S: EffectJournalStorage, A: EffectJournalStorage> Journal<S, A> {
         let starts_stage = self.snapshot.stage != snapshot.stage
             && matches!(
                 snapshot.stage,
-                Stage::TreeTransition
+                Stage::ManagerTransition
+                    | Stage::TreeOpening
+                    | Stage::TreeTransition
                     | Stage::WorkshopOpening
                     | Stage::Transition
                     | Stage::ProductionOpening
@@ -878,7 +959,7 @@ impl<S: EffectJournalStorage, A: EffectJournalStorage> Journal<S, A> {
         {
             return Err(conflict());
         }
-        transition(&self.snapshot, &snapshot)?;
+        transition(&self.snapshot, &snapshot, self.after_manager)?;
         self.verify_work(&work)?;
         if self.snapshot == snapshot && self.recorded_tick == self.high_tick {
             return Ok(self.pin());

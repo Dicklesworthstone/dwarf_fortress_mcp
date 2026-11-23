@@ -1,5 +1,5 @@
 #![forbid(unsafe_code)]
-//! Isolated, explicitly unadmitted optional Tree -> Workshop -> stock project.
+//! Isolated, explicitly unadmitted optional Manager -> Tree -> Workshop -> stock project.
 //! All native effects stay inside the existing independently reviewed children.
 mod config;
 mod continuity;
@@ -221,7 +221,7 @@ fn budget(
 
 #[tool(
     name = "fortress_open_session",
-    description = "Open one explicitly unadmitted native resource project: optionally harvest the fixed Tree, construct the fixed Carpenter Workshop, then pursue the fixed furniture stock goal. mode defaults offline; control requires independent host family permissions and new parent/child custody. Recovery opens existing custody only and restores no review. Defaults:60000ms,16GiB logical byte-work,65536 output tokens,zero game ticks. Every clock remains separately configured and confirmed."
+    description = "Open one explicitly unadmitted native resource project: optionally appoint the fixed Manager, optionally harvest the fixed Tree, construct the fixed Carpenter Workshop, then pursue the fixed furniture stock goal. mode defaults offline; control requires independent host family permissions and new parent/child custody. Recovery opens existing custody only and restores no review. Defaults:60000ms,16GiB logical byte-work,65536 output tokens,zero game ticks. Every native effect has its own review; every clock remains separately configured and confirmed."
 )]
 pub fn fortress_open_session(
     mode: Option<String>,
@@ -305,7 +305,7 @@ pub fn fortress_open_session(
 
 #[tool(
     name = "fortress_observe",
-    description = "Read the active child's bounded native evidence. Tree and Workshop accept no request selector. Production accepts its existing closed workforce-selection/production-inspection request. Observation never prepares a new stage or native effect."
+    description = "Read the active child's bounded native evidence. Manager, Tree and Workshop accept no request selector. Production accepts its existing closed workforce-selection/production-inspection request. Observation never prepares a new stage or native effect."
 )]
 pub fn fortress_observe(
     session_id: String,
@@ -324,7 +324,7 @@ pub fn fortress_query(session_id: String) -> McpResult<CompleteResult<FinalCallT
 
 #[tool(
     name = "fortress_plan",
-    description = "Plan within the active original child. Optional Tree uses fell_one_visible_tree with the fixed project deadline or separately configured run_tree. Workshop uses its observed material request or run_workshop. advance_to_workshop and advance_to_production require exact expected_head, freshly verify the original completed donor and durably transfer ownership without a native mutation. Production accepts stock_target matching every root goal term, step/review_prepared with original_plan_digest, run or inventory_run. Each native effect requires its own current review and explicit Commit."
+    description = "Plan within the active original child. Optional Manager uses appoint_vacant_manager with its observed witness and fixed project deadline. Optional Tree uses fell_one_visible_tree with that deadline or separately configured run_tree. Workshop uses its observed material request or run_workshop. advance_from_manager, advance_to_workshop and advance_to_production require exact expected_head, freshly verify the completed original donor and durably transfer ownership without a native mutation. Production accepts stock_target matching every root goal term, step/review_prepared with original_plan_digest, run or inventory_run. Each native effect requires its own current review and explicit Commit."
 )]
 pub fn fortress_plan(
     session_id: String,
@@ -335,7 +335,7 @@ pub fn fortress_plan(
 
 #[tool(
     name = "fortress_commit",
-    description = "Confirm one complete current child review. scope=goal for Tree designation, Workshop construction or original labor/order step; scope=clock for a separately reviewed Tree/Workshop/order clock; scope=inventory_clock for production stability. The project never renews the original deadline or restores confirmation after restart."
+    description = "Confirm one complete current child review. scope=goal for Manager appointment, Tree designation, Workshop construction or original labor/order step; scope=clock for a separately reviewed Tree/Workshop/order clock; scope=inventory_clock for production stability. Manager accepts only goal scope. The project never renews the original deadline or restores confirmation after restart."
 )]
 pub fn fortress_commit(
     session_id: String,
@@ -356,7 +356,7 @@ pub fn fortress_commit(
 
 #[tool(
     name = "fortress_wait",
-    description = "Perform one foreground reconciliation or goal sample for the active original child. Tree and Workshop scope=clock reconcile their independently retained clock. Production reconciles its original goals and clocks. No background polling, redispatch, new stage or implicit unpause. Historical Tree supply alone is not a fresh handoff or final stock proof."
+    description = "Perform one foreground reconciliation or goal sample for the active original child. Manager reconciles its original appointment key. Tree and Workshop scope=clock reconcile their independently retained clock. Production reconciles its original goals and clocks. No background polling, redispatch, new stage or implicit unpause. Historical appointment or Tree supply alone is not a fresh handoff or final stock proof."
 )]
 pub fn fortress_wait(
     session_id: String,
@@ -367,7 +367,7 @@ pub fn fortress_wait(
 
 #[tool(
     name = "fortress_cancel",
-    description = "Default scope=project (goal is an alias) durably stops future stages/reviews, then retires the current undispatched preparation. It does not undo a designation, construction or inserted order. scope=clock or inventory_clock requests the active child's separately authorized safety stop. scope=session releases local ownership while preserving all custody; it does not claim a native pause or effect cancellation."
+    description = "Default scope=project (goal is an alias) durably stops future stages/reviews, then retires the current undispatched preparation. It does not remove an appointed Manager or undo a designation, construction or inserted order. scope=clock or inventory_clock requests the active child's separately authorized safety stop; Manager has no clock scope. scope=session releases local ownership while preserving all custody; it does not claim a native pause or effect cancellation."
 )]
 pub fn fortress_cancel(
     session_id: String,
@@ -475,7 +475,7 @@ pub fn run_stdio() {
         .tool(FortressPlan).tool(FortressCommit).tool(FortressWait)
         .tool(FortressCancel).tool(FortressExplain).tool(FortressDoctor)
         .tool(FortressCheckpoint).tool(FortressRestore)
-        .instructions("One explicitly unadmitted resource project with a fixed host stock goal and absolute deadline. The parent owns an optional Tree harvest, then Workshop construction, then actual stock-target production, one child at a time. Review and confirm every native effect separately. Advance to Workshop or production only with the current parent head; each transition acquires fresh original donor evidence and settled clock custody, acknowledges the transition before releasing its writer, then independently imports that exact donor Offline. Tree supply remains subject to current Workshop material validation. Defaults forbid game-time advancement. Project cancellation durably stops new work but does not undo existing native effects; explicitly reconcile/cancel active clocks. Retain every returned parent/child recovery reference, including after errors. Never initialize an existing opening marker again. Complete evidence may use numbered text blocks with byte counts, SHA-256 and exact JSON paths; reassemble them before confirming. Tree semantic reviews name a capsule commitment; raw capsule bytes remain in native custody and are not inline evidence chunks. No Manager appointment, world restore or production admission.")
+        .instructions("One explicitly unadmitted resource project with a fixed host stock goal and absolute deadline. The parent owns an optional Manager/1.23 appointment, an optional Tree harvest, Workshop construction and actual stock-target production, one child at a time. Review and confirm every native effect separately. Advance from Manager, to Workshop or to production only with the current parent head; each transition acquires fresh original donor evidence and any settled clock custody, then acknowledges the transition before releasing its writer. Production independently imports the exact Manager and Workshop donors Offline and freshly revalidates their readiness; historical appointment is not present production proof. Tree supply remains subject to current Workshop material validation. Defaults forbid game-time advancement. Project cancellation durably stops new work but does not remove an appointed Manager or undo other existing native effects; explicitly reconcile/cancel active clocks. Retain every returned parent/child recovery reference, including after errors. Never initialize an existing opening marker again. Complete evidence may use numbered text blocks with byte counts, SHA-256 and exact JSON paths; reassemble them before confirming. Manager and Tree semantic reviews name capsule commitments; raw capsule bytes remain with their indicated owner or custody and are not inline evidence chunks. No world restore or production admission.")
         .build();
     crate::run_modern_stdio(server);
 }

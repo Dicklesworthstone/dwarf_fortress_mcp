@@ -161,6 +161,23 @@ impl Runtime {
         context: &OperationContext,
         work: &mut TurnWork,
     ) -> Result<Value> {
+        let handoff = self.acquire_production_handoff(context, work)?;
+        let value = handoff_json(&self.config.input.directory, &handoff)?;
+        if value.to_string().len() as u64 > RESPONSE_BYTES {
+            return Err(error(
+                ErrorCode::BudgetExceeded,
+                "complete Manager handoff exceeds output allowance",
+            ));
+        }
+        work.reserve(context, 0)?;
+        Ok(value)
+    }
+
+    pub(super) fn acquire_production_handoff(
+        &mut self,
+        context: &OperationContext,
+        work: &mut TurnWork,
+    ) -> Result<ManagerProductionHandoff> {
         self.config.current()?;
         if self.config.binding.protocol != ManagerProtocol::V1_23 || self.mode == Mode::Offline {
             return Err(denied(
@@ -193,15 +210,8 @@ impl Runtime {
         }
         self.config.current()?;
         let handoff = result?;
-        let value = handoff_json(&self.config.input.directory, &handoff)?;
-        if value.to_string().len() as u64 > RESPONSE_BYTES {
-            return Err(error(
-                ErrorCode::BudgetExceeded,
-                "complete Manager handoff exceeds output allowance",
-            ));
-        }
         work.reserve(context, 0)?;
-        Ok(value)
+        Ok(handoff)
     }
 }
 

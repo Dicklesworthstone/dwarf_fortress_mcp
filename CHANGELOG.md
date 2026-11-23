@@ -1,5 +1,45 @@
 # Changelog
 
+## Unreleased — Manager appointment inside the native resource project
+
+The fixed native resource project now accepts `appoint_manager: true` and owns
+one original Manager/1.23 appointment before its selected Tree or Workshop
+stage. The configured candidate, original root deadline, source policy and
+private custody remain fixed. Manager receives its own current semantic review
+and explicit confirmation through the existing eleven-tool surface; it does
+not gain a clock action or authorize later native effects.
+
+The exact-head `advance_from_manager` transition uses the existing typed
+exporter, verifies the original journal and independent ACK, and requires a
+fresh paused appointment plus production-cache proof. All consumed source
+floors are retained before freezing the handoff. The parent acknowledges the
+transition before releasing the Manager writer and acknowledges the next opening
+before initialization. Production later imports that exact donor Offline,
+compares the complete original descriptor and independently rechecks readiness
+at its existing planning and native-effect boundaries.
+
+Recovery retains original keys, plan, deadline, native dispatch history and all
+source-counter/fence floors without restoring reviews or repeating an effect.
+Cancelled openings remain local. Configurations reject legacy Manager 1.22
+credentials, substituted donors, overlapping custody and mismatched fortress
+source policies. Manager review projections retain semantic approval terms and
+named native-capsule commitments within the existing output ceiling. Guidance
+also respects the native 12,000-tick appointment horizon.
+
+Forty-two new Rust tests are authored for the Manager increment, including one
+actual-owner/native-TCP campaign containing five success/failure scenarios.
+They cover both successor chains, immutable custody, interrupted publication,
+lost replies, stale sources, private files, compact review/output bounds and
+recovery without redispatch. The earlier floor commit adds five separate tests.
+Manager source checks pass for 49 legacy/shared and 68 successor source paths;
+all seven inventory mutation tests pass. Integrated Rust compilation and new
+Rust execution remain pending at this commit after the execution-environment
+interruption; source presence and static checks are not runtime qualification.
+No new native wire method, production admission or live-game proof is claimed.
+The owning Manager prerequisite and broader resource-project beads remain in
+progress; generic mixed-family planning and the live acceptance campaign remain
+open.
+
 ## Unreleased — Preserve parent game-tick authority across child startup
 
 The native resource-project parent now passes its consumed game-tick floor into
