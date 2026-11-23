@@ -1,5 +1,51 @@
 # Implementation Status
 
+## Unreleased — Carry complete stock portfolios through native resource projects
+
+The durable native resource-project parent now accepts one to four immutable
+wooden-furniture minima, with the existing optional Manager and Tree stages,
+Carpenter Workshop handoff and combined-production owner. Positive deficits
+create only their necessary finite orders; already-met minima remain in the
+original goal. Four orders and an optional labor-enable step fit the existing
+five-action ceiling.
+
+The parent uses the existing joint portfolio proof and complete no-work
+portfolio watch. All-met roots create no original order, labor effect or
+publication intent; fresh spaced observations must prove every original
+minimum together. Retargeting, altered timing, scalar/vector cross-adoption,
+selected-leaf completion and historical samples cannot establish current
+project success.
+
+Publication acknowledges the full immutable target vector and ordered original
+order slots before child original writes. Interrupted publication can recover
+only exact, complete, unexecuted custody. Every leaf's historical goal marker
+remains monotone through later checkpoints, including inactive leaves. Recovery
+restores neither preparation nor current proof. Legacy scalar JSON remains
+byte-compatible.
+
+Portfolio roots currently reject production and inventory clocks before any
+child opens and throughout recovery. Tree and Workshop clocks retain their
+existing authority. Portfolio production requires externally advanced game
+time until the parent retains complete per-slot clock heads and source floors.
+
+A focused actual-source component passes 162 tests on the official 2026-11-23
+nightly with locked dependencies. Included source hashes match the formatted
+repository. It compiles the complete core/world/intent/adapter graph and
+semantic workforce/order owners and executes the new goal/compiler, recovery,
+continuity, parent request/clock-policy and native custody regressions. The six
+new presentation groups remain source-reviewed but unexecuted. Full parent and
+combined-production Runtime orchestration, MCP transport and Asupersync
+scheduling are outside that component's scope.
+
+Independent source review, scoped formatting, patch whitespace, repository,
+dependency and source-contract checks pass. Beads coverage passes 22/22.
+Workspace formatting reports drift in 117 unchanged files; the release
+qualifier refuses the changing worktree. Full integrated MCP/stdio, mandatory
+qualification and live DFHack proof are not claimed.
+
+Owners remain in progress: `df-native-stock-target-3m9`,
+`df-dfhack-bridge-plane-c-pic.4`, `dfmcp-reality-wiring-proof-4bf.14`.
+
 ## Unreleased — Resume clockless portfolios after reopening native custody
 
 A combined production owner reopened before its first original can now publish

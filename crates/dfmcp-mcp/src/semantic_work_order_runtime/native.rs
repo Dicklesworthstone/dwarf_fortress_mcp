@@ -1373,6 +1373,11 @@ mod runtime_checkpoint_tests {
                     ] {
                         assert!(
                             shell
+                                .portfolio_slot(slot, initialize, expected, true)
+                                .is_err()
+                        );
+                        assert!(
+                            shell
                                 .open_portfolio_clock(slot, Mode::Offline, initialize, expected, &c)
                                 .is_err()
                         );

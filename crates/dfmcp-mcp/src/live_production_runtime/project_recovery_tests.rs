@@ -61,6 +61,11 @@ fn original_input(recovery: Recovery) -> Result<RecoveryInput> {
         "goal_history_present": recovery.goal_history_present,
         "clock_journal_id": recovery.clock_journal_id.map(|id| id.to_hex()),
         "inventory_clock_journal_id": recovery.inventory_clock_journal_id.map(|id| id.to_hex()),
+        "portfolio": recovery.portfolio.map(|slots| slots.into_iter().flatten().map(|slot| json!({
+            "step_id": slot.step_id, "goal_history_present": slot.goal_history_present,
+            "clock_journal_id": slot.clock_journal_id.map(|id| id.to_hex()),
+            "inventory_clock_journal_id": slot.inventory_clock_journal_id.map(|id| id.to_hex()),
+        })).collect::<Vec<_>>()),
     }))
     .map_err(|_| invalid("test recovery input"))
 }
@@ -352,15 +357,16 @@ fn publication_fixture() -> Result<(ProjectProductionIntent, Value, Value)> {
     });
     let policy = identity("project independent input policy").to_hex();
     let intent = ProjectProductionIntent::new(
-        ProjectStockGoal {
-            recipe: "wooden_bed".into(),
-            minimum_stack_units: 7,
-            max_order_amount: 100,
-            deadline_tick: 300,
-            poll_interval_ticks: 5,
-            stable_samples: 2,
-            assign_labor: true,
-        },
+        serde_json::from_value(json!({
+            "recipe": "wooden_bed",
+            "minimum_stack_units": 7,
+            "max_order_amount": 100,
+            "deadline_tick": 300,
+            "poll_interval_ticks": 5,
+            "stable_samples": 2,
+            "assign_labor": true,
+        }))
+        .map_err(|_| invalid("test scalar project goal"))?,
         reference.clone(),
         Some(policy.clone()),
     )?;
@@ -404,8 +410,9 @@ fn exact_publication_intent_is_closed_and_never_retains_execution_or_current_pro
         edit(&mut changed);
         assert!(ProjectProductionIntent::from_json(&changed).is_err());
     }
-    let mut goal = intent.goal.clone();
-    goal.minimum_stack_units += 1;
+    let mut goal = intent.to_json()["goal"].clone();
+    goal["minimum_stack_units"] = json!(8);
+    let goal = serde_json::from_value(goal).map_err(|_| invalid("test changed scalar goal"))?;
     assert!(intent.validate_goal(&goal).is_err());
     let mut oversized = raw;
     oversized["schema"] = json!("x".repeat(MAX_REFERENCE_BYTES));
@@ -525,5 +532,314 @@ fn publication_intent_rejects_foreign_custody_sources_originals_and_advanced_ado
     regressed["manager_prerequisite"]["checkpoint"]["sequence"] = json!(200);
     regressed["recovery"]["manager_prerequisite_floor"]["sequence"] = json!(200);
     assert!(intent.validate_checkpoint(&regressed).is_err());
+    Ok(())
+}
+
+/// Mechanical selectors exercise custody only. The actual compiler/archive
+/// tests separately prove which of the four exact minima need an order.
+fn reference_input(reference: &Value) -> Result<RecoveryInput> {
+    serde_json::from_value(reference["recovery"].clone())
+        .map_err(|_| invalid("test retained original input"))
+}
+
+fn portfolio_fixture(
+    assign_labor: bool,
+    order_count: usize,
+) -> Result<(ProjectProductionIntent, Value, Value)> {
+    let (scalar, _, mut reference) = publication_fixture()?;
+    reference["clock"] = Value::Null;
+    reference["recovery"]["clock_journal_id"] = Value::Null;
+    reference["recovery"]["portfolio"] = json!(
+        (0..order_count)
+            .map(|index| json!({
+                "step_id": u32::from(assign_labor) + index as u32,
+                "goal_history_present": false,
+                "clock_journal_id": null,
+                "inventory_clock_journal_id": null,
+            }))
+            .collect::<Vec<_>>()
+    );
+    let goal = serde_json::from_value(json!({
+        "targets": [
+            {"recipe": "wooden_bed", "minimum_stack_units": 7, "max_order_amount": 10},
+            {"recipe": "wooden_chair", "minimum_stack_units": 8, "max_order_amount": 11},
+            {"recipe": "wooden_door", "minimum_stack_units": 9, "max_order_amount": 12},
+            {"recipe": "wooden_table", "minimum_stack_units": 10, "max_order_amount": 13}
+        ],
+        "deadline_tick": 300,
+        "poll_interval_ticks": 5,
+        "stable_samples": 2,
+        "assign_labor": assign_labor,
+    }))
+    .map_err(|_| invalid("test portfolio project goal"))?;
+    let intent =
+        ProjectProductionIntent::new(goal, reference.clone(), scalar.input_policy_witness.clone())?;
+    let mut preplan = reference.clone();
+    preplan["recovery"] = Value::Null;
+    preplan["input_supply"]["checkpoint"]["origin_witness"] = json!(scalar.input_policy_witness);
+    Ok((intent, preplan, reference))
+}
+
+#[test]
+fn clockless_portfolio_intent_retains_all_targets_and_every_original_order() -> Result<()> {
+    for assign_labor in [false, true] {
+        for order_count in 1..=4 {
+            let (intent, preplan, planned) = portfolio_fixture(assign_labor, order_count)?;
+            let encoded = intent.to_json();
+            let parsed = ProjectProductionIntent::from_json(&encoded)?;
+            assert_eq!(parsed.to_json(), encoded);
+            assert_eq!(encoded["goal"]["targets"].as_array().map(Vec::len), Some(4));
+            parsed.validate_goal(&intent.goal)?;
+            parsed.validate_checkpoint(&preplan)?;
+            parsed.validate_checkpoint(&planned)?;
+            let recovered = reference_recovery(&planned)?;
+            parsed.validate_pending_checkpoint(&planned)?;
+            assert_eq!(
+                recovered
+                    .portfolio
+                    .map(|slots| slots.iter().flatten().count()),
+                Some(order_count)
+            );
+            assert_eq!(
+                recovered
+                    .portfolio
+                    .and_then(|slots| slots[0])
+                    .map(|slot| slot.step_id),
+                Some(u32::from(assign_labor))
+            );
+            assert!(recovered.clock_journal_id.is_none());
+            assert!(recovered.inventory_clock_journal_id.is_none());
+            assert_eq!(publication_reference(&preplan, &parsed)?, planned);
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn portfolio_intent_rejects_shape_changes_leaf_history_and_any_clock_owner() -> Result<()> {
+    let (intent, _, planned) = portfolio_fixture(true, 4)?;
+    let raw = intent.to_json();
+    let edits: [fn(&mut Value); 14] = [
+        |v| v["recovery_reference"]["recovery"]["portfolio"] = Value::Null,
+        |v| v["recovery_reference"]["recovery"]["portfolio"] = json!([]),
+        |v| v["recovery_reference"]["recovery"]["portfolio"][0]["step_id"] = json!(0),
+        |v| v["recovery_reference"]["recovery"]["portfolio"][1]["step_id"] = json!(1),
+        |v| v["recovery_reference"]["recovery"]["portfolio"][3]["step_id"] = json!(5),
+        |v| {
+            v["recovery_reference"]["recovery"]["portfolio"][3]["goal_history_present"] =
+                json!(true)
+        },
+        |v| v["recovery_reference"]["recovery"]["goal_history_present"] = json!(true),
+        |v| {
+            v["recovery_reference"]["recovery"]["portfolio"][2]["clock_journal_id"] =
+                json!(identity("unretained inactive clock").to_hex())
+        },
+        |v| {
+            v["recovery_reference"]["recovery"]["portfolio"][2]["inventory_clock_journal_id"] =
+                json!(identity("unretained inactive inventory clock").to_hex())
+        },
+        |v| {
+            v["recovery_reference"]["recovery"]["clock_journal_id"] =
+                json!(identity("unretained selected clock").to_hex())
+        },
+        |v| {
+            v["recovery_reference"]["clock"] = json!({
+                "journal_id": identity("added clock").to_hex(),
+                "head": identity("added clock").to_hex(),
+                "authority_tick_floor": 150, "high_source_sequence": 0,
+            })
+        },
+        |v| {
+            v["recovery_reference"]["inventory_clock"] = json!({
+                "journal_id": identity("added inventory clock").to_hex(),
+                "head": identity("added inventory clock").to_hex(),
+                "authority_tick_floor": 150, "high_source_sequence": 0,
+            })
+        },
+        |v| v["recovery_reference"]["recovery"]["portfolio"][1]["permit"] = json!(true),
+        |v| v["goal"]["assign_labor"] = json!(false),
+    ];
+    for (index, edit) in edits.into_iter().enumerate() {
+        let mut changed = raw.clone();
+        edit(&mut changed);
+        assert!(
+            ProjectProductionIntent::from_json(&changed).is_err(),
+            "{index}"
+        );
+    }
+    // A scalar intent cannot adopt even a correctly formed clockless vector.
+    let (scalar, _, _) = publication_fixture()?;
+    let mut mixed = scalar.to_json();
+    mixed["recovery_reference"] = planned;
+    assert!(ProjectProductionIntent::from_json(&mixed).is_err());
+    Ok(())
+}
+
+#[test]
+fn portfolio_recovery_keeps_each_leaf_history_monotone_and_exact_slot_identity() -> Result<()> {
+    let (_, _, planned) = portfolio_fixture(false, 4)?;
+    let mut reference = planned;
+    reference["recovery"]["portfolio"][1]["goal_history_present"] = json!(true);
+    reference["recovery"]["portfolio"][3]["goal_history_present"] = json!(true);
+    let current = reference_recovery(&reference)?;
+    let prior = reference_input(&reference)?;
+    original(current, &prior, 150)?;
+    let mut progressed = current;
+    if let Some(slots) = progressed.portfolio.as_mut()
+        && let Some(first) = slots[0].as_mut()
+    {
+        first.goal_history_present = true;
+    }
+    progressed.goal_history_present = true;
+    progressed.frontier.authority_tick_floor += 1;
+    original(progressed, &prior, 150)?;
+    for index in [1, 3] {
+        let mut changed = current;
+        if let Some(slots) = changed.portfolio.as_mut()
+            && let Some(slot) = slots[index].as_mut()
+        {
+            slot.goal_history_present = false;
+        }
+        assert!(original(changed, &prior, 150).is_err(), "{index}");
+    }
+    for index in 0..4 {
+        let mut missing = current;
+        if let Some(slots) = missing.portfolio.as_mut() {
+            slots[index] = None;
+        }
+        assert!(original(missing, &prior, 150).is_err(), "{index}");
+        let mut replaced = current;
+        if let Some(slots) = replaced.portfolio.as_mut()
+            && let Some(slot) = slots[index].as_mut()
+        {
+            slot.step_id += 1;
+        }
+        assert!(original(replaced, &prior, 150).is_err(), "{index}");
+    }
+    let mut discarded = current;
+    discarded.portfolio = None;
+    assert!(original(discarded, &prior, 150).is_err());
+    let mut scalar = reference_input(&reference)?;
+    scalar.portfolio = None;
+    assert!(original(current, &scalar, 150).is_err());
+    let mut contradictory = current;
+    contradictory.goal_history_present = true;
+    assert!(original(contradictory, &prior, 150).is_err());
+    Ok(())
+}
+
+#[test]
+fn portfolio_recovery_cannot_hide_clock_custody_in_an_inactive_leaf() -> Result<()> {
+    let (_, _, planned) = portfolio_fixture(true, 4)?;
+    let current = reference_recovery(&planned)?;
+    let prior = reference_input(&planned)?;
+    for index in 0..4 {
+        for inventory in [false, true] {
+            let mut changed = current;
+            if let Some(slots) = changed.portfolio.as_mut()
+                && let Some(slot) = slots[index].as_mut()
+            {
+                if inventory {
+                    slot.inventory_clock_journal_id = Some(identity("hidden inventory clock"));
+                } else {
+                    slot.clock_journal_id = Some(identity("hidden order clock"));
+                }
+            }
+            assert!(
+                original(changed, &prior, 150).is_err(),
+                "{index}/{inventory}"
+            );
+        }
+    }
+    for clock in ["clock", "inventory_clock"] {
+        let mut changed = planned.clone();
+        changed[clock] = json!({
+            "journal_id": identity("added parent clock").to_hex(),
+            "head": identity("added parent clock").to_hex(),
+            "authority_tick_floor": 150, "high_source_sequence": 0,
+        });
+        assert!(reference_recovery(&changed).is_err());
+    }
+    Ok(())
+}
+
+#[test]
+fn pending_portfolio_publication_rejects_inactive_history_and_advanced_frontier() -> Result<()> {
+    let (intent, _, planned) = portfolio_fixture(false, 4)?;
+    let current = reference_recovery(&planned)?;
+    intent.validate_pending_checkpoint(&planned)?;
+    for index in 0..4 {
+        let mut changed = current;
+        if let Some(slots) = changed.portfolio.as_mut()
+            && let Some(slot) = slots[index].as_mut()
+        {
+            slot.goal_history_present = true;
+        }
+        if index == 0 {
+            changed.goal_history_present = true;
+        }
+        assert!(
+            intent.validate_pending_recovery(changed).is_err(),
+            "{index}"
+        );
+    }
+    let mut advanced = current;
+    advanced.frontier.head = identity("native prepare already advanced the frontier");
+    assert!(intent.validate_pending_recovery(advanced).is_err());
+    let mut published = planned;
+    published["recovery"]["frontier"]["head"] = json!(advanced.frontier.head.to_hex());
+    published["recovery"]["portfolio"][3]["goal_history_present"] = json!(true);
+    // Once acknowledged as published, genuine descendants and per-leaf
+    // historical custody are valid; each durable child proves its own ancestry.
+    intent.validate_checkpoint(&published)?;
+    Ok(())
+}
+
+#[test]
+fn portfolio_publication_joins_floors_without_dropping_targets_or_inactive_slots() -> Result<()> {
+    let (intent, mut preplan, planned) = portfolio_fixture(true, 4)?;
+    preplan["observation_tick_floor"] = json!(170);
+    preplan["workshop_prerequisite"]["checkpoint"]["tick"] = json!(170);
+    preplan["workshop_prerequisite"]["checkpoint"]["next_building_id"] = json!(210);
+    preplan["workshop_prerequisite"]["checkpoint"]["fenced"] = json!(true);
+    let reference = publication_reference(&preplan, &intent)?;
+    assert_eq!(
+        reference["recovery"]["portfolio"],
+        planned["recovery"]["portfolio"]
+    );
+    let recovered = reference_recovery(&reference)?;
+    validate_reference_sources(&retained(&reference)?, recovered)?;
+    intent.validate_pending_recovery(recovered)?;
+    assert_eq!(recovered.frontier.authority_tick_floor, 170);
+    assert!(recovered.workshop_prerequisite_floor.is_some_and(|floor| {
+        floor.tick == 170 && floor.next_building_id == 210 && floor.fenced
+    }));
+    let mut changed = intent.to_json()["goal"].clone();
+    changed["targets"][3]["minimum_stack_units"] = json!(11);
+    let changed =
+        serde_json::from_value(changed).map_err(|_| invalid("test changed vector goal"))?;
+    assert!(intent.validate_goal(&changed).is_err());
+    let mut dropped = intent.to_json()["goal"].clone();
+    dropped["targets"] = json!([
+        {"recipe": "wooden_bed", "minimum_stack_units": 7, "max_order_amount": 10}
+    ]);
+    let dropped =
+        serde_json::from_value(dropped).map_err(|_| invalid("test dropped vector goal"))?;
+    assert!(intent.validate_goal(&dropped).is_err());
+    Ok(())
+}
+
+#[test]
+fn scalar_publication_goal_serialization_stays_untagged_and_clock_pinned() -> Result<()> {
+    let (intent, _, planned) = publication_fixture()?;
+    assert_eq!(
+        serde_json::to_string(&intent.goal).map_err(|_| invalid("test scalar goal encoding"))?,
+        "{\"recipe\":\"wooden_bed\",\"minimum_stack_units\":7,\"max_order_amount\":100,\"deadline_tick\":300,\"poll_interval_ticks\":5,\"stable_samples\":2,\"assign_labor\":true}"
+    );
+    intent.validate_pending_checkpoint(&planned)?;
+    let mut without_clock = planned;
+    without_clock["clock"] = Value::Null;
+    without_clock["recovery"]["clock_journal_id"] = Value::Null;
+    assert!(intent.validate_checkpoint(&without_clock).is_err());
     Ok(())
 }

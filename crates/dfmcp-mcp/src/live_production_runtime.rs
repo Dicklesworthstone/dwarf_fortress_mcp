@@ -55,6 +55,7 @@ mod portfolio;
 mod portfolio_request;
 mod prerequisite_binding;
 mod project;
+mod project_goal;
 #[cfg(all(
     test,
     target_os = "linux",
@@ -1914,9 +1915,14 @@ impl Runtime {
             recovery,
             true,
         )?);
+        if portfolio && publication_intent.is_some() {
+            // The descriptor retains every original order slot, including a
+            // one-order portfolio with other already-met minima. Initialize
+            // these clockless project slots before comparing the actual
+            // publication with the parent's acknowledged complete original.
+            self.initialize_portfolio(None, &mut work)?;
+        }
         if let Some(intent) = &publication_intent {
-            // Compare the actual retained seals with the pre-write descriptor,
-            // including native associations, before installing an executor.
             intent.validate_checkpoint(&self.project_recovery_reference())?;
         }
         self.create_executor(&mut work)?;
@@ -1924,7 +1930,7 @@ impl Runtime {
             basis.choices = None;
             basis.existing_labor_capture = None;
         }
-        if portfolio {
+        if portfolio && self.portfolio.is_none() {
             self.initialize_portfolio(None, &mut work)?;
         }
         self.initialization_failed = false;

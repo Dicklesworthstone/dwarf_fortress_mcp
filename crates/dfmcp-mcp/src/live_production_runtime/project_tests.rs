@@ -1,5 +1,6 @@
 //! Original-policy and typed-census mechanics use the existing qualified
 //! compiler fixtures. These tests do not claim native Workshop completion.
+use super::super::project_goal::ProjectSingleStockGoal;
 use super::super::stock_target::StockTargetNoWork;
 use super::super::stock_target_request::tests::{
     stock_assessment, stock_fixture, stock_policy, stock_request, stock_workers,
@@ -7,8 +8,8 @@ use super::super::stock_target_request::tests::{
 use super::*;
 use dfmcp_world::PredicateEvidence;
 
-fn goal(assign_labor: bool) -> ProjectStockGoal {
-    ProjectStockGoal {
+fn single_goal(assign_labor: bool) -> ProjectSingleStockGoal {
+    ProjectSingleStockGoal {
         recipe: "wooden_bed".into(),
         minimum_stack_units: 7,
         max_order_amount: 100,
@@ -17,6 +18,10 @@ fn goal(assign_labor: bool) -> ProjectStockGoal {
         stable_samples: 2,
         assign_labor,
     }
+}
+
+fn goal(assign_labor: bool) -> ProjectStockGoal {
+    ProjectStockGoal::Single(single_goal(assign_labor))
 }
 
 #[test]
@@ -56,9 +61,9 @@ fn project_goal_is_closed_and_bounded_before_child_io() -> Result<()> {
     invalid["amount"] = serde_json::json!(1);
     assert!(serde_json::from_value::<ProjectStockGoal>(invalid).is_err());
     for recipe in ["wooden_bed", "wooden_door", "wooden_table", "wooden_chair"] {
-        let mut admitted = original.clone();
+        let mut admitted = single_goal(false);
         admitted.recipe = recipe.into();
-        admitted.validate()?;
+        ProjectStockGoal::Single(admitted).validate()?;
     }
     Ok(())
 }
@@ -102,7 +107,7 @@ fn recovered_project_stock_target_keeps_exact_original_goal_keys_and_workshop() 
         PredicateEvidence::scoped(&projection.snapshot, stock_policy(&projection.snapshot))?;
     let assessment = stock_assessment(&c, 7, 100, 5, 99)?;
     let origin = Digest32::of_bytes(b"immutable Workshop origin identity mechanics");
-    let edits: [fn(&mut ProjectStockGoal); 7] = [
+    let edits: [fn(&mut ProjectSingleStockGoal); 7] = [
         |value| value.recipe = "wooden_door".into(),
         |value| value.minimum_stack_units = 8,
         |value| value.max_order_amount = 99,
@@ -126,9 +131,13 @@ fn recovered_project_stock_target_keeps_exact_original_goal_keys_and_workshop() 
         original_goal.validate_original(&recovered, origin)?;
         assert_eq!(recovered, plan);
         for edit in edits {
-            let mut changed = original_goal.clone();
+            let mut changed = single_goal(assign_labor);
             edit(&mut changed);
-            assert!(changed.validate_original(&recovered, origin).is_err());
+            assert!(
+                ProjectStockGoal::Single(changed)
+                    .validate_original(&recovered, origin)
+                    .is_err()
+            );
         }
         assert!(
             original_goal

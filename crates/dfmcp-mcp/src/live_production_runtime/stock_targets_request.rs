@@ -12,9 +12,9 @@ use dfmcp_adapter::semantic_work_orders::StockTargetAssessment;
 use dfmcp_core::{Digest32, EntityId, OperationContext, Result};
 use dfmcp_intent::PreparedPlan;
 use dfmcp_world::PredicateEvidence;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct StockTarget {
     pub recipe: String,

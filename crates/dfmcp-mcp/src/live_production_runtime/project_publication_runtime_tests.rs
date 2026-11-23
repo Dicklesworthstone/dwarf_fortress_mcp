@@ -128,7 +128,7 @@ fn no_work_parent_floor(runtime: &mut Runtime, goal: &ProjectStockGoal) -> TestR
     );
     assert_eq!(
         current["no_work_stock_goal"]["deadline_tick"],
-        goal.deadline_tick
+        goal.deadline_tick()
     );
     let sample = runtime.no_work_goal_json();
     runtime.retain_project_authority_tick(floor)?;
@@ -189,8 +189,8 @@ fn prepared_parent_floor(runtime: &mut Runtime) -> TestResult {
 fn bind_project(config: &mut Config, goal: &ProjectStockGoal, origin: Digest32) {
     config.project_binding = Some(config::ProjectProductionBinding {
         workshop_origin: origin,
-        deadline_tick: goal.deadline_tick,
-        authority_expires_tick: goal.deadline_tick,
+        deadline_tick: goal.deadline_tick(),
+        authority_expires_tick: goal.deadline_tick(),
     });
 }
 
@@ -216,7 +216,7 @@ fn control(case: &str) -> TestResult {
     )?;
     let c = runtime.context(false)?;
     let observed = runtime.observe(ObserveRequest::default(), &c)?.value;
-    let goal = ProjectStockGoal {
+    let scalar_goal = project_goal::ProjectSingleStockGoal {
         recipe: "wooden_bed".into(),
         minimum_stack_units: 6,
         max_order_amount: 100,
@@ -225,6 +225,7 @@ fn control(case: &str) -> TestResult {
         stable_samples: 2,
         assign_labor: true,
     };
+    let goal = ProjectStockGoal::Single(scalar_goal.clone());
     let origin = runtime
         .workshop
         .as_ref()
@@ -241,10 +242,10 @@ fn control(case: &str) -> TestResult {
     let request = StockTargetRequest::parse(
         &json!({
             "kind":"stock_target", "expected_observation":observed["observation"]["seal"],
-            "units":["43"], "labor":"CARPENTER", "recipe":goal.recipe,
-            "minimum_stack_units":goal.minimum_stack_units,"max_order_amount":goal.max_order_amount,
-            "deadline_tick":goal.deadline_tick,"poll_interval_ticks":goal.poll_interval_ticks,
-            "stable_samples":goal.stable_samples,"assign_labor":goal.assign_labor,
+            "units":["43"], "labor":"CARPENTER", "recipe":scalar_goal.recipe,
+            "minimum_stack_units":scalar_goal.minimum_stack_units,"max_order_amount":scalar_goal.max_order_amount,
+            "deadline_tick":goal.deadline_tick(),"poll_interval_ticks":goal.poll_interval_ticks(),
+            "stable_samples":goal.stable_samples(),"assign_labor":goal.assign_labor(),
         })
         .to_string(),
     )?;

@@ -70,7 +70,7 @@ fn control(case: &str) -> TestResult {
     let opened = opened?;
     assert_eq!(opened["stage"], "manager");
     assert_eq!(opened["original_goal_proven"], false);
-    let deadline = runtime.config.goal.deadline_tick;
+    let deadline = runtime.config.goal.deadline_tick();
     let observed = runtime.perform(Action::Observe(None))?;
     assert_eq!(observed["child"]["source_profile"], "manager/1.23");
     assert_eq!(observed["child"]["project_deadline_tick"], deadline);
@@ -262,7 +262,7 @@ fn recovered(phase: &str, case: &str) -> TestResult {
     let opened = opened?;
     assert_eq!(opened["original_goal_proven"], false);
     assert_eq!(
-        Some(runtime.config.goal.deadline_tick),
+        Some(runtime.config.goal.deadline_tick()),
         retained["deadline_tick"].as_u64()
     );
     let inspected = runtime.perform(Action::Inspect)?;

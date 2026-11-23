@@ -4,7 +4,8 @@
 
 `dfmcp-native-resource-project-dev-server` owns an optional original Manager
 1.23 appointment, an optional original Tree harvest, one original Carpenter
-Workshop construction and one fixed wooden-furniture stock target. It composes
+Workshop construction and either one fixed wooden-furniture stock target or a
+fixed portfolio of one to four targets. It composes
 the actual Manager, Tree, Workshop and combined-production runtimes inside one
 modern MCP session. The public surface
 retains the eleven existing tool names.
@@ -24,8 +25,9 @@ exact original as the later production prerequisite. Without this optional
 stage, configured external Manager and input-supply policies retain their
 existing independent checks.
 
-Owning work: `df-dfhack-bridge-plane-c-pic.4` and
-`dfmcp-reality-wiring-proof-4bf.14`. Both remain in progress. This increment
+Owning work: `df-dfhack-bridge-plane-c-pic.4`,
+`dfmcp-reality-wiring-proof-4bf.14` and `df-native-stock-target-3m9`. These remain
+in progress. This increment
 implements a concrete resource consumer; it does not complete generic
 mixed-family planning or the full live acceptance campaign.
 
@@ -112,6 +114,9 @@ The dedicated profile requires:
 All existing independent family opt-ins and permission flags remain required.
 Configured Tree ownership/material, Tree clock, Workshop clock, production clock, inventory clock and
 Manager credentials are accepted only for the corresponding configured feature.
+Portfolio roots currently reject configured production and inventory clocks
+before any child opens. Optional Tree and Workshop clocks remain supported;
+production time for a portfolio must advance outside this owner.
 Production launch/admission variables and unrelated `DFMCP_` profiles refuse.
 
 The parent and each child retain exact byte hashes of their live configuration
@@ -155,13 +160,13 @@ stops retain the original host authority expiry, so the parent goal deadline
 does not itself revoke those safety paths.
 
 Supported recipes are `wooden_bed`, `wooden_door`, `wooden_table` and
-`wooden_chair`. The target is 1–1,000,000 observed type stack units; a single
+`wooden_chair`. Each target is 1–1,000,000 observed type stack units; a single
 finite order is bounded by `max_order_amount` in 1–100. Positive deficits beyond
 that bound refuse instead of being silently truncated.
 
 `assign_labor: false` uses already-enabled eligible Carpenter workers.
 `assign_labor: true` adds an independently reviewed labor-enable step before the
-dependent finite order. This choice is fixed in the parent original. Worker IDs
+dependent finite order or orders. This choice is fixed in the parent original. Worker IDs
 come from the later production observation; labor remains `CARPENTER`.
 
 The production template must not contain `workshop_prerequisite`: the parent
@@ -169,6 +174,46 @@ supplies the typed, independently verified original donor at the transition.
 All three production configuration strings are validated before the first
 child operation. Fresh initialization requires both existing production native family
 authorities even when the selected later plan will not assign labor.
+
+### Fixed portfolio goal
+
+To retain several furniture minima in one project, replace the scalar `goal`
+above with:
+
+```json
+{
+  "targets": [
+    {"recipe": "wooden_bed", "minimum_stack_units": 5, "max_order_amount": 20},
+    {"recipe": "wooden_chair", "minimum_stack_units": 5, "max_order_amount": 20},
+    {"recipe": "wooden_door", "minimum_stack_units": 1, "max_order_amount": 5},
+    {"recipe": "wooden_table", "minimum_stack_units": 5, "max_order_amount": 20}
+  ],
+  "deadline_tick": 13000,
+  "poll_interval_ticks": 10,
+  "stable_samples": 2,
+  "assign_labor": false
+}
+```
+
+A portfolio contains one to four distinct supported recipes. Fresh operator
+configuration sorts targets by recipe before retaining the original; duplicate
+recipes refuse. Retained journals, intents and recovery references must already
+have that exact canonical order. Do not combine `targets` with the scalar
+`recipe`, `minimum_stack_units` or `max_order_amount` fields. Both forms are
+closed, and existing scalar journals retain their original JSON bytes.
+
+All targets share the same deadline, cadence, stability requirement and
+labor-assignment choice. The complete vector remains mandatory even when the
+initial census finds some targets already met. The compiler creates an order
+only for a positive bounded deficit. Four orders plus one optional labor-enable
+step fit the existing five-action ceiling; no per-target timing or extra action
+authority is introduced.
+
+Leave both combined-production `clock` and `inventory_clock` unconfigured
+for a portfolio. This restriction also applies to recovered metadata, including
+inactive order slots. It avoids claiming per-order clock recovery authority the
+parent does not yet retain. Optional Tree and Workshop clocks keep their normal
+configuration, current review and fixed project deadline.
 
 ### Optional Manager stage
 
@@ -367,7 +412,7 @@ fresh handoff sample is evidence at its export anchor; production still freshly
 qualifies the original donor before positive planning and protected native
 order boundaries.
 
-### 4. Plan the fixed stock target
+### 4. Plan the fixed stock target or portfolio
 
 Call `fortress_observe` for current production worker choices. The existing
 closed `stock_target` request names the published observation seal, selected
@@ -390,8 +435,9 @@ eligible worker IDs and all original goal terms:
 ```
 
 Recipe, minimum, order bound, deadline, cadence, stability and assignment choice
-must equal the original parent goal. A different target, portfolio, labor or
-deadline refuses.
+must equal the original parent goal. A scalar root requires `stock_target`;
+a portfolio root requires `stock_targets` with every original target. Neither
+form can change into the other.
 
 The child obtains its real qualified complete stock census and computes the
 finite deficit. A met initial target returns `already_satisfied` with its exact
@@ -414,6 +460,38 @@ publication withdraw current proof; consumption makes current truth false.
 Explicit goal/project cancellation withdraws the watch. Its sample history is
 process-local and is never restored from the retained census or recovery JSON.
 The parent goal and deadline remain immutable across recovery.
+
+For the four-target configuration above, use this production request:
+
+```json
+{
+  "kind": "stock_targets",
+  "expected_observation": "<published production observation seal>",
+  "units": ["<published eligible worker ID>"],
+  "labor": "CARPENTER",
+  "targets": [
+    {"recipe": "wooden_bed", "minimum_stack_units": 5, "max_order_amount": 20},
+    {"recipe": "wooden_chair", "minimum_stack_units": 5, "max_order_amount": 20},
+    {"recipe": "wooden_door", "minimum_stack_units": 1, "max_order_amount": 5},
+    {"recipe": "wooden_table", "minimum_stack_units": 5, "max_order_amount": 20}
+  ],
+  "deadline_tick": 13000,
+  "poll_interval_ticks": 10,
+  "stable_samples": 2,
+  "assign_labor": false
+}
+```
+
+The Agent Turn supplies the complete canonical vector in its planning
+recommendation. Each requested minimum and order limit must match the root,
+including already-met members. One positive deficit plus several met targets
+still remains a portfolio. If every minimum is met, the child retains a
+`dfmcp.stock-targets-watch/1` no-work watch instead of an original plan or
+publication intent. Planning contributes no stability sample. Wait and default
+Observe require the entire cohort to hold in the same fresh qualified census
+at the required spaced ticks. Separate historical member successes cannot
+combine into project success. Stock loss, Unknown coverage, source rejection,
+failed publication or cancellation withdraws current proof.
 
 For a positive deficit, the compiler fixes the complete original before any
 child publication. The parent then writes and independently acknowledges a
@@ -445,10 +523,13 @@ separate native effects.
 `fortress_wait` performs one foreground reconciliation or goal sample. It
 does not run a background loop. The existing full-parent labor/inventory
 monitor, original deadline, cadence and stability rules determine
-`original_goal_proven`. Settled clocks are required. An order insertion
+`original_goal_proven`. For a portfolio, every original minimum must hold
+under the existing joint portfolio monitor; selected-order or per-leaf success
+is insufficient. Settled clocks are required. An order insertion
 receipt or a retired order cannot alone produce this flag.
 
-Independently configured production clocks retain their existing requests:
+For scalar roots, independently configured production clocks retain their
+existing requests:
 
 | Plan kind | Commit/cancel scope | Purpose |
 | --- | --- | --- |
@@ -457,6 +538,9 @@ Independently configured production clocks retain their existing requests:
 
 Each interval needs a separate current review and explicit confirmation.
 Neither changes the parent deadline or grants another native mutation.
+Portfolio production refuses `run`, `inventory_run` and production clock
+scopes. Fresh stock samples still require actual observed game-tick progress;
+repeated foreground calls do not advance time.
 
 ## Stop, close and recover
 
@@ -526,10 +610,19 @@ lost; supplied selectors must match the parent-held original. Keep the native
 workforce/order custody identities and configured clock journal identities.
 Their files still undergo the ordinary child validation.
 
+For a portfolio, the intent and recovery reference retain the exact ordered
+original order slots, including the assignment-dependent first StepId. The
+complete goal vector also retains minima that created no order. Each leaf's
+historical goal marker is monotone; changing selection cannot drop or roll back
+an inactive leaf. The top-level historical marker remains tied to the first
+original order. Adding, removing, reordering or replacing slots refuses, as does
+any retained production or inventory clock identity. Fresh and recovered
+scalar originals cannot be adopted by portfolio roots, or vice versa.
+
 This pending-publication recovery requires the exact original archive, citizen
 capsule, prerequisite associations and initial execution journal. Native effect
-journals must remain empty; goal history, execution progress or clock runs
-cannot be adopted through the pending intent. If the child checkpoint was
+journals must remain empty; goal history in any portfolio slot, execution
+progress or clock runs cannot be adopted through the pending intent. If the child checkpoint was
 already acknowledged, ordinary authenticated descendant recovery applies.
 Both paths retain newer rejection floors and sticky source fences. The intent
 is immutable after publication and remains present through later checkpoints
@@ -566,6 +659,9 @@ is released. Recovery data never restores a native permit or current goal proof.
 | Child checkpoint | 32 KiB each |
 | Exact production publication intent | 32 KiB |
 | Parent configuration | 128 KiB |
+| `stock_targets` planning request | 8 KiB |
+| Other parent planning requests | 4 KiB |
+| Portfolio | One to four distinct recipes; at most four finite orders |
 
 Byte-work is a conservative bound on repeated reads, replay, hashing and
 verification; it is not resident memory or output size. Ledger operations
@@ -600,6 +696,36 @@ historical custody and current production goal anchors remain explicit and
 separate.
 
 ## Validation record
+
+### Current parent-portfolio increment
+
+A focused component passes **162 tests, zero failures**, using the official
+2026-11-23 nightly (`rustc 1.102.0-nightly (137d1d494 2026-11-22)`) and exact
+locked dependencies. Its included source hashes match the formatted repository
+files. It compiles the complete actual core/world/intent/adapter graph and
+semantic workforce/order production owners without changing repository
+dependencies or substituting native implementations.
+
+The executed cases include six new goal/compiler groups, fifteen recovery
+groups (seven new portfolio groups), nine continuity groups (five new portfolio
+groups), four preserved scalar project groups, two parent request-routing
+groups, one parent clock-policy group and the actual NativeShell clockless
+reopening regression. The other 124 cases cover existing semantic compilers,
+bindings, clocks and rosters. The new native regression runs all four fresh/
+reopened and configured/unconfigured subprocess cases with no native contact.
+The six new portfolio presentation groups are authored and source-reviewed but
+were not included in this component.
+
+The component excludes full native resource-project and combined-production
+Runtime orchestration, MCP transport and real Asupersync scheduling. It does
+not establish integrated or live qualification. Independent source review covers
+the acknowledged publication sequence, complete target proof and per-slot
+recovery. Scoped formatting and patch whitespace checks pass. Repository,
+dependency, source and agent contracts pass; Beads coverage passes 22/22 after
+locating the existing CLI. Workspace formatting still reports drift in 117
+unchanged files. Full `verify.sh`, `qualify_local.sh`, integrated MCP/stdio and
+live DFHack qualification have not passed for this increment. Earlier receipts
+below describe their stated checkpoints and do not qualify this extension.
 
 ### Current Tree integration evidence
 

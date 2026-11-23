@@ -33,11 +33,13 @@ independent clocks; source availability does not establish live qualification.
 
 For a fixed stock objective with durable parent stage and cancellation custody,
 use [`serve-gameplay-dev native-resource-project`](docs/NATIVE_RESOURCE_PROJECT_MCP.md).
-It can own Tree harvesting, Workshop construction and finite furniture
-production under one original goal and absolute deadline. Each native effect
-keeps its own review, and each material handoff verifies current original
-evidence. Component-tested development source still requires full MCP/stdio
-and live-game qualification.
+It can own Manager appointment, Tree harvesting, Workshop construction and
+finite furniture production under one original goal and absolute deadline.
+The stock goal can retain one to four furniture minima, including targets that
+need no new order. Each native effect keeps its own review, and completion
+requires current proof for the whole goal. Portfolio production currently
+requires externally advanced game time. This development source still requires
+full MCP/stdio and live-game qualification.
 
 The motivating problem is not merely “let a model press keys.” Dwarf Fortress is an unusually rich
 long-horizon environment, but a naive automation layer would expose incomplete observations,
@@ -236,7 +238,7 @@ alone never establishes harvested wood.
 
 The native resource project can begin with `appoint_manager: true`, followed by
 an optional `harvest_tree: true`, Workshop construction and its fixed furniture
-stock goal. It retains one original deadline and independently acknowledged
+stock goal or portfolio. It retains one original deadline and independently acknowledged
 custody for every stage. Manager appointment proves the 1.23 production cache;
 later production independently rechecks that exact original. Each native effect
 still needs its own current review and explicit confirmation. This remains an

@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased — Native resource-project stock portfolios
+
+- Accept one to four immutable furniture targets through optional Manager and
+  Tree stages, Workshop handoff and finite production.
+- Preserve already-met minima, compile only positive deficits, and require
+  joint proof of the complete original portfolio.
+- Use the existing no-work portfolio watch when every minimum is initially met;
+  planning creates no effect and contributes no stability sample.
+- Acknowledge the complete prospective original before child writes, retain
+  exact per-order recovery slots and monotone leaf history, and refuse changed
+  goals, partial custody or advanced pending publication.
+- Preserve scalar goal serialization and existing effect reviews. Restrict
+  portfolio production to unconfigured production/inventory clocks while
+  retaining optional Tree and Workshop clocks.
+- Pass 162 focused actual-source tests, including new goal/compiler, recovery,
+  continuity, request/clock-policy and native custody regressions. Six new
+  presentation groups remain unexecuted; full Runtime orchestration, transport
+  and live qualification are outside this component evidence.
+
 ## Unreleased — Clockless portfolio planning after reopening
 
 - Allow the first multi-order stock portfolio after reopening native insertion

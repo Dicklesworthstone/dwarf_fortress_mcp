@@ -474,6 +474,15 @@ impl Runtime {
         request: StockTargetsRequest,
         c: &OperationContext,
     ) -> Result<View> {
+        self.plan_stock_targets_recorded(request, c, None)
+    }
+
+    pub(super) fn plan_stock_targets_recorded(
+        &mut self,
+        request: StockTargetsRequest,
+        c: &OperationContext,
+        publication: Option<project::ProjectPublication<'_>>,
+    ) -> Result<View> {
         request.validate()?;
         self.check(c, true)?;
         if let Some(goal) = &self.stock_targets_no_work
@@ -584,24 +593,26 @@ impl Runtime {
                 &[],
                 None,
             )?;
-            return self.plan_compiled(
+            return self.plan_compiled_recorded(
                 request.observation()?,
                 true,
                 &[],
                 PlanInputs::captured(&assessments)?,
                 &work.current()?,
+                publication,
                 |evidence, _, current, origin| {
                     request.compile_with_labor_assignment(&assessments, evidence, current, origin)
                 },
             );
         }
-        self.plan_existing_workers(
+        self.plan_existing_workers_recorded(
             request.observation()?,
             (request.unit_ids()?, request.labor.clone()),
             true,
             &[],
             PlanInputs::captured(&assessments)?,
             &work.current()?,
+            publication,
             |evidence, workers, _, current, origin| {
                 request.compile(&assessments, evidence, workers, current, origin)
             },

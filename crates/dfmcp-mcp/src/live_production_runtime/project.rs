@@ -5,13 +5,12 @@
 //! receipt into proof of the complete labor and inventory goal.
 use super::{
     ProductionClock, ProductionInventoryClock, ProjectProductionIntent, Runtime,
-    StockTargetRequest, View, request, stock_target_binding, workshop_binding,
+    StockTargetRequest, View,
 };
 use crate::semantic_workforce_runtime::{denied, invalid};
 use dfmcp_adapter::live_production::ProductionLayout;
 use dfmcp_core::{Digest32, OperationContext, Result, StateAnchor};
-use dfmcp_intent::{Action, PreparedPlan, effects::MAX_DEFAULT_OBLIGATION_TICKS};
-use serde::{Deserialize, Serialize};
+use dfmcp_intent::PreparedPlan;
 
 /// The parent owns the durable ACK; this borrowed callback cannot outlive the
 /// single planning call or become a preparation/dispatch permit.
@@ -21,115 +20,7 @@ pub(super) struct ProjectPublication<'a> {
         &'a mut dyn FnMut(&ProjectProductionIntent, &OperationContext) -> Result<()>,
 }
 
-/// Complete caller-selected goal retained by the parent before either child
-/// opens. Worker identities are chosen from a fresh production observation;
-/// their native family and all goal and temporal terms remain fixed here.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct ProjectStockGoal {
-    pub recipe: String,
-    pub minimum_stack_units: u64,
-    pub max_order_amount: u32,
-    pub deadline_tick: u64,
-    pub poll_interval_ticks: u64,
-    pub stable_samples: u32,
-    pub assign_labor: bool,
-}
-
-impl ProjectStockGoal {
-    pub(crate) fn validate(&self) -> Result<()> {
-        // The existing registry contains precisely the four wooden furniture
-        // recipes admitted by the Carpenters Workshop production prerequisite.
-        request::recipe(&self.recipe)?;
-        if !(1..=1_000_000).contains(&self.minimum_stack_units)
-            || !(1..=100).contains(&self.max_order_amount)
-            || self.deadline_tick == 0
-            || self.deadline_tick > dfmcp_adapter::bounded_run::MAX_NATIVE_TICK
-            || !(1..=MAX_DEFAULT_OBLIGATION_TICKS).contains(&self.poll_interval_ticks)
-            || !(1..=64).contains(&self.stable_samples)
-            || self
-                .poll_interval_ticks
-                .checked_mul(u64::from(self.stable_samples))
-                .is_none_or(|ticks| ticks > self.deadline_tick)
-        {
-            return Err(invalid("invalid bounded original project stock goal"));
-        }
-        Ok(())
-    }
-
-    pub(crate) fn validate_request(&self, request: &StockTargetRequest) -> Result<()> {
-        self.validate()?;
-        request.validate()?;
-        // Workshop/1.20 qualifies the actual CARPENTER labor bit. A different
-        // enabled labor must not become the selected production prerequisite.
-        if request.labor != "CARPENTER"
-            || request.recipe != self.recipe
-            || request.minimum_stack_units != self.minimum_stack_units
-            || request.max_order_amount != self.max_order_amount
-            || request.deadline_tick != self.deadline_tick
-            || request.poll_interval_ticks != self.poll_interval_ticks
-            || request.stable_samples != self.stable_samples
-            || request.assign_labor != self.assign_labor
-        {
-            return Err(denied(
-                "production request changed the original project goal, deadline or Carpenter labor",
-            ));
-        }
-        Ok(())
-    }
-
-    /// Reconstruct the existing stock-target identity, including its original
-    /// census, actual step IDs and keys, before comparing the parent contract.
-    /// This is also required when an existing child is opened from recovery.
-    pub(crate) fn validate_original(
-        &self,
-        plan: &PreparedPlan,
-        workshop_origin: Digest32,
-    ) -> Result<()> {
-        self.validate()?;
-        let binding = stock_target_binding::requirement(plan)?
-            .ok_or_else(|| denied("project production requires its original stock target"))?;
-        let layout = ProductionLayout::from_plan(plan)?;
-        let order = layout
-            .order_steps()
-            .first()
-            .and_then(|id| plan.steps.iter().find(|step| step.id == *id))
-            .ok_or_else(|| denied("project original finite order is absent"))?;
-        let obligation = order
-            .obligation
-            .as_ref()
-            .ok_or_else(|| denied("project original order obligation is absent"))?;
-        let carpenter = if let Some(id) = layout.assignment_step() {
-            plan.steps
-                .iter()
-                .find(|step| step.id == id)
-                .is_some_and(|step| {
-                    matches!(&step.action, Action::SetLabor { labor, enabled: true, .. }
-                        if labor == "CARPENTER")
-                })
-        } else {
-            layout
-                .existing_labor()
-                .is_some_and(|workers| workers.labor() == "CARPENTER")
-        };
-        if !carpenter
-            || binding.recipe().as_str() != self.recipe
-            || binding.objective().target_stack_units() != self.minimum_stack_units
-            || binding.max_order_amount() != self.max_order_amount
-            || binding.assign_labor() != self.assign_labor
-            || obligation.deadline_tick.get() != self.deadline_tick
-            || obligation.poll_interval_ticks != self.poll_interval_ticks
-            || obligation.stable_for_observations != self.stable_samples
-            || workshop_origin == Digest32::ZERO
-            || workshop_binding::requirement(plan)? != Some(workshop_origin)
-        {
-            return Err(denied(
-                "recovered production original differs from the immutable project goal or Workshop origin",
-            ));
-        }
-        Ok(())
-    }
-}
+pub(crate) use super::project_goal::ProjectStockGoal;
 
 /// A qualified complete stock census can close a no-work target without an
 /// original order. It proves the count at this anchor only; there is no worker,
@@ -192,6 +83,9 @@ fn satisfied_census(
     anchor: StateAnchor,
 ) -> Result<ProjectTargetAlreadySatisfied> {
     goal.validate_request(&no_work.request)?;
+    let ProjectStockGoal::Single(goal) = goal else {
+        return Err(denied("a portfolio cannot adopt a scalar no-work census"));
+    };
     let assessment = &no_work.assessment;
     if assessment.amount().is_some()
         || assessment.original_anchor() != anchor
@@ -264,6 +158,13 @@ impl Runtime {
     fn project_workshop_origin(&self, goal: &ProjectStockGoal) -> Result<Digest32> {
         goal.validate()?;
         self.config.current()?;
+        if goal.is_portfolio()
+            && (self.config.clock.is_some() || self.config.inventory_clock.is_some())
+        {
+            return Err(denied(
+                "project stock portfolios require externally advanced production time",
+            ));
+        }
         let binding = self.config.project_binding.ok_or_else(|| {
             denied("production child is not bound to its original native project")
         })?;
@@ -273,8 +174,8 @@ impl Runtime {
             .ok_or_else(|| denied("project production lost its completed Workshop donor"))?;
         let actual = workshop.witness()?;
         if actual != binding.workshop_origin
-            || goal.deadline_tick != binding.deadline_tick
-            || goal.deadline_tick > binding.authority_expires_tick
+            || goal.deadline_tick() != binding.deadline_tick
+            || goal.deadline_tick() > binding.authority_expires_tick
         {
             return Err(denied(
                 "production child changed its project deadline or Workshop origin",
@@ -363,6 +264,18 @@ impl Runtime {
         self.plan_stock_target_recorded(request, c, Some(ProjectPublication { goal, acknowledge }))
     }
 
+    pub(crate) fn project_plan_stock_targets_recorded(
+        &mut self,
+        goal: &ProjectStockGoal,
+        request: super::StockTargetsRequest,
+        c: &OperationContext,
+        acknowledge: &mut dyn FnMut(&ProjectProductionIntent, &OperationContext) -> Result<()>,
+    ) -> Result<View> {
+        goal.validate_targets_request(&request)?;
+        self.project_workshop_origin(goal)?;
+        self.plan_stock_targets_recorded(request, c, Some(ProjectPublication { goal, acknowledge }))
+    }
+
     /// All values below come from the completed compiler and retained source
     /// owners. The future archive, capsule and associations have not been
     /// created. The exact header identity is reused by their later publication.
@@ -402,6 +315,23 @@ impl Runtime {
             "clock_journal_id": reference["clock"]["journal_id"],
             "inventory_clock_journal_id": reference["inventory_clock"]["journal_id"],
         });
+        if goal.is_portfolio() {
+            // Prospective immutable leaf identities exist before child writes.
+            // No leaf has execution history or clock custody at publication.
+            let layout = ProductionLayout::from_plan(plan)?;
+            recovery["portfolio"] = serde_json::json!(
+                layout
+                    .order_steps()
+                    .iter()
+                    .map(|step| serde_json::json!({
+                        "step_id": step.get(),
+                        "goal_history_present": false,
+                        "clock_journal_id": null,
+                        "inventory_clock_journal_id": null,
+                    }))
+                    .collect::<Vec<_>>()
+            );
+        }
         if let Some(owner) = &self.workshop {
             recovery["workshop_prerequisite_digest"] = serde_json::json!(
                 owner
@@ -465,9 +395,8 @@ impl Runtime {
                 .as_ref()
                 .ok_or_else(|| denied("project publication lost its exact initial frontier"))?;
             intent.validate_initial_frontier(frontier.recovery())?;
+            intent.validate_pending_checkpoint(&self.project_recovery_reference())?;
             if self.goal_history_present
-                || self.portfolio.is_some()
-                || self.stock_targets.is_some()
                 || self.clock.as_ref().is_some_and(ProductionClock::has_runs)
                 || self
                     .inventory_clock
@@ -494,10 +423,27 @@ impl Runtime {
         if let Some(original) = &self.original {
             goal.validate_original(original, origin)?;
         }
-        if self.portfolio.is_some() || self.stock_targets.is_some() {
+        if goal.is_portfolio() {
+            if self.stock_target.is_some()
+                || self.stock_target_no_work.is_some()
+                || (self.original.is_some()
+                    && (self.portfolio.is_none() || self.stock_targets.is_none()))
+            {
+                return Err(denied("project portfolio lost its complete typed original"));
+            }
+            if let Some(no_work) = &self.stock_targets_no_work {
+                goal.validate_targets_request(&no_work.request)?;
+            }
+        } else if self.portfolio.is_some()
+            || self.stock_targets.is_some()
+            || self.stock_targets_no_work.is_some()
+        {
             return Err(denied(
-                "project production cannot adopt a portfolio original",
+                "single-target project cannot adopt a portfolio original",
             ));
+        }
+        if let Some(no_work) = &self.stock_target_no_work {
+            goal.validate_request(&no_work.request)?;
         }
         let clocks_settled = self.clock_review.is_none()
             && self.inventory_clock_review.is_none()

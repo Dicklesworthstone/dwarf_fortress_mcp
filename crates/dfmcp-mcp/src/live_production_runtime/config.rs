@@ -1065,9 +1065,10 @@ impl Config {
         if parsed
             .2
             .is_some_and(|recovery| recovery.portfolio.is_some())
+            && (parsed.3.is_some() || parsed.4.is_some())
         {
             return Err(denied(
-                "project production recovery cannot adopt a portfolio original",
+                "project portfolio recovery cannot adopt production clock custody",
             ));
         }
         let conditional = (

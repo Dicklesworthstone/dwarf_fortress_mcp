@@ -6,7 +6,7 @@ use super::error;
 use super::journal::{self, Checkpoint, Mode, Stage};
 use crate::live_production_runtime::{
     Config as ProductionConfig, Mode as ProductionMode, ObserveRequest, ProjectProductionIntent,
-    Runtime as ProductionRuntime, StockTargetRequest,
+    ProjectStockGoal, Runtime as ProductionRuntime, StockTargetRequest, StockTargetsRequest,
 };
 use crate::manager_appointment_server::{
     ManagerProjectHandoff, ProjectManagerAction as ManagerAction,
@@ -108,6 +108,25 @@ pub(super) enum Action {
     },
     Wait(Option<String>),
     Cancel(Option<String>),
+}
+
+enum ProductionTargetRequest {
+    Single(StockTargetRequest),
+    Portfolio(StockTargetsRequest),
+}
+
+impl ProductionTargetRequest {
+    fn parse(raw: &str, goal: &ProjectStockGoal) -> Result<Self> {
+        if goal.is_portfolio() {
+            let request = StockTargetsRequest::parse(raw)?;
+            goal.validate_targets_request(&request)?;
+            Ok(Self::Portfolio(request))
+        } else {
+            let request = StockTargetRequest::parse(raw)?;
+            goal.validate_request(&request)?;
+            Ok(Self::Single(request))
+        }
+    }
 }
 
 struct Work {
@@ -346,7 +365,7 @@ impl Runtime {
             return Err(denied("project is stopped, fenced or not in control mode"));
         }
         let current = self.context(work)?;
-        if current.anchor.tick.get() >= self.config.goal.deadline_tick {
+        if current.anchor.tick.get() >= self.config.goal.deadline_tick() {
             return Err(denied("original resource project deadline has passed"));
         }
         current.authorize(Capability::Plan, RiskTier::Guarded, &[], None)
@@ -361,10 +380,10 @@ impl Runtime {
             .as_ref()
             .ok_or_else(|| denied("project has no acknowledged Workshop handoff"))?;
         let handoff = WorkshopProjectHandoff::from_json(value)?;
-        if handoff.project_deadline_tick() != self.config.goal.deadline_tick
+        if handoff.project_deadline_tick() != self.config.goal.deadline_tick()
             || handoff
                 .clock_deadline_tick()
-                .is_some_and(|deadline| deadline != self.config.goal.deadline_tick)
+                .is_some_and(|deadline| deadline != self.config.goal.deadline_tick())
             || self
                 .config
                 .handoff
@@ -565,6 +584,13 @@ impl Runtime {
     }
 
     fn open_production(&mut self, mut config: ProductionConfig, work: &mut Work) -> Result<()> {
+        if self.config.goal.is_portfolio()
+            && (config.clock.is_some() || config.inventory_clock.is_some())
+        {
+            return Err(denied(
+                "stock portfolio projects cannot open production clock custody",
+            ));
+        }
         let intent = self
             .journal
             .snapshot()
@@ -622,8 +648,7 @@ impl Runtime {
     }
 
     fn plan_production_target(&mut self, raw: &str, work: &mut Work) -> Result<Value> {
-        let request = StockTargetRequest::parse(raw)?;
-        self.config.goal.validate_request(&request)?;
+        let request = ProductionTargetRequest::parse(raw, &self.config.goal)?;
         if self.journal.snapshot().stage != Stage::Production
             || self
                 .journal
@@ -681,7 +706,7 @@ impl Runtime {
             if journal.pin().head != expected_head
                 || journal.snapshot().stage != Stage::Production
                 || journal.snapshot().checkpoint.production_intent.is_some()
-                || *high_tick >= config.goal.deadline_tick
+                || *high_tick >= config.goal.deadline_tick()
             {
                 return Err(denied(
                     "production publication lost its exact parent head, original deadline or opening slot",
@@ -701,12 +726,16 @@ impl Runtime {
             work.remaining()?;
             Ok(())
         };
-        let view = child.project_plan_stock_target_recorded(
-            &config.goal,
-            request,
-            &current,
-            &mut record,
-        )?;
+        let view = match request {
+            ProductionTargetRequest::Single(request) => child.project_plan_stock_target_recorded(
+                &config.goal,
+                request,
+                &current,
+                &mut record,
+            ),
+            ProductionTargetRequest::Portfolio(request) => child
+                .project_plan_stock_targets_recorded(&config.goal, request, &current, &mut record),
+        }?;
         self.current_goal = child.project_status(&config.goal)?.to_json();
         Ok(view.to_json())
     }
@@ -786,11 +815,16 @@ impl Runtime {
     fn child_call(&mut self, action: Action, work: &mut Work) -> Result<Value> {
         let mut stock_target = false;
         if let Action::Plan(raw) = &action {
-            if raw.len() > 4096 {
+            if raw.len() > 8192 {
                 return Err(exhausted());
             }
             let value: Value =
                 serde_json::from_str(raw).map_err(|_| invalid("invalid project plan request"))?;
+            if raw.len() > 4096
+                && !(self.config.goal.is_portfolio() && value["kind"] == "stock_targets")
+            {
+                return Err(exhausted());
+            }
             if value["kind"] == "advance_to_production" {
                 return self.advance_to_production(raw, work);
             }
@@ -800,7 +834,10 @@ impl Runtime {
             if value["kind"] == "advance_from_manager" {
                 return self.advance_from_manager(raw, work);
             }
-            stock_target = value["kind"] == "stock_target";
+            stock_target = matches!(
+                value["kind"].as_str(),
+                Some("stock_target" | "stock_targets")
+            );
         }
         if matches!(&action, Action::Plan(_) | Action::Commit { .. }) {
             self.authorize_forward(work)?;
@@ -861,7 +898,7 @@ impl Runtime {
                 budget.max_game_ticks = 0;
                 child.raise_project_tick_floor(self.high_tick)?;
                 child.perform_project(
-                    manager::action(action, offline, goal.deadline_tick)?,
+                    manager::action(action, offline, goal.deadline_tick())?,
                     budget,
                 )
             }
@@ -942,9 +979,14 @@ impl Runtime {
                         let value: Value = serde_json::from_str(&raw)
                             .map_err(|_| invalid("invalid production project request"))?;
                         match value["kind"].as_str() {
-                            Some("stock_target") => {
+                            Some("stock_target" | "stock_targets") => {
                                 return Err(denied(
                                     "stock targets require their parent publication intent",
+                                ));
+                            }
+                            Some("run" | "inventory_run") if goal.is_portfolio() => {
+                                return Err(denied(
+                                    "stock portfolio projects have no production clock authority",
                                 ));
                             }
                             Some("run") => child.plan_run(RunRequest::parse(&raw)?, &current),
@@ -975,7 +1017,7 @@ impl Runtime {
                             }
                             _ => {
                                 return Err(invalid(
-                                    "project permits only its fixed stock target, original steps and independently reviewed clocks",
+                                    "project permits only its fixed stock goal, original steps and configured clocks",
                                 ));
                             }
                         }
@@ -988,6 +1030,11 @@ impl Runtime {
                         let seal = digest(&seal)?;
                         match scope.as_deref().unwrap_or("goal") {
                             "goal" => child.commit(seal, confirmed, &current),
+                            "clock" | "inventory_clock" if goal.is_portfolio() => {
+                                return Err(denied(
+                                    "stock portfolio projects have no production clock authority",
+                                ));
+                            }
                             "clock" => child.commit_run(seal, confirmed, &current),
                             "inventory_clock" => {
                                 child.commit_inventory_run(seal, confirmed, &current)
@@ -1002,6 +1049,13 @@ impl Runtime {
                         ) {
                             return Err(invalid("unknown production wait scope"));
                         }
+                        if goal.is_portfolio()
+                            && matches!(scope.as_deref(), Some("clock" | "inventory_clock"))
+                        {
+                            return Err(denied(
+                                "stock portfolio projects have no production clock authority",
+                            ));
+                        }
                         if offline {
                             child.inspect(&current)
                         } else {
@@ -1010,6 +1064,11 @@ impl Runtime {
                     }
                     Action::Cancel(scope) => match scope.as_deref().unwrap_or("project") {
                         "goal" | "project" => child.cancel(&current),
+                        "clock" | "inventory_clock" if goal.is_portfolio() => {
+                            return Err(denied(
+                                "stock portfolio projects have no production clock authority",
+                            ));
+                        }
                         "clock" => child.cancel_run(&current),
                         "inventory_clock" => child.cancel_inventory_run(&current),
                         _ => return Err(invalid("unknown production cancellation scope")),
@@ -1109,6 +1168,10 @@ impl Runtime {
         })
     }
 }
+
+#[cfg(test)]
+#[path = "portfolio_runtime_tests.rs"]
+mod portfolio_tests;
 
 #[cfg(test)]
 #[path = "manager_runtime_tests.rs"]

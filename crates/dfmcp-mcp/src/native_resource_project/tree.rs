@@ -30,7 +30,7 @@ impl Runtime {
             .as_ref()
             .ok_or_else(|| denied("project has no acknowledged Tree handoff"))?;
         let handoff = TreeProjectHandoff::from_json(value)?;
-        if handoff.project_deadline_tick() != self.config.goal.deadline_tick
+        if handoff.project_deadline_tick() != self.config.goal.deadline_tick()
             || self
                 .config
                 .tree_handoff

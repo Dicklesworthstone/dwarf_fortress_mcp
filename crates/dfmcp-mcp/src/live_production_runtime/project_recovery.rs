@@ -53,9 +53,16 @@ impl ProjectProductionIntent {
         let recovery = reference_recovery(&intent.recovery_reference)?;
         validate_reference_sources(&expected, recovery)?;
         if recovery.goal_history_present
-            || recovery.portfolio.is_some()
+            || intent.goal.is_portfolio() != recovery.portfolio.is_some()
+            || recovery.portfolio.is_some_and(|slots| {
+                slots[0].is_none_or(|first| first.step_id != u32::from(intent.goal.assign_labor()))
+                    || slots
+                        .into_iter()
+                        .flatten()
+                        .any(|slot| slot.goal_history_present)
+            })
             || recovery.frontier.head != recovery.frontier.journal_id
-            || recovery.anchor.tick.get() >= intent.goal.deadline_tick
+            || recovery.anchor.tick.get() >= intent.goal.deadline_tick()
             || expected.workshop_prerequisite.is_none()
             || expected
                 .workshop_prerequisite
@@ -116,6 +123,37 @@ impl ProjectProductionIntent {
         {
             return Err(denied(
                 "unacknowledged project original has advanced beyond its exact initial frontier",
+            ));
+        }
+        Ok(())
+    }
+
+    /// Pending publication can recover only the exact, still unexecuted
+    /// original. Per-order history is checked even for an inactive portfolio
+    /// leaf; no selected-leaf summary can hide already started goal custody.
+    pub(crate) fn validate_pending_checkpoint(&self, checkpoint: &Value) -> Result<()> {
+        self.validate_checkpoint(checkpoint)?;
+        self.validate_pending_recovery(reference_recovery(checkpoint)?)
+    }
+
+    fn validate_pending_recovery(&self, current: Recovery) -> Result<()> {
+        self.validate_initial_frontier(current.frontier)?;
+        let expected = retained(&self.recovery_reference)?;
+        let prior = expected
+            .recovery
+            .as_ref()
+            .ok_or_else(|| invalid("project intent original is absent"))?;
+        original(current, prior, expected.observation_tick_floor)?;
+        if current.goal_history_present
+            || current.portfolio.is_some_and(|slots| {
+                slots
+                    .into_iter()
+                    .flatten()
+                    .any(|slot| slot.goal_history_present)
+            })
+        {
+            return Err(denied(
+                "unacknowledged project original already has goal history",
             ));
         }
         Ok(())
@@ -302,6 +340,7 @@ fn validate_preplan_sources(reference: &Retained) -> Result<()> {
 
 fn validate_reference_sources(reference: &Retained, recovery: Recovery) -> Result<()> {
     validate_preplan_sources(reference)?;
+    validate_clockless_portfolio(recovery)?;
     if recovery.anchor.tick.get() > reference.observation_tick_floor
         || recovery.frontier.authority_tick_floor < reference.observation_tick_floor
     {
@@ -688,14 +727,86 @@ fn optional_floor<T: Copy>(
     }
 }
 
+/// The project currently admits portfolio originals only without production
+/// clocks. Each order retains its own history identity, including inactive
+/// leaves, and the legacy selected summary always names the first order.
+fn validate_clockless_portfolio(recovery: Recovery) -> Result<()> {
+    let Some(slots) = recovery.portfolio else {
+        return Ok(());
+    };
+    let first =
+        slots[0].ok_or_else(|| denied("project portfolio lost its first original order"))?;
+    if first.step_id > 1
+        || recovery.goal_history_present != first.goal_history_present
+        || recovery.clock_journal_id.is_some()
+        || recovery.inventory_clock_journal_id.is_some()
+    {
+        return Err(denied(
+            "project portfolio changed its first-order summary or clock custody",
+        ));
+    }
+    let mut ended = false;
+    for (index, slot) in slots.into_iter().enumerate() {
+        match slot {
+            Some(slot)
+                if !ended
+                    && slot.step_id == first.step_id + index as u32
+                    && slot.clock_journal_id.is_none()
+                    && slot.inventory_clock_journal_id.is_none() => {}
+            None => ended = true,
+            Some(_) => {
+                return Err(denied(
+                    "project portfolio requires every original order in order without clocks",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn same_portfolio(current: Recovery, prior: &RecoveryInput) -> Result<()> {
+    validate_clockless_portfolio(current)?;
+    match (current.portfolio, prior.portfolio.as_deref()) {
+        (None, None) => Ok(()),
+        (Some(current), Some(prior_slots)) => {
+            let count = current.iter().flatten().count();
+            if count != prior_slots.len()
+                || prior_slots
+                    .first()
+                    .is_none_or(|first| prior.goal_history_present != first.goal_history_present)
+                || prior.clock_journal_id.is_some()
+                || prior.inventory_clock_journal_id.is_some()
+            {
+                return Err(denied(
+                    "project recovery changed its complete original portfolio",
+                ));
+            }
+            for (now, before) in current.into_iter().flatten().zip(prior_slots) {
+                if now.step_id != before.step_id
+                    || (before.goal_history_present && !now.goal_history_present)
+                    || before.clock_journal_id.is_some()
+                    || before.inventory_clock_journal_id.is_some()
+                {
+                    return Err(denied(
+                        "project recovery replaced an order or erased its retained goal history",
+                    ));
+                }
+            }
+            Ok(())
+        }
+        _ => Err(denied(
+            "project recovery cannot add or discard an original portfolio",
+        )),
+    }
+}
+
 fn original(current: Recovery, prior: &RecoveryInput, observation_tick_floor: u64) -> Result<()> {
+    same_portfolio(current, prior)?;
     same_digest(current.seal.plan_digest, &prior.plan_digest)?;
     same_digest(current.seal.object_digest, &prior.object_digest)?;
     same_digest(current.identity_digest, &prior.identity_digest)?;
     same_digest(current.anchor.state_hash, &prior.anchor.state_hash)?;
-    if prior.portfolio.is_some()
-        || current.portfolio.is_some()
-        || current.anchor.fortress_id.get().to_string() != prior.anchor.fortress_id
+    if current.anchor.fortress_id.get().to_string() != prior.anchor.fortress_id
         || current.anchor.cursor.epoch != prior.anchor.epoch
         || current.anchor.cursor.sequence != prior.anchor.sequence
         || current.anchor.tick.get() != prior.anchor.tick
@@ -788,8 +899,8 @@ impl Config {
             .project_binding
             .ok_or_else(|| denied("project publication requires its completed Workshop handoff"))?;
         if self.initialize
-            || intent.goal.deadline_tick != binding.deadline_tick
-            || intent.goal.deadline_tick > binding.authority_expires_tick
+            || intent.goal.deadline_tick() != binding.deadline_tick
+            || intent.goal.deadline_tick() > binding.authority_expires_tick
         {
             return Err(denied(
                 "project publication cannot initialize custody or change its original deadline",
@@ -880,6 +991,12 @@ impl Config {
             self.input_supply_checkpoint = None;
         }
         self.validate_project_recovery(&reference)?;
+        if pending {
+            intent.validate_pending_recovery(
+                self.recovery
+                    .ok_or_else(|| denied("project publication lost its exact original"))?,
+            )?;
+        }
         let expected = self
             .project_recovery
             .as_mut()

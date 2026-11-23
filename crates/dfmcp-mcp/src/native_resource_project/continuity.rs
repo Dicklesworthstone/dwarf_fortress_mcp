@@ -24,6 +24,7 @@ pub(super) fn tick(reference: &Value) -> u64 {
 /// Recovery may acquire a newer valid descendant, never another original.
 /// Source generations of different native families are deliberately not joined.
 pub(super) fn same_original(before: &Value, after: &Value) -> Result<()> {
+    same_portfolio(before, after)?;
     for path in [
         "/native_custody/workforce_journal_id",
         "/native_custody/order_journal_id",
@@ -143,6 +144,93 @@ pub(super) fn same_original(before: &Value, after: &Value) -> Result<()> {
                 "project child erased original dispatch or goal history",
             ));
         }
+    }
+    Ok(())
+}
+
+/// Portfolio history belongs to every original order, including inactive
+/// leaves. The scalar summary remains a view of the first order and cannot
+/// conceal lost history or introduce clocks that the project does not own.
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PortfolioSlot {
+    step_id: u32,
+    goal_history_present: bool,
+    clock_journal_id: Option<String>,
+    inventory_clock_journal_id: Option<String>,
+}
+
+fn portfolio_slots(reference: &Value) -> Result<Option<Vec<PortfolioSlot>>> {
+    let Some(raw) = reference
+        .pointer("/recovery/portfolio")
+        .filter(|value| !value.is_null())
+    else {
+        return Ok(None);
+    };
+    let conflict = || {
+        error(
+            ErrorCode::Conflict,
+            "project child changed its complete clockless original portfolio",
+        )
+    };
+    if raw
+        .as_array()
+        .is_none_or(|slots| slots.is_empty() || slots.len() > 4)
+    {
+        return Err(conflict());
+    }
+    let slots: Vec<PortfolioSlot> = serde_json::from_value(raw.clone()).map_err(|_| conflict())?;
+    let first = slots.first().ok_or_else(conflict)?;
+    if first.step_id > 1
+        || reference
+            .pointer("/recovery/goal_history_present")
+            .and_then(Value::as_bool)
+            != Some(first.goal_history_present)
+        || [
+            "/recovery/clock_journal_id",
+            "/recovery/inventory_clock_journal_id",
+            "/clock",
+            "/inventory_clock",
+        ]
+        .iter()
+        .any(|path| {
+            reference
+                .pointer(path)
+                .is_some_and(|value| !value.is_null())
+        })
+        || slots.iter().enumerate().any(|(index, slot)| {
+            slot.step_id != first.step_id + index as u32
+                || slot.clock_journal_id.is_some()
+                || slot.inventory_clock_journal_id.is_some()
+        })
+    {
+        return Err(conflict());
+    }
+    Ok(Some(slots))
+}
+
+fn same_portfolio(before: &Value, after: &Value) -> Result<()> {
+    let prior = portfolio_slots(before)?;
+    let current = portfolio_slots(after)?;
+    let valid = match (prior, current) {
+        (None, None) => true,
+        // The separately ACKed publication intent already owns the complete
+        // prospective vector before the child first publishes its original.
+        (None, Some(_)) => before.pointer("/recovery") == Some(&Value::Null),
+        (Some(prior), Some(current)) => {
+            prior.len() == current.len()
+                && prior.iter().zip(current).all(|(before, after)| {
+                    before.step_id == after.step_id
+                        && (!before.goal_history_present || after.goal_history_present)
+                })
+        }
+        (Some(_), None) => false,
+    };
+    if !valid {
+        return Err(error(
+            ErrorCode::Conflict,
+            "project child replaced an original order or erased its goal history",
+        ));
     }
     Ok(())
 }
@@ -284,6 +372,156 @@ mod tests {
             })? = Value::Null;
             assert!(same_original(&before, &changed).is_err(), "{path}");
         }
+        Ok(())
+    }
+
+    fn portfolio_reference(first: u32, count: usize) -> Value {
+        json!({
+            "native_custody": {"workforce_journal_id": "workforce", "order_journal_id": "orders"},
+            "observation_tick_floor": 150, "clock": null, "inventory_clock": null,
+            "recovery": {
+                "plan_digest": "complete original", "object_digest": "complete archive",
+                "frontier": {"journal_id": "execution", "head": "acknowledged", "authority_tick_floor": 150},
+                "goal_history_present": false, "clock_journal_id": null, "inventory_clock_journal_id": null,
+                "portfolio": (0..count).map(|index| json!({
+                    "step_id": first + index as u32, "goal_history_present": false,
+                    "clock_journal_id": null, "inventory_clock_journal_id": null,
+                })).collect::<Vec<_>>(),
+            }
+        })
+    }
+
+    #[test]
+    fn portfolio_publication_keeps_all_order_slots_and_accepts_monotone_history() -> Result<()> {
+        for first in [0, 1] {
+            for count in 1..=4 {
+                let planned = portfolio_reference(first, count);
+                let mut preplan = planned.clone();
+                preplan["recovery"] = Value::Null;
+                same_original(&preplan, &planned)?;
+                let mut prior = planned;
+                for index in (0..count).rev() {
+                    let mut after = prior.clone();
+                    after["recovery"]["portfolio"][index]["goal_history_present"] = json!(true);
+                    if index == 0 {
+                        after["recovery"]["goal_history_present"] = json!(true);
+                    }
+                    after["recovery"]["frontier"]["head"] = json!("verified descendant");
+                    same_original(&prior, &after)?;
+                    assert!(
+                        same_original(&after, &prior).is_err(),
+                        "{first}/{count}/{index}"
+                    );
+                    prior = after;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn portfolio_replay_cannot_drop_reorder_replace_or_reinterpret_original_orders() {
+        let before = portfolio_reference(0, 4);
+        let edits: [fn(&mut Value); 8] = [
+            |v| v["recovery"] = Value::Null,
+            |v| v["recovery"]["portfolio"] = Value::Null,
+            |v| v["recovery"]["portfolio"] = json!([]),
+            |v| v["recovery"]["portfolio"] = json!([v["recovery"]["portfolio"][0].clone()]),
+            |v| v["recovery"]["portfolio"][0]["step_id"] = json!(1),
+            |v| v["recovery"]["portfolio"][1]["step_id"] = json!(0),
+            |v| v["recovery"]["portfolio"][2]["step_id"] = json!(3),
+            |v| v["recovery"]["portfolio"][3]["unknown"] = json!(true),
+        ];
+        for (index, edit) in edits.into_iter().enumerate() {
+            let mut after = before.clone();
+            edit(&mut after);
+            assert!(same_original(&before, &after).is_err(), "{index}");
+        }
+        let mut longer = before.clone();
+        longer["recovery"]["portfolio"] = json!([
+            {"step_id":0,"goal_history_present":false},
+            {"step_id":1,"goal_history_present":false},
+            {"step_id":2,"goal_history_present":false},
+            {"step_id":3,"goal_history_present":false},
+            {"step_id":4,"goal_history_present":false}
+        ]);
+        assert!(same_original(&before, &longer).is_err());
+        let mut scalar = before.clone();
+        scalar["recovery"]["portfolio"] = Value::Null;
+        assert!(same_original(&scalar, &before).is_err());
+        assert!(same_original(&before, &scalar).is_err());
+    }
+
+    #[test]
+    fn inactive_portfolio_history_and_first_order_summary_cannot_diverge() -> Result<()> {
+        let mut before = portfolio_reference(1, 4);
+        before["recovery"]["portfolio"][3]["goal_history_present"] = json!(true);
+        same_original(&before, &before)?;
+        let mut forgotten = before.clone();
+        forgotten["recovery"]["portfolio"][3]["goal_history_present"] = json!(false);
+        assert!(same_original(&before, &forgotten).is_err());
+        for path in [
+            "/recovery/goal_history_present",
+            "/recovery/portfolio/0/goal_history_present",
+        ] {
+            let mut mismatch = before.clone();
+            *mismatch.pointer_mut(path).ok_or_else(|| {
+                error(
+                    ErrorCode::InternalInvariantViolation,
+                    "test portfolio summary absent",
+                )
+            })? = json!(true);
+            assert!(same_original(&before, &mismatch).is_err(), "{path}");
+        }
+        let mut missing = before.clone();
+        missing["recovery"]["portfolio"][2]["goal_history_present"] = Value::Null;
+        assert!(same_original(&before, &missing).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn portfolio_parent_replay_refuses_selected_or_inactive_clock_custody() {
+        let before = portfolio_reference(0, 4);
+        for path in [
+            "/recovery/clock_journal_id",
+            "/recovery/inventory_clock_journal_id",
+            "/clock",
+            "/inventory_clock",
+        ] {
+            let mut after = before.clone();
+            if let Some(value) = after.pointer_mut(path) {
+                *value = json!("unacknowledged clock");
+            }
+            assert!(same_original(&before, &after).is_err(), "{path}");
+        }
+        for index in 0..4 {
+            for field in ["clock_journal_id", "inventory_clock_journal_id"] {
+                let mut after = before.clone();
+                after["recovery"]["portfolio"][index][field] = json!("unacknowledged clock");
+                assert!(same_original(&before, &after).is_err(), "{index}/{field}");
+            }
+        }
+    }
+
+    #[test]
+    fn scalar_child_clock_continuity_remains_compatible() -> Result<()> {
+        let before = json!({
+            "recovery": {
+                "plan_digest":"scalar","goal_history_present":true,
+                "clock_journal_id":"original-clock",
+            },
+            "clock": {
+                "journal_id":"original-clock","head":"ack",
+                "authority_tick_floor":150,"high_source_sequence":9
+            }
+        });
+        let mut after = before.clone();
+        after["clock"]["head"] = json!("descendant");
+        after["clock"]["authority_tick_floor"] = json!(151);
+        after["clock"]["high_source_sequence"] = json!(10);
+        same_original(&before, &after)?;
+        after["clock"]["high_source_sequence"] = json!(8);
+        assert!(same_original(&before, &after).is_err());
         Ok(())
     }
 }

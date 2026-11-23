@@ -8,7 +8,8 @@
   "configuration": "DFMCP_NATIVE_RESOURCE_PROJECT_CONFIG",
   "work_items": [
     "df-dfhack-bridge-plane-c-pic.4",
-    "dfmcp-reality-wiring-proof-4bf.14"
+    "dfmcp-reality-wiring-proof-4bf.14",
+    "df-native-stock-target-3m9"
   ],
   "public_tools": [
     "fortress_open_session",
@@ -61,7 +62,30 @@
       "assign_labor"
     ],
     "worker_selection": "published production observation after workshop handoff",
-    "deadline_renewal": false
+    "deadline_renewal": false,
+    "forms": [
+      "scalar",
+      "portfolio"
+    ],
+    "portfolio_fields": [
+      "targets",
+      "deadline_tick",
+      "poll_interval_ticks",
+      "stable_samples",
+      "assign_labor"
+    ],
+    "target_fields": [
+      "recipe",
+      "minimum_stack_units",
+      "max_order_amount"
+    ],
+    "portfolio_minimum_targets": 1,
+    "portfolio_maximum_targets": 4,
+    "fresh_input_canonicalization": "sort distinct targets by recipe before fixing original",
+    "retained_target_order_immutable": true,
+    "initially_met_targets_retained": true,
+    "complete_cohort_required": true,
+    "scalar_serialized_bytes_preserved": true
   },
   "handoff": {
     "schema": "dfmcp.workshop-project-handoff/1",
@@ -123,7 +147,11 @@
     "legacy_journal_canonical_encoding_preserved": true,
     "unrecorded_original_adoption": false,
     "partial_publication_repaired": false,
-    "native_preparation_restored": false
+    "native_preparation_restored": false,
+    "portfolio_order_slots_fixed_before_child_write": true,
+    "pending_adoption_rejects_history_in_any_slot": true,
+    "portfolio_leaf_history_monotone": true,
+    "portfolio_clock_custody_supported": false
   },
   "bounds": {
     "max_wall_millis": 60000,
@@ -149,7 +177,11 @@
     "ledger_frame_bytes": 278528,
     "manager_actions": 1,
     "manager_handoff_bytes": 16384,
-    "parent_configuration_bytes": 131072
+    "parent_configuration_bytes": 131072,
+    "portfolio_targets": 4,
+    "portfolio_order_slots": 4,
+    "stock_targets_request_bytes": 8192,
+    "other_plan_request_bytes": 4096
   },
   "output": {
     "agent_turn_schema": "dfmcp.agent_turn/1",
@@ -187,7 +219,9 @@
     "generic_mixed_family_plan",
     "world_checkpoint_restore",
     "adoption_of_production_original_without_acknowledged_prior_intent",
-    "production_admission"
+    "production_admission",
+    "portfolio_production_clock",
+    "portfolio_inventory_clock"
   ],
   "production_admitted": false,
   "bridge_methods_added": false,
@@ -265,7 +299,16 @@
     "crates/dfmcp-mcp/src/live_production_runtime/project_manager_config.rs",
     "crates/dfmcp-mcp/src/workshop_construction_server/material_selection.rs",
     "tests/stdio/resource_project_manager_runtime_peer.py",
-    "docs/MANAGER_APPOINTMENT_V1_23.md"
+    "docs/MANAGER_APPOINTMENT_V1_23.md",
+    "crates/dfmcp-mcp/src/live_production_runtime/project_goal.rs",
+    "crates/dfmcp-mcp/src/live_production_runtime/project_goal_tests.rs",
+    "crates/dfmcp-mcp/src/live_production_runtime/stock_targets.rs",
+    "crates/dfmcp-mcp/src/live_production_runtime/stock_targets_request.rs",
+    "crates/dfmcp-mcp/src/live_production_runtime/stock_targets_binding.rs",
+    "crates/dfmcp-mcp/src/live_production_runtime/stock_targets_watch.rs",
+    "crates/dfmcp-mcp/src/native_resource_project/portfolio_runtime_tests.rs",
+    "crates/dfmcp-mcp/src/native_resource_project/portfolio_presentation_tests.rs",
+    "crates/dfmcp-mcp/src/semantic_work_order_runtime/native.rs"
   ],
   "qualification": {
     "pre_outage_ledger_component_cases_passed": 17,
@@ -345,7 +388,11 @@
     "process_local_history": true,
     "recovery_restores_proof": false,
     "cancelled_or_failed_publication_proof": false,
-    "execution_qualification": "source_review_and_rustfmt_parse_only; Rust typecheck and execution unverified"
+    "execution_qualification": "source_review_and_rustfmt_parse_only; Rust typecheck and execution unverified",
+    "portfolio_schema": "dfmcp.stock-targets-watch/1",
+    "all_original_targets_bound": true,
+    "joint_current_sample_required": true,
+    "initial_met_target_is_optional": false
   },
   "parent_tick_floor_validation": {
     "new_regressions": 5,
@@ -389,5 +436,27 @@
     "modern_stdio_qualified": false,
     "live_dfhack_qualified": false,
     "execution_status": "integrated compilation and focused tests pending; historical qualification receipts do not cover this increment"
+  },
+  "portfolio_validation": {
+    "source_reviewed": true,
+    "new_test_groups_authored": 27,
+    "selected_component_typecheck_completed": true,
+    "selected_component_cases_passed": 162,
+    "selected_component_source_hashes_match": true,
+    "parent_presentation_tests_executed": false,
+    "full_parent_runtime_executed": false,
+    "compiler": "rustc 1.102.0-nightly (137d1d494 2026-11-22)",
+    "scope": "complete actual semantic library graph and workforce/order owners; goal/compiler, recovery, continuity, parent request/clock policy and native custody tests",
+    "excludes": [
+      "full_resource_project_runtime_orchestration",
+      "full_combined_production_runtime_orchestration",
+      "MCP_transport",
+      "Asupersync_scheduling"
+    ],
+    "workspace_formatting_unchanged_files_with_drift": 117,
+    "integrated_rust_qualified": false,
+    "modern_stdio_qualified": false,
+    "live_dfhack_qualified": false,
+    "historical_receipts_cover_this_increment": false
   }
 }

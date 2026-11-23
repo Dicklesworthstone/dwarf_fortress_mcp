@@ -123,34 +123,92 @@ fn observed_plan(result: &Value) -> Option<Value> {
         let units = option[candidates]
             .as_array()
             .filter(|ids| !ids.is_empty() && ids.len() <= 32 && ids.iter().all(Value::is_string))?;
-        return Some(json!({
-            "kind":"stock_target","expected_observation":observation["seal"].as_str()?,
-            "units":units,"labor":"CARPENTER","recipe":goal["recipe"],
-            "minimum_stack_units":goal["minimum_stack_units"],
-            "max_order_amount":goal["max_order_amount"],"deadline_tick":goal["deadline_tick"],
+        let mut request = json!({
+            "expected_observation":observation["seal"].as_str()?,
+            "units":units,"labor":"CARPENTER","deadline_tick":goal["deadline_tick"],
             "poll_interval_ticks":goal["poll_interval_ticks"],"stable_samples":goal["stable_samples"],
             "assign_labor":assigning,
-        }));
+        });
+        if let Some(targets) = goal.get("targets") {
+            let rows = targets.as_array()?;
+            if rows.is_empty() || rows.len() > 4 {
+                return None;
+            }
+            request["kind"] = json!("stock_targets");
+            request["targets"] = targets.clone();
+        } else {
+            request["kind"] = json!("stock_target");
+            request["recipe"] = goal["recipe"].clone();
+            request["minimum_stack_units"] = goal["minimum_stack_units"].clone();
+            request["max_order_amount"] = goal["max_order_amount"].clone();
+        }
+        return Some(request);
     }
     None
 }
 
-/// The project and child must name the same original minimum and current
-/// sample. A retained stage checkpoint never supplies temporal evidence.
-fn no_work_stock_goal(result: &Value, reference: &Value) -> Value {
-    let child = &result["child"];
-    let raw = &child["no_work_stock_goal"];
-    let parent = &result["current_stock_goal"];
-    let original = &result["original"]["goal"];
-    let matches_original = [
-        ("recipe", "recipe"),
-        ("target_stack_units", "minimum_stack_units"),
+/// The stock watch must retain every root minimum, including original rows
+/// that needed no order. The assessment independently binds each amount limit
+/// and the fixed labor mode; the watch binds the shared original timing.
+fn no_work_matches_root(raw: &Value, child: &Value, original: &Value) -> bool {
+    let timing = [
         ("deadline_tick", "deadline_tick"),
         ("poll_interval_ticks", "poll_interval_ticks"),
         ("stable_samples_required", "stable_samples"),
     ]
     .into_iter()
     .all(|(watch, goal)| !raw[watch].is_null() && raw[watch] == original[goal]);
+    if !timing {
+        return false;
+    }
+    if let Some(requested) = original.get("targets") {
+        let Some(requested) = requested.as_array() else {
+            return false;
+        };
+        let Some(watched) = raw["targets"].as_array() else {
+            return false;
+        };
+        let assessment = &child["stock_targets"];
+        let Some(assessed) = assessment["targets"].as_array() else {
+            return false;
+        };
+        raw["schema"] == "dfmcp.stock-targets-watch/1"
+            && (1..=4).contains(&requested.len())
+            && watched.len() == requested.len()
+            && assessed.len() == requested.len()
+            && original["assign_labor"].is_boolean()
+            && assessment["labor_assignment_requested"] == original["assign_labor"]
+            && requested
+                .iter()
+                .zip(watched)
+                .zip(assessed)
+                .all(|((goal, watch), assessed)| {
+                    goal["recipe"].is_string()
+                        && goal["minimum_stack_units"].is_u64()
+                        && goal["max_order_amount"].is_u64()
+                        && watch["recipe"] == goal["recipe"]
+                        && watch["target_stack_units"] == goal["minimum_stack_units"]
+                        && assessed["recipe"] == goal["recipe"]
+                        && assessed["target_stack_units"] == goal["minimum_stack_units"]
+                        && assessed["max_order_amount"] == goal["max_order_amount"]
+                        && assessed["labor_assignment_requested"] == original["assign_labor"]
+                })
+    } else {
+        !raw["recipe"].is_null()
+            && raw["recipe"] == original["recipe"]
+            && !raw["target_stack_units"].is_null()
+            && raw["target_stack_units"] == original["minimum_stack_units"]
+    }
+}
+
+/// The project and child must name the same original minima and current
+/// sample. A retained stage checkpoint never supplies temporal evidence.
+fn no_work_stock_goal(result: &Value, reference: &Value) -> Value {
+    let child = &result["child"];
+    let raw = &child["no_work_stock_goal"];
+    let parent = &result["current_stock_goal"];
+    let original = &result["original"]["goal"];
+    let matches_original = no_work_matches_root(raw, child, original);
     let proven = raw["original_goal_proven"] == true;
     let current = result["ok"] == true
         && result["stage"] == "production"
@@ -261,7 +319,7 @@ fn next_step(
             arguments["scope"] = json!("goal");
             (
                 "fortress_wait",
-                "Take one fresh inventory sample for the original no-work target. Later game ticks at its fixed cadence are required; wait does not create an order or advance time.",
+                "Take one fresh inventory sample for every original no-work minimum together. Later game ticks at the fixed cadence are required; wait does not create an order or advance time.",
             )
         }
     } else if result["original_goal_proven"] == true
@@ -554,12 +612,16 @@ pub(super) fn packet(
     })).into_iter().collect::<Vec<_>>();
     let mut uncertainty = vec![
         json!({"uncertainty_id":"native_project_scope","epistemic_state":"unknown",
-            "statement":"This explicitly unadmitted development owner can retain an optional original Manager appointment, an optional original Tree designation and supply handoff, original Workshop construction and one fixed furniture stock target. Each native effect and clock interval has its own review."}),
+            "statement":"This explicitly unadmitted development owner can retain an optional original Manager appointment, an optional original Tree designation and supply handoff, original Workshop construction and one fixed furniture stock goal or bounded portfolio. Every original minimum remains required; each native effect and configured clock interval has its own review."}),
         json!({"uncertainty_id":"receipt_and_goal","epistemic_state":"unknown",
             "statement":"Placement, order insertion and clock receipts are historical custody. Production with an order requires its current labor and stock monitor. An originally satisfied no-work target instead requires fresh qualified inventory samples at its fixed cadence and deadline; its planning census contributes no stability. Neither path proves causal output attribution."}),
         json!({"uncertainty_id":"stop_and_recovery","epistemic_state":"indeterminate",
             "statement":"A project stop prevents new stages and new reviews. It does not remove an appointed Manager, undo construction, cancel an already inserted order or prove a clock paused. Preserve all recovery references; independently reconcile or cancel the active clock. Opening markers never grant replayed initialization."}),
     ];
+    if goal["goal"]["targets"].is_array() {
+        uncertainty.push(json!({"uncertainty_id":"portfolio_time_control","epistemic_state":"observed",
+            "statement":"This fixed stock portfolio has no production or inventory clock. Foreground goal samples require separately managed game time and jointly preserve every original minimum, cadence and deadline. Optional Tree and Workshop prefix clocks keep their independent authority."}));
+    }
     if manager_visible {
         uncertainty.push(json!({"uncertainty_id":"manager_appointment_and_readiness","epistemic_state":"unknown",
             "statement":"A verified original Manager/1.23 receipt covers its historical assignment, HF link, history event and responsibility-cache transaction. A retained handoff cannot establish current Manager readiness, office sufficiency, recipe feasibility or final stock. Production independently reopens and freshly qualifies the exact donor. Native Manager projection anchors are not canonical world anchors; capsule commitments name retained raw bytes, not inline evidence chunks."}));
@@ -828,6 +890,10 @@ pub(super) fn render(packet: Value) -> Option<CompleteResult<FinalCallToolResult
     let result = complete(texts(packet)?, is_error);
     fits(&result).then_some(result)
 }
+
+#[cfg(test)]
+#[path = "portfolio_presentation_tests.rs"]
+mod portfolio_tests;
 
 #[cfg(test)]
 mod tests {

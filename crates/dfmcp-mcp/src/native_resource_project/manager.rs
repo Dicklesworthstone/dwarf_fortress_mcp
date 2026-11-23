@@ -22,7 +22,7 @@ impl Runtime {
                 .as_ref()
                 .ok_or_else(|| denied("project lost its original Manager checkpoint"))?,
         )?;
-        if handoff.project_deadline_tick() != self.config.goal.deadline_tick
+        if handoff.project_deadline_tick() != self.config.goal.deadline_tick()
             || self
                 .config
                 .manager_handoff
