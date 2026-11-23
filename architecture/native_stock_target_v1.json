@@ -57,6 +57,8 @@
     "crates/dfmcp-adapter/src/semantic_work_orders/inventory_baseline.rs",
     "crates/dfmcp-adapter/src/semantic_work_orders/stock_target.rs",
     "crates/dfmcp-adapter/src/semantic_work_orders/stock_target_tests.rs",
+    "crates/dfmcp-adapter/src/semantic_work_orders/stock_target_watch.rs",
+    "crates/dfmcp-adapter/src/semantic_work_orders/stock_target_watch_tests.rs",
     "docs/NATIVE_STOCK_TARGET.md"
   ],
   "mcp_consumer": {
@@ -232,5 +234,25 @@
     },
     "runtime_peer_existing_worker_cases": 11,
     "runtime_peer_assignment_cases": 14
+  },
+  "no_work_watch": {
+    "owner_bead": "df-native-stock-target-3m9",
+    "adapter_type": "StockTargetWatch",
+    "progress_type": "StockTargetWatchProgress",
+    "mode": "read_only_foreground_process_local",
+    "original_must_be_satisfied": true,
+    "planning_census_stability_samples": 0,
+    "fixed_deadline": true,
+    "fixed_cadence": true,
+    "distinct_advancing_ticks_required": true,
+    "unknown_is_zero": false,
+    "missed_deadline_can_be_renewed": false,
+    "source_regression_fences": true,
+    "decoded_rejection_floors_retained": true,
+    "historical_achievement_is_current_truth": false,
+    "restored_current_proof": false,
+    "new_order_or_labor_effect": false,
+    "clock_authority": false,
+    "source_status": "implemented; fourteen regression tests authored; execution unverified"
   }
 }

@@ -1,5 +1,24 @@
 # Implementation Status
 
+## Unreleased — Observe already-satisfied stock targets without creating work
+
+A reusable `StockTargetWatch` now monitors a qualified zero-deficit stock
+assessment against fresh, independently accepted complete Item censuses.
+The original target, deadline and cadence remain fixed. Planning and repeated
+same-tick reads cannot manufacture stability; incomplete evidence remains
+Unknown. Failed samples, contradictions and gaps interrupt unfinished streaks,
+while source regressions fence the owner. Current truth and timely historical
+achievement remain separate and source-bound.
+
+Fourteen focused regressions are authored. Independent source review and exact
+GitHub blob readback completed; Rust compilation, execution and formatting did
+not complete because the execution service disconnected. The official current
+nightly compiler was installed, but no completed Rust check is claimed.
+This is a pure adapter increment with no native effect, new public tool or
+production admission. Runtime integration follows separately. Owner:
+`df-native-stock-target-3m9`.
+
+
 ## Unreleased — Own Tree harvesting, Workshop construction and stock production
 
 The existing `native-resource-project` profile now accepts `harvest_tree: true`

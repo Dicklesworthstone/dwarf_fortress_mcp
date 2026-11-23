@@ -110,6 +110,39 @@ authorized clocks retain their normal boundaries. Assignment is not a stability
 sample: the complete-parent tracker reads timing only from the original positive
 order obligations, and clock requests use the actual order StepIds.
 
+## Read-only monitoring when no order is needed
+
+The reusable `StockTargetWatch` adapter accepts only an independently qualified
+already-satisfied `StockTargetAssessment`. It fixes the original target,
+source lineage, absolute deadline, cadence and required sample count. It
+creates no order, labor assignment, preparation, clock run or effect journal.
+
+The planning census is historical sizing evidence and contributes zero
+stability samples. Later `InventoryBaselineProjection` captures require fresh
+independent Item-domain and field policy. Complete empty stock is zero; partial
+or unqualified stock remains Unknown. Changed stock is evaluated as a minimum,
+without applying order-size limits or rejecting unrelated production jobs.
+
+The first eligible sample is at least one original cadence after the initial
+census. Repeated ticks and exact replays cannot increase stability. False,
+Unknown, acquisition/publication failure and cursor gaps interrupt an
+unfinished streak. A missed absolute deadline cannot be renewed. Source
+generation, fortress/restore identity, cursor, tick or allocation regression
+fences the owner. Decoded rejection floors survive later policy refusal.
+
+Each result separates current truth from the first timely achievement, names
+its complete anchor and source digest, and carries a deterministic witness.
+Historical achievement cannot make a later false or missing current count
+true. This monitor is process-local: reopening restores neither an unfinished
+streak nor current proof. It provides no recurring maintenance, material or
+usability guarantee, and no causal attribution to production.
+
+The adapter and fourteen focused regression tests are present in source.
+Execution of this increment remains unverified because the editing host's
+execution service disconnected before Rust validation completed. MCP consumer
+integration is recorded separately; this reusable type alone adds no runtime
+admission or public tool.
+
 ## Evidence boundary
 
 The assessment itself observes no source, persists no effect, inserts no order
