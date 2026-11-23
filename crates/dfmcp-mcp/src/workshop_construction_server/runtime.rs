@@ -812,6 +812,12 @@ impl Runtime {
                 std::time::Duration::from_millis(c.budget.max_wall_millis),
             )?;
             config.capture(&observed)?;
+            if observed.tick() < c.anchor.tick.get() {
+                return Err(error(
+                    ErrorCode::StaleAnchor,
+                    "workshop initialization predates the consumed parent authority floor",
+                ));
+            }
             work.advance_authorization_tick(observed.tick());
             if let Some(donor) = &mut tree_material {
                 donor.check_capture_clock(&observed)?;

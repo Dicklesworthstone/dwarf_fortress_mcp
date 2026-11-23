@@ -91,7 +91,12 @@
     "unacknowledged_opening_adopts_original_or_clock_history": false,
     "tree_original_deadline_checked_before_parent_ack": true,
     "parent_rejection_tick_seeded_into_tree_before_fresh_read": true,
-    "project_child_and_clock_initialization_must_agree": true
+    "project_child_and_clock_initialization_must_agree": true,
+    "parent_rejection_tick_seeded_before_tree_and_workshop_initialization": true,
+    "stale_initial_capture_rejected_before_child_custody": true,
+    "parent_rejection_tick_retained_before_each_child_operation": true,
+    "higher_parent_tick_withdraws_stale_offers_and_preparations": true,
+    "native_capture_tick_and_witness_preserved": true
   },
   "production_publication": {
     "intent_schema": "dfmcp.project-production-intent/1",
@@ -313,5 +318,12 @@
     "recovery_restores_proof": false,
     "cancelled_or_failed_publication_proof": false,
     "execution_qualification": "source_review_and_rustfmt_parse_only; Rust typecheck and execution unverified"
+  },
+  "parent_tick_floor_validation": {
+    "new_regressions": 5,
+    "source_reviewed": true,
+    "rust_typecheck_completed": false,
+    "rust_tests_executed": false,
+    "execution_blocker": "dependency build exhausted disk; execution environment became unavailable during relocated retry"
   }
 }

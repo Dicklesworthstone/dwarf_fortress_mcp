@@ -27,7 +27,12 @@ impl Runtime {
             donor.check_capture_clock(&capture)?;
             donor.verify(work)?;
         }
-        if capture.tick() < self.anchor.map_or(0, |a| a.tick.get()) {
+        if capture.tick()
+            < self
+                .anchor
+                .map_or(0, |a| a.tick.get())
+                .max(work.context.anchor.tick.get())
+        {
             return Err(error(
                 ErrorCode::StaleAnchor,
                 "workshop observation clock regressed",
@@ -63,7 +68,12 @@ impl Runtime {
             work.advance_authorization_tick(self.authority_tick);
             donor.qualify(handle, &capture, work)?;
             donor.verify(work)?;
-            if capture.tick() < self.anchor.map_or(0, |anchor| anchor.tick.get()) {
+            if capture.tick()
+                < self
+                    .anchor
+                    .map_or(0, |anchor| anchor.tick.get())
+                    .max(work.context.anchor.tick.get())
+            {
                 return Err(error(ErrorCode::StaleAnchor, "workshop observation clock regressed"));
             }
             self.guard.selection = Some(selection);

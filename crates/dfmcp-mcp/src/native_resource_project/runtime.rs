@@ -461,8 +461,13 @@ impl Runtime {
                     config.validate_project_recovery(reference)?;
                 }
                 let budget = self.workshop_budget(work, journal::WORK_BYTES)?;
-                let child =
-                    WorkshopRuntime::open(config, workshop_mode(self.mode), self.session, budget)?;
+                let child = WorkshopRuntime::open_for_resource_project(
+                    config,
+                    workshop_mode(self.mode),
+                    self.session,
+                    budget,
+                    self.high_tick,
+                )?;
                 self.child = Some(Child::Workshop(Box::new(child)));
                 if prior.is_none()
                     && let Some(Child::Workshop(child)) = &self.child
@@ -674,6 +679,7 @@ impl Runtime {
             let Some(Child::Workshop(child)) = &mut self.child else {
                 return Err(denied("original Workshop owner is unavailable"));
             };
+            child.retain_project_authority_tick(self.high_tick)?;
             let handoff = child.project_handoff(budget)?;
             // Handoff consumed a fresh native sample. Retain its floors before
             // freezing Workshop custody in the next durable stage.
@@ -785,6 +791,7 @@ impl Runtime {
         let offline = self.mode == Mode::Offline;
         match self.child.as_mut() {
             Some(Child::Tree(child)) => {
+                child.retain_project_authority_tick(self.high_tick)?;
                 budget.max_actions = 1;
                 budget.max_entities = budget.max_entities.min(4096);
                 if !self
@@ -798,6 +805,7 @@ impl Runtime {
                 child.perform_project(tree::action(action, offline)?, budget)
             }
             Some(Child::Workshop(child)) => {
+                child.retain_project_authority_tick(self.high_tick)?;
                 budget.max_actions = 1;
                 if !self.workshop_config.project_clock_configured() {
                     budget.max_game_ticks = 0;

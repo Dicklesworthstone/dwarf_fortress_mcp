@@ -203,6 +203,44 @@ fn narrow(ceiling: WorkBudget, remaining: WorkBudget, start: Instant) -> Result<
 }
 
 impl Runtime {
+    pub(crate) fn open_for_resource_project(
+        config: Config,
+        mode: Mode,
+        session: SessionId,
+        budget: WorkBudget,
+        start: Instant,
+        parent_tick_floor: u64,
+    ) -> Result<(Self, Value)> {
+        if config.parent_check.is_none()
+            || config.project_deadline.is_none()
+            || parent_tick_floor > MAX_NATIVE_TICK
+        {
+            return Err(denied(
+                "invalid resource project Tree owner or authority floor",
+            ));
+        }
+        Self::open_at_floor(config, mode, session, budget, start, parent_tick_floor)
+    }
+
+    /// Carry a consumed parent clock into the child's rejection state without
+    /// changing the native capture or reviving an old preparation connection.
+    /// This only narrows authority and performs no I/O.
+    pub(crate) fn retain_project_authority_tick(&mut self, parent_tick_floor: u64) -> Result<()> {
+        self.validate_project_original_policy()?;
+        if parent_tick_floor > MAX_NATIVE_TICK {
+            return Err(invalid("invalid resource project Tree authority floor"));
+        }
+        let current = self
+            .high_tick
+            .max(self.journal.high_tick)
+            .max(self.clock.as_ref().map_or(0, clock::Owner::high_tick));
+        self.high_tick = current.max(parent_tick_floor);
+        if parent_tick_floor > current {
+            self.withdraw();
+        }
+        Ok(())
+    }
+
     pub(crate) fn project_has_original_history(&self) -> bool {
         self.journal.pin().frames != 0
             || self

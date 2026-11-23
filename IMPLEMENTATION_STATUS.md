@@ -1,5 +1,25 @@
 # Implementation Status
 
+## Unreleased — Preserve parent game-tick authority across child startup
+
+The native resource-project parent now passes its consumed game-tick floor into
+Tree and Workshop initialization, later child calls and handoff exports. An
+initial native capture older than that floor is rejected before child custody
+is created. Higher retained floors withdraw stale offers and preparations while
+preserving the actual observation's tick and witness and every original journal
+and independent acknowledgement. Fixed deadlines and authority expiry cannot be
+reset by opening the next child.
+
+Five focused regressions cover retained originals and custody, monotonic floors,
+withdrawn offers, native observation identity, expired authority, and rejection
+of unbound or out-of-range initialization before I/O. These new tests have been
+source-reviewed but have not executed. The integrated dependency build first
+stopped on disk exhaustion; the execution environment became unavailable during
+the relocated retry, before a completed Rust typecheck or test result. This
+change does not claim integrated, stdio or live-game qualification. Owning work
+`dfmcp-reality-wiring-proof-4bf.14` and `df-dfhack-bridge-plane-c-pic.4`
+remains in progress.
+
 ## Unreleased — Complete already-satisfied stock goals through MCP
 
 The existing single-target combined runtime now retains a process-local

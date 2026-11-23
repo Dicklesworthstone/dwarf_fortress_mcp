@@ -482,3 +482,131 @@ fn project_tree_budget_narrows_every_allowance_without_renewal() -> Result<()> {
     assert_eq!(narrowed.max_game_ticks, 0);
     Ok(())
 }
+
+#[test]
+fn parent_authority_floor_withdraws_tree_offer_and_rejects_older_native_capture() -> Result<()> {
+    let (mut runtime, directory, _context, _) = fixture_with_original(false)?;
+    let capture = runtime
+        .observation
+        .clone()
+        .ok_or_else(|| invalid("fixture observation"))?;
+    let files = ["tree-harvest.journal", "tree-harvest.ack"];
+    let before = files
+        .iter()
+        .map(|name| std::fs::read(directory.0.join(name)))
+        .collect::<std::io::Result<Vec<_>>>()
+        .map_err(|_| invalid("read original custody"))?;
+    runtime.retain_project_authority_tick(capture.tick)?;
+    assert_eq!(
+        runtime.observation.as_ref().map(Capture::witness),
+        Some(capture.witness())
+    );
+    let parent_tick = capture.tick + 100;
+    runtime.retain_project_authority_tick(parent_tick)?;
+    assert!(runtime.observation.is_none());
+    assert!(runtime.source.is_none());
+    assert!(!runtime.journal.dispatchable());
+    assert_eq!(runtime.high_tick, parent_tick);
+    assert_eq!(
+        runtime.project_recovery_reference()["project_source_frontier"]["high_tick"],
+        parent_tick
+    );
+    assert!(runtime.project_recovery_reference()["original"].is_null());
+    runtime.retain_project_authority_tick(capture.tick)?;
+    assert_eq!(runtime.high_tick, parent_tick);
+    assert!(runtime.consume(&capture).is_err());
+    assert!(runtime.project.fenced);
+    assert_eq!(runtime.high_tick, parent_tick);
+    assert_eq!(Capture::decode(capture.bytes())?.tick, capture.tick);
+    assert!(
+        runtime
+            .retain_project_authority_tick(MAX_NATIVE_TICK + 1)
+            .is_err()
+    );
+    assert_eq!(runtime.high_tick, parent_tick);
+    for (name, expected) in files.into_iter().zip(before) {
+        assert_eq!(
+            std::fs::read(directory.0.join(name))
+                .map_err(|_| invalid("read retained custody"))?,
+            expected
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn parent_authority_floor_preserves_tree_original_and_cannot_renew_expired_designation()
+-> Result<()> {
+    let (mut runtime, _directory, _context, _) = fixture()?;
+    let before = runtime.project_recovery_reference();
+    let parent_tick = runtime
+        .config
+        .project_deadline
+        .ok_or_else(|| invalid("deadline"))?
+        + 1;
+    runtime.retain_project_authority_tick(parent_tick)?;
+    let after = runtime.project_recovery_reference();
+    assert_eq!(after["original"], before["original"]);
+    assert_eq!(after["acknowledged"], before["acknowledged"]);
+    assert_eq!(after["project_source_frontier"]["high_tick"], parent_tick);
+    let authority = context(
+        &runtime.config,
+        runtime.mode,
+        runtime.session,
+        runtime.budget,
+        9,
+        runtime.high_tick,
+        Digest32::ZERO,
+    );
+    assert!(
+        authority
+            .authorize(
+                Capability::Designate,
+                RiskTier::Irreversible,
+                &[],
+                Some(runtime.config.scope),
+            )
+            .is_err()
+    );
+    assert!(
+        authority
+            .authorize(
+                Capability::Query,
+                RiskTier::ReadOnly,
+                &[],
+                Some(runtime.config.scope),
+            )
+            .is_ok()
+    );
+    runtime.config.parent_check = None;
+    assert!(
+        runtime
+            .retain_project_authority_tick(parent_tick + 1)
+            .is_err()
+    );
+    assert_eq!(runtime.high_tick, parent_tick);
+    Ok(())
+}
+
+#[test]
+fn resource_tree_open_rejects_unbound_policy_or_invalid_floor_before_io() -> Result<()> {
+    let capture = Capture::decode(&vector("capture")?)?;
+    let policy = configured(&capture, Path::new("/tmp/tree-project-floor-not-opened"));
+    let bound = project_config(policy.clone(), capture.tick + 12000)?;
+    let standalone = Config::parse(&policy.to_string())?;
+    for (config, floor) in [(standalone, capture.tick), (bound, MAX_NATIVE_TICK + 1)] {
+        let result = Runtime::open_for_resource_project(
+            config,
+            Mode::Control,
+            SessionId::new(71),
+            WorkBudget::CONSERVATIVE_DEFAULT,
+            Instant::now(),
+            floor,
+        );
+        assert_eq!(
+            result.err().map(|error| error.code),
+            Some(ErrorCode::CapabilityDenied)
+        );
+    }
+    Ok(())
+}

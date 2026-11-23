@@ -496,7 +496,25 @@ impl Runtime {
         budget: WorkBudget,
         start: Instant,
     ) -> Result<(Self, Value)> {
-        let initial = context(&config, mode, session, budget, 1, 0, Digest32::ZERO);
+        Self::open_at_floor(config, mode, session, budget, start, 0)
+    }
+    fn open_at_floor(
+        config: Config,
+        mode: Mode,
+        session: SessionId,
+        budget: WorkBudget,
+        start: Instant,
+        authority_tick_floor: u64,
+    ) -> Result<(Self, Value)> {
+        let initial = context(
+            &config,
+            mode,
+            session,
+            budget,
+            1,
+            authority_tick_floor,
+            Digest32::ZERO,
+        );
         let mut work = TurnWork::new(&initial, start)?;
         config.current()?;
         let mut observation = None;
@@ -507,6 +525,12 @@ impl Runtime {
             let mut source = config.connect(&work.reserve(&initial, CONNECT_BYTES)?, mode)?;
             let c = source.observe(config.input.root, &work.reserve(&initial, CONNECT_BYTES)?)?;
             config.binding.capture(&c)?;
+            if c.tick < authority_tick_floor {
+                return Err(error(
+                    ErrorCode::StaleAnchor,
+                    "tree initialization predates the consumed parent authority floor",
+                ));
+            }
             if !c.paused {
                 return Err(denied("tree initialization requires paused source"));
             }
@@ -518,7 +542,7 @@ impl Runtime {
             session,
             budget,
             1,
-            observation.as_ref().map_or(0, |c| c.tick),
+            authority_tick_floor.max(observation.as_ref().map_or(0, |c| c.tick)),
             Digest32::ZERO,
         );
         let entropy = if config.input.initialize {
@@ -538,6 +562,7 @@ impl Runtime {
         )?;
         let high_tick = journal
             .high_tick
+            .max(authority_tick_floor)
             .max(observation.as_ref().map_or(0, |c| c.tick));
         let high_sequence = journal
             .high_sequence

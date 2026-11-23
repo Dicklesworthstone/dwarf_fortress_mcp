@@ -56,6 +56,16 @@ A marker left by an incomplete open is **not initialization permission**. Reopen
 existing custody only. The controller does not recreate missing files, choose a
 replacement key, silently repair a journal, or dispatch an effect from replay.
 
+## Inherited game-tick authority
+
+Every project-owned Tree and Workshop child receives the greatest game tick
+already consumed by the parent before its first native read. Initialization
+rejects an older capture before creating the child's journal or acknowledgement.
+The same floor is retained before subsequent child operations and handoffs.
+Raising it withdraws old offers and preparations; it does not rewrite the tick
+or witness of an actual native observation. A new stage therefore cannot reset
+expiry checks or recover authority from an older source response.
+
 ## Start the profile
 
 Select the fixed profile with the standard executable:

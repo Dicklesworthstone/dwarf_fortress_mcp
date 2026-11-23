@@ -80,12 +80,13 @@ impl Runtime {
             config.validate_project_recovery(reference)?;
         }
         let budget = self.tree_budget(work, journal::WORK_BYTES)?;
-        let (child, _) = TreeRuntime::open(
+        let (child, _) = TreeRuntime::open_for_resource_project(
             config,
             tree_mode(self.mode),
             self.session,
             budget,
             Instant::now(),
+            self.high_tick,
         )?;
         // Keep custody before any retained-reference comparison can fail.
         self.child = Some(Child::Tree(Box::new(child)));
@@ -128,6 +129,7 @@ impl Runtime {
             let Some(Child::Tree(child)) = &mut self.child else {
                 return Err(denied("original Tree owner is unavailable"));
             };
+            child.retain_project_authority_tick(self.high_tick)?;
             let handoff = child.project_handoff(budget)?;
             // This revalidates current, paused supply; achieved_tick alone is
             // historical evidence. Consume its floors even if transfer fails.
@@ -160,7 +162,13 @@ impl Runtime {
             self.journal.snapshot().checkpoint.clone(),
         )?;
         let budget = self.workshop_budget(work, journal::WORK_BYTES)?;
-        let child = WorkshopRuntime::open(config, workshop_mode(self.mode), self.session, budget)?;
+        let child = WorkshopRuntime::open_for_resource_project(
+            config,
+            workshop_mode(self.mode),
+            self.session,
+            budget,
+            self.high_tick,
+        )?;
         self.child = Some(Child::Workshop(Box::new(child)));
         self.save_child(work, Some(Stage::Workshop))?;
         Ok(json!({

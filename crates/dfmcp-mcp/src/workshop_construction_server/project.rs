@@ -484,6 +484,46 @@ impl WorkshopProjectHandoff {
 }
 
 impl Runtime {
+    pub(crate) fn open_for_resource_project(
+        config: Config,
+        mode: WorkshopMode,
+        session: SessionId,
+        budget: WorkBudget,
+        parent_tick_floor: u64,
+    ) -> Result<Self> {
+        if config.parent_check.is_none()
+            || config.project_deadline.is_none()
+            || parent_tick_floor > dfmcp_adapter::bounded_run::MAX_NATIVE_TICK
+        {
+            return Err(denied(
+                "invalid resource project Workshop owner or authority floor",
+            ));
+        }
+        Self::open_at_floor(config, mode, session, budget, parent_tick_floor)
+    }
+
+    /// Narrow the next child operation by every tick already consumed by its
+    /// parent. A newer floor withdraws old offers/permits, while the actual
+    /// historical anchor keeps its own tick and witness. No native or file I/O.
+    pub(crate) fn retain_project_authority_tick(&mut self, parent_tick_floor: u64) -> Result<()> {
+        if self.config.parent_check.is_none() || self.config.project_deadline.is_none() {
+            return Err(denied(
+                "Workshop authority floor requires its original resource project",
+            ));
+        }
+        if parent_tick_floor > dfmcp_adapter::bounded_run::MAX_NATIVE_TICK {
+            return Err(invalid("invalid resource project Workshop authority floor"));
+        }
+        let current = self.parent_authority_tick_floor();
+        self.authority_tick = current.max(parent_tick_floor);
+        if parent_tick_floor > current {
+            let observed_anchor = self.anchor;
+            self.withdraw();
+            self.anchor = observed_anchor;
+        }
+        Ok(())
+    }
+
     pub(crate) fn project_has_original_history(&self) -> bool {
         self.journal.pin().frames != 0
             || self

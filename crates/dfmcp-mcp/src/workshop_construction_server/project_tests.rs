@@ -302,3 +302,138 @@ fn restart_selectors_must_match_parent_ack_and_clock_checkpoint() -> Result<()> 
         .is_err());
     Ok(())
 }
+
+#[test]
+fn parent_floor_withdraws_workshop_offer_without_relabeling_native_anchor_or_custody()
+-> Result<()> {
+    let fixture = super::super::production_handoff_tests::completed_original_fixture()?;
+    let config = config(fixture.configuration())?;
+    let observed = WorkshopCapture::decode(&vector("capture")?)?;
+    let observed_anchor = anchor(&observed);
+    let budget = WorkBudget {
+        max_wall_millis: 60000,
+        max_bytes: 512 * 1024 * 1024,
+        ..WorkBudget::CONSERVATIVE_DEFAULT
+    };
+    let session = SessionId::new(713);
+    let initial = OperationContext {
+        session_id: session,
+        request_id: RequestId::new(1),
+        anchor: observed_anchor,
+        budget,
+        grants: Runtime::grants(&config, false, false),
+        cancellation_requested: false,
+    };
+    let acks = open_private_acknowledgements(
+        &config.input.directory.join("workshop.ack"),
+        &initial,
+        WorkshopMode::Offline,
+        false,
+        config.pin,
+    )?;
+    let journal = open_private_workshop(
+        &config.input.directory.join("workshop.journal"),
+        &initial,
+        WorkshopMode::Offline,
+        None,
+        [0; 32],
+        acks.latest(),
+    )?;
+    let authority_tick = journal.high_tick().max(observed.tick());
+    let guard = Guard {
+        config: config.clone(),
+        selection: Some(observed.selection()),
+        acks: Arc::new(Mutex::new(acks)),
+        leases: LeaseManager::new(),
+        lease: None,
+        session,
+    };
+    let mut runtime = Runtime {
+        session,
+        mode: WorkshopMode::Offline,
+        budget,
+        config,
+        journal,
+        guard,
+        source: None,
+        observation: Some(observed.clone()),
+        tree_material: None,
+        clock: None,
+        anchor: Some(observed_anchor),
+        authority_tick,
+        next_request: 2,
+        project: State::default(),
+    };
+    let reference = runtime.project_recovery_reference();
+    let files = ["workshop.journal", "workshop.ack"];
+    let before = files
+        .iter()
+        .map(|name| std::fs::read(runtime.config.input.directory.join(name)))
+        .collect::<std::io::Result<Vec<_>>>()
+        .map_err(|_| invalid("read original Workshop custody"))?;
+    runtime.retain_project_authority_tick(authority_tick)?;
+    assert_eq!(
+        runtime.observation.as_ref().map(WorkshopCapture::witness),
+        Some(observed.witness())
+    );
+    let parent_tick = authority_tick + 100;
+    runtime.retain_project_authority_tick(parent_tick)?;
+    assert!(runtime.observation.is_none());
+    assert!(runtime.source.is_none());
+    assert_eq!(runtime.anchor, Some(observed_anchor));
+    let current = runtime.context()?;
+    assert_eq!(current.anchor.tick.get(), parent_tick);
+    assert_eq!(current.anchor.state_hash, observed.witness());
+    assert_eq!(runtime.anchor, Some(observed_anchor));
+    let after = runtime.project_recovery_reference();
+    assert_eq!(after["original"], reference["original"]);
+    assert_eq!(after["acknowledged"], reference["acknowledged"]);
+    assert_eq!(after["project_source_frontier"]["high_tick"], parent_tick);
+    runtime.retain_project_authority_tick(authority_tick)?;
+    assert_eq!(runtime.authority_tick, parent_tick);
+    assert!(
+        runtime
+            .retain_project_authority_tick(dfmcp_adapter::bounded_run::MAX_NATIVE_TICK + 1)
+            .is_err()
+    );
+    assert_eq!(runtime.authority_tick, parent_tick);
+    runtime.retain_project_authority_tick(runtime.config.input.authority_expires_tick + 1)?;
+    assert!(
+        runtime
+            .context()?
+            .authorize(Capability::Query, RiskTier::ReadOnly, &[], None)
+            .is_err()
+    );
+    assert_eq!(runtime.anchor, Some(observed_anchor));
+    for (name, expected) in files.into_iter().zip(before) {
+        assert_eq!(
+            std::fs::read(runtime.config.input.directory.join(name))
+                .map_err(|_| invalid("read retained Workshop custody"))?,
+            expected
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn resource_workshop_open_rejects_unbound_policy_or_invalid_floor_before_io() -> Result<()> {
+    let standalone = Config::parse(&configured().to_string())?;
+    let bound = config(configured())?;
+    for (config, floor) in [
+        (standalone, 100),
+        (bound, dfmcp_adapter::bounded_run::MAX_NATIVE_TICK + 1),
+    ] {
+        let result = Runtime::open_for_resource_project(
+            config,
+            WorkshopMode::Control,
+            SessionId::new(713),
+            WorkBudget::CONSERVATIVE_DEFAULT,
+            floor,
+        );
+        assert_eq!(
+            result.err().map(|error| error.code),
+            Some(ErrorCode::CapabilityDenied)
+        );
+    }
+    Ok(())
+}
