@@ -81,9 +81,11 @@ The complete parent monitor still checks current labor and stock together.
 
 The `stock_targets` consumer assesses one to four distinct furniture recipes
 against a single independently qualified census. It refuses the entire proposal
-if any positive deficit is over its limit, creates no original when every target
-is met, and emits original orders only for positive deficits. All requested
-minima remain explicit complete-parent requirements, including already-met stock.
+if any positive deficit is over its limit, creates no effect-bearing original
+when every target is met, and emits original orders only for positive deficits. A
+wholly met request instead retains the read-only original portfolio described
+below. All requested minima remain explicit complete-parent requirements,
+including already-met stock.
 The selected eligible workers must already have the requested labor enabled by
 default. Explicit `assign_labor=true` instead creates one reviewed enable at
 StepId zero and one to four dependent orders at StepIds one through four. A wholly
@@ -155,12 +157,59 @@ original goal identity with no current sample or proof. The resource-project
 parent consumes this typed result, so an initially met single stock target can
 complete under its original deadline without inventing production.
 
-The wholly met `stock_targets` portfolio still returns its existing count-only
-result; this watch is scoped to a single `stock_target`. The pure adapter has
-fourteen focused regression cases, and the runtime/native-peer and presentation
-sources cover no-work sampling, repeated ticks, withdrawal, stock consumption,
-restoration and cancellation. Execution evidence for this increment is recorded
-separately in `IMPLEMENTATION_STATUS.md`; source presence adds no admission.
+### Keep every already-met target stable together
+
+The reusable `StockTargetsWatch` accepts one through four distinct, already-met
+assessments from the same complete census. Recipe ordering is canonical. Its
+immutable witness binds every original assessment and the one shared deadline,
+cadence and required sample count. Each sample qualifies every requested minimum
+against one `InventoryBaselineProjection`, with one exact anchor, source digest,
+generation and allocation horizon. A missing or failed qualification cannot
+publish a partially successful target set.
+
+The portfolio owns one joint stability streak. All targets must be True together
+in each eligible cohort; independent achievements at different ticks cannot be
+combined. For example, two good bed samples followed by two good door samples
+do not establish a two-sample portfolio while either stock was missing from the
+other samples. The original planning census contributes zero samples. False,
+Unknown, cursor gaps and failed acquisition or publication interrupt unfinished
+joint stability. Repeated ticks do not advance it. A timely achievement remains
+historical, but current proof additionally requires a complete current cohort
+in which every original minimum is True. Missing the original deadline cannot
+be repaired by repeating Plan or replacing an individual target.
+
+An all-met `kind="stock_targets"` Plan retains this monitor through the existing
+`no_work_stock_goal` field, tagged with schema `dfmcp.stock-targets-watch/1` and
+scope `original_no_work_inventory_portfolio`. Its `targets` preserve every
+original minimum; `sample.targets` carry the independently qualified current
+counts or null and each comparison truth. The sample also carries the joint
+truth, stability count, exact source and timely achievement. The separate
+`stock_targets` assessment remains historical and does not itself prove current
+inventory. This inventory-only goal does not establish a workforce prerequisite,
+including when the original request used `assign_labor=true`.
+
+Wait and default Observe acquire one complete current portfolio cohort per call.
+Query inspects the retained result without native I/O. Repeating the identical
+Plan preserves the original target set, deadline and progress; changing a target,
+timing field or request mode requires explicit cancellation first. Use the
+existing Cancel with its default scope or `scope="step"`; a replacement request
+must name a valid retained observation, so Observe again when that selection
+has been consumed by sampling. Cancellation and failed publication
+withdraw the complete current proof. Decoded native and canonical rejection
+floors survive later authority, policy or budget failures, and source or identity
+regression fences the complete watch. Recovery output preserves original target
+identity without a current sample; restarting restores no joint achievement,
+unfinished streak or current proof.
+
+This path creates no insertion keys, effect-bearing original, native preparation,
+labor assignment, clock run or goal-history sidecar. It cannot replace consumed
+stock with a new order. The root resource-project request remains single-target;
+the portfolio monitor is available through the combined production requests.
+The adapter sources contain eighteen portfolio regression cases alongside the
+fourteen single-target cases. Runtime/native-peer and presentation coverage
+address the public sampling, cancellation and proof-withdrawal boundaries.
+Execution evidence for these bytes belongs in `IMPLEMENTATION_STATUS.md`;
+source presence and authored tests add no qualification or admission.
 
 ## Evidence boundary
 

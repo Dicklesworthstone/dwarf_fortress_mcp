@@ -85,6 +85,7 @@ mod stock_targets_request;
 ))]
 #[path = "live_production_runtime/stock_targets_tests.rs"]
 mod stock_targets_tests;
+mod stock_targets_watch;
 mod workshop_binding;
 mod workshop_config;
 mod workshop_parent;
@@ -119,6 +120,7 @@ use stock_target::{SharedStockTarget, StockTargetNoWork};
 pub(crate) use stock_target_request::StockTargetRequest;
 use stock_targets::SharedStockTargets;
 pub(crate) use stock_targets_request::StockTargetsRequest;
+use stock_targets_watch::StockTargetsNoWork;
 pub(crate) use workforce::Mode;
 use workforce::Shell as WorkforceShell;
 use workforce::{denied, digest, exhausted, invalid};
@@ -286,7 +288,7 @@ pub(crate) struct Runtime {
     stock_target: Option<SharedStockTarget>,
     stock_target_no_work: Option<StockTargetNoWork>,
     stock_targets: Option<SharedStockTargets>,
-    stock_targets_no_work: Option<Value>,
+    stock_targets_no_work: Option<StockTargetsNoWork>,
     original: Option<PreparedPlan>,
     layout: Option<ProductionLayout>,
     seal: Option<PlanArchiveSeal>,
@@ -1148,7 +1150,9 @@ impl Runtime {
         if let Some(goal) = &mut self.stock_target_no_work {
             goal.monitor.invalidate_current_sample();
         }
-        self.stock_targets_no_work = None;
+        if let Some(goal) = &mut self.stock_targets_no_work {
+            goal.monitor.invalidate_current_sample();
+        }
         if let Some(input) = &self.input_supply {
             input.withdraw();
         }
@@ -1400,11 +1404,7 @@ impl Runtime {
         c: &OperationContext,
     ) -> Result<View> {
         self.check(c, false)?;
-        if self
-            .stock_target_no_work
-            .as_ref()
-            .is_some_and(|goal| !goal.cancelled)
-        {
+        if self.has_active_stock_watch() {
             if request != ObserveRequest::default() {
                 return Err(invalid(
                     "a retained no-work stock goal accepts only default observation",
@@ -1968,7 +1968,7 @@ impl Runtime {
         })
     }
     pub(crate) fn wait(&mut self, c: &OperationContext) -> Result<View> {
-        if self.stock_target_no_work.is_some() {
+        if self.stock_target_no_work.is_some() || self.stock_targets_no_work.is_some() {
             self.wait_stock_target(c)
         } else if self.portfolio.is_some() {
             self.wait_portfolio(c)
@@ -1977,7 +1977,7 @@ impl Runtime {
         }
     }
     pub(crate) fn cancel(&mut self, c: &OperationContext) -> Result<View> {
-        if self.stock_target_no_work.is_some() {
+        if self.stock_target_no_work.is_some() || self.stock_targets_no_work.is_some() {
             return self.cancel_stock_target(c);
         }
         self.check(c, true)?;

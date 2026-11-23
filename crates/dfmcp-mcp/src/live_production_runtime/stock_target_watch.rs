@@ -1,32 +1,40 @@
-//! Foreground observation of an originally satisfied stock target. No order,
+//! Foreground observation of originally satisfied stock targets. No order,
 //! labor assignment, native preparation, clock run or effect journal is needed.
 //! The original sizing census is never reused as a temporal sample.
 use super::*;
 use dfmcp_adapter::semantic_work_orders::{
     INVENTORY_BASELINE_PROJECTION_BYTES, INVENTORY_BASELINE_QUALIFY_BYTES,
-    InventoryBaselineProjection, OperationsGoalSource,
+    InventoryBaselineProjection, OperationsGoalSource, STOCK_TARGETS_WATCH_BYTES,
 };
 
 const SAMPLE_BYTES: u64 = 16 * MIB + 2 * MIB + stock_target::CENSUS_BYTES;
+const PORTFOLIO_SAMPLE_BYTES: u64 = 16 * MIB + 2 * MIB + stock_targets::CENSUS_BYTES;
 
 impl Runtime {
     pub(super) fn no_work_goal_proven(&self) -> bool {
         !self.fenced
             && !self.initialization_failed
             && !self.clock_withholds_goal()
-            && self.stock_target_no_work.as_ref().is_some_and(|goal| {
+            && (self.stock_target_no_work.as_ref().is_some_and(|goal| {
                 !goal.cancelled
                     && goal.monitor.current_goal_proven()
                     && goal
                         .monitor
                         .latest()
                         .is_some_and(|sample| sample.anchor == self.anchor)
-            })
+            }) || self.stock_targets_no_work.as_ref().is_some_and(|goal| {
+                !goal.cancelled
+                    && goal.monitor.current_goal_proven()
+                    && goal
+                        .monitor
+                        .latest()
+                        .is_some_and(|sample| sample.anchor == self.anchor)
+            }))
     }
 
     pub(super) fn no_work_goal_json(&self) -> Value {
         let Some(goal) = &self.stock_target_no_work else {
-            return Value::Null;
+            return self.no_work_portfolio_json();
         };
         let current = goal.monitor.latest().filter(|sample| {
             !goal.cancelled && !self.clock_withholds_goal() && sample.anchor == self.anchor
@@ -84,12 +92,18 @@ impl Runtime {
         retained
     }
 
-    pub(super) fn require_no_active_stock_watch(&self) -> Result<()> {
-        if self
-            .stock_target_no_work
+    pub(super) fn has_active_stock_watch(&self) -> bool {
+        self.stock_target_no_work
             .as_ref()
             .is_some_and(|goal| !goal.cancelled)
-        {
+            || self
+                .stock_targets_no_work
+                .as_ref()
+                .is_some_and(|goal| !goal.cancelled)
+    }
+
+    pub(super) fn require_no_active_stock_watch(&self) -> Result<()> {
+        if self.has_active_stock_watch() {
             return Err(denied(
                 "retain the original no-work stock goal or explicitly cancel it before new planning",
             ));
@@ -100,6 +114,9 @@ impl Runtime {
     pub(super) fn wait_stock_target(&mut self, c: &OperationContext) -> Result<View> {
         let result = self.wait_stock_target_inner(c);
         if let Some(goal) = &self.stock_target_no_work {
+            self.observation_tick_floor = self.observation_tick_floor.max(goal.monitor.high_tick());
+        }
+        if let Some(goal) = &self.stock_targets_no_work {
             self.observation_tick_floor = self.observation_tick_floor.max(goal.monitor.high_tick());
         }
         if result.is_err() {
@@ -113,14 +130,28 @@ impl Runtime {
         if self.mode == Mode::Offline {
             return self.inspect(c);
         }
-        let goal = self
-            .stock_target_no_work
-            .as_ref()
-            .ok_or_else(|| invalid("no original no-work stock goal"))?;
-        if goal.cancelled {
+        let (cancelled, fenced, high_cursor, sample_bytes) =
+            if let Some(goal) = &self.stock_target_no_work {
+                (
+                    goal.cancelled,
+                    goal.monitor.fenced(),
+                    goal.monitor.high_cursor(),
+                    SAMPLE_BYTES,
+                )
+            } else if let Some(goal) = &self.stock_targets_no_work {
+                (
+                    goal.cancelled,
+                    goal.monitor.fenced(),
+                    goal.monitor.high_cursor(),
+                    PORTFOLIO_SAMPLE_BYTES,
+                )
+            } else {
+                return Err(invalid("no original no-work stock goal"));
+            };
+        if cancelled {
             return self.inspect(c);
         }
-        if goal.monitor.fenced() || self.clock_withholds_goal() {
+        if fenced || self.clock_withholds_goal() {
             return Err(denied(
                 "no-work stock sampling requires continuous sources and settled clocks",
             ));
@@ -131,7 +162,7 @@ impl Runtime {
                 .anchor
                 .cursor
                 .sequence
-                .max(goal.monitor.high_cursor().sequence)
+                .max(high_cursor.sequence)
                 .checked_add(1)
                 .ok_or_else(|| exhausted("no-work stock cursor exhausted"))?,
         };
@@ -139,7 +170,7 @@ impl Runtime {
         // Reserve output and the complete pair of real reads before accessing
         // credentials or contacting either source. There is no hidden retry.
         let output = work.take(256 * MIB)?;
-        let mut sample_work = Work::new(&work.take(SAMPLE_BYTES)?)?;
+        let mut sample_work = Work::new(&work.take(sample_bytes)?)?;
         inventory_baseline::authorize_observe(
             &sample_work.current()?,
             self.authority_tick_floor(),
@@ -177,11 +208,13 @@ impl Runtime {
         let operations = source.read_operations(&sample_work.take(16 * MIB)?)?;
         drop(source);
         self.observation_tick_floor = self.observation_tick_floor.max(operations.jobs.tick());
-        let goal = self
-            .stock_target_no_work
-            .as_mut()
-            .ok_or_else(|| invalid("no-work goal disappeared during its sample"))?;
-        goal.monitor.note_capture(&operations)?;
+        if let Some(goal) = &mut self.stock_target_no_work {
+            goal.monitor.note_capture(&operations)?;
+        } else if let Some(goal) = &mut self.stock_targets_no_work {
+            goal.monitor.note_capture(&operations)?;
+        } else {
+            return Err(invalid("no-work goal disappeared during its sample"));
+        }
         inventory_baseline::authorize_observe(
             &sample_work.current()?,
             self.observation_tick_floor,
@@ -196,11 +229,21 @@ impl Runtime {
             .orders
             .acceptance()
             .baseline(&projection, &sample_work.take(MIB)?)?;
-        goal.monitor.sample(
-            &projection,
-            policy,
-            &sample_work.take(INVENTORY_BASELINE_QUALIFY_BYTES)?,
-        )?;
+        if let Some(goal) = &mut self.stock_target_no_work {
+            goal.monitor.sample(
+                &projection,
+                policy,
+                &sample_work.take(INVENTORY_BASELINE_QUALIFY_BYTES)?,
+            )?;
+        } else if let Some(goal) = &mut self.stock_targets_no_work {
+            goal.monitor.sample(
+                &projection,
+                policy,
+                &sample_work.take(STOCK_TARGETS_WATCH_BYTES)?,
+            )?;
+        } else {
+            return Err(invalid("no-work goal disappeared during its sample"));
+        }
         self.config.current()?;
         sample_work.current()?;
         self.anchor = anchor;
@@ -218,12 +261,15 @@ impl Runtime {
 
     pub(super) fn cancel_stock_target(&mut self, c: &OperationContext) -> Result<View> {
         self.check(c, true)?;
-        let goal = self
-            .stock_target_no_work
-            .as_mut()
-            .ok_or_else(|| invalid("no original no-work stock goal"))?;
-        goal.cancelled = true;
-        goal.monitor.invalidate_current_sample();
+        if let Some(goal) = &mut self.stock_target_no_work {
+            goal.cancelled = true;
+            goal.monitor.invalidate_current_sample();
+        } else if let Some(goal) = &mut self.stock_targets_no_work {
+            goal.cancelled = true;
+            goal.monitor.invalidate_current_sample();
+        } else {
+            return Err(invalid("no original no-work stock goal"));
+        }
         self.view(&mut Work::new(c)?)
     }
 }

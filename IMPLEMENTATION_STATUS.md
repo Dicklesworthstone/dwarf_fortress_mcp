@@ -1,5 +1,52 @@
 # Implementation Status
 
+## Unreleased — Complete already-satisfied stock portfolios through MCP
+
+A wholly satisfied `stock_targets` request now retains a typed no-work portfolio
+instead of ending at a historical count report. One to four furniture minima
+share one original census, fixed target vector, deadline, cadence and joint
+stability interval. Every target must hold in the same independently qualified
+current census; separate member achievements cannot be combined into success.
+
+Wait and default Observe acquire one fresh citizen/operations pair and publish
+the complete cohort atomically. Query and identical Plan preserve the original
+identity and timing. Changed planning requires explicit cancellation. No labor
+assignment, work order, clock advance or extra custody write is created.
+
+The existing `no_work_stock_goal` field carries the new tagged
+`dfmcp.stock-targets-watch/1` view. Bounded presentation independently checks
+every original target, common source and temporal certificate. Missing or
+substituted members, incomplete coverage, stock loss, stale observations,
+failed publication, cancellation and source fences withdraw current proof.
+Historical timely achievement stays separate from current truth. Complete
+target identity survives compaction; reopening restores no sample or streak.
+The native resource-project root remains single-target.
+
+Eighteen adapter regressions and seven presentation regressions are authored.
+Both existing all-met Runtime/native-TCP campaigns now cover stable joint
+sampling, immutable repeated planning, loss/recovery, retained rejection floors,
+overflow withdrawal, cancellation and custody bytes unchanged by the watch.
+The overflow case exercises the actual presentation owner and runtime
+withdrawal hook; it does not claim MCP transport publication evidence.
+
+The complete actual adapter library passes latest-nightly locked/offline
+compilation. All 32 unchanged stock-watch regressions pass: eighteen portfolio
+and fourteen single-target cases, linked against the complete actual adapter,
+core, world and intent libraries. A scratch harness includes the original test
+files unchanged and uses the real public APIs; it substitutes no production
+implementation or authority. This is scoped component execution, not the full
+adapter test binary or clean-source qualification.
+
+Scoped formatting, patch whitespace, Python fixture parsing,
+JSON/source-path/budget checks, repository integrity, implementation status,
+dependency policy and repository validation pass. The complete MCP build and
+its runtime/presentation test execution remain pending at this checkpoint.
+No live-game proof, production admission or full qualification is claimed.
+
+Owners: `df-native-stock-target-3m9`,
+`df-dfhack-bridge-plane-c-pic.4`, and
+`dfmcp-reality-wiring-proof-4bf.14`.
+
 ## Unreleased — Carry project authority into the production owner
 
 The native resource-project parent now carries its highest consumed game tick

@@ -31,6 +31,7 @@ mod inventory_baseline;
 mod inventory_objective;
 mod stock_target;
 mod stock_target_watch;
+mod stock_targets_watch;
 pub mod store;
 pub use goal_history::{
     DurableWorkOrderGoalMonitor, GoalHistoryStore, PrivateGoalHistoryStore,
@@ -56,6 +57,9 @@ pub use inventory_objective::{
 pub use stock_target::StockTargetAssessment;
 pub use stock_target_watch::{
     STOCK_TARGET_WATCH_BYTES, StockTargetWatch, StockTargetWatchProgress,
+};
+pub use stock_targets_watch::{
+    STOCK_TARGETS_WATCH_BYTES, StockTargetsWatch, StockTargetsWatchCount, StockTargetsWatchProgress,
 };
 use store::{Association, MAX_ASSOCIATIONS, MAX_STORE_BYTES};
 pub use store::{AssociationStore, PrivateAssociationStore, open_private_association_store};

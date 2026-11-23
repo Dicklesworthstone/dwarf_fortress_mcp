@@ -78,6 +78,7 @@ def run_case(executable, test_name, requested_case):
                     "DOOR": 1 if case.startswith("multiple") or case == "four" else 3,
                 }
                 self.last_stage = None
+                self.no_work_citizen_tick = combined.TICK
                 self.injected_after_dispatch = False
                 self.injected_prefix_change = False
                 self.first_created_record = None
@@ -100,6 +101,25 @@ def run_case(executable, test_name, requested_case):
                 if value == self.last_stage:
                     return
                 self.last_stage = value
+                if case == "already":
+                    offsets = {
+                        "goal_first": (5, 5), "goal_second": (10, 10),
+                        "watch_publication": (15, 15),
+                        "watch_consumed": (20, 20), "watch_restored": (25, 25),
+                        "watch_source_ahead": (40, 50),
+                        "watch_source_behind": (45, 50),
+                        "watch_source_current": (50, 50),
+                        "watch_new_plan": (55, 55),
+                    }
+                    if value in offsets:
+                        assert not self.order_created and not self.workforce_applied
+                        citizen, inventory = offsets[value]
+                        self.no_work_citizen_tick = combined.TICK + citizen
+                        self.order_tick = self.workforce_tick = combined.TICK + inventory
+                        self.inventory = {
+                            "BED": 6, "DOOR": 0 if value == "watch_consumed" else 3,
+                        }
+                    return
                 if value == "before_prepare" and case == "before_stock":
                     # A previously met target remains part of the exact census,
                     # even though it has no native order of its own.
@@ -130,6 +150,11 @@ def run_case(executable, test_name, requested_case):
 
             def reply(self, plugin, operation, request):
                 self.apply_stage()
+                if case == "already" and plugin == "dfmcp_bridge":
+                    return combined.citizen_reply(
+                        operation, request, self.citizen_ids,
+                        tick=self.no_work_citizen_tick,
+                    )
                 if case == "after_stock" and not self.injected_after_dispatch:
                     if 2 in helpers.creation_states(production):
                         self.injected_after_dispatch = True

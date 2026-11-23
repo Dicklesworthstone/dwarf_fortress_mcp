@@ -403,6 +403,7 @@ impl Runtime {
             }
             return self.view(&mut Work::new(c)?);
         }
+        self.require_no_active_stock_watch()?;
         self.stock_target_no_work = None;
         self.stock_targets_no_work = None;
         self.planning_inspection.withdraw();

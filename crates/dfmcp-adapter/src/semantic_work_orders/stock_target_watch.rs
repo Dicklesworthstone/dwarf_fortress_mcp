@@ -230,24 +230,8 @@ impl StockTargetWatch {
         policy: EvidencePolicy,
         context: &OperationContext,
     ) -> Result<StockTargetWatchProgress> {
-        self.note_capture(projection.operations())?;
+        let previous = self.note_projection(projection)?;
         let anchor = projection.original_anchor();
-        let previous = self.high_anchor;
-        if anchor.fortress_id != self.original.original_anchor().fortress_id
-            || anchor.cursor.epoch != self.original.original_anchor().cursor.epoch
-            || anchor.cursor.sequence < previous.cursor.sequence
-            || anchor.tick < self.high_tick
-            || anchor.tick < previous.tick
-            || (anchor.cursor == previous.cursor && anchor != previous)
-        {
-            self.fenced = true;
-            return Err(error(
-                ErrorCode::StaleAnchor,
-                "no-work stock watch canonical source changed lineage, regressed or forked a cursor",
-            ));
-        }
-        // A decoded but unqualified newer anchor cannot later be rolled back.
-        self.high_anchor = anchor;
         let call = Call::new(context)?;
         call.admit(STOCK_TARGET_WATCH_BYTES)?;
         authorize(anchor, &call.current()?)?;
@@ -334,6 +318,34 @@ impl StockTargetWatch {
         self.interrupted = false;
         self.latest = Some(progress);
         Ok(progress)
+    }
+
+    /// Retain source and canonical rejection floors without qualifying a count.
+    /// The returned previous anchor lets a portfolio preserve cohort continuity
+    /// while prepaying its complete multi-target qualification before sampling.
+    pub(super) fn note_projection(
+        &mut self,
+        projection: &InventoryBaselineProjection,
+    ) -> Result<StateAnchor> {
+        self.note_capture(projection.operations())?;
+        let anchor = projection.original_anchor();
+        let previous = self.high_anchor;
+        if anchor.fortress_id != self.original.original_anchor().fortress_id
+            || anchor.cursor.epoch != self.original.original_anchor().cursor.epoch
+            || anchor.cursor.sequence < previous.cursor.sequence
+            || anchor.tick < self.high_tick
+            || anchor.tick < previous.tick
+            || (anchor.cursor == previous.cursor && anchor != previous)
+        {
+            self.fenced = true;
+            return Err(error(
+                ErrorCode::StaleAnchor,
+                "no-work stock watch canonical source changed lineage, regressed or forked a cursor",
+            ));
+        }
+        // A decoded but unqualified newer anchor cannot later be rolled back.
+        self.high_anchor = anchor;
+        Ok(previous)
     }
 }
 

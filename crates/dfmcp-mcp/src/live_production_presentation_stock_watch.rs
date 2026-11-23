@@ -3,6 +3,9 @@
 use super::{bounded, compact_anchor, digest};
 use serde_json::{Value, json};
 
+#[path = "live_production_presentation_stock_targets_watch.rs"]
+mod portfolio;
+
 const MAX_SPAN: u64 = dfmcp_intent::effects::MAX_DEFAULT_OBLIGATION_TICKS;
 
 fn counters(value: &Value) -> Option<[u64; 3]> {
@@ -99,9 +102,8 @@ fn identity(view: &Value) -> Option<()> {
     valid.then_some(())
 }
 
-fn current_sample(view: &Value, anchor: &Value) -> Option<Value> {
+fn temporal_sample(view: &Value, anchor: &Value, original: &Value, truth: &str) -> Option<Value> {
     let goal = &view["no_work_stock_goal"];
-    let original = &view["stock_target"];
     let sample = &goal["sample"];
     let tick = sample["anchor"]["tick"].as_u64()?;
     let start = original["baseline_anchor"]["tick"].as_u64()?;
@@ -109,15 +111,8 @@ fn current_sample(view: &Value, anchor: &Value) -> Option<Value> {
     let interval = goal["poll_interval_ticks"].as_u64()?;
     let required = goal["stable_samples_required"].as_u64()?;
     let observed = sample["stable_samples_observed"].as_u64()?;
-    let count = optional_u64(&sample["observed_stack_units"])?;
     let achieved = optional_u64(&sample["achieved_at_tick"])?;
     let counted = optional_u64(&sample["last_counted_tick"])?;
-    let target = goal["target_stack_units"].as_u64()?;
-    let truth = match count {
-        Some(units) if units >= target => "true",
-        Some(_) => "false",
-        None => "unknown",
-    };
     let expected_proof = achieved.is_some() && truth == "true";
     let source_counters = counters(&sample["source_counters"])?;
     let original_counters = counters(&original["source_counters"])?;
@@ -177,7 +172,6 @@ fn current_sample(view: &Value, anchor: &Value) -> Option<Value> {
         "source_digest":digest(&sample["source_digest"]),
         "source_generation":sample["source_generation"].as_u64(),
         "source_counters":source_counters,
-        "observed_stack_units":count,
         "current_truth":truth,
         "stable_samples_observed":observed,
         "achieved_at_tick":achieved,
@@ -189,9 +183,26 @@ fn current_sample(view: &Value, anchor: &Value) -> Option<Value> {
     }))
 }
 
+fn current_sample(view: &Value, anchor: &Value) -> Option<Value> {
+    let goal = &view["no_work_stock_goal"];
+    let count = optional_u64(&goal["sample"]["observed_stack_units"])?;
+    let target = goal["target_stack_units"].as_u64()?;
+    let truth = match count {
+        Some(units) if units >= target => "true",
+        Some(_) => "false",
+        None => "unknown",
+    };
+    let mut sample = temporal_sample(view, anchor, &view["stock_target"], truth)?;
+    sample["observed_stack_units"] = json!(count);
+    Some(sample)
+}
+
 /// Current presentation requires an independently accepted runtime view at the
 /// exact supplied canonical anchor. Retention always drops the entire sample.
 pub(crate) fn summary(view: &Value, anchor: Option<&Value>, allow_current: bool) -> Value {
+    if view["no_work_stock_goal"]["schema"] == "dfmcp.stock-targets-watch/1" {
+        return portfolio::summary(view, anchor, allow_current);
+    }
     if identity(view).is_none() {
         return Value::Null;
     }

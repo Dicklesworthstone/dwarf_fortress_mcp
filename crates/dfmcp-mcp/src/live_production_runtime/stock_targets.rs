@@ -409,7 +409,7 @@ impl Owner {
     }
 }
 
-fn report(
+pub(super) fn report(
     binding: &StockTargetsBinding,
     planned: bool,
     floor: GameTick,
@@ -476,6 +476,16 @@ impl Runtime {
     ) -> Result<View> {
         request.validate()?;
         self.check(c, true)?;
+        if let Some(goal) = &self.stock_targets_no_work
+            && !goal.cancelled
+        {
+            if goal.request != request {
+                return Err(denied(
+                    "cancel the original no-work stock portfolio before changing its request",
+                ));
+            }
+            return self.view(&mut Work::new(c)?);
+        }
         self.require_no_active_stock_watch()?;
         self.stock_targets_no_work = None;
         self.stock_target_no_work = None;
@@ -549,14 +559,12 @@ impl Runtime {
             .iter()
             .all(|assessment| assessment.amount().is_none())
         {
-            self.stock_targets_no_work = Some(report(
-                &binding,
-                false,
-                self.observation_tick_floor,
-                false,
-                None,
-                None,
-            ));
+            self.stock_targets_no_work = Some(StockTargetsNoWork::new(
+                assessments,
+                binding,
+                request,
+                &work.take(dfmcp_adapter::semantic_work_orders::STOCK_TARGETS_WATCH_BYTES)?,
+            )?);
             return self.view(&mut work);
         }
         if request.assign_labor {
@@ -707,7 +715,11 @@ impl Runtime {
 
     pub(super) fn stock_targets_json(&self) -> Value {
         self.stock_targets.as_ref().map_or_else(
-            || self.stock_targets_no_work.clone().unwrap_or(Value::Null),
+            || {
+                self.stock_targets_no_work
+                    .as_ref()
+                    .map_or(Value::Null, StockTargetsNoWork::assessment_json)
+            },
             SharedStockTargets::status,
         )
     }

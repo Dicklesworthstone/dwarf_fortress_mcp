@@ -17,7 +17,8 @@ The additive `kind="stock_targets"` request sizes up to four distinct furniture
 targets together from one census, retaining already-met minima in the original
 parent and using the selected existing workers by default. Explicit
 `assign_labor=true` adds one reviewed enable before all positive order leaves;
-a fully met vector still creates no work.
+a fully met vector retains one read-only monitor for all original minima and
+creates no work.
 The source is explicitly unadmitted development work. Current executed checks,
 qualification and real-game evidence belong in `IMPLEMENTATION_STATUS.md`.
 The private custody implementation supports Linux x86_64/aarch64; unsupported
@@ -55,8 +56,45 @@ No native order, labor effect, preparation, clock run or goal-history sidecar is
 created by this path. Later game ticks must be observed for the cadence to
 advance. Repeat planning with the identical request preserves the watch; cancel
 the goal before changing the request. Failure and cancellation withdraw current
-proof. Recovery retains no current sample or observation streak. The wholly
-satisfied `stock_targets` portfolio retains its existing count-only behavior.
+proof. Recovery retains no current sample or observation streak.
+
+### Observe an already-satisfied stock portfolio
+
+A wholly met `stock_targets` request retains all one through four original
+minima in the same `no_work_stock_goal` field, with schema
+`dfmcp.stock-targets-watch/1` and scope `original_no_work_inventory_portfolio`.
+The separate `stock_targets` assessment records the original census; it never
+becomes current proof. The watch's sorted `targets` bind every original minimum.
+Each successful Wait or default Observe acquires one complete census for the
+whole set. Its `sample.targets` report each qualified current count or null and
+comparison truth under the sample's single anchor and source identity.
+
+All targets must be True together across the one original stability interval.
+Separate successes for different targets cannot be combined into portfolio
+success. The planning census contributes zero samples; the first eligible
+cohort is at least one original cadence later. Same-tick reads do not increase
+the count. False, Unknown, a cursor gap or failed acquisition/publication
+interrupts unfinished stability. A timely joint achievement remains history;
+current proof additionally needs a complete current True cohort. Source or
+identity regression fences the whole watch, including floors consumed by a
+subsequently refused read.
+
+Query inspects the retained cohort without another read. The identical Plan
+preserves all original targets, timing and progress. A changed target, deadline,
+cadence or request mode is refused until the original watch is cancelled. Use
+the existing Cancel with default scope or `scope="step"`. A replacement request
+must name a valid retained observation; Observe again when sampling has consumed
+that selection. Cancellation and failures withdraw the complete
+current proof. Restart and recovery restore no current cohort, unfinished
+streak or joint achievement; a missed original deadline is never renewed.
+
+No-work portfolio sampling creates no original effect plan, insertion key,
+native preparation, labor assignment, clock run or goal-history sidecar.
+`worker_prerequisite_checked` remains false, even with `assign_labor=true`.
+Stock loss is reported against the original goal without sizing a replacement
+order. Game-time progression is managed separately. The root resource-project
+request continues to accept one stock goal; this extension applies to the
+combined production portfolio request.
 
 ## Operator configuration
 
@@ -713,10 +751,13 @@ The following outcomes are distinct:
 - **Already satisfied:** `status="already_satisfied"`, `amount=0`,
   `work_required=false` and `mutation_planned=false`. No original plan, keys,
   archive, frontier or native preparation/insertion is created. The result
-  establishes only the stock minimum at its reported source anchor. Since no
-  work is needed, existing labor is not qualified and
+  establishes only the stock minimum at its reported source anchor. The separate
+  `no_work_stock_goal` monitor retains the original target and timing for fresh
+  Wait/default Observe samples, as described above. Since no work is needed,
+  existing labor is not qualified and
   `worker_prerequisite_checked=false`; this is not a complete labor/production
-  goal proof. Observe again before a later goal.
+  goal proof. Cancel this watch before changing the goal, and Observe again when
+  the original selection has been consumed by sampling.
 - **Within the limit:** `status="planned"` and the exact positive deficit is
   sealed into one finite order. With the default `assign_labor=false`, this is
   StepId 0. Current selected labor and citizen eligibility are independently
@@ -889,10 +930,13 @@ Plan obtains one fresh complete source-qualified operations/1.3 census at the
 original paused citizen tick. Every target uses that same census. For example,
 observed BED=4, DOOR=2 and TABLE=1 yields two orders: three beds and three tables.
 The door target creates no order, but DOOR>=2 remains part of the complete
-original goal. If all targets are met, the result is a count-only
-`status="already_satisfied"` with no original plan, keys, archive or native
-effect, and no workforce-prerequisite proof. This also holds with `assign_labor=true`: an
-all-met request neither assigns labor nor requires ConfigureLabor authority. If any positive deficit exceeds its
+original goal. If all targets are met, the historical assessment reports
+`status="already_satisfied"` with no original effect plan, insertion keys,
+archive or native effect, and no workforce-prerequisite proof. A separate
+`no_work_stock_goal` retains every original minimum and the shared timing for
+the read-only portfolio monitor described above. It starts without a temporal
+sample or current proof. This also holds with `assign_labor=true`: an all-met
+request neither assigns labor nor requires ConfigureLabor authority. If any positive deficit exceeds its
 selected limit or any required sizing evidence is unavailable, the whole proposal
 refuses. Matching production jobs and unknown reaction output retain the
 single-target policy; no pending output is credited to stock.
@@ -942,8 +986,9 @@ identity; it never resizes an amount or substitutes a replacement key.
 
 ### Prove the whole requested stock set
 
-After all insertions settle, Wait samples the full original portfolio, even when
-only one target needed an order. A coherent current parent includes current
+For a portfolio with positive deficits, after all insertions settle, Wait
+samples the full original portfolio, even when only one target needed an order.
+A coherent current parent includes current
 labor, every original leaf and every requested inventory minimum under the same
 paused source bracket. Its sorted `inventory_requirements` rows contain
 `item_type`, `minimum_stack_units`, independently qualified
@@ -1962,7 +2007,13 @@ reserves 230 MiB; six guards plus the existing 2 GiB parent ceiling require
 original order, at most three. These reservations share the same default 8 GiB
 call allowance and shrinking wall deadline. The prefix must exactly match the
 earlier original Created queue readback; arbitrary rows are not classified by
-this receipt check.
+this receipt check. When every target is already met, Plan additionally reserves
+64 MiB to retain the typed read-only portfolio watch. Each later foreground
+portfolio sample prepays 243 MiB for the complete citizen/operations capture,
+projection and qualification of up to four targets, plus 256 MiB for its
+publication work. Each sample's full reservation occurs before source contact
+and shares the same public allowance and shrinking deadline; sampling performs no effect or
+game-tick charge.
 When the manager prerequisite is configured, its owner uses the same 200 MiB
 import, 80 MiB fresh-read and 32 MiB local-verification reservations. Read custody
 can reserve 1,152 MiB and ordinary dispatch 2,304 MiB, accounting for both optional

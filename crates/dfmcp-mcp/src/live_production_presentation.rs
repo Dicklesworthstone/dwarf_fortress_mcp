@@ -1532,7 +1532,13 @@ fn encode(
         partial_domains.push("original_stock_target_portfolio");
     }
     if no_work_stock_goal.is_object() {
-        partial_domains.push("original_no_work_inventory_goal");
+        partial_domains.push(
+            if no_work_stock_goal["scope"] == "original_no_work_inventory_portfolio" {
+                "original_no_work_inventory_portfolio"
+            } else {
+                "original_no_work_inventory_goal"
+            },
+        );
     }
     if preplan_inspection_available {
         partial_domains.push("preplan_captured_operations");
@@ -1611,7 +1617,7 @@ fn encode(
     };
     if no_work_stock_goal.is_object() && !no_work_proven {
         uncertainty.push(json!({
-            "scope":"original_no_work_inventory_goal",
+            "scope":no_work_stock_goal["scope"],
             "epistemic_status":"unknown",
             "current_truth":no_work_stock_goal["sample"]["current_truth"],
             "source_fenced":no_work_stock_goal["source_fenced"],

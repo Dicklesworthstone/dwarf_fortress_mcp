@@ -28,6 +28,26 @@ fn stage(name: &str) -> TestResult {
     std::fs::write(std::env::var(STAGE)?, name)?;
     Ok(())
 }
+fn custody_bytes() -> TestResult<std::collections::BTreeMap<std::path::PathBuf, Vec<u8>>> {
+    let mut files = std::collections::BTreeMap::new();
+    for name in [
+        "DFMCP_COMBINED_PRODUCTION_CONFIG",
+        "DFMCP_SEMANTIC_WORKFORCE_CONFIG",
+        "DFMCP_SEMANTIC_WORK_ORDER_CONFIG",
+    ] {
+        let config: Value = serde_json::from_str(&std::env::var(name)?)?;
+        let directory = config["directory"]
+            .as_str()
+            .ok_or("missing custody directory")?;
+        for entry in std::fs::read_dir(directory)? {
+            let entry = entry?;
+            if entry.file_type()?.is_file() {
+                files.insert(entry.path(), std::fs::read(entry.path())?);
+            }
+        }
+    }
+    Ok(files)
+}
 fn open(mode: Mode) -> TestResult<Runtime> {
     let session = match mode {
         Mode::Control => 30_001,
@@ -216,11 +236,264 @@ fn assert_report(view: &Value, case: &str) -> TestResult {
     }
     Ok(())
 }
+
+fn no_work_watch(runtime: &mut Runtime, planned: &Value) -> TestResult {
+    let original = runtime
+        .stock_targets_no_work
+        .as_ref()
+        .ok_or("no-work portfolio owner absent")?
+        .request
+        .clone();
+    let start_tick = runtime.anchor.tick.get();
+    let witness = planned["no_work_stock_goal"]["goal_witness"].clone();
+    let files = custody_bytes()?;
+    assert_eq!(
+        planned["no_work_stock_goal"]["schema"],
+        "dfmcp.stock-targets-watch/1"
+    );
+    assert_eq!(
+        planned["no_work_stock_goal"]["deadline_tick"],
+        original.deadline_tick
+    );
+    assert!(planned["no_work_stock_goal"]["sample"].is_null());
+    let context = runtime.context(false)?;
+    let repeated = runtime
+        .plan_stock_targets(original.clone(), &context)?
+        .value;
+    assert_eq!(
+        repeated["no_work_stock_goal"],
+        planned["no_work_stock_goal"]
+    );
+    for change in 0..3 {
+        let mut changed = original.clone();
+        match change {
+            0 => changed.deadline_tick += 1,
+            1 => changed.targets[0].minimum_stack_units += 1,
+            _ => changed.assign_labor = !changed.assign_labor,
+        }
+        let context = runtime.context(false)?;
+        assert!(runtime.plan_stock_targets(changed, &context).is_err());
+        assert_eq!(
+            runtime
+                .stock_targets_no_work
+                .as_ref()
+                .ok_or("lost original")?
+                .request,
+            original
+        );
+    }
+    for (index, (phase, count, proven)) in [
+        ("", 0, false),
+        ("goal_first", 1, false),
+        ("goal_first", 1, false),
+        ("goal_second", 2, true),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        stage(phase)?;
+        let context = runtime.context(false)?;
+        let sampled = if index % 2 == 0 {
+            runtime.wait(&context)?
+        } else {
+            runtime.observe(ObserveRequest::default(), &context)?
+        }
+        .value;
+        assert_same(&sampled, planned);
+        assert_eq!(sampled["original_goal_proven"], proven);
+        assert_eq!(sampled["current_state_proven"], false);
+        let goal = &sampled["no_work_stock_goal"];
+        assert_eq!(goal["goal_witness"], witness);
+        assert_eq!(goal["deadline_tick"], original.deadline_tick);
+        assert_eq!(goal["original_goal_proven"], proven);
+        assert_eq!(goal["current_inventory_proven"], proven);
+        assert_eq!(goal["sample"]["stable_samples_observed"], count);
+        assert_eq!(goal["sample"]["current_truth"], "true");
+        assert_eq!(goal["sample"]["anchor"], sampled["anchor"]);
+        let targets = goal["sample"]["targets"]
+            .as_array()
+            .ok_or("current target census")?;
+        assert_eq!(targets.len(), 2);
+        for (index, (kind, units)) in [("BED", 6), ("DOOR", 3)].into_iter().enumerate() {
+            assert_eq!(targets[index]["item_type"], kind);
+            assert_eq!(targets[index]["observed_stack_units"], units);
+            assert_eq!(targets[index]["current_truth"], "true");
+        }
+        for key in [
+            "native_effect_dispatched",
+            "labor_assignment_planned",
+            "worker_prerequisite_checked",
+        ] {
+            assert_eq!(goal[key], false);
+        }
+        assert!(sampled["original_plan"].is_null());
+        assert!(sampled["frontier"].is_null());
+        assert!(sampled["review"].is_null());
+    }
+    let current = inspect(runtime)?;
+    let context = runtime.context(false)?;
+    let repeated = runtime
+        .plan_stock_targets(original.clone(), &context)?
+        .value;
+    assert_eq!(
+        repeated["no_work_stock_goal"],
+        current["no_work_stock_goal"]
+    );
+
+    // Exercise the actual response-size refusal and the Runtime withdrawal
+    // hook used by live_production_server::render. This component fixture does
+    // not substitute for MCP transport or final authority-boundary evidence.
+    stage("watch_publication")?;
+    let context = runtime.context(false)?;
+    let mut unpublished = runtime.wait(&context)?.value;
+    assert_eq!(unpublished["original_goal_proven"], true);
+    unpublished["fixture_output_overflow"] = json!("x".repeat(70_000));
+    let retained = runtime.opening_recovery_reference();
+    let (packet, overflow) = crate::live_production_server::presentation::packet(
+        "fortress.wait",
+        Some(runtime.session_id()),
+        Some(runtime.anchor()),
+        Some(runtime.mode().as_str()),
+        Some(context.request_id),
+        Some(context.budget),
+        unpublished,
+        Some(&retained),
+        true,
+        false,
+    );
+    assert!(overflow);
+    let refused: Value = serde_json::from_str(&packet)?;
+    assert_eq!(refused["original_goal_proven"], false);
+    assert_eq!(refused["error"]["code"], "budget_exceeded");
+    runtime.abandon_preparation();
+    assert_eq!(runtime.authority_tick_floor().get(), start_tick + 15);
+    assert_eq!(
+        runtime
+            .stock_targets_no_work
+            .as_ref()
+            .ok_or("lost original")?
+            .monitor
+            .high_tick()
+            .get(),
+        start_tick + 15
+    );
+    let withdrawn = inspect(runtime)?;
+    assert_same(&withdrawn, planned);
+    assert_eq!(withdrawn["original_goal_proven"], false);
+    assert!(withdrawn["no_work_stock_goal"]["sample"].is_null());
+    assert_eq!(withdrawn["no_work_stock_goal"]["goal_witness"], witness);
+    assert_eq!(custody_bytes()?, files);
+
+    stage("watch_consumed")?;
+    let context = runtime.context(false)?;
+    let consumed = runtime.wait(&context)?.value;
+    assert_same(&consumed, planned);
+    assert_eq!(consumed["original_goal_proven"], false);
+    let sample = &consumed["no_work_stock_goal"]["sample"];
+    assert_eq!(sample["current_truth"], "false");
+    assert_eq!(sample["targets"][0]["observed_stack_units"], 6);
+    assert_eq!(sample["targets"][1]["observed_stack_units"], 0);
+    assert_eq!(sample["achieved_at_tick"], start_tick + 10);
+    stage("watch_restored")?;
+    let context = runtime.context(false)?;
+    let restored = runtime.observe(ObserveRequest::default(), &context)?.value;
+    assert_same(&restored, planned);
+    assert_eq!(restored["original_goal_proven"], true);
+    assert_eq!(
+        restored["no_work_stock_goal"]["sample"]["achieved_at_tick"],
+        start_tick + 10
+    );
+
+    // A decoded future operations census cannot be published against an older
+    // citizen anchor, and its consumed tick cannot later be rolled back.
+    let anchor = runtime.anchor;
+    for phase in ["watch_source_ahead", "watch_source_behind"] {
+        stage(phase)?;
+        let context = runtime.context(false)?;
+        assert!(runtime.wait(&context).is_err());
+        assert_eq!(runtime.anchor, anchor);
+        assert_eq!(runtime.authority_tick_floor().get(), start_tick + 50);
+        let retained = inspect(runtime)?;
+        assert_same(&retained, planned);
+        assert_eq!(retained["original_goal_proven"], false);
+        assert!(retained["no_work_stock_goal"]["sample"].is_null());
+        assert_eq!(retained["no_work_stock_goal"]["source_fenced"], false);
+        assert_eq!(retained["no_work_stock_goal"]["goal_witness"], witness);
+        assert_eq!(
+            retained["no_work_stock_goal"]["consumed_tick_floor"],
+            start_tick + 50
+        );
+    }
+    stage("watch_source_current")?;
+    let context = runtime.context(false)?;
+    let current = runtime.observe(ObserveRequest::default(), &context)?.value;
+    assert_same(&current, planned);
+    assert_eq!(current["original_goal_proven"], true);
+    assert_eq!(current["anchor"]["tick"], start_tick + 50);
+    assert_eq!(
+        current["no_work_stock_goal"]["sample"]["achieved_at_tick"],
+        start_tick + 10
+    );
+    assert_eq!(
+        current["no_work_stock_goal"]["deadline_tick"],
+        original.deadline_tick
+    );
+    let recovery = runtime.opening_recovery_reference();
+    assert_eq!(recovery["original_goal_proven"], false);
+    assert_eq!(
+        recovery["no_work_stock_goal"]["original_goal_proven"],
+        false
+    );
+    assert!(recovery["no_work_stock_goal"]["sample"].is_null());
+    assert_eq!(custody_bytes()?, files);
+
+    let context = runtime.context(false)?;
+    let cancelled = runtime.cancel(&context)?.value;
+    assert_same(&cancelled, planned);
+    assert_eq!(cancelled["no_work_stock_goal"]["cancelled"], true);
+    assert_eq!(cancelled["original_goal_proven"], false);
+    assert!(cancelled["no_work_stock_goal"]["sample"].is_null());
+    let context = runtime.context(false)?;
+    let waiting = runtime.wait(&context)?.value;
+    assert_eq!(
+        waiting["no_work_stock_goal"],
+        cancelled["no_work_stock_goal"]
+    );
+
+    // Cancellation permits an explicit fresh observation and new request. It
+    // cannot lend the new portfolio the earlier owner's temporal achievement.
+    stage("watch_new_plan")?;
+    let context = runtime.context(false)?;
+    let observed = runtime.observe(ObserveRequest::default(), &context)?.value;
+    let mut replacement = original;
+    replacement.expected_observation = text(&observed["observation"]["seal"])?.into();
+    replacement.deadline_tick = runtime.anchor.tick.get() + 300;
+    replacement.targets[0].minimum_stack_units = 5;
+    let deadline = replacement.deadline_tick;
+    let context = runtime.context(false)?;
+    let replanned = runtime.plan_stock_targets(replacement, &context)?.value;
+    assert_ne!(replanned["no_work_stock_goal"]["goal_witness"], witness);
+    assert_eq!(replanned["no_work_stock_goal"]["deadline_tick"], deadline);
+    assert_eq!(
+        replanned["no_work_stock_goal"]["targets"][0]["target_stack_units"],
+        5
+    );
+    assert_eq!(replanned["no_work_stock_goal"]["cancelled"], false);
+    assert_eq!(replanned["original_goal_proven"], false);
+    assert!(replanned["no_work_stock_goal"]["sample"].is_null());
+    assert!(runtime.original.is_none());
+    assert!(runtime.frontier.is_none());
+    assert!(runtime.portfolio.is_none());
+    assert_eq!(custody_bytes()?, files);
+    output(&replanned)
+}
+
 fn control(case: &str) -> TestResult {
     if let Some(behavior) = case.strip_prefix("assignment_") {
         return assignment_control(case, behavior);
     }
     let mut runtime = open(Mode::Control)?;
+    let before_no_work = (case == "already").then(custody_bytes).transpose()?;
     let context = runtime.context(false)?;
     let observed = runtime.observe(ObserveRequest::default(), &context)?.value;
     let request = request(&runtime, &observed, case)?;
@@ -254,7 +527,8 @@ fn control(case: &str) -> TestResult {
             planned["stock_targets"]["worker_prerequisite_checked"],
             false
         );
-        return output(&planned);
+        assert_eq!(Some(custody_bytes()?), before_no_work);
+        return no_work_watch(&mut runtime, &planned);
     }
     // Even one positive leaf is an original portfolio: all met targets keep
     // their current proof and complete-parent temporal requirements.
@@ -489,6 +763,7 @@ fn stock_targets_runtime_cases() -> TestResult {
 
 fn assignment_control(case: &str, behavior: &str) -> TestResult {
     let mut runtime = open(Mode::Control)?;
+    let before_no_work = (behavior == "already").then(custody_bytes).transpose()?;
     let context = runtime.context(false)?;
     let observed = runtime.observe(ObserveRequest::default(), &context)?.value;
     let request = request(&runtime, &observed, case)?;
@@ -524,7 +799,8 @@ fn assignment_control(case: &str, behavior: &str) -> TestResult {
         assert!(planned["original_plan"].is_null());
         assert!(planned["frontier"].is_null());
         assert!(!runtime.config.path("original.plan").exists());
-        return output(&planned);
+        assert_eq!(Some(custody_bytes()?), before_no_work);
+        return no_work_watch(&mut runtime, &planned);
     }
     assert!(runtime.portfolio.is_some());
     let steps = planned["original_plan"]["steps"]
