@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased — Resource-project production inspection
+
+- Expose original portfolio order selection through the existing project Query.
+- Route bounded, source-anchored inventory, production diagnosis and structured
+  queries through the actual combined-production inspector in the same session.
+- Reject selectors in other stages and scalar goals; preserve source freshness,
+  original identity, uncertainty and complete response bounds.
+- Add three focused routing/parser regression groups. Execution and formatting
+  remain unavailable after the execution host failed; this is source evidence.
+
 ## Unreleased — Portfolio publication and recovery campaign
 
 - Extend the actual Runtime/native-TCP publication fixture from seven scalar

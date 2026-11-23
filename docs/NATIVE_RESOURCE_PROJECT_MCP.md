@@ -412,6 +412,38 @@ fresh handoff sample is evidence at its export anchor; production still freshly
 qualifies the original donor before positive planning and protected native
 order boundaries.
 
+### Inspect production without leaving the project
+
+In the Production stage, `fortress_query` accepts optional `order_step_id`
+and `request` arguments. The selector is an original plan StepId, not a native
+manager-order ID. Existing-worker portfolios start their order StepIds at zero;
+portfolios with a separately reviewed labor-enable step start at one. Scalar
+goals and non-production stages reject order selectors.
+
+With no `request`, selecting an order inspects that exact original's local
+custody, goal and independently configured clock state. It does not sample the
+game or change the original portfolio. A pending or uncertain clock still
+prevents an incompatible selection.
+
+A closed `dfmcp.query/1` request uses the same bounded inspector as the combined
+production profile. Before planning, call `fortress_observe` with
+`include_production: true` in its existing observation request and omit an order
+selector. After an original exists, `fortress_wait` must first publish the
+selected order's current operations sample. Use the exact
+`child.production_inspection_source.anchor` as `expected_anchor`; the parent
+or citizen anchor cannot substitute for it.
+
+For example, pass the child's published `diagnosis_request` or
+`inventory_totals_request` as the Query `request` string, with the corresponding
+original `order_step_id` for a portfolio. Supported queries include observed
+production diagnoses, inventory totals, declared supply-chain models and
+bounded entity, graph and event inspection. The existing child validates
+coverage, freshness, source identity, current authority and query budgets.
+Inspection performs no native read or mutation, does not advance time, and
+cannot restore a source after a failed observation or restart. Stock totals
+include ineligible items; declared supply-chain results are models and do not
+prove native recipe feasibility, reservations or goal completion.
+
 ### 4. Plan the fixed stock target or portfolio
 
 Call `fortress_observe` for current production worker choices. The existing

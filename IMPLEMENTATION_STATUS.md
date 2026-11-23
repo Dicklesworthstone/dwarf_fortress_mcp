@@ -1,5 +1,31 @@
 # Implementation Status
 
+## Unreleased — Inspect production inside the original resource project
+
+The native resource-project Query now reaches the existing combined-production
+inspection owner. Agents can select an exact original portfolio order and
+inspect its custody, or run bounded source-anchored inventory, production
+diagnosis and structured queries against an already captured operations sample.
+Non-production stages reject these requests; scalar roots reject order
+selectors. Pre-plan inspection keeps its existing no-selector contract.
+
+The parent preserves the complete original goal, current authority, source
+coverage and freshness checks, pending-clock selection fences and response
+bounds. Query creates no native read, mutation, time advancement or replacement
+plan. Recovery still restores no inspection source or current goal proof.
+
+Three focused Rust regression groups cover the routing matrix, all supported
+query kinds, closed envelopes, duplicate fields and request bounds. They are
+authored and independently source-reviewed, not executed. The execution
+environment became unavailable after the official nightly installation failed
+with disk exhaustion. No Rust compilation, formatting or test result is claimed
+for this increment; prior component results do not qualify it. Production
+portfolio clocks remain gated pending complete per-slot parent recovery.
+
+Owners: `df-native-stock-target-3m9`,
+`df-production-preplan-inspection-7hd` and
+`dfmcp-reality-wiring-proof-4bf.14` (in progress).
+
 ## Unreleased — Exercise portfolio publication and lost-reply recovery
 
 The actual combined-production Runtime/native-TCP campaign now preserves its

@@ -316,10 +316,17 @@ pub fn fortress_observe(
 
 #[tool(
     name = "fortress_query",
-    description = "Verify local parent and active-child custody and expose original goals, stage, reviews, source floors, clock uncertainty and exact recovery references. Does not renew a native observation or prove inventory is still unchanged."
+    description = "Verify local parent and active-child custody and expose original goals, stage, reviews, source floors, clock uncertainty and exact recovery references. In production, optional order_step_id selects an exact original portfolio order. Optional closed dfmcp.query/1 request inspects a previously captured operations source for inventory totals, production diagnosis, declared supply chains and bounded structured queries. expected_anchor names production_inspection_source.anchor. Before original planning, Observe(include_production=true) supplies the source and order selectors are forbidden; afterwards Wait supplies the current selected source. Other stages reject both selectors. Inspection does not read the native game, advance time, renew observations or authorize effects."
 )]
-pub fn fortress_query(session_id: String) -> McpResult<CompleteResult<FinalCallToolResult>> {
-    call("fortress.query", session_id, Action::Inspect)
+pub fn fortress_query(
+    session_id: String,
+    order_step_id: Option<u32>,
+    request: Option<String>,
+) -> McpResult<CompleteResult<FinalCallToolResult>> {
+    match Action::query(request.as_deref(), order_step_id) {
+        Ok(action) => call("fortress.query", session_id, action),
+        Err(cause) => rejected("fortress.query", session_id, cause),
+    }
 }
 
 #[tool(

@@ -5,7 +5,8 @@ use super::continuity;
 use super::error;
 use super::journal::{self, Checkpoint, Mode, Stage};
 use crate::live_production_runtime::{
-    Config as ProductionConfig, Mode as ProductionMode, ObserveRequest, ProjectProductionIntent,
+    Config as ProductionConfig, InspectionRequest, Mode as ProductionMode, ObserveRequest,
+    ProjectProductionIntent,
     ProjectStockGoal, Runtime as ProductionRuntime, StockTargetRequest, StockTargetsRequest,
 };
 use crate::manager_appointment_server::{
@@ -100,6 +101,8 @@ fn production_mode(mode: Mode) -> ProductionMode {
 pub(super) enum Action {
     Observe(Option<String>),
     Inspect,
+    InspectOrder(u32),
+    InspectProduction(InspectionRequest, Option<u32>),
     Plan(String),
     Commit {
         seal: String,
@@ -108,6 +111,39 @@ pub(super) enum Action {
     },
     Wait(Option<String>),
     Cancel(Option<String>),
+}
+
+impl Action {
+    pub(super) fn query(request: Option<&str>, order_step_id: Option<u32>) -> Result<Self> {
+        if order_step_id.is_some_and(|step| step > 4) {
+            return Err(invalid("order_step_id must name an original order from zero through four"));
+        }
+        match request {
+            Some(raw) => Ok(Self::InspectProduction(
+                InspectionRequest::parse(raw)?,
+                order_step_id,
+            )),
+            None => Ok(order_step_id.map_or(Self::Inspect, Self::InspectOrder)),
+        }
+    }
+
+    fn validate_query_scope(&self, production: bool, portfolio: bool) -> Result<()> {
+        let selector = match self {
+            Self::InspectOrder(step) => Some(*step),
+            Self::InspectProduction(_, step) => *step,
+            _ => return Ok(()),
+        };
+        if !production || selector.is_some_and(|step| step > 4 || !portfolio) {
+            return Err(invalid(
+                "structured inspection requires production; order selectors require its original portfolio",
+            ));
+        }
+        Ok(())
+    }
+
+    fn is_inspection(&self) -> bool {
+        matches!(self, Self::Inspect | Self::InspectOrder(_) | Self::InspectProduction(..))
+    }
 }
 
 enum ProductionTargetRequest {
@@ -813,6 +849,10 @@ impl Runtime {
     }
 
     fn child_call(&mut self, action: Action, work: &mut Work) -> Result<Value> {
+        action.validate_query_scope(
+            matches!(&self.child, Some(Child::Production(_))),
+            self.config.goal.is_portfolio(),
+        )?;
         let mut stock_target = false;
         if let Action::Plan(raw) = &action {
             if raw.len() > 8192 {
@@ -930,6 +970,9 @@ impl Runtime {
                         ));
                     }
                     Action::Inspect => WorkshopAction::Inspect,
+                    Action::InspectOrder(_) | Action::InspectProduction(..) => {
+                        return Err(invalid("Workshop has no production inspection selector"));
+                    }
                     Action::Plan(raw) => WorkshopAction::Plan(raw),
                     Action::Commit {
                         seal,
@@ -975,6 +1018,10 @@ impl Runtime {
                         &current,
                     ),
                     Action::Inspect => child.inspect(&current),
+                    Action::InspectOrder(step) => child.inspect_order(Some(step), &current),
+                    Action::InspectProduction(request, step) => {
+                        child.inspect_production(request, step, &current)
+                    }
                     Action::Plan(raw) => {
                         let value: Value = serde_json::from_str(&raw)
                             .map_err(|_| invalid("invalid production project request"))?;
@@ -1091,7 +1138,7 @@ impl Runtime {
                 if matches!(scope.as_deref().unwrap_or("project"), "goal" | "project"));
             // The reserved terminal frame must remain usable even when there
             // is no space for another active-stage checkpoint.
-            self.preflight(&mut work, stopping || matches!(&action, Action::Inspect))?;
+            self.preflight(&mut work, stopping || action.is_inspection())?;
             if stopping {
                 let base = self.context(&work)?;
                 let current = work.reserve(&base, journal::WORK_BYTES)?;

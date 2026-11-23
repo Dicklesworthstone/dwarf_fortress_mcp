@@ -102,3 +102,72 @@ fn fixed_portfolio_rejects_dropped_targets_and_every_changed_root_term()
     assert!(ProductionTargetRequest::parse(&duplicate, &goal).is_err());
     Ok(())
 }
+
+#[test]
+fn production_query_keeps_original_order_selection_explicit_and_stage_scoped() -> Result<()> {
+    assert!(matches!(Action::query(None, None)?, Action::Inspect));
+    for step in 0..=4 {
+        let query = Action::query(None, Some(step))?;
+        assert!(matches!(&query, Action::InspectOrder(selected) if *selected == step));
+        assert!(query.is_inspection());
+        query.validate_query_scope(true, true)?;
+        assert!(query.validate_query_scope(false, true).is_err());
+        assert!(query.validate_query_scope(true, false).is_err());
+    }
+    for step in [5, u32::MAX] {
+        assert!(Action::query(None, Some(step)).is_err());
+    }
+    Ok(())
+}
+
+#[test]
+fn production_queries_use_the_existing_closed_source_bound_inspector() -> Result<()> {
+    for kind in [
+        "production_diagnosis",
+        "inventory_plan",
+        "production_chain",
+        "production_chain_compare",
+        "aggregate",
+        "entities",
+        "inspect",
+        "traverse",
+        "dependencies",
+        "search",
+        "events",
+        "spatial_entities",
+        "related_entities",
+        "ranked_entities",
+    ] {
+        let raw = json!({"schema":"dfmcp.query/1","query":{"kind":kind}}).to_string();
+        for step in [None, Some(0), Some(4)] {
+            let query = Action::query(Some(&raw), step)?;
+            assert!(matches!(&query, Action::InspectProduction(_, selected) if *selected == step));
+            assert!(query.is_inspection());
+            query.validate_query_scope(true, true)?;
+            assert!(query.validate_query_scope(false, true).is_err());
+            assert_eq!(query.validate_query_scope(true, false).is_ok(), step.is_none());
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn production_query_parser_rejects_foreign_authority_and_unbounded_envelopes() {
+    for raw in [
+        r#"{"schema":"dfmcp.query/2","query":{"kind":"aggregate"}}"#,
+        r#"{"schema":"dfmcp.query/1","query":{"kind":"run"}}"#,
+        r#"{"schema":"dfmcp.query/1","query":{"kind":"aggregate"},"confirmed":true}"#,
+        r#"{"schema":"dfmcp.query/1","schema":"dfmcp.query/1","query":{"kind":"aggregate"}}"#,
+        r#"{"schema":"dfmcp.query/1","query":{"kind":"aggregate"},"query":{"kind":"entities"}}"#,
+        r#"{"schema":"dfmcp.query/1","query":{"kind":"aggregate"},"order_step_id":0}"#,
+        "{}",
+        "null",
+    ] {
+        assert!(Action::query(Some(raw), None).is_err(), "{raw}");
+    }
+    let oversized = format!(
+        r#"{{"schema":"dfmcp.query/1","query":{{"kind":"aggregate","padding":"{}"}}}}"#,
+        "x".repeat(65_536)
+    );
+    assert!(Action::query(Some(&oversized), None).is_err());
+}

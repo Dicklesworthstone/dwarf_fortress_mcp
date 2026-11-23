@@ -187,6 +187,9 @@ pub(super) fn action(action: Action, offline: bool) -> Result<TreeAction> {
             return Err(invalid("Tree observation has no caller-selected source"));
         }
         Action::Inspect => TreeAction::Query,
+        Action::InspectOrder(_) | Action::InspectProduction(..) => {
+            return Err(invalid("Tree has no production inspection selector"));
+        }
         Action::Plan(raw) => {
             let value: Value =
                 serde_json::from_str(&raw).map_err(|_| invalid("invalid Tree project request"))?;

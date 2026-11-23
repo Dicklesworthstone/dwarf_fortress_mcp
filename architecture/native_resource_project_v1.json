@@ -9,7 +9,8 @@
   "work_items": [
     "df-dfhack-bridge-plane-c-pic.4",
     "dfmcp-reality-wiring-proof-4bf.14",
-    "df-native-stock-target-3m9"
+    "df-native-stock-target-3m9",
+    "df-production-preplan-inspection-7hd"
   ],
   "public_tools": [
     "fortress_open_session",
@@ -181,7 +182,8 @@
     "portfolio_targets": 4,
     "portfolio_order_slots": 4,
     "stock_targets_request_bytes": 8192,
-    "other_plan_request_bytes": 4096
+    "other_plan_request_bytes": 4096,
+    "production_inspection_request_bytes": 65536
   },
   "output": {
     "agent_turn_schema": "dfmcp.agent_turn/1",
@@ -308,7 +310,10 @@
     "crates/dfmcp-mcp/src/live_production_runtime/stock_targets_watch.rs",
     "crates/dfmcp-mcp/src/native_resource_project/portfolio_runtime_tests.rs",
     "crates/dfmcp-mcp/src/native_resource_project/portfolio_presentation_tests.rs",
-    "crates/dfmcp-mcp/src/semantic_work_order_runtime/native.rs"
+    "crates/dfmcp-mcp/src/semantic_work_order_runtime/native.rs",
+    "crates/dfmcp-mcp/src/live_production_runtime/inspection.rs",
+    "crates/dfmcp-mcp/src/live_production_runtime/planning_inspection.rs",
+    "crates/dfmcp-mcp/src/live_production_runtime/portfolio.rs"
   ],
   "qualification": {
     "pre_outage_ledger_component_cases_passed": 17,
@@ -465,5 +470,28 @@
     "full_owner_typecheck_completed": false,
     "full_owner_typecheck_blocker": "metadata-only compiler received SIGKILL under memory pressure; no successful full-owner result",
     "successful_component_evidence_blob": "59eb141fe3933ccf7b38feaa81299645e0883c57"
+  },
+  "production_inspection": {
+    "tool": "fortress_query",
+    "optional_arguments": [
+      "order_step_id",
+      "request"
+    ],
+    "request_schema": "dfmcp.query/1",
+    "owner": "live_production_runtime::Runtime::inspect_production",
+    "selector": "original portfolio order StepId; zero through four, membership checked by original owner",
+    "non_production_stage_selectors": false,
+    "scalar_goal_order_selector": false,
+    "preplan_order_selector": false,
+    "source": "previously captured complete eligible operations sample",
+    "expected_anchor": "production_inspection_source.anchor",
+    "current_authority_and_source_coverage_required": true,
+    "recovery_restores_source": false,
+    "native_contact": false,
+    "time_advance": false,
+    "mutation_authority": false,
+    "new_regression_groups_authored": 3,
+    "rust_tests_executed": false,
+    "execution_status": "execution environment unavailable after nightly installation disk exhaustion; source review only"
   }
 }

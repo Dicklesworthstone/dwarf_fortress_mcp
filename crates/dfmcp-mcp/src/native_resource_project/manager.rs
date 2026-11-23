@@ -214,6 +214,9 @@ pub(super) fn action(action: Action, offline: bool, deadline: u64) -> Result<Man
             return Err(invalid("Manager observation has no caller-selected source"));
         }
         Action::Inspect => ManagerAction::Query(None),
+        Action::InspectOrder(_) | Action::InspectProduction(..) => {
+            return Err(invalid("Manager has no production inspection selector"));
+        }
         Action::Plan(raw) => {
             // Deserialize the original raw request, preserving duplicate-field
             // rejection before the existing child receives exactly these bytes.
