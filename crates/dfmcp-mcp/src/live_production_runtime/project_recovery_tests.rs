@@ -843,3 +843,207 @@ fn scalar_publication_goal_serialization_stays_untagged_and_clock_pinned() -> Re
     assert!(intent.validate_checkpoint(&without_clock).is_err());
     Ok(())
 }
+
+fn clocked_portfolio_fixture(
+    assign_labor: bool,
+    count: usize,
+    order_clock: bool,
+    inventory_clock: bool,
+) -> Result<(ProjectProductionIntent, Value, Value)> {
+    let (original, _, mut reference) = portfolio_fixture(assign_labor, count)?;
+    let slots = (0..count)
+        .map(|index| {
+            let pin = |family: &str| {
+                let id = identity(&format!("original portfolio {index} {family}")).to_hex();
+                json!({
+                    "journal_id": id, "head": id,
+                    "authority_tick_floor": 150, "high_source_sequence": 0,
+                })
+            };
+            json!({
+                "step_id": u32::from(assign_labor) + index as u32,
+                "clock": order_clock.then(|| pin("order")),
+                "inventory_clock": inventory_clock.then(|| pin("inventory")),
+            })
+        })
+        .collect::<Vec<_>>();
+    reference["portfolio_clocks"] = json!(slots);
+    for index in 0..count {
+        for (pin, id) in [
+            ("clock", "clock_journal_id"),
+            ("inventory_clock", "inventory_clock_journal_id"),
+        ] {
+            reference["recovery"]["portfolio"][index][id] = slots[index][pin]["journal_id"].clone();
+        }
+    }
+    for (pin, id) in [
+        ("clock", "clock_journal_id"),
+        ("inventory_clock", "inventory_clock_journal_id"),
+    ] {
+        reference[pin] = slots[0][pin].clone();
+        reference["recovery"][id] = slots[0][pin]["journal_id"].clone();
+    }
+    let intent = ProjectProductionIntent::new(
+        original.goal,
+        reference.clone(),
+        original.input_policy_witness.clone(),
+    )?;
+    let mut preplan = reference.clone();
+    preplan["recovery"] = Value::Null;
+    preplan
+        .as_object_mut()
+        .ok_or_else(|| invalid("test preplan object"))?
+        .remove("portfolio_clocks");
+    preplan["input_supply"]["checkpoint"]["origin_witness"] =
+        json!(original.input_policy_witness);
+    Ok((intent, preplan, reference))
+}
+
+fn checked_reference(reference: &Value) -> Result<()> {
+    validate_reference_sources(&retained(reference)?, reference_recovery(reference)?)
+}
+
+#[test]
+fn portfolio_clock_reference_keeps_every_slot_and_each_independent_family() -> Result<()> {
+    for assign in [false, true] {
+        for count in 1..=4 {
+            for (order, inventory) in [(true, false), (false, true), (true, true)] {
+                let (intent, preplan, planned) =
+                    clocked_portfolio_fixture(assign, count, order, inventory)?;
+                checked_reference(&planned)?;
+                intent.validate_checkpoint(&preplan)?;
+                intent.validate_pending_checkpoint(&planned)?;
+                let slots = portfolio_clock_pins(
+                    &retained(&planned)?,
+                    reference_recovery(&planned)?,
+                )?
+                .ok_or_else(|| invalid("test complete clock vector absent"))?;
+                assert_eq!(slots.iter().flatten().count(), count);
+                for (index, slot) in slots.into_iter().flatten().enumerate() {
+                    assert_eq!(slot.step_id, u32::from(assign) + index as u32);
+                    assert_eq!(slot.clock.is_some(), order);
+                    assert_eq!(slot.inventory_clock.is_some(), inventory);
+                }
+                assert_eq!(publication_reference(&preplan, &intent)?, planned);
+            }
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn portfolio_clock_reference_rejects_incomplete_or_substituted_inactive_custody() -> Result<()> {
+    let (_, _, planned) = clocked_portfolio_fixture(false, 4, true, true)?;
+    let edits: [fn(&mut Value); 12] = [
+        |v| v["portfolio_clocks"] = Value::Null,
+        |v| v["portfolio_clocks"] = json!([]),
+        |v| v["portfolio_clocks"] = json!([v["portfolio_clocks"][0].clone()]),
+        |v| v["portfolio_clocks"][3]["step_id"] = json!(2),
+        |v| v["portfolio_clocks"][2]["clock"] = Value::Null,
+        |v| v["portfolio_clocks"][3]["inventory_clock"] = Value::Null,
+        |v| v["portfolio_clocks"][2]["clock"]["head"] = json!(Digest32::ZERO.to_hex()),
+        |v| v["portfolio_clocks"][3]["clock"]["journal_id"] =
+            json!(identity("replacement inactive owner").to_hex()),
+        |v| v["portfolio_clocks"][3]["clock"]["authority_tick_floor"] = json!(151),
+        |v| v["portfolio_clocks"][1]["inventory_clock"]["high_source_sequence"] = json!(-1),
+        |v| v["portfolio_clocks"][2]["permit"] = json!(true),
+        |v| v["clock"] = v["portfolio_clocks"][1]["clock"].clone(),
+    ];
+    for (index, edit) in edits.into_iter().enumerate() {
+        let mut changed = planned.clone();
+        edit(&mut changed);
+        assert!(checked_reference(&changed).is_err(), "{index}");
+    }
+    // Even internally matching metadata cannot reuse one journal for two
+    // original orders or reinterpret it as the independent clock family.
+    for family in ["clock", "inventory_clock"] {
+        let mut changed = planned.clone();
+        changed["portfolio_clocks"][3][family] = changed["portfolio_clocks"][2]["clock"].clone();
+        let id_field = if family == "clock" {
+            "clock_journal_id"
+        } else {
+            "inventory_clock_journal_id"
+        };
+        changed["recovery"]["portfolio"][3][id_field] =
+            changed["portfolio_clocks"][2]["clock"]["journal_id"].clone();
+        assert!(checked_reference(&changed).is_err());
+    }
+    let mut scalar = planned;
+    scalar["recovery"]["portfolio"] = Value::Null;
+    assert!(checked_reference(&scalar).is_err());
+    Ok(())
+}
+
+#[test]
+fn every_portfolio_clock_retains_source_floors_and_pending_publication_rejects_runs()
+-> Result<()> {
+    let (intent, _, planned) = clocked_portfolio_fixture(true, 4, true, true)?;
+    for index in 0..4 {
+        for family in ["clock", "inventory_clock"] {
+            let mut descendant = planned.clone();
+            descendant["observation_tick_floor"] = json!(170);
+            descendant["recovery"]["frontier"]["authority_tick_floor"] = json!(170);
+            descendant["portfolio_clocks"][index][family]["authority_tick_floor"] = json!(170);
+            descendant["portfolio_clocks"][index][family]["high_source_sequence"] = json!(9);
+            descendant["portfolio_clocks"][index][family]["head"] =
+                json!(identity("authentic later clock head").to_hex());
+            if index == 0 {
+                descendant[family] = descendant["portfolio_clocks"][0][family].clone();
+            }
+            intent.validate_checkpoint(&descendant)?;
+            assert!(intent.validate_pending_checkpoint(&descendant).is_err());
+            let prior = retained(&descendant)?;
+            for field in ["authority_tick_floor", "high_source_sequence"] {
+                let mut regressed = descendant.clone();
+                regressed["portfolio_clocks"][index][family][field] = json!(0);
+                if index == 0 {
+                    regressed[family] = regressed["portfolio_clocks"][0][family].clone();
+                }
+                assert!(
+                    compare_portfolio_clock_sources(&retained(&regressed)?, &prior, true).is_err(),
+                    "{index}/{family}/{field}"
+                );
+            }
+            let mut new_intent = intent.to_json();
+            new_intent["recovery_reference"] = descendant;
+            assert!(ProjectProductionIntent::from_json(&new_intent).is_err());
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn portfolio_publication_joins_preplan_clock_floors_without_replacing_other_slots() -> Result<()> {
+    let (intent, mut preplan, planned) = clocked_portfolio_fixture(false, 4, true, true)?;
+    preplan["observation_tick_floor"] = json!(170);
+    for family in ["clock", "inventory_clock"] {
+        preplan[family]["authority_tick_floor"] = json!(170);
+        preplan[family]["high_source_sequence"] = json!(11);
+    }
+    let joined = publication_reference(&preplan, &intent)?;
+    checked_reference(&joined)?;
+    intent.validate_pending_checkpoint(&joined)?;
+    for family in ["clock", "inventory_clock"] {
+        assert_eq!(joined["portfolio_clocks"][0][family], joined[family]);
+        for index in 1..4 {
+            assert_eq!(
+                joined["portfolio_clocks"][index][family],
+                planned["portfolio_clocks"][index][family]
+            );
+        }
+    }
+    preplan["portfolio_clocks"] = planned["portfolio_clocks"].clone();
+    assert!(intent.validate_checkpoint(&preplan).is_err());
+    Ok(())
+}
+
+#[test]
+fn clockless_and_scalar_recovery_do_not_gain_an_empty_clock_vector() -> Result<()> {
+    for (_, _, mut reference) in [publication_fixture()?, portfolio_fixture(false, 4)?] {
+        checked_reference(&reference)?;
+        assert!(reference.get("portfolio_clocks").is_none());
+        reference["portfolio_clocks"] = json!([]);
+        assert!(checked_reference(&reference).is_err());
+    }
+    Ok(())
+}

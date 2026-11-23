@@ -289,6 +289,24 @@ impl ProjectClockRecovery {
     }
 }
 
+/// Independent historical custody for each immutable original order slot.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct ProjectPortfolioClockRecovery {
+    pub(super) step_id: u32,
+    pub(super) clock: Option<ProjectClockRecovery>,
+    pub(super) inventory_clock: Option<ProjectClockRecovery>,
+}
+
+impl ProjectPortfolioClockRecovery {
+    pub(super) fn to_json(self) -> serde_json::Value {
+        serde_json::json!({
+            "step_id": self.step_id,
+            "clock": self.clock.map(ProjectClockRecovery::to_json),
+            "inventory_clock": self.inventory_clock.map(ProjectClockRecovery::to_json),
+        })
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub(super) struct ProjectRecovery {
     pub(super) workforce_journal: Digest32,
@@ -296,6 +314,7 @@ pub(super) struct ProjectRecovery {
     pub(super) observation_tick_floor: u64,
     pub(super) clock: Option<ProjectClockRecovery>,
     pub(super) inventory_clock: Option<ProjectClockRecovery>,
+    pub(super) portfolio_clocks: Option<[Option<ProjectPortfolioClockRecovery>; 4]>,
     pub(super) manager_origin: Option<Digest32>,
     pub(super) publication_pending: bool,
 }

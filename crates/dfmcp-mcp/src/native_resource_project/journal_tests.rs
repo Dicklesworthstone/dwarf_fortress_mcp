@@ -1281,6 +1281,249 @@ fn failed_intent_publication_never_acknowledges_child_write_permission() -> Test
     Ok(())
 }
 
+fn clocked_portfolio_publication() -> (Value, Checkpoint, Checkpoint, Checkpoint) {
+    let goal = json!({
+        "targets": [
+            {"recipe":"wooden_bed","minimum_stack_units":2,"max_order_amount":2},
+            {"recipe":"wooden_chair","minimum_stack_units":2,"max_order_amount":2},
+            {"recipe":"wooden_door","minimum_stack_units":2,"max_order_amount":2},
+            {"recipe":"wooden_table","minimum_stack_units":2,"max_order_amount":2}
+        ],
+        "deadline_tick":1000,"poll_interval_ticks":10,"stable_samples":2,"assign_labor":true,
+    });
+    let mut original = original();
+    original["goal"] = goal.clone();
+    let mut reference = production_publication();
+    let clocks: Vec<_> = (1..=4)
+        .map(|step_id| {
+            let pin = |family: &str| {
+                let id = Digest32::of_bytes(
+                    format!("original portfolio {family} {step_id}").as_bytes(),
+                )
+                .to_hex();
+                json!({
+                    "journal_id":id,"head":id,
+                    "authority_tick_floor":130,"high_source_sequence":0,
+                })
+            };
+            json!({"step_id":step_id,"clock":pin("order"),"inventory_clock":pin("inventory")})
+        })
+        .collect();
+    reference["recovery"]["portfolio"] = json!(
+        clocks
+            .iter()
+            .map(|slot| json!({
+                "step_id":slot["step_id"],"goal_history_present":false,
+                "clock_journal_id":slot["clock"]["journal_id"],
+                "inventory_clock_journal_id":slot["inventory_clock"]["journal_id"],
+            }))
+            .collect::<Vec<_>>()
+    );
+    for (family, identity) in [
+        ("clock", "clock_journal_id"),
+        ("inventory_clock", "inventory_clock_journal_id"),
+    ] {
+        reference[family] = clocks[0][family].clone();
+        reference["recovery"][identity] = clocks[0][family]["journal_id"].clone();
+    }
+    reference["portfolio_clocks"] = json!(clocks);
+    let mut intent = production_intent();
+    intent["goal"] = goal;
+    intent["recovery_reference"] = reference.clone();
+    let mut preplan_reference = reference.clone();
+    preplan_reference["recovery"] = Value::Null;
+    if let Some(object) = preplan_reference.as_object_mut() {
+        object.remove("portfolio_clocks");
+    }
+    let mut preplan = handoff();
+    preplan.production = Some(preplan_reference);
+    let mut intended = preplan.clone();
+    intended.production_intent = Some(intent);
+    let mut published = intended.clone();
+    published.production = Some(reference);
+    (original, preplan, intended, published)
+}
+
+fn clocked_portfolio_seeded() -> TestResult<(Journal<Memory, Memory>, Memory, Memory, Value)> {
+    let (original, preplan, intended, published) = clocked_portfolio_publication();
+    let storage = Memory::default();
+    let acknowledgements = Memory::default();
+    let mut c = context();
+    let mut journal = Journal::open(
+        storage.clone(),
+        acknowledgements.clone(),
+        &c,
+        Mode::Control,
+        true,
+        original.clone(),
+        None,
+    )?;
+    journal.advance(&c, Stage::Workshop, workshop())?;
+    journal.advance(&c, Stage::Transition, handoff())?;
+    journal.advance(&c, Stage::ProductionOpening, handoff())?;
+    c.anchor.tick = GameTick(130);
+    journal.advance(&c, Stage::Production, preplan)?;
+    journal.advance(&c, Stage::Production, intended)?;
+    journal.advance(&c, Stage::Production, published)?;
+    Ok((journal, storage, acknowledgements, original))
+}
+
+fn advance_inactive_portfolio_clocks(checkpoint: &mut Checkpoint) -> TestResult {
+    let reference = checkpoint.production.as_mut().ok_or("missing production")?;
+    for (index, family) in [(3, "clock"), (2, "inventory_clock")] {
+        reference["portfolio_clocks"][index][family]["head"] =
+            json!(Digest32::of_bytes(format!("retained {family} run {index}").as_bytes()).to_hex());
+        reference["portfolio_clocks"][index][family]["authority_tick_floor"] = json!(170);
+        reference["portfolio_clocks"][index][family]["high_source_sequence"] = json!(9);
+        reference["recovery"]["portfolio"][index]["goal_history_present"] = json!(true);
+    }
+    reference["observation_tick_floor"] = json!(170);
+    reference["recovery"]["frontier"]["authority_tick_floor"] = json!(170);
+    Ok(())
+}
+
+#[test]
+fn acknowledged_portfolio_clock_progress_reopens_from_ancestor_even_after_project_stop()
+-> TestResult {
+    for stopped in [false, true] {
+        let (mut journal, storage, acknowledgements, original) = clocked_portfolio_seeded()?;
+        let ancestor = journal.pin();
+        let mut c = context();
+        if stopped {
+            journal.cancel(&c)?;
+        }
+        let mut checkpoint = journal.snapshot().checkpoint.clone();
+        advance_inactive_portfolio_clocks(&mut checkpoint)?;
+        c.anchor.tick = GameTick(170);
+        let stage = if stopped {
+            Stage::Cancelled
+        } else {
+            Stage::Production
+        };
+        journal.advance(&c, stage, checkpoint.clone())?;
+        let expected = journal.pin();
+        let bytes = (storage.raw(), acknowledgements.raw());
+        let writes = (
+            storage.state.borrow().writes,
+            acknowledgements.state.borrow().writes,
+        );
+        drop(journal);
+        c.session_id = SessionId::new(7002);
+        let recovered = Journal::open(
+            storage.clone(),
+            acknowledgements.clone(),
+            &c,
+            Mode::Recover,
+            false,
+            original,
+            Some(ancestor),
+        )?;
+        assert_eq!(recovered.pin(), expected);
+        assert_eq!(recovered.snapshot().stage, stage);
+        assert_eq!(recovered.snapshot().checkpoint, checkpoint);
+        assert_eq!(
+            recovered.snapshot().cancelled_from,
+            stopped.then_some(Stage::Production)
+        );
+        assert_eq!((storage.raw(), acknowledgements.raw()), bytes);
+        assert_eq!(
+            (
+                storage.state.borrow().writes,
+                acknowledgements.state.borrow().writes,
+            ),
+            writes
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn checksummed_parent_replay_cannot_regress_inactive_portfolio_clock_custody() -> TestResult {
+    let (mut journal, storage, acknowledgements, original) = clocked_portfolio_seeded()?;
+    let mut c = context();
+    c.anchor.tick = GameTick(170);
+    let mut checkpoint = journal.snapshot().checkpoint.clone();
+    advance_inactive_portfolio_clocks(&mut checkpoint)?;
+    journal.advance(&c, Stage::Production, checkpoint.clone())?;
+    let pin = journal.pin();
+    let base = (storage.raw(), acknowledgements.raw());
+    let ack_chain = journal.ack_chain;
+    drop(journal);
+    for cause in 0..3 {
+        let mut regressed = checkpoint.clone();
+        let reference = regressed.production.as_mut().ok_or("missing production")?;
+        match cause {
+            0 => reference["portfolio_clocks"][3]["clock"]["authority_tick_floor"] = json!(160),
+            1 => {
+                reference["portfolio_clocks"][2]["inventory_clock"]["high_source_sequence"] =
+                    json!(8)
+            }
+            _ => reference["recovery"]["portfolio"][3]["goal_history_present"] = json!(false),
+        }
+        // Each forged frame still exceeds the initial intent's source floors.
+        // The prior acknowledged parent frame must independently retain the
+        // newer inactive owner and goal history, even with both public checksums.
+        let body = serde_json::to_vec(&Body {
+            high_tick: pin.authority_tick_floor,
+            snapshot: Snapshot {
+                stage: Stage::Production,
+                checkpoint: regressed,
+                cancelled_from: None,
+            },
+        })?;
+        let mut record = FRAME.to_vec();
+        record.extend_from_slice(&(body.len() as u32).to_be_bytes());
+        record.extend_from_slice(&(pin.frames + 1).to_be_bytes());
+        record.extend_from_slice(parsed_digest(&pin.head)?.as_bytes());
+        record.extend_from_slice(&body);
+        let head = Head {
+            digest: hash(b"dfmcp-resource-project-frame/1", &record),
+            tick: pin.authority_tick_floor,
+        };
+        record.extend_from_slice(head.digest.as_bytes());
+        let mut raw = base.0.clone();
+        raw.extend_from_slice(&record);
+        let mut ack = base.1.clone();
+        ack.extend_from_slice(&acknowledgement(
+            parsed_digest(&pin.journal_id)?,
+            head,
+            pin.frames + 1,
+            ack_chain,
+        ));
+        storage.replace(raw.clone());
+        acknowledgements.replace(ack.clone());
+        let writes = (
+            storage.state.borrow().writes,
+            acknowledgements.state.borrow().writes,
+        );
+        c.session_id = SessionId::new(7002);
+        assert!(
+            Journal::open(
+                storage.clone(),
+                acknowledgements.clone(),
+                &c,
+                Mode::Recover,
+                false,
+                original.clone(),
+                Some(pin.clone()),
+            )
+            .is_err(),
+            "{cause}"
+        );
+        assert_eq!((storage.raw(), acknowledgements.raw()), (raw, ack));
+        assert_eq!(
+            (
+                storage.state.borrow().writes,
+                acknowledgements.state.borrow().writes,
+            ),
+            writes
+        );
+    }
+    assert_eq!(storage.state.borrow().truncates, 0);
+    assert_eq!(acknowledgements.state.borrow().truncates, 0);
+    Ok(())
+}
+
 #[test]
 fn checksummed_replay_cannot_clear_replace_or_publish_against_another_intent() -> TestResult {
     let (mut journal, storage, acknowledgements) = production_seeded()?;

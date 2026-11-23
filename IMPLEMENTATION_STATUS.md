@@ -1,5 +1,31 @@
 # Implementation Status
 
+## Unreleased — Retain every original portfolio clock through recovery
+
+Combined-production project custody now exports an ordered checkpoint for every
+original order's configured order and inventory clocks. The legacy top-level
+clock summaries always refer to the first original order, so changing the active
+inspection leaf cannot change the parent identity. Every real owner contributes
+its current journal head, authority tick and source-sequence floor.
+
+Child recovery validates the complete vector before opening original custody and
+checks each inactive journal's retained head before restoring its target. Parent
+continuity rejects dropped, reordered, duplicated or substituted slots, changed
+clock families, regressed inactive counters and erased goal history. Pending
+original publication accepts only the exact untouched clock headers.
+
+Five child regression groups, seven continuity groups and two actual parent
+journal/independent-ACK/replay groups cover these boundaries. These additions
+have independent source review but remain unexecuted while the execution host
+is unavailable; no full compilation or new live qualification is claimed.
+The five files in the preceding inspection increment did successfully parse
+with the available September nightly rustfmt during a brief host recovery;
+that was a parser check, not formatting or test execution. Parent portfolio
+clock planning remains gated until prospective publication and explicit order
+routing are connected.
+
+Owner: `df-native-stock-target-3m9` (in progress).
+
 ## Unreleased — Inspect production inside the original resource project
 
 The native resource-project Query now reaches the existing combined-production

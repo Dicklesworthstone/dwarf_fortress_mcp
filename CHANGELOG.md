@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased — Complete portfolio clock recovery custody
+
+- Export every original order and inventory clock's real journal head and
+  rejection floors; keep first-order compatibility summaries stable when the
+  active order changes.
+- Verify inactive clock ancestry before target restoration and reject missing,
+  reordered, duplicated or substituted slots, counter regressions and lost
+  goal history through parent journal and independent-ACK replay.
+- Require untouched headers for pending original publication. Add child,
+  continuity and real parent-ledger regression groups; independently reviewed
+  source, with execution unavailable. Parent clock routing remains gated here.
+
 ## Unreleased — Resource-project production inspection
 
 - Expose original portfolio order selection through the existing project Query.

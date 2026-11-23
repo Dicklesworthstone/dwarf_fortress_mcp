@@ -342,6 +342,7 @@ impl Runtime {
         }
         self.activate_leaf(ids[0])?;
         if recovery.is_some() {
+            self.verify_project_portfolio_clocks(work)?;
             self.restore_portfolio_targets(work)?;
         }
         Ok(())
@@ -765,6 +766,86 @@ impl Runtime {
             })
         })
     }
+    /// Read the real owners rather than cached presentation views. The first
+    /// original order remains the legacy summary even when another is active.
+    pub(super) fn project_portfolio_clocks(
+        &self,
+    ) -> Option<Vec<config::ProjectPortfolioClockRecovery>> {
+        let portfolio = self.portfolio.as_ref()?;
+        if self.config.clock.is_none() && self.config.inventory_clock.is_none() {
+            return None;
+        }
+        Some(
+            self.portfolio_ids()
+                .into_iter()
+                .map(|step| {
+                    let (clock, inventory_clock) = if step == portfolio.active {
+                        (self.clock.as_ref(), self.inventory_clock.as_ref())
+                    } else {
+                        let leaf = portfolio.leaves.get(&step);
+                        (
+                            leaf.and_then(|leaf| leaf.clock.as_ref()),
+                            leaf.and_then(|leaf| leaf.inventory_clock.as_ref()),
+                        )
+                    };
+                    config::ProjectPortfolioClockRecovery {
+                        step_id: step.get(),
+                        clock: clock.map(ProductionClock::project_recovery_checkpoint),
+                        inventory_clock: inventory_clock
+                            .map(ProductionInventoryClock::project_recovery_checkpoint),
+                    }
+                })
+                .collect(),
+        )
+    }
+
+    /// The first slot was checked before the original archive opened. Every
+    /// additional owner must prove its own retained head before target recovery;
+    /// a selected-order summary cannot authenticate an inactive journal.
+    fn verify_project_portfolio_clocks(&mut self, work: &mut Work) -> Result<()> {
+        let Some(retained) = self
+            .config
+            .project_recovery
+            .and_then(|recovery| recovery.portfolio_clocks)
+        else {
+            return Ok(());
+        };
+        let ids = self.portfolio_ids();
+        if retained.iter().flatten().count() != ids.len() {
+            return Err(denied("project recovery lost an original clock slot"));
+        }
+        for (index, step) in ids.into_iter().enumerate() {
+            let pin = retained[index]
+                .filter(|pin| pin.step_id == step.get())
+                .ok_or_else(|| denied("project recovery changed an original clock slot"))?;
+            if index == 0 {
+                continue;
+            }
+            let leaf = self
+                .portfolio
+                .as_mut()
+                .and_then(|portfolio| portfolio.leaves.get_mut(&step))
+                .ok_or_else(|| denied("project recovery lost an inactive clock owner"))?;
+            match (&mut leaf.clock, pin.clock) {
+                (Some(clock), Some(pin)) => {
+                    clock.verify_project_recovery(pin, &work.take(8 * MIB)?)?;
+                }
+                (None, None) => {}
+                _ => return Err(denied("project recovery changed an inactive order clock")),
+            }
+            match (&mut leaf.inventory_clock, pin.inventory_clock) {
+                (Some(clock), Some(pin)) => {
+                    let context = work.take(8 * MIB)?;
+                    let native = self.config.orders.inventory_clock_context(&context, false)?;
+                    clock.verify_project_recovery(pin, &context, &native)?;
+                }
+                (None, None) => {}
+                _ => return Err(denied("project recovery changed an inactive inventory clock")),
+            }
+        }
+        Ok(())
+    }
+
     pub(super) fn portfolio_recovery(&self) -> Option<Value> {
         self.portfolio.as_ref().map(|p| Value::Array(self.portfolio_ids().into_iter().map(|step| {
             if step == p.active {

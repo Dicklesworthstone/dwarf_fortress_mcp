@@ -188,27 +188,46 @@ impl Runtime {
     /// from initialize to reopen. This deliberately carries no current goal
     /// proof, review, or permit and is available after a failed child call.
     pub(crate) fn project_recovery_reference(&self) -> serde_json::Value {
-        let clock = self
-            .clock
-            .as_ref()
-            .map(ProductionClock::project_recovery_checkpoint);
-        let inventory_clock = self
-            .inventory_clock
-            .as_ref()
-            .map(ProductionInventoryClock::project_recovery_checkpoint);
-        let floor = self
+        let portfolio = self.project_portfolio_clocks();
+        let (clock, inventory_clock) = match portfolio.as_ref().and_then(|slots| slots.first()) {
+            Some(first) => (first.clock, first.inventory_clock),
+            None => (
+                self.clock
+                    .as_ref()
+                    .map(ProductionClock::project_recovery_checkpoint),
+                self.inventory_clock
+                    .as_ref()
+                    .map(ProductionInventoryClock::project_recovery_checkpoint),
+            ),
+        };
+        let mut floor = self
             .authority_tick_floor()
             .get()
             .max(clock.map_or(0, |pin| pin.authority_tick_floor))
             .max(inventory_clock.map_or(0, |pin| pin.authority_tick_floor));
+        if let Some(slots) = &portfolio {
+            for slot in slots {
+                floor = floor
+                    .max(slot.clock.map_or(0, |pin| pin.authority_tick_floor))
+                    .max(slot.inventory_clock.map_or(0, |pin| pin.authority_tick_floor));
+            }
+        }
         let mut recovery = self.recovery_json();
         if recovery.is_object() {
-            // The compact parent reference must survive a failed operation
-            // whose last published clock view predates its durable marker.
+            // Read exact custody even when a failed operation left its last
+            // published clock view older than the durable dispatch marker.
             recovery["clock_journal_id"] =
                 serde_json::json!(clock.map(|pin| pin.journal_id.to_hex()));
             recovery["inventory_clock_journal_id"] =
                 serde_json::json!(inventory_clock.map(|pin| pin.journal_id.to_hex()));
+            if let Some(slots) = &portfolio {
+                for (index, slot) in slots.iter().enumerate() {
+                    recovery["portfolio"][index]["clock_journal_id"] =
+                        serde_json::json!(slot.clock.map(|pin| pin.journal_id.to_hex()));
+                    recovery["portfolio"][index]["inventory_clock_journal_id"] =
+                        serde_json::json!(slot.inventory_clock.map(|pin| pin.journal_id.to_hex()));
+                }
+            }
             let frontier_floor = recovery["frontier"]["authority_tick_floor"]
                 .as_u64()
                 .unwrap_or(0)
@@ -220,7 +239,7 @@ impl Runtime {
         // their existing child stores, not the parent's compact checkpoint.
         let checkpoint =
             |status: serde_json::Value| serde_json::json!({"checkpoint": status["checkpoint"]});
-        serde_json::json!({
+        let mut reference = serde_json::json!({
             "schema": "dfmcp.project-production-recovery/1",
             "recovery": recovery,
             "native_custody": {
@@ -238,7 +257,14 @@ impl Runtime {
                 .map(|owner| checkpoint(owner.status())),
             "original_goal_proven": false,
             "preparation_restored": false,
-        })
+        });
+        // Scalar and clockless historical references keep their exact shape.
+        if let Some(slots) = portfolio {
+            reference["portfolio_clocks"] = serde_json::json!(
+                slots.into_iter().map(|slot| slot.to_json()).collect::<Vec<_>>()
+            );
+        }
+        reference
     }
 
     pub(crate) fn project_plan_stock_target(

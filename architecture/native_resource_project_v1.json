@@ -127,7 +127,10 @@
     "higher_parent_tick_withdraws_stale_offers_and_preparations": true,
     "native_capture_tick_and_witness_preserved": true,
     "manager_original_deadline_checked_before_parent_ack": true,
-    "manager_rejection_floors_and_fences_retained": true
+    "manager_rejection_floors_and_fences_retained": true,
+    "portfolio_clock_heads_from_every_actual_owner": true,
+    "portfolio_clock_summary_is_first_original_order": true,
+    "inactive_clock_ancestry_required_before_target_recovery": true
   },
   "production_publication": {
     "intent_schema": "dfmcp.project-production-intent/1",
@@ -152,7 +155,8 @@
     "portfolio_order_slots_fixed_before_child_write": true,
     "pending_adoption_rejects_history_in_any_slot": true,
     "portfolio_leaf_history_monotone": true,
-    "portfolio_clock_custody_supported": false
+    "portfolio_clock_custody_supported": true,
+    "pending_portfolio_clock_heads_must_equal_initial_headers": true
   },
   "bounds": {
     "max_wall_millis": 60000,
@@ -493,5 +497,16 @@
     "new_regression_groups_authored": 3,
     "rust_tests_executed": false,
     "execution_status": "execution environment unavailable after nightly installation disk exhaustion; source review only"
+  },
+  "portfolio_clock_recovery_validation": {
+    "source_reviewed": true,
+    "child_test_groups_authored": 5,
+    "continuity_test_groups_authored": 7,
+    "parent_journal_ack_replay_test_groups_authored": 2,
+    "tests_executed": false,
+    "integrated_rust_qualified": false,
+    "live_dfhack_qualified": false,
+    "parent_clock_routing_enabled": false,
+    "blocker": "execution environment unavailable; prospective publication and explicit order routing remain separate"
   }
 }

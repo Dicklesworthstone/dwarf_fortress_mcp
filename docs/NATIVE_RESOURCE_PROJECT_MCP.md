@@ -673,6 +673,30 @@ rolled-back journal/ACK data is not repaired in place. A failed response fit or
 expired final publication budget withdraws live reviews before the session lock
 is released. Recovery data never restores a native permit or current goal proof.
 
+### Complete portfolio clock recovery custody
+
+Production recovery can retain `portfolio_clocks`, an ordered vector matching
+the complete original order slots. Every entry carries `step_id` plus the
+configured `clock` and/or `inventory_clock` checkpoint: `journal_id`, `head`,
+`authority_tick_floor` and `high_source_sequence`. The top-level compatibility
+summaries always name the first original order, independently of inspection
+selection. Scalar and clockless references keep their prior shape.
+
+Every inactive owner contributes to the parent rejection floor. Recovery
+rejects missing/reordered slots, substituted or duplicated journal identities,
+changed clock families, regressed counters and lost per-order goal history.
+The child proves each actual private journal is descended from the retained
+head before restoring targets; parent metadata never substitutes for that
+proof. An unacknowledged original publication can adopt only its exact
+untouched clock headers. None of these checkpoints restores a review,
+permission to unpause, current pause proof or current stock proof.
+
+This custody support is independently source-reviewed, with regression groups
+for child validation, continuity and actual parent journal plus independent ACK
+replay. The new tests have not executed because the execution environment is
+unavailable. At this checkpoint the parent configuration still rejects
+portfolio clocks pending prospective publication and explicit order routing.
+
 ## Shared request and output bounds
 
 | Bound | Value |
