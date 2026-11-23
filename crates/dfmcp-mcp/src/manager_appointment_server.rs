@@ -98,6 +98,18 @@ fn packet(
                 "fortress_commit",
                 "Review the exact citizen/HF, vacancy, unchanged assignment flags, new POSITION link, one history event and source witness; confirm this seal once.",
             )
+        } else if result["production_handoff"].is_object() {
+            args["scope"] = json!("session");
+            (
+                "fortress_cancel",
+                "Retain the exact Manager prerequisite and source checkpoint, then release this writer before the production owner imports its original Offline and freshly checks readiness.",
+            )
+        } else if result["production_handoff_available"] == true {
+            args["query"] = json!("production_handoff");
+            (
+                "fortress_query",
+                "Export the exact appointed Manager and one fresh paused cache sample for a separately configured production owner; this read grants no production authority.",
+            )
         } else if proved || matches!(original["native_phase"].as_u64(), Some(3 | 4)) {
             (
                 "fortress_explain",
@@ -367,10 +379,13 @@ pub fn fortress_observe(session_id: String) -> McpResult<CompleteResult<FinalCal
 }
 #[tool(
     name = "fortress_query",
-    description = "Verify and inspect original local manager custody; no native call, designation or clock."
+    description = "Verify original local Manager custody (default query=custody). query=production_handoff on Manager 1.23 independently verifies the resolved original and one fresh paused Manager/cache sample, then exports the exact read-only prerequisite for a separately configured production owner. Close the Manager session before Offline import; no appointment, order or clock effect."
 )]
-pub fn fortress_query(session_id: String) -> McpResult<CompleteResult<FinalCallToolResult>> {
-    presentation::present(call("fortress.query", session_id, Action::Query))
+pub fn fortress_query(
+    session_id: String,
+    query: Option<String>,
+) -> McpResult<CompleteResult<FinalCallToolResult>> {
+    presentation::present(call("fortress.query", session_id, Action::Query(query)))
 }
 #[tool(
     name = "fortress_plan",
@@ -461,14 +476,14 @@ fn cancel_packet(session_id: String, scope: Option<String>) -> String {
     description = "Inspect original manager plan, exact assignment/HF/history evidence and uncertainty and recovery identity without native work."
 )]
 pub fn fortress_explain(session_id: String) -> McpResult<CompleteResult<FinalCallToolResult>> {
-    presentation::present(call("fortress.explain", session_id, Action::Query))
+    presentation::present(call("fortress.explain", session_id, Action::Query(None)))
 }
 #[tool(
     name = "fortress_doctor",
     description = "Inspect original manager custody and explicit unadmitted limitations without native work."
 )]
 pub fn fortress_doctor(session_id: String) -> McpResult<CompleteResult<FinalCallToolResult>> {
-    presentation::present(call("fortress.doctor", session_id, Action::Query))
+    presentation::present(call("fortress.doctor", session_id, Action::Query(None)))
 }
 #[tool(
     name = "fortress_checkpoint",

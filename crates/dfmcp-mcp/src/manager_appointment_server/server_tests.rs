@@ -248,3 +248,73 @@ fn manager_packet_remaining_metadata_overflow_preserves_ack_and_uncertainty() {
     assert_eq!(value["retained_reference"], reference);
     assert_eq!(value["result"]["custody"], reference);
 }
+
+#[test]
+fn manager_handoff_guidance_exports_then_releases_without_effect_confirmation() {
+    let session = SessionId::new((1u128 << 127) | FAMILY | 7);
+    let reference = json!({
+        "original_key":"original",
+        "production_handoff_floor":{"tick":45,"generation":7,"fenced":false},
+        "uncertain_effect":false
+    });
+    for exported in [false, true] {
+        let mut result = json!({
+            "ok":true,"retained_state_currently_verified":true,"mode":"control",
+            "original":{"appointment_proved":true,"native_phase":2},
+            "production_handoff_available":true
+        });
+        if exported {
+            result["production_handoff"] = json!({
+                "schema":"dfmcp.manager-production-handoff/1",
+                "production_ready":false,"mutation_authority":false
+            });
+        }
+        let raw = packet(
+            "fortress.query",
+            Some(session),
+            Some(RequestId::new(20)),
+            result,
+            reference.clone(),
+        );
+        let value: Value = serde_json::from_str(&raw).expect("handoff packet");
+        spine(&value);
+        assert_eq!(value["retained_reference"], reference);
+        assert_eq!(value["agent_turn"]["active_work"]["confirmations"], json!([]));
+        let next = &value["agent_turn"]["recommendations"][0];
+        if exported {
+            assert_eq!(next["tool"], "fortress_cancel");
+            assert_eq!(next["arguments"]["scope"], "session");
+        } else {
+            assert_eq!(next["tool"], "fortress_query");
+            assert_eq!(next["arguments"]["query"], "production_handoff");
+        }
+        assert_eq!(next["grants_authority"], false);
+    }
+}
+
+#[test]
+fn failed_manager_handoff_preserves_rejection_floor_without_recommending_transfer() {
+    let session = SessionId::new((1u128 << 127) | FAMILY | 8);
+    let reference = json!({
+        "original_key":"original",
+        "production_handoff_floor":{"tick":51,"generation":8,"fenced":true},
+        "uncertain_effect":false
+    });
+    let raw = failed(
+        "fortress.query",
+        Some(session),
+        Some(RequestId::new(21)),
+        error(ErrorCode::StaleAnchor, "Manager source generation changed"),
+        reference.clone(),
+    );
+    let value: Value = serde_json::from_str(&raw).expect("failed handoff packet");
+    spine(&value);
+    assert_eq!(value["retained_reference"], reference);
+    assert_eq!(value["agent_turn"]["active_work"]["confirmations"], json!([]));
+    assert_eq!(value["agent_turn"]["briefing"]["development_commit_available"], false);
+    assert!(value["result"]["production_handoff"].is_null());
+    let next = &value["agent_turn"]["recommendations"][0];
+    assert_eq!(next["tool"], "fortress_query");
+    assert!(next["arguments"]["query"].is_null());
+    assert_eq!(next["grants_authority"], false);
+}

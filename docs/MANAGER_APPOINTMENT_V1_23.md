@@ -101,3 +101,38 @@ fresh-read floors are caller-held recovery data, not new donor ACKs. The [combin
 uses this API for optional `manager_prerequisite` policy, alone or alongside the
 original workshop. Positive planning and native order boundaries requalify it. Existing Manager 1.22/1.23
 appointment protocols and their historical evidence remain unchanged.
+
+### Export a current handoff from the Manager owner
+
+After the exact Manager 1.23 appointment completes, call `fortress_query` with
+`query:"production_handoff"`. Control and Recover sessions independently verify
+the original private journal and profile-specific ACK before opening one
+read-only native connection. Exactly one fresh ReadManager must still show the
+same selected citizen, original assignment and HF link, consistent getters and
+populated MANAGE_PRODUCTION cache while paused. The result carries the immutable
+canonical origin descriptor, original receipt and seal, current native sample,
+and directly usable `manager_prerequisite` and
+`manager_prerequisite_checkpoint` configuration objects.
+
+Retain both configuration objects, then follow the recommendation to close the
+Manager session before opening the combined production owner. That owner reopens
+the exact donor files Offline, checks the descriptor identity, retains the
+rejection checkpoint and independently reads its own current paused source tick.
+The exported sample is fresh only for the export call; it is not production
+readiness, clock authority or permission to appoint or create an order. Default
+`fortress_query` (or `query:"custody"`) stays local and never replays a fresh
+handoff.
+
+Consumed tick, generation, native sequence, history and allocation floors survive
+rejected reads and late authority/custody failures. Existing Manager 1.23
+sessions can restore this caller-held frontier through optional
+`production_handoff_floor` in their closed host configuration. This is rejection
+custody, not a new journal acknowledgement. Legacy 1.22, Offline, incomplete,
+prepared, changed or fenced originals refuse current export without writing
+donor bytes; genuine identity/source loss stays fenced.
+
+Regression sources cover active export/Offline reimport, exact immutable
+descriptor, one-read/zero-writer behavior, closed recovery floors, late failures,
+ACK damage, legacy/Offline refusal and the public stdio lifecycle. Source review
+completed; compilation and test execution have not completed for this increment.
+Native methods, tool names and production admission remain unchanged.

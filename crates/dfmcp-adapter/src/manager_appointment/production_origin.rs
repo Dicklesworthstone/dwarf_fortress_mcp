@@ -13,6 +13,12 @@ use dfmcp_core::StateAnchor;
 pub const IMPORT_WORK_BYTES: u64 = 96 * 1024 * 1024;
 pub const VERIFY_WORK_BYTES: u64 = 24 * 1024 * 1024;
 pub const REFRESH_WORK_BYTES: u64 = 64 * 1024 * 1024;
+/// Complete original import, one native read, and independent current-state
+/// verification. This is logical work, not output or resident allocation.
+pub const EXPORT_WORK_BYTES: u64 = IMPORT_WORK_BYTES + REFRESH_WORK_BYTES + 32 * 1024 * 1024;
+/// One authenticated connection and one complete native capsule. A source may
+/// establish that connection lazily, after local original custody is verified.
+pub const EXPORT_READ_WORK_BYTES: u64 = 16 * 1024 * 1024;
 pub const MAX_ORIGINAL_FRAMES: u32 = MAX_FRAMES;
 /// Full native records remain in the original donor. This descriptor commits
 /// their complete bytes without copying up to 129 KiB into a host association.
@@ -181,6 +187,7 @@ pub struct ManagerProductionOrigin {
     witness: Digest32,
     owner: SessionId,
     epoch: u64,
+    custody_mode: Mode,
     floor: ManagerProductionFloor,
 }
 
@@ -206,6 +213,74 @@ impl ReadyManagerProduction {
     pub fn witness(&self) -> Digest32 {
         self.witness
     }
+}
+
+/// Immutable export from one exact acknowledged appointment. Only the capture
+/// was fresh during this export. The later production owner must release the
+/// donor writer, reopen its exact files Offline and qualify its own current
+/// paused anchor. This type grants no appointment or production permission.
+#[derive(Debug)]
+pub struct ManagerProductionHandoff {
+    origin: ManagerProductionOrigin,
+    capture: Capture,
+    witness: Digest32,
+}
+impl ManagerProductionHandoff {
+    pub fn binding(&self) -> &Binding {
+        self.origin.binding()
+    }
+    pub fn pin(&self) -> WorkshopPin {
+        self.origin.pin()
+    }
+    pub fn plan(&self) -> &Plan {
+        self.origin.plan()
+    }
+    pub fn original_seal(&self) -> Digest32 {
+        self.origin.original_seal()
+    }
+    pub fn receipt(&self) -> Digest32 {
+        self.origin.receipt()
+    }
+    pub fn origin_witness(&self) -> Digest32 {
+        self.origin.witness()
+    }
+    pub fn origin_canonical_bytes(&self) -> &[u8] {
+        self.origin.canonical_bytes()
+    }
+    pub fn capture(&self) -> &Capture {
+        &self.capture
+    }
+    pub fn floor(&self) -> ManagerProductionFloor {
+        self.origin.floor()
+    }
+    pub fn witness(&self) -> Digest32 {
+        self.witness
+    }
+}
+
+/// Recheck exactly the one acquired capsule through the ordinary readiness
+/// verifier. This wrapper cannot trigger a second native read or use a second
+/// capture; the outer export retains ownership and fences the real connection.
+struct CapturedRead<'a, N> {
+    source: &'a mut N,
+    capture: Option<Capture>,
+}
+impl<N: ManagerReadSource> ManagerReadSource for CapturedRead<'_, N> {
+    fn binding(&self) -> &Binding {
+        self.source.binding()
+    }
+    fn observed_generation(&self) -> Option<u64> {
+        self.source.observed_generation()
+    }
+    fn observed_floor(&self) -> Option<ManagerProductionFloor> {
+        self.source.observed_floor()
+    }
+    fn read_manager(&mut self, _: &OperationContext) -> Result<Capture> {
+        self.capture
+            .take()
+            .ok_or_else(|| denied("Manager handoff capsule was already consumed"))
+    }
+    fn fence(&mut self) {}
 }
 
 impl ManagerProductionOrigin {
@@ -361,7 +436,7 @@ impl ManagerProductionOrigin {
         work: &mut Work,
     ) -> Result<()> {
         work.context = self.access(&work.current()?, false)?;
-        if journal.mode != Mode::Offline
+        if journal.mode != self.custody_mode
             || journal.owner != self.owner
             || journal.binding != self.binding
             || journal.pin() != self.pin
@@ -370,15 +445,25 @@ impl ManagerProductionOrigin {
             return Err(corrupt());
         }
         let scope = self.binding.read_scope()?;
-        acknowledgement
-            .verify_manager_v1_23_offline(&work.reserve(ACK_WORK_BYTES as usize)?, scope)?;
+        self.verify_ack(acknowledgement, &work.reserve(ACK_WORK_BYTES as usize)?, scope)?;
         check(acknowledgement.latest() == Some(self.pin))?;
         journal.verify(&work.reserve(JOURNAL_WORK_BYTES)?)?;
-        acknowledgement
-            .verify_manager_v1_23_offline(&work.reserve(ACK_WORK_BYTES as usize)?, scope)?;
+        self.verify_ack(acknowledgement, &work.reserve(ACK_WORK_BYTES as usize)?, scope)?;
         check(acknowledgement.latest() == Some(self.pin))?;
         self.access(&work.current()?, false)?;
         Ok(())
+    }
+
+    fn verify_ack<A: EffectJournalStorage>(
+        &self,
+        acknowledgement: &mut WorkshopAcknowledgements<A>,
+        context: &OperationContext,
+        scope: dfmcp_core::MapCuboid,
+    ) -> Result<()> {
+        match self.custody_mode {
+            Mode::Offline => acknowledgement.verify_manager_v1_23_offline(context, scope),
+            Mode::Control | Mode::Recover => acknowledgement.verify_manager_v1_23(context, scope),
+        }
     }
 
     /// Exact local historical custody only, including after a source fence.
@@ -580,6 +665,113 @@ impl ManagerProductionOrigin {
 }
 
 impl<S: EffectJournalStorage> Journal<S> {
+    /// Export a cache-bearing, resolved original from the existing active
+    /// owner. One native read is surrounded by exact independent custody checks.
+    /// All decoded rejection floors survive later failures through retained;
+    /// no journal/ACK write, new original, permit or second read is possible.
+    pub fn export_production_handoff<A: EffectJournalStorage, N: ManagerReadSource>(
+        &mut self,
+        acknowledgement: &mut WorkshopAcknowledgements<A>,
+        source: &mut N,
+        retained: &mut Option<ManagerProductionFloor>,
+        context: &OperationContext,
+    ) -> Result<ManagerProductionHandoff> {
+        let result = (|| {
+            let mut work = prepaid(context, EXPORT_WORK_BYTES)?;
+            if self.mode == Mode::Offline || self.permit {
+                return Err(denied(
+                    "Manager handoff needs read-enabled resolved custody without a live preparation",
+                ));
+            }
+            // Diagnostic selectors are only candidates. The private canonical
+            // chain below must prove this exact original and complete record.
+            let original = self.original.as_ref().ok_or_else(corrupt)?;
+            let key = original.plan.key().to_owned();
+            let digest = original.plan.digest;
+            let mut origin = self.production_origin_for_mode(
+                acknowledgement,
+                &key,
+                digest,
+                self.mode,
+                &work.reserve(IMPORT_WORK_BYTES as usize)?,
+            )?;
+            let validation = (|| {
+                if let Some(floor) = *retained {
+                    origin.retain_recovery_floor(floor, &work.current()?)?;
+                }
+                origin.retain_source_state(source)?;
+                if origin.is_fenced() {
+                    return Err(stale("Manager handoff source continuity is fenced"));
+                }
+                // Reserve canonical decoding before source contact. A returned
+                // capture must raise rejection floors even if authority expires.
+                work.charge(4 * MAX_CAPTURE_BYTES)?;
+                let read_context = origin.access(
+                    &work.reserve(EXPORT_READ_WORK_BYTES as usize)?,
+                    true,
+                )?;
+                let read = source.read_manager(&read_context);
+                let source_state = origin.retain_source_state(source);
+                let captured = match read {
+                    Ok(capture) => capture,
+                    Err(cause) => {
+                        origin.fence();
+                        return Err(cause);
+                    }
+                };
+                let capture = match Capture::decode(captured.bytes()) {
+                    Ok(capture) => capture,
+                    Err(cause) => {
+                        origin.fence();
+                        return Err(cause);
+                    }
+                };
+                let next = ManagerProductionFloor::capture(&capture);
+                let regressed = !next.dominates(&origin.floor);
+                origin.floor.retain(next);
+                source_state?;
+                if regressed || capture != captured {
+                    origin.fence();
+                    return Err(stale("Manager handoff capsule or retained frontier changed"));
+                }
+                // This is a native projection, never a synthetic canonical
+                // world anchor. Only the typed export's capture is published.
+                let mut current = work.reserve(REFRESH_WORK_BYTES as usize)?;
+                current.anchor.tick = GameTick(capture.tick);
+                current.anchor.state_hash = capture.witness();
+                let mut replay = CapturedRead {
+                    source: &mut *source,
+                    capture: Some(capture),
+                };
+                let ready = origin.refresh(
+                    self,
+                    acknowledgement,
+                    &mut replay,
+                    current.anchor.tick,
+                    &current,
+                )?;
+                let mut bytes = b"dfmcp-manager-production-handoff/1\0".to_vec();
+                bytes.extend_from_slice(origin.witness().as_bytes());
+                bytes.extend_from_slice(ready.capture().witness().as_bytes());
+                origin.floor.append(&mut bytes);
+                origin.access(&work.current()?, true)?;
+                Ok((ready.capture, Digest32::of_bytes(&bytes)))
+            })();
+            if let Some(floor) = retained.as_mut() {
+                floor.retain(origin.floor());
+            } else {
+                *retained = Some(origin.floor());
+            }
+            validation.map(|(capture, witness)| ManagerProductionHandoff {
+                origin,
+                capture,
+                witness,
+            })
+        })();
+        source.fence();
+        result
+    }
+
     /// Read the already validated private canonical chain, not publicly mutable
     /// diagnostic fields. Its exact bytes are independently reverified below.
     fn production_record(&self, work: &mut Work) -> Result<(Original, Record)> {
@@ -624,8 +816,26 @@ impl<S: EffectJournalStorage> Journal<S> {
         digest: Digest32,
         context: &OperationContext,
     ) -> Result<ManagerProductionOrigin> {
+        if self.mode != Mode::Offline {
+            return Err(denied(
+                "Manager production import requires exact Offline Manager/1.23 custody",
+            ));
+        }
+        self.production_origin_for_mode(acknowledgement, key, digest, Mode::Offline, context)
+    }
+
+    // Active custody is available only to export_production_handoff below. Its
+    // temporary origin cannot escape as an importer or grant native permission.
+    fn production_origin_for_mode<A: EffectJournalStorage>(
+        &mut self,
+        acknowledgement: &mut WorkshopAcknowledgements<A>,
+        key: &str,
+        digest: Digest32,
+        custody_mode: Mode,
+        context: &OperationContext,
+    ) -> Result<ManagerProductionOrigin> {
         let mut work = prepaid(context, IMPORT_WORK_BYTES)?;
-        if self.mode != Mode::Offline
+        if self.mode != custody_mode
             || self.binding.protocol != ManagerProtocol::V1_23
             || self.owner != context.session_id
             || self.fenced
@@ -672,6 +882,7 @@ impl<S: EffectJournalStorage> Journal<S> {
             canonical,
             owner: context.session_id,
             epoch: context.anchor.cursor.epoch,
+            custody_mode,
             floor,
         };
         origin.verify_with(self, acknowledgement, &mut work)?;

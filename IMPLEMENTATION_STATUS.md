@@ -1,5 +1,23 @@
 # Implementation Status
 
+## Unreleased — Export the completed Manager into finite production
+
+Manager 1.23 now exports a production handoff through the existing
+`fortress_query` tool. It verifies the exact completed original and independent
+ACK, acquires one paused current Manager/cache sample, and returns import-ready
+`manager_prerequisite` plus `manager_prerequisite_checkpoint` and a bounded
+canonical descriptor. The next action closes the donor owner before the
+combined host independently imports and requalifies it. Caller-held monotone
+floors and sticky fences survive failures; default custody inspection stays
+local.
+
+Ten Rust regressions are authored and the existing stdio lifecycle is extended.
+Two independent source reviews and exact GitHub blob readback completed.
+Compilation, test execution and formatting have not completed because the
+execution service became unavailable. No native writer, clock advance, new tool,
+parent Manager project stage or production admission is added. Owner:
+`dfmcp-reality-wiring-proof-4bf.14.2`.
+
 ## Unreleased — Observe already-satisfied stock targets without creating work
 
 A reusable `StockTargetWatch` now monitors a qualified zero-deficit stock

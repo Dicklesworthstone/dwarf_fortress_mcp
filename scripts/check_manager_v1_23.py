@@ -17,6 +17,7 @@ ADDITIONS = [
     'crates/dfmcp-adapter/src/manager_appointment/tests_v1_23.rs',
     'crates/dfmcp-adapter/src/manager_appointment/production_origin.rs',
     'crates/dfmcp-adapter/src/manager_appointment/production_origin_tests.rs',
+    'crates/dfmcp-adapter/src/manager_appointment/production_handoff_tests.rs',
     'crates/dfmcp-mcp/src/manager_appointment_v1_23_server.rs',
     'crates/dfmcp-mcp/src/bin/dfmcp-manager-v1-23-dev-server.rs',
     'crates/dfmcp-mcp/tests/manager_appointment_v1_23_stdio.rs',

@@ -31,7 +31,7 @@ SOURCES = [
     *[A + "build_placement/rpc/" + n for n in ("codec.rs", "link.rs")],
     A + "build_placement/journal/private_file.rs", A + "workshop_construction/acknowledgement.rs", A + "workshop_construction/journal.rs",
     M + "src/lib.rs", M + "src/agent_turn.rs", M + "src/manager_appointment_server.rs",
-    *[M + "src/manager_appointment_server/" + n for n in ("runtime.rs", "presentation.rs", "server_tests.rs")],
+    *[M + "src/manager_appointment_server/" + n for n in ("runtime.rs", "production_handoff.rs", "presentation.rs", "server_tests.rs")],
     M + "src/bin/dfmcp-manager-v1-22-dev-server.rs", M + "tests/manager_appointment_stdio.rs",
     "crates/dwarf-fortress-mcp/src/main.rs", "crates/dwarf-fortress-mcp/tests/manager_gameplay_cli.rs",
     "tests/native/manager/stubs.h", "tests/native/manager/handler.cpp", "tests/fixtures/manager_v1_22_component.json",

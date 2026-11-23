@@ -5,6 +5,9 @@ use crate::manager_appointment::tests::native_capture;
 use crate::workshop_construction::acknowledgement::open_private_manager_acknowledgements_for_protocol;
 use dfmcp_core::{MapCoord, MapCuboid};
 
+#[path = "production_handoff_tests.rs"]
+mod handoff_tests;
+
 fn fixture_capture() -> Result<Capture> {
     let text = include_str!("../../../../tests/fixtures/manager_v1_23_component.json")
         .lines()

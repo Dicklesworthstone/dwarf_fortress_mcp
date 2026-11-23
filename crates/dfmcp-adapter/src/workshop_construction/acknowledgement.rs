@@ -311,10 +311,19 @@ impl<S: EffectJournalStorage> WorkshopAcknowledgements<S> {
         context: &OperationContext,
         scope: MapCuboid,
     ) -> Result<()> {
+        check(self.offline)?;
+        self.verify_manager_v1_23(context, scope)
+    }
+    /// Verify an already-owned Manager/1.23 acknowledgement without changing
+    /// custody mode. Only a bounded donor export may use active custody;
+    /// production import retains the separate Offline-only check above.
+    pub(crate) fn verify_manager_v1_23(
+        &mut self,
+        context: &OperationContext,
+        scope: MapCuboid,
+    ) -> Result<()> {
         check(
-            matches!(self.protocol, Protocol::ManagerV1_23)
-                && self.scope == Some(scope)
-                && self.offline,
+            matches!(self.protocol, Protocol::ManagerV1_23) && self.scope == Some(scope),
         )?;
         self.verify(context)
     }

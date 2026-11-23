@@ -7,6 +7,9 @@ use dfmcp_adapter::manager_appointment::{
     journal::{self, Journal, Mode, Original, State},
     rpc::{Binding, CONNECT_BYTES, ManagerRpc},
 };
+use dfmcp_adapter::manager_appointment::production_origin::ManagerProductionFloor;
+#[path = "production_handoff.rs"]
+mod production_handoff;
 use dfmcp_adapter::workshop_construction::{
     acknowledgement::WorkshopAcknowledgements, journal::WorkshopPin,
 };
@@ -145,6 +148,8 @@ struct Input {
     authority_expires_tick: u64,
     lease_ticks: u64,
     checkpoint: String,
+    #[serde(default)]
+    production_handoff_floor: Option<production_handoff::FloorInput>,
 }
 #[derive(Clone)]
 pub(super) struct Config {
@@ -222,6 +227,14 @@ impl Config {
             dfhack_version: i.dfhack_version.clone(),
         };
         binding.validate()?;
+        if let Some(floor) = &i.production_handoff_floor {
+            if i.initialize || binding.protocol != ManagerProtocol::V1_23 {
+                return Err(denied(
+                    "Manager handoff recovery floor requires existing 1.23 custody",
+                ));
+            }
+            floor.validate(binding.generation)?;
+        }
         let external = i
             .acknowledged
             .as_ref()
@@ -383,7 +396,7 @@ pub(super) enum Action {
     Plan(String),
     Commit(String, bool),
     Wait,
-    Query,
+    Query(Option<String>),
     Cancel,
 }
 struct TurnWork {
@@ -443,6 +456,7 @@ pub(super) struct Runtime {
     next_request: u64,
     high_tick: u64,
     high_sequence: u64,
+    handoff_floor: Option<ManagerProductionFloor>,
 }
 impl Runtime {
     pub(super) fn open(
@@ -495,12 +509,19 @@ impl Runtime {
             config.external,
             entropy,
         )?;
+        let handoff_floor = config
+            .input
+            .production_handoff_floor
+            .as_ref()
+            .map(production_handoff::FloorInput::floor);
         let high_tick = journal
             .high_tick
-            .max(observation.as_ref().map_or(0, |c| c.tick));
+            .max(observation.as_ref().map_or(0, |c| c.tick))
+            .max(handoff_floor.map_or(0, |floor| floor.tick));
         let high_sequence = journal
             .high_sequence
-            .max(observation.as_ref().map_or(0, |c| c.sequence));
+            .max(observation.as_ref().map_or(0, |c| c.sequence))
+            .max(handoff_floor.map_or(0, |floor| floor.sequence));
         let mut leases = LeaseManager::new();
         let lease = if mode == Mode::Control && config.input.initialize {
             Some(leases.acquire_spatial_lease(
@@ -527,6 +548,7 @@ impl Runtime {
             next_request: 2,
             high_tick,
             high_sequence,
+            handoff_floor,
         };
         // Initial publication belongs to the same opening operation, not a renewed Query budget.
         let mut current = current;
@@ -618,8 +640,21 @@ impl Runtime {
             let mut work = TurnWork::new(&c, start)?;
             self.guard(&work.reserve(&c, 32 * 1024 * 1024)?, false)?;
 
+            let mut handoff = None;
             match action {
-                Action::Query => {}
+                Action::Query(query) => match query.as_deref() {
+                    None | Some("custody") => {}
+                    Some("production_handoff") => {
+                        handoff = Some(self.production_handoff(&c, &mut work)?);
+                        c.anchor.tick = GameTick(c.anchor.tick.get().max(self.high_tick));
+                    }
+                    _ => {
+                        return Err(error(
+                            ErrorCode::InvalidRequest,
+                            "unknown Manager query; use custody or production_handoff",
+                        ));
+                    }
+                },
                 Action::Observe => {
                     if self.mode == Mode::Offline {
                         return Err(denied("offline manager custody cannot observe"));
@@ -813,7 +848,12 @@ impl Runtime {
                 }
             }
             self.guard(&work.reserve(&c, 32 * 1024 * 1024)?, false)?;
-            Ok(self.view(false))
+            let mut view = self.view(false);
+            if let Some(handoff) = handoff {
+                view["production_handoff"] = handoff;
+            }
+            work.reserve(&c, 0)?;
+            Ok(view)
         })();
         if let Err(e) = &result {
             for (key, value) in &e.details {
@@ -837,7 +877,10 @@ impl Runtime {
             "source_identity":{"protocol":format!("1.{}", self.config.binding.protocol.minor()),"endpoint":self.config.binding.endpoint.to_string(),"world_folder":self.config.binding.source.folder(),"site_id":self.config.binding.source.site(),"generation":self.config.binding.generation,"df_version":self.config.binding.df_version,"dfhack_version":self.config.binding.dfhack_version,"unit_id":self.config.binding.selection.unit,"histfig_id":self.config.binding.selection.figure},
             "native_anchor":self.journal.native.as_ref().and_then(|n|n.after.as_ref()).or(self.observation.as_ref()).or(self.journal.original.as_ref().map(|o|&o.plan.before)).map(|c|json!({"schema":"dfmcp.manager-native-projection-anchor/1","fortress_id":c.source.fortress_id().to_string(),"generation":c.generation,"sequence":c.sequence,"game_tick":c.tick,"state_hash":c.witness().to_hex(),"canonical_world_anchor":false})),
             "dispatch_started":self.journal.dispatch_started,"uncertain_effect":self.journal.effect_uncertain,
-            "consumed_tick_floor":self.high_tick.max(self.journal.high_tick),"automatic_redispatch":false})
+            "consumed_tick_floor":self.high_tick.max(self.journal.high_tick),
+            "production_handoff_floor":self.handoff_floor.map(production_handoff::floor_json),
+            "production_handoff_floor_custody":"caller-retained rejection frontier; not a durable ACK or current readiness proof",
+            "automatic_redispatch":false})
     }
     fn view(&self, fresh: bool) -> Value {
         let original=self.journal.original.as_ref().map(|o|json!({"key":o.plan.key(),"plan_digest":o.plan.digest.to_hex(),"review_seal":o.seal().to_hex(),
@@ -849,6 +892,9 @@ impl Runtime {
             "production_manager_cache_proved":self.config.binding.protocol==ManagerProtocol::V1_23 && self.journal.native.as_ref().is_some_and(|n|n.complete()),
             "after":self.journal.native.as_ref().and_then(|n|n.after.as_ref()).map(capture_json),"fresh_observation":fresh}));
         json!({"ok":true,"source_profile":super::profile_name(),"mode":self.mode.as_str(),"retained_state_currently_verified":true,"original":original,
+            "production_handoff_available":self.config.binding.protocol==ManagerProtocol::V1_23
+                && self.mode!=Mode::Offline && self.journal.native.as_ref().is_some_and(|record|record.complete())
+                && !self.handoff_floor.is_some_and(|floor|floor.fenced),
             "observation":if self.journal.original.is_none(){self.observation.as_ref().map(capture_json)}else{None},
             "recommended_deadline_tick":self.observation.as_ref().map(|c|(c.tick+journal::MAX_HORIZON_TICKS).min(self.config.input.authority_expires_tick)),
             "custody":self.reference(),"canonical_world_anchor":null,"canonical_world_continuity":"unestablished",

@@ -195,6 +195,7 @@ class Peer:
         self.stop, self.entered, self.release_commit = threading.Event(), threading.Event(), threading.Event()
         self.record = self.key = self.stale = self.active = None
         self.bad_after = False
+        self.observation = None
         self.drop_commit = False
         self.writer_count = 0
         self.reads = 0
@@ -242,7 +243,7 @@ class Peer:
                             assert set(request) == {1, 2, 3, 4, 5, 6, 7}
                             assert [request[t] for t in (6, 7)] == [256, 361]
                             self.reads += 1
-                            capture = bytearray(self.vectors["capture"])
+                            capture = bytearray(self.observation if self.observation is not None else self.vectors["capture"])
                             if self.stale == "cache":
                                 at = cache_bucket_offset(capture, 0); assert capture[at:at+2] == b"\x00\x00"
                                 capture[at:at+2] = b"\x00\x01" + (600).to_bytes(4, "big")
@@ -475,14 +476,77 @@ class ManagerStdioTests(unittest.TestCase):
         self.assertTrue(after["dual_getters_agree"]);self.assertEqual(after["lookup_unit"],256);self.assertEqual(after["manager_links"],1)
         self.assertEqual(after["assignment_id"],600);self.assertEqual(after["assignment_index"],3);self.assertEqual(after["manager_position_id"],1000);self.assertEqual(after["manager_position_index"],2)
         self.assertEqual(after["history_count"],3);self.assertEqual(after["next_event_id"],1993)
+        custody = self.directory / "custody"
+        custody_before = {path.name: path.read_bytes() for path in custody.iterdir()}
+        reads_before = self.peer.reads
+        calls_before = list(self.peer.calls)
+        handoff_floor = None
+        if MINOR == 23:
+            # This explicit protocol double now exposes the original assigned
+            # capsule to ReadManager. No game or native SDK evidence is implied.
+            self.peer.observation = bytes.fromhex(after["native_capture_hex"])
+            exported = c.tool("query", session_id=sid, query="production_handoff")
+            self.assertTrue(exported["result"]["ok"], exported)
+            handoff = exported["result"]["production_handoff"]
+            self.assertEqual(handoff["schema"], "dfmcp.manager-production-handoff/1")
+            self.assertTrue(handoff["fresh_for_current_call"])
+            self.assertFalse(handoff["production_ready"])
+            self.assertFalse(handoff["mutation_authority"])
+            self.assertTrue(handoff["close_manager_session_before_import"])
+            self.assertEqual(handoff["native_observations"], 1)
+            self.assertEqual(handoff["native_mutations"], 0)
+            self.assertEqual(handoff["current_manager_sample"]["native_capture_hex"], after["native_capture_hex"])
+            prerequisite = handoff["manager_prerequisite"]
+            self.assertEqual(prerequisite["directory"], str(custody))
+            self.assertEqual(prerequisite["original_key"], o["key"])
+            self.assertEqual(prerequisite["original_plan_digest"], o["plan_digest"])
+            self.assertEqual(prerequisite["acknowledged"], exported["result"]["custody"]["acknowledged"])
+            self.assertEqual(handoff["original_receipt"], done["native_receipt"])
+            descriptor = handoff["origin_descriptor"]
+            origin = bytes.fromhex(descriptor["bytes"])
+            self.assertEqual(len(origin), descriptor["byte_length"])
+            self.assertEqual(hashlib.sha256(origin).hexdigest(), descriptor["sha256"])
+            self.assertEqual(descriptor["sha256"], handoff["origin_witness"])
+            checkpoint = dict(handoff["manager_prerequisite_checkpoint"])
+            self.assertEqual(checkpoint.pop("origin_witness"), handoff["origin_witness"])
+            handoff_floor = handoff["production_handoff_floor"]
+            self.assertEqual(checkpoint, handoff_floor)
+            self.assertEqual(handoff_floor["tick"], after["tick"])
+            self.assertEqual(handoff_floor["generation"], after["generation"])
+            self.assertEqual(handoff_floor["next_event"], after["next_event_id"])
+            self.assertEqual(handoff_floor["history_count"], after["history_count"])
+            self.assertFalse(handoff_floor["fenced"])
+            self.assertEqual(self.peer.reads, reads_before + 1)
+            self.assertEqual(exported["agent_turn"]["recommendations"][0]["tool"], "fortress_cancel")
+            self.assertEqual(exported["agent_turn"]["recommendations"][0]["arguments"]["scope"], "session")
+            local = c.tool("query", session_id=sid)
+            self.assertTrue(local["result"]["ok"], local)
+            self.assertNotIn("production_handoff", local["result"])
+            self.assertEqual(self.peer.reads, reads_before + 1)
+        else:
+            refused = c.tool("query", session_id=sid, query="production_handoff")
+            self.assertFalse(refused["result"]["ok"], refused)
+            self.assertEqual(self.peer.calls, calls_before)
+        self.assertEqual(custody_before, {path.name: path.read_bytes() for path in custody.iterdir()})
+        self.assertEqual(self.peer.writer_count, 1)
         repeated=c.tool("commit",session_id=sid,review_seal=o["review_seal"],confirmed=True);self.assertTrue(repeated["result"]["ok"],repeated)
         self.assertEqual(repeated["result"]["original"]["native_receipt"],done["native_receipt"]);self.assertEqual(self.peer.writer_count,1)
         pin=repeated["result"]["custody"]["acknowledged"];c.tool("cancel",session_id=sid,scope="session");c.close()
         before={p.name:p.read_bytes() for p in (self.directory/"custody").iterdir()};calls=list(self.peer.calls)
-        offline=self.client(config(self.directory,self.peer,initialize=False,acknowledged=pin),"offline");opened=offline.open("offline")
+        recovered = config(self.directory, self.peer, initialize=False, acknowledged=pin)
+        if handoff_floor is not None:
+            recovered["production_handoff_floor"] = handoff_floor
+        offline=self.client(recovered,"offline");opened=offline.open("offline")
         self.assertTrue(opened["result"]["ok"],opened);self.assertTrue(opened["result"]["original"]["appointment_proved"])
         self.assertEqual(opened["result"]["original"]["key"],o["key"]);self.assertFalse(opened["result"]["original"]["prepared_in_this_connection"])
         self.assertEqual(self.peer.calls,calls);self.assertEqual(before,{p.name:p.read_bytes() for p in (self.directory/"custody").iterdir()})
+        if handoff_floor is not None:
+            self.assertEqual(opened["result"]["custody"]["production_handoff_floor"], handoff_floor)
+            refused = offline.tool("query", session_id=opened["agent_turn"]["session_id"], query="production_handoff")
+            self.assertFalse(refused["result"]["ok"], refused)
+            self.assertEqual(refused["retained_reference"]["production_handoff_floor"], handoff_floor)
+            self.assertEqual(self.peer.calls, calls)
+            self.assertEqual(before, {p.name: p.read_bytes() for p in (self.directory/"custody").iterdir()})
     def test_crash_lost_reply_reconciles_original_without_redispatch(self):
         c=self.client();sid,o,planned=self.prepared(c);external=planned["result"]["custody"]["acknowledged"]
         journal=self.directory/"custody"/custody_name("journal");prefix=journal.read_bytes();self.peer.drop_commit=True
